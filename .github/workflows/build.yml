@@ -9,7 +9,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
 
     env:
       VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
@@ -29,7 +29,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y ninja-build
+          sudo apt-get install -y ninja-build gcc-14 g++-14
 
       - name: Install CMake 4.x
         uses: lukka/get-cmake@latest
@@ -38,6 +38,9 @@ jobs:
 
       - name: Configure
         run: cmake --preset x64-linux-debug
+        env:
+          CC: gcc-14
+          CXX: g++-14
 
       - name: Build
         run: cmake --build --preset x64-linux-debug

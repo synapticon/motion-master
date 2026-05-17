@@ -1,0 +1,53 @@
+name: Lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  clang-format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang-format
+        run: sudo apt-get install -y clang-format
+
+      - name: Check formatting
+        run: |
+          find apps libs \( -name '*.cc' -o -name '*.hh' \) \
+            | xargs clang-format --dry-run --Werror
+
+  cpplint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cpplint
+        run: pip install cpplint
+
+      - name: Run cpplint
+        run: |
+          find apps libs \( -name '*.cc' -o -name '*.hh' \) \
+            | xargs cpplint
+
+  cppcheck:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install cppcheck
+        run: sudo apt-get install -y cppcheck
+
+      - name: Run cppcheck
+        run: |
+          cppcheck \
+            --enable=warning,style,performance,portability \
+            --std=c++23 \
+            --suppress=missingIncludeSystem \
+            --error-exitcode=1 \
+            --quiet \
+            -I libs \
+            apps libs

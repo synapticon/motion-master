@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 #include <semver.hpp>
 
+#include <string>
+
 #include "core/version.hh"
 
 TEST(VersionTest, StringConstant) {

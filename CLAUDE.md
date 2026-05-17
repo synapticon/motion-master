@@ -52,6 +52,10 @@ Available presets: `x64-linux-debug`, `x64-linux-release`, `x64-windows-debug`, 
 
 Build output goes to `build/<preset>/`. Compiler requirements: C++23, warnings as errors (`-Wall -Wextra -Wpedantic -Werror` on GCC/Clang; `/W4 /WX` on MSVC).
 
+## CI
+
+The workflow in `.github/workflows/build.yml` caches vcpkg binaries with `actions/cache@v5` on `~/.cache/vcpkg/archives`, keyed on OS + `vcpkg.json` hash. The `x-gha` vcpkg binary caching backend was **removed** in the pinned vcpkg version (`56bb241`) — do not use `VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"` or the `actions/github-script` workaround.
+
 ## Architecture
 
 ### Directory Layout

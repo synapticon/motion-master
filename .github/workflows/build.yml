@@ -11,20 +11,18 @@ jobs:
   build:
     runs-on: ubuntu-24.04
 
-    env:
-      VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: recursive
 
-      - name: Export vcpkg binary cache variables
-        uses: actions/github-script@v8
+      - name: Cache vcpkg packages
+        uses: actions/cache@v5
         with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL)
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN)
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
 
       - name: Install system dependencies
         run: |

@@ -22,26 +22,35 @@ CMake 4.0+ with Ninja and vcpkg. Initialize the vcpkg submodule before the first
 git submodule update --init --recursive
 ```
 
-### Build Commands
+### Scripts
+
+All common tasks have wrapper scripts in `tools/`. They default to the `x64-linux-debug` preset; pass a preset name as the first argument to override.
 
 ```bash
-# Configure
-cmake --preset x64-linux-debug       # also: x64-linux-release, x64-windows-debug, x64-windows-release
+./tools/configure.sh              # cmake --preset
+./tools/build.sh                  # cmake --build --preset
+./tools/test.sh                   # ctest --output-on-failure
+./tools/format.sh                 # clang-format all sources
+./tools/lint.sh                   # cpplint (requires: pip install cpplint)
+./tools/cppcheck.sh               # cppcheck static analysis
+./tools/clean.sh                  # remove build/<preset>
 
-# Build
-cmake --build --preset x64-linux-debug
-
-# Or directly with Ninja after configuring
-ninja -C build/x64-linux-debug
+# Use a different preset:
+./tools/configure.sh x64-linux-release
+./tools/build.sh x64-linux-release
 ```
 
-Build output: `build/<presetName>/`. Binaries land in `build/x64-linux-debug/apps/motion_master/motion-master` and `build/x64-linux-debug/apps/playground/playground`.
+### Raw CMake commands
 
-Compiler requirements: C++23 required. Warnings are errors (`-Wall -Wextra -Wpedantic -Werror` on GCC/Clang; `/W4 /WX` on MSVC).
+```bash
+cmake --preset x64-linux-debug
+cmake --build --preset x64-linux-debug
+ctest --test-dir build/x64-linux-debug --output-on-failure
+```
 
-### Planned CMake Custom Targets
+Available presets: `x64-linux-debug`, `x64-linux-release`, `x64-windows-debug`, `x64-windows-release`.
 
-Replace any `.sh`/`.ps1` scripts with CMake targets: `format`, `lint`, `docs`. All helper scripts go in `tools/`.
+Build output goes to `build/<preset>/`. Compiler requirements: C++23, warnings as errors (`-Wall -Wextra -Wpedantic -Werror` on GCC/Clang; `/W4 /WX` on MSVC).
 
 ## Architecture
 
@@ -50,15 +59,16 @@ Replace any `.sh`/`.ps1` scripts with CMake targets: `format`, `lint`, `docs`. A
 ```
 motion-master/
   apps/
-    motion-master/     ← main executable (flat file layout)
+    motion_master/     ← main executable (flat file layout)
     playground/        ← scratch binary
   libs/
-    core/              ← ThreadSafeQueue, seqlock, platform timers, cross-cutting utils
-    comm/              ← flat layout: soem.cc, spoe.cc, igh.cc alongside base interfaces
+    core/              ← version, seqlock, platform timers, cross-cutting utils
+    comm/              ← fieldbus interfaces; soem.cc, spoe.cc, igh.cc alongside base
+  cmake/
+    lint.cmake         ← lint, cppcheck, format CMake targets
   extern/
     vcpkg/             ← git submodule
-    SOEM/              ← git submodule (planned)
-  tools/               ← all helper scripts
+  tools/               ← developer scripts
 ```
 
 Flat layout within each lib/app is intentional — navigate by filename and grep, not nested folders.
@@ -118,36 +128,44 @@ Motion Master binds to `127.0.0.1:8443`. The PWA at `https://motion-master.synap
 
 ## Dependencies
 
-Managed via vcpkg (`extern/vcpkg` submodule, pinned in `vcpkg.json`). Add to the `dependencies` array in `vcpkg.json`, then use `find_package` in the relevant `CMakeLists.txt`.
+Managed via vcpkg (`extern/vcpkg` submodule, pinned in `vcpkg.json`). To add a dependency: add it to `vcpkg.json`, then `find_package` + `target_link_libraries` in the relevant `CMakeLists.txt`.
 
-Planned additions: `loguru` (via vcpkg, not submodule), `GTest`, HTTP server library, WebSocket library.
+| Package | Version | Used in | CMake target |
+|---|---|---|---|
+| `cli11` | 2.6.2 | `motion_master` | `CLI11::CLI11` |
+| `gtest` | 1.17.0 | test targets | `GTest::gtest`, `GTest::gtest_main` |
+| `neargye-semver` | 1.0.0-rc | `mm_core` | `semver::semver` |
+| `nlohmann-json` | 3.12.0 | `motion_master` | `nlohmann_json::nlohmann_json` |
+| `spdlog` | 1.17.0 | `motion_master` | `spdlog::spdlog` |
 
-Do not commit private keys or certificates. Add `*.key` and `*.pem` to `.gitignore`.
+Do not commit private keys or certificates (`*.key`, `*.pem`).
+
+## Testing
+
+Tests live alongside their library in a `tests/` subdirectory. The test binary is discovered automatically by CTest via `gtest_discover_tests`.
+
+```bash
+./tools/test.sh                          # run all tests
+ctest --test-dir build/x64-linux-debug -R VersionTest  # run a specific test by name
+```
 
 ## Code Style
 
-Formatting: `.clang-format` (Google style, 100-column limit).
+Formatting: `.clang-format` (Google style, 100-column limit). Run `./tools/format.sh` to format all sources, or use the CMake target:
 
 ```bash
-# Format a file
-clang-format -i <file>
-
-# Format all source files
-find apps libs tools -name '*.cc' -o -name '*.hh' | xargs clang-format -i
+ninja -C build/x64-linux-debug format
 ```
 
 File naming: `lowercase_with_underscores` (e.g. `soem_driver.cc` pairs with `SoemDriver`). Repo/folder name uses hyphens (`motion-master`) by GitHub convention.
 
 ## Static Analysis
 
-Both tools run as CMake custom targets defined in `cmake/lint.cmake`. Run them after configuring:
+`lint`, `cppcheck`, and `format` are CMake custom targets defined in `cmake/lint.cmake`, callable via scripts or directly with ninja:
 
 ```bash
-# cpplint — Google C++ style lint (requires: pip install cpplint)
-ninja -C build/x64-linux-debug lint
-
-# cppcheck — static analysis (already installed)
-ninja -C build/x64-linux-debug cppcheck
+./tools/cppcheck.sh                            # or: ninja -C build/x64-linux-debug cppcheck
+./tools/lint.sh                                # or: ninja -C build/x64-linux-debug lint
 ```
 
-cpplint is configured via `CPPLINT.cfg` at the repo root (`-legal/copyright`, `-build/c++11` suppressed; 100-column limit; `.hh` treated as headers). cppcheck runs with `warning,style,performance,portability` checks, `--std=c++23`, and exits non-zero on findings.
+cpplint is configured via `CPPLINT.cfg` (`-legal/copyright`, `-build/c++11` suppressed; 100-column limit; `.hh` treated as headers). cppcheck runs with `warning,style,performance,portability`, `--std=c++23`, exits non-zero on findings.

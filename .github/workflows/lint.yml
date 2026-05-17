@@ -18,7 +18,7 @@ jobs:
 
       - name: Check formatting
         run: |
-          find apps libs \( -name '*.cc' -o -name '*.hh' \) \
+          find apps libs \( -name '*.cc' -o -name '*.h' \) \
             | xargs clang-format --dry-run --Werror
 
   cpplint:
@@ -31,7 +31,7 @@ jobs:
 
       - name: Run cpplint
         run: |
-          find apps libs \( -name '*.cc' -o -name '*.hh' \) \
+          find apps libs \( -name '*.cc' -o -name '*.h' \) \
             | xargs cpplint
 
   cppcheck:

@@ -68,3 +68,107 @@ Managed via [vcpkg](https://vcpkg.io). No manual installation needed — vcpkg d
 | Linux x86-64 | Primary target |
 | Linux ARM | Planned |
 | Windows x64 | Planned |
+
+## Real-Time Deployment on Linux (Intel E3940 / AAeon)
+
+The reference embedded target is an AAeon board with an Intel E3940 (Apollo Lake) CPU, 4 GB RAM, and 20 GB storage. The recommended OS is **Debian 13 (Trixie)** with XFCE desktop (~5 GB installed, leaves headroom for build artifacts).
+
+### 1. Install the RT Kernel
+
+```bash
+sudo apt install linux-image-rt-amd64 linux-headers-rt-amd64
+sudo reboot
+```
+
+Verify after reboot:
+
+```bash
+uname -r          # should contain -rt
+cat /sys/kernel/realtime   # prints 1
+```
+
+### 2. Boot Parameters
+
+Add to `GRUB_CMDLINE_LINUX` in `/etc/default/grub`, then run `sudo update-grub`:
+
+```
+isolcpus=2,3 rcu_nocbs=2,3 nohz_full=2,3 intel_idle.max_cstate=1 processor.max_cstate=1 quiet
+```
+
+`isolcpus=2,3` reserves cores 2 and 3 for the RT thread. The E3940 has 4 cores (0–3); cores 0–1 handle the OS and GUI. Adjust if you need more OS headroom.
+
+### 3. RT Privileges for the motion-master User
+
+```bash
+sudo groupadd realtime
+sudo usermod -aG realtime $USER
+```
+
+Create `/etc/security/limits.d/99-realtime.conf`:
+
+```
+@realtime soft rtprio  99
+@realtime hard rtprio  99
+@realtime soft memlock unlimited
+@realtime hard memlock unlimited
+```
+
+Log out and back in for group membership to take effect.
+
+### 4. Set CPU Affinity at Launch
+
+Pin motion-master to the isolated cores so the OS scheduler never migrates it:
+
+```bash
+taskset -c 2 ./motion-master --driver soem
+```
+
+Or use `chrt` to also set the scheduling policy explicitly:
+
+```bash
+chrt -f 80 taskset -c 2 ./motion-master --driver soem
+```
+
+The `GameLoop` already calls `pthread_setschedparam(SCHED_FIFO, 80)` internally; `chrt` here is a belt-and-suspenders fallback in case the process lacks `CAP_SYS_NICE`.
+
+### 5. EtherCAT NIC Assignment
+
+The E3940 board typically has an Intel I211 or I219 onboard NIC. Identify your interfaces:
+
+```bash
+ip link show
+lspci | grep -i ethernet
+```
+
+Pass the EtherCAT interface name to motion-master via config or `--ifname` (once that flag is wired up). Keep a separate NIC or VLAN for management traffic — SOEM takes exclusive control of the EtherCAT NIC.
+
+Verify the NIC supports raw socket access (no offloading that interferes with EtherCAT frames):
+
+```bash
+sudo ethtool -K <iface> gso off gro off tso off
+```
+
+### 6. IRQ Affinity
+
+Move NIC interrupts off the isolated cores so they do not interrupt the RT thread:
+
+```bash
+# Find the IRQ number for your NIC
+grep <iface> /proc/interrupts
+
+# Pin it to core 0
+echo 1 | sudo tee /proc/irq/<IRQ>/smp_affinity
+```
+
+Consider adding this to a systemd service or `/etc/rc.local` for persistence.
+
+### 7. Verify Latency
+
+Install `cyclictest` and run a latency benchmark before deploying:
+
+```bash
+sudo apt install rt-tests
+sudo cyclictest --mlockall --smp --priority=80 --interval=1000 --distance=0 --duration=60s
+```
+
+Target: max latency well under 200 µs with the 1 ms cycle. If you see spikes above 500 µs, revisit C-state and IRQ affinity settings.

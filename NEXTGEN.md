@@ -16,7 +16,7 @@
 - Configurable via a JSON config file — timeouts, buffer sizes, and similar parameters.
 - All public functions fully documented.
 - Clients are responsible for managing EtherCAT state transitions. Motion Master handles PDO configuration, decides when to start and stop process-data exchange, and rejects operations that are invalid in the current state (e.g. SDO reads or file transfers in INIT state).
-- Targets x86-64 and ARM.
+- Targets x86-64 and ARM (Linux and Windows).
 - Fieldbus drivers (SOEM, SPoE, IgH EtherCAT) abstracted behind a common interface.
 - Structured, leveled logging throughout — verbose debug logs available without cluttering normal operation. A companion web application for viewing and analyzing logs.
 - A Claude-generated ReactJS application with access to the full API surface, used initially for testing state transitions, register reads/writes, etc.
@@ -66,6 +66,7 @@ Motion Master sets `Access-Control-Allow-Origin: https://motion-master.synaptico
 **PWA connectivity**
 
 The PWA at `https://motion-master.synapticon.com` connects to:
+
 - `https://local.motion-master.synapticon.com:8443` — HTTP API
 - `wss://local.motion-master.synapticon.com:8443` — monitoring WebSocket
 
@@ -136,9 +137,10 @@ App  (composition root, owns everything)
 
 `Device → Cia402Drive` via inheritance: correct. The relationship is genuinely "is-a" — CiA402 is a standard and every such device has the same state machine, op modes, and control/status word bits. Shallow inheritance is appropriate.
 
-`Cia402Drive → SomanetDevice` via inheritance: no. Somanet-specific features are not what the device *is*, they are what you *do with it* using knowledge of Somanet's OD layout. Subclassing here would force `DeviceManager` to know about `SomanetDevice` or require downcasting — both are signs the abstraction is wrong.
+`Cia402Drive → SomanetDevice` via inheritance: no. Somanet-specific features are not what the device _is_, they are what you _do with it_ using knowledge of Somanet's OD layout. Subclassing here would force `DeviceManager` to know about `SomanetDevice` or require downcasting — both are signs the abstraction is wrong.
 
 Instead:
+
 - Simple Somanet-specific OD access → free functions in `namespace somanet`
 - Complex multi-step procedures (encoder calibration, auto-tuning) → separate `ICyclicTask` implementations that take a `Cia402Drive&`
 

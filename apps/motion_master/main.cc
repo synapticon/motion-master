@@ -1,9 +1,9 @@
-#include <fstream>
-#include <string>
+#include <spdlog/spdlog.h>
 
 #include <CLI/CLI.hpp>
+#include <fstream>
 #include <nlohmann/json.hpp>
-#include <spdlog/spdlog.h>
+#include <string>
 
 #include "core/version.hh"
 
@@ -12,12 +12,10 @@ int main(int argc, char** argv) {
   app.set_version_flag("--version", std::string{mm::core::kVersion});
 
   std::string config;
-  app.add_option("-c,--config", config, "Path to JSON config file")
-      ->check(CLI::ExistingFile);
+  app.add_option("-c,--config", config, "Path to JSON config file")->check(CLI::ExistingFile);
 
   uint16_t port = 8443;
-  app.add_option("-p,--port", port, "HTTP/WebSocket port")
-      ->capture_default_str();
+  app.add_option("-p,--port", port, "HTTP/WebSocket port")->capture_default_str();
 
   std::string driver = "soem";
   app.add_option("-d,--driver", driver, "Fieldbus driver")

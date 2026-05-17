@@ -1,8 +1,7 @@
 #pragma once
 
-#include <string_view>
-
 #include <semver.hpp>
+#include <string_view>
 
 namespace mm::core {
 

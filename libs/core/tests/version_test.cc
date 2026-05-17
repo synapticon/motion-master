@@ -1,13 +1,11 @@
-#include <gtest/gtest.h>
-#include <semver.hpp>
-
-#include <string>
-
 #include "core/version.hh"
 
-TEST(VersionTest, StringConstant) {
-  EXPECT_EQ(mm::core::kVersion, "6.0.0");
-}
+#include <gtest/gtest.h>
+
+#include <semver.hpp>
+#include <string>
+
+TEST(VersionTest, StringConstant) { EXPECT_EQ(mm::core::kVersion, "6.0.0"); }
 
 TEST(VersionTest, SemverComponents) {
   semver::version<> v{};

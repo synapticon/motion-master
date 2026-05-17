@@ -52,7 +52,7 @@ export default function RootLayout() {
 
         <nav className="flex-1 overflow-y-auto py-4">
           <NavItem to="/" label="Dashboard" />
-          {deviceId && <DeviceSection deviceId={deviceId} />}
+          <DeviceSection deviceId={deviceId ?? '1'} />
         </nav>
 
         <div className="px-5 py-3 border-t border-white/10">

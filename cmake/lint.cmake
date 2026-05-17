@@ -1,8 +1,8 @@
 file(GLOB_RECURSE PROJECT_SOURCE_FILES
     "${CMAKE_SOURCE_DIR}/apps/*.cc"
-    "${CMAKE_SOURCE_DIR}/apps/*.hh"
+    "${CMAKE_SOURCE_DIR}/apps/*.h"
     "${CMAKE_SOURCE_DIR}/libs/*.cc"
-    "${CMAKE_SOURCE_DIR}/libs/*.hh"
+    "${CMAKE_SOURCE_DIR}/libs/*.h"
 )
 
 # ---------- cpplint ----------

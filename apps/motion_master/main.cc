@@ -5,7 +5,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 
-#include "core/version.hh"
+#include "core/version.h"
 
 int main(int argc, char** argv) {
   CLI::App app{"Motion Master", "motion-master"};

@@ -1,4 +1,4 @@
-#include "core/version.hh"
+#include "core/version.h"
 
 #include <gtest/gtest.h>
 

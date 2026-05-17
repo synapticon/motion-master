@@ -51,7 +51,7 @@ All scripts default to the `x64-linux-debug` preset. Pass a preset name as the f
 
 ### Code Quality Tools
 
-- **`format`** — runs `clang-format` over all `.cc`/`.hh` sources and rewrites them in-place. Enforces Google style with a 100-column limit as defined in `.clang-format`. CI fails if any file is not already formatted.
+- **`format`** — runs `clang-format` over all `.cc`/`.h` sources and rewrites them in-place. Enforces Google style with a 100-column limit as defined in `.clang-format`. CI fails if any file is not already formatted.
 - **`lint`** — runs `cpplint` to check for Google-style C++ convention violations: include order, naming, deprecated constructs, and header guards. Configured via `CPPLINT.cfg`.
 - **`cppcheck`** — static analysis that catches bugs the compiler doesn't warn about: null pointer dereferences, out-of-bounds access, uninitialized variables, resource leaks, etc. Runs with `warning,style,performance,portability` checks at `--std=c++23` and exits non-zero on any finding.
 

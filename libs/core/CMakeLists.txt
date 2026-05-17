@@ -1,6 +1,6 @@
 find_package(semver CONFIG REQUIRED)
 
-configure_file(version.hh.in "${CMAKE_CURRENT_BINARY_DIR}/version.hh")
+configure_file(version.h.in "${CMAKE_CURRENT_BINARY_DIR}/version.h")
 
 add_library(mm_core STATIC
     version.cc

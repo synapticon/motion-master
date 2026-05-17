@@ -157,7 +157,7 @@ Formatting: `.clang-format` (Google style, 100-column limit). Run `./tools/forma
 ninja -C build/x64-linux-debug format
 ```
 
-File naming: `lowercase_with_underscores` (e.g. `soem_driver.cc` pairs with `SoemDriver`). Repo/folder name uses hyphens (`motion-master`) by GitHub convention.
+File naming: `lowercase_with_underscores` (e.g. `soem_driver.cc`/`soem_driver.h` pairs with `SoemDriver`). Headers use `.h`, sources use `.cc` (Google style). Repo/folder name uses hyphens (`motion-master`) by GitHub convention.
 
 ## Static Analysis
 
@@ -168,4 +168,4 @@ File naming: `lowercase_with_underscores` (e.g. `soem_driver.cc` pairs with `Soe
 ./tools/lint.sh                                # or: ninja -C build/x64-linux-debug lint
 ```
 
-cpplint is configured via `CPPLINT.cfg` (`-legal/copyright`, `-build/c++11` suppressed; 100-column limit; `.hh` treated as headers). cppcheck runs with `warning,style,performance,portability`, `--std=c++23`, exits non-zero on findings.
+cpplint is configured via `CPPLINT.cfg` (`-legal/copyright`, `-build/c++11` suppressed; 100-column limit; `.h` treated as headers). cppcheck runs with `warning,style,performance,portability`, `--std=c++23`, exits non-zero on findings.

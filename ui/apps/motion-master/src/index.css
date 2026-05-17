@@ -1,1 +1,126 @@
 @import "tailwindcss";
+
+/* ─── Synapticon Design System — April 2026 ─────────────────────────────────
+   Fonts: Synapticon Campton (display) + Univers LT Pro (body).
+   Place font files in public/fonts/ to activate them.
+   ────────────────────────────────────────────────────────────────────────── */
+
+@font-face {
+  font-family: "Synapticon Campton";
+  font-weight: 300;
+  font-style: normal;
+  src: url("/fonts/CamptonLight.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Synapticon Campton";
+  font-weight: 500;
+  font-style: normal;
+  src: url("/fonts/CamptonMedium.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Univers LT Pro";
+  font-weight: 400;
+  font-style: normal;
+  src: url("/fonts/UniversLTPro-55Roman.woff2") format("woff2");
+}
+
+@theme {
+  /* ── Brand palette ───────────────────────────────────────────── */
+  --color-syn-red:        #e0004d;  /* primary brand, CTAs, links, bullets */
+  --color-ocean:          #00849b;  /* PMS 7712C — tech / motion accent */
+  --color-ocean-dark:     #004f5d;  /* nav surfaces, dark accents */
+  --color-safety-yellow:  #ffcc00;  /* sparing highlight only */
+
+  /* ── Grey scale (10-step) ────────────────────────────────────── */
+  --color-grey-50:  #fafafa;
+  --color-grey-100: #f5f5f5;
+  --color-grey-200: #eeeeee;  /* section backgrounds */
+  --color-grey-300: #d9d9d9;  /* nav surfaces */
+  --color-grey-400: #bdbcbc;
+  --color-grey-500: #a9a9a9;  /* light */
+  --color-grey-600: #848484;
+  --color-grey-700: #656565;  /* borders */
+  --color-grey-800: #434343;  /* dark */
+  --color-grey-900: #191817;  /* near-black — icon stroke */
+
+  /* ── Semantic ────────────────────────────────────────────────── */
+  --color-status-bad:  #8c072f;  /* errors, destructive */
+  --color-status-warn: #ffcc03;  /* caution, medium */
+  --color-status-good: #008d9d;  /* success, positive */
+  --color-status-info: #166fc0;  /* generic info */
+
+  /* ── Typography ──────────────────────────────────────────────── */
+  --font-display: "Synapticon Campton", "Raleway", ui-sans-serif, system-ui, sans-serif;
+  --font-body:    "Univers LT Pro", "Inter", ui-sans-serif, system-ui, sans-serif;
+
+  /* ── Radii — brand is squared off ────────────────────────────── */
+  --radius-none:   0px;
+  --radius-sm:     2px;   /* subtle rounding (interactive states only) */
+  --radius:        0px;
+  --radius-md:     0px;
+  --radius-lg:     0px;
+  --radius-xl:     0px;
+  --radius-2xl:    0px;
+  --radius-full:   9999px;
+
+  /* ── Elevation — reserved for in-app overlays only ───────────── */
+  --shadow-overlay-1: 0 2px 8px  rgb(0 0 0 / 0.12);
+  --shadow-overlay-2: 0 4px 16px rgb(0 0 0 / 0.18);
+  --shadow-none:      none;
+
+  /* ── Spacing — 8 px grid, tokens 1–10 ───────────────────────── */
+  --spacing-1:  0.25rem;   /*   4 px */
+  --spacing-2:  0.5rem;    /*   8 px */
+  --spacing-3:  0.75rem;   /*  12 px */
+  --spacing-4:  1rem;      /*  16 px */
+  --spacing-5:  1.5rem;    /*  24 px */
+  --spacing-6:  2rem;      /*  32 px */
+  --spacing-7:  3rem;      /*  48 px */
+  --spacing-8:  4rem;      /*  64 px */
+  --spacing-9:  6rem;      /*  96 px */
+  --spacing-10: 8rem;      /* 128 px */
+}
+
+/* ── Base ────────────────────────────────────────────────────────────────── */
+@layer base {
+  html {
+    font-family: var(--font-body);
+    color: #000000;
+    background-color: #ffffff;
+    line-height: 1.52;
+    letter-spacing: 0.03em;
+  }
+
+  /* Display headings — Campton, always uppercase */
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-display);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    line-height: 1.1;
+  }
+
+  /* Eyebrow labels */
+  .eyebrow {
+    font-family: var(--font-display);
+    font-size: 0.75rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-syn-red);
+  }
+
+  /* Buttons — squared, uppercase Campton */
+  button, [role="button"] {
+    font-family: var(--font-display);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-radius: 0;
+  }
+
+  /* Flat borders throughout — no box-shadow on surfaces */
+  * {
+    border-color: var(--color-grey-700);
+  }
+}

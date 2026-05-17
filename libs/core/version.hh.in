@@ -5,7 +5,7 @@
 
 namespace mm::core {
 
-constexpr std::string_view kVersion = "6.0.0";
+constexpr std::string_view kVersion = "@MM_VERSION@";
 static_assert(semver::valid(kVersion));
 
 }  // namespace mm::core

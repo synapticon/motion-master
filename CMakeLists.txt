@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 4.0)
-project(motion-master VERSION 6.0.0 LANGUAGES CXX)
+
+file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" MM_VERSION)
+
+project(motion-master LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

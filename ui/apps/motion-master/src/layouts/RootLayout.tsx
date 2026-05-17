@@ -1,5 +1,7 @@
 import { NavLink, Outlet, useParams } from 'react-router'
 
+const mockDevices = ['1', '2', '3', '4', '5', '6', '7', '8']
+
 const deviceLinks = [
   { to: 'ethercat-state',    label: 'EtherCAT State' },
   { to: 'object-dictionary', label: 'Object Dictionary' },
@@ -30,9 +32,11 @@ function DeviceSection({ deviceId }: { deviceId: string }) {
   return (
     <div className="mt-6">
       <p className="eyebrow px-5 mb-2">Device {deviceId}</p>
-      {deviceLinks.map(({ to, label }) => (
-        <NavItem key={to} to={`/devices/${deviceId}/${to}`} label={label} />
-      ))}
+      <div className="pl-3">
+        {deviceLinks.map(({ to, label }) => (
+          <NavItem key={to} to={`/devices/${deviceId}/${to}`} label={label} />
+        ))}
+      </div>
     </div>
   )
 }
@@ -43,16 +47,18 @@ export default function RootLayout() {
   return (
     <div className="flex h-screen bg-grey-50 text-grey-900">
       {/* Sidebar — Ocean Dark */}
-      <aside className="w-56 shrink-0 bg-ocean-dark flex flex-col">
+      <aside className="w-56 shrink-0 bg-ocean-dark flex flex-col border-r border-white/10">
         <div className="px-5 py-4 border-b border-white/10">
           <span className="font-display text-sm font-medium uppercase tracking-widest text-white">
             Motion Master
           </span>
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-4">
+        <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
           <NavItem to="/" label="Dashboard" />
-          <DeviceSection deviceId={deviceId ?? '1'} />
+          {mockDevices.map((id) => (
+            <DeviceSection key={id} deviceId={id} />
+          ))}
         </nav>
 
         <div className="px-5 py-3 border-t border-white/10">

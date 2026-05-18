@@ -23,6 +23,14 @@ GENERATE_HTML          = YES
 HTML_OUTPUT            = html
 GENERATE_LATEX         = NO
 
+# doxygen-awesome-css theme (v2.4.2)
+GENERATE_TREEVIEW      = YES
+DISABLE_INDEX          = NO
+FULL_SIDEBAR           = NO
+HTML_COLORSTYLE        = AUTO
+HTML_EXTRA_STYLESHEET  = @CMAKE_SOURCE_DIR@/extern/doxygen-awesome-css/doxygen-awesome.css \
+                         @CMAKE_SOURCE_DIR@/extern/doxygen-awesome-css/doxygen-awesome-sidebar-only.css
+
 QUIET                  = NO
 WARNINGS               = YES
 WARN_IF_UNDOCUMENTED   = YES

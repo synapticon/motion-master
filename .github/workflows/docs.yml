@@ -23,6 +23,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Checkout theme submodule
+        run: git submodule update --init extern/doxygen-awesome-css
+
       - name: Install Doxygen
         run: |
           sudo apt-get update -q

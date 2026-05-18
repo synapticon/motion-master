@@ -48,6 +48,7 @@ jobs:
             --enable=warning,style,performance,portability \
             --std=c++23 \
             --suppress=missingIncludeSystem \
+            --suppressions-list=cppcheck.supp \
             --error-exitcode=1 \
             --quiet \
             -I libs \

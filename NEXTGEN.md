@@ -167,6 +167,29 @@ Inject `IFieldbusDriver` into `GameLoop`, `DeviceManager`, `SdoService`, `Networ
 
 ---
 
+## Session 2026-05-18 — Monitoring WebSocket protocol
+
+**Message format**
+
+Two message types flow over the monitoring WebSocket:
+
+```json
+{"type": "monitoring", "topic": "pdos", "data": [1234567890, 39, 0, 12345]}
+{"type": "notification", "data": {"event": "slaves_changed"}}
+```
+
+`data` in a monitoring message is a positionally-ordered array of numbers. The array order is stable for the lifetime of a monitoring session. Clients fetch the schema once via HTTP (e.g. `GET /api/monitoring/pdos`) and use the positional index to look up meaning — no keys are repeated in every 1 ms message.
+
+```
+GET /api/monitoring/pdos → [{"index": "6064:00", "name": "actual_position"}, ...]
+```
+
+**Throughput**
+
+At ~40 × 32-bit PDO values per message, a monitoring message is approximately 450 bytes of JSON. At 1 ms cycles with up to 5 simultaneous clients, total loopback throughput is ~2.25 MB/s — negligible on loopback. Using an array rather than a key-value map halves the message size and keeps the high-frequency path minimal.
+
+---
+
 ## Session 2026-05-16 — Design review and approach
 
 **Viable.** The design reflects clear lessons from the current codebase. Key sound decisions: `std::expected` over exceptions, HTTP + single monitoring WebSocket instead of dual-port Protobuf, object dictionary as single source of truth updated each cycle, and clients owning EtherCAT state transitions (removes significant complexity from Motion Master).

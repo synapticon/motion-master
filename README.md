@@ -31,8 +31,45 @@ motion-master [OPTIONS]
       --version                 Display program version and exit
   -c, --config TEXT:FILE        Path to JSON config file
   -p, --port UINT [8443]        HTTP/WebSocket port
+      --cert TEXT:FILE          TLS certificate file
+      --key TEXT:FILE           TLS private key file
   -d, --driver TEXT [soem]      Fieldbus driver: soem, spoe, igh
   -l, --log-level TEXT [info]   Log level: trace, debug, info, warn, error
+```
+
+## Local Development
+
+Production releases bundle a CA-signed TLS certificate for `local.motion-master.synapticon.com`. For local development, generate a self-signed certificate:
+
+```bash
+openssl req -x509 -newkey rsa:2048 -keyout /tmp/key.pem -out /tmp/cert.pem \
+  -days 365 -nodes -subj "/CN=localhost"
+```
+
+Run with the self-signed cert:
+
+```bash
+./build/x64-linux-debug/apps/motion_master/motion-master \
+  --cert /tmp/cert.pem --key /tmp/key.pem
+```
+
+Test the HTTP API (accept the self-signed cert warning):
+
+```bash
+curl -k https://localhost:8443/api/version
+```
+
+Connect a WebSocket client to `wss://localhost:8443/ws`. The server sends two message types:
+
+```json
+{"type": "monitoring", "topic": "pdos", "data": [1234567890, 39, 0, 12345]}
+{"type": "notification", "data": {"event": "slaves_changed"}}
+```
+
+Fetch the monitoring schema to interpret the `data` array:
+
+```bash
+curl -k https://localhost:8443/api/monitoring/pdos
 ```
 
 ## Developer Scripts
@@ -69,6 +106,7 @@ Managed via [vcpkg](https://vcpkg.io). No manual installation needed — vcpkg d
 | spdlog | Structured logging |
 | nlohmann-json | JSON config file parsing |
 | neargye-semver | Semantic versioning |
+| uwebsockets | HTTP and WebSocket server (TLS via OpenSSL) |
 | GTest | Unit testing |
 
 ## Platform Support

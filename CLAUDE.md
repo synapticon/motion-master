@@ -126,6 +126,23 @@ Cycle timer: `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...)` on Linux (ab
 
 Motion Master binds to `127.0.0.1:8443`. The PWA at `https://motion-master.synapticon.com` connects to `https://local.motion-master.synapticon.com:8443` (HTTP API) and `wss://local.motion-master.synapticon.com:8443` (WebSocket). The DNS record `local.motion-master.synapticon.com A 127.0.0.1` resolves to localhost. A real CA-signed TLS cert is bundled with each release; renewal is automated via DNS-01 ACME in CI/CD. CORS is set to `Access-Control-Allow-Origin: https://motion-master.synapticon.com`.
 
+### Monitoring WebSocket Protocol
+
+Two message types are sent over the WebSocket:
+
+```json
+{"type": "monitoring", "topic": "pdos", "data": [1234567890, 39, 0, 12345]}
+{"type": "notification", "data": {"event": "slaves_changed"}}
+```
+
+`data` is a positionally-ordered array of numbers — no keys in the high-frequency path. Clients fetch the schema once via HTTP and cache it:
+
+```
+GET /api/monitoring/pdos → [{"index": "6064:00", "name": "actual_position"}, ...]
+```
+
+The array order is stable for the lifetime of a monitoring session. Up to 5 simultaneous clients; ~40 × 32-bit values per message ≈ 450 bytes at 1 ms cycles.
+
 ### CiA402 / Somanet
 
 `Device → Cia402Drive` via inheritance (is-a relationship, shallow). **No** `Cia402Drive → SomanetDevice` inheritance — Somanet-specific OD access is free functions in `namespace somanet`; multi-step procedures (encoder calibration, auto-tuning) are `ICyclicTask` implementations that take a `Cia402Drive&`.
@@ -141,6 +158,7 @@ Managed via vcpkg (`extern/vcpkg` submodule, pinned in `vcpkg.json`). To add a d
 | `neargye-semver` | 1.0.0-rc | `mm_core` | `semver::semver` |
 | `nlohmann-json` | 3.12.0 | `motion_master` | `nlohmann_json::nlohmann_json` |
 | `spdlog` | 1.17.0 | `motion_master` | `spdlog::spdlog` |
+| `uwebsockets` | 20.77.0 | `motion_master` | `unofficial::uwebsockets::uwebsockets` |
 
 Do not commit private keys or certificates (`*.key`, `*.pem`).
 

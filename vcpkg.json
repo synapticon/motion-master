@@ -7,6 +7,10 @@
     "gtest",
     "neargye-semver",
     "nlohmann-json",
-    "spdlog"
+    "spdlog",
+    {
+      "name": "uwebsockets",
+      "features": ["ssl"]
+    }
   ]
 }

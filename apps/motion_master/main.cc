@@ -1,11 +1,19 @@
 #include <spdlog/spdlog.h>
 
 #include <CLI/CLI.hpp>
+#include <atomic>
+#include <csignal>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <thread>
 
 #include "core/version.h"
+#include "server.h"
+
+namespace {
+std::atomic<bool> g_quit{false};
+}
 
 int main(int argc, char** argv) {
   CLI::App app{"Motion Master", "motion-master"};
@@ -16,6 +24,12 @@ int main(int argc, char** argv) {
 
   uint16_t port = 8443;
   app.add_option("-p,--port", port, "HTTP/WebSocket port")->capture_default_str();
+
+  std::string cert_file;
+  app.add_option("--cert", cert_file, "TLS certificate file")->check(CLI::ExistingFile);
+
+  std::string key_file;
+  app.add_option("--key", key_file, "TLS private key file")->check(CLI::ExistingFile);
 
   std::string driver = "soem";
   app.add_option("-d,--driver", driver, "Fieldbus driver")
@@ -38,8 +52,27 @@ int main(int argc, char** argv) {
       spdlog::error("Failed to parse config file: {}", config);
       return 1;
     }
+
     spdlog::debug("Loaded config from {}", config);
   }
+
+  std::signal(SIGINT, [](int) { g_quit = true; });
+  std::signal(SIGTERM, [](int) { g_quit = true; });
+
+  Server server{Server::Config{
+      .port = port,
+      .cert_file = cert_file,
+      .key_file = key_file,
+      .version = std::string{mm::core::kVersion},
+  }};
+  server.start();
+
+  while (!g_quit) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+
+  spdlog::info("Shutting down");
+  server.stop();
 
   return 0;
 }

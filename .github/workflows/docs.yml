@@ -1,0 +1,62 @@
+name: Docs
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Only one deployment at a time; don't cancel in-progress runs so a queued
+# deploy is not dropped when a new push arrives.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y doxygen
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@v5
+
+      - name: Generate Doxyfile
+        run: |
+          MM_VERSION=$(cat VERSION)
+          mkdir -p build/docs
+          cmake \
+            -D MM_VERSION="${MM_VERSION}" \
+            -D MM_SOURCE_DIR="${GITHUB_WORKSPACE}" \
+            -D MM_BINARY_DIR="${GITHUB_WORKSPACE}/build" \
+            -P cmake/configure_doxyfile.cmake
+
+      - name: Build docs
+        run: doxygen build/Doxyfile
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: build/docs/html
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-24.04
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

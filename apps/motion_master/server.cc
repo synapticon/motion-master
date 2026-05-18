@@ -2,7 +2,9 @@
 
 #include <spdlog/spdlog.h>
 
+#include <fstream>
 #include <nlohmann/json.hpp>
+#include <sstream>
 
 static constexpr std::string_view kCorsOrigin = "https://motion-master.synapticon.com";
 
@@ -48,6 +50,20 @@ void Server::broadcast(std::string json) {
 }
 
 void Server::run() {
+  // Read once at startup: the spec is static for the lifetime of the server, and
+  // failing early here surfaces a missing file before any client connects.
+  std::string swagger_content;
+  if (!config_.swagger_file.empty()) {
+    std::ifstream f{config_.swagger_file};
+    if (f) {
+      std::ostringstream ss;
+      ss << f.rdbuf();
+      swagger_content = ss.str();
+    } else {
+      spdlog::warn("Could not read swagger file: {}", config_.swagger_file);
+    }
+  }
+
   loop_.store(uWS::Loop::get());
 
   uWS::SSLApp::WebSocketBehavior<WsData> ws_behavior{};
@@ -64,6 +80,18 @@ void Server::run() {
       .key_file_name = config_.key_file.c_str(),
       .cert_file_name = config_.cert_file.c_str(),
   }}
+      .get("/api/swagger.yml",
+           [swagger_content](auto* res, auto* /*req*/) {
+             if (swagger_content.empty()) {
+               res->writeStatus("404 Not Found")->end();
+               return;
+             }
+             // text/* renders inline in the browser; non-text MIME types trigger a download.
+             res->writeHeader("Content-Type", "text/yaml; charset=utf-8")
+                 ->writeHeader("Content-Disposition", "inline")
+                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->end(swagger_content);
+           })
       .get("/api/version",
            [this](auto* res, auto* /*req*/) {
              res->writeHeader("Content-Type", "application/json")

@@ -14,6 +14,7 @@ class Server {
     std::string cert_file;
     std::string key_file;
     std::string version;
+    std::string swagger_file;
   };
 
   explicit Server(Config config);

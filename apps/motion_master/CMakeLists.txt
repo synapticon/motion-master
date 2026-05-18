@@ -1,3 +1,7 @@
+# Copies swagger.yml into the build output directory so the development layout
+# matches production — both have swagger.yml next to the binary.
+configure_file(swagger.yml swagger.yml COPYONLY)
+
 add_executable(motion_master
     main.cc
     server.cc

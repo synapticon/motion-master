@@ -3,16 +3,33 @@
 #include <CLI/CLI.hpp>
 #include <atomic>
 #include <csignal>
+#include <filesystem>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <thread>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
 
 #include "core/version.h"
 #include "server.h"
 
 namespace {
 std::atomic<bool> g_quit{false};
+
+std::filesystem::path exe_dir() {
+  // argv[0] is unreliable — it can be a relative path, a bare command name
+  // resolved via PATH, or a symlink — so we ask the OS for the real path instead.
+#ifdef _WIN32
+  wchar_t buf[MAX_PATH];
+  GetModuleFileNameW(nullptr, buf, MAX_PATH);
+  return std::filesystem::path{buf}.parent_path();
+#else
+  return std::filesystem::canonical("/proc/self/exe").parent_path();
+#endif
+}
 }
 
 int main(int argc, char** argv) {
@@ -59,11 +76,15 @@ int main(int argc, char** argv) {
   std::signal(SIGINT, [](int) { g_quit = true; });
   std::signal(SIGTERM, [](int) { g_quit = true; });
 
+  // swagger.yml ships alongside the binary, so no user configuration is needed.
+  auto swagger_file = (exe_dir() / "swagger.yml").string();
+
   Server server{Server::Config{
       .port = port,
       .cert_file = cert_file,
       .key_file = key_file,
       .version = std::string{mm::core::kVersion},
+      .swagger_file = std::move(swagger_file),
   }};
   server.start();
 

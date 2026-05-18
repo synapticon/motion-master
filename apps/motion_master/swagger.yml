@@ -1,0 +1,39 @@
+openapi: "3.1.0"
+info:
+  title: Motion Master API
+  version: "6.0.0"
+  description: >
+    HTTP API for Motion Master motion control software.
+    A monitoring WebSocket is also available at /ws — clients fetch the PDO
+    schema via GET /api/monitoring/pdos and then subscribe to real-time updates.
+servers:
+  - url: https://local.motion-master.synapticon.com:8443
+    description: Local Motion Master instance
+paths:
+  /api/swagger.yml:
+    get:
+      summary: OpenAPI specification
+      operationId: getSwaggerYml
+      responses:
+        "200":
+          description: This OpenAPI specification in YAML format
+          content:
+            text/yaml:
+              schema:
+                type: string
+  /api/version:
+    get:
+      summary: Get Motion Master version
+      operationId: getVersion
+      responses:
+        "200":
+          description: Version string
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version]
+                properties:
+                  version:
+                    type: string
+                    example: "6.0.0"

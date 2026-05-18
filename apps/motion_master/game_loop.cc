@@ -14,7 +14,7 @@ namespace {
 
 void setRealtimePriority() {
 #ifndef _WIN32
-  struct sched_param param{};
+  struct sched_param param = {};
   param.sched_priority = 80;
   if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &param) != 0) {
     spdlog::warn("GameLoop: failed to set SCHED_FIFO — running without RT scheduling");

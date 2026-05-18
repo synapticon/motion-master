@@ -19,7 +19,7 @@ void CyclicTimer::waitForNextCycle() {
     next_nsec_ -= 1'000'000'000L;
     next_sec_++;
   }
-  struct timespec target{next_sec_, next_nsec_};
+  struct timespec target = {next_sec_, next_nsec_};
   // TIMER_ABSTIME: sleep to a fixed absolute deadline so drift never accumulates.
   // Retry on EINTR so a signal (e.g. stop) doesn't cut a cycle short — the caller
   // checks its stop flag after waitForNextCycle() returns normally.

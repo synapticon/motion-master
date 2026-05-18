@@ -4,7 +4,8 @@ PROJECT_BRIEF          = "Next-generation EtherCAT motion control software"
 
 OUTPUT_DIRECTORY       = @CMAKE_CURRENT_BINARY_DIR@/docs
 
-INPUT                  = @CMAKE_SOURCE_DIR@/apps \
+INPUT                  = @CMAKE_SOURCE_DIR@/README.md \
+                         @CMAKE_SOURCE_DIR@/apps \
                          @CMAKE_SOURCE_DIR@/libs
 RECURSIVE              = YES
 FILE_PATTERNS          = *.cc *.h *.h.in

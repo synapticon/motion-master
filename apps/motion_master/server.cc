@@ -5,6 +5,8 @@
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <sstream>
+#include <string>
+#include <utility>
 
 static constexpr std::string_view kCorsOrigin = "https://motion-master.synapticon.com";
 
@@ -101,7 +103,8 @@ void Server::run() {
       .options("/api/*",
                [](auto* res, auto* /*req*/) {
                  res->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
-                     ->writeHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+                     ->writeHeader("Access-Control-Allow-Methods",
+                                   "GET, POST, PUT, DELETE, OPTIONS")
                      ->writeHeader("Access-Control-Allow-Headers", "Content-Type")
                      ->writeStatus("204 No Content")
                      ->end();

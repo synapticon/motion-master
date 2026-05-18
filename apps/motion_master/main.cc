@@ -8,6 +8,7 @@
 #include <nlohmann/json.hpp>
 #include <string>
 #include <thread>
+#include <utility>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -30,7 +31,7 @@ std::filesystem::path exe_dir() {
   return std::filesystem::canonical("/proc/self/exe").parent_path();
 #endif
 }
-}
+}  // namespace
 
 int main(int argc, char** argv) {
   CLI::App app{"Motion Master", "motion-master"};

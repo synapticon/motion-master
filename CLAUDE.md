@@ -13,6 +13,7 @@ Key design mandates from NEXTGEN.md:
 - `IFieldbusDriver` interface abstracts SOEM, SPoE, and IgH EtherCAT — `SoemDriver`, `SpoeDriver`, `IghDriver` are the concrete implementations
 - `App` is the only place that instantiates concrete types (dependency injection at the composition root)
 - Namespaces mirror directory layout (`mm::core`, `mm::comm::soem`, `mm::api`, `mm::devices`); do not use C++20 modules
+- Config file format is JSONC — parse via `nlohmann::json::parse(stream, nullptr, true, true)` (the fourth `true` enables `ignore_comments`); config files use the `.jsonc` extension and may freely use `//` and `/* */` comments
 
 ## Build System
 

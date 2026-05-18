@@ -13,7 +13,7 @@
 - Real-time support on Linux.
 - No exceptions — use `std::expected` instead.
 - Full device control through the API: reading registers, setting EtherCAT state, SII access, etc.
-- Configurable via a JSON config file — timeouts, buffer sizes, and similar parameters.
+- Configurable via a JSONC config file (JSON with `//` and `/* */` comments) — timeouts, buffer sizes, and similar parameters. Parsed via nlohmann-json with `ignore_comments = true`; no extra dependency needed.
 - All public functions fully documented.
 - Clients are responsible for managing EtherCAT state transitions. Motion Master handles PDO configuration, decides when to start and stop process-data exchange, and rejects operations that are invalid in the current state (e.g. SDO reads or file transfers in INIT state).
 - Targets x86-64 and ARM (Linux and Windows).
@@ -187,6 +187,35 @@ GET /api/monitoring/pdos → [{"index": "6064:00", "name": "actual_position"}, .
 **Throughput**
 
 At ~40 × 32-bit PDO values per message, a monitoring message is approximately 450 bytes of JSON. At 1 ms cycles with up to 5 simultaneous clients, total loopback throughput is ~2.25 MB/s — negligible on loopback. Using an array rather than a key-value map halves the message size and keeps the high-frequency path minimal.
+
+---
+
+## Session 2026-05-18 — Configuration file format
+
+**JSONC over plain JSON**
+
+Config files use JSONC — JSON with `//` line comments and `/* */` block comments. This is the right choice for a C++ app that already depends on nlohmann-json: no new dependency, and operators can annotate their config files naturally.
+
+Parsed with the `ignore_comments` flag:
+
+```cpp
+std::ifstream f(configPath);
+auto cfg = nlohmann::json::parse(f, nullptr, /*exceptions=*/true, /*ignore_comments=*/true);
+```
+
+Config files use the `.jsonc` extension by convention. Example:
+
+```jsonc
+{
+  // EtherCAT cycle time in microseconds
+  "cycle_time_us": 1000,
+
+  /* SDO timeout; increase for slow devices or long cables */
+  "sdo_timeout_ms": 100
+}
+```
+
+TOML was considered (clean syntax, native comment support, `toml++` available in vcpkg) but rejected because the config schema is flat and nlohmann-json is already in the dependency graph — adding a library for the same job has no payoff here.
 
 ---
 

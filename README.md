@@ -29,7 +29,7 @@ motion-master [OPTIONS]
 
   -h, --help                    Print this help message and exit
       --version                 Display program version and exit
-  -c, --config TEXT:FILE        Path to JSON config file
+  -c, --config TEXT:FILE        Path to JSONC config file (JSON with // and /* */ comments)
   -p, --port UINT [8443]        HTTP/WebSocket port
       --cert TEXT:FILE          TLS certificate file
       --key TEXT:FILE           TLS private key file
@@ -98,7 +98,7 @@ Managed via [vcpkg](https://vcpkg.io). No manual installation needed — vcpkg d
 |---|---|
 | CLI11 | Command-line argument parsing |
 | spdlog | Structured logging |
-| nlohmann-json | JSON config file parsing |
+| nlohmann-json | JSONC config file parsing (comments enabled) and HTTP response serialization |
 | neargye-semver | Semantic versioning |
 | uwebsockets | HTTP and WebSocket server (TLS via OpenSSL) |
 | GTest | Unit testing |

@@ -5,6 +5,7 @@ configure_file(swagger.yml swagger.yml COPYONLY)
 add_executable(motion_master
     main.cc
     server.cc
+    game_loop.cc
 )
 
 set_target_properties(motion_master PROPERTIES OUTPUT_NAME "motion-master")
@@ -21,3 +22,8 @@ target_link_libraries(motion_master PRIVATE
     spdlog::spdlog
     unofficial::uwebsockets::uwebsockets
 )
+
+if(NOT WIN32)
+  find_package(Threads REQUIRED)
+  target_link_libraries(motion_master PRIVATE Threads::Threads)
+endif()

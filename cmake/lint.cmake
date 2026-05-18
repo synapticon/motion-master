@@ -51,6 +51,7 @@ if(CPPCHECK_EXECUTABLE)
             --enable=warning,style,performance,portability
             --std=c++23
             --suppress=missingIncludeSystem
+            --suppressions-list=${CMAKE_SOURCE_DIR}/cppcheck.supp
             --error-exitcode=1
             --quiet
             -I ${CMAKE_SOURCE_DIR}/libs

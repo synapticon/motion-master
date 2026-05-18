@@ -79,9 +79,9 @@ void Server::run() {
   };
 
   uWS::SSLApp{uWS::SocketContextOptions{
-      .key_file_name = config_.key_file.c_str(),
-      .cert_file_name = config_.cert_file.c_str(),
-  }}
+                  .key_file_name = config_.key_file.c_str(),
+                  .cert_file_name = config_.cert_file.c_str(),
+              }}
       .get("/api/swagger.yml",
            [swagger_content](auto* res, auto* /*req*/) {
              if (swagger_content.empty()) {

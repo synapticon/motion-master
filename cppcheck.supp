@@ -1,0 +1,3 @@
+// cppcheck 2.20.0 misidentifies the argument inside std::move() as a post-move
+// access, flagging std::move(x) as both moving and reading x in the same expression.
+accessMoved:*/server.cc

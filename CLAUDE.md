@@ -70,6 +70,8 @@ motion-master/
   libs/
     core/              ← version, seqlock, platform timers, cross-cutting utils
     comm/              ← fieldbus interfaces; soem.cc, spoe.cc, igh.cc alongside base
+  hil/
+    jitter_bench/      ← RT scheduling jitter benchmark (Linux only); CSV output + Python plot script
   cmake/
     lint.cmake         ← lint, cppcheck, format CMake targets
   extern/
@@ -172,6 +174,33 @@ Tests live alongside their library in a `tests/` subdirectory. The test binary i
 ./tools/test.sh                          # run all tests
 ctest --test-dir build/x64-linux-debug -R VersionTest  # run a specific test by name
 ```
+
+## Hardware-in-the-Loop Tests
+
+The `hil/` directory contains standalone binaries that run on a pre-configured RT Linux machine. These are not CTest unit tests — they exercise real OS scheduling behaviour and require elevated privileges.
+
+### jitter_bench
+
+Measures GameLoop scheduling jitter: how much each actual cycle interval deviates from the target period. Runs the same `CyclicTimer` loop the production `GameLoop` uses, sets `SCHED_FIFO` priority 80 + `mlockall`, and records a `clock_gettime(CLOCK_MONOTONIC)` timestamp immediately after each `waitForNextCycle()` returns.
+
+```bash
+# Build
+./tools/build.sh
+
+# Run — requires root or CAP_SYS_NICE + CAP_IPC_LOCK for valid RT results
+sudo ./build/x64-linux-debug/hil/jitter_bench/jitter_bench [options]
+
+#   --duration <s>    run duration in seconds        (default: 30)
+#   --period <µs>     cycle period in microseconds   (default: 1000)
+#   --workload <µs>   per-cycle busy-wait to simulate task load  (default: 0)
+#   --output <file>   CSV output path                (default: jitter.csv)
+
+# Graph results (requires matplotlib)
+python3 hil/jitter_bench/plot_jitter.py jitter.csv
+python3 hil/jitter_bench/plot_jitter.py jitter.csv -o report.png
+```
+
+`--workload` simulates per-cycle task execution with a CPU-bound spin-wait, so you can test whether a realistic task budget (e.g. `--workload 300` for 300 µs of work in a 1 ms cycle) causes jitter spikes or overruns on a given kernel. The CSV has columns `cycle`, `elapsed_ms`, `jitter_ns`; the plot script renders a time-series and histogram and prints min/max/mean/stddev/P50/P95/P99/P99.9.
 
 ## Code Style
 

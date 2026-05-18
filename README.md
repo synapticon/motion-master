@@ -113,4 +113,32 @@ Managed via [vcpkg](https://vcpkg.io). No manual installation needed — vcpkg d
 
 ## Real-Time Linux
 
-See [`rt/`](rt/) for the full setup guide and Ansible provisioning playbooks. Covers RT kernel installation, boot parameters, CPU isolation, IRQ affinity, and latency verification on the reference hardware (AAeon / Intel E3940).
+Motion Master targets `CONFIG_PREEMPT_RT` kernels for hard real-time operation. The `GameLoop` sets `SCHED_FIFO` priority 80 and calls `mlockall` before entering the cycle loop. The cycle timer uses `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME)` so scheduling jitter in one cycle never accumulates into drift.
+
+## Hardware-in-the-Loop Tests
+
+The `hil/` directory contains standalone binaries for validating RT behaviour on a pre-configured Linux machine. They are built automatically with the rest of the project but require root (or `CAP_SYS_NICE` + `CAP_IPC_LOCK`) to produce valid results.
+
+### jitter_bench
+
+Measures the cycle-to-cycle scheduling jitter of the `GameLoop` timer loop — how much each actual cycle interval deviates from the target period.
+
+```bash
+# Build
+./tools/build.sh
+
+# Run 30 s at 1 ms period, write jitter.csv
+sudo ./build/x64-linux-debug/hil/jitter_bench/jitter_bench
+
+# Simulate 300 µs of task load per cycle
+sudo ./build/x64-linux-debug/hil/jitter_bench/jitter_bench --workload 300
+
+# Plot (requires matplotlib)
+python3 hil/jitter_bench/plot_jitter.py jitter.csv
+python3 hil/jitter_bench/plot_jitter.py jitter.csv -o report.png
+
+# Full option list
+./build/x64-linux-debug/hil/jitter_bench/jitter_bench --help
+```
+
+The plot shows a time-series with P99/P99.9 reference lines and a jitter histogram. The terminal output prints min/max/mean/stddev/P50/P95/P99/P99.9 and an overrun count. Compare a standard kernel against `PREEMPT_RT` by running with `--workload 300` (a realistic 1 ms cycle budget) on each.

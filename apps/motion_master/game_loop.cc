@@ -31,6 +31,10 @@ void setRealtimePriority() {
 
 GameLoop::GameLoop(std::chrono::microseconds period) : period_(period) {}
 
+void GameLoop::addTask(ICyclicTask* task) {
+  tasks_.push_back(task);
+}
+
 void GameLoop::run() {
   setRealtimePriority();
   running_.store(true, std::memory_order_relaxed);
@@ -39,6 +43,9 @@ void GameLoop::run() {
   while (running_.load(std::memory_order_relaxed)) {
     timer.waitForNextCycle();
     tick_.fetch_add(1, std::memory_order_relaxed);
+    for (ICyclicTask* task : tasks_) {
+      task->execute();
+    }
   }
 }
 

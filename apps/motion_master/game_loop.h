@@ -3,6 +3,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <vector>
+
+#include "icyclic_task.h"
 
 /// @brief Fixed-period real-time loop.
 ///
@@ -32,6 +35,14 @@ class GameLoop {
   /// @brief Copy assignment is deleted — see copy constructor.
   GameLoop& operator=(const GameLoop&) = delete;
 
+  /// @brief Registers a task to be executed every cycle.
+  ///
+  /// Tasks are called in registration order after each timer tick.  Must be
+  /// called before run() — not safe to call concurrently with a running loop.
+  ///
+  /// @param task  Non-owning pointer.  The task must outlive the loop.
+  void addTask(ICyclicTask* task);
+
   /// @brief Blocks the calling thread, running one cycle per period until
   ///        stop() is called.
   ///
@@ -59,4 +70,5 @@ class GameLoop {
   std::chrono::microseconds period_;
   std::atomic<bool> running_{false};
   std::atomic<uint64_t> tick_{0};
+  std::vector<ICyclicTask*> tasks_;
 };

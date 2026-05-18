@@ -5,6 +5,9 @@
 
 namespace mm::core {
 
+/// @brief Application version string, injected by CMake from the top-level VERSION file.
+///
+/// Validated at compile time against the SemVer 2.0 grammar via `semver::valid`.
 constexpr std::string_view kVersion = "@MM_VERSION@";
 static_assert(semver::valid(kVersion));
 

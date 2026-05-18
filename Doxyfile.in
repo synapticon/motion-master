@@ -1,0 +1,32 @@
+PROJECT_NAME           = "Motion Master"
+PROJECT_NUMBER         = @MM_VERSION@
+PROJECT_BRIEF          = "Next-generation EtherCAT motion control software"
+
+OUTPUT_DIRECTORY       = @CMAKE_CURRENT_BINARY_DIR@/docs
+
+INPUT                  = @CMAKE_SOURCE_DIR@/apps \
+                         @CMAKE_SOURCE_DIR@/libs
+RECURSIVE              = YES
+FILE_PATTERNS          = *.cc *.h *.h.in
+EXTENSION_MAPPING      = h.in=C++
+EXCLUDE_PATTERNS       = */tests/*
+
+STRIP_FROM_PATH        = @CMAKE_SOURCE_DIR@
+
+USE_MDFILE_AS_MAINPAGE = @CMAKE_SOURCE_DIR@/README.md
+
+EXTRACT_ALL            = YES
+EXTRACT_PRIVATE        = NO
+EXTRACT_STATIC         = YES
+
+GENERATE_HTML          = YES
+HTML_OUTPUT            = html
+GENERATE_LATEX         = NO
+
+QUIET                  = NO
+WARNINGS               = YES
+WARN_IF_UNDOCUMENTED   = YES
+WARN_NO_PARAMDOC       = YES
+
+BUILTIN_STL_SUPPORT    = YES
+CLANG_ASSISTED_PARSING = NO

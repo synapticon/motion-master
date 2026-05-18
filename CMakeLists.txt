@@ -22,3 +22,4 @@ add_subdirectory(apps/motion_master)
 add_subdirectory(apps/playground)
 
 include(cmake/lint.cmake)
+include(cmake/docs.cmake)

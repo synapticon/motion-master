@@ -1,3 +1,10 @@
 // cppcheck 2.20.0 misidentifies the argument inside std::move() as a post-move
 // access, flagging std::move(x) as both moving and reading x in the same expression.
 accessMoved:*/server.cc
+
+// CyclicTimer has platform-split members (#ifdef _WIN32 / #else). cppcheck
+// analyses each .cc against both preprocessor branches, so it sees the Linux
+// implementation without Linux members (and vice versa) and incorrectly
+// concludes that waitForNextCycle() could be static.
+functionStatic:*/cyclic_timer_linux.cc
+functionStatic:*/cyclic_timer_windows.cc

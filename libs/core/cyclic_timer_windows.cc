@@ -1,6 +1,6 @@
-#include "core/cyclic_timer.h"
-
 #include <windows.h>
+
+#include "core/cyclic_timer.h"
 
 namespace mm::core {
 
@@ -9,8 +9,7 @@ namespace mm::core {
 // resolution but as a system-wide change that affects all processes and
 // increases power consumption — avoid it.
 CyclicTimer::CyclicTimer(std::chrono::microseconds period) {
-  handle_ = CreateWaitableTimerExW(nullptr, nullptr,
-                                   CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
+  handle_ = CreateWaitableTimerExW(nullptr, nullptr, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION,
                                    TIMER_ALL_ACCESS);
 
   // Negative due time = relative first fire, in 100-nanosecond units.
@@ -19,8 +18,7 @@ CyclicTimer::CyclicTimer(std::chrono::microseconds period) {
 
   // lPeriod is in milliseconds; acceptable for ≥1 ms cycles (Windows is a
   // development target, not a hard-RT target).
-  SetWaitableTimer(static_cast<HANDLE>(handle_), &due,
-                   static_cast<LONG>(period.count() / 1000),
+  SetWaitableTimer(static_cast<HANDLE>(handle_), &due, static_cast<LONG>(period.count() / 1000),
                    nullptr, nullptr, FALSE);
 }
 

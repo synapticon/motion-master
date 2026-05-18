@@ -52,11 +52,11 @@ class CyclicTimer {
 
  private:
 #ifdef _WIN32
-  void* handle_;  // HANDLE — avoids pulling <windows.h> into every consumer
+  void* handle_ = nullptr;  // HANDLE — avoids pulling <windows.h> into every consumer
 #else
-  long period_ns_;
-  long next_sec_;
-  long next_nsec_;
+  int64_t period_ns_ = 0;
+  int64_t next_sec_ = 0;
+  int64_t next_nsec_ = 0;
 #endif
 };
 

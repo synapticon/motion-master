@@ -31,9 +31,7 @@ void setRealtimePriority() {
 
 GameLoop::GameLoop(std::chrono::microseconds period) : period_(period) {}
 
-void GameLoop::addTask(ICyclicTask* task) {
-  tasks_.push_back(task);
-}
+void GameLoop::addTask(ICyclicTask* task) { tasks_.push_back(task); }
 
 void GameLoop::run() {
   setRealtimePriority();
@@ -49,10 +47,6 @@ void GameLoop::run() {
   }
 }
 
-void GameLoop::stop() {
-  running_.store(false, std::memory_order_relaxed);
-}
+void GameLoop::stop() { running_.store(false, std::memory_order_relaxed); }
 
-uint64_t GameLoop::tick() const {
-  return tick_.load(std::memory_order_relaxed);
-}
+uint64_t GameLoop::tick() const { return tick_.load(std::memory_order_relaxed); }

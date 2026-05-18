@@ -39,24 +39,17 @@ motion-master [OPTIONS]
 
 ## Local Development
 
-Production releases bundle a CA-signed TLS certificate for `local.motion-master.synapticon.com`. For local development, generate a self-signed certificate:
+Production releases bundle a CA-signed TLS certificate for `local.motion-master.synapticon.com`. For local development, use the run script — it generates a short-lived self-signed certificate and launches the binary:
 
 ```bash
-openssl req -x509 -newkey rsa:2048 -keyout /tmp/key.pem -out /tmp/cert.pem \
-  -days 365 -nodes -subj "/CN=localhost"
-```
-
-Run with the self-signed cert:
-
-```bash
-./build/x64-linux-debug/apps/motion_master/motion-master \
-  --cert /tmp/cert.pem --key /tmp/key.pem
+./tools/run.sh
 ```
 
 Test the HTTP API (accept the self-signed cert warning):
 
 ```bash
 curl -k https://localhost:8443/api/version
+curl -k https://localhost:8443/api/swagger.yml
 ```
 
 Connect a WebSocket client to `wss://localhost:8443/ws`. The server sends two message types:
@@ -80,6 +73,7 @@ All scripts default to the `x64-linux-debug` preset. Pass a preset name as the f
 |---|---|
 | `./tools/configure.sh` | Run CMake configure |
 | `./tools/build.sh` | Build all targets |
+| `./tools/run.sh` | Generate a tmp self-signed cert and run the binary |
 | `./tools/test.sh` | Run tests |
 | `./tools/format.sh` | Auto-format all sources with clang-format |
 | `./tools/lint.sh` | Run cpplint (`pip install cpplint` if missing) |

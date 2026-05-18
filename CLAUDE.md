@@ -29,6 +29,7 @@ All common tasks have wrapper scripts in `tools/`. They default to the `x64-linu
 ```bash
 ./tools/configure.sh              # cmake --preset
 ./tools/build.sh                  # cmake --build --preset
+./tools/run.sh                    # generate a tmp self-signed cert and run the binary
 ./tools/test.sh                   # ctest --output-on-failure
 ./tools/format.sh                 # clang-format all sources
 ./tools/lint.sh                   # cpplint (requires: pip install cpplint)
@@ -63,7 +64,7 @@ The workflow in `.github/workflows/build.yml` caches vcpkg binaries with `action
 ```
 motion-master/
   apps/
-    motion_master/     ← main executable (flat file layout)
+    motion_master/     ← main executable (flat file layout); swagger.yml ships here alongside binary
     playground/        ← scratch binary
   libs/
     core/              ← version, seqlock, platform timers, cross-cutting utils

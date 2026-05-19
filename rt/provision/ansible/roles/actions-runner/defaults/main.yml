@@ -4,5 +4,4 @@ runner_dir: "{{ home_dir }}/actions-runner"
 runner_name: ci-belgrade-rt
 runner_group: Belgrade
 runner_extra_labels:
-  - "{{ ansible_facts.hostname }}"
   - ci-belgrade-rt

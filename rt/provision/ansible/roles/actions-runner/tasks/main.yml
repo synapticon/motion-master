@@ -1,7 +1,17 @@
 ---
-- name: Verify gh is authenticated
-  ansible.builtin.command: gh auth status
+- name: Check gh auth status
+  ansible.builtin.shell: gh auth status 2>&1
   changed_when: false
+  register: gh_auth_status
+
+- name: Assert gh has admin:org scope
+  ansible.builtin.assert:
+    that: "'admin:org' in gh_auth_status.stdout"
+    fail_msg: >-
+      gh token is missing the 'admin:org' scope required to manage org runners.
+      Run: gh auth refresh -h github.com -s admin:org
+      (You also need org-admin rights, or the runners/runner-groups fine-grained
+      permission, on the '{{ runner_org }}' org.)
 
 - name: Look up runner group ID
   ansible.builtin.command:

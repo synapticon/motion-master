@@ -27,6 +27,8 @@ async function waitForApi(timeoutMs = 60_000): Promise<void> {
     } catch {}
     await new Promise((r) => setTimeout(r, 1_000));
   }
+  console.error('[global-setup] Timed out — container logs:');
+  execFileSync('docker', ['logs', CONTAINER_NAME], { stdio: 'inherit' });
   throw new Error(`Motion Master not reachable at ${mmUrl} after ${timeoutMs}ms`);
 }
 

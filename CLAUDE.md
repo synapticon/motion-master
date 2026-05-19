@@ -72,6 +72,7 @@ motion-master/
     comm/              ← fieldbus interfaces; soem.cc, spoe.cc, igh.cc alongside base
   hil/
     jitter_bench/      ← RT scheduling jitter benchmark (Linux only); CSV output + Python plot script
+    api/               ← HTTP API + WebSocket integration tests (TypeScript / Vitest; Docker-managed)
   cmake/
     lint.cmake         ← lint, cppcheck, format CMake targets
   extern/
@@ -201,6 +202,18 @@ python3 hil/jitter_bench/plot_jitter.py jitter.csv -o report.png
 ```
 
 `--workload` simulates per-cycle task execution with a CPU-bound spin-wait, so you can test whether a realistic task budget (e.g. `--workload 300` for 300 µs of work in a 1 ms cycle) causes jitter spikes or overruns on a given kernel. The CSV has columns `cycle`, `elapsed_ms`, `jitter_ns`; the plot script renders a time-series and histogram and prints min/max/mean/stddev/P50/P95/P99/P99.9.
+
+### api
+
+TypeScript integration tests for the HTTP API and monitoring WebSocket, using Vitest. The global setup manages the full Docker lifecycle automatically — no manual server startup required.
+
+```bash
+cd hil/api
+npm install          # first time only
+npm test             # build image → start container → run tests → stop & remove container
+```
+
+The `motion-master` Docker image is built from the repo root and run with `--network host` (required because the server binds to `127.0.0.1`). Set `MM_SKIP_DOCKER=1` to bypass Docker and test against an already-running instance (e.g. from `./tools/run.sh`).
 
 ## Code Style
 

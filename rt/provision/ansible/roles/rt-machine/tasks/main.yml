@@ -10,3 +10,17 @@
     name: "{{ username }}"
     groups: docker
     append: true
+
+- name: Install matplotlib for jitter_bench plot script
+  ansible.builtin.pip:
+    name: matplotlib
+    executable: pip3
+
+- name: Allow runner user passwordless sudo
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/{{ username }}-nopasswd
+    content: "{{ username }} ALL=(ALL) NOPASSWD: ALL\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: visudo -cf %s

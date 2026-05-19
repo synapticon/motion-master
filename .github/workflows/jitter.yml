@@ -1,0 +1,64 @@
+name: Jitter Bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: Run duration (seconds)
+        default: '30'
+      period:
+        description: Cycle period (microseconds)
+        default: '1000'
+      workload:
+        description: Per-cycle busy-wait to simulate task load (microseconds)
+        default: '0'
+
+jobs:
+  jitter:
+    runs-on: [self-hosted, ci-belgrade-rt]
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Install CMake 4.x
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: "~4.0.0"
+
+      - name: Configure
+        run: cmake --preset x64-linux-release
+        env:
+          CC: gcc-14
+          CXX: g++-14
+
+      - name: Build
+        run: cmake --build --preset x64-linux-release --target jitter_bench
+
+      - name: Run jitter_bench
+        run: >-
+          sudo ./build/x64-linux-release/hil/jitter_bench/jitter_bench
+          --duration ${{ inputs.duration }}
+          --period ${{ inputs.period }}
+          --workload ${{ inputs.workload }}
+          --output jitter.csv
+
+      - name: Plot results
+        run: python3 hil/jitter_bench/plot_jitter.py jitter.csv -o jitter.png
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: jitter-results-${{ github.run_id }}
+          path: |
+            jitter.csv
+            jitter.png

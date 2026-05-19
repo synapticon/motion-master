@@ -17,6 +17,8 @@ packages:
 
   # C++ build toolchain
   - build-essential
+  - gcc-14
+  - g++-14
   - cmake
   - ninja-build
   - pkg-config

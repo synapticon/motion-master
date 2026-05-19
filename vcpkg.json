@@ -7,6 +7,7 @@
     "gtest",
     "neargye-semver",
     "nlohmann-json",
+    "soem",
     "spdlog",
     {
       "name": "uwebsockets",

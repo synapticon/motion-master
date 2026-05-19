@@ -8,6 +8,7 @@ Next-generation motion control software featuring a simplified design, streamlin
 - Ninja
 - GCC / Clang with C++23 support (or MSVC on Windows)
 - Git
+- **Windows only:** [Npcap](https://npcap.com) in WinPcap-compatible mode — required at runtime for raw EtherCAT packet capture (install with "Install Npcap in WinPcap API-compatible Mode" checked)
 
 ## Getting Started
 

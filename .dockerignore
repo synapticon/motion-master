@@ -1,3 +1,6 @@
+# Exclude .git/ to avoid busting the COPY layer on every commit, but
+# re-include .git/modules/ so the extern/vcpkg gitfile can resolve inside
+# the container (extern/vcpkg/.git points to ../../.git/modules/extern/vcpkg).
 .git/
 !.git/modules/
 build/

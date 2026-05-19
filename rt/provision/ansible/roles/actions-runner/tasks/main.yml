@@ -1,0 +1,126 @@
+---
+- name: Verify gh is authenticated
+  ansible.builtin.command: gh auth status
+  changed_when: false
+
+- name: Look up runner group ID
+  ansible.builtin.command:
+    argv:
+      - gh
+      - api
+      - "/orgs/{{ runner_org }}/actions/runner-groups"
+      - --jq
+      - '.runner_groups[] | select(.name == "{{ runner_group }}") | .id'
+  register: runner_group_lookup
+  changed_when: false
+
+- name: Create runner group
+  when: runner_group_lookup.stdout == ""
+  ansible.builtin.command:
+    argv:
+      - gh
+      - api
+      - -X
+      - POST
+      - "/orgs/{{ runner_org }}/actions/runner-groups"
+      - -f
+      - "name={{ runner_group }}"
+      - -f
+      - visibility=all
+      - -F
+      - allows_public_repositories=true
+      - --jq
+      - .id
+  register: runner_group_create
+
+- name: Set runner group ID
+  ansible.builtin.set_fact:
+    runner_group_id: "{{ runner_group_create.stdout if runner_group_lookup.stdout == '' else runner_group_lookup.stdout }}"
+
+- name: Check if runner is configured
+  ansible.builtin.stat:
+    path: "{{ runner_dir }}/.runner"
+  register: runner_configured
+
+- name: Register runner
+  when: not runner_configured.stat.exists
+  block:
+    - name: Create runner directory
+      ansible.builtin.file:
+        path: "{{ runner_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Fetch latest runner release
+      ansible.builtin.uri:
+        url: https://api.github.com/repos/actions/runner/releases/latest
+        return_content: true
+      register: runner_release
+
+    - name: Download and extract runner
+      ansible.builtin.unarchive:
+        src: "https://github.com/actions/runner/releases/download/{{ runner_release.json.tag_name }}/actions-runner-linux-x64-{{ runner_release.json.tag_name | regex_replace('^v', '') }}.tar.gz"
+        dest: "{{ runner_dir }}"
+        remote_src: true
+
+    - name: Get registration token
+      ansible.builtin.command:
+        cmd: "gh api -X POST /orgs/{{ runner_org }}/actions/runners/registration-token -q .token"
+      register: registration_token
+      changed_when: false
+      no_log: true
+
+    - name: Configure runner
+      ansible.builtin.command:
+        cmd: >-
+          ./config.sh
+          --url https://github.com/{{ runner_org }}
+          --token {{ registration_token.stdout }}
+          --name {{ runner_name }}
+          --runnergroup {{ runner_group }}
+          --labels {{ runner_extra_labels | join(',') }}
+          --unattended
+          --replace
+        chdir: "{{ runner_dir }}"
+        creates: "{{ runner_dir }}/.runner"
+      no_log: true
+
+- name: Look up runner ID
+  ansible.builtin.command:
+    argv:
+      - gh
+      - api
+      - "/orgs/{{ runner_org }}/actions/runners"
+      - --jq
+      - '.runners[] | select(.name == "{{ runner_name }}") | .id'
+  register: runner_id_lookup
+  changed_when: false
+
+- name: Assign runner to group
+  ansible.builtin.command:
+    argv:
+      - gh
+      - api
+      - -X
+      - PUT
+      - "/orgs/{{ runner_org }}/actions/runner-groups/{{ runner_group_id }}/runners/{{ runner_id_lookup.stdout }}"
+  changed_when: false
+
+- name: Set runner service name
+  ansible.builtin.set_fact:
+    runner_service: "actions.runner.{{ runner_org }}.{{ runner_name }}.service"
+
+- name: Install runner systemd service
+  ansible.builtin.command:
+    cmd: "./svc.sh install {{ username }}"
+    chdir: "{{ runner_dir }}"
+    creates: "/etc/systemd/system/{{ runner_service }}"
+  become: true
+
+- name: Enable and start runner service
+  ansible.builtin.systemd:
+    name: "{{ runner_service }}"
+    state: started
+    enabled: true
+    daemon_reload: true
+  become: true

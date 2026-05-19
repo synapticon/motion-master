@@ -1,0 +1,12 @@
+---
+- name: Install and configure system packages
+  hosts: local
+  become: true
+  roles:
+    - { role: rt-machine, tags: rt-machine }
+
+- name: Set up GitHub Actions runner
+  hosts: local
+  become: false
+  roles:
+    - { role: actions-runner, tags: actions-runner }

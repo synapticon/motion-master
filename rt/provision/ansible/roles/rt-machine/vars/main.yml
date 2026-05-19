@@ -1,0 +1,46 @@
+---
+packages:
+  # essentials
+  - git
+  - curl
+  - wget
+  - jq
+  - htop
+  - tree
+  - net-tools
+  - ca-certificates
+
+  # Python (vcpkg bootstrap + hil/jitter_bench plot script)
+  - python3
+  - python3-pip
+  - python3-venv
+
+  # C++ build toolchain
+  - build-essential
+  - cmake
+  - ninja-build
+  - pkg-config
+  - clang
+  - clang-format
+  - clang-tidy
+  - cppcheck
+
+  # vcpkg dependencies
+  - zip
+  - unzip
+  - tar
+  - autoconf
+  - automake
+  - libtool
+
+  # dev tooling
+  - gh
+  - vim
+
+  # Docker (hil/api integration tests)
+  - docker.io
+  - docker-compose-v2
+  - docker-buildx
+
+  # Node.js (hil/api TypeScript/Vitest tests; bundles npm)
+  - nodejs

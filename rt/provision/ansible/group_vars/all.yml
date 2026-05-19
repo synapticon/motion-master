@@ -1,0 +1,6 @@
+---
+# ansible_facts['user_id'] / ansible_facts['env']['HOME'] resolve to root/root in
+# any play with become: true (gather_facts runs escalated). Use the controller
+# process env so paths land in the invoking user's home.
+username: "{{ lookup('env', 'USER') }}"
+home_dir: "{{ lookup('env', 'HOME') }}"

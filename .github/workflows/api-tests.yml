@@ -10,7 +10,7 @@ on:
 jobs:
   api-tests:
     name: Run API tests
-    runs-on: [self-hosted, OptiPlex-3080]
+    runs-on: [self-hosted, ci-belgrade-linux]
     timeout-minutes: 30
 
     steps:

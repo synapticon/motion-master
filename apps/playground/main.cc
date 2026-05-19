@@ -1,3 +1,5 @@
+#include <cerrno>
+#include <cstring>
 #include <print>
 
 #include <soem/soem.h>
@@ -21,7 +23,8 @@ void init_devices(const char* ifname) {
     std::println("Initializing EtherCAT on {}...", ifname);
 
     if (!ecx_init(&ctx, ifname)) {
-        std::println("Failed to open socket on {} — run as root", ifname);
+        std::println("Failed to open socket on {}: {} (wrong interface name, or run as root)",
+            ifname, std::strerror(errno));
         return;
     }
 

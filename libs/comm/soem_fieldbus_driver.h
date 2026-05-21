@@ -16,7 +16,7 @@ namespace mm::comm::soem {
 /// Owns one EtherCAT master context.  Constructed with the name of the
 /// network interface to use (e.g. "eth0").  App creates exactly one instance
 /// and injects it into DeviceManager, GameLoop, SdoService, etc.
-class SoemFieldbusDriver : public IFieldbusDriver {
+class SoemFieldbusDriver : public FieldbusDriver {
  public:
   /// @brief Constructs the driver for the given network interface.
   /// @param ifname  OS network interface name (e.g. "eth0", "enp3s0").

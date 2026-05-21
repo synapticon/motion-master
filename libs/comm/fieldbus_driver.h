@@ -10,10 +10,10 @@ namespace mm::comm {
 /// Concrete implementations are SoemDriver (SOEM), SpoeDriver (SPoE), and
 /// IghDriver (IgH EtherCAT).  App instantiates exactly one and injects it into
 /// DeviceManager and GameLoop via dependency injection.
-class IFieldbusDriver {
+class FieldbusDriver {
  public:
   /// @brief Virtual destructor.
-  virtual ~IFieldbusDriver() = default;
+  virtual ~FieldbusDriver() = default;
 
   /// @brief Initialises the fieldbus hardware and prepares for cyclic operation.
   ///

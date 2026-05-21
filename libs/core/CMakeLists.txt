@@ -8,16 +8,17 @@ else()
   set(CYCLIC_TIMER_SRC cyclic_timer_linux.cc)
 endif()
 
-add_library(mm_core STATIC
+add_library(core STATIC
     version.cc
     ${CYCLIC_TIMER_SRC}
 )
+add_library(mm::core ALIAS core)
 
-target_include_directories(mm_core PUBLIC
+target_include_directories(core PUBLIC
     ${CMAKE_SOURCE_DIR}/libs
     ${CMAKE_CURRENT_BINARY_DIR}/..
 )
 
-target_link_libraries(mm_core PUBLIC semver::semver)
+target_link_libraries(core PUBLIC semver::semver)
 
 add_subdirectory(tests)

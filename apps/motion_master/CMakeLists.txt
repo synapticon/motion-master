@@ -16,7 +16,7 @@ find_package(spdlog CONFIG REQUIRED)
 find_package(unofficial-uwebsockets CONFIG REQUIRED)
 
 target_link_libraries(motion_master PRIVATE
-    mm_comm
+    mm::comm
     CLI11::CLI11
     nlohmann_json::nlohmann_json
     spdlog::spdlog

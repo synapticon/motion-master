@@ -1,7 +1,7 @@
 add_library(comm STATIC
     fieldbus_driver.cc
     soem_fieldbus_driver.cc
-    soem_util.cc
+    soem_base.cc
 )
 add_library(mm::comm ALIAS comm)
 

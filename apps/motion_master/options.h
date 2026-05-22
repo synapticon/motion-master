@@ -9,13 +9,13 @@
 
 /// All command-line options and loaded configuration for Motion Master.
 struct Options {
-  std::string config;            ///< Path to the JSONC config file; empty if not given.
-  uint16_t port{8443};           ///< HTTP/WebSocket listen port.
-  std::string certFile;          ///< Path to the TLS certificate file.
-  std::string keyFile;           ///< Path to the TLS private key file.
+  std::string config;    ///< Path to the JSONC config file; empty if not given.
+  uint16_t port{8443};   ///< HTTP/WebSocket listen port.
+  std::string certFile;  ///< Path to the TLS certificate file.
+  std::string keyFile;   ///< Path to the TLS private key file.
   /// Fieldbus driver: "soem", "spoe", or "igh". Absent means defer init to the HTTP API.
   std::optional<std::string> driver;
-  std::string logLevel{"info"};  ///< spdlog level: trace/debug/info/warn/error.
+  std::string logLevel{"info"};                     ///< spdlog level: trace/debug/info/warn/error.
   std::optional<mm::comm::NetworkAdapter> adapter;  ///< Absent when --adapter is not given.
   std::optional<nlohmann::json> configData;  ///< Parsed config; absent when --config not given.
 };

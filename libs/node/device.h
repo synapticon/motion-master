@@ -1,9 +1,8 @@
 #pragma once
 
 #include <cstdint>
-#include <string>
-
 #include <nlohmann/json_fwd.hpp>
+#include <string>
 
 #include "comm/fieldbus_driver.h"
 

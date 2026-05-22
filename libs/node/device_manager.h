@@ -2,10 +2,9 @@
 
 #include <expected>
 #include <memory>
+#include <nlohmann/json_fwd.hpp>
 #include <string>
 #include <vector>
-
-#include <nlohmann/json_fwd.hpp>
 
 #include "comm/fieldbus_driver.h"
 #include "node/device.h"

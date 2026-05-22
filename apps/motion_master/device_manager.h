@@ -31,6 +31,10 @@ class DeviceManager {
   /// @return Number of slaves found on success, or an error string on failure.
   std::expected<int, std::string> configure();
 
+  /// @brief Returns the list of configured devices.
+  /// @return Devices in bus order (index 0 = slave position 1). Empty before @c configure().
+  const std::vector<Device>& devices() const;
+
   /// @brief Exchanges process data with all devices.
   ///
   /// Called once per @c GameLoop cycle. Forwards to @c FieldbusDriver::exchangeProcessData().

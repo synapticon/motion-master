@@ -1,5 +1,8 @@
 #include "device_manager.h"
 
+#include <string>
+#include <vector>
+
 DeviceManager::DeviceManager(mm::comm::FieldbusDriver& driver) : driver_(driver) {}
 
 std::expected<void, std::string> DeviceManager::init() { return driver_.init(); }
@@ -15,5 +18,7 @@ std::expected<int, std::string> DeviceManager::configure() {
   }
   return *result;
 }
+
+const std::vector<Device>& DeviceManager::devices() const { return devices_; }
 
 void DeviceManager::pdoExchange() { driver_.exchangeProcessData(); }

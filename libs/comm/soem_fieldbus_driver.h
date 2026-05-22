@@ -43,6 +43,10 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// @return Number of slaves found on success, or an error string if no slaves are found.
   std::expected<int, std::string> configure() override;
 
+  /// @brief Returns the immutable identity fields for the slave at @p position.
+  /// @param position  1-based slave position on the bus.
+  SlaveInfo slaveInfo(uint16_t position) const override;
+
   /// @brief Sends output PDOs and receives input PDOs in one LRW frame.
   ///
   /// Called once per @c GameLoop cycle.  Must not be called before a successful

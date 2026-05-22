@@ -1,9 +1,19 @@
 #pragma once
 
+#include <cstdint>
 #include <expected>
 #include <string>
 
 namespace mm::comm {
+
+/// @brief Immutable identity fields read from a slave's EEPROM during configuration.
+struct SlaveInfo {
+  std::string name;         ///< Human-readable name from SII.
+  uint32_t vendorId;        ///< Vendor ID (EEprom manufacturer field).
+  uint32_t productCode;     ///< Product code (EEprom ID field).
+  uint32_t revisionNumber;  ///< Revision number.
+  uint32_t serialNumber;    ///< Serial number.
+};
 
 /// @brief Abstract interface for an EtherCAT fieldbus driver.
 ///
@@ -32,6 +42,10 @@ class FieldbusDriver {
   ///
   /// @return Number of slaves found on success, or an error string if configuration fails.
   virtual std::expected<int, std::string> configure() = 0;
+
+  /// @brief Returns the immutable identity fields for the slave at @p position.
+  /// @param position  1-based slave position on the bus.
+  virtual SlaveInfo slaveInfo(uint16_t position) const = 0;
 
   /// @brief Exchanges process data with all slaves in one EtherCAT LRW frame.
   ///

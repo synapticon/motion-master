@@ -10,9 +10,10 @@ Key design mandates from NEXTGEN.md:
 - No exceptions — use `std::expected<T, std::string>` (C++23 stdlib, no `tl::expected`)
 - HTTP API + single monitoring WebSocket (no Protobuf, no dual-port setup)
 - Single `Device` abstraction (replaces `VirtualDevice` + `comm::base::Device` overlap from the old codebase)
-- `FieldbusDriver` interface abstracts SOEM and SPoE — `SoemDriver` and `SpoeDriver` are the concrete implementations; `FieldbusDriver` owns the mutex that serializes SDO and PDO socket access across threads
+- `FieldbusDriver` interface abstracts SOEM and SPoE — `SoemFieldbusDriver` and `SpoeDriver` are the concrete implementations; `FieldbusDriver` owns the mutex that serializes SDO and PDO socket access across threads
 - No service layer — SDO read/write, file transfer, and state control are methods on `Device` and `DeviceManager`; `HttpServer` and `GameLoop` both take a `DeviceManager&` directly
 - `GameLoop` calls `deviceManager_.pdoExchange()` — it has no knowledge of `FieldbusDriver`
+- `DeviceManager` owns slave discovery and network scanning via `FieldbusDriver` — there is no separate `NetworkScanner`
 - `App` is the only place that instantiates concrete types (dependency injection at the composition root)
 - Namespaces mirror directory layout (`mm::core`, `mm::comm::soem`, `mm::api`, `mm::devices`); do not use C++20 modules
 - Config file format is JSONC — parse via `nlohmann::json::parse(stream, nullptr, true, true)` (the fourth `true` enables `ignore_comments`); config files use the `.jsonc` extension and may freely use `//` and `/* */` comments
@@ -31,7 +32,7 @@ All common tasks have wrapper scripts in `tools/`. They default to the `x64-linu
 
 ```bash
 ./tools/configure.sh              # cmake --preset
-./tools/build.sh                  # cmake --build --preset
+./tools/build.sh                  # cmake --build --preset; then sudo setcap for raw socket + RT access
 ./tools/run.sh                    # generate a tmp self-signed cert and run the binary
 ./tools/test.sh                   # ctest --output-on-failure
 ./tools/format.sh                 # clang-format all sources
@@ -89,13 +90,14 @@ Flat layout within each lib/app is intentional — navigate by filename and grep
 ```
 App  (composition root, owns everything)
  ├── Config
- ├── FieldbusDriver               ← SoemDriver | SpoeDriver; owns mutex
- ├── DeviceManager                (holds FieldbusDriver&)
- │     ├── owns: Device[]         (each Device holds FieldbusDriver&)
+ ├── FieldbusDriver               ← SoemFieldbusDriver | SpoeDriver; owns mutex
+ ├── DeviceManager                (holds FieldbusDriver&; owns Device[]; drives scanning)
+ │     ├── owns: Device[]         (each Device holds FieldbusDriver& + immutable SlaveInfo)
+ │     │     ├── slavePosition, name, vendorId, productCode, revisionNumber, serialNumber
  │     │     ├── owns: DeviceParameter[] (index/subindex → DeviceParameterValue variant)
  │     │     ├── owns: PdoMappings
  │     │     └── owns: Cia402StateMachine  (only if Cia402Drive)
- │     └── pdoExchange(), state transitions, scanning
+ │     └── init(), configure(), pdoExchange(), state transitions
  ├── GameLoop  (RT thread, SCHED_FIFO, 1ms)
  │     ├── uses: DeviceManager    (calls pdoExchange each cycle)
  │     ├── writes: Device parameters via seqlock
@@ -104,10 +106,8 @@ App  (composition root, owns everything)
  │     └── uses: DeviceManager    (SDO read/write, file transfer, state control)
  ├── WebSocketServer  (monitoring output)
  ├── NotificationBus  (observer; decouples Watchdog/DeviceManager from servers)
- ├── FirmwareInstaller
- │     └── uses: DeviceManager
- └── NetworkScanner
-       └── uses: FieldbusDriver
+ └── FirmwareInstaller
+       └── uses: DeviceManager
 ```
 
 ### Key Types

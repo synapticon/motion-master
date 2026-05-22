@@ -76,6 +76,11 @@ int main(int argc, char** argv) {
     return 1;
   } else {
     spdlog::info("Found {} slave(s)", *result);
+    for (const auto& device : deviceManager.devices()) {
+      spdlog::info("  [{:2}] {} — vendor: {:#010x}  product: {:#010x}  rev: {:#010x}  serial: {}",
+                   device.slavePosition(), device.name(), device.vendorId(),
+                   device.productCode(), device.revisionNumber(), device.serialNumber());
+    }
   }
 
   auto swaggerFile = (exeDir() / "swagger.yml").string();

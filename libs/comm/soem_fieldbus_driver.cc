@@ -5,6 +5,7 @@
 #include <cerrno>
 #include <cstring>
 #include <expected>
+#include <memory>
 #include <string>
 #include <utility>
 
@@ -35,6 +36,17 @@ std::expected<int, std::string> SoemFieldbusDriver::configure() {
 void SoemFieldbusDriver::exchangeProcessData() {}
 
 void SoemFieldbusDriver::stop() {}
+
+SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
+  const auto& s = ctx_->slavelist[position];
+  return {
+      .name = std::string(s.name),
+      .vendorId = s.eep_man,
+      .productCode = s.eep_id,
+      .revisionNumber = s.eep_rev,
+      .serialNumber = s.eep_ser,
+  };
+}
 
 int SoemFieldbusDriver::slaveCount() const { return ctx_ ? ctx_->slavecount : 0; }
 

@@ -483,3 +483,51 @@ Bypasses the Docker lifecycle and polls an already-running instance. Useful when
 The container entrypoint generates a self-signed certificate for `local.motion-master.synapticon.com` on each start. The test suite sets `NODE_TLS_REJECT_UNAUTHORIZED=0` to accept it. This is acceptable because the tests run against localhost and certificate pinning is not a testing concern here.
 
 Revisit modules when vcpkg packages start shipping module interfaces and CMake support matures. The namespace-to-module rename is mechanical at that point.
+
+---
+
+## Session 2026-05-22 — Device, DeviceManager, SlaveInfo, and fieldbus driver selection
+
+**No NetworkScanner**
+
+There will be no separate `NetworkScanner` class. `DeviceManager` owns slave discovery and network scanning directly via `FieldbusDriver`. This keeps the dependency graph flat — one fewer class, no forwarding methods.
+
+**FieldbusDriver startup sequence**
+
+Three calls in order:
+
+1. `init()` — opens the NIC (`ecx_init`).
+2. `configure()` — discovers slaves and configures SM/FMMU (`ecx_config_init`). Sets `manualstatechange = 1` so slaves remain in INIT; all EtherCAT state transitions are left entirely to the caller (HTTP API or test code). Returns the slave count on success.
+3. `exchangeProcessData()` — called each game loop cycle once slaves are in OP.
+
+**SlaveInfo — immutable identity from EEPROM**
+
+After `configure()`, SOEM has read each slave's SII EEPROM. These fields do not change for the lifetime of the session and are captured immediately into `SlaveInfo`:
+
+```cpp
+struct SlaveInfo {
+  std::string name;
+  uint32_t vendorId;       // eep_man
+  uint32_t productCode;    // eep_id
+  uint32_t revisionNumber; // eep_rev
+  uint32_t serialNumber;   // eep_ser
+};
+```
+
+`Device` reads `SlaveInfo` from the driver in its constructor and stores the values as plain members. This avoids repeated SOEM lookups and makes identity always available without driver access.
+
+**Device**
+
+`Device` holds a 1-based `slavePosition` (SOEM's slave array index; 0 is the master) and a `FieldbusDriver&` for SDO and state operations. Immutable identity fields (`name`, `vendorId`, `productCode`, `revisionNumber`, `serialNumber`) are populated from `SlaveInfo` at construction.
+
+**DeviceManager::configure() populates devices_**
+
+`DeviceManager::configure()` calls `driver_.configure()`, then constructs one `Device` per slave (positions 1..n) and stores them in `devices_`. This is the single place where the device list is created.
+
+**Driver selection in App**
+
+`main.cc` constructs a `unique_ptr<FieldbusDriver>` conditionally: `--driver soem` creates a `SoemFieldbusDriver`; any other value exits with an error. Adding a new driver is an `else if` branch. `DeviceManager` receives a `FieldbusDriver&` and has no knowledge of the concrete type.
+
+**Linux capabilities**
+
+`motion-master` requires `cap_net_raw` (raw EtherCAT socket) and `cap_sys_nice` (SCHED_FIFO). `tools/build.sh` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw=eip` on the binary after linking so developers do not need to run the binary as root.

@@ -7,6 +7,8 @@ add_executable(motion_master
     options.cc
     server.cc
     game_loop.cc
+    device_manager.cc
+    device.cc
 )
 
 set_target_properties(motion_master PROPERTIES OUTPUT_NAME "motion-master")
@@ -27,4 +29,5 @@ target_link_libraries(motion_master PRIVATE
 if(NOT WIN32)
   find_package(Threads REQUIRED)
   target_link_libraries(motion_master PRIVATE Threads::Threads)
+
 endif()

@@ -9,7 +9,12 @@
 #include <windows.h>
 #endif
 
+#include <memory>
+
+#include "comm/fieldbus_driver.h"
+#include "comm/soem_fieldbus_driver.h"
 #include "core/version.h"
+#include "device_manager.h"
 #include "game_loop.h"
 #include "options.h"
 #include "server.h"
@@ -49,6 +54,22 @@ int main(int argc, char** argv) {
   auto opts = parseOptions(argc, argv);
 
   spdlog::info("Motion Master v{}", mm::core::kVersion);
+
+  std::unique_ptr<mm::comm::FieldbusDriver> fieldbusDriver;
+  if (opts.driver == "soem") {
+    std::string ifname = opts.adapter ? opts.adapter->adapterName : "";
+    fieldbusDriver = std::make_unique<mm::comm::soem::SoemFieldbusDriver>(ifname);
+  } else {
+    spdlog::error("Unsupported driver: {}", opts.driver);
+    return 1;
+  }
+
+  DeviceManager deviceManager{*fieldbusDriver};
+
+  if (auto result = deviceManager.init(); !result) {
+    spdlog::error("DeviceManager init failed: {}", result.error());
+    return 1;
+  }
 
   auto swaggerFile = (exeDir() / "swagger.yml").string();
 

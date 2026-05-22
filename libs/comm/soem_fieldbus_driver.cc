@@ -2,6 +2,9 @@
 
 #include <soem/soem.h>
 
+#include <string>
+#include <utility>
+
 namespace mm::comm::soem {
 
 SoemFieldbusDriver::SoemFieldbusDriver(std::string ifname)

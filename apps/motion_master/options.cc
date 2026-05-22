@@ -6,8 +6,10 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <string>
+#include <utility>
 
-#include "comm/soem_base.h"
+#include "comm/base.h"
 #include "core/version.h"
 
 Options parseOptions(int argc, char** argv) {
@@ -17,7 +19,8 @@ Options parseOptions(int argc, char** argv) {
   app.set_version_flag("--version", std::string{mm::core::kVersion});
 
   bool list_adapters = false;
-  app.add_flag("--list-adapters", list_adapters, "Print network adapters (MAC → interface) and exit");
+  app.add_flag("--list-adapters", list_adapters,
+               "Print network adapters (MAC -> interface) and exit");
 
   app.add_option("-c,--config", opts.config, "Path to JSON config file")->check(CLI::ExistingFile);
   app.add_option("-p,--port", opts.port, "HTTP/WebSocket port")->capture_default_str();
@@ -30,6 +33,11 @@ Options parseOptions(int argc, char** argv) {
       ->capture_default_str()
       ->check(CLI::IsMember({"trace", "debug", "info", "warn", "error"}));
 
+  std::string adapter_input;
+  app.add_option("--adapter", adapter_input,
+                 "Network adapter: MAC (AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF)"
+                 " or interface name (eth0)");
+
   try {
     app.parse(argc, argv);
   } catch (const CLI::ParseError& e) {
@@ -37,10 +45,14 @@ Options parseOptions(int argc, char** argv) {
   }
 
   if (list_adapters) {
-    for (const auto& [mac, iface] : mm::comm::soem::mapMacAddressesToInterfaces()) {
+    for (const auto& [mac, iface] : mm::comm::mapMacAddressesToInterfaces()) {
       std::cout << mac << "  " << iface << "\n";
     }
     std::exit(0);
+  }
+
+  if (!adapter_input.empty()) {
+    opts.adapter = mm::comm::resolveNetworkAdapter(adapter_input);
   }
 
   if (!opts.config.empty()) {

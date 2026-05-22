@@ -2,6 +2,7 @@
 
 #include <csignal>
 #include <filesystem>
+#include <string>
 #include <utility>
 
 #ifdef _WIN32

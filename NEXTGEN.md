@@ -426,8 +426,8 @@ Namespace structure mirrors the directory layout:
 namespace mm::core { }
 namespace mm::comm::soem { }
 namespace mm::comm::spoe { }
+namespace mm::node { }
 namespace mm::api { }
-namespace mm::devices { }
 ```
 
 ---
@@ -531,3 +531,30 @@ struct SlaveInfo {
 **Linux capabilities**
 
 `motion-master` requires `cap_net_raw` (raw EtherCAT socket) and `cap_sys_nice` (SCHED_FIFO). `tools/build.sh` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw=eip` on the binary after linking so developers do not need to run the binary as root.
+
+---
+
+## Session 2026-05-22 — libs/node and the mm::node library
+
+**Why a separate library layer**
+
+`mm::comm` is the transport/protocol layer: `FieldbusDriver` (abstract interface), `SoemFieldbusDriver`, `SpoeDriver`. It is stable and protocol-focused. `Device` and `DeviceManager` are the device model — and as CiA402, drive profiles, and encoder calibration are added, they accumulate application-layer logic that does not belong in a transport library.
+
+`libs/node/` (`mm::node`) is introduced as the distributable device-model layer above `mm::comm`. External users who want to build their own tooling on top of Motion Master receive `mm::comm` + `mm::node` as the SDK. They get `Device`, `DeviceManager`, CiA402 state machines, profiles, and encoder support without reimplementing any of it.
+
+**Why `mm::node` and not `mm::devices`, `mm::ethercat`, or `mm::drives`**
+
+- `mm::devices` — too generic; could mean anything.
+- `mm::ethercat` — excludes SPoE, which is not EtherCAT but works over the same `FieldbusDriver` abstraction.
+- `mm::drives` — accurate for CiA402 servo drives but breaks when I/O modules, sensors, or other non-drive nodes are added.
+- `mm::node` — the standard protocol-agnostic term for any addressable device on a fieldbus. Scales to drives, I/O modules, sensors equally.
+
+**Layer summary**
+
+```
+libs/comm/   mm::comm   ← EtherCAT/SPoE transport: FieldbusDriver interface + concrete drivers
+libs/node/   mm::node   ← Device model: Device, DeviceManager, CiA402, profiles, encoder
+apps/        (app layer) ← GameLoop, HttpServer, WebSocket, CLI — thin shell, not distributable
+```
+
+`mm::node` links `mm::comm` as a PUBLIC dependency so its include paths propagate to any target that links `mm::node`.

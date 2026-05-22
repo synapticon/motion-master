@@ -15,7 +15,7 @@ Key design mandates from NEXTGEN.md:
 - `GameLoop` calls `deviceManager_.pdoExchange()` — it has no knowledge of `FieldbusDriver`
 - `DeviceManager` owns slave discovery and network scanning via `FieldbusDriver` — there is no separate `NetworkScanner`
 - `App` is the only place that instantiates concrete types (dependency injection at the composition root)
-- Namespaces mirror directory layout (`mm::core`, `mm::comm::soem`, `mm::api`, `mm::devices`); do not use C++20 modules
+- Namespaces mirror directory layout (`mm::core`, `mm::comm::soem`, `mm::node`, `mm::api`); do not use C++20 modules
 - Config file format is JSONC — parse via `nlohmann::json::parse(stream, nullptr, true, true)` (the fourth `true` enables `ignore_comments`); config files use the `.jsonc` extension and may freely use `//` and `/* */` comments
 
 ## Build System
@@ -73,6 +73,7 @@ motion-master/
   libs/
     core/              ← version, seqlock, platform timers, cross-cutting utils
     comm/              ← fieldbus interfaces; soem.cc, spoe.cc, igh.cc alongside base
+    node/              ← Device, DeviceManager, CiA402, profiles (depends on mm::comm)
   hil/
     jitter_bench/      ← RT scheduling jitter benchmark (Linux only); CSV output + Python plot script
     api/               ← HTTP API + WebSocket integration tests (TypeScript / Vitest; Docker-managed)
@@ -91,8 +92,8 @@ Flat layout within each lib/app is intentional — navigate by filename and grep
 App  (composition root, owns everything)
  ├── Config
  ├── FieldbusDriver               ← SoemFieldbusDriver | SpoeDriver; owns mutex
- ├── DeviceManager                (holds FieldbusDriver&; owns Device[]; drives scanning)
- │     ├── owns: Device[]         (each Device holds FieldbusDriver& + immutable SlaveInfo)
+ ├── mm::node::DeviceManager      (holds FieldbusDriver&; owns Device[]; drives scanning)
+ │     ├── owns: mm::node::Device[] (each Device holds FieldbusDriver& + immutable SlaveInfo)
  │     │     ├── slavePosition, name, vendorId, productCode, revisionNumber, serialNumber
  │     │     ├── owns: DeviceParameter[] (index/subindex → DeviceParameterValue variant)
  │     │     ├── owns: PdoMappings

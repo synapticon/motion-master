@@ -19,9 +19,12 @@ struct Options {
 /// @brief Parse argv and load the config file into an Options value.
 /// @details CLI flags are parsed first via CLI11. If --config is given the named file is
 ///          read and parsed as JSON; on failure the process exits with code 1.
+///          If --list-adapters is given, network adapters are printed to stdout and the
+///          process exits with code 0 before an Options value is constructed.
 /// @param argc Argument count forwarded from main().
 /// @param argv Argument vector forwarded from main().
 /// @return Fully populated Options.
-/// @note Never returns on --help, --version, a CLI parse error, or a config parse failure;
-///       exit codes for the first three cases are determined by CLI11, config failure uses 1.
+/// @note Never returns on --help, --version, --list-adapters, a CLI parse error, or a
+///       config parse failure; exit codes for CLI11-handled flags are determined by CLI11,
+///       --list-adapters uses 0, and config failure uses 1.
 Options parseOptions(int argc, char** argv);

@@ -5,7 +5,9 @@
 #include <CLI/CLI.hpp>
 #include <cstdlib>
 #include <fstream>
+#include <iostream>
 
+#include "comm/soem_base.h"
 #include "core/version.h"
 
 Options parseOptions(int argc, char** argv) {
@@ -13,6 +15,9 @@ Options parseOptions(int argc, char** argv) {
 
   CLI::App app{"Motion Master", "motion-master"};
   app.set_version_flag("--version", std::string{mm::core::kVersion});
+
+  bool list_adapters = false;
+  app.add_flag("--list-adapters", list_adapters, "Print network adapters (MAC → interface) and exit");
 
   app.add_option("-c,--config", opts.config, "Path to JSON config file")->check(CLI::ExistingFile);
   app.add_option("-p,--port", opts.port, "HTTP/WebSocket port")->capture_default_str();
@@ -29,6 +34,13 @@ Options parseOptions(int argc, char** argv) {
     app.parse(argc, argv);
   } catch (const CLI::ParseError& e) {
     std::exit(app.exit(e));
+  }
+
+  if (list_adapters) {
+    for (const auto& [mac, iface] : mm::comm::soem::mapMacAddressesToInterfaces()) {
+      std::cout << mac << "  " << iface << "\n";
+    }
+    std::exit(0);
   }
 
   if (!opts.config.empty()) {

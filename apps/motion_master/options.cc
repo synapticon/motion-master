@@ -18,23 +18,23 @@ Options parseOptions(int argc, char** argv) {
   CLI::App app{"Motion Master", "motion-master"};
   app.set_version_flag("--version", std::string{mm::core::kVersion});
 
-  bool list_adapters = false;
-  app.add_flag("--list-adapters", list_adapters,
+  bool listAdapters = false;
+  app.add_flag("--list-adapters", listAdapters,
                "Print network adapters (MAC -> interface) and exit");
 
   app.add_option("-c,--config", opts.config, "Path to JSON config file")->check(CLI::ExistingFile);
   app.add_option("-p,--port", opts.port, "HTTP/WebSocket port")->capture_default_str();
-  app.add_option("--cert", opts.cert_file, "TLS certificate file")->check(CLI::ExistingFile);
-  app.add_option("--key", opts.key_file, "TLS private key file")->check(CLI::ExistingFile);
+  app.add_option("--cert", opts.certFile, "TLS certificate file")->check(CLI::ExistingFile);
+  app.add_option("--key", opts.keyFile, "TLS private key file")->check(CLI::ExistingFile);
   app.add_option("-d,--driver", opts.driver, "Fieldbus driver")
       ->capture_default_str()
       ->check(CLI::IsMember({"soem", "spoe", "igh"}));
-  app.add_option("-l,--log-level", opts.log_level, "Log level")
+  app.add_option("-l,--log-level", opts.logLevel, "Log level")
       ->capture_default_str()
       ->check(CLI::IsMember({"trace", "debug", "info", "warn", "error"}));
 
-  std::string adapter_input;
-  app.add_option("--adapter", adapter_input,
+  std::string adapterInput;
+  app.add_option("--adapter", adapterInput,
                  "Network adapter: MAC (AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF)"
                  " or interface name (eth0)");
 
@@ -44,15 +44,15 @@ Options parseOptions(int argc, char** argv) {
     std::exit(app.exit(e));
   }
 
-  if (list_adapters) {
+  if (listAdapters) {
     for (const auto& [mac, iface] : mm::comm::mapMacAddressesToInterfaces()) {
       std::cout << mac << "  " << iface << "\n";
     }
     std::exit(0);
   }
 
-  if (!adapter_input.empty()) {
-    opts.adapter = mm::comm::resolveNetworkAdapter(adapter_input);
+  if (!adapterInput.empty()) {
+    opts.adapter = mm::comm::resolveNetworkAdapter(adapterInput);
   }
 
   if (!opts.config.empty()) {
@@ -63,7 +63,7 @@ Options parseOptions(int argc, char** argv) {
       std::exit(1);
     }
     spdlog::debug("Loaded config from {}", opts.config);
-    opts.config_data = std::move(cfg);
+    opts.configData = std::move(cfg);
   }
 
   return opts;

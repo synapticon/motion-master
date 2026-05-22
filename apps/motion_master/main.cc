@@ -24,7 +24,7 @@ namespace {
 ///          - Linux: resolves `/proc/self/exe` via `std::filesystem::canonical`.
 ///          - Windows: queries the path via `GetModuleFileNameW`.
 /// @return Absolute path to the executable's parent directory.
-std::filesystem::path exe_dir() {
+std::filesystem::path exeDir() {
 #ifdef _WIN32
   wchar_t buf[MAX_PATH];
   GetModuleFileNameW(nullptr, buf, MAX_PATH);
@@ -34,7 +34,7 @@ std::filesystem::path exe_dir() {
 #endif
 }
 
-GameLoop* g_game_loop = nullptr;  ///< Signal handler target; set before run(), cleared after.
+GameLoop* gGameLoop = nullptr;  ///< Signal handler target; set before run(), cleared after.
 
 }  // namespace
 
@@ -50,34 +50,34 @@ int main(int argc, char** argv) {
 
   spdlog::info("Motion Master v{}", mm::core::kVersion);
 
-  auto swagger_file = (exe_dir() / "swagger.yml").string();
+  auto swaggerFile = (exeDir() / "swagger.yml").string();
 
   Server server{Server::Config{
       .port = opts.port,
-      .cert_file = opts.cert_file,
-      .key_file = opts.key_file,
+      .certFile = opts.certFile,
+      .keyFile = opts.keyFile,
       .version = std::string{mm::core::kVersion},
-      .swagger_file = std::move(swagger_file),
+      .swaggerFile = std::move(swaggerFile),
   }};
   server.start();
 
   GameLoop game_loop{std::chrono::microseconds{1000}};
-  g_game_loop = &game_loop;
+  gGameLoop = &game_loop;
 
   std::signal(SIGINT, [](int) {
-    if (g_game_loop) {
-      g_game_loop->stop();
+    if (gGameLoop) {
+      gGameLoop->stop();
     }
   });
   std::signal(SIGTERM, [](int) {
-    if (g_game_loop) {
-      g_game_loop->stop();
+    if (gGameLoop) {
+      gGameLoop->stop();
     }
   });
 
   game_loop.run();  // main thread IS the RT loop — blocks until stop()
 
-  g_game_loop = nullptr;
+  gGameLoop = nullptr;
   server.stop();
 
   spdlog::info("Shutting down");

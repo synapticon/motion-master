@@ -12,9 +12,9 @@ namespace mm::comm {
 /// dash-separated format) or as an OS interface name.  All three fields are
 /// always populated — the adapter map is consulted to resolve the missing form.
 struct NetworkAdapter {
-  std::string mac_linux;    ///< Colon-separated uppercase MAC, e.g. @c "AA:BB:CC:DD:EE:FF".
-  std::string mac_windows;  ///< Dash-separated uppercase MAC, e.g. @c "AA-BB-CC-DD-EE-FF".
-  std::string adapter_name;  ///< OS interface name, e.g. @c "eth0" or @c "\\Device\\NPF_{GUID}".
+  std::string macLinux;     ///< Colon-separated uppercase MAC, e.g. @c "AA:BB:CC:DD:EE:FF".
+  std::string macWindows;   ///< Dash-separated uppercase MAC, e.g. @c "AA-BB-CC-DD-EE-FF".
+  std::string adapterName;  ///< OS interface name, e.g. @c "eth0" or @c "\\Device\\NPF_{GUID}".
 };
 
 /// @brief Returns true if @p s is a MAC address in either Linux (@c :) or

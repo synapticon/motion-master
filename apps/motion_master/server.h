@@ -21,10 +21,10 @@ class Server {
   /// @brief Server configuration.
   struct Config {
     uint16_t port = 8443;      ///< TCP port to listen on (TLS).
-    std::string cert_file;     ///< Path to the TLS certificate (PEM).
-    std::string key_file;      ///< Path to the TLS private key (PEM).
+    std::string certFile;      ///< Path to the TLS certificate (PEM).
+    std::string keyFile;       ///< Path to the TLS private key (PEM).
     std::string version;       ///< Application version string served at `GET /api/version`.
-    std::string swagger_file;  ///< Path to `swagger.yml`; served at `GET /api/swagger.yml`.
+    std::string swaggerFile;   ///< Path to `swagger.yml`; served at `GET /api/swagger.yml`.
   };
 
   /// @brief Constructs the server with the given configuration.

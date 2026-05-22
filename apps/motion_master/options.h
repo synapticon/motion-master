@@ -11,12 +11,12 @@
 struct Options {
   std::string config;                   ///< Path to the JSONC config file; empty if not given.
   uint16_t port{8443};                  ///< HTTP/WebSocket listen port.
-  std::string cert_file;                ///< Path to the TLS certificate file.
-  std::string key_file;                 ///< Path to the TLS private key file.
+  std::string certFile;                 ///< Path to the TLS certificate file.
+  std::string keyFile;                  ///< Path to the TLS private key file.
   std::string driver{"soem"};           ///< Fieldbus driver: "soem", "spoe", or "igh".
-  std::string log_level{"info"};        ///< spdlog level: trace/debug/info/warn/error.
+  std::string logLevel{"info"};         ///< spdlog level: trace/debug/info/warn/error.
   std::optional<mm::comm::NetworkAdapter> adapter;   ///< Absent when --adapter is not given.
-  std::optional<nlohmann::json> config_data;  ///< Parsed config; absent when --config not given.
+  std::optional<nlohmann::json> configData;  ///< Parsed config; absent when --config not given.
 };
 
 /// @brief Parse argv and load the config file into an Options value.

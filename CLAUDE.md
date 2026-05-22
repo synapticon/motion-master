@@ -222,13 +222,25 @@ The `motion-master` Docker image is built from the repo root and run with `--net
 
 ## Code Style
 
-Formatting: `.clang-format` (Google style, 100-column limit). Run `./tools/format.sh` to format all sources, or use the CMake target:
+Formatting is enforced by `.clang-format` (Google layout, 100-column limit). Run `./tools/format.sh` or the CMake target:
 
 ```bash
 ninja -C build/x64-linux-debug format
 ```
 
-File naming: `lowercase_with_underscores` (e.g. `soem_driver.cc`/`soem_driver.h` pairs with `SoemDriver`). Headers use `.h`, sources use `.cc` (Google style). Repo/folder name uses hyphens (`motion-master`) by GitHub convention.
+### Naming Conventions
+
+| Category | Convention | Examples |
+|---|---|---|
+| Classes, structs, enums, type aliases | `PascalCase` | `NetworkAdapter`, `GameLoop`, `SoemDriver` |
+| Functions (free and member) | `camelCase` | `isMacAddress()`, `addTask()`, `resolveNetworkAdapter()` |
+| Variables, parameters, struct members | `camelCase` | `macLinux`, `adapterName`, `swaggerFile` |
+| Private class data members | `camelCase_` (trailing `_`) | `period_`, `running_`, `tasks_` |
+| Files | `snake_case` | `game_loop.cc`, `soem_driver.h` |
+| Namespaces | `snake_case` | `mm::comm`, `mm::core` |
+| Macros | `SCREAMING_SNAKE_CASE` | `MAX_RETRY_COUNT` |
+
+Headers use `.h`, sources use `.cc`. Repo/folder names use hyphens (`motion-master`) by GitHub convention. Naming conventions are enforced in code review — no automated tool checks them.
 
 ## Static Analysis
 

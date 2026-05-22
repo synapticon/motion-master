@@ -160,20 +160,20 @@ NetworkAdapter resolveNetworkAdapter(const std::string& input) {
   auto adapters = mapMacAddressesToInterfaces();
 
   if (isMacAddress(input)) {
-    std::string mac_linux = normalizeMac(input, ':');
-    std::string mac_windows = normalizeMac(input, '-');
-    auto it = adapters.find(mac_linux);
+    std::string macLinux = normalizeMac(input, ':');
+    std::string macWindows = normalizeMac(input, '-');
+    auto it = adapters.find(macLinux);
     if (it == adapters.end()) {
-      spdlog::error("No network adapter found with MAC {}", mac_linux);
+      spdlog::error("No network adapter found with MAC {}", macLinux);
       std::exit(1);
     }
-    return {.mac_linux = mac_linux, .mac_windows = mac_windows, .adapter_name = it->second};
+    return {.macLinux = macLinux, .macWindows = macWindows, .adapterName = it->second};
   }
 
   // Reverse lookup by interface name.
   for (const auto& [mac, name] : adapters) {
     if (name == input) {
-      return {.mac_linux = mac, .mac_windows = normalizeMac(mac, '-'), .adapter_name = input};
+      return {.macLinux = mac, .macWindows = normalizeMac(mac, '-'), .adapterName = input};
     }
   }
   spdlog::error("Network adapter '{}' not found", input);

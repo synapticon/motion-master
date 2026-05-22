@@ -54,15 +54,15 @@ void Server::broadcast(std::string json) {
 void Server::run() {
   // Read once at startup: the spec is static for the lifetime of the server, and
   // failing early here surfaces a missing file before any client connects.
-  std::string swagger_content;
-  if (!config_.swagger_file.empty()) {
-    std::ifstream f{config_.swagger_file};
+  std::string swaggerContent;
+  if (!config_.swaggerFile.empty()) {
+    std::ifstream f{config_.swaggerFile};
     if (f) {
       std::ostringstream ss;
       ss << f.rdbuf();
-      swagger_content = ss.str();
+      swaggerContent = ss.str();
     } else {
-      spdlog::warn("Could not read swagger file: {}", config_.swagger_file);
+      spdlog::warn("Could not read swagger file: {}", config_.swaggerFile);
     }
   }
 
@@ -79,12 +79,12 @@ void Server::run() {
   };
 
   uWS::SSLApp{uWS::SocketContextOptions{
-                  .key_file_name = config_.key_file.c_str(),
-                  .cert_file_name = config_.cert_file.c_str(),
+                  .key_file_name = config_.keyFile.c_str(),
+                  .cert_file_name = config_.certFile.c_str(),
               }}
       .get("/api/swagger.yml",
-           [swagger_content](auto* res, auto* /*req*/) {
-             if (swagger_content.empty()) {
+           [swaggerContent](auto* res, auto* /*req*/) {
+             if (swaggerContent.empty()) {
                res->writeStatus("404 Not Found")->end();
                return;
              }
@@ -92,7 +92,7 @@ void Server::run() {
              res->writeHeader("Content-Type", "text/yaml; charset=utf-8")
                  ->writeHeader("Content-Disposition", "inline")
                  ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
-                 ->end(swagger_content);
+                 ->end(swaggerContent);
            })
       .get("/api/version",
            [this](auto* res, auto* /*req*/) {

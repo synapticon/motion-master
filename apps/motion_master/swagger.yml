@@ -37,6 +37,60 @@ paths:
                   version:
                     type: string
                     example: "6.0.0"
+  /api/devices/{slavePosition}:
+    get:
+      summary: Get a single fieldbus device by bus position
+      operationId: getDevice
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: Device at the given bus position
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slavePosition, name, vendorId, productCode, revisionNumber, serialNumber]
+                properties:
+                  slavePosition:
+                    type: integer
+                    description: 1-based position on the fieldbus
+                    example: 1
+                  name:
+                    type: string
+                    description: Human-readable device name from SII EEPROM
+                    example: "SOMANET Node"
+                  vendorId:
+                    type: integer
+                    format: int64
+                    description: Vendor ID from EEPROM
+                    example: 131073
+                  productCode:
+                    type: integer
+                    format: int64
+                    description: Product code from EEPROM
+                    example: 5570560
+                  revisionNumber:
+                    type: integer
+                    format: int64
+                    description: Revision number from EEPROM
+                    example: 1
+                  serialNumber:
+                    type: integer
+                    format: int64
+                    description: Serial number from EEPROM
+                    example: 12345
+        "400":
+          description: slavePosition is not a valid integer
+        "404":
+          description: No device at the given bus position
   /api/devices:
     get:
       summary: List all fieldbus devices

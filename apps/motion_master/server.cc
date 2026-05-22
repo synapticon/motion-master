@@ -2,6 +2,8 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
+#include <charconv>
 #include <fstream>
 #include <nlohmann/json.hpp>
 #include <sstream>
@@ -108,6 +110,30 @@ void Server::run() {
              res->writeHeader("Content-Type", "application/json")
                  ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
                  ->end(nlohmann::json(deviceManager_).dump());
+           })
+      .get("/api/devices/:slavePosition",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto param = req->getParameter("slavePosition");
+             auto [ptr, ec] = std::from_chars(param.data(), param.data() + param.size(), pos);
+             if (ec != std::errc{} || ptr != param.data() + param.size()) {
+               res->writeStatus("400 Bad Request")
+                   ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                   ->end();
+               return;
+             }
+             const auto& devices = deviceManager_.devices();
+             auto it = std::find_if(devices.begin(), devices.end(),
+                                    [pos](const auto& d) { return d.slavePosition() == pos; });
+             if (it == devices.end()) {
+               res->writeStatus("404 Not Found")
+                   ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                   ->end();
+               return;
+             }
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->end(nlohmann::json(*it).dump());
            })
       .options("/api/*",
                [](auto* res, auto* /*req*/) {

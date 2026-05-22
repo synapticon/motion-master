@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <vector>
 
-#include "icyclic_task.h"
+#include "cyclic_task.h"
 
 /// @brief Fixed-period real-time loop.
 ///
@@ -41,7 +41,7 @@ class GameLoop {
   /// called before run() — not safe to call concurrently with a running loop.
   ///
   /// @param task  Non-owning pointer.  The task must outlive the loop.
-  void addTask(ICyclicTask* task);
+  void addTask(CyclicTask* task);
 
   /// @brief Blocks the calling thread, running one cycle per period until
   ///        stop() is called.
@@ -70,5 +70,5 @@ class GameLoop {
   std::chrono::microseconds period_;
   std::atomic<bool> running_{false};
   std::atomic<uint64_t> tick_{0};
-  std::vector<ICyclicTask*> tasks_;
+  std::vector<CyclicTask*> tasks_;
 };

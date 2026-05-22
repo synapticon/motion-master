@@ -8,10 +8,10 @@
 ///
 /// Tasks are registered with GameLoop::addTask() before run() is called and
 /// are owned by the caller (App).  GameLoop holds non-owning pointers.
-class ICyclicTask {
+class CyclicTask {
  public:
   /// @brief Virtual destructor.
-  virtual ~ICyclicTask() = default;
+  virtual ~CyclicTask() = default;
 
   /// @brief Called once per cycle, after process data has been exchanged and
   ///        device parameters updated.

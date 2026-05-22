@@ -4,6 +4,7 @@ configure_file(swagger.yml swagger.yml COPYONLY)
 
 add_executable(motion_master
     main.cc
+    options.cc
     server.cc
     game_loop.cc
 )

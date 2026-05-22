@@ -35,6 +35,14 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// @return Void on success, or an error string if the interface cannot be opened.
   std::expected<void, std::string> init() override;
 
+  /// @brief Discovers slaves and configures their sync managers and FMMUs.
+  ///
+  /// Sets @c manualstatechange so slaves remain in INIT after configuration —
+  /// state transitions are left to the caller.
+  ///
+  /// @return Number of slaves found on success, or an error string if no slaves are found.
+  std::expected<int, std::string> configure() override;
+
   /// @brief Sends output PDOs and receives input PDOs in one LRW frame.
   ///
   /// Called once per @c GameLoop cycle.  Must not be called before a successful

@@ -24,6 +24,13 @@ class DeviceManager {
   /// @return Void on success, or an error string on failure.
   std::expected<void, std::string> init();
 
+  /// @brief Discovers slaves and populates the device list.
+  ///
+  /// Must be called after @c init(). Forwards to @c FieldbusDriver::configure().
+  ///
+  /// @return Number of slaves found on success, or an error string on failure.
+  std::expected<int, std::string> configure();
+
   /// @brief Exchanges process data with all devices.
   ///
   /// Called once per @c GameLoop cycle. Forwards to @c FieldbusDriver::exchangeProcessData().

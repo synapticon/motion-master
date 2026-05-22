@@ -25,6 +25,14 @@ class FieldbusDriver {
   /// @return Void on success, or an error string describing the failure.
   virtual std::expected<void, std::string> init() = 0;
 
+  /// @brief Discovers slaves and configures their sync managers and FMMUs.
+  ///
+  /// Must be called after a successful @c init(). Slaves remain in INIT state —
+  /// state transitions are left entirely to the caller.
+  ///
+  /// @return Number of slaves found on success, or an error string if configuration fails.
+  virtual std::expected<int, std::string> configure() = 0;
+
   /// @brief Exchanges process data with all slaves in one EtherCAT LRW frame.
   ///
   /// Called once per @c GameLoop cycle.  Must complete within the cycle budget;

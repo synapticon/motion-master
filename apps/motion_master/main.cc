@@ -71,6 +71,13 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  if (auto result = deviceManager.configure(); !result) {
+    spdlog::error("DeviceManager configure failed: {}", result.error());
+    return 1;
+  } else {
+    spdlog::info("Found {} slave(s)", *result);
+  }
+
   auto swaggerFile = (exeDir() / "swagger.yml").string();
 
   Server server{Server::Config{

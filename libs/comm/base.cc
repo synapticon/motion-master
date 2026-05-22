@@ -157,7 +157,7 @@ std::map<std::string, std::string> mapMacAddressesToInterfaces() {
   return map;
 }
 
-NetworkAdapter resolveNetworkAdapter(const std::string& input) {
+std::expected<NetworkAdapter, std::string> resolveNetworkAdapter(const std::string& input) {
   auto adapters = mapMacAddressesToInterfaces();
 
   if (isMacAddress(input)) {
@@ -165,20 +165,20 @@ NetworkAdapter resolveNetworkAdapter(const std::string& input) {
     std::string macWindows = normalizeMac(input, '-');
     auto it = adapters.find(macLinux);
     if (it == adapters.end()) {
-      spdlog::error("No network adapter found with MAC {}", macLinux);
-      std::exit(1);
+      return std::unexpected("no network adapter found with MAC " + macLinux);
     }
-    return {.macLinux = macLinux, .macWindows = macWindows, .adapterName = it->second};
+    return NetworkAdapter{
+        .macLinux = macLinux, .macWindows = macWindows, .adapterName = it->second};
   }
 
   // Reverse lookup by interface name.
   for (const auto& [mac, name] : adapters) {
     if (name == input) {
-      return {.macLinux = mac, .macWindows = normalizeMac(mac, '-'), .adapterName = input};
+      return NetworkAdapter{
+          .macLinux = mac, .macWindows = normalizeMac(mac, '-'), .adapterName = input};
     }
   }
-  spdlog::error("Network adapter '{}' not found", input);
-  std::exit(1);
+  return std::unexpected("network adapter '" + input + "' not found");
 }
 
 }  // namespace mm::comm

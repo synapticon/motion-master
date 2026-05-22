@@ -55,44 +55,56 @@ int main(int argc, char** argv) {
 
   spdlog::info("Motion Master v{}", mm::core::kVersion);
 
-  std::unique_ptr<mm::comm::FieldbusDriver> fieldbusDriver;
-  if (opts.driver == "soem") {
+  mm::node::DeviceManager deviceManager;
+
+  auto makeDriver = [](const std::string& type, const std::string& adapter)
+      -> std::expected<std::unique_ptr<mm::comm::FieldbusDriver>, std::string> {
+    if (type == "soem") {
+      return std::make_unique<mm::comm::soem::SoemFieldbusDriver>(adapter);
+    }
+    return std::unexpected("unsupported driver: " + type);
+  };
+
+  if (opts.driver.has_value()) {
     std::string ifname = opts.adapter ? opts.adapter->adapterName : "";
-    fieldbusDriver = std::make_unique<mm::comm::soem::SoemFieldbusDriver>(ifname);
-  } else {
-    spdlog::error("Unsupported driver: {}", opts.driver);
-    return 1;
-  }
-
-  mm::node::DeviceManager deviceManager{*fieldbusDriver};
-
-  if (auto result = deviceManager.init(); !result) {
-    spdlog::error("DeviceManager init failed: {}", result.error());
-    return 1;
-  }
-
-  if (auto result = deviceManager.configure(); !result) {
-    spdlog::error("DeviceManager configure failed: {}", result.error());
-    return 1;
-  } else {
-    spdlog::info("Found {} slave(s)", *result);
-    for (const auto& device : deviceManager.devices()) {
-      spdlog::info("  [{:2}] {} — vendor: {:#010x}  product: {:#010x}  rev: {:#010x}  serial: {}",
-                   device.slavePosition(), device.name(), device.vendorId(),
-                   device.productCode(), device.revisionNumber(), device.serialNumber());
+    auto driver = makeDriver(*opts.driver, ifname);
+    if (!driver) {
+      spdlog::error("{}", driver.error());
+      return 1;
+    }
+    if (auto result = deviceManager.init(std::move(*driver)); !result) {
+      spdlog::error("DeviceManager init failed: {}", result.error());
+      return 1;
+    }
+    if (auto result = deviceManager.configure(); !result) {
+      return 1;
     }
   }
 
   auto swaggerFile = (exeDir() / "swagger.yml").string();
 
-  Server server{Server::Config{
-                    .port = opts.port,
-                    .certFile = opts.certFile,
-                    .keyFile = opts.keyFile,
-                    .version = std::string{mm::core::kVersion},
-                    .swaggerFile = std::move(swaggerFile),
-                },
-                deviceManager};
+  Server server{
+      Server::Config{
+          .port = opts.port,
+          .certFile = opts.certFile,
+          .keyFile = opts.keyFile,
+          .version = std::string{mm::core::kVersion},
+          .swaggerFile = std::move(swaggerFile),
+          .initDriver = [&deviceManager, makeDriver](std::string type,
+                                                     std::string adapter)
+              -> std::expected<void, std::string> {
+            std::string ifname = adapter;
+            if (!adapter.empty()) {
+              auto resolved = mm::comm::resolveNetworkAdapter(adapter);
+              if (!resolved) return std::unexpected(resolved.error());
+              ifname = resolved->adapterName;
+            }
+            auto driver = makeDriver(type, ifname);
+            if (!driver) return std::unexpected(driver.error());
+            return deviceManager.init(std::move(*driver));
+          },
+      },
+      deviceManager};
   server.start();
 
   GameLoop game_loop{std::chrono::microseconds{1000}};

@@ -9,8 +9,10 @@ target_include_directories(node PUBLIC
 )
 
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(spdlog CONFIG REQUIRED)
 
 target_link_libraries(node PUBLIC
     mm::comm
     nlohmann_json::nlohmann_json
+    spdlog::spdlog
 )

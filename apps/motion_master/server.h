@@ -3,6 +3,8 @@
 #include <uwebsockets/App.h>
 
 #include <atomic>
+#include <expected>
+#include <functional>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -22,13 +24,24 @@ class DeviceManager;
 /// uWebSockets event loop via defer() so that the caller never blocks.
 class Server {
  public:
+  /// @brief Callback type for `POST /api/init`.
+  ///
+  /// Receives the requested driver name (e.g. `"soem"`) and adapter string
+  /// (interface name or MAC; may be empty for auto-detect).  The callback is
+  /// responsible for constructing the concrete @c FieldbusDriver and calling
+  /// @c DeviceManager::init().  Lives in the composition root (main.cc) so that
+  /// concrete driver types are never referenced inside the server.
+  using InitDriverFn =
+      std::function<std::expected<void, std::string>(std::string driver, std::string adapter)>;
+
   /// @brief Server configuration.
   struct Config {
-    uint16_t port = 8443;     ///< TCP port to listen on (TLS).
-    std::string certFile;     ///< Path to the TLS certificate (PEM).
-    std::string keyFile;      ///< Path to the TLS private key (PEM).
-    std::string version;      ///< Application version string served at `GET /api/version`.
-    std::string swaggerFile;  ///< Path to `swagger.yml`; served at `GET /api/swagger.yml`.
+    uint16_t port = 8443;          ///< TCP port to listen on (TLS).
+    std::string certFile;          ///< Path to the TLS certificate (PEM).
+    std::string keyFile;           ///< Path to the TLS private key (PEM).
+    std::string version;           ///< Application version string served at `GET /api/version`.
+    std::string swaggerFile;       ///< Path to `swagger.yml`; served at `GET /api/swagger.yml`.
+    InitDriverFn initDriver;       ///< Handler for `POST /api/init`; required for API-driven init.
   };
 
   /// @brief Constructs the server with the given configuration.

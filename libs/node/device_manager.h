@@ -1,6 +1,7 @@
 #pragma once
 
 #include <expected>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -11,22 +12,24 @@
 
 namespace mm::node {
 
-/// @brief Owns the fieldbus node collection and drives PDO exchange.
+/// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.
 ///
-/// Constructed by @c App with a concrete @c FieldbusDriver. Injected into
-/// @c GameLoop (for @c pdoExchange) and @c HttpServer (for SDO/state operations).
+/// The driver is not required at construction — call @c init() to supply one.
+/// This allows the app to start without a driver and be initialised later via
+/// the HTTP API. Injected into @c GameLoop (for @c pdoExchange) and
+/// @c HttpServer (for SDO/state operations).
 class DeviceManager {
  public:
-  /// @brief Constructs the manager bound to the given fieldbus driver.
-  /// @param driver  Lifetime must exceed that of this object.
-  explicit DeviceManager(mm::comm::FieldbusDriver& driver);
+  DeviceManager() = default;
 
-  /// @brief Initialises the fieldbus driver.
+  /// @brief Takes ownership of @p driver and initialises it.
   ///
-  /// Must be called before @c pdoExchange(). Forwards to @c FieldbusDriver::init().
+  /// Must be called before @c configure() and @c pdoExchange(). Any previously
+  /// held driver is replaced.
   ///
+  /// @param driver  Concrete fieldbus driver to own and operate.
   /// @return Void on success, or an error string on failure.
-  std::expected<void, std::string> init();
+  std::expected<void, std::string> init(std::unique_ptr<mm::comm::FieldbusDriver> driver);
 
   /// @brief Discovers nodes and populates the device list.
   ///
@@ -49,11 +52,18 @@ class DeviceManager {
 
   /// @brief Exchanges process data with all nodes.
   ///
-  /// Called once per @c GameLoop cycle. Forwards to @c FieldbusDriver::exchangeProcessData().
+  /// Called once per @c GameLoop cycle. No-op when no driver is initialised.
+  ///
+  /// @warning @c pdoExchange() runs on the RT GameLoop thread while @c init(),
+  ///          @c configure(), and @c reset() may be called from the HTTP server thread.
+  ///          There is currently no lock guarding @c driver_ or @c devices_ across
+  ///          that boundary.  This is safe only because @c pdoExchange() is not yet
+  ///          wired into the GameLoop.  Before enabling PDO exchange, stop the loop
+  ///          (or drain one cycle) before calling @c init() / @c reset() via the API.
   void pdoExchange();
 
  private:
-  mm::comm::FieldbusDriver& driver_;
+  std::unique_ptr<mm::comm::FieldbusDriver> driver_;
   std::vector<Device> devices_;
 };
 

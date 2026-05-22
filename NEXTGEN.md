@@ -89,28 +89,28 @@ Based on reviewing the current source (`comm::base::Device`, `VirtualDevice`, `E
 ```
 App  (composition root, owns everything)
  ├── Config
- ├── FieldbusDriver               ← SoemDriver | SpoeDriver; owns mutex
- ├── DeviceManager                (holds FieldbusDriver&)
+ ├── DeviceManager                (owns FieldbusDriver + Device[]; drives scanning)
+ │     ├── unique_ptr<FieldbusDriver>  ← SoemDriver | SpoeDriver; owns mutex
+ │     │                                 null until init(); set via init(unique_ptr<FieldbusDriver>)
  │     ├── owns: Device[]         (each Device holds FieldbusDriver&)
  │     │     ├── DeviceType  { Cia402Drive, DigitalIo }
  │     │     ├── owns: DeviceParameter[] (index/subindex → DeviceParameterValue variant)
  │     │     ├── owns: PdoMappings
  │     │     └── owns: Cia402StateMachine  (only if Cia402Drive)
- │     └── pdoExchange(), state transitions, scanning
+ │     └── init(unique_ptr<FieldbusDriver>), configure(), reset(), pdoExchange(), state transitions
  ├── GameLoop  (RT thread, SCHED_FIFO, 1ms)
- │     ├── uses: DeviceManager    (calls pdoExchange each cycle)
+ │     ├── uses: DeviceManager    (calls pdoExchange each cycle; no-op when driver is null)
  │     ├── writes: Device parameters via seqlock
  │     └── runs: ICyclicTask[]
  │           ├── Watchdog           → NotificationBus
  │           └── MonitorPublisher   → WebSocketServer
  ├── HttpServer
- │     └── uses: DeviceManager    (SDO read/write, file transfer, state control)
+ │     ├── uses: DeviceManager    (SDO read/write, file transfer, state control)
+ │     └── Config.InitDriverFn    (callback to main.cc; creates concrete driver for POST /api/init)
  ├── WebSocketServer  (monitoring output)
  ├── NotificationBus  (observer; decouples Watchdog/DeviceManager from servers)
- ├── FirmwareInstaller
- │     └── uses: DeviceManager
- └── NetworkScanner
-       └── uses: FieldbusDriver
+ └── FirmwareInstaller
+       └── uses: DeviceManager
 ```
 
 **What carries over from current code**
@@ -524,9 +524,11 @@ struct SlaveInfo {
 
 `DeviceManager::configure()` calls `driver_.configure()`, then constructs one `Device` per slave (positions 1..n) and stores them in `devices_`. This is the single place where the device list is created.
 
-**Driver selection in App**
+**Driver selection and deferred initialisation**
 
-`main.cc` constructs a `unique_ptr<FieldbusDriver>` conditionally: `--driver soem` creates a `SoemFieldbusDriver`; any other value exits with an error. Adding a new driver is an `else if` branch. `DeviceManager` receives a `FieldbusDriver&` and has no knowledge of the concrete type.
+`--driver` and `--adapter` are optional at startup. If `--driver` is given, `main.cc` constructs the concrete driver and immediately calls `deviceManager.init(std::move(driver))` + `configure()`; the app starts with devices ready. If omitted, the app starts in an uninitialised state and the HTTP API is used to initialise later.
+
+`DeviceManager` owns the driver via `unique_ptr<FieldbusDriver>` (null until `init()` is called). Adding a new driver type is an `else if` in `main.cc`'s `makeDriver` lambda; `DeviceManager` has no knowledge of the concrete type.
 
 **Linux capabilities**
 
@@ -558,3 +560,39 @@ apps/        (app layer) ← GameLoop, HttpServer, WebSocket, CLI — thin shell
 ```
 
 `mm::node` links `mm::comm` as a PUBLIC dependency so its include paths propagate to any target that links `mm::node`.
+
+---
+
+## Session 2026-05-22 — Deferred fieldbus initialisation and HTTP lifecycle API
+
+**Motivation**
+
+Previously the app required `--driver` and could not start without a functioning EtherCAT adapter. This prevented headless deployment scenarios and made the app harder to test without hardware. The fieldbus lifecycle is now fully controllable via the HTTP API.
+
+**Ownership change: DeviceManager owns FieldbusDriver**
+
+`DeviceManager` changed from holding a `FieldbusDriver&` (non-owning reference) to owning a `unique_ptr<FieldbusDriver>` (null until initialised). The driver is never constructed inside `DeviceManager` — `main.cc` creates the concrete type and transfers ownership via `DeviceManager::init(unique_ptr<FieldbusDriver>)`. This keeps the composition-root rule intact.
+
+`reset()` ordering is now mechanically enforced: `devices_.clear()` first (so `Device` objects drop their `FieldbusDriver&` before the driver stops), then `driver_->stop()`, then `driver_.reset()`. With the old reference-based design this ordering was a soft contract enforced only by convention.
+
+**Server::Config::InitDriverFn**
+
+`Server::Config` carries an `InitDriverFn` callback (`std::function<std::expected<void, std::string>(std::string driver, std::string adapter)>`). The lambda is wired in `main.cc` and creates the concrete driver, then calls `deviceManager.init()`. The server only knows the abstract callback — no concrete driver type leaks past the composition root.
+
+**New HTTP lifecycle endpoints**
+
+| Endpoint | Body | Effect |
+|---|---|---|
+| `POST /api/init` | `{"driver":"soem","adapter":"eth0"}` (adapter optional) | Creates driver, calls `DeviceManager::init()` |
+| `POST /api/configure` | — | Calls `DeviceManager::configure()`; returns `{"slaves": N}` |
+| `POST /api/reset` | — | Calls `DeviceManager::reset()`; releases driver |
+
+`GET /api/devices` returns an empty array when uninitialised; all other behaviour is unchanged.
+
+**GameLoop start**
+
+The GameLoop starts unconditionally regardless of whether a driver is present. `pdoExchange()` is a no-op when `driver_` is null, so the loop runs safely in the uninitialised state.
+
+**Thread safety — open issue**
+
+`POST /api/init`, `POST /api/configure`, and `POST /api/reset` run on the HTTP server thread and mutate `driver_` and `devices_`. `pdoExchange()` runs on the RT GameLoop thread and reads both. There is currently no lock guarding this boundary. This is safe only because `pdoExchange()` is not yet wired into the GameLoop. Before enabling live PDO exchange, the loop must be stopped (or drained for one cycle) before `init()` or `reset()` is called via the API.

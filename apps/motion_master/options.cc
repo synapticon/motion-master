@@ -26,9 +26,9 @@ Options parseOptions(int argc, char** argv) {
   app.add_option("-p,--port", opts.port, "HTTP/WebSocket port")->capture_default_str();
   app.add_option("--cert", opts.certFile, "TLS certificate file")->check(CLI::ExistingFile);
   app.add_option("--key", opts.keyFile, "TLS private key file")->check(CLI::ExistingFile);
-  app.add_option("-d,--driver", opts.driver, "Fieldbus driver")
-      ->capture_default_str()
-      ->check(CLI::IsMember({"soem", "spoe", "igh"}));
+  std::string driverInput;
+  auto* driverOpt = app.add_option("-d,--driver", driverInput, "Fieldbus driver (soem|spoe|igh)")
+                        ->check(CLI::IsMember({"soem", "spoe", "igh"}));
   app.add_option("-l,--log-level", opts.logLevel, "Log level")
       ->capture_default_str()
       ->check(CLI::IsMember({"trace", "debug", "info", "warn", "error"}));
@@ -51,8 +51,17 @@ Options parseOptions(int argc, char** argv) {
     std::exit(0);
   }
 
+  if (driverOpt->count() > 0) {
+    opts.driver = driverInput;
+  }
+
   if (!adapterInput.empty()) {
-    opts.adapter = mm::comm::resolveNetworkAdapter(adapterInput);
+    auto adapter = mm::comm::resolveNetworkAdapter(adapterInput);
+    if (!adapter) {
+      spdlog::error("{}", adapter.error());
+      std::exit(1);
+    }
+    opts.adapter = *adapter;
   }
 
   if (!opts.config.empty()) {

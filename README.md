@@ -34,7 +34,7 @@ motion-master [OPTIONS]
   -p, --port UINT [8443]        HTTP/WebSocket port
       --cert TEXT:FILE          TLS certificate file
       --key TEXT:FILE           TLS private key file
-  -d, --driver TEXT [soem]      Fieldbus driver: soem (others not yet supported)
+  -d, --driver TEXT             Fieldbus driver: soem (omit to defer initialisation to the HTTP API)
   -l, --log-level TEXT [info]   Log level: trace, debug, info, warn, error
   -a, --adapter TEXT            Network adapter for EtherCAT: interface name or MAC address
       --list-adapters           Print available network adapters and exit
@@ -55,6 +55,29 @@ Test the HTTP API (accept the self-signed cert warning):
 ```bash
 curl -k https://localhost:8443/api/version
 curl -k https://localhost:8443/api/swagger.yml
+```
+
+### Fieldbus lifecycle via API
+
+`--driver` and `--adapter` are optional at startup. When omitted, the fieldbus is uninitialised and `GET /api/devices` returns an empty array. Use the lifecycle endpoints to initialise at runtime:
+
+```bash
+# 1. Discover available adapters
+curl -k https://localhost:8443/api/adapters
+
+# 2. Initialise the fieldbus driver
+curl -k -X POST https://localhost:8443/api/init \
+     -H 'Content-Type: application/json' \
+     -d '{"driver":"soem","adapter":"eth0"}'
+
+# 3. Scan for slaves and populate the device list
+curl -k -X POST https://localhost:8443/api/configure
+
+# 4. List discovered devices
+curl -k https://localhost:8443/api/devices
+
+# 5. Tear down (stops driver, clears device list; init + configure can be called again)
+curl -k -X POST https://localhost:8443/api/reset
 ```
 
 Connect a WebSocket client to `wss://localhost:8443/ws`. The server sends two message types:

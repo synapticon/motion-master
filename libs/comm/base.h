@@ -1,5 +1,6 @@
 #pragma once
 
+#include <expected>
 #include <map>
 #include <string>
 
@@ -78,11 +79,10 @@ std::map<std::string, std::string> mapMacAddressesToInterfaces();
 ///   - OS interface name:   @c "eth0", @c "\\Device\\NPF_{GUID}"
 ///
 /// Calls @c mapMacAddressesToInterfaces() once to resolve the form that was
-/// not supplied.  Exits the process with code 1 and logs an error if the
-/// adapter cannot be found in the OS adapter map.
+/// not supplied.
 /// @param input  User-supplied adapter specifier string.
-/// @return Fully populated @c NetworkAdapter with all three fields set.
-/// @note Never returns if @p input cannot be resolved.
-NetworkAdapter resolveNetworkAdapter(const std::string& input);
+/// @return Fully populated @c NetworkAdapter, or an error string if the adapter
+///         cannot be found in the OS adapter map.
+std::expected<NetworkAdapter, std::string> resolveNetworkAdapter(const std::string& input);
 
 }  // namespace mm::comm

@@ -11,10 +11,11 @@ Key design mandates from NEXTGEN.md:
 - HTTP API + single monitoring WebSocket (no Protobuf, no dual-port setup)
 - Single `Device` abstraction (replaces `VirtualDevice` + `comm::base::Device` overlap from the old codebase)
 - `FieldbusDriver` interface abstracts SOEM and SPoE — `SoemFieldbusDriver` and `SpoeDriver` are the concrete implementations; `FieldbusDriver` owns the mutex that serializes SDO and PDO socket access across threads
+- `DeviceManager` owns `FieldbusDriver` via `unique_ptr<FieldbusDriver>` (null until `init()` is called) — the driver is constructed by `main.cc` and transferred via `DeviceManager::init(unique_ptr<FieldbusDriver>)`; `DeviceManager` never references concrete driver types
 - No service layer — SDO read/write, file transfer, and state control are methods on `Device` and `DeviceManager`; `HttpServer` and `GameLoop` both take a `DeviceManager&` directly
-- `GameLoop` calls `deviceManager_.pdoExchange()` — it has no knowledge of `FieldbusDriver`
+- `GameLoop` calls `deviceManager_.pdoExchange()` — it has no knowledge of `FieldbusDriver`; `pdoExchange()` is a no-op when the driver is null so the loop always starts unconditionally
 - `DeviceManager` owns slave discovery and network scanning via `FieldbusDriver` — there is no separate `NetworkScanner`
-- `App` is the only place that instantiates concrete types (dependency injection at the composition root)
+- `App` is the only place that instantiates concrete types (dependency injection at the composition root); `Server::Config` carries an `InitDriverFn` callback wired in `main.cc` so `POST /api/init` can create a driver without the server knowing concrete types
 - Namespaces mirror directory layout (`mm::core`, `mm::comm::soem`, `mm::node`, `mm::api`); do not use C++20 modules
 - Config file format is JSONC — parse via `nlohmann::json::parse(stream, nullptr, true, true)` (the fourth `true` enables `ignore_comments`); config files use the `.jsonc` extension and may freely use `//` and `/* */` comments
 
@@ -91,20 +92,22 @@ Flat layout within each lib/app is intentional — navigate by filename and grep
 ```
 App  (composition root, owns everything)
  ├── Config
- ├── FieldbusDriver               ← SoemFieldbusDriver | SpoeDriver; owns mutex
- ├── mm::node::DeviceManager      (holds FieldbusDriver&; owns Device[]; drives scanning)
+ ├── mm::node::DeviceManager      (owns FieldbusDriver + Device[]; drives scanning)
+ │     ├── unique_ptr<FieldbusDriver>   ← SoemFieldbusDriver | SpoeDriver; owns mutex
+ │     │                                  null until init(); set via init(unique_ptr<FieldbusDriver>)
  │     ├── owns: mm::node::Device[] (each Device holds FieldbusDriver& + immutable SlaveInfo)
  │     │     ├── slavePosition, name, vendorId, productCode, revisionNumber, serialNumber
  │     │     ├── owns: DeviceParameter[] (index/subindex → DeviceParameterValue variant)
  │     │     ├── owns: PdoMappings
  │     │     └── owns: Cia402StateMachine  (only if Cia402Drive)
- │     └── init(), configure(), pdoExchange(), state transitions
+ │     └── init(unique_ptr<FieldbusDriver>), configure(), reset(), pdoExchange(), state transitions
  ├── GameLoop  (RT thread, SCHED_FIFO, 1ms)
- │     ├── uses: DeviceManager    (calls pdoExchange each cycle)
+ │     ├── uses: DeviceManager    (calls pdoExchange each cycle; no-op when driver is null)
  │     ├── writes: Device parameters via seqlock
  │     └── runs: ICyclicTask[]  (Watchdog, MonitorPublisher)
  ├── HttpServer
- │     └── uses: DeviceManager    (SDO read/write, file transfer, state control)
+ │     ├── uses: DeviceManager    (SDO read/write, file transfer, state control)
+ │     └── Config.InitDriverFn    (callback to main.cc; creates concrete driver for POST /api/init)
  ├── WebSocketServer  (monitoring output)
  ├── NotificationBus  (observer; decouples Watchdog/DeviceManager from servers)
  └── FirmwareInstaller
@@ -130,6 +133,8 @@ Use `std::visit` for type dispatch on `DeviceParameterValue`. `DeviceParameter` 
 `GameLoop` calls `deviceManager_.pdoExchange()` each cycle — it has no direct knowledge of `FieldbusDriver`. HTTP handlers call SDO methods on `DeviceManager`/`Device` from their own threads; `FieldbusDriver` serializes all socket access via its internal mutex.
 
 PDO values are shared between the RT loop and HTTP/monitoring readers via a **seqlock** (odd seq = write in progress; even = stable). At ~100 PDO values / 400 bytes at 1 ms cycles, the retry path is effectively never triggered.
+
+**Thread safety caveat — `init`/`reset` vs `pdoExchange`:** `POST /api/init`, `POST /api/configure`, and `POST /api/reset` run on the HTTP server thread and mutate `DeviceManager::driver_` and `devices_`. `pdoExchange()` runs on the RT GameLoop thread and reads both. There is currently no lock guarding this boundary. This is safe only because `pdoExchange()` is not yet wired into the GameLoop. Before enabling live PDO exchange, the loop must be stopped (or at least drained for one cycle) before `init()` or `reset()` is called via the API.
 
 Cycle timer: `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...)` on Linux (absolute mode to prevent drift accumulation); `CreateWaitableTimerEx` with `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` on Windows.
 

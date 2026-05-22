@@ -116,7 +116,7 @@ void Server::run() {
              uint16_t pos{};
              auto param = req->getParameter("slavePosition");
              auto [ptr, ec] = std::from_chars(param.data(), param.data() + param.size(), pos);
-             if (ec != std::errc{} || ptr != param.data() + param.size()) {
+             if (ec != std::errc() || ptr != param.data() + param.size()) {
                res->writeStatus("400 Bad Request")
                    ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
                    ->end();

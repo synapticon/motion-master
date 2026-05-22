@@ -5,21 +5,23 @@
 
 #include "comm/fieldbus_driver.h"
 
-/// @brief Represents a single EtherCAT slave.
+namespace mm::node {
+
+/// @brief Represents a single node on the fieldbus.
 ///
-/// Holds the slave's bus position, immutable identity read from EEPROM,
+/// Holds the node's bus position, immutable identity read from EEPROM,
 /// and a reference to the fieldbus driver for SDO and state operations.
 class Device {
  public:
   /// @brief Constructs a device, reading identity from the driver at @p slavePosition.
-  /// @param slavePosition  1-based position on the EtherCAT bus (0 is reserved for the master).
+  /// @param slavePosition  1-based position on the fieldbus (0 is reserved for the master).
   /// @param driver         Fieldbus driver; lifetime must exceed that of this object.
   Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver);
 
-  /// @brief Returns the 1-based position of this slave on the EtherCAT bus.
+  /// @brief Returns the 1-based position of this node on the fieldbus.
   uint16_t slavePosition() const;
 
-  /// @brief Human-readable slave name from SII EEPROM.
+  /// @brief Human-readable node name from SII EEPROM.
   const std::string& name() const;
 
   /// @brief Vendor ID from EEPROM.
@@ -43,3 +45,5 @@ class Device {
   uint32_t revisionNumber_;
   uint32_t serialNumber_;
 };
+
+}  // namespace mm::node

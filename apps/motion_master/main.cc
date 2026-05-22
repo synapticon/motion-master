@@ -14,7 +14,7 @@
 #include "comm/fieldbus_driver.h"
 #include "comm/soem_fieldbus_driver.h"
 #include "core/version.h"
-#include "device_manager.h"
+#include "node/device_manager.h"
 #include "game_loop.h"
 #include "options.h"
 #include "server.h"
@@ -64,7 +64,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  DeviceManager deviceManager{*fieldbusDriver};
+  mm::node::DeviceManager deviceManager{*fieldbusDriver};
 
   if (auto result = deviceManager.init(); !result) {
     spdlog::error("DeviceManager init failed: {}", result.error());

@@ -18,6 +18,7 @@ enable_testing()
 
 add_subdirectory(libs/core)
 add_subdirectory(libs/comm)
+add_subdirectory(libs/node)
 add_subdirectory(apps/motion_master)
 add_subdirectory(apps/playground)
 add_subdirectory(hil)

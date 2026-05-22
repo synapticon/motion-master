@@ -1,7 +1,9 @@
-#include "device.h"
+#include "node/device.h"
 
 #include <string>
 #include <utility>
+
+namespace mm::node {
 
 Device::Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver)
     : slavePosition_(slavePosition), driver_(driver) {
@@ -19,3 +21,5 @@ uint32_t Device::vendorId() const { return vendorId_; }
 uint32_t Device::productCode() const { return productCode_; }
 uint32_t Device::revisionNumber() const { return revisionNumber_; }
 uint32_t Device::serialNumber() const { return serialNumber_; }
+
+}  // namespace mm::node

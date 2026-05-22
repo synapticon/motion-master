@@ -1,7 +1,9 @@
-#include "device_manager.h"
+#include "node/device_manager.h"
 
 #include <string>
 #include <vector>
+
+namespace mm::node {
 
 DeviceManager::DeviceManager(mm::comm::FieldbusDriver& driver) : driver_(driver) {}
 
@@ -22,3 +24,5 @@ std::expected<int, std::string> DeviceManager::configure() {
 const std::vector<Device>& DeviceManager::devices() const { return devices_; }
 
 void DeviceManager::pdoExchange() { driver_.exchangeProcessData(); }
+
+}  // namespace mm::node

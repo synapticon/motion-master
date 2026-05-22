@@ -83,27 +83,28 @@ int main(int argc, char** argv) {
 
   auto swaggerFile = (exeDir() / "swagger.yml").string();
 
-  Server server{Server::Config{
-                    .port = opts.port,
-                    .certFile = opts.certFile,
-                    .keyFile = opts.keyFile,
-                    .version = std::string{mm::core::kVersion},
-                    .swaggerFile = std::move(swaggerFile),
-                    .initDriver = [&deviceManager, makeDriver](
-                                      const std::string& type,
-                                      const std::string& adapter) -> std::expected<void, std::string> {
-                      std::string ifname = adapter;
-                      if (!adapter.empty()) {
-                        auto resolved = mm::comm::resolveNetworkAdapter(adapter);
-                        if (!resolved) return std::unexpected(resolved.error());
-                        ifname = resolved->adapterName;
-                      }
-                      auto driver = makeDriver(type, ifname);
-                      if (!driver) return std::unexpected(driver.error());
-                      return deviceManager.init(std::move(*driver));
-                    },
-                },
-                deviceManager};
+  Server server{
+      Server::Config{
+          .port = opts.port,
+          .certFile = opts.certFile,
+          .keyFile = opts.keyFile,
+          .version = std::string{mm::core::kVersion},
+          .swaggerFile = std::move(swaggerFile),
+          .initDriver = [&deviceManager, makeDriver](
+                            const std::string& type,
+                            const std::string& adapter) -> std::expected<void, std::string> {
+            std::string ifname = adapter;
+            if (!adapter.empty()) {
+              auto resolved = mm::comm::resolveNetworkAdapter(adapter);
+              if (!resolved) return std::unexpected(resolved.error());
+              ifname = resolved->adapterName;
+            }
+            auto driver = makeDriver(type, ifname);
+            if (!driver) return std::unexpected(driver.error());
+            return deviceManager.init(std::move(*driver));
+          },
+      },
+      deviceManager};
   server.start();
 
   GameLoop game_loop{std::chrono::microseconds{1000}};

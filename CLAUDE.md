@@ -10,7 +10,9 @@ Key design mandates from NEXTGEN.md:
 - No exceptions — use `std::expected<T, std::string>` (C++23 stdlib, no `tl::expected`)
 - HTTP API + single monitoring WebSocket (no Protobuf, no dual-port setup)
 - Single `Device` abstraction (replaces `VirtualDevice` + `comm::base::Device` overlap from the old codebase)
-- `IFieldbusDriver` interface abstracts SOEM, SPoE, and IgH EtherCAT — `SoemDriver`, `SpoeDriver`, `IghDriver` are the concrete implementations
+- `FieldbusDriver` interface abstracts SOEM and SPoE — `SoemDriver` and `SpoeDriver` are the concrete implementations; `FieldbusDriver` owns the mutex that serializes SDO and PDO socket access across threads
+- No service layer — SDO read/write, file transfer, and state control are methods on `Device` and `DeviceManager`; `HttpServer` and `GameLoop` both take a `DeviceManager&` directly
+- `GameLoop` calls `deviceManager_.pdoExchange()` — it has no knowledge of `FieldbusDriver`
 - `App` is the only place that instantiates concrete types (dependency injection at the composition root)
 - Namespaces mirror directory layout (`mm::core`, `mm::comm::soem`, `mm::api`, `mm::devices`); do not use C++20 modules
 - Config file format is JSONC — parse via `nlohmann::json::parse(stream, nullptr, true, true)` (the fourth `true` enables `ignore_comments`); config files use the `.jsonc` extension and may freely use `//` and `/* */` comments
@@ -87,24 +89,25 @@ Flat layout within each lib/app is intentional — navigate by filename and grep
 ```
 App  (composition root, owns everything)
  ├── Config
- ├── IFieldbusDriver               ← SoemDriver, SpoeDriver, IghDriver
- ├── DeviceManager
- │     ├── owns: Device[]
- │     └── uses: IFieldbusDriver
- ├── Device                        ← single abstraction; no VirtualDevice/comm::base::Device split
- │     ├── owns: DeviceParameter[] (index/subindex → DeviceParameterValue variant)
- │     ├── owns: PdoMappings
- │     └── owns: Cia402StateMachine  (only if Cia402Drive)
+ ├── FieldbusDriver               ← SoemDriver | SpoeDriver; owns mutex
+ ├── DeviceManager                (holds FieldbusDriver&)
+ │     ├── owns: Device[]         (each Device holds FieldbusDriver&)
+ │     │     ├── owns: DeviceParameter[] (index/subindex → DeviceParameterValue variant)
+ │     │     ├── owns: PdoMappings
+ │     │     └── owns: Cia402StateMachine  (only if Cia402Drive)
+ │     └── pdoExchange(), state transitions, scanning
  ├── GameLoop  (RT thread, SCHED_FIFO, 1ms)
- │     ├── uses: IFieldbusDriver
+ │     ├── uses: DeviceManager    (calls pdoExchange each cycle)
  │     ├── writes: Device parameters via seqlock
  │     └── runs: ICyclicTask[]  (Watchdog, MonitorPublisher)
- ├── SdoService  (dedicated thread, safe concurrent with RT loop via SOEM socket mutex)
  ├── HttpServer
+ │     └── uses: DeviceManager    (SDO read/write, file transfer, state control)
  ├── WebSocketServer  (monitoring output)
  ├── NotificationBus  (observer; decouples Watchdog/DeviceManager from servers)
  ├── FirmwareInstaller
+ │     └── uses: DeviceManager
  └── NetworkScanner
+       └── uses: FieldbusDriver
 ```
 
 ### Key Types
@@ -122,6 +125,8 @@ Use `std::visit` for type dispatch on `DeviceParameterValue`. `DeviceParameter` 
 ### Game Loop / RT Threading
 
 `GameLoop::run()` blocks the **main thread** — this IS the RT thread. All other subsystems start their own threads before `run()` is called. Shutdown via signal sets an atomic flag checked after each cycle.
+
+`GameLoop` calls `deviceManager_.pdoExchange()` each cycle — it has no direct knowledge of `FieldbusDriver`. HTTP handlers call SDO methods on `DeviceManager`/`Device` from their own threads; `FieldbusDriver` serializes all socket access via its internal mutex.
 
 PDO values are shared between the RT loop and HTTP/monitoring readers via a **seqlock** (odd seq = write in progress; even = stable). At ~100 PDO values / 400 bytes at 1 ms cycles, the retry path is effectively never triggered.
 

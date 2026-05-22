@@ -89,48 +89,41 @@ Based on reviewing the current source (`comm::base::Device`, `VirtualDevice`, `E
 ```
 App  (composition root, owns everything)
  ├── Config
- ├── IFieldbusDriver               ← replaces EthercatMaster; covers SOEM, SPoE, IgH
- │     ├── SoemDriver              (absorbs soem::Master + soem::Slave internals)
- │     ├── SpoeDriver              (absorbs spoe::Device + async logic)
- │     └── IghDriver
- ├── DeviceManager
- │     ├── owns: Device[]
- │     └── uses: IFieldbusDriver   (enumeration, init)
- ├── Device                        ← single abstraction; replaces VirtualDevice + comm::base::Device
- │     ├── DeviceType  { Cia402Drive, DigitalIo }
- │     ├── owns: DeviceParameter[] (index/subindex → DeviceParameterValue variant)
- │     ├── owns: PdoMappings
- │     └── owns: Cia402StateMachine  (only if Cia402Drive)
+ ├── FieldbusDriver               ← SoemDriver | SpoeDriver; owns mutex
+ ├── DeviceManager                (holds FieldbusDriver&)
+ │     ├── owns: Device[]         (each Device holds FieldbusDriver&)
+ │     │     ├── DeviceType  { Cia402Drive, DigitalIo }
+ │     │     ├── owns: DeviceParameter[] (index/subindex → DeviceParameterValue variant)
+ │     │     ├── owns: PdoMappings
+ │     │     └── owns: Cia402StateMachine  (only if Cia402Drive)
+ │     └── pdoExchange(), state transitions, scanning
  ├── GameLoop  (RT thread, SCHED_FIFO, 1ms)
- │     ├── uses: IFieldbusDriver   (PDO exchange)
+ │     ├── uses: DeviceManager    (calls pdoExchange each cycle)
  │     ├── writes: Device parameters via seqlock
  │     └── runs: ICyclicTask[]
  │           ├── Watchdog           → NotificationBus
  │           └── MonitorPublisher   → WebSocketServer
- ├── SdoService  (dedicated thread)
- │     └── uses: IFieldbusDriver   (SDO read/write; replaces DeviceParameterRefresher)
  ├── HttpServer
- │     └── uses: DeviceManager, SdoService, FirmwareInstaller, NetworkScanner
+ │     └── uses: DeviceManager    (SDO read/write, file transfer, state control)
  ├── WebSocketServer  (monitoring output)
  ├── NotificationBus  (observer; decouples Watchdog/DeviceManager from servers)
  ├── FirmwareInstaller
- │     └── uses: IFieldbusDriver   (FoE)
+ │     └── uses: DeviceManager
  └── NetworkScanner
-       └── uses: IFieldbusDriver
+       └── uses: FieldbusDriver
 ```
 
 **What carries over from current code**
 
 - `DeviceParameter` with index, subindex, and a `DeviceParameterValue` — solid design, keep it
 - `PdoMappings` with `rxPdos`/`txPdos` and `PdoMappingEntry` — keep as-is
-- `mailboxMutex_` per slave — confirms SDO thread safety is already at the socket level; `SdoService` on a separate thread is safe
-- `DeviceParameterRefresher` concept — background SDO refresh is valid, folds into `SdoService`
+- Socket-level mutex per slave — SDO calls from any thread are safe as long as FieldbusDriver owns and holds the mutex
 
 **What changes**
 
 - `IEthercatDriver` → `IFieldbusDriver` — SPoE is not EtherCAT; the name was inaccurate
 - `MainTimer` singleton → removed; `GameLoop` owns the timer directly
-- Static `slaveMap_` in `EthernetMaster` → removed; existed only so refreshers could hold raw pointers, which `SdoService` eliminates
+- Static `slaveMap_` in `EthernetMaster` → removed; `DeviceManager` owns `Device[]` directly
 - `Cia402Drive` (currently just static maps/enums) → `Cia402StateMachine`, a proper owned component of `Device`
 
 **Device hierarchy — inheritance vs composition**
@@ -163,7 +156,7 @@ using DeviceParameterValue = std::variant<
 
 **Dependency injection**
 
-Inject `IFieldbusDriver` into `GameLoop`, `DeviceManager`, `SdoService`, `NetworkScanner`, `FirmwareInstaller` — this is the critical seam for testing without hardware and for swapping drivers. Inject `NotificationBus` into `Watchdog`, `DeviceManager`, `WebSocketServer`. `App` is the only place that instantiates concrete types.
+`App` is the only place that instantiates concrete types. `FieldbusDriver` is injected into `DeviceManager` and `NetworkScanner`; `DeviceManager` passes a `FieldbusDriver&` into each `Device` it creates. `GameLoop` and `HttpServer` both receive a `DeviceManager&` — `GameLoop` calls `pdoExchange`, `HttpServer` calls SDO/file/state methods. Inject `NotificationBus` into `Watchdog`, `DeviceManager`, `WebSocketServer`.
 
 ---
 
@@ -242,7 +235,7 @@ TOML was considered (clean syntax, native comment support, `toml++` available in
 
 **HTTP API + real-time loop**
 
-The RT loop runs on a `SCHED_FIFO` thread and owns the EtherCAT context. SDO operations (CoE mailbox) and PDO exchange (LRW datagrams) are separate EtherCAT mechanisms. SOEM protects socket access internally with `tx_mutex`/`rx_mutex`, so it is safe to run SDO reads/writes from a dedicated normal-priority thread concurrently with the RT PDO loop — no request queue needed. The only practical concern is that a blocking `ecx_SDOread` (mailbox timeout, tens of ms) can cause minor jitter on the PDO thread due to socket mutex contention; for most use cases this is acceptable.
+The RT loop runs on a `SCHED_FIFO` thread and owns the EtherCAT context. SDO operations (CoE mailbox) and PDO exchange (LRW datagrams) are separate EtherCAT mechanisms. `FieldbusDriver` owns a mutex that serializes all SDO and PDO socket access. HTTP handlers call `device.readSdo()` / `device.writeSdo()` directly on their thread; each call acquires the driver mutex, does the work, and releases it — no separate SDO thread or request queue needed. The only practical concern is that a blocking SDO read (mailbox timeout, tens of ms) can cause minor jitter on the PDO thread due to mutex contention; for most use cases this is acceptable.
 
 **Object dictionary threading**
 
@@ -276,7 +269,6 @@ Triple buffering was considered but is unnecessary at this data size. `memcpy` i
 `GameLoop::run()` blocks the calling thread. The main thread becomes the RT thread — no artificial sleep, no extra thread to manage. All other subsystems start their own threads before `run()` is called:
 
 ```cpp
-sdoService.start();   // spawns SDO thread
 wsServer.start();     // spawns WS thread
 httpServer.start();   // spawns HTTP thread(s)
 
@@ -284,7 +276,6 @@ gameLoop.run();       // main thread IS the loop — blocks until stopped
 
 httpServer.stop();
 wsServer.stop();
-sdoService.stop();
 ```
 
 Signal handling sets an atomic flag that `run()` checks after each cycle:
@@ -350,7 +341,7 @@ void GameLoop::run() {
     while (running) {
         timer.waitForNextCycle();
 
-        driver_.exchangeProcessData();
+        deviceManager_.pdoExchange();
         updateDeviceParameters();   // write fresh PDO values into devices (seqlock)
 
         for (auto* task : tasks_) {
@@ -358,7 +349,7 @@ void GameLoop::run() {
         }
     }
 
-    driver_.stop();
+    deviceManager_.stop();
 }
 ```
 

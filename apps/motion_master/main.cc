@@ -86,12 +86,13 @@ int main(int argc, char** argv) {
   auto swaggerFile = (exeDir() / "swagger.yml").string();
 
   Server server{Server::Config{
-      .port = opts.port,
-      .certFile = opts.certFile,
-      .keyFile = opts.keyFile,
-      .version = std::string{mm::core::kVersion},
-      .swaggerFile = std::move(swaggerFile),
-  }};
+                    .port = opts.port,
+                    .certFile = opts.certFile,
+                    .keyFile = opts.keyFile,
+                    .version = std::string{mm::core::kVersion},
+                    .swaggerFile = std::move(swaggerFile),
+                },
+                deviceManager};
   server.start();
 
   GameLoop game_loop{std::chrono::microseconds{1000}};

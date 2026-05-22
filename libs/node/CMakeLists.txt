@@ -8,6 +8,9 @@ target_include_directories(node PUBLIC
     ${CMAKE_SOURCE_DIR}/libs
 )
 
+find_package(nlohmann_json CONFIG REQUIRED)
+
 target_link_libraries(node PUBLIC
     mm::comm
+    nlohmann_json::nlohmann_json
 )

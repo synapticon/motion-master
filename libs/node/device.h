@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <string>
 
+#include <nlohmann/json_fwd.hpp>
+
 #include "comm/fieldbus_driver.h"
 
 namespace mm::node {
@@ -45,5 +47,16 @@ class Device {
   uint32_t revisionNumber_;
   uint32_t serialNumber_;
 };
+
+/// @brief Serialises a Device to JSON.
+///
+/// Produces an object with keys `slavePosition`, `name`, `vendorId`,
+/// `productCode`, `revisionNumber`, and `serialNumber`.  Participates in
+/// nlohmann ADL so that `nlohmann::json(device)` and `std::vector<Device>`
+/// conversions work automatically.
+///
+/// @param j  Output JSON value.
+/// @param d  Device to serialise.
+void to_json(nlohmann::json& j, const Device& d);
 
 }  // namespace mm::node

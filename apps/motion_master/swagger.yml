@@ -37,3 +37,46 @@ paths:
                   version:
                     type: string
                     example: "6.0.0"
+  /api/devices:
+    get:
+      summary: List all fieldbus devices
+      operationId: getDevices
+      responses:
+        "200":
+          description: Array of devices in bus order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [slavePosition, name, vendorId, productCode, revisionNumber, serialNumber]
+                  properties:
+                    slavePosition:
+                      type: integer
+                      description: 1-based position on the fieldbus
+                      example: 1
+                    name:
+                      type: string
+                      description: Human-readable device name from SII EEPROM
+                      example: "SOMANET Node"
+                    vendorId:
+                      type: integer
+                      format: int64
+                      description: Vendor ID from EEPROM
+                      example: 131073
+                    productCode:
+                      type: integer
+                      format: int64
+                      description: Product code from EEPROM
+                      example: 5570560
+                    revisionNumber:
+                      type: integer
+                      format: int64
+                      description: Revision number from EEPROM
+                      example: 1
+                    serialNumber:
+                      type: integer
+                      format: int64
+                      description: Serial number from EEPROM
+                      example: 12345

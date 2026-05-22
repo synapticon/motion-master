@@ -1,5 +1,6 @@
 #include "node/device.h"
 
+#include <nlohmann/json.hpp>
 #include <string>
 #include <utility>
 
@@ -21,5 +22,16 @@ uint32_t Device::vendorId() const { return vendorId_; }
 uint32_t Device::productCode() const { return productCode_; }
 uint32_t Device::revisionNumber() const { return revisionNumber_; }
 uint32_t Device::serialNumber() const { return serialNumber_; }
+
+void to_json(nlohmann::json& j, const Device& d) {
+  j = nlohmann::json{
+      {"slavePosition", d.slavePosition()},
+      {"name", d.name()},
+      {"vendorId", d.vendorId()},
+      {"productCode", d.productCode()},
+      {"revisionNumber", d.revisionNumber()},
+      {"serialNumber", d.serialNumber()},
+  };
+}
 
 }  // namespace mm::node

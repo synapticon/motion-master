@@ -7,6 +7,10 @@
 #include <thread>
 #include <unordered_set>
 
+namespace mm::node {
+class DeviceManager;
+}  // namespace mm::node
+
 /// @brief Combined HTTPS + WebSocket server.
 ///
 /// Hosts the REST API (swagger spec, version endpoint, CORS preflight) and a
@@ -28,8 +32,9 @@ class Server {
   };
 
   /// @brief Constructs the server with the given configuration.
-  /// @param config  Server parameters.  The config is copied internally.
-  explicit Server(Config config);
+  /// @param config         Server parameters.  The config is copied internally.
+  /// @param deviceManager  Device list source; lifetime must exceed that of this object.
+  Server(Config config, mm::node::DeviceManager& deviceManager);
 
   /// @brief Destructor.  Calls stop() if the server is still running.
   ~Server();
@@ -58,6 +63,7 @@ class Server {
   void run();
 
   Config config_;
+  mm::node::DeviceManager& deviceManager_;
   std::atomic<bool> running_{false};
   std::thread thread_;
   std::atomic<uWS::Loop*> loop_{nullptr};

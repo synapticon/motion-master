@@ -4,6 +4,8 @@
 #include <string>
 #include <vector>
 
+#include <nlohmann/json_fwd.hpp>
+
 #include "comm/fieldbus_driver.h"
 #include "node/device.h"
 
@@ -46,5 +48,15 @@ class DeviceManager {
   mm::comm::FieldbusDriver& driver_;
   std::vector<Device> devices_;
 };
+
+/// @brief Serialises all devices in a DeviceManager to a JSON array.
+///
+/// Produces a JSON array where each element is the serialised form of a
+/// `Device` (see `to_json(nlohmann::json&, const Device&)`), in bus order.
+/// Participates in nlohmann ADL so that `nlohmann::json(deviceManager)` works.
+///
+/// @param j   Output JSON value.
+/// @param dm  DeviceManager whose device list to serialise.
+void to_json(nlohmann::json& j, const DeviceManager& dm);
 
 }  // namespace mm::node

@@ -1,5 +1,6 @@
 #include "node/device_manager.h"
 
+#include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
 
@@ -24,5 +25,7 @@ std::expected<int, std::string> DeviceManager::configure() {
 const std::vector<Device>& DeviceManager::devices() const { return devices_; }
 
 void DeviceManager::pdoExchange() { driver_.exchangeProcessData(); }
+
+void to_json(nlohmann::json& j, const DeviceManager& dm) { j = dm.devices(); }
 
 }  // namespace mm::node

@@ -8,9 +8,12 @@
 #include <string>
 #include <utility>
 
+#include "node/device_manager.h"
+
 static constexpr std::string_view kCorsOrigin = "https://motion-master.synapticon.com";
 
-Server::Server(Config config) : config_(std::move(config)) {}
+Server::Server(Config config, mm::node::DeviceManager& deviceManager)
+    : config_(std::move(config)), deviceManager_(deviceManager) {}
 
 Server::~Server() { stop(); }
 
@@ -99,6 +102,12 @@ void Server::run() {
              res->writeHeader("Content-Type", "application/json")
                  ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
                  ->end(nlohmann::json{{"version", config_.version}}.dump());
+           })
+      .get("/api/devices",
+           [this](auto* res, auto* /*req*/) {
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->end(nlohmann::json(deviceManager_).dump());
            })
       .options("/api/*",
                [](auto* res, auto* /*req*/) {

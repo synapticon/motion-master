@@ -5,33 +5,36 @@
 
 namespace mm::comm {
 
-/// @brief Abstract interface for a fieldbus driver.
+/// @brief Abstract interface for an EtherCAT fieldbus driver.
 ///
-/// Concrete implementations are SoemDriver (SOEM), SpoeDriver (SPoE), and
-/// IghDriver (IgH EtherCAT).  App instantiates exactly one and injects it into
-/// DeviceManager and GameLoop via dependency injection.
+/// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeDriver (SPoE).
+/// @c App instantiates exactly one and injects it into @c DeviceManager and
+/// @c GameLoop.
+///
+/// The driver owns the mutex that serialises all EtherCAT socket access — both
+/// the real-time PDO path (@c exchangeProcessData, called from the RT thread)
+/// and the SDO path (called from HTTP handler threads).
 class FieldbusDriver {
  public:
-  /// @brief Virtual destructor.
   virtual ~FieldbusDriver() = default;
 
-  /// @brief Initialises the fieldbus hardware and prepares for cyclic operation.
+  /// @brief Opens the network interface and initialises the master context.
   ///
-  /// Must be called once before exchangeProcessData().  Discovers slaves, maps
-  /// PDOs, and transitions the network to OP state.
+  /// Must be called before any other driver method.
   ///
-  /// @return Void on success, or an error message on failure.
+  /// @return Void on success, or an error string describing the failure.
   virtual std::expected<void, std::string> init() = 0;
 
-  /// @brief Exchanges process data with all slaves in one EtherCAT frame.
+  /// @brief Exchanges process data with all slaves in one EtherCAT LRW frame.
   ///
-  /// Called once per GameLoop cycle.  Must complete within the cycle budget.
-  /// Timing jitter here propagates directly to control latency.
+  /// Called once per @c GameLoop cycle.  Must complete within the cycle budget;
+  /// timing jitter here propagates directly to control latency.  Must not be
+  /// called before a successful @c init() or after @c stop().
   virtual void exchangeProcessData() = 0;
 
-  /// @brief Releases fieldbus hardware resources and closes the network.
+  /// @brief Transitions all slaves to INIT state and closes the network interface.
   ///
-  /// After stop() returns, exchangeProcessData() must not be called again.
+  /// After @c stop() returns, @c exchangeProcessData() must not be called again.
   virtual void stop() = 0;
 };
 

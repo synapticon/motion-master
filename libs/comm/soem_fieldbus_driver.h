@@ -1,6 +1,5 @@
 #pragma once
 
-#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -11,50 +10,49 @@ struct ecx_context;
 
 namespace mm::comm::soem {
 
-/// @brief SOEM-backed fieldbus driver.
+/// @brief SOEM-backed EtherCAT fieldbus driver.
 ///
-/// Owns one EtherCAT master context.  Constructed with the name of the
-/// network interface to use (e.g. "eth0").  App creates exactly one instance
-/// and injects it into DeviceManager, GameLoop, SdoService, etc.
+/// Owns one @c ecx_contextt master context and its PDO I/O map.  @c App
+/// creates exactly one instance and injects it into @c DeviceManager and
+/// @c GameLoop.
 class SoemFieldbusDriver : public FieldbusDriver {
  public:
   /// @brief Constructs the driver for the given network interface.
-  /// @param ifname  OS network interface name (e.g. "eth0", "enp3s0").
+  /// @param ifname  OS network interface name (e.g. @c "eth0", @c "enp3s0").
   explicit SoemFieldbusDriver(std::string ifname);
 
-  /// @brief Closes the fieldbus if still open.
+  /// @brief Closes the NIC if @c init() succeeded.
   ~SoemFieldbusDriver() override;
 
   SoemFieldbusDriver(const SoemFieldbusDriver&) = delete;
   SoemFieldbusDriver& operator=(const SoemFieldbusDriver&) = delete;
 
-  /// @brief Opens the NIC, discovers slaves, maps PDOs, and transitions the
-  ///        network to OP state.
+  /// @brief Opens the NIC and initialises the SOEM master context.
   ///
-  /// Safe to call once.  Returns an error if the interface cannot be opened,
-  /// no slaves are found, or any slave fails to reach OP.
+  /// Must be called before any other driver method.  Device discovery and state
+  /// transitions are performed by separate functions after a successful init.
+  ///
+  /// @return Void on success, or an error string if the interface cannot be opened.
   std::expected<void, std::string> init() override;
 
   /// @brief Sends output PDOs and receives input PDOs in one LRW frame.
   ///
-  /// Called once per GameLoop cycle.  Must not be called before a successful
-  /// init() or after stop().
+  /// Called once per @c GameLoop cycle.  Must not be called before a successful
+  /// @c init() or after @c stop().
   void exchangeProcessData() override;
 
-  /// @brief Transitions all slaves to INIT state and closes the NIC.
+  /// @brief Closes the NIC and releases all driver resources.
   void stop() override;
 
-  /// @brief Number of slaves found during init().  Zero before init().
+  /// @brief Returns the number of discovered slaves, or 0 before discovery.
   int slaveCount() const;
 
  private:
   std::string ifname_;
-  // ecx_contextt holds EC_MAXSLAVE (200) slave entries — too large for the
-  // stack, so we heap-allocate it.
+  // ecx_contextt is several hundred KB (EC_MAXSLAVE slave entries) — heap-
+  // allocated and null until init() succeeds.
   std::unique_ptr<ecx_context> ctx_;
-  static constexpr int kIomapSize = 4096;
-  std::array<uint8_t, kIomapSize> iomap_{};
-  int slave_count_{0};
+  uint8_t map_[4096]{};
 };
 
 }  // namespace mm::comm::soem

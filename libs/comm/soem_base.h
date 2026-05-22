@@ -1,9 +1,9 @@
 #pragma once
 
+#include <soem/soem.h>
+
 #include <cstdint>
 #include <string>
-
-#include <soem/soem.h>
 
 namespace mm::comm::soem {
 
@@ -30,22 +30,22 @@ struct SoemMaster {
 
   /// @name SOEM storage — pointed to by @c ctx; all members must outlive @c ctx.
   /// @{
-  uint8 map[4096];                       ///< PDO I/O map buffer; @c ctx.iomap points here.
-  ecx_portt port;                        ///< SOEM low-level port and socket state.
-  ec_slavet slavelist[EC_MAXSLAVE];      ///< Per-slave config and state; indexed 1..slavecount.
-  int slavecount;                        ///< Number of EtherCAT slaves found during network init.
-  ec_groupt grouplist[EC_MAXGROUP];      ///< Per-group PDO configuration.
-  uint8 esibuf[EC_MAXEEPBUF];            ///< ESI (EEPROM) read buffer.
-  uint32 esimap[EC_MAXEEPBITMAP];        ///< ESI bitmap; tracks which EEPROM words have been read.
-  ec_eringt elist;                       ///< EtherCAT error ring buffer.
-  ec_idxstackT idxstack;                 ///< Frame index stack for tracking outstanding frames.
-  boolean ecaterror;                     ///< Set to @c TRUE when an EtherCAT error is detected.
-  int64 DCtime;                          ///< Distributed Clock reference time in nanoseconds.
+  uint8 map[4096];                   ///< PDO I/O map buffer; @c ctx.iomap points here.
+  ecx_portt port;                    ///< SOEM low-level port and socket state.
+  ec_slavet slavelist[EC_MAXSLAVE];  ///< Per-slave config and state; indexed 1..slavecount.
+  int slavecount;                    ///< Number of EtherCAT slaves found during network init.
+  ec_groupt grouplist[EC_MAXGROUP];  ///< Per-group PDO configuration.
+  uint8 esibuf[EC_MAXEEPBUF];        ///< ESI (EEPROM) read buffer.
+  uint32 esimap[EC_MAXEEPBITMAP];    ///< ESI bitmap; tracks which EEPROM words have been read.
+  ec_eringt elist;                   ///< EtherCAT error ring buffer.
+  ec_idxstackT idxstack;             ///< Frame index stack for tracking outstanding frames.
+  boolean ecaterror;                 ///< Set to @c TRUE when an EtherCAT error is detected.
+  int64 DCtime;                      ///< Distributed Clock reference time in nanoseconds.
   ec_SMcommtypet SMcommtype[EC_MAX_MAPT];  ///< Sync Manager comm-type scratch buffer (PDO mapping).
-  ec_PDOassignt PDOassign[EC_MAX_MAPT];  ///< PDO assignment scratch buffer (PDO mapping).
-  ec_PDOdesct PDOdesc[EC_MAX_MAPT];      ///< PDO descriptor scratch buffer (PDO mapping).
-  ec_eepromSMt eepSM;                    ///< EEPROM Sync Manager configuration scratch buffer.
-  ec_eepromFMMUt eepFMMU;                ///< EEPROM FMMU configuration scratch buffer.
+  ec_PDOassignt PDOassign[EC_MAX_MAPT];    ///< PDO assignment scratch buffer (PDO mapping).
+  ec_PDOdesct PDOdesc[EC_MAX_MAPT];        ///< PDO descriptor scratch buffer (PDO mapping).
+  ec_eepromSMt eepSM;                      ///< EEPROM Sync Manager configuration scratch buffer.
+  ec_eepromFMMUt eepFMMU;                  ///< EEPROM FMMU configuration scratch buffer.
   /// @}
 };
 

@@ -9,21 +9,22 @@
 #include <string>
 
 #ifdef _WIN32
-#include <iomanip>
-#include <sstream>
+#include <iphlpapi.h>
 #include <windows.h>
 #include <winsock2.h>
-#include <iphlpapi.h>
+
+#include <iomanip>
+#include <sstream>
 #pragma comment(lib, "IPHLPAPI.lib")
 #else
-#include <cstring>
 #include <linux/if.h>
 #include <netinet/in.h>
+#include <soem/soem.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include <soem/soem.h>
+#include <cstring>
 #endif
 
 namespace mm::comm {
@@ -144,9 +145,9 @@ std::map<std::string, std::string> mapMacAddressesToInterfaces() {
     close(fd);
 
     char mac[18];
-    auto* hw = reinterpret_cast<unsigned char*>(ifr.ifr_hwaddr.sa_data);
-    snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
-             hw[0], hw[1], hw[2], hw[3], hw[4], hw[5]);
+    const auto* hw = reinterpret_cast<const unsigned char*>(ifr.ifr_hwaddr.sa_data);
+    snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", hw[0], hw[1], hw[2], hw[3], hw[4],
+             hw[5]);
     map[mac] = adapter->name;
 
     adapter = adapter->next;

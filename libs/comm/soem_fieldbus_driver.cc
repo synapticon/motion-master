@@ -12,9 +12,7 @@ SoemFieldbusDriver::SoemFieldbusDriver(std::string ifname)
 
 SoemFieldbusDriver::~SoemFieldbusDriver() {}
 
-std::expected<void, std::string> SoemFieldbusDriver::init() {
-  return {};
-}
+std::expected<void, std::string> SoemFieldbusDriver::init() { return {}; }
 
 void SoemFieldbusDriver::exchangeProcessData() {}
 

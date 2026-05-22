@@ -8,7 +8,8 @@
       "binaryDir": "${sourceDir}/build/${presetName}",
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/extern/vcpkg/scripts/buildsystems/vcpkg.cmake",
-        "VCPKG_OVERLAY_PORTS": "${sourceDir}/ports"
+        "VCPKG_OVERLAY_PORTS": "${sourceDir}/ports",
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/triplets"
       }
     },
     {
@@ -66,6 +67,64 @@
         "CMAKE_BUILD_TYPE": "Release",
         "VCPKG_TARGET_TRIPLET": "x64-windows"
       }
+    },
+    {
+      "name": "arm64-linux-debug",
+      "inherits": "base",
+      "displayName": "Linux ARM64 Debug (native)",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "arm64-linux"
+      }
+    },
+    {
+      "name": "arm64-linux-release",
+      "inherits": "base",
+      "displayName": "Linux ARM64 Release (native)",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VCPKG_TARGET_TRIPLET": "arm64-linux"
+      }
+    },
+    {
+      "name": "arm64-linux-cross-debug",
+      "inherits": "base",
+      "displayName": "Linux ARM64 Debug (cross-compile from x64)",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "arm64-linux-cross",
+        "VCPKG_HOST_TRIPLET": "x64-linux"
+      }
+    },
+    {
+      "name": "arm64-linux-cross-release",
+      "inherits": "base",
+      "displayName": "Linux ARM64 Release (cross-compile from x64)",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VCPKG_TARGET_TRIPLET": "arm64-linux-cross",
+        "VCPKG_HOST_TRIPLET": "x64-linux"
+      }
     }
   ],
   "buildPresets": [
@@ -84,6 +143,22 @@
     {
       "name": "x64-windows-release",
       "configurePreset": "x64-windows-release"
+    },
+    {
+      "name": "arm64-linux-debug",
+      "configurePreset": "arm64-linux-debug"
+    },
+    {
+      "name": "arm64-linux-release",
+      "configurePreset": "arm64-linux-release"
+    },
+    {
+      "name": "arm64-linux-cross-debug",
+      "configurePreset": "arm64-linux-cross-debug"
+    },
+    {
+      "name": "arm64-linux-cross-release",
+      "configurePreset": "arm64-linux-cross-release"
     }
   ]
 }

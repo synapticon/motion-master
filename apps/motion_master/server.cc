@@ -10,6 +10,7 @@
 #include <string>
 #include <utility>
 
+#include "comm/base.h"
 #include "node/device_manager.h"
 
 static constexpr std::string_view kCorsOrigin = "https://motion-master.synapticon.com";
@@ -98,6 +99,17 @@ void Server::run() {
                  ->writeHeader("Content-Disposition", "inline")
                  ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
                  ->end(swaggerContent);
+           })
+      .get("/api/adapters",
+           [](auto* res, auto* /*req*/) {
+             auto adapterMap = mm::comm::mapMacAddressesToInterfaces();
+             nlohmann::json arr = nlohmann::json::array();
+             for (const auto& [mac, name] : adapterMap) {
+               arr.push_back({{"mac", mac}, {"name", name}});
+             }
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->end(arr.dump());
            })
       .get("/api/version",
            [this](auto* res, auto* /*req*/) {

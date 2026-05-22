@@ -10,6 +10,29 @@ servers:
   - url: https://local.motion-master.synapticon.com:8443
     description: Local Motion Master instance
 paths:
+  /api/adapters:
+    get:
+      summary: List network adapters on the host
+      operationId: getAdapters
+      responses:
+        "200":
+          description: Array of network adapters available on the host machine
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [mac, name]
+                  properties:
+                    mac:
+                      type: string
+                      description: MAC address in colon-separated uppercase format
+                      example: "AA:BB:CC:DD:EE:FF"
+                    name:
+                      type: string
+                      description: OS interface name (e.g. eth0 on Linux, \\Device\\NPF_{GUID} on Windows)
+                      example: "eth0"
   /api/swagger.yml:
     get:
       summary: OpenAPI specification

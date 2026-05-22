@@ -22,6 +22,11 @@ std::expected<int, std::string> DeviceManager::configure() {
   return *result;
 }
 
+void DeviceManager::reset() {
+  driver_.stop();
+  devices_.clear();
+}
+
 const std::vector<Device>& DeviceManager::devices() const { return devices_; }
 
 void DeviceManager::pdoExchange() { driver_.exchangeProcessData(); }

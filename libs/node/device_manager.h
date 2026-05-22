@@ -35,6 +35,14 @@ class DeviceManager {
   /// @return Number of nodes found on success, or an error string on failure.
   std::expected<int, std::string> configure();
 
+  /// @brief Stops the fieldbus driver and clears the device list.
+  ///
+  /// Transitions all slaves to INIT state, closes the network interface, and
+  /// removes all @c Device objects. After this returns, @c init() and
+  /// @c configure() may be called again. Must not be called while @c pdoExchange()
+  /// is running concurrently.
+  void reset();
+
   /// @brief Returns the list of configured devices.
   /// @return Devices in bus order (index 0 = node position 1). Empty before @c configure().
   const std::vector<Device>& devices() const;

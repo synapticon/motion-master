@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "comm/base.h"
+#include "comm/esc_registers.h"
 #include "node/device_manager.h"
 
 static constexpr std::string_view kCorsOrigin = "https://motion-master.synapticon.com";
@@ -119,6 +120,12 @@ void Server::run() {
              res->writeHeader("Content-Type", "application/json")
                  ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
                  ->end(nlohmann::json{{"version", config_.version}}.dump());
+           })
+      .get("/api/registers",
+           [](auto* res, auto* /*req*/) {
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->end(nlohmann::json(mm::comm::kEscRegisters).dump());
            })
       .get("/api/devices",
            [this](auto* res, auto* /*req*/) {

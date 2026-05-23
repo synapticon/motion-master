@@ -5,7 +5,7 @@
   "type": "module",
   "main": "./src/index.ts",
   "scripts": {
-    "generate": "swagger-typescript-api -p ../../openapi.json -o ./src/generated -n api.ts --modular"
+    "generate": "swagger-typescript-api generate -p ../../../apps/motion_master/swagger.yml -o ./src/generated -n api.ts --modular"
   },
   "devDependencies": {
     "swagger-typescript-api": "^13.0.0",

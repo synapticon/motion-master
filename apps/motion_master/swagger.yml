@@ -202,6 +202,20 @@ paths:
                   ok:
                     type: boolean
                     example: true
+  /api/log:
+    get:
+      summary: Get recent log output
+      operationId: getLog
+      description: >
+        Returns the most recent in-memory log lines as plain text, one entry per line.
+        The ring buffer holds up to 100 000 entries (~10 MB).
+      responses:
+        "200":
+          description: Log output as plain text, one entry per line
+          content:
+            text/plain:
+              schema:
+                type: string
   /api/registers:
     get:
       summary: List all known ESC registers

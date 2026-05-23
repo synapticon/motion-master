@@ -7,16 +7,39 @@
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+    @font-face {
+      font-family: "Synapticon Campton";
+      font-weight: 300;
+      font-style: normal;
+      src: url("/fonts/CamptonLight.woff2") format("woff2");
+    }
+
+    @font-face {
+      font-family: "Synapticon Campton";
+      font-weight: 500;
+      font-style: normal;
+      src: url("/fonts/CamptonMedium.woff2") format("woff2");
+    }
+
+    @font-face {
+      font-family: "Univers LT Pro";
+      font-weight: 400;
+      font-style: normal;
+      src: url("/fonts/UniversLTPro-55Roman.woff2") format("woff2");
+    }
+
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      background: #0f1117;
-      color: #e2e8f0;
+      font-family: "Univers LT Pro", "Inter", ui-sans-serif, system-ui, sans-serif;
+      background: #191817;
+      color: #d9d9d9;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
       padding: 2rem;
+      letter-spacing: 0.03em;
+      line-height: 1.52;
     }
 
     .hero {
@@ -28,46 +51,54 @@
     .logo {
       display: inline-flex;
       align-items: center;
-      gap: 0.75rem;
+      gap: 1rem;
       margin-bottom: 1.5rem;
     }
 
     .logo-icon {
-      width: 48px;
-      height: 48px;
-      border-radius: 10px;
+      width: 64px;
+      height: 64px;
+      border-radius: 0;
       object-fit: contain;
     }
 
     h1 {
+      font-family: "Synapticon Campton", "Raleway", ui-sans-serif, system-ui, sans-serif;
       font-size: 2.5rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      color: #f8fafc;
+      font-weight: 500;
+      letter-spacing: 0.03em;
+      line-height: 1.1;
+      text-transform: uppercase;
+      color: #fafafa;
     }
 
     .version {
       display: inline-block;
       margin-left: 0.5rem;
-      font-size: 1rem;
+      font-family: "Synapticon Campton", "Raleway", ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.75rem;
       font-weight: 500;
-      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #e0004d;
       vertical-align: middle;
     }
 
     .tagline {
       margin-top: 1rem;
       font-size: 1.125rem;
-      color: #94a3b8;
+      color: #a9a9a9;
       line-height: 1.6;
     }
 
     .cards {
       display: grid;
       grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem;
+      gap: 1px;
       width: 100%;
       max-width: 680px;
+      background: #434343;
+      border: 1px solid #434343;
     }
 
     .card {
@@ -76,56 +107,48 @@
       align-items: flex-start;
       gap: 0.5rem;
       padding: 1.5rem;
-      border-radius: 12px;
+      border-radius: 0;
       text-decoration: none;
-      transition: transform 0.15s, box-shadow 0.15s;
+      background: #191817;
+      transition: background 0.15s;
     }
 
-    .card:hover { transform: translateY(-2px); }
+    .card:hover { background: #252322; }
 
     .card--primary {
-      background: linear-gradient(135deg, #1e3a5f, #1e2d5a);
-      border: 1px solid #3b82f6;
-      box-shadow: 0 0 0 1px rgba(59,130,246,0.2), 0 4px 24px rgba(59,130,246,0.1);
+      border-left: 3px solid #e0004d;
+      padding-left: calc(1.5rem - 3px);
     }
-
-    .card--primary:hover {
-      box-shadow: 0 0 0 1px rgba(59,130,246,0.4), 0 8px 32px rgba(59,130,246,0.2);
-    }
-
-    .card--secondary {
-      background: #1e2433;
-      border: 1px solid #2d3748;
-    }
-
-    .card--secondary:hover { border-color: #4a5568; }
 
     .card-icon {
       width: 36px;
       height: 36px;
-      border-radius: 8px;
+      border-radius: 0;
       display: flex;
       align-items: center;
       justify-content: center;
       margin-bottom: 0.25rem;
     }
 
-    .card--primary .card-icon { background: rgba(59,130,246,0.2); }
-    .card--secondary .card-icon { background: rgba(255,255,255,0.05); }
+    .card--primary .card-icon { background: rgba(224,0,77,0.12); }
+    .card--secondary .card-icon { background: rgba(0,132,155,0.12); }
 
     .card-icon svg { width: 18px; height: 18px; }
-    .card--primary .card-icon svg { stroke: #60a5fa; }
-    .card--secondary .card-icon svg { stroke: #94a3b8; }
+    .card--primary .card-icon svg { stroke: #e0004d; }
+    .card--secondary .card-icon svg { stroke: #00849b; }
 
     .card-title {
-      font-size: 1rem;
-      font-weight: 600;
-      color: #f1f5f9;
+      font-family: "Synapticon Campton", "Raleway", ui-sans-serif, system-ui, sans-serif;
+      font-size: 0.875rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #fafafa;
     }
 
     .card-desc {
       font-size: 0.8125rem;
-      color: #64748b;
+      color: #656565;
       line-height: 1.4;
     }
 
@@ -143,29 +166,31 @@
       align-items: flex-start;
       gap: 0.625rem;
       font-size: 0.875rem;
-      color: #64748b;
+      color: #656565;
       line-height: 1.5;
     }
+
+    .notice-row--warn svg { stroke: #ffcc03; }
+    .notice-row--info svg { stroke: #00849b; }
 
     .notice-row svg {
       width: 16px;
       height: 16px;
-      stroke: #475569;
       flex-shrink: 0;
       margin-top: 2px;
     }
 
     .notice-row a {
-      color: #60a5fa;
+      color: #00849b;
       text-decoration: none;
     }
 
-    .notice-row a:hover { text-decoration: underline; }
+    .notice-row a:hover { color: #fafafa; }
 
     footer {
       margin-top: 3rem;
       font-size: 0.8125rem;
-      color: #1e293b;
+      color: #434343;
     }
   </style>
 </head>
@@ -173,7 +198,7 @@
 
   <div class="hero">
     <div class="logo">
-      <img class="logo-icon" src="/app/pwa-192x192.png" alt="Motion Master" width="48" height="48" />
+      <img class="logo-icon" src="/app/pwa-192x192.png" alt="Motion Master" width="64" height="64" />
       <h1>Motion Master <span class="version">v6</span></h1>
     </div>
     <p class="tagline">
@@ -220,14 +245,14 @@
   </div>
 
   <div class="notice">
-    <div class="notice-row">
+    <div class="notice-row notice-row--warn">
       <svg fill="none" viewBox="0 0 24 24" stroke-width="1.8" xmlns="http://www.w3.org/2000/svg">
         <path stroke-linecap="round" stroke-linejoin="round"
           d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
       </svg>
       <span>Under active development &mdash; official release planned for <strong>end of 2026</strong></span>
     </div>
-    <div class="notice-row">
+    <div class="notice-row notice-row--info">
       <svg fill="none" viewBox="0 0 24 24" stroke-width="1.8" xmlns="http://www.w3.org/2000/svg">
         <path stroke-linecap="round" stroke-linejoin="round"
           d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"/>

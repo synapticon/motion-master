@@ -380,12 +380,13 @@ void Server::run() {
                       ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
                       ->end(nlohmann::json{{"error",
                                             "invalid state: use 1 (Init), 2 (PreOp),"
-                                            " 3 (Boot), 4 (SafeOp), or 8 (Op)"}}.dump());
+                                            " 3 (Boot), 4 (SafeOp), or 8 (Op)"}}
+                                .dump());
                   return;
                 }
                 auto targetState = static_cast<S>(stateVal);
-                if (auto r = deviceManager_.transitionToState(
-                        positions, targetState, std::chrono::milliseconds(timeoutMs));
+                if (auto r = deviceManager_.transitionToState(positions, targetState,
+                                                              std::chrono::milliseconds(timeoutMs));
                     !r) {
                   res->writeStatus("500 Internal Server Error")
                       ->writeHeader("Content-Type", "application/json")

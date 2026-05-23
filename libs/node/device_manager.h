@@ -76,9 +76,9 @@ class DeviceManager {
   /// @param timeout      Maximum time to wait for all devices.
   /// @return Void on success, or an error string if no driver is initialised or no devices
   ///         have been discovered.
-  std::expected<void, std::string> transitionToState(
-      const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
-      std::chrono::steady_clock::duration timeout);
+  std::expected<void, std::string> transitionToState(const std::vector<uint16_t>& positions,
+                                                     mm::comm::EtherCatState targetState,
+                                                     std::chrono::steady_clock::duration timeout);
 
  private:
   std::unique_ptr<mm::comm::FieldbusDriver> driver_;

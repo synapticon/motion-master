@@ -76,7 +76,7 @@ int main(int argc, char** argv) {
       spdlog::error("DeviceManager init failed: {}", result.error());
       return 1;
     }
-    if (auto result = deviceManager.configure(); !result) {
+    if (auto result = deviceManager.scan(); !result) {
       return 1;
     }
   }

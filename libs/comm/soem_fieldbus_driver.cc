@@ -25,7 +25,7 @@ std::expected<void, std::string> SoemFieldbusDriver::init() {
   return {};
 }
 
-std::expected<int, std::string> SoemFieldbusDriver::configure() {
+std::expected<int, std::string> SoemFieldbusDriver::scan() {
   ctx_->manualstatechange = 1;
   int found = ecx_config_init(ctx_.get());
   if (found <= 0) {

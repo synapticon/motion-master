@@ -35,13 +35,13 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// @return Void on success, or an error string if the interface cannot be opened.
   std::expected<void, std::string> init() override;
 
-  /// @brief Discovers slaves and configures their sync managers and FMMUs.
+  /// @brief Scans the bus for slaves and configures their sync managers and FMMUs.
   ///
-  /// Sets @c manualstatechange so slaves remain in INIT after configuration —
+  /// Sets @c manualstatechange so slaves remain in INIT after the scan —
   /// state transitions are left to the caller.
   ///
   /// @return Number of slaves found on success, or an error string if no slaves are found.
-  std::expected<int, std::string> configure() override;
+  std::expected<int, std::string> scan() override;
 
   /// @brief Returns the immutable identity fields for the slave at @p position.
   /// @param position  1-based slave position on the bus.

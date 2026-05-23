@@ -22,14 +22,14 @@ std::expected<void, std::string> DeviceManager::init(
   return result;
 }
 
-std::expected<int, std::string> DeviceManager::configure() {
+std::expected<int, std::string> DeviceManager::scan() {
   if (!driver_) {
-    spdlog::error("configure() called with no driver — call init() first");
+    spdlog::error("scan() called with no driver — call init() first");
     return std::unexpected("no driver — call init() first");
   }
-  auto result = driver_->configure();
+  auto result = driver_->scan();
   if (!result) {
-    spdlog::error("FieldbusDriver configure failed: {}", result.error());
+    spdlog::error("FieldbusDriver scan failed: {}", result.error());
     return std::unexpected(result.error());
   }
   devices_.clear();

@@ -97,7 +97,7 @@ App  (composition root, owns everything)
  │     │     ├── owns: DeviceParameter[] (index/subindex → DeviceParameterValue variant)
  │     │     ├── owns: PdoMappings
  │     │     └── owns: Cia402StateMachine  (only if Cia402Drive)
- │     └── init(unique_ptr<FieldbusDriver>), configure(), reset(), pdoExchange(), state transitions
+ │     └── init(unique_ptr<FieldbusDriver>), scan(), reset(), pdoExchange(), state transitions
  ├── GameLoop  (RT thread, SCHED_FIFO, 1ms)
  │     ├── uses: DeviceManager    (calls pdoExchange each cycle; no-op when driver is null)
  │     ├── writes: Device parameters via seqlock
@@ -497,12 +497,12 @@ There will be no separate `NetworkScanner` class. `DeviceManager` owns slave dis
 Three calls in order:
 
 1. `init()` — opens the NIC (`ecx_init`).
-2. `configure()` — discovers slaves and configures SM/FMMU (`ecx_config_init`). Sets `manualstatechange = 1` so slaves remain in INIT; all EtherCAT state transitions are left entirely to the caller (HTTP API or test code). Returns the slave count on success.
+2. `scan()` — discovers slaves and configures SM/FMMU (`ecx_config_init`). Sets `manualstatechange = 1` so slaves remain in INIT; all EtherCAT state transitions are left entirely to the caller (HTTP API or test code). Returns the slave count on success.
 3. `exchangeProcessData()` — called each game loop cycle once slaves are in OP.
 
 **SlaveInfo — immutable identity from EEPROM**
 
-After `configure()`, SOEM has read each slave's SII EEPROM. These fields do not change for the lifetime of the session and are captured immediately into `SlaveInfo`:
+After `scan()`, SOEM has read each slave's SII EEPROM. These fields do not change for the lifetime of the session and are captured immediately into `SlaveInfo`:
 
 ```cpp
 struct SlaveInfo {
@@ -520,13 +520,13 @@ struct SlaveInfo {
 
 `Device` holds a 1-based `slavePosition` (SOEM's slave array index; 0 is the master) and a `FieldbusDriver&` for SDO and state operations. Immutable identity fields (`name`, `vendorId`, `productCode`, `revisionNumber`, `serialNumber`) are populated from `SlaveInfo` at construction.
 
-**DeviceManager::configure() populates devices_**
+**DeviceManager::scan() populates devices_**
 
-`DeviceManager::configure()` calls `driver_.configure()`, then constructs one `Device` per slave (positions 1..n) and stores them in `devices_`. This is the single place where the device list is created.
+`DeviceManager::scan()` calls `driver_.scan()`, then constructs one `Device` per slave (positions 1..n) and stores them in `devices_`. This is the single place where the device list is created.
 
 **Driver selection and deferred initialisation**
 
-`--driver` and `--adapter` are optional at startup. If `--driver` is given, `main.cc` constructs the concrete driver and immediately calls `deviceManager.init(std::move(driver))` + `configure()`; the app starts with devices ready. If omitted, the app starts in an uninitialised state and the HTTP API is used to initialise later.
+`--driver` and `--adapter` are optional at startup. If `--driver` is given, `main.cc` constructs the concrete driver and immediately calls `deviceManager.init(std::move(driver))` + `scan()`; the app starts with devices ready. If omitted, the app starts in an uninitialised state and the HTTP API is used to initialise later.
 
 `DeviceManager` owns the driver via `unique_ptr<FieldbusDriver>` (null until `init()` is called). Adding a new driver type is an `else if` in `main.cc`'s `makeDriver` lambda; `DeviceManager` has no knowledge of the concrete type.
 
@@ -584,7 +584,7 @@ Previously the app required `--driver` and could not start without a functioning
 | Endpoint | Body | Effect |
 |---|---|---|
 | `POST /api/init` | `{"driver":"soem","adapter":"eth0"}` (adapter optional) | Creates driver, calls `DeviceManager::init()` |
-| `POST /api/configure` | — | Calls `DeviceManager::configure()`; returns `{"slaves": N}` |
+| `POST /api/scan` | — | Calls `DeviceManager::scan()`; returns `{"slaves": N}` |
 | `POST /api/reset` | — | Calls `DeviceManager::reset()`; releases driver |
 
 `GET /api/devices` returns an empty array when uninitialised; all other behaviour is unchanged.
@@ -595,4 +595,4 @@ The GameLoop starts unconditionally regardless of whether a driver is present. `
 
 **Thread safety — open issue**
 
-`POST /api/init`, `POST /api/configure`, and `POST /api/reset` run on the HTTP server thread and mutate `driver_` and `devices_`. `pdoExchange()` runs on the RT GameLoop thread and reads both. There is currently no lock guarding this boundary. This is safe only because `pdoExchange()` is not yet wired into the GameLoop. Before enabling live PDO exchange, the loop must be stopped (or drained for one cycle) before `init()` or `reset()` is called via the API.
+`POST /api/init`, `POST /api/scan`, and `POST /api/reset` run on the HTTP server thread and mutate `driver_` and `devices_`. `pdoExchange()` runs on the RT GameLoop thread and reads both. There is currently no lock guarding this boundary. This is safe only because `pdoExchange()` is not yet wired into the GameLoop. Before enabling live PDO exchange, the loop must be stopped (or drained for one cycle) before `init()` or `reset()` is called via the API.

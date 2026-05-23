@@ -100,7 +100,7 @@ App  (composition root, owns everything)
  │     │     ├── owns: DeviceParameter[] (index/subindex → DeviceParameterValue variant)
  │     │     ├── owns: PdoMappings
  │     │     └── owns: Cia402StateMachine  (only if Cia402Drive)
- │     └── init(unique_ptr<FieldbusDriver>), configure(), reset(), pdoExchange(), state transitions
+ │     └── init(unique_ptr<FieldbusDriver>), scan(), reset(), pdoExchange(), state transitions
  ├── GameLoop  (RT thread, SCHED_FIFO, 1ms)
  │     ├── uses: DeviceManager    (calls pdoExchange each cycle; no-op when driver is null)
  │     ├── writes: Device parameters via seqlock
@@ -134,7 +134,7 @@ Use `std::visit` for type dispatch on `DeviceParameterValue`. `DeviceParameter` 
 
 PDO values are shared between the RT loop and HTTP/monitoring readers via a **seqlock** (odd seq = write in progress; even = stable). At ~100 PDO values / 400 bytes at 1 ms cycles, the retry path is effectively never triggered.
 
-**Thread safety caveat — `init`/`reset` vs `pdoExchange`:** `POST /api/init`, `POST /api/configure`, and `POST /api/reset` run on the HTTP server thread and mutate `DeviceManager::driver_` and `devices_`. `pdoExchange()` runs on the RT GameLoop thread and reads both. There is currently no lock guarding this boundary. This is safe only because `pdoExchange()` is not yet wired into the GameLoop. Before enabling live PDO exchange, the loop must be stopped (or at least drained for one cycle) before `init()` or `reset()` is called via the API.
+**Thread safety caveat — `init`/`reset` vs `pdoExchange`:** `POST /api/init`, `POST /api/scan`, and `POST /api/reset` run on the HTTP server thread and mutate `DeviceManager::driver_` and `devices_`. `pdoExchange()` runs on the RT GameLoop thread and reads both. There is currently no lock guarding this boundary. This is safe only because `pdoExchange()` is not yet wired into the GameLoop. Before enabling live PDO exchange, the loop must be stopped (or at least drained for one cycle) before `init()` or `reset()` is called via the API.
 
 Cycle timer: `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...)` on Linux (absolute mode to prevent drift accumulation); `CreateWaitableTimerEx` with `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` on Windows.
 

@@ -120,7 +120,7 @@ paths:
       operationId: init
       description: >
         Constructs the requested fieldbus driver, opens the network interface, and
-        makes the driver available for subsequent calls to /api/configure.
+        makes the driver available for subsequent calls to /api/scan.
         The request body is optional; omitting it selects the SOEM driver with
         automatic adapter selection.
       requestBody:
@@ -159,17 +159,17 @@ paths:
           $ref: "#/components/responses/DriverError"
         "501":
           description: No driver factory configured on this instance
-  /api/configure:
+  /api/scan:
     post:
-      summary: Discover slaves and configure the fieldbus
-      operationId: configure
+      summary: Scan the bus for slaves
+      operationId: scan
       description: >
-        Runs slave discovery and sync manager / FMMU configuration on the already-initialised
-        driver. Must be called after a successful POST /api/init. Slaves remain in INIT state
+        Scans the fieldbus for slaves and configures their sync managers and FMMUs.
+        Must be called after a successful POST /api/init. Slaves remain in INIT state
         after this call; state transitions are driven by subsequent API calls.
       responses:
         "200":
-          description: Configuration successful; returns the number of slaves found
+          description: Scan successful; returns the number of slaves found
           content:
             application/json:
               schema:
@@ -188,7 +188,7 @@ paths:
       operationId: reset
       description: >
         Transitions all slaves to INIT state, closes the network interface, and removes
-        all Device objects. After this returns, POST /api/init and POST /api/configure
+        all Device objects. After this returns, POST /api/init and POST /api/scan
         may be called again.
       responses:
         "200":

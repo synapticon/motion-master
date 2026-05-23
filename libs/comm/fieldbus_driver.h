@@ -36,13 +36,13 @@ class FieldbusDriver {
   /// @return Void on success, or an error string describing the failure.
   virtual std::expected<void, std::string> init() = 0;
 
-  /// @brief Discovers slaves and configures their sync managers and FMMUs.
+  /// @brief Scans the bus for slaves and configures their sync managers and FMMUs.
   ///
   /// Must be called after a successful @c init(). Slaves remain in INIT state —
   /// state transitions are left entirely to the caller.
   ///
-  /// @return Number of slaves found on success, or an error string if configuration fails.
-  virtual std::expected<int, std::string> configure() = 0;
+  /// @return Number of slaves found on success, or an error string if the scan fails.
+  virtual std::expected<int, std::string> scan() = 0;
 
   /// @brief Returns the immutable identity fields for the slave at @p position.
   /// @param position  1-based slave position on the bus.

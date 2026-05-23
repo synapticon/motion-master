@@ -71,12 +71,12 @@ curl -k -X POST https://localhost:8443/api/init \
      -d '{"driver":"soem","adapter":"eth0"}'
 
 # 3. Scan for slaves and populate the device list
-curl -k -X POST https://localhost:8443/api/configure
+curl -k -X POST https://localhost:8443/api/scan
 
 # 4. List discovered devices
 curl -k https://localhost:8443/api/devices
 
-# 5. Tear down (stops driver, clears device list; init + configure can be called again)
+# 5. Tear down (stops driver, clears device list; init + scan can be called again)
 curl -k -X POST https://localhost:8443/api/reset
 ```
 

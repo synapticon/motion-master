@@ -306,14 +306,14 @@ void Server::run() {
                 }
               });
             })
-      .post("/api/configure",
+      .post("/api/scan",
             [this](auto* res, auto* /*req*/) {
               auto aborted = std::make_shared<bool>(false);
               res->onAborted([aborted]() { *aborted = true; });
               res->onData([this, res, aborted](std::string_view /*data*/, bool last) {
                 if (!last) return;
                 if (*aborted) return;
-                if (auto r = deviceManager_.configure(); !r) {
+                if (auto r = deviceManager_.scan(); !r) {
                   res->writeStatus("500 Internal Server Error")
                       ->writeHeader("Content-Type", "application/json")
                       ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)

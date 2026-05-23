@@ -69,7 +69,7 @@ export default function DashboardPage() {
       <div className="p-8 space-y-8">
         <p className="text-sm">
           <a
-            href="/docs"
+            href="https://synapticon.github.io/motion-master/docs/"
             target="_blank"
             rel="noopener noreferrer"
             className="text-syn-red underline hover:opacity-70"

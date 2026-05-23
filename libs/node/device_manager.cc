@@ -2,6 +2,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -73,9 +74,9 @@ std::expected<void, std::string> DeviceManager::transitionToState(
   }
   std::vector<uint16_t> targets = positions;
   if (targets.empty()) {
-    for (const auto& d : devices_) {
-      targets.push_back(d.slavePosition());
-    }
+    targets.reserve(devices_.size());
+    std::transform(devices_.begin(), devices_.end(), std::back_inserter(targets),
+                   [](const Device& d) { return d.slavePosition(); });
   }
   driver_->transitionToState(targets, std::nullopt, targetState, timeout);
   return {};

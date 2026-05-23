@@ -94,6 +94,23 @@ void Server::run() {
                   .key_file_name = config_.keyFile.c_str(),
                   .cert_file_name = config_.certFile.c_str(),
               }}
+      .get("/",
+           [](auto* res, auto* /*req*/) {
+             res->writeHeader("Content-Type", "text/html; charset=utf-8")
+                 ->end(
+                     "<!DOCTYPE html><html><head><title>Motion Master API</title></head>"
+                     "<body><h1>Motion Master API</h1>"
+                     "<p>This is the Motion Master local API server. "
+                     "For documentation and the web interface, visit "
+                     "<a href=\"https://synapticon.github.io/motion-master/\">"
+                     "https://synapticon.github.io/motion-master/</a>.</p>"
+                     "<ul>"
+                     "<li><a href=\"/api/swagger.yml\">API specification (swagger.yml)</a></li>"
+                     "<li><a href=\"/api/log\">Log</a></li>"
+                     "<li><a href=\"/api/registers\">ESC registers</a></li>"
+                     "</ul>"
+                     "</body></html>");
+           })
       .get("/api/swagger.yml",
            [swaggerContent](auto* res, auto* /*req*/) {
              if (swaggerContent.empty()) {
@@ -126,9 +143,14 @@ void Server::run() {
       .get("/api/log",
            [this](auto* res, auto* /*req*/) {
              auto lines = config_.getLog ? config_.getLog() : std::vector<std::string>{};
-             res->writeHeader("Content-Type", "application/json")
+             std::string body;
+             for (const auto& line : lines) {
+               body += line;
+               body += '\n';
+             }
+             res->writeHeader("Content-Type", "text/plain; charset=utf-8")
                  ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
-                 ->end(nlohmann::json{{"entries", std::move(lines)}}.dump());
+                 ->end(body);
            })
       .get("/api/registers",
            [](auto* res, auto* /*req*/) {

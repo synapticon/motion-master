@@ -8,6 +8,7 @@
 #include <string>
 #include <thread>
 #include <unordered_set>
+#include <vector>
 
 namespace mm::node {
 class DeviceManager;
@@ -34,6 +35,12 @@ class Server {
   using InitDriverFn =
       std::function<std::expected<void, std::string>(std::string driver, std::string adapter)>;
 
+  /// @brief Callback type for `GET /api/log`.
+  ///
+  /// Returns a snapshot of all log entries collected since startup in
+  /// chronological order.  Wired to @c RingLogSinkMt::entries() in main.cc.
+  using GetLogFn = std::function<std::vector<std::string>()>;
+
   /// @brief Server configuration.
   struct Config {
     uint16_t port = 8443;     ///< TCP port to listen on (TLS).
@@ -42,6 +49,7 @@ class Server {
     std::string version;      ///< Application version string served at `GET /api/version`.
     std::string swaggerFile;  ///< Path to `swagger.yml`; served at `GET /api/swagger.yml`.
     InitDriverFn initDriver;  ///< Handler for `POST /api/init`; required for API-driven init.
+    GetLogFn getLog;          ///< Handler for `GET /api/log`; returns buffered log entries.
   };
 
   /// @brief Constructs the server with the given configuration.

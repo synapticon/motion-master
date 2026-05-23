@@ -1,3 +1,4 @@
+#include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
 #include <csignal>
@@ -17,6 +18,7 @@
 #include "game_loop.h"
 #include "node/device_manager.h"
 #include "options.h"
+#include "ring_log_sink.h"
 #include "server.h"
 
 namespace {
@@ -51,7 +53,15 @@ GameLoop* gGameLoop = nullptr;  ///< Signal handler target; set before run(), cl
 /// @param argv Argument vector from the OS.
 /// @return 0 on clean shutdown.
 int main(int argc, char** argv) {
+  // Replacing the default logger drops its built-in console sink, so re-add it
+  // explicitly alongside the ring sink that backs GET /api/log.
+  auto ringLogSink = std::make_shared<mm::RingLogSinkMt>();
+  auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
+  spdlog::set_default_logger(
+      std::make_shared<spdlog::logger>("", spdlog::sinks_init_list{consoleSink, ringLogSink}));
+
   auto opts = parseOptions(argc, argv);
+  spdlog::set_level(spdlog::level::from_str(opts.logLevel));
 
   spdlog::info("Motion Master v{}", mm::core::kVersion);
 
@@ -103,6 +113,7 @@ int main(int argc, char** argv) {
             if (!driver) return std::unexpected(driver.error());
             return deviceManager.init(std::move(*driver));
           },
+          .getLog = [ringLogSink]() { return ringLogSink->entries(); },
       },
       deviceManager};
   server.start();

@@ -123,6 +123,13 @@ void Server::run() {
                  ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
                  ->end(nlohmann::json{{"version", config_.version}}.dump());
            })
+      .get("/api/log",
+           [this](auto* res, auto* /*req*/) {
+             auto lines = config_.getLog ? config_.getLog() : std::vector<std::string>{};
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->end(nlohmann::json{{"entries", std::move(lines)}}.dump());
+           })
       .get("/api/registers",
            [](auto* res, auto* /*req*/) {
              res->writeHeader("Content-Type", "application/json")

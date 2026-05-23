@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router'
+import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
 
 const mockDevices = ['1', '2', '3', '4', '5', '6', '7', '8']
 
@@ -70,6 +71,8 @@ export default function RootLayout() {
       <main className="flex-1 overflow-auto bg-white">
         <Outlet />
       </main>
+
+      <PwaUpdatePrompt />
     </div>
   )
 }

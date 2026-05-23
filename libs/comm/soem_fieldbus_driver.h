@@ -56,6 +56,22 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// @brief Closes the NIC and releases all driver resources.
   void stop() override;
 
+  /// @brief Reads bytes from an ESC register via FPRD.
+  /// @param slavePosition  1-based slave position on the bus.
+  /// @param address        ESC register address.
+  /// @param data           Output buffer; its size determines how many bytes are read.
+  /// @return Void on success, or an error string if the working counter is not 1.
+  std::expected<void, std::string> readRegister(uint16_t slavePosition, uint16_t address,
+                                                std::span<uint8_t> data) override;
+
+  /// @brief Writes bytes to an ESC register via FPWR.
+  /// @param slavePosition  1-based slave position on the bus.
+  /// @param address        ESC register address.
+  /// @param data           Bytes to write.
+  /// @return Void on success, or an error string if the working counter is not 1.
+  std::expected<void, std::string> writeRegister(uint16_t slavePosition, uint16_t address,
+                                                 std::span<const uint8_t> data) override;
+
   /// @brief Returns the number of discovered slaves, or 0 before discovery.
   int slaveCount() const;
 

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstdint>
+#include <expected>
 #include <nlohmann/json_fwd.hpp>
+#include <span>
 #include <string>
 
 #include "comm/fieldbus_driver.h"
@@ -36,6 +38,24 @@ class Device {
 
   /// @brief Serial number from EEPROM.
   uint32_t serialNumber() const;
+
+  /// @brief Reads bytes from an ESC register on this device.
+  ///
+  /// Delegates to the fieldbus driver's @c readRegister using this device's slave position.
+  ///
+  /// @param address  ESC register address (e.g. @c 0x0130 for DL Status).
+  /// @param data     Output buffer; its size determines how many bytes are read.
+  /// @return Void on success, or an error string on failure.
+  std::expected<void, std::string> readRegister(uint16_t address, std::span<uint8_t> data);
+
+  /// @brief Writes bytes to an ESC register on this device.
+  ///
+  /// Delegates to the fieldbus driver's @c writeRegister using this device's slave position.
+  ///
+  /// @param address  ESC register address.
+  /// @param data     Bytes to write.
+  /// @return Void on success, or an error string on failure.
+  std::expected<void, std::string> writeRegister(uint16_t address, std::span<const uint8_t> data);
 
  private:
   uint16_t slavePosition_;

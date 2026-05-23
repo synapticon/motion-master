@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <span>
 #include <string>
 
 namespace mm::comm {
@@ -58,6 +59,30 @@ class FieldbusDriver {
   ///
   /// After @c stop() returns, @c exchangeProcessData() must not be called again.
   virtual void stop() = 0;
+
+  /// @brief Reads bytes from an ESC register via a Configured-Address Read (FPRD) datagram.
+  ///
+  /// @p data.size() bytes are read from register @p address of the slave at @p slavePosition.
+  /// Called from HTTP handler threads; must not overlap with @c exchangeProcessData.
+  ///
+  /// @param slavePosition  1-based slave position on the bus.
+  /// @param address        ESC register address (e.g. @c 0x0130 for DL Status).
+  /// @param data           Output buffer; its size determines how many bytes are read.
+  /// @return Void on success, or an error string if no slave responded.
+  virtual std::expected<void, std::string> readRegister(uint16_t slavePosition, uint16_t address,
+                                                        std::span<uint8_t> data) = 0;
+
+  /// @brief Writes bytes to an ESC register via a Configured-Address Write (FPWR) datagram.
+  ///
+  /// @p data.size() bytes are written to register @p address of the slave at @p slavePosition.
+  /// Called from HTTP handler threads; must not overlap with @c exchangeProcessData.
+  ///
+  /// @param slavePosition  1-based slave position on the bus.
+  /// @param address        ESC register address.
+  /// @param data           Bytes to write.
+  /// @return Void on success, or an error string if no slave responded.
+  virtual std::expected<void, std::string> writeRegister(uint16_t slavePosition, uint16_t address,
+                                                         std::span<const uint8_t> data) = 0;
 };
 
 }  // namespace mm::comm

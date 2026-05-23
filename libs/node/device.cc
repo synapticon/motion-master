@@ -23,6 +23,15 @@ uint32_t Device::productCode() const { return productCode_; }
 uint32_t Device::revisionNumber() const { return revisionNumber_; }
 uint32_t Device::serialNumber() const { return serialNumber_; }
 
+std::expected<void, std::string> Device::readRegister(uint16_t address, std::span<uint8_t> data) {
+  return driver_.readRegister(slavePosition_, address, data);
+}
+
+std::expected<void, std::string> Device::writeRegister(uint16_t address,
+                                                        std::span<const uint8_t> data) {
+  return driver_.writeRegister(slavePosition_, address, data);
+}
+
 void to_json(nlohmann::json& j, const Device& d) {
   j = nlohmann::json{
       {"slavePosition", d.slavePosition()},

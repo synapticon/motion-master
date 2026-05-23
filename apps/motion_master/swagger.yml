@@ -114,6 +114,139 @@ paths:
           description: slavePosition is not a valid integer
         "404":
           description: No device at the given bus position
+  /api/registers:
+    get:
+      summary: List all known ESC registers
+      operationId: getRegisters
+      description: >
+        Returns the static catalogue of well-known EtherCAT Slave Controller registers
+        from the Beckhoff ESC datasheet (Section II) and ETG.1000.4.
+        Use the address and length fields as inputs to the device register read/write endpoints.
+      responses:
+        "200":
+          description: Array of ESC register descriptors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EscRegister"
+  /api/devices/{slavePosition}/registers/{address}:
+    get:
+      summary: Read bytes from an ESC register
+      operationId: readRegister
+      description: >
+        Reads `length` bytes from the ESC register at `address` on the slave at `slavePosition`
+        using a Configured-Address Read (FPRD) datagram.
+        Pass `address` in decimal (e.g. 272 for DL Status at 0x0110).
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: address
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 65535
+          description: ESC register address in decimal (e.g. 272 for 0x0110)
+          example: 272
+        - name: length
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: Number of bytes to read
+          example: 2
+      responses:
+        "200":
+          description: Raw register bytes
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    items:
+                      type: integer
+                      minimum: 0
+                      maximum: 255
+                    description: Register bytes in ascending address order
+                    example: [65, 0]
+        "400":
+          description: slavePosition, address, or length is missing or not a valid integer
+        "404":
+          description: No device at the given bus position
+        "500":
+          $ref: "#/components/responses/DriverError"
+    post:
+      summary: Write bytes to an ESC register
+      operationId: writeRegister
+      description: >
+        Writes bytes to the ESC register at `address` on the slave at `slavePosition`
+        using a Configured-Address Write (FPWR) datagram.
+        Pass `address` in decimal (e.g. 272 for DL Status at 0x0110).
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: address
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 65535
+          description: ESC register address in decimal
+          example: 288
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data]
+              properties:
+                data:
+                  type: array
+                  items:
+                    type: integer
+                    minimum: 0
+                    maximum: 255
+                  description: Bytes to write in ascending address order
+                  example: [1, 0]
+      responses:
+        "200":
+          description: Write completed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        "400":
+          description: slavePosition or address is not a valid integer, or request body is malformed
+        "404":
+          description: No device at the given bus position
+        "500":
+          $ref: "#/components/responses/DriverError"
   /api/devices:
     get:
       summary: List all fieldbus devices
@@ -157,3 +290,38 @@ paths:
                       format: int64
                       description: Serial number from EEPROM
                       example: 12345
+components:
+  schemas:
+    EscRegister:
+      type: object
+      required: [address, length, name, description]
+      properties:
+        address:
+          type: integer
+          description: Register address in the ESC address space (decimal)
+          example: 272
+        length:
+          type: integer
+          description: Register width in bytes (1, 2, 4, or 8)
+          example: 2
+        name:
+          type: string
+          description: Short snake_case identifier
+          example: "dl_status"
+        description:
+          type: string
+          description: Human-readable description from the Beckhoff ESC datasheet
+          example: "DL status: EEPROM load ok, link detected, communication established per port"
+  responses:
+    DriverError:
+      description: Fieldbus driver returned an error
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: string
+                description: Human-readable error message from the driver
+                example: "FPRD slave 1: wkc=0"

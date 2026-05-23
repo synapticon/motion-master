@@ -64,15 +64,18 @@ jobs:
       - name: Build UI
         working-directory: ui
         env:
-          VITE_BASE: /
+          VITE_BASE: /app
         run: pnpm build
 
       - name: Assemble Pages artifact
         run: |
-          mkdir -p build/pages/docs
-          cp -r ui/apps/motion-master/dist/. build/pages/
+          mkdir -p build/pages/app build/pages/docs
+          cp ui/landing/index.html build/pages/index.html
+          cp -r ui/apps/motion-master/dist/. build/pages/app/
           cp -r build/docs/html/. build/pages/docs/
-          cp build/pages/index.html build/pages/404.html
+          cp apps/motion_master/swagger.yml build/pages/swagger.yml
+          # 404.html is the SPA shell so GitHub Pages deep-links into /app/* work
+          cp build/pages/app/index.html build/pages/404.html
           echo "motion-master.synapticon.com" > build/pages/CNAME
 
       - name: Upload Pages artifact

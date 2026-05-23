@@ -4,12 +4,14 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstdint>
 #include <fstream>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <sstream>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "comm/base.h"
 #include "node/device_manager.h"
@@ -148,6 +150,118 @@ void Server::run() {
                  ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
                  ->end(nlohmann::json(*it).dump());
            })
+      .get("/api/devices/:slavePosition/registers/:address",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p1, ec1] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             if (ec1 != std::errc() || p1 != posParam.data() + posParam.size()) {
+               res->writeStatus("400 Bad Request")
+                   ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                   ->end();
+               return;
+             }
+             uint16_t address{};
+             auto addrParam = req->getParameter("address");
+             auto [p2, ec2] =
+                 std::from_chars(addrParam.data(), addrParam.data() + addrParam.size(), address);
+             if (ec2 != std::errc() || p2 != addrParam.data() + addrParam.size()) {
+               res->writeStatus("400 Bad Request")
+                   ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                   ->end();
+               return;
+             }
+             uint16_t length{};
+             auto lenParam = req->getQuery("length");
+             auto [p3, ec3] =
+                 std::from_chars(lenParam.data(), lenParam.data() + lenParam.size(), length);
+             if (ec3 != std::errc() || p3 != lenParam.data() + lenParam.size() || length == 0) {
+               res->writeStatus("400 Bad Request")
+                   ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                   ->end();
+               return;
+             }
+             const auto& devices = deviceManager_.devices();
+             auto it = std::find_if(devices.begin(), devices.end(),
+                                    [pos](const auto& d) { return d.slavePosition() == pos; });
+             if (it == devices.end()) {
+               res->writeStatus("404 Not Found")
+                   ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                   ->end();
+               return;
+             }
+             std::vector<uint8_t> buf(length);
+             if (auto r = it->readRegister(address, buf); !r) {
+               res->writeStatus("500 Internal Server Error")
+                   ->writeHeader("Content-Type", "application/json")
+                   ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                   ->end(nlohmann::json{{"error", r.error()}}.dump());
+               return;
+             }
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->end(nlohmann::json{{"data", buf}}.dump());
+           })
+      .post("/api/devices/:slavePosition/registers/:address",
+            [this](auto* res, auto* req) {
+              uint16_t pos{};
+              auto posParam = req->getParameter("slavePosition");
+              auto [p1, ec1] =
+                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+              bool posOk = (ec1 == std::errc() && p1 == posParam.data() + posParam.size());
+              uint16_t address{};
+              auto addrParam = req->getParameter("address");
+              auto [p2, ec2] =
+                  std::from_chars(addrParam.data(), addrParam.data() + addrParam.size(), address);
+              bool addrOk = (ec2 == std::errc() && p2 == addrParam.data() + addrParam.size());
+              auto aborted = std::make_shared<bool>(false);
+              auto body = std::make_shared<std::string>();
+              res->onAborted([aborted]() { *aborted = true; });
+              res->onData([this, res, body, aborted, pos, posOk, address, addrOk](
+                              std::string_view chunk, bool last) {
+                body->append(chunk);
+                if (!last) return;
+                if (*aborted) return;
+                if (!posOk || !addrOk) {
+                  res->writeStatus("400 Bad Request")
+                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->end();
+                  return;
+                }
+                std::vector<uint8_t> data;
+                try {
+                  nlohmann::json j = nlohmann::json::parse(*body);
+                  data = j.at("data").get<std::vector<uint8_t>>();
+                } catch (const nlohmann::json::exception& e) {
+                  res->writeStatus("400 Bad Request")
+                      ->writeHeader("Content-Type", "application/json")
+                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->end(nlohmann::json{{"error", e.what()}}.dump());
+                  return;
+                }
+                const auto& devices = deviceManager_.devices();
+                auto it =
+                    std::find_if(devices.begin(), devices.end(),
+                                 [pos](const auto& d) { return d.slavePosition() == pos; });
+                if (it == devices.end()) {
+                  res->writeStatus("404 Not Found")
+                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->end();
+                  return;
+                }
+                if (auto r = it->writeRegister(address, data); !r) {
+                  res->writeStatus("500 Internal Server Error")
+                      ->writeHeader("Content-Type", "application/json")
+                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->end(nlohmann::json{{"error", r.error()}}.dump());
+                  return;
+                }
+                res->writeHeader("Content-Type", "application/json")
+                    ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                    ->end(nlohmann::json{{"ok", true}}.dump());
+              });
+            })
       .post("/api/init",
             [this](auto* res, auto* /*req*/) {
               auto aborted = std::make_shared<bool>(false);

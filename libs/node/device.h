@@ -46,7 +46,7 @@ class Device {
   /// @param address  ESC register address (e.g. @c 0x0130 for DL Status).
   /// @param data     Output buffer; its size determines how many bytes are read.
   /// @return Void on success, or an error string on failure.
-  std::expected<void, std::string> readRegister(uint16_t address, std::span<uint8_t> data);
+  std::expected<void, std::string> readRegister(uint16_t address, std::span<uint8_t> data) const;
 
   /// @brief Writes bytes to an ESC register on this device.
   ///
@@ -55,7 +55,8 @@ class Device {
   /// @param address  ESC register address.
   /// @param data     Bytes to write.
   /// @return Void on success, or an error string on failure.
-  std::expected<void, std::string> writeRegister(uint16_t address, std::span<const uint8_t> data);
+  std::expected<void, std::string> writeRegister(uint16_t address,
+                                                 std::span<const uint8_t> data) const;
 
  private:
   uint16_t slavePosition_;

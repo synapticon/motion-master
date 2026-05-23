@@ -1,14 +1,21 @@
 #include "comm/soem_fieldbus_driver.h"
 
 #include <soem/soem.h>
+#include <spdlog/spdlog.h>
 
 #include <cerrno>
+#include <chrono>
 #include <cstring>
 #include <expected>
+#include <functional>
 #include <memory>
+#include <optional>
+#include <set>
 #include <span>
 #include <string>
+#include <thread>
 #include <utility>
+#include <vector>
 
 namespace mm::comm::soem {
 
@@ -76,6 +83,151 @@ std::expected<void, std::string> SoemFieldbusDriver::writeRegister(uint16_t slav
                            ": wkc=" + std::to_string(wkc));
   }
   return {};
+}
+
+// BOOT and PRE-OP use different mailbox sizes (e.g. 1024 vs 128 bytes on Integro
+// devices). After a firmware download the slave context still holds BOOT SM parameters;
+// without reprogramming them here an INIT→PRE-OP transition would reuse stale BOOT
+// values and break mailbox communication. SOEM does not do this automatically.
+void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState targetState) {
+  if (targetState == EtherCatState::Boot) {
+    uint32_t data = ecx_readeeprom(ctx, slave, ECT_SII_BOOTRXMBX, EC_TIMEOUTEEP);
+    ctx->slavelist[slave].SM[0].StartAddr = static_cast<uint16_t>(LO_WORD(data));
+    ctx->slavelist[slave].SM[0].SMlength = static_cast<uint16_t>(HI_WORD(data));
+    ctx->slavelist[slave].mbx_wo = static_cast<uint16_t>(LO_WORD(data));
+    ctx->slavelist[slave].mbx_l = static_cast<uint16_t>(HI_WORD(data));
+
+    data = ecx_readeeprom(ctx, slave, ECT_SII_BOOTTXMBX, EC_TIMEOUTEEP);
+    ctx->slavelist[slave].SM[1].StartAddr = static_cast<uint16_t>(LO_WORD(data));
+    ctx->slavelist[slave].SM[1].SMlength = static_cast<uint16_t>(HI_WORD(data));
+    ctx->slavelist[slave].mbx_ro = static_cast<uint16_t>(LO_WORD(data));
+    ctx->slavelist[slave].mbx_rl = static_cast<uint16_t>(HI_WORD(data));
+
+    spdlog::info("Device {}: BOOT mailbox - write 0x{:04X}/{}, read 0x{:04X}/{}", slave,
+                 ctx->slavelist[slave].mbx_wo, ctx->slavelist[slave].mbx_l,
+                 ctx->slavelist[slave].mbx_ro, ctx->slavelist[slave].mbx_rl);
+
+    ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM0, sizeof(ec_smt),
+             &ctx->slavelist[slave].SM[0], EC_TIMEOUTRET);
+    ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM1, sizeof(ec_smt),
+             &ctx->slavelist[slave].SM[1], EC_TIMEOUTRET);
+
+  } else if (targetState == EtherCatState::PreOp) {
+    // PRE-OP SMs come from the standard SII mailbox entries, not the BOOT entries.
+    ecx_readeeprom1(ctx, slave, ECT_SII_RXMBXADR);
+    uint32_t eedat = ecx_readeeprom2(ctx, slave, EC_TIMEOUTEEP);
+    ctx->slavelist[slave].mbx_wo = static_cast<uint16_t>(LO_WORD(etohl(eedat)));
+    ctx->slavelist[slave].mbx_l = static_cast<uint16_t>(HI_WORD(etohl(eedat)));
+    ctx->slavelist[slave].SM[0].StartAddr = ctx->slavelist[slave].mbx_wo;
+    ctx->slavelist[slave].SM[0].SMlength = ctx->slavelist[slave].mbx_l;
+
+    ecx_readeeprom1(ctx, slave, ECT_SII_TXMBXADR);
+    eedat = ecx_readeeprom2(ctx, slave, EC_TIMEOUTEEP);
+    ctx->slavelist[slave].mbx_ro = static_cast<uint16_t>(LO_WORD(etohl(eedat)));
+    ctx->slavelist[slave].mbx_rl = static_cast<uint16_t>(HI_WORD(etohl(eedat)));
+    if (ctx->slavelist[slave].mbx_rl == 0) {
+      ctx->slavelist[slave].mbx_rl = ctx->slavelist[slave].mbx_l;
+    }
+    ctx->slavelist[slave].SM[1].StartAddr = ctx->slavelist[slave].mbx_ro;
+    ctx->slavelist[slave].SM[1].SMlength = ctx->slavelist[slave].mbx_rl;
+
+    spdlog::info("Device {}: PRE-OP mailbox - write 0x{:04X}/{}, read 0x{:04X}/{}", slave,
+                 ctx->slavelist[slave].mbx_wo, ctx->slavelist[slave].mbx_l,
+                 ctx->slavelist[slave].mbx_ro, ctx->slavelist[slave].mbx_rl);
+
+    ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM0, sizeof(ec_smt),
+             &ctx->slavelist[slave].SM[0], EC_TIMEOUTRET);
+    ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM1, sizeof(ec_smt),
+             &ctx->slavelist[slave].SM[1], EC_TIMEOUTRET);
+  }
+}
+
+void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& positions,
+                                           std::optional<EtherCatState> requiredState,
+                                           EtherCatState targetState,
+                                           std::chrono::steady_clock::duration timeout,
+                                           std::chrono::steady_clock::duration resendInterval,
+                                           std::function<void()> tick,
+                                           std::function<bool()> shouldAbort) {
+  const auto targetRaw = static_cast<uint16_t>(targetState);
+
+  ecx_readstate(ctx_.get());
+
+  std::set<uint16_t> pending;
+  for (uint16_t pos : positions) {
+    uint16_t state = ctx_->slavelist[pos].state;
+    uint16_t stateClean = state & 0x000Fu;
+    if (!requiredState || stateClean == static_cast<uint16_t>(*requiredState)) {
+      if (stateClean == static_cast<uint16_t>(EtherCatState::Init) &&
+          (targetState == EtherCatState::Boot || targetState == EtherCatState::PreOp)) {
+        updateMailboxSyncManagers(ctx_.get(), pos, targetState);
+      }
+      ctx_->slavelist[pos].state = targetRaw;
+      ecx_writestate(ctx_.get(), pos);
+      pending.insert(pos);
+    }
+  }
+
+  auto deadline = std::chrono::steady_clock::now() + timeout;
+  auto lastResend = std::chrono::steady_clock::now();
+  bool aborted = false;
+
+  while (!pending.empty() && std::chrono::steady_clock::now() < deadline) {
+    if (shouldAbort && shouldAbort()) {
+      aborted = true;
+      break;
+    }
+
+    // When a tick is provided (e.g. SAFE-OP → OP), call it at ~1 ms intervals
+    // so process data keeps flowing and the SM watchdog does not fire.
+    if (tick) {
+      auto pollEnd = std::chrono::steady_clock::now() + std::chrono::milliseconds(100);
+      auto nextTick = std::chrono::steady_clock::now();
+      while (std::chrono::steady_clock::now() < pollEnd) {
+        tick();
+        nextTick += std::chrono::milliseconds(1);
+        auto now = std::chrono::steady_clock::now();
+        if (nextTick > now) {
+          std::this_thread::sleep_for(nextTick - now);
+        }
+      }
+    } else {
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    }
+
+    ecx_readstate(ctx_.get());
+
+    for (auto it = pending.begin(); it != pending.end();) {
+      uint16_t pos = *it;
+      // Exact match required: OP+ERROR (0x18) must not pass as OP (0x08).
+      if (ctx_->slavelist[pos].state == targetRaw) {
+        spdlog::info("Device {}: reached state 0x{:02X}", pos, targetRaw);
+        it = pending.erase(it);
+      } else {
+        ++it;
+      }
+    }
+
+    if (std::chrono::steady_clock::now() - lastResend > resendInterval) {
+      for (uint16_t pos : pending) {
+        uint16_t state = ctx_->slavelist[pos].state;
+        if (state & EC_STATE_ERROR) {
+          ctx_->slavelist[pos].state = (state & 0x000Fu) | EC_STATE_ACK;
+          ecx_writestate(ctx_.get(), pos);
+        }
+        ctx_->slavelist[pos].state = targetRaw;
+        ecx_writestate(ctx_.get(), pos);
+      }
+      lastResend = std::chrono::steady_clock::now();
+    }
+  }
+
+  if (!aborted) {
+    for (uint16_t pos : pending) {
+      spdlog::error("Device {}: failed to reach state 0x{:02X} (AL status: 0x{:04X})", pos,
+                    targetRaw, ctx_->slavelist[pos].ALstatuscode);
+    }
+  }
 }
 
 }  // namespace mm::comm::soem

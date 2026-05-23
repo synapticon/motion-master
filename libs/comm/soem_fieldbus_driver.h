@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "comm/fieldbus_driver.h"
 
@@ -74,6 +75,13 @@ class SoemFieldbusDriver : public FieldbusDriver {
 
   /// @brief Returns the number of discovered slaves, or 0 before discovery.
   int slaveCount() const;
+
+  /// @copydoc FieldbusDriver::transitionToState
+  void transitionToState(
+      const std::vector<uint16_t>& positions, std::optional<EtherCatState> requiredState,
+      EtherCatState targetState, std::chrono::steady_clock::duration timeout,
+      std::chrono::steady_clock::duration resendInterval = std::chrono::seconds(2),
+      std::function<void()> tick = nullptr, std::function<bool()> shouldAbort = nullptr) override;
 
  private:
   std::string ifname_;

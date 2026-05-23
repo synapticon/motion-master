@@ -1,11 +1,27 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <expected>
+#include <functional>
+#include <optional>
 #include <span>
 #include <string>
+#include <vector>
 
 namespace mm::comm {
+
+/// @brief EtherCAT Application Layer state values.
+///
+/// Numeric values match the EtherCAT standard AL control/status register
+/// encoding (ETG.1000.6 §6.4.1).
+enum class EtherCatState : uint16_t {
+  Init = 0x01,    ///< INIT — reset state, no communication.
+  PreOp = 0x02,   ///< PRE-OPERATIONAL — mailbox communication active.
+  Boot = 0x03,    ///< BOOT — firmware download mode.
+  SafeOp = 0x04,  ///< SAFE-OPERATIONAL — inputs only; outputs ignored.
+  Op = 0x08,      ///< OPERATIONAL — full PDO exchange.
+};
 
 /// @brief Immutable identity fields read from a slave's EEPROM during configuration.
 struct SlaveInfo {
@@ -83,6 +99,33 @@ class FieldbusDriver {
   /// @return Void on success, or an error string if no slave responded.
   virtual std::expected<void, std::string> writeRegister(uint16_t slavePosition, uint16_t address,
                                                          std::span<const uint8_t> data) = 0;
+
+  /// @brief Commands a set of devices to @p targetState and blocks until all arrive or
+  ///        @p timeout elapses.
+  ///
+  /// Devices whose current state (error bit masked) does not match @p requiredState are
+  /// skipped; pass @c std::nullopt to command all @p positions unconditionally.
+  ///
+  /// The call polls at ~100 ms intervals, re-sending the command to lagging devices every
+  /// @p resendInterval.  Devices that do not arrive in time are logged at error level; no
+  /// exception is thrown.
+  ///
+  /// @param positions       1-based device positions to target.
+  /// @param requiredState   Pre-filter: only command devices whose current state equals this
+  ///                        value.  @c std::nullopt skips filtering and commands all positions.
+  /// @param targetState     Desired state.
+  /// @param timeout         Maximum time to wait for all devices.
+  /// @param resendInterval  How often to re-send the command to lagging devices.
+  /// @param tick            Optional callback invoked at ~1 ms intervals while waiting.
+  ///                        Pass a PDO sender when targeting @c EtherCatState::Op so the
+  ///                        sync-manager watchdog does not fire during the wait.
+  /// @param shouldAbort     Optional predicate; when it returns @c true the wait is abandoned
+  ///                        early without logging failures for pending devices.
+  virtual void transitionToState(
+      const std::vector<uint16_t>& positions, std::optional<EtherCatState> requiredState,
+      EtherCatState targetState, std::chrono::steady_clock::duration timeout,
+      std::chrono::steady_clock::duration resendInterval = std::chrono::seconds(2),
+      std::function<void()> tick = nullptr, std::function<bool()> shouldAbort = nullptr) = 0;
 };
 
 }  // namespace mm::comm

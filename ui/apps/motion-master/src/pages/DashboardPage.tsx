@@ -25,6 +25,8 @@ const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
 const btnCls =
   'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 w-full transition-colors'
+const btnOutlineCls =
+  'border border-syn-red text-syn-red px-3 py-1.5 text-xs hover:bg-syn-red hover:text-white disabled:opacity-50 transition-colors'
 
 export default function DashboardPage() {
   const queryClient = useQueryClient()
@@ -70,13 +72,16 @@ export default function DashboardPage() {
           </a>
         </p>
 
+        {/* Fieldbus — numbered steps */}
         <section>
           <p className="eyebrow mb-5">Fieldbus</p>
           <div className="grid grid-cols-3 gap-6">
 
-            {/* Init */}
+            {/* 1. Init */}
             <div className="border border-grey-200 p-5 space-y-4">
-              <h3 className="text-sm font-display uppercase tracking-widest">Init</h3>
+              <h3 className="text-sm font-display uppercase tracking-widest">
+                <span className="text-syn-red mr-1">1.</span>Init
+              </h3>
               <div className="space-y-3">
                 <div>
                   <label className={labelCls}>Driver</label>
@@ -116,9 +121,11 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Scan */}
+            {/* 2. Scan */}
             <div className="border border-grey-200 p-5 space-y-4">
-              <h3 className="text-sm font-display uppercase tracking-widest">Scan</h3>
+              <h3 className="text-sm font-display uppercase tracking-widest">
+                <span className="text-syn-red mr-1">2.</span>Scan
+              </h3>
               <p className="text-xs text-grey-600">
                 Discover EtherCAT slaves on the bus. Requires a successful init first.
               </p>
@@ -140,9 +147,11 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* Transition to State */}
+            {/* 3. Transition to State */}
             <div className="border border-grey-200 p-5 space-y-4">
-              <h3 className="text-sm font-display uppercase tracking-widest">Transition to State</h3>
+              <h3 className="text-sm font-display uppercase tracking-widest">
+                <span className="text-syn-red mr-1">3.</span>Transition to State
+              </h3>
               <div>
                 <label className={labelCls}>Target state</label>
                 <select
@@ -171,22 +180,34 @@ export default function DashboardPage() {
             </div>
 
           </div>
+        </section>
 
-          {/* Device list — populated after a successful scan */}
-          {hasScanned && (
-            <div className="mt-6">
-              {devicesQuery.isFetching && (
-                <p className="text-xs text-grey-600">Loading devices…</p>
+        {/* Devices — separate section, populated after scan */}
+        {hasScanned && (
+          <section>
+            <div className="flex items-center justify-between mb-4">
+              <p className="eyebrow">Devices</p>
+              <button
+                onClick={() => devicesQuery.refetch()}
+                disabled={devicesQuery.isFetching}
+                className={btnOutlineCls}
+              >
+                {devicesQuery.isFetching ? 'Reading…' : 'Re-read'}
+              </button>
+            </div>
+            <div className="border border-grey-200">
+              {devicesQuery.isFetching && !devicesQuery.data && (
+                <p className="p-4 text-xs text-grey-600">Loading devices…</p>
               )}
               {devicesQuery.isSuccess && devicesQuery.data.data.length === 0 && (
-                <p className="text-xs text-grey-600">No devices found.</p>
+                <p className="p-4 text-xs text-grey-600">No devices found.</p>
               )}
               {devicesQuery.isSuccess && devicesQuery.data.data.length > 0 && (
                 <table className="w-full text-xs border-collapse">
                   <thead>
-                    <tr className="border-b border-grey-200">
+                    <tr className="border-b border-grey-200 bg-grey-50">
                       {['Pos', 'Name', 'Vendor ID', 'Product Code', 'Revision', 'Serial'].map(h => (
-                        <th key={h} className="text-left py-2 pr-6 font-display uppercase tracking-wide text-grey-600 font-medium">
+                        <th key={h} className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium">
                           {h}
                         </th>
                       ))}
@@ -194,21 +215,21 @@ export default function DashboardPage() {
                   </thead>
                   <tbody>
                     {devicesQuery.data.data.map(d => (
-                      <tr key={d.slavePosition} className="border-b border-grey-100">
-                        <td className="py-2 pr-6">{d.slavePosition}</td>
-                        <td className="py-2 pr-6">{d.name}</td>
-                        <td className="py-2 pr-6 font-mono">0x{d.vendorId.toString(16).toUpperCase()}</td>
-                        <td className="py-2 pr-6 font-mono">0x{d.productCode.toString(16).toUpperCase()}</td>
-                        <td className="py-2 pr-6 font-mono">0x{d.revisionNumber.toString(16).toUpperCase()}</td>
-                        <td className="py-2 font-mono">{d.serialNumber}</td>
+                      <tr key={d.slavePosition} className="border-b border-grey-100 last:border-0">
+                        <td className="px-4 py-2">{d.slavePosition}</td>
+                        <td className="px-4 py-2">{d.name}</td>
+                        <td className="px-4 py-2 font-mono">0x{d.vendorId.toString(16).toUpperCase()}</td>
+                        <td className="px-4 py-2 font-mono">0x{d.productCode.toString(16).toUpperCase()}</td>
+                        <td className="px-4 py-2 font-mono">0x{d.revisionNumber.toString(16).toUpperCase()}</td>
+                        <td className="px-4 py-2 font-mono">{d.serialNumber}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               )}
             </div>
-          )}
-        </section>
+          </section>
+        )}
       </div>
     </div>
   )

@@ -1,4 +1,4 @@
-name: Docs
+name: Deploy Pages
 
 on:
   push:
@@ -47,10 +47,35 @@ jobs:
       - name: Build docs
         run: doxygen build/Doxyfile
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+          cache-dependency-path: ui/pnpm-lock.yaml
+
+      - name: Install UI dependencies
+        working-directory: ui
+        run: pnpm install --frozen-lockfile
+
+      - name: Build UI
+        working-directory: ui
+        run: pnpm build
+
+      - name: Assemble Pages artifact
+        run: |
+          mkdir -p build/pages/docs
+          cp -r ui/apps/motion-master/dist/. build/pages/
+          cp -r build/docs/html/. build/pages/docs/
+          cp build/pages/index.html build/pages/404.html
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: build/docs/html
+          path: build/pages
 
   deploy:
     needs: build

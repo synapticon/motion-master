@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
 import { api } from '../api'
 
@@ -27,9 +27,11 @@ const btnCls =
   'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 w-full transition-colors'
 
 export default function DashboardPage() {
+  const queryClient = useQueryClient()
   const [driver, setDriver] = useState<'soem' | 'spoe' | 'igh'>('soem')
   const [adapter, setAdapter] = useState('')
   const [alState, setAlState] = useState<1 | 2 | 3 | 4 | 8>(8)
+  const [hasScanned, setHasScanned] = useState(false)
 
   const initMutation = useMutation({
     mutationFn: () => api.init({ driver, adapter }),
@@ -37,6 +39,16 @@ export default function DashboardPage() {
 
   const scanMutation = useMutation({
     mutationFn: () => api.scan(),
+    onSuccess: () => {
+      setHasScanned(true)
+      queryClient.invalidateQueries({ queryKey: ['devices'] })
+    },
+  })
+
+  const devicesQuery = useQuery({
+    queryKey: ['devices'],
+    queryFn: () => api.getDevices(),
+    enabled: hasScanned,
   })
 
   const transitionMutation = useMutation({
@@ -159,6 +171,43 @@ export default function DashboardPage() {
             </div>
 
           </div>
+
+          {/* Device list — populated after a successful scan */}
+          {hasScanned && (
+            <div className="mt-6">
+              {devicesQuery.isFetching && (
+                <p className="text-xs text-grey-600">Loading devices…</p>
+              )}
+              {devicesQuery.isSuccess && devicesQuery.data.data.length === 0 && (
+                <p className="text-xs text-grey-600">No devices found.</p>
+              )}
+              {devicesQuery.isSuccess && devicesQuery.data.data.length > 0 && (
+                <table className="w-full text-xs border-collapse">
+                  <thead>
+                    <tr className="border-b border-grey-200">
+                      {['Pos', 'Name', 'Vendor ID', 'Product Code', 'Revision', 'Serial'].map(h => (
+                        <th key={h} className="text-left py-2 pr-6 font-display uppercase tracking-wide text-grey-600 font-medium">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {devicesQuery.data.data.map(d => (
+                      <tr key={d.slavePosition} className="border-b border-grey-100">
+                        <td className="py-2 pr-6">{d.slavePosition}</td>
+                        <td className="py-2 pr-6">{d.name}</td>
+                        <td className="py-2 pr-6 font-mono">0x{d.vendorId.toString(16).toUpperCase()}</td>
+                        <td className="py-2 pr-6 font-mono">0x{d.productCode.toString(16).toUpperCase()}</td>
+                        <td className="py-2 pr-6 font-mono">0x{d.revisionNumber.toString(16).toUpperCase()}</td>
+                        <td className="py-2 font-mono">{d.serialNumber}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          )}
         </section>
       </div>
     </div>

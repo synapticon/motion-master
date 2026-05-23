@@ -52,8 +52,8 @@ SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
 int SoemFieldbusDriver::slaveCount() const { return ctx_ ? ctx_->slavecount : 0; }
 
 std::expected<void, std::string> SoemFieldbusDriver::readRegister(uint16_t slavePosition,
-                                                                   uint16_t address,
-                                                                   std::span<uint8_t> data) {
+                                                                  uint16_t address,
+                                                                  std::span<uint8_t> data) {
   uint16_t configAddr = ctx_->slavelist[slavePosition].configadr;
   int wkc = ecx_FPRD(&ctx_->port, configAddr, address, static_cast<uint16_t>(data.size()),
                      data.data(), EC_TIMEOUTRET);
@@ -65,8 +65,8 @@ std::expected<void, std::string> SoemFieldbusDriver::readRegister(uint16_t slave
 }
 
 std::expected<void, std::string> SoemFieldbusDriver::writeRegister(uint16_t slavePosition,
-                                                                    uint16_t address,
-                                                                    std::span<const uint8_t> data) {
+                                                                   uint16_t address,
+                                                                   std::span<const uint8_t> data) {
   uint16_t configAddr = ctx_->slavelist[slavePosition].configadr;
   // ecx_FPWR takes void*, not const void*
   int wkc = ecx_FPWR(&ctx_->port, configAddr, address, static_cast<uint16_t>(data.size()),

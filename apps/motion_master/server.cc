@@ -248,9 +248,8 @@ void Server::run() {
                   return;
                 }
                 const auto& devices = deviceManager_.devices();
-                auto it =
-                    std::find_if(devices.begin(), devices.end(),
-                                 [pos](const auto& d) { return d.slavePosition() == pos; });
+                auto it = std::find_if(devices.begin(), devices.end(),
+                                       [pos](const auto& d) { return d.slavePosition() == pos; });
                 if (it == devices.end()) {
                   res->writeStatus("404 Not Found")
                       ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)

@@ -134,10 +134,43 @@
       line-height: 1.4;
     }
 
+    .notice {
+      margin-top: 3rem;
+      width: 100%;
+      max-width: 680px;
+      display: flex;
+      flex-direction: column;
+      gap: 0.625rem;
+    }
+
+    .notice-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.625rem;
+      font-size: 0.875rem;
+      color: #64748b;
+      line-height: 1.5;
+    }
+
+    .notice-row svg {
+      width: 16px;
+      height: 16px;
+      stroke: #475569;
+      flex-shrink: 0;
+      margin-top: 2px;
+    }
+
+    .notice-row a {
+      color: #60a5fa;
+      text-decoration: none;
+    }
+
+    .notice-row a:hover { text-decoration: underline; }
+
     footer {
-      margin-top: 4rem;
+      margin-top: 3rem;
       font-size: 0.8125rem;
-      color: #334155;
+      color: #1e293b;
     }
   </style>
 </head>
@@ -194,9 +227,30 @@
     </a>
   </div>
 
+  <div class="notice">
+    <div class="notice-row">
+      <svg fill="none" viewBox="0 0 24 24" stroke-width="1.8" xmlns="http://www.w3.org/2000/svg">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126zM12 15.75h.007v.008H12v-.008z"/>
+      </svg>
+      <span>Under active development &mdash; official release planned for <strong>end of 2026</strong></span>
+    </div>
+    <div class="notice-row">
+      <svg fill="none" viewBox="0 0 24 24" stroke-width="1.8" xmlns="http://www.w3.org/2000/svg">
+        <path stroke-linecap="round" stroke-linejoin="round"
+          d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"/>
+      </svg>
+      <span>
+        Fully open source under the
+        <a href="https://github.com/synapticon/motion-master/blob/main/LICENSE">GNU GPL v3</a>
+        &mdash; source available at
+        <a href="https://github.com/synapticon/motion-master">github.com/synapticon/motion-master</a>
+      </span>
+    </div>
+  </div>
+
   <footer>
-    &copy; Synapticon GmbH &mdash;
-    <a href="https://github.com/synapticon/motion-master" style="color: inherit;">GitHub</a>
+    &copy; Synapticon GmbH
   </footer>
 
 </body>

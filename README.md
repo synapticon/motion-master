@@ -1,6 +1,6 @@
 # Motion Master
 
-Next-generation motion control software featuring a simplified design, streamlined HTTP API, and true real-time support. See [NEXTGEN.md](NEXTGEN.md) for the full design specification.
+Next-generation motion control software for EtherCAT devices. Browser-based control interface, real-time process data exchange at 1 ms, and an HTTP API with WebSockets — control from any language, any tool, any AI agent.
 
 ## Prerequisites
 

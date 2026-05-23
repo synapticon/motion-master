@@ -62,6 +62,12 @@ Build output goes to `build/<preset>/`. Compiler requirements: C++23, warnings a
 
 The workflow in `.github/workflows/build.yml` caches vcpkg binaries with `actions/cache@v5` on `~/.cache/vcpkg/archives`, keyed on OS + `vcpkg.json` hash. The `x-gha` vcpkg binary caching backend was **removed** in the pinned vcpkg version (`56bb241`) — do not use `VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"` or the `actions/github-script` workaround.
 
+Three additional workflows exist alongside `build.yml`:
+
+- **`cert-renewal.yml`** — runs on the 1st of every month. Uses `acme.sh` with the `dns_acmedns` plugin against `auth.acme-dns.io` to issue a fresh Let's Encrypt cert for `local.motion-master.synapticon.com` (DNS-01 via CNAME delegation — no manual DNS touch required after the one-time setup). Stores the renewed cert and key as GitHub Secrets `TLS_CERT` and `TLS_KEY`. Requires `ACMEDNS_CONFIG` (acme-dns credentials JSON) and `GH_PAT_SECRETS` (fine-grained PAT with Secrets read/write on this repo) to be set as repository secrets.
+- **`release.yml`** — triggered by `v*` tags. Builds with the `x64-linux-release` preset, reads `TLS_CERT` and `TLS_KEY` from secrets, writes them as `cert.pem`/`key.pem` into the build output, then creates a GitHub Release with `motion-master-<version>-linux-x64.tar.gz` containing the binary, `swagger.yml`, `cert.pem`, and `key.pem`.
+- **`lint.yml`** — runs clang-format and cpplint checks on every push and PR.
+
 ## Architecture
 
 ### Directory Layout
@@ -140,7 +146,11 @@ Cycle timer: `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...)` on Linux (ab
 
 ### Networking / TLS
 
-Motion Master binds to `127.0.0.1:8443`. The PWA at `https://motion-master.synapticon.com` connects to `https://local.motion-master.synapticon.com:8443` (HTTP API) and `wss://local.motion-master.synapticon.com:8443` (WebSocket). The DNS record `local.motion-master.synapticon.com A 127.0.0.1` resolves to localhost. A real CA-signed TLS cert is bundled with each release; renewal is automated via DNS-01 ACME in CI/CD. CORS is set to `Access-Control-Allow-Origin: https://motion-master.synapticon.com`.
+Motion Master binds to `127.0.0.1:8443`. The PWA at `https://motion-master.synapticon.com` connects to `https://local.motion-master.synapticon.com:8443` (HTTP API) and `wss://local.motion-master.synapticon.com:8443` (WebSocket). The DNS record `local.motion-master.synapticon.com A 127.0.0.1` resolves to localhost. CORS is set to `Access-Control-Allow-Origin: https://motion-master.synapticon.com`.
+
+**TLS certificate:** A real Let's Encrypt cert for `local.motion-master.synapticon.com` is bundled with every release. Renewal is automated via `cert-renewal.yml` using DNS-01 with acme-dns delegation: `_acme-challenge.local.motion-master.synapticon.com` is a permanent CNAME to `4723b93a-99f5-43d7-93f1-195dbb4168ea.auth.acme-dns.io`; acme.sh updates the challenge record there via the `dns_acmedns` plugin without touching the main DNS zone. The renewed cert and key are stored as GitHub Secrets `TLS_CERT` and `TLS_KEY` and bundled into release artifacts by `release.yml`.
+
+On developer machines, `tools/run.sh` discovers the cert in this priority order: `cert.pem`/`key.pem` next to the binary (release install) → `~/.acme.sh/local.motion-master.synapticon.com_ecc/` (acme.sh local install, renewed automatically by cron) → self-signed fallback (requires accepting a browser security exception).
 
 ### Monitoring WebSocket Protocol
 

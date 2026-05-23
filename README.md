@@ -44,13 +44,20 @@ On Linux, `motion-master` requires raw socket and RT scheduling capabilities. `.
 
 ## Local Development
 
-Production releases bundle a CA-signed TLS certificate for `local.motion-master.synapticon.com`. For local development, use the run script — it generates a short-lived self-signed certificate and launches the binary:
+Production releases bundle a real Let's Encrypt TLS certificate for `local.motion-master.synapticon.com`, so the PWA at `https://motion-master.synapticon.com` connects without any browser warning.
+
+For development, the run script picks up a cert automatically:
 
 ```bash
 ./tools/run.sh
 ```
 
-Test the HTTP API (accept the self-signed cert warning):
+It looks for a certificate in this order:
+1. `cert.pem` / `key.pem` next to the binary (present in release builds)
+2. `~/.acme.sh/local.motion-master.synapticon.com_ecc/` — if you have `acme.sh` installed locally with the Let's Encrypt cert (no browser warning)
+3. Self-signed fallback — generated on the fly; requires accepting a browser security exception once per server restart
+
+Test the API (add `-k` only when using the self-signed fallback):
 
 ```bash
 curl -k https://localhost:8443/api/version
@@ -111,7 +118,7 @@ All scripts default to the `x64-linux-debug` preset. Pass a preset name as the f
 |---|---|
 | `./tools/configure.sh` | Run CMake configure |
 | `./tools/build.sh` | Build all targets |
-| `./tools/run.sh` | Generate a tmp self-signed cert and run the binary |
+| `./tools/run.sh` | Run the binary with the best available TLS cert (real cert if acme.sh is set up, self-signed otherwise) |
 | `./tools/test.sh` | Run tests |
 | `./tools/format.sh` | Auto-format all sources with clang-format |
 | `./tools/lint.sh` | Run cpplint (`pip install cpplint` if missing) |
@@ -126,7 +133,14 @@ All scripts default to the `x64-linux-debug` preset. Pass a preset name as the f
 
 ## CI
 
-GitHub Actions (`.github/workflows/build.yml`) caches vcpkg pre-built packages in `~/.cache/vcpkg/archives` via `actions/cache@v5`, keyed on OS and `vcpkg.json` hash. The first run after a dependency change rebuilds from source; subsequent runs restore from cache.
+| Workflow | Trigger | Purpose |
+|---|---|---|
+| `build.yml` | push / PR to `main` | Build, test; vcpkg packages cached in `~/.cache/vcpkg/archives` |
+| `lint.yml` | push / PR to `main` | clang-format + cpplint checks |
+| `cert-renewal.yml` | 1st of every month | Renew Let's Encrypt cert via acme-dns; update `TLS_CERT` / `TLS_KEY` secrets |
+| `release.yml` | `v*` tag push | Build release binary, bundle cert + key from secrets, publish GitHub Release |
+
+The vcpkg cache key is OS + `vcpkg.json` hash. The first run after a dependency change rebuilds from source; subsequent runs restore from cache.
 
 ## Dependencies
 

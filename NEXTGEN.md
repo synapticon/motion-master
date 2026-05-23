@@ -600,6 +600,48 @@ The GameLoop starts unconditionally regardless of whether a driver is present. `
 
 ---
 
+## Session 2026-05-23 — TLS certificate automation
+
+**Problem**
+
+The PWA at `https://motion-master.synapticon.com` targets `https://local.motion-master.synapticon.com:8443`. Because the PWA is served over a real HTTPS origin, browsers enforce strict certificate validation. The previous `tools/run.sh` generated a self-signed cert on every start, causing `ERR_CERT_AUTHORITY_INVALID` in the browser.
+
+**Solution: Let's Encrypt via DNS-01 + acme-dns delegation**
+
+A real Let's Encrypt cert is issued for `local.motion-master.synapticon.com` using DNS-01. HTTP-01 is not viable because the domain resolves to `127.0.0.1` and Let's Encrypt's validators cannot reach localhost. DNS-01 only requires a publicly visible TXT record — no inbound connectivity.
+
+Automating the DNS-01 challenge without direct DNS API access uses **acme-dns**: a small service that holds ACME challenge TXT records and exposes a simple update API. A one-time permanent CNAME is added to the main zone:
+
+```
+_acme-challenge.local.motion-master.synapticon.com
+  → CNAME → 4723b93a-99f5-43d7-93f1-195dbb4168ea.auth.acme-dns.io
+```
+
+When Let's Encrypt validates, it follows the CNAME and reads the TXT record from `auth.acme-dns.io`. The acme-dns account credentials are stored as the GitHub Secret `ACMEDNS_CONFIG` (JSON). The `acme.sh` tool with its `dns_acmedns` plugin updates the challenge record over the acme-dns REST API automatically — the main DNS zone (`synapticon.com`) is never touched again.
+
+**cert-renewal.yml**
+
+Runs on the 1st of every month via `schedule`. Installs `acme.sh`, writes `~/.acmedns.json` from the `ACMEDNS_CONFIG` secret, issues a fresh cert with `--issue --force --dns dns_acmedns --server letsencrypt`, then updates two repository secrets via `gh secret set` using a PAT (`GH_PAT_SECRETS`) with Secrets read/write permission:
+
+- `TLS_CERT` — full-chain PEM (renewed cert + Let's Encrypt intermediate)
+- `TLS_KEY` — EC private key
+
+**release.yml**
+
+Triggered by `v*` tag pushes. Builds with the `x64-linux-release` CMake preset, reads `TLS_CERT` and `TLS_KEY` from secrets, writes them as `cert.pem`/`key.pem` into the build output directory, then packages `motion-master`, `swagger.yml`, `cert.pem`, and `key.pem` into `motion-master-<version>-linux-x64.tar.gz` and publishes a GitHub Release.
+
+**tools/run.sh cert discovery order**
+
+1. `cert.pem` / `key.pem` next to the binary — present in release installs
+2. `~/.acme.sh/local.motion-master.synapticon.com_ecc/fullchain.cer` + `.key` — present on developer machines with `acme.sh` installed; renewed automatically by the cron job `acme.sh` registers on install
+3. Self-signed fallback — generated fresh each run; browsers require a one-time exception
+
+**Private key in release artifact**
+
+The key is bundled alongside the binary in every release (effectively public). This is acceptable: the domain always resolves to `127.0.0.1`, so an attacker with the key can only serve HTTPS on their own loopback interface — not intercept traffic between a user's PWA and their own Motion Master instance.
+
+---
+
 ## Session 2026-05-23 — DeviceManager::transitionToState and POST /api/state
 
 **DeviceManager::transitionToState**

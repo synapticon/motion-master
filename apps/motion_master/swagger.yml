@@ -114,6 +114,94 @@ paths:
           description: slavePosition is not a valid integer
         "404":
           description: No device at the given bus position
+  /api/init:
+    post:
+      summary: Initialise the fieldbus driver
+      operationId: init
+      description: >
+        Constructs the requested fieldbus driver, opens the network interface, and
+        makes the driver available for subsequent calls to /api/configure.
+        The request body is optional; omitting it selects the SOEM driver with
+        automatic adapter selection.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                driver:
+                  type: string
+                  description: Fieldbus driver to use
+                  enum: [soem, spoe, igh]
+                  default: soem
+                  example: "soem"
+                adapter:
+                  type: string
+                  description: Network interface name or MAC address; empty string for auto-detect
+                  default: ""
+                  example: "eth0"
+      responses:
+        "200":
+          description: Driver initialised successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        "400":
+          description: Request body is not valid JSON
+        "500":
+          $ref: "#/components/responses/DriverError"
+        "501":
+          description: No driver factory configured on this instance
+  /api/configure:
+    post:
+      summary: Discover slaves and configure the fieldbus
+      operationId: configure
+      description: >
+        Runs slave discovery and sync manager / FMMU configuration on the already-initialised
+        driver. Must be called after a successful POST /api/init. Slaves remain in INIT state
+        after this call; state transitions are driven by subsequent API calls.
+      responses:
+        "200":
+          description: Configuration successful; returns the number of slaves found
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slaves]
+                properties:
+                  slaves:
+                    type: integer
+                    description: Number of slaves discovered on the bus
+                    example: 3
+        "500":
+          $ref: "#/components/responses/DriverError"
+  /api/reset:
+    post:
+      summary: Reset the fieldbus driver and clear the device list
+      operationId: reset
+      description: >
+        Transitions all slaves to INIT state, closes the network interface, and removes
+        all Device objects. After this returns, POST /api/init and POST /api/configure
+        may be called again.
+      responses:
+        "200":
+          description: Reset completed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
   /api/registers:
     get:
       summary: List all known ESC registers

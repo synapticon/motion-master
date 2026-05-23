@@ -1,0 +1,67 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y ninja-build gcc-14 g++-14
+
+      - name: Install CMake 4.x
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: "~4.0.0"
+
+      - name: Configure
+        run: cmake --preset x64-linux-release
+        env:
+          CC: gcc-14
+          CXX: g++-14
+
+      - name: Build
+        run: cmake --build --preset x64-linux-release
+
+      - name: Bundle TLS certificate and key
+        env:
+          TLS_CERT: ${{ secrets.TLS_CERT }}
+          TLS_KEY: ${{ secrets.TLS_KEY }}
+        run: |
+          dir=build/x64-linux-release/apps/motion_master
+          echo "$TLS_CERT" > "$dir/cert.pem"
+          echo "$TLS_KEY"  > "$dir/key.pem"
+
+      - name: Package
+        run: |
+          dir=build/x64-linux-release/apps/motion_master
+          archive="motion-master-${GITHUB_REF_NAME}-linux-x64.tar.gz"
+          tar -czf "$archive" -C "$dir" motion-master swagger.yml cert.pem key.pem
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Motion Master $GITHUB_REF_NAME" \
+            --generate-notes \
+            "$ARCHIVE"

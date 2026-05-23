@@ -1,0 +1,37 @@
+name: Renew TLS Certificate
+
+on:
+  schedule:
+    - cron: '0 10 1 * *'  # 1st of every month at 10:00 UTC
+  workflow_dispatch:
+
+jobs:
+  renew:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Install acme.sh
+        run: curl -fsSL https://get.acme.sh | sh -s email=msankovic@synapticon.com
+
+      - name: Write acme-dns credentials
+        env:
+          ACMEDNS_CONFIG: ${{ secrets.ACMEDNS_CONFIG }}
+        run: echo "$ACMEDNS_CONFIG" > ~/.acmedns.json
+
+      - name: Issue certificate
+        run: |
+          ~/.acme.sh/acme.sh --issue --force \
+            -d local.motion-master.synapticon.com \
+            --dns dns_acmedns \
+            --server letsencrypt
+
+      - name: Store renewed cert and key as secrets
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT_SECRETS }}
+        run: |
+          gh secret set TLS_CERT \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$(cat ~/.acme.sh/local.motion-master.synapticon.com_ecc/fullchain.cer)"
+          gh secret set TLS_KEY \
+            --repo "$GITHUB_REPOSITORY" \
+            --body "$(cat ~/.acme.sh/local.motion-master.synapticon.com_ecc/local.motion-master.synapticon.com.key)"

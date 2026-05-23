@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useParams } from 'react-router'
+import { NavLink, Outlet } from 'react-router'
 
 const mockDevices = ['1', '2', '3', '4', '5', '6', '7', '8']
 
@@ -42,8 +42,6 @@ function DeviceSection({ deviceId }: { deviceId: string }) {
 }
 
 export default function RootLayout() {
-  const { deviceId } = useParams()
-
   return (
     <div className="flex h-screen bg-grey-50 text-grey-900">
       {/* Sidebar — Ocean Dark */}

@@ -63,6 +63,8 @@ jobs:
 
       - name: Build UI
         working-directory: ui
+        env:
+          VITE_BASE: /motion-master/
         run: pnpm build
 
       - name: Assemble Pages artifact

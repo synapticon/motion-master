@@ -1,7 +1,7 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
-import { api } from '../api'
+import { Api } from '@mm/api-client'
 
 const AL_STATES = [
   { value: 1 as const, label: 'Init' },
@@ -30,10 +30,17 @@ const btnOutlineCls =
 
 export default function DashboardPage() {
   const queryClient = useQueryClient()
+  const [host, setHost] = useState('local.motion-master.synapticon.com')
+  const [port, setPort] = useState('8443')
   const [driver, setDriver] = useState<'soem' | 'spoe' | 'igh'>('soem')
   const [adapter, setAdapter] = useState('')
   const [alState, setAlState] = useState<1 | 2 | 3 | 4 | 8>(8)
   const [hasScanned, setHasScanned] = useState(false)
+
+  const api = useMemo(
+    () => new Api({ baseUrl: `https://${host}:${port}` }),
+    [host, port],
+  )
 
   const initMutation = useMutation({
     mutationFn: () => api.init({ driver, adapter }),
@@ -78,10 +85,39 @@ export default function DashboardPage() {
           </a>
         </p>
 
-        {/* Fieldbus — numbered steps */}
+        {/* Row 1 — Connection */}
+        <section>
+          <p className="eyebrow mb-5">Connection</p>
+          <div className="border border-grey-200 p-5">
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className={labelCls}>Host</label>
+                <input
+                  type="text"
+                  value={host}
+                  onChange={e => setHost(e.target.value)}
+                  placeholder="local.motion-master.synapticon.com"
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>Port</label>
+                <input
+                  type="text"
+                  value={port}
+                  onChange={e => setPort(e.target.value)}
+                  placeholder="8443"
+                  className={inputCls}
+                />
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {/* Row 2 — Init + Scan (with devices) */}
         <section>
           <p className="eyebrow mb-5">Fieldbus</p>
-          <div className="grid grid-cols-3 gap-6">
+          <div className="grid grid-cols-2 gap-6">
 
             {/* 1. Init */}
             <div className="border border-grey-200 p-5 space-y-4">
@@ -152,7 +188,7 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* 2. Scan */}
+            {/* 2. Scan + Devices */}
             <div className="border border-grey-200 p-5 space-y-4">
               <h3 className="text-sm font-display uppercase tracking-widest">
                 <span className="text-syn-red mr-1">2.</span>Scan
@@ -176,9 +212,62 @@ export default function DashboardPage() {
               {scanMutation.isError && (
                 <p className="text-status-bad text-xs">{apiError(scanMutation.error)}</p>
               )}
+
+              {hasScanned && (
+                <div className="pt-2 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="eyebrow text-xs">Devices</p>
+                    <button
+                      onClick={() => devicesQuery.refetch()}
+                      disabled={devicesQuery.isFetching}
+                      className={btnOutlineCls}
+                    >
+                      {devicesQuery.isFetching ? 'Reading…' : 'Re-read'}
+                    </button>
+                  </div>
+                  <div className="border border-grey-200">
+                    {devicesQuery.isFetching && !devicesQuery.data && (
+                      <p className="p-4 text-xs text-grey-600">Loading devices…</p>
+                    )}
+                    {devicesQuery.isSuccess && devicesQuery.data.data.length === 0 && (
+                      <p className="p-4 text-xs text-grey-600">No devices found.</p>
+                    )}
+                    {devicesQuery.isSuccess && devicesQuery.data.data.length > 0 && (
+                      <table className="w-full text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b border-grey-200 bg-grey-50">
+                            {['Pos', 'Name', 'Vendor ID', 'Product Code', 'Revision', 'Serial'].map(h => (
+                              <th key={h} className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium">
+                                {h}
+                              </th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {devicesQuery.data.data.map(d => (
+                            <tr key={d.slavePosition} className="border-b border-grey-100 last:border-0">
+                              <td className="px-4 py-2">{d.slavePosition}</td>
+                              <td className="px-4 py-2">{d.name}</td>
+                              <td className="px-4 py-2 font-mono">0x{d.vendorId.toString(16).toUpperCase()}</td>
+                              <td className="px-4 py-2 font-mono">0x{d.productCode.toString(16).toUpperCase()}</td>
+                              <td className="px-4 py-2 font-mono">0x{d.revisionNumber.toString(16).toUpperCase()}</td>
+                              <td className="px-4 py-2 font-mono">{d.serialNumber}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* 3. Transition to State */}
+          </div>
+        </section>
+
+        {/* Row 3 — Transition to State */}
+        <section>
+          <div className="grid grid-cols-2 gap-6">
             <div className="border border-grey-200 p-5 space-y-4">
               <h3 className="text-sm font-display uppercase tracking-widest">
                 <span className="text-syn-red mr-1">3.</span>Transition to State
@@ -209,58 +298,9 @@ export default function DashboardPage() {
                 <p className="text-status-bad text-xs">{apiError(transitionMutation.error)}</p>
               )}
             </div>
-
           </div>
         </section>
 
-        {/* Devices — separate section, populated after scan */}
-        {hasScanned && (
-          <section>
-            <div className="flex items-center justify-between mb-4">
-              <p className="eyebrow">Devices</p>
-              <button
-                onClick={() => devicesQuery.refetch()}
-                disabled={devicesQuery.isFetching}
-                className={btnOutlineCls}
-              >
-                {devicesQuery.isFetching ? 'Reading…' : 'Re-read'}
-              </button>
-            </div>
-            <div className="border border-grey-200">
-              {devicesQuery.isFetching && !devicesQuery.data && (
-                <p className="p-4 text-xs text-grey-600">Loading devices…</p>
-              )}
-              {devicesQuery.isSuccess && devicesQuery.data.data.length === 0 && (
-                <p className="p-4 text-xs text-grey-600">No devices found.</p>
-              )}
-              {devicesQuery.isSuccess && devicesQuery.data.data.length > 0 && (
-                <table className="w-full text-xs border-collapse">
-                  <thead>
-                    <tr className="border-b border-grey-200 bg-grey-50">
-                      {['Pos', 'Name', 'Vendor ID', 'Product Code', 'Revision', 'Serial'].map(h => (
-                        <th key={h} className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium">
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {devicesQuery.data.data.map(d => (
-                      <tr key={d.slavePosition} className="border-b border-grey-100 last:border-0">
-                        <td className="px-4 py-2">{d.slavePosition}</td>
-                        <td className="px-4 py-2">{d.name}</td>
-                        <td className="px-4 py-2 font-mono">0x{d.vendorId.toString(16).toUpperCase()}</td>
-                        <td className="px-4 py-2 font-mono">0x{d.productCode.toString(16).toUpperCase()}</td>
-                        <td className="px-4 py-2 font-mono">0x{d.revisionNumber.toString(16).toUpperCase()}</td>
-                        <td className="px-4 py-2 font-mono">{d.serialNumber}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
-            </div>
-          </section>
-        )}
       </div>
     </div>
   )

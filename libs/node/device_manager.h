@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
@@ -60,6 +62,23 @@ class DeviceManager {
   ///          wired into the GameLoop.  Before enabling PDO exchange, stop the loop
   ///          (or drain one cycle) before calling @c init() / @c reset() via the API.
   void pdoExchange();
+
+  /// @brief Transitions a set of devices to @p targetState, blocking until all arrive or
+  ///        @p timeout elapses.
+  ///
+  /// If @p positions is empty, all discovered devices are targeted. Devices that do not
+  /// arrive within @p timeout are logged at error level; the call still returns successfully.
+  ///
+  /// Must be called after both @c init() and @c scan().
+  ///
+  /// @param positions    1-based slave positions to transition; empty = all devices.
+  /// @param targetState  Desired EtherCAT AL state.
+  /// @param timeout      Maximum time to wait for all devices.
+  /// @return Void on success, or an error string if no driver is initialised or no devices
+  ///         have been discovered.
+  std::expected<void, std::string> transitionToState(
+      const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
+      std::chrono::steady_clock::duration timeout);
 
  private:
   std::unique_ptr<mm::comm::FieldbusDriver> driver_;

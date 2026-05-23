@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <cstdint>
 #include <fstream>
 #include <memory>
@@ -15,6 +16,7 @@
 
 #include "comm/base.h"
 #include "comm/esc_registers.h"
+#include "comm/fieldbus_driver.h"
 #include "node/device_manager.h"
 
 static constexpr std::string_view kCorsOrigin = "https://motion-master.synapticon.com";
@@ -334,6 +336,63 @@ void Server::run() {
                 if (!last) return;
                 if (*aborted) return;
                 deviceManager_.reset();
+                res->writeHeader("Content-Type", "application/json")
+                    ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                    ->end(nlohmann::json{{"ok", true}}.dump());
+              });
+            })
+      .post("/api/state",
+            [this](auto* res, auto* /*req*/) {
+              auto aborted = std::make_shared<bool>(false);
+              auto body = std::make_shared<std::string>();
+              res->onAborted([aborted]() { *aborted = true; });
+              res->onData([this, res, body, aborted](std::string_view chunk, bool last) {
+                body->append(chunk);
+                if (!last) return;
+                if (*aborted) return;
+                uint16_t stateVal{};
+                std::vector<uint16_t> positions;
+                int timeoutMs = 5000;
+                try {
+                  nlohmann::json j = nlohmann::json::parse(*body);
+                  stateVal = j.at("state").get<uint16_t>();
+                  if (j.contains("positions")) {
+                    positions = j["positions"].get<std::vector<uint16_t>>();
+                  }
+                  if (j.contains("timeout")) {
+                    timeoutMs = j["timeout"].get<int>();
+                  }
+                } catch (const nlohmann::json::exception& e) {
+                  res->writeStatus("400 Bad Request")
+                      ->writeHeader("Content-Type", "application/json")
+                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->end(nlohmann::json{{"error", e.what()}}.dump());
+                  return;
+                }
+                using S = mm::comm::EtherCatState;
+                if (stateVal != static_cast<uint16_t>(S::Init) &&
+                    stateVal != static_cast<uint16_t>(S::PreOp) &&
+                    stateVal != static_cast<uint16_t>(S::Boot) &&
+                    stateVal != static_cast<uint16_t>(S::SafeOp) &&
+                    stateVal != static_cast<uint16_t>(S::Op)) {
+                  res->writeStatus("400 Bad Request")
+                      ->writeHeader("Content-Type", "application/json")
+                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->end(nlohmann::json{{"error",
+                                            "invalid state: use 1 (Init), 2 (PreOp),"
+                                            " 3 (Boot), 4 (SafeOp), or 8 (Op)"}}.dump());
+                  return;
+                }
+                auto targetState = static_cast<S>(stateVal);
+                if (auto r = deviceManager_.transitionToState(
+                        positions, targetState, std::chrono::milliseconds(timeoutMs));
+                    !r) {
+                  res->writeStatus("500 Internal Server Error")
+                      ->writeHeader("Content-Type", "application/json")
+                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->end(nlohmann::json{{"error", r.error()}}.dump());
+                  return;
+                }
                 res->writeHeader("Content-Type", "application/json")
                     ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
                     ->end(nlohmann::json{{"ok", true}}.dump());

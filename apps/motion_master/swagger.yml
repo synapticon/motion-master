@@ -335,6 +335,64 @@ paths:
           description: No device at the given bus position
         "500":
           $ref: "#/components/responses/DriverError"
+  /api/state:
+    post:
+      summary: Transition devices to an EtherCAT AL state
+      operationId: transitionToState
+      description: >
+        Commands one or more devices to the requested EtherCAT Application Layer state
+        and blocks until all targeted devices arrive or the timeout elapses.
+        Devices that do not arrive in time are logged at error level; the call still
+        returns 200. Omit `positions` or pass an empty array to target all discovered devices.
+        State values are the standard AL state register encodings from ETG.1000.6:
+        1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                positions:
+                  type: array
+                  items:
+                    type: integer
+                    minimum: 1
+                  description: >
+                    1-based slave positions to target. Omit or pass an empty array
+                    to target all discovered devices.
+                  example: [1, 2]
+                state:
+                  type: integer
+                  enum: [1, 2, 3, 4, 8]
+                  description: >
+                    Target EtherCAT AL state (ETG.1000.6 AL control register encoding):
+                    1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+                  example: 8
+                timeout:
+                  type: integer
+                  description: Maximum time to wait for all devices, in milliseconds
+                  default: 5000
+                  example: 5000
+      responses:
+        "200":
+          description: >
+            Transition command completed. All targeted devices may or may not have
+            reached the target state within the timeout; check device state via GET /api/devices.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        "400":
+          description: Request body is malformed or `state` is not a valid AL state value
+        "500":
+          $ref: "#/components/responses/DriverError"
   /api/devices:
     get:
       summary: List all fieldbus devices

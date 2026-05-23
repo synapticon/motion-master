@@ -76,7 +76,17 @@ curl -k -X POST https://localhost:8443/api/scan
 # 4. List discovered devices
 curl -k https://localhost:8443/api/devices
 
-# 5. Tear down (stops driver, clears device list; init + scan can be called again)
+# 5. Transition all devices to Op state (state values: 1=Init, 2=PreOp, 3=Boot, 4=SafeOp, 8=Op)
+curl -k -X POST https://localhost:8443/api/state \
+     -H 'Content-Type: application/json' \
+     -d '{"state":8}'
+
+# 6. Transition specific devices, with a custom timeout
+curl -k -X POST https://localhost:8443/api/state \
+     -H 'Content-Type: application/json' \
+     -d '{"state":2,"positions":[1,2],"timeout":3000}'
+
+# 7. Tear down (stops driver, clears device list; init + scan can be called again)
 curl -k -X POST https://localhost:8443/api/reset
 ```
 

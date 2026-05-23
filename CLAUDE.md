@@ -100,7 +100,7 @@ App  (composition root, owns everything)
  │     │     ├── owns: DeviceParameter[] (index/subindex → DeviceParameterValue variant)
  │     │     ├── owns: PdoMappings
  │     │     └── owns: Cia402StateMachine  (only if Cia402Drive)
- │     └── init(unique_ptr<FieldbusDriver>), scan(), reset(), pdoExchange(), state transitions
+ │     └── init(unique_ptr<FieldbusDriver>), scan(), reset(), pdoExchange(), transitionToState()
  ├── GameLoop  (RT thread, SCHED_FIFO, 1ms)
  │     ├── uses: DeviceManager    (calls pdoExchange each cycle; no-op when driver is null)
  │     ├── writes: Device parameters via seqlock

@@ -62,6 +62,25 @@ void DeviceManager::pdoExchange() {
   }
 }
 
+std::expected<void, std::string> DeviceManager::transitionToState(
+    const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
+    std::chrono::steady_clock::duration timeout) {
+  if (!driver_) {
+    return std::unexpected("no driver — call init() first");
+  }
+  if (devices_.empty()) {
+    return std::unexpected("no devices — call scan() first");
+  }
+  std::vector<uint16_t> targets = positions;
+  if (targets.empty()) {
+    for (const auto& d : devices_) {
+      targets.push_back(d.slavePosition());
+    }
+  }
+  driver_->transitionToState(targets, std::nullopt, targetState, timeout);
+  return {};
+}
+
 void to_json(nlohmann::json& j, const DeviceManager& dm) { j = dm.devices(); }
 
 }  // namespace mm::node

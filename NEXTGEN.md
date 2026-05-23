@@ -586,6 +586,7 @@ Previously the app required `--driver` and could not start without a functioning
 | `POST /api/init` | `{"driver":"soem","adapter":"eth0"}` (adapter optional) | Creates driver, calls `DeviceManager::init()` |
 | `POST /api/scan` | — | Calls `DeviceManager::scan()`; returns `{"slaves": N}` |
 | `POST /api/reset` | — | Calls `DeviceManager::reset()`; releases driver |
+| `POST /api/state` | `{"state":8,"positions":[1,2],"timeout":5000}` (positions/timeout optional) | Calls `DeviceManager::transitionToState()` |
 
 `GET /api/devices` returns an empty array when uninitialised; all other behaviour is unchanged.
 
@@ -596,3 +597,42 @@ The GameLoop starts unconditionally regardless of whether a driver is present. `
 **Thread safety — open issue**
 
 `POST /api/init`, `POST /api/scan`, and `POST /api/reset` run on the HTTP server thread and mutate `driver_` and `devices_`. `pdoExchange()` runs on the RT GameLoop thread and reads both. There is currently no lock guarding this boundary. This is safe only because `pdoExchange()` is not yet wired into the GameLoop. Before enabling live PDO exchange, the loop must be stopped (or drained for one cycle) before `init()` or `reset()` is called via the API.
+
+---
+
+## Session 2026-05-23 — DeviceManager::transitionToState and POST /api/state
+
+**DeviceManager::transitionToState**
+
+`DeviceManager` now exposes `transitionToState` as a thin delegation to `FieldbusDriver::transitionToState`. Requires both `init()` and `scan()` to have been called — `init()` opens the NIC and `scan()` configures slave addresses and the io map; neither is meaningful without the other.
+
+```cpp
+std::expected<void, std::string> transitionToState(
+    const std::vector<uint16_t>& positions,
+    mm::comm::EtherCatState targetState,
+    std::chrono::steady_clock::duration timeout);
+```
+
+- If `positions` is empty, all entries in `devices_` are targeted.
+- Returns an error string if no driver is initialised (`driver_` is null) or no devices have been discovered (`devices_` is empty).
+- Devices that do not reach the target state within `timeout` are logged at error level; the call still returns successfully — the caller can inspect device state via `GET /api/devices` if needed.
+- `requiredState` (pre-filter) and `tick` (watchdog keepalive) are not exposed at the `DeviceManager` level for now; they are implementation details of the driver that will be wired in when live PDO exchange is enabled.
+
+**POST /api/state**
+
+```
+POST /api/state
+{"state": 8, "positions": [1, 2], "timeout": 5000}
+```
+
+`state` uses the standard ETG.1000.6 AL control register encoding: 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op). Numbers were chosen over strings because these values are well-known to EtherCAT engineers and map directly to the wire protocol. `positions` and `timeout` are optional; omitting `positions` targets all discovered devices, `timeout` defaults to 5000 ms.
+
+**Firmware update lifecycle — future work**
+
+The planned firmware update flow is:
+1. Transition target device to BOOT (other devices continue PDO exchange normally).
+2. Flash firmware over the Boot mailbox.
+3. Device returns to INIT — at this point it is stale: potentially a new PDO layout and updated object dictionary.
+4. Future `DeviceManager::reintegrate(slavePosition)` will: re-run `ec_config_map()` for that slave's io map slot, refresh the `Device`'s parameter list from the updated OD, then call `transitionToState` to bring it back to Op.
+
+Step 4 is not yet implemented. `transitionToState` as shipped covers steps 1 and 3.

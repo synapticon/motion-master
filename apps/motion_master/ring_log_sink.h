@@ -24,7 +24,7 @@ class RingLogSink : public spdlog::sinks::base_sink<Mutex> {
  public:
   /// @brief Constructs the sink with the given ring-buffer capacity.
   /// @param capacity  Maximum number of log lines to retain.  Defaults to 10 000.
-  explicit RingLogSink(std::size_t capacity = 10000) : capacity_(capacity) {}
+  explicit RingLogSink(std::size_t capacity = 100000) : capacity_(capacity) {}
 
   /// @brief Returns a snapshot of all currently buffered log lines.
   ///

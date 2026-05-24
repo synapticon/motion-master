@@ -46,6 +46,14 @@ export default function DashboardPage() {
     mutationFn: () => api.init({ driver, adapter }),
   })
 
+  const resetMutation = useMutation({
+    mutationFn: () => api.reset(),
+    onSuccess: () => {
+      setHasScanned(false)
+      queryClient.removeQueries({ queryKey: ['devices'] })
+    },
+  })
+
   const scanMutation = useMutation({
     mutationFn: () => api.scan(),
     onSuccess: () => {
@@ -74,17 +82,6 @@ export default function DashboardPage() {
     <div>
       <PageHeader eyebrow="App" title="Dashboard" />
       <div className="p-8 space-y-8">
-        <p className="text-sm">
-          <a
-            href="https://synapticon.github.io/motion-master/docs/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-syn-red underline hover:opacity-70"
-          >
-            Documentation
-          </a>
-        </p>
-
         {/* Row 1 — Connection */}
         <section>
           <p className="eyebrow mb-5">Connection</p>
@@ -114,16 +111,17 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* Row 2 — Init + Scan (with devices) */}
+        {/* Row 2 — Init + Reset */}
         <section>
           <p className="eyebrow mb-5">Fieldbus</p>
           <div className="grid grid-cols-2 gap-6">
 
-            {/* 1. Init */}
+            {/* Init */}
             <div className="border border-grey-200 p-5 space-y-4">
-              <h3 className="text-sm font-display uppercase tracking-widest">
-                <span className="text-syn-red mr-1">1.</span>Init
-              </h3>
+              <h3 className="text-sm font-display uppercase tracking-widest">Init</h3>
+              <p className="text-xs text-grey-600">
+                Initialize the fieldbus driver with the selected protocol and network adapter. Must be called before scanning.
+              </p>
               <div className="space-y-3">
                 <div>
                   <label className={labelCls}>Driver</label>
@@ -188,11 +186,38 @@ export default function DashboardPage() {
               )}
             </div>
 
-            {/* 2. Scan + Devices */}
+            {/* Reset */}
             <div className="border border-grey-200 p-5 space-y-4">
-              <h3 className="text-sm font-display uppercase tracking-widest">
-                <span className="text-syn-red mr-1">2.</span>Scan
-              </h3>
+              <h3 className="text-sm font-display uppercase tracking-widest">Reset</h3>
+              <p className="text-xs text-grey-600">
+                Reset the fieldbus driver and clear the device list. Init must be performed again afterwards.
+              </p>
+              <button
+                onClick={() => resetMutation.mutate()}
+                disabled={resetMutation.isPending}
+                className={btnCls}
+              >
+                {resetMutation.isPending ? 'Resetting…' : 'Reset'}
+              </button>
+              {resetMutation.isSuccess && (
+                <p className="text-status-good text-xs">Reset</p>
+              )}
+              {resetMutation.isError && (
+                <p className="text-status-bad text-xs">{apiError(resetMutation.error)}</p>
+              )}
+            </div>
+
+          </div>
+        </section>
+
+        {/* Row 3 — Scan + Transition to State */}
+        <section>
+          <p className="eyebrow mb-5">Devices</p>
+          <div className="grid grid-cols-2 gap-6">
+
+            {/* Scan + Devices */}
+            <div className="border border-grey-200 p-5 space-y-4">
+              <h3 className="text-sm font-display uppercase tracking-widest">Scan</h3>
               <p className="text-xs text-grey-600">
                 Discover EtherCAT slaves on the bus. Requires a successful init first.
               </p>
@@ -262,16 +287,12 @@ export default function DashboardPage() {
               )}
             </div>
 
-          </div>
-        </section>
-
-        {/* Row 3 — Transition to State */}
-        <section>
-          <div className="grid grid-cols-2 gap-6">
+            {/* Transition to State */}
             <div className="border border-grey-200 p-5 space-y-4">
-              <h3 className="text-sm font-display uppercase tracking-widest">
-                <span className="text-syn-red mr-1">3.</span>Transition to State
-              </h3>
+              <h3 className="text-sm font-display uppercase tracking-widest">Transition to State</h3>
+              <p className="text-xs text-grey-600">
+                Command all slaves to transition to the selected EtherCAT AL state. Requires a successful scan first.
+              </p>
               <div>
                 <label className={labelCls}>Target state</label>
                 <select
@@ -298,6 +319,7 @@ export default function DashboardPage() {
                 <p className="text-status-bad text-xs">{apiError(transitionMutation.error)}</p>
               )}
             </div>
+
           </div>
         </section>
 

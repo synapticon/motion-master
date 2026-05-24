@@ -81,12 +81,12 @@ export default function DashboardPage() {
   return (
     <div>
       <PageHeader eyebrow="App" title="Dashboard" />
-      <div className="p-8 space-y-8">
+      <div className="p-4 sm:p-8 space-y-8">
         {/* Row 1 — Connection */}
         <section>
           <p className="eyebrow mb-5">Connection</p>
           <div className="border border-grey-200 p-5">
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className={labelCls}>Host</label>
                 <input
@@ -114,7 +114,7 @@ export default function DashboardPage() {
         {/* Row 2 — Init + Reset */}
         <section>
           <p className="eyebrow mb-5">Fieldbus</p>
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
             {/* Init */}
             <div className="border border-grey-200 p-5 space-y-4">
@@ -213,7 +213,7 @@ export default function DashboardPage() {
         {/* Row 3 — Scan + Transition to State */}
         <section>
           <p className="eyebrow mb-5">Devices</p>
-          <div className="grid grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
             {/* Scan + Devices */}
             <div className="border border-grey-200 p-5 space-y-4">
@@ -250,7 +250,7 @@ export default function DashboardPage() {
                       {devicesQuery.isFetching ? 'Reading…' : 'Re-read'}
                     </button>
                   </div>
-                  <div className="border border-grey-200">
+                  <div className="border border-grey-200 overflow-x-auto">
                     {devicesQuery.isFetching && !devicesQuery.data && (
                       <p className="p-4 text-xs text-grey-600">Loading devices…</p>
                     )}

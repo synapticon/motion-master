@@ -1,11 +1,11 @@
 import { useParams } from 'react-router'
-import PageHeader from '../components/PageHeader'
+import DevicePageHeader from '../components/DevicePageHeader'
 
 export default function EthercatStatePage() {
   const { deviceId } = useParams()
   return (
     <div>
-      <PageHeader eyebrow={`Device ${deviceId}`} title="EtherCAT State" />
+      <DevicePageHeader slavePosition={Number(deviceId)} title="EtherCAT State" />
     </div>
   )
 }

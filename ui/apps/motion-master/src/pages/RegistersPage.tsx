@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
-import PageHeader from '../components/PageHeader'
+import DevicePageHeader from '../components/DevicePageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
@@ -91,7 +91,7 @@ export default function RegistersPage() {
 
   return (
     <div>
-      <PageHeader eyebrow={`Device ${deviceId}`} title="Registers" />
+      <DevicePageHeader slavePosition={slavePosition} title="Registers" />
       <div className="p-4 sm:p-8 space-y-8">
 
         {/* Read form */}

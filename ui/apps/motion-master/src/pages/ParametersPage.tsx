@@ -1,11 +1,11 @@
 import { useParams } from 'react-router'
-import PageHeader from '../components/PageHeader'
+import DevicePageHeader from '../components/DevicePageHeader'
 
 export default function ParametersPage() {
   const { deviceId } = useParams()
   return (
     <div>
-      <PageHeader eyebrow={`Device ${deviceId}`} title="Parameters" />
+      <DevicePageHeader slavePosition={Number(deviceId)} title="Parameters" />
     </div>
   )
 }

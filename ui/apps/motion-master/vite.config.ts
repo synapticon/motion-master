@@ -17,7 +17,6 @@ export default defineConfig({
         theme_color: '#004f5d',
         background_color: '#004f5d',
         display: 'standalone',
-        // @ts-expect-error — display_override is valid per spec but missing from vite-plugin-pwa types
         display_override: ['window-controls-overlay'],
         scope: '/app',
         start_url: '/app',

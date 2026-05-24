@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Context
 
-**Motion Master v6.0.0** — next-generation motion control software. This project is a clean-sheet rewrite of the previous `motion_master` codebase; the design rationale and session notes live in `NEXTGEN.md`. Read that file for architectural decisions, class diagrams, and design rationale before making structural changes.
+**Motion Master v6.0.0** — next-generation motion control software for SOMANET servo drives. This project is a clean-sheet rewrite of the previous `motion_master` codebase; the design rationale and session notes live in `NEXTGEN.md`. Read that file for architectural decisions, class diagrams, and design rationale before making structural changes.
 
 Key design mandates from NEXTGEN.md:
 - No exceptions — use `std::expected<T, std::string>` (C++23 stdlib, no `tl::expected`)

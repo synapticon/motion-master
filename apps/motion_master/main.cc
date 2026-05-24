@@ -103,8 +103,8 @@ int main(int argc, char** argv) {
       opts.keyFile = bundledKey.string();
       spdlog::info("TLS: bundled cert ({})", opts.certFile);
     } else if (const char* home = std::getenv("HOME")) {
-      const auto acmeDir = std::filesystem::path(home) /
-                           ".acme.sh/local.motion-master.synapticon.com_ecc";
+      const auto acmeDir =
+          std::filesystem::path(home) / ".acme.sh/local.motion-master.synapticon.com_ecc";
       const auto acmeCert = acmeDir / "fullchain.cer";
       const auto acmeKey = acmeDir / "local.motion-master.synapticon.com.key";
       if (std::filesystem::exists(acmeCert) && std::filesystem::exists(acmeKey)) {

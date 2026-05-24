@@ -2,6 +2,7 @@
 #include <spdlog/spdlog.h>
 
 #include <csignal>
+#include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <utility>
@@ -87,6 +88,39 @@ int main(int argc, char** argv) {
       return 1;
     }
     if (auto result = deviceManager.scan(); !result) {
+      return 1;
+    }
+  }
+
+  // Auto-discover TLS cert/key when not supplied via --cert/--key:
+  //   1. cert.pem / key.pem next to the binary  (release install)
+  //   2. ~/.acme.sh/local.motion-master.synapticon.com_ecc/  (local acme.sh)
+  if (opts.certFile.empty() || opts.keyFile.empty()) {
+    const auto bundledCert = exeDir() / "cert.pem";
+    const auto bundledKey = exeDir() / "key.pem";
+    if (std::filesystem::exists(bundledCert) && std::filesystem::exists(bundledKey)) {
+      opts.certFile = bundledCert.string();
+      opts.keyFile = bundledKey.string();
+      spdlog::info("TLS: bundled cert ({})", opts.certFile);
+    } else if (const char* home = std::getenv("HOME")) {
+      const auto acmeDir = std::filesystem::path(home) /
+                           ".acme.sh/local.motion-master.synapticon.com_ecc";
+      const auto acmeCert = acmeDir / "fullchain.cer";
+      const auto acmeKey = acmeDir / "local.motion-master.synapticon.com.key";
+      if (std::filesystem::exists(acmeCert) && std::filesystem::exists(acmeKey)) {
+        opts.certFile = acmeCert.string();
+        opts.keyFile = acmeKey.string();
+        spdlog::info("TLS: Let's Encrypt cert from acme.sh ({})", opts.certFile);
+      } else {
+        spdlog::error(
+            "No TLS certificate found — pass --cert/--key or place cert.pem/key.pem next to the "
+            "binary");
+        return 1;
+      }
+    } else {
+      spdlog::error(
+          "No TLS certificate found — pass --cert/--key or place cert.pem/key.pem next to the "
+          "binary");
       return 1;
     }
   }

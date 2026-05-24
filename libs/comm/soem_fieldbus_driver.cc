@@ -3,6 +3,7 @@
 #include <soem/soem.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
@@ -63,9 +64,8 @@ std::expected<std::vector<uint16_t>, std::string> SoemFieldbusDriver::readStates
   ecx_readstate(ctx_.get());
   std::vector<uint16_t> result;
   result.reserve(positions.size());
-  for (uint16_t pos : positions) {
-    result.push_back(ctx_->slavelist[pos].state);
-  }
+  std::ranges::transform(positions, std::back_inserter(result),
+                         [this](uint16_t pos) { return ctx_->slavelist[pos].state; });
   return result;
 }
 

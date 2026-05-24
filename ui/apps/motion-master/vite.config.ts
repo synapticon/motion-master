@@ -17,6 +17,7 @@ export default defineConfig({
         theme_color: '#004f5d',
         background_color: '#004f5d',
         display: 'standalone',
+        display_override: ['window-controls-overlay'],
         scope: '/app',
         start_url: '/app',
         orientation: 'landscape',

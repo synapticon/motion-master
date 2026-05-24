@@ -76,6 +76,19 @@ class FieldbusDriver {
   /// After @c stop() returns, @c exchangeProcessData() must not be called again.
   virtual void stop() = 0;
 
+  /// @brief Reads the current AL Status for each slave in @p positions.
+  ///
+  /// Refreshes slave state from the hardware in one pass, then returns the raw
+  /// AL Status register value for each requested position.  Bits 3:0 encode the
+  /// current state (1=Init, 2=PreOp, 3=Boot, 4=SafeOp, 8=Op); bit 4 is the
+  /// error indicator.
+  ///
+  /// @param positions  1-based slave positions to read.
+  /// @return Raw AL Status values in the same order as @p positions, or an
+  ///         error string if the hardware read fails.
+  virtual std::expected<std::vector<uint16_t>, std::string> readStates(
+      const std::vector<uint16_t>& positions) = 0;
+
   /// @brief Reads bytes from an ESC register via a Configured-Address Read (FPRD) datagram.
   ///
   /// @p data.size() bytes are read from register @p address of the slave at @p slavePosition.

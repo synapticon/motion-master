@@ -82,6 +82,38 @@ std::expected<void, std::string> DeviceManager::transitionToState(
   return {};
 }
 
+void to_json(nlohmann::json& j, const DeviceStateInfo& info) {
+  j = {{"slavePosition", info.slavePosition}, {"alState", info.alState}, {"error", info.error}};
+}
+
+std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::getDeviceStates(
+    const std::vector<uint16_t>& positions) {
+  if (!driver_) {
+    return std::unexpected("no driver — call init() first");
+  }
+  std::vector<uint16_t> targets = positions;
+  if (targets.empty()) {
+    targets.reserve(devices_.size());
+    std::transform(devices_.begin(), devices_.end(), std::back_inserter(targets),
+                   [](const Device& d) { return d.slavePosition(); });
+  }
+  auto raw = driver_->readStates(targets);
+  if (!raw) {
+    return std::unexpected(raw.error());
+  }
+  std::vector<DeviceStateInfo> result;
+  result.reserve(targets.size());
+  for (std::size_t i = 0; i < targets.size(); ++i) {
+    uint16_t state = (*raw)[i];
+    result.push_back({
+        .slavePosition = targets[i],
+        .alState = static_cast<uint16_t>(state & 0x000Fu),
+        .error = !!(state & 0x0010u),
+    });
+  }
+  return result;
+}
+
 void to_json(nlohmann::json& j, const DeviceManager& dm) { j = dm.devices(); }
 
 }  // namespace mm::node

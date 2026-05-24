@@ -349,7 +349,53 @@ paths:
           description: No device at the given bus position
         "500":
           $ref: "#/components/responses/DriverError"
-  /api/state:
+  /api/devices/state:
+    get:
+      summary: Read current AL state for devices
+      operationId: getDeviceStates
+      description: >
+        Reads the current EtherCAT Application Layer state for one or more devices.
+        Omit the `positions` query parameter to query all discovered devices.
+      parameters:
+        - name: positions
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Comma-separated list of 1-based slave positions to query (e.g. `1,2,3`).
+            Omit to query all discovered devices.
+          example: "1,2"
+      responses:
+        "200":
+          description: AL state snapshot for each queried device
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [slavePosition, alState, error]
+                  properties:
+                    slavePosition:
+                      type: integer
+                      description: 1-based position on the fieldbus
+                      example: 1
+                    alState:
+                      type: integer
+                      enum: [1, 2, 3, 4, 8]
+                      description: >
+                        Current AL state (ETG.1000.6 encoding):
+                        1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+                      example: 2
+                    error:
+                      type: boolean
+                      description: True when the AL Status error indicator bit is set
+                      example: false
+        "400":
+          description: A `positions` value is not a valid integer
+        "500":
+          $ref: "#/components/responses/DriverError"
     post:
       summary: Transition devices to an EtherCAT AL state
       operationId: transitionToState
@@ -393,7 +439,8 @@ paths:
         "200":
           description: >
             Transition command completed. All targeted devices may or may not have
-            reached the target state within the timeout; check device state via GET /api/devices.
+            reached the target state within the timeout; check device state via
+            GET /api/devices/state.
           content:
             application/json:
               schema:

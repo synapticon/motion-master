@@ -58,6 +58,17 @@ SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
 
 int SoemFieldbusDriver::slaveCount() const { return ctx_ ? ctx_->slavecount : 0; }
 
+std::expected<std::vector<uint16_t>, std::string> SoemFieldbusDriver::readStates(
+    const std::vector<uint16_t>& positions) {
+  ecx_readstate(ctx_.get());
+  std::vector<uint16_t> result;
+  result.reserve(positions.size());
+  for (uint16_t pos : positions) {
+    result.push_back(ctx_->slavelist[pos].state);
+  }
+  return result;
+}
+
 std::expected<void, std::string> SoemFieldbusDriver::readRegister(uint16_t slavePosition,
                                                                   uint16_t address,
                                                                   std::span<uint8_t> data) {

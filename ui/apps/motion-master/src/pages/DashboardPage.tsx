@@ -31,7 +31,28 @@ const btnOutlineCls =
 export default function DashboardPage() {
   const queryClient = useQueryClient()
   const { host, port, setHost, setPort, api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned } = useConnection()
-  const [alState, setAlState] = useState<1 | 2 | 3 | 4 | 8>(8)
+  const [alState, setAlState] = useState<1 | 2 | 3 | 4 | 8>(2)
+  const AL_STATE_LABEL: Record<number, string> = { 1: 'Init', 2: 'PreOp', 3: 'Boot', 4: 'SafeOp', 8: 'Op' }
+
+  type DeviceState = { alState: number; error: boolean }
+  const [deviceStates, setDeviceStates] = useState<Record<number, DeviceState>>({})
+  const [readingStates, setReadingStates] = useState(false)
+
+  async function readAllStates() {
+    if (!devicesQuery.data) return
+    setReadingStates(true)
+    const positions = devicesQuery.data.data.map(d => d.slavePosition).join(',')
+    try {
+      const res = await api.getDeviceStates({ positions })
+      const next: Record<number, DeviceState> = {}
+      for (const entry of res.data) {
+        next[entry.slavePosition] = { alState: entry.alState, error: entry.error }
+      }
+      setDeviceStates(next)
+    } finally {
+      setReadingStates(false)
+    }
+  }
 
   const initMutation = useMutation({
     mutationFn: () => api.init({ driver, adapter }),
@@ -41,6 +62,7 @@ export default function DashboardPage() {
     mutationFn: () => api.reset(),
     onSuccess: () => {
       setHasScanned(false)
+      setDeviceStates({})
       queryClient.removeQueries({ queryKey: ['devices'] })
     },
   })
@@ -49,6 +71,7 @@ export default function DashboardPage() {
     mutationFn: () => api.scan(),
     onSuccess: () => {
       setHasScanned(true)
+      setDeviceStates({})
     },
   })
 
@@ -232,13 +255,22 @@ export default function DashboardPage() {
                 <div className="pt-2 space-y-2">
                   <div className="flex items-center justify-between">
                     <p className="eyebrow text-xs">Devices</p>
-                    <button
-                      onClick={() => devicesQuery.refetch()}
-                      disabled={devicesQuery.isFetching}
-                      className={btnOutlineCls}
-                    >
-                      {devicesQuery.isFetching ? 'Reading…' : 'Re-read'}
-                    </button>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={readAllStates}
+                        disabled={readingStates || !devicesQuery.data?.data.length}
+                        className={btnOutlineCls}
+                      >
+                        {readingStates ? 'Reading…' : 'Read States'}
+                      </button>
+                      <button
+                        onClick={() => devicesQuery.refetch()}
+                        disabled={devicesQuery.isFetching}
+                        className={btnOutlineCls}
+                      >
+                        {devicesQuery.isFetching ? 'Reading…' : 'Re-read'}
+                      </button>
+                    </div>
                   </div>
                   <div className="border border-grey-200 overflow-x-auto">
                     {devicesQuery.isFetching && !devicesQuery.data && (
@@ -251,7 +283,7 @@ export default function DashboardPage() {
                       <table className="w-full text-xs border-collapse">
                         <thead>
                           <tr className="border-b border-grey-200 bg-grey-50">
-                            {['Pos', 'Name', 'Vendor ID', 'Product Code', 'Revision', 'Serial'].map(h => (
+                            {['Pos', 'Name', 'Vendor ID', 'Product Code', 'Revision', 'Serial', 'AL State'].map(h => (
                               <th key={h} className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium">
                                 {h}
                               </th>
@@ -267,6 +299,14 @@ export default function DashboardPage() {
                               <td className="px-4 py-2 font-mono">0x{d.productCode.toString(16).toUpperCase()}</td>
                               <td className="px-4 py-2 font-mono">0x{d.revisionNumber.toString(16).toUpperCase()}</td>
                               <td className="px-4 py-2 font-mono">{d.serialNumber}</td>
+                              <td className="px-4 py-2">
+                                {deviceStates[d.slavePosition] !== undefined
+                                  ? <span className={deviceStates[d.slavePosition].error ? 'text-status-bad' : ''}>
+                                      {AL_STATE_LABEL[deviceStates[d.slavePosition].alState] ?? `0x${deviceStates[d.slavePosition].alState.toString(16).toUpperCase()}`}
+                                      {deviceStates[d.slavePosition].error ? ' !' : ''}
+                                    </span>
+                                  : '—'}
+                              </td>
                             </tr>
                           ))}
                         </tbody>

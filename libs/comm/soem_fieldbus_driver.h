@@ -57,6 +57,10 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// @brief Closes the NIC and releases all driver resources.
   void stop() override;
 
+  /// @copydoc FieldbusDriver::readStates
+  std::expected<std::vector<uint16_t>, std::string> readStates(
+      const std::vector<uint16_t>& positions) override;
+
   /// @brief Reads bytes from an ESC register via FPRD.
   /// @param slavePosition  1-based slave position on the bus.
   /// @param address        ESC register address.

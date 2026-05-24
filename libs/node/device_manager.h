@@ -13,6 +13,16 @@
 
 namespace mm::node {
 
+/// @brief Current AL state snapshot for a single device.
+struct DeviceStateInfo {
+  uint16_t slavePosition;  ///< 1-based position on the fieldbus.
+  uint16_t alState;        ///< Current AL state (1=Init, 2=PreOp, 3=Boot, 4=SafeOp, 8=Op).
+  bool error;              ///< True when the AL Status error indicator bit is set.
+};
+
+/// @brief Serialises a DeviceStateInfo to JSON.
+void to_json(nlohmann::json& j, const DeviceStateInfo& info);
+
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.
 ///
 /// The driver is not required at construction — call @c init() to supply one.
@@ -79,6 +89,17 @@ class DeviceManager {
   std::expected<void, std::string> transitionToState(const std::vector<uint16_t>& positions,
                                                      mm::comm::EtherCatState targetState,
                                                      std::chrono::steady_clock::duration timeout);
+
+  /// @brief Reads the current AL state for a set of devices.
+  ///
+  /// If @p positions is empty, all discovered devices are queried.
+  /// Must be called after both @c init() and @c scan().
+  ///
+  /// @param positions  1-based slave positions to query; empty = all devices.
+  /// @return AL state snapshot per device, or an error string if the driver is
+  ///         not initialised or the hardware read fails.
+  std::expected<std::vector<DeviceStateInfo>, std::string> getDeviceStates(
+      const std::vector<uint16_t>& positions);
 
  private:
   std::unique_ptr<mm::comm::FieldbusDriver> driver_;

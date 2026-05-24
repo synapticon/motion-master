@@ -24,7 +24,7 @@ std::optional<T> parseHexOrDec(std::string_view s) {
   } else {
     r = std::from_chars(s.data(), s.data() + s.size(), value);
   }
-  if (r.ec != std::errc {} || r.ptr != s.data() + s.size()) {
+  if (r.ec != std::errc{} || r.ptr != s.data() + s.size()) {  // NOLINT(whitespace/braces)
     return std::nullopt;
   }
   return value;

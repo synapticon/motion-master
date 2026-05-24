@@ -70,8 +70,9 @@ std::expected<std::vector<uint16_t>, std::string> SoemFieldbusDriver::readStates
   return result;
 }
 
-std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(
-    uint16_t slavePosition, uint16_t index, uint8_t subindex) {
+std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uint16_t slavePosition,
+                                                                             uint16_t index,
+                                                                             uint8_t subindex) {
   std::vector<uint8_t> data(4096, 0);
   int size = static_cast<int>(data.size());
   int wkc = ecx_SDOread(ctx_.get(), slavePosition, index, subindex, FALSE, &size, data.data(),

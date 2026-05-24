@@ -14,9 +14,9 @@
 #include <vector>
 
 #include "comm/base.h"
-#include "core/util.h"
 #include "comm/esc_registers.h"
 #include "comm/fieldbus_driver.h"
+#include "core/util.h"
 #include "node/device_manager.h"
 
 Server::Server(Config config, mm::node::DeviceManager& deviceManager)

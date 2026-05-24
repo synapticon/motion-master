@@ -1,8 +1,8 @@
 #include "core/util.h"
 
-#include <cstdint>
-
 #include <gtest/gtest.h>
+
+#include <cstdint>
 
 using mm::core::parseHexOrDec;
 
@@ -42,9 +42,7 @@ TEST(ParseHexOrDecTest, RejectsOverflow) {
   EXPECT_EQ(parseHexOrDec<uint8_t>("0x100"), std::nullopt);
 }
 
-TEST(ParseHexOrDecTest, RejectsNegative) {
-  EXPECT_EQ(parseHexOrDec<uint16_t>("-1"), std::nullopt);
-}
+TEST(ParseHexOrDecTest, RejectsNegative) { EXPECT_EQ(parseHexOrDec<uint16_t>("-1"), std::nullopt); }
 
 TEST(ParseHexOrDecTest, RejectsBareHexPrefix) {
   EXPECT_EQ(parseHexOrDec<uint16_t>("0x"), std::nullopt);

@@ -24,7 +24,7 @@ uint32_t Device::revisionNumber() const { return revisionNumber_; }
 uint32_t Device::serialNumber() const { return serialNumber_; }
 
 std::expected<std::vector<uint8_t>, std::string> Device::upload(uint16_t index,
-                                                                  uint8_t subindex) const {
+                                                                uint8_t subindex) const {
   return driver_.readSdo(slavePosition_, index, subindex);
 }
 

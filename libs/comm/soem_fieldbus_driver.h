@@ -63,7 +63,7 @@ class SoemFieldbusDriver : public FieldbusDriver {
 
   /// @copydoc FieldbusDriver::readSdo
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t slavePosition, uint16_t index,
-                                                            uint8_t subindex) override;
+                                                           uint8_t subindex) override;
 
   /// @brief Reads bytes from an ESC register via FPRD.
   /// @param slavePosition  1-based slave position on the bus.

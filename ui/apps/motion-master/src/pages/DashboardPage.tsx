@@ -257,18 +257,18 @@ export default function DashboardPage() {
                     <p className="eyebrow text-xs">Devices</p>
                     <div className="flex gap-2">
                       <button
+                        onClick={() => devicesQuery.refetch()}
+                        disabled={devicesQuery.isFetching}
+                        className={btnOutlineCls}
+                      >
+                        {devicesQuery.isFetching ? 'Reading…' : 'Re-read Devices'}
+                      </button>
+                      <button
                         onClick={readAllStates}
                         disabled={readingStates || !devicesQuery.data?.data.length}
                         className={btnOutlineCls}
                       >
                         {readingStates ? 'Reading…' : 'Read States'}
-                      </button>
-                      <button
-                        onClick={() => devicesQuery.refetch()}
-                        disabled={devicesQuery.isFetching}
-                        className={btnOutlineCls}
-                      >
-                        {devicesQuery.isFetching ? 'Reading…' : 'Re-read'}
                       </button>
                     </div>
                   </div>
@@ -303,6 +303,7 @@ export default function DashboardPage() {
                                 {deviceStates[d.slavePosition] !== undefined
                                   ? <span className={deviceStates[d.slavePosition].error ? 'text-status-bad' : ''}>
                                       {AL_STATE_LABEL[deviceStates[d.slavePosition].alState] ?? `0x${deviceStates[d.slavePosition].alState.toString(16).toUpperCase()}`}
+                                      {' '}({deviceStates[d.slavePosition].alState})
                                       {deviceStates[d.slavePosition].error ? ' !' : ''}
                                     </span>
                                   : '—'}

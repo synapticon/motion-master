@@ -61,6 +61,12 @@ class DeviceManager {
   /// @return Devices in bus order (index 0 = node position 1). Empty before @c scan().
   const std::vector<Device>& devices() const;
 
+  /// @brief Finds a device by its 1-based bus position.
+  ///
+  /// @param slavePosition  1-based position of the device on the fieldbus.
+  /// @return Pointer to the matching @c Device, or @c nullptr if not found.
+  const Device* findDevice(uint16_t slavePosition) const;
+
   /// @brief Exchanges process data with all nodes.
   ///
   /// Called once per @c GameLoop cycle. No-op when no driver is initialised.

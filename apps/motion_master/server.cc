@@ -2,7 +2,6 @@
 
 #include <spdlog/spdlog.h>
 
-#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cstdint>
@@ -15,6 +14,7 @@
 #include <vector>
 
 #include "comm/base.h"
+#include "core/util.h"
 #include "comm/esc_registers.h"
 #include "comm/fieldbus_driver.h"
 #include "node/device_manager.h"
@@ -205,10 +205,8 @@ void Server::run() {
                    ->end();
                return;
              }
-             const auto& devices = deviceManager_.devices();
-             auto it = std::find_if(devices.begin(), devices.end(),
-                                    [pos](const auto& d) { return d.slavePosition() == pos; });
-             if (it == devices.end()) {
+             const auto* device = deviceManager_.findDevice(pos);
+             if (!device) {
                res->writeStatus("404 Not Found")
                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                    ->end();
@@ -216,7 +214,7 @@ void Server::run() {
              }
              res->writeHeader("Content-Type", "application/json")
                  ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json(*it).dump());
+                 ->end(nlohmann::json(*device).dump());
            })
       .get("/api/devices/:slavePosition/registers/:address",
            [this](auto* res, auto* req) {
@@ -250,17 +248,15 @@ void Server::run() {
                    ->end();
                return;
              }
-             const auto& devices = deviceManager_.devices();
-             auto it = std::find_if(devices.begin(), devices.end(),
-                                    [pos](const auto& d) { return d.slavePosition() == pos; });
-             if (it == devices.end()) {
+             const auto* device = deviceManager_.findDevice(pos);
+             if (!device) {
                res->writeStatus("404 Not Found")
                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                    ->end();
                return;
              }
              std::vector<uint8_t> buf(length);
-             if (auto r = it->readRegister(address, buf); !r) {
+             if (auto r = device->readRegister(address, buf); !r) {
                res->writeStatus("500 Internal Server Error")
                    ->writeHeader("Content-Type", "application/json")
                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
@@ -308,16 +304,14 @@ void Server::run() {
                       ->end(nlohmann::json{{"error", e.what()}}.dump());
                   return;
                 }
-                const auto& devices = deviceManager_.devices();
-                auto it = std::find_if(devices.begin(), devices.end(),
-                                       [pos](const auto& d) { return d.slavePosition() == pos; });
-                if (it == devices.end()) {
+                const auto* device = deviceManager_.findDevice(pos);
+                if (!device) {
                   res->writeStatus("404 Not Found")
                       ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                       ->end();
                   return;
                 }
-                if (auto r = it->writeRegister(address, data); !r) {
+                if (auto r = device->writeRegister(address, data); !r) {
                   res->writeStatus("500 Internal Server Error")
                       ->writeHeader("Content-Type", "application/json")
                       ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
@@ -329,6 +323,51 @@ void Server::run() {
                     ->end(nlohmann::json{{"ok", true}}.dump());
               });
             })
+      .get("/api/devices/:slavePosition/sdo/:index/:subindex",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p1, ec1] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             if (ec1 != std::errc() || p1 != posParam.data() + posParam.size()) {
+               res->writeStatus("400 Bad Request")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end();
+               return;
+             }
+             auto index = mm::core::parseHexOrDec<uint16_t>(req->getParameter("index"));
+             if (!index) {
+               res->writeStatus("400 Bad Request")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end();
+               return;
+             }
+             auto subindex = mm::core::parseHexOrDec<uint8_t>(req->getParameter("subindex"));
+             if (!subindex) {
+               res->writeStatus("400 Bad Request")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end();
+               return;
+             }
+             const auto* device = deviceManager_.findDevice(pos);
+             if (!device) {
+               res->writeStatus("404 Not Found")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end();
+               return;
+             }
+             auto r = device->upload(*index, *subindex);
+             if (!r) {
+               res->writeStatus("500 Internal Server Error")
+                   ->writeHeader("Content-Type", "application/json")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end(nlohmann::json{{"error", r.error()}}.dump());
+               return;
+             }
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                 ->end(nlohmann::json{{"data", *r}}.dump());
+           })
       .post("/api/init",
             [this](auto* res, auto* /*req*/) {
               auto aborted = std::make_shared<bool>(false);

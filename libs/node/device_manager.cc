@@ -57,6 +57,13 @@ void DeviceManager::reset() {
 
 const std::vector<Device>& DeviceManager::devices() const { return devices_; }
 
+const Device* DeviceManager::findDevice(uint16_t slavePosition) const {
+  auto it = std::find_if(devices_.begin(), devices_.end(), [slavePosition](const Device& d) {
+    return d.slavePosition() == slavePosition;
+  });
+  return it != devices_.end() ? &*it : nullptr;
+}
+
 void DeviceManager::pdoExchange() {
   if (driver_) {
     driver_->exchangeProcessData();

@@ -1,6 +1,6 @@
 PROJECT_NAME           = "Motion Master"
 PROJECT_NUMBER         = @MM_VERSION@
-PROJECT_BRIEF          = "Next-generation EtherCAT motion control software"
+PROJECT_BRIEF          = "Next-generation motion control software"
 
 OUTPUT_DIRECTORY       = @CMAKE_CURRENT_BINARY_DIR@/docs
 

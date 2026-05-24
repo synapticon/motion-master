@@ -1,6 +1,6 @@
 # Motion Master
 
-Next-generation motion control software for EtherCAT devices. Browser-based control interface, real-time process data exchange at 1 ms, and an HTTP API with WebSockets — control from any language, any tool, any AI agent.
+Next-generation motion control software for SOMANET servo drives. Browser-based control interface, real-time process data exchange, and a secure HTTP API and WebSocket interface — control from any language, any tool, any AI agent.
 
 ## Prerequisites
 

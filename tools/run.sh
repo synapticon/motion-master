@@ -3,7 +3,7 @@ set -euo pipefail
 
 preset="${1:-x64-linux-debug}"
 binary="build/${preset}/apps/motion_master/motion-master"
-cors_origin="${CORS_ORIGIN:-http://localhost:5173}"
+cors_origin="${CORS_ORIGIN:-https://motion-master.synapticon.com}"
 
 if [[ ! -x "$binary" ]]; then
     echo "Binary not found: $binary — run ./tools/build.sh first" >&2

@@ -37,6 +37,8 @@ Options parseOptions(int argc, char** argv) {
   app.add_option("--adapter", adapterInput,
                  "Network adapter: MAC (AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF)"
                  " or interface name (eth0)");
+  app.add_option("--cors-origin", opts.corsOrigin, "Allowed CORS origin")
+      ->capture_default_str();
 
   try {
     app.parse(argc, argv);

@@ -18,6 +18,8 @@ struct Options {
   std::string logLevel{"info"};                     ///< spdlog level: trace/debug/info/warn/error.
   std::optional<mm::comm::NetworkAdapter> adapter;  ///< Absent when --adapter is not given.
   std::optional<nlohmann::json> configData;  ///< Parsed config; absent when --config not given.
+  /// Allowed CORS origin. Defaults to the production PWA origin.
+  std::string corsOrigin{"https://motion-master.synapticon.com"};
 };
 
 /// @brief Parse argv and load the config file into an Options value.

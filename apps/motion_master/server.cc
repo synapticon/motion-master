@@ -19,7 +19,6 @@
 #include "comm/fieldbus_driver.h"
 #include "node/device_manager.h"
 
-static constexpr std::string_view kCorsOrigin = "https://motion-master.synapticon.com";
 
 Server::Server(Config config, mm::node::DeviceManager& deviceManager)
     : config_(std::move(config)), deviceManager_(deviceManager) {}
@@ -112,7 +111,7 @@ void Server::run() {
                      "</body></html>");
            })
       .get("/api/swagger.yml",
-           [swaggerContent](auto* res, auto* /*req*/) {
+           [this, swaggerContent](auto* res, auto* /*req*/) {
              if (swaggerContent.empty()) {
                res->writeStatus("404 Not Found")->end();
                return;
@@ -120,24 +119,24 @@ void Server::run() {
              // text/* renders inline in the browser; non-text MIME types trigger a download.
              res->writeHeader("Content-Type", "text/yaml; charset=utf-8")
                  ->writeHeader("Content-Disposition", "inline")
-                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(swaggerContent);
            })
       .get("/api/adapters",
-           [](auto* res, auto* /*req*/) {
+           [this](auto* res, auto* /*req*/) {
              auto adapterMap = mm::comm::mapMacAddressesToInterfaces();
              nlohmann::json arr = nlohmann::json::array();
              for (const auto& [mac, name] : adapterMap) {
                arr.push_back({{"mac", mac}, {"name", name}});
              }
              res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(arr.dump());
            })
       .get("/api/version",
            [this](auto* res, auto* /*req*/) {
              res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(nlohmann::json{{"version", config_.version}}.dump());
            })
       .get("/api/log",
@@ -149,19 +148,19 @@ void Server::run() {
                body += '\n';
              }
              res->writeHeader("Content-Type", "text/plain; charset=utf-8")
-                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(body);
            })
       .get("/api/registers",
-           [](auto* res, auto* /*req*/) {
+           [this](auto* res, auto* /*req*/) {
              res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(nlohmann::json(mm::comm::kEscRegisters).dump());
            })
       .get("/api/devices",
            [this](auto* res, auto* /*req*/) {
              res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(nlohmann::json(deviceManager_).dump());
            })
       .get("/api/devices/:slavePosition",
@@ -171,7 +170,7 @@ void Server::run() {
              auto [ptr, ec] = std::from_chars(param.data(), param.data() + param.size(), pos);
              if (ec != std::errc() || ptr != param.data() + param.size()) {
                res->writeStatus("400 Bad Request")
-                   ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                    ->end();
                return;
              }
@@ -180,12 +179,12 @@ void Server::run() {
                                     [pos](const auto& d) { return d.slavePosition() == pos; });
              if (it == devices.end()) {
                res->writeStatus("404 Not Found")
-                   ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                    ->end();
                return;
              }
              res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(nlohmann::json(*it).dump());
            })
       .get("/api/devices/:slavePosition/registers/:address",
@@ -196,7 +195,7 @@ void Server::run() {
                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
              if (ec1 != std::errc() || p1 != posParam.data() + posParam.size()) {
                res->writeStatus("400 Bad Request")
-                   ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                    ->end();
                return;
              }
@@ -206,7 +205,7 @@ void Server::run() {
                  std::from_chars(addrParam.data(), addrParam.data() + addrParam.size(), address);
              if (ec2 != std::errc() || p2 != addrParam.data() + addrParam.size()) {
                res->writeStatus("400 Bad Request")
-                   ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                    ->end();
                return;
              }
@@ -216,7 +215,7 @@ void Server::run() {
                  std::from_chars(lenParam.data(), lenParam.data() + lenParam.size(), length);
              if (ec3 != std::errc() || p3 != lenParam.data() + lenParam.size() || length == 0) {
                res->writeStatus("400 Bad Request")
-                   ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                    ->end();
                return;
              }
@@ -225,7 +224,7 @@ void Server::run() {
                                     [pos](const auto& d) { return d.slavePosition() == pos; });
              if (it == devices.end()) {
                res->writeStatus("404 Not Found")
-                   ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                    ->end();
                return;
              }
@@ -233,12 +232,12 @@ void Server::run() {
              if (auto r = it->readRegister(address, buf); !r) {
                res->writeStatus("500 Internal Server Error")
                    ->writeHeader("Content-Type", "application/json")
-                   ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                    ->end(nlohmann::json{{"error", r.error()}}.dump());
                return;
              }
              res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(nlohmann::json{{"data", buf}}.dump());
            })
       .post("/api/devices/:slavePosition/registers/:address",
@@ -263,7 +262,7 @@ void Server::run() {
                 if (*aborted) return;
                 if (!posOk || !addrOk) {
                   res->writeStatus("400 Bad Request")
-                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                       ->end();
                   return;
                 }
@@ -274,7 +273,7 @@ void Server::run() {
                 } catch (const nlohmann::json::exception& e) {
                   res->writeStatus("400 Bad Request")
                       ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                       ->end(nlohmann::json{{"error", e.what()}}.dump());
                   return;
                 }
@@ -283,19 +282,19 @@ void Server::run() {
                                        [pos](const auto& d) { return d.slavePosition() == pos; });
                 if (it == devices.end()) {
                   res->writeStatus("404 Not Found")
-                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                       ->end();
                   return;
                 }
                 if (auto r = it->writeRegister(address, data); !r) {
                   res->writeStatus("500 Internal Server Error")
                       ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                       ->end(nlohmann::json{{"error", r.error()}}.dump());
                   return;
                 }
                 res->writeHeader("Content-Type", "application/json")
-                    ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                     ->end(nlohmann::json{{"ok", true}}.dump());
               });
             })
@@ -310,7 +309,7 @@ void Server::run() {
                 if (*aborted) return;
                 if (!config_.initDriver) {
                   res->writeStatus("501 Not Implemented")
-                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                       ->end();
                   return;
                 }
@@ -322,17 +321,17 @@ void Server::run() {
                   if (auto r = config_.initDriver(driver, adapter); !r) {
                     res->writeStatus("500 Internal Server Error")
                         ->writeHeader("Content-Type", "application/json")
-                        ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                        ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                         ->end(nlohmann::json{{"error", r.error()}}.dump());
                     return;
                   }
                   res->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                       ->end(nlohmann::json{{"ok", true}}.dump());
                 } catch (const nlohmann::json::exception& e) {
                   res->writeStatus("400 Bad Request")
                       ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                       ->end(nlohmann::json{{"error", e.what()}}.dump());
                 }
               });
@@ -347,12 +346,12 @@ void Server::run() {
                 if (auto r = deviceManager_.scan(); !r) {
                   res->writeStatus("500 Internal Server Error")
                       ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                       ->end(nlohmann::json{{"error", r.error()}}.dump());
                   return;
                 } else {
                   res->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                       ->end(nlohmann::json{{"slaves", *r}}.dump());
                 }
               });
@@ -366,7 +365,7 @@ void Server::run() {
                 if (*aborted) return;
                 deviceManager_.reset();
                 res->writeHeader("Content-Type", "application/json")
-                    ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                     ->end(nlohmann::json{{"ok", true}}.dump());
               });
             })
@@ -394,7 +393,7 @@ void Server::run() {
                 } catch (const nlohmann::json::exception& e) {
                   res->writeStatus("400 Bad Request")
                       ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                       ->end(nlohmann::json{{"error", e.what()}}.dump());
                   return;
                 }
@@ -406,7 +405,7 @@ void Server::run() {
                     stateVal != static_cast<uint16_t>(S::Op)) {
                   res->writeStatus("400 Bad Request")
                       ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                       ->end(nlohmann::json{{"error",
                                             "invalid state: use 1 (Init), 2 (PreOp),"
                                             " 3 (Boot), 4 (SafeOp), or 8 (Op)"}}
@@ -419,18 +418,18 @@ void Server::run() {
                     !r) {
                   res->writeStatus("500 Internal Server Error")
                       ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                       ->end(nlohmann::json{{"error", r.error()}}.dump());
                   return;
                 }
                 res->writeHeader("Content-Type", "application/json")
-                    ->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                     ->end(nlohmann::json{{"ok", true}}.dump());
               });
             })
       .options("/api/*",
-               [](auto* res, auto* /*req*/) {
-                 res->writeHeader("Access-Control-Allow-Origin", kCorsOrigin)
+               [this](auto* res, auto* /*req*/) {
+                 res->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                      ->writeHeader("Access-Control-Allow-Methods",
                                    "GET, POST, PUT, DELETE, OPTIONS")
                      ->writeHeader("Access-Control-Allow-Headers", "Content-Type")

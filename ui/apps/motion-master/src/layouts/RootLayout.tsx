@@ -1,15 +1,13 @@
 import { NavLink, Outlet } from 'react-router'
+import { useQuery } from '@tanstack/react-query'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
-
-const mockDevices = ['1', '2', '3', '4', '5', '6', '7', '8']
+import { useConnection } from '../contexts/ConnectionContext'
 
 const deviceLinks = [
-  { to: 'ethercat-state',    label: 'EtherCAT State' },
-  { to: 'object-dictionary', label: 'Object Dictionary' },
-  { to: 'sii',               label: 'SII' },
-  { to: 'registers',         label: 'Registers' },
-  { to: 'foe',               label: 'FoE' },
-  { to: 'process-data',      label: 'Process Data' },
+  { to: 'foe',        label: 'FoE' },
+  { to: 'parameters', label: 'Parameters' },
+  { to: 'registers',  label: 'Registers' },
+  { to: 'sii',        label: 'SII' },
 ]
 
 function NavItem({ to, label }: { to: string; label: string }) {
@@ -43,6 +41,16 @@ function DeviceSection({ deviceId }: { deviceId: string }) {
 }
 
 export default function RootLayout() {
+  const { api, hasScanned } = useConnection()
+
+  const devicesQuery = useQuery({
+    queryKey: ['devices'],
+    queryFn: () => api.getDevices(),
+    enabled: hasScanned,
+  })
+
+  const devices = devicesQuery.data?.data ?? []
+
   return (
     <div className="flex h-screen bg-grey-50 text-grey-900">
       {/* Sidebar — Ocean Dark */}
@@ -55,8 +63,15 @@ export default function RootLayout() {
 
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
           <NavItem to="/" label="Dashboard" />
-          {mockDevices.map((id) => (
-            <DeviceSection key={id} deviceId={id} />
+
+          {hasScanned && (
+            <p className="eyebrow px-5 mt-6 mb-1 text-white/40">
+              {devices.length} {devices.length === 1 ? 'device' : 'devices'}
+            </p>
+          )}
+
+          {devices.map(d => (
+            <DeviceSection key={d.slavePosition} deviceId={String(d.slavePosition)} />
           ))}
         </nav>
 

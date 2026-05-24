@@ -6,6 +6,7 @@ import ObjectDictionaryPage from './pages/ObjectDictionaryPage'
 import SiiPage from './pages/SiiPage'
 import RegistersPage from './pages/RegistersPage'
 import FoePage from './pages/FoePage'
+import ParametersPage from './pages/ParametersPage'
 import ProcessDataPage from './pages/ProcessDataPage'
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
           <Route path="sii" element={<SiiPage />} />
           <Route path="registers" element={<RegistersPage />} />
           <Route path="foe" element={<FoePage />} />
+          <Route path="parameters" element={<ParametersPage />} />
           <Route path="process-data" element={<ProcessDataPage />} />
         </Route>
       </Route>

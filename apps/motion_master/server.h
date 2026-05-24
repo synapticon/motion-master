@@ -50,6 +50,8 @@ class Server {
     std::string swaggerFile;  ///< Path to `swagger.yml`; served at `GET /api/swagger.yml`.
     InitDriverFn initDriver;  ///< Handler for `POST /api/init`; required for API-driven init.
     GetLogFn getLog;          ///< Handler for `GET /api/log`; returns buffered log entries.
+    /// Value sent in `Access-Control-Allow-Origin`. Defaults to the production PWA origin.
+    std::string corsOrigin{"https://motion-master.synapticon.com"};
   };
 
   /// @brief Constructs the server with the given configuration.

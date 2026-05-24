@@ -114,6 +114,7 @@ int main(int argc, char** argv) {
             return deviceManager.init(std::move(*driver));
           },
           .getLog = [ringLogSink]() { return ringLogSink->entries(); },
+          .corsOrigin = opts.corsOrigin,
       },
       deviceManager};
   server.start();

@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
-import { Api } from '@mm/api-client'
+import { useConnection } from '../contexts/ConnectionContext'
 
 const AL_STATES = [
   { value: 1 as const, label: 'Init' },
@@ -30,17 +30,10 @@ const btnOutlineCls =
 
 export default function DashboardPage() {
   const queryClient = useQueryClient()
-  const [host, setHost] = useState('local.motion-master.synapticon.com')
-  const [port, setPort] = useState('8443')
+  const { host, port, setHost, setPort, api, hasScanned, setHasScanned } = useConnection()
   const [driver, setDriver] = useState<'soem' | 'spoe' | 'igh'>('soem')
   const [adapter, setAdapter] = useState('')
   const [alState, setAlState] = useState<1 | 2 | 3 | 4 | 8>(8)
-  const [hasScanned, setHasScanned] = useState(false)
-
-  const api = useMemo(
-    () => new Api({ baseUrl: `https://${host}:${port}` }),
-    [host, port],
-  )
 
   const initMutation = useMutation({
     mutationFn: () => api.init({ driver, adapter }),
@@ -58,7 +51,6 @@ export default function DashboardPage() {
     mutationFn: () => api.scan(),
     onSuccess: () => {
       setHasScanned(true)
-      queryClient.invalidateQueries({ queryKey: ['devices'] })
     },
   })
 

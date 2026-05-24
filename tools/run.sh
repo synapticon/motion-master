@@ -3,6 +3,7 @@ set -euo pipefail
 
 preset="${1:-x64-linux-debug}"
 binary="build/${preset}/apps/motion_master/motion-master"
+cors_origin="${CORS_ORIGIN:-http://localhost:5173}"
 
 if [[ ! -x "$binary" ]]; then
     echo "Binary not found: $binary — run ./tools/build.sh first" >&2
@@ -18,11 +19,11 @@ acme_cert="$acme_dir/fullchain.cer"
 acme_key="$acme_dir/local.motion-master.synapticon.com.key"
 
 if [[ -f "$bundled_cert" && -f "$bundled_key" ]]; then
-    echo "Starting Motion Master (preset: $preset, cert: bundled)"
-    "$binary" --cert "$bundled_cert" --key "$bundled_key" "${@:2}"
+    echo "Starting Motion Master (preset: $preset, cert: bundled, cors: $cors_origin)"
+    "$binary" --cert "$bundled_cert" --key "$bundled_key" --cors-origin "$cors_origin" "${@:2}"
 elif [[ -f "$acme_cert" && -f "$acme_key" ]]; then
-    echo "Starting Motion Master (preset: $preset, cert: Let's Encrypt)"
-    "$binary" --cert "$acme_cert" --key "$acme_key" "${@:2}"
+    echo "Starting Motion Master (preset: $preset, cert: Let's Encrypt, cors: $cors_origin)"
+    "$binary" --cert "$acme_cert" --key "$acme_key" --cors-origin "$cors_origin" "${@:2}"
 else
     # Fall back to a short-lived self-signed cert for environments without the
     # acme.sh certificate (requires accepting the browser security exception).
@@ -38,6 +39,6 @@ else
         -addext "subjectAltName=DNS:local.motion-master.synapticon.com,IP:127.0.0.1" \
         2>/dev/null
 
-    echo "Starting Motion Master (preset: $preset, cert: self-signed — browser exception required)"
-    "$binary" --cert "$cert" --key "$key" "${@:2}"
+    echo "Starting Motion Master (preset: $preset, cert: self-signed — browser exception required, cors: $cors_origin)"
+    "$binary" --cert "$cert" --key "$key" --cors-origin "$cors_origin" "${@:2}"
 fi

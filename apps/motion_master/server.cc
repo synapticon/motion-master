@@ -22,7 +22,13 @@
 Server::Server(Config config, mm::node::DeviceManager& deviceManager)
     : config_(std::move(config)), deviceManager_(deviceManager) {}
 
-Server::~Server() { stop(); }
+Server::~Server() {
+  stop();
+  // stop() returns early when running_ was already false (listen failed), leaving thread_ joinable.
+  if (thread_.joinable()) {
+    thread_.join();
+  }
+}
 
 void Server::start() {
   bool expected = false;

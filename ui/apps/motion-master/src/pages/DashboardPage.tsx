@@ -132,9 +132,9 @@ export default function DashboardPage() {
                     onChange={e => setDriver(e.target.value as 'soem' | 'spoe' | 'igh')}
                     className={inputCls}
                   >
-                    <option value="soem">SOEM</option>
-                    <option value="spoe">SPoE</option>
-                    <option value="igh">IgH</option>
+                    <option value="soem">SOEM (Simple Open EtherCAT Master)</option>
+                    <option value="spoe">SPoE (SOMANET Protocol over Ethernet)</option>
+                    <option value="igh">IgH EtherCAT Master</option>
                   </select>
                 </div>
                 <div>
@@ -143,7 +143,7 @@ export default function DashboardPage() {
                     type="text"
                     value={adapter}
                     onChange={e => setAdapter(e.target.value)}
-                    placeholder="auto-detect"
+                    placeholder="network adapter name or MAC address"
                     className={inputCls}
                   />
                   <button
@@ -280,7 +280,7 @@ export default function DashboardPage() {
                   className={inputCls}
                 >
                   {AL_STATES.map(({ value, label }) => (
-                    <option key={value} value={value}>{label}</option>
+                    <option key={value} value={value}>{label} ({value})</option>
                   ))}
                 </select>
               </div>

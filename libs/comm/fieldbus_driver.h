@@ -89,6 +89,20 @@ class FieldbusDriver {
   virtual std::expected<std::vector<uint16_t>, std::string> readStates(
       const std::vector<uint16_t>& positions) = 0;
 
+  /// @brief Reads an object dictionary entry via CoE SDO upload.
+  ///
+  /// Allocates up to 4096 bytes, performs a mailbox SDO upload, and returns the exact
+  /// bytes the slave sent (resized to the actual transfer size).
+  /// Called from HTTP handler threads; must not overlap with @c exchangeProcessData.
+  ///
+  /// @param slavePosition  1-based slave position on the bus.
+  /// @param index          CoE object index.
+  /// @param subindex       CoE object subindex.
+  /// @return The bytes transferred on success, or an error string if the mailbox transfer fails.
+  virtual std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t slavePosition,
+                                                                    uint16_t index,
+                                                                    uint8_t subindex) = 0;
+
   /// @brief Reads bytes from an ESC register via a Configured-Address Read (FPRD) datagram.
   ///
   /// @p data.size() bytes are read from register @p address of the slave at @p slavePosition.

@@ -23,6 +23,11 @@ uint32_t Device::productCode() const { return productCode_; }
 uint32_t Device::revisionNumber() const { return revisionNumber_; }
 uint32_t Device::serialNumber() const { return serialNumber_; }
 
+std::expected<std::vector<uint8_t>, std::string> Device::upload(uint16_t index,
+                                                                  uint8_t subindex) const {
+  return driver_.readSdo(slavePosition_, index, subindex);
+}
+
 std::expected<void, std::string> Device::readRegister(uint16_t address,
                                                       std::span<uint8_t> data) const {
   return driver_.readRegister(slavePosition_, address, data);

@@ -5,6 +5,7 @@
 #include <nlohmann/json_fwd.hpp>
 #include <span>
 #include <string>
+#include <vector>
 
 #include "comm/fieldbus_driver.h"
 
@@ -38,6 +39,14 @@ class Device {
 
   /// @brief Serial number from EEPROM.
   uint32_t serialNumber() const;
+
+  /// @brief Uploads an object dictionary entry from the device (CoE SDO upload).
+  ///
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @return The bytes transferred on success, or an error string if the mailbox transfer fails.
+  std::expected<std::vector<uint8_t>, std::string> upload(uint16_t index,
+                                                           uint8_t subindex) const;
 
   /// @brief Reads bytes from an ESC register on this device.
   ///

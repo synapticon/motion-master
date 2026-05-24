@@ -11,7 +11,7 @@
 - All helper/utility functions included.
 - HTTP API compatible with the existing Motion Master API where possible.
 - Real-time support on Linux.
-- No exceptions — use `std::expected` instead.
+- No exceptions — use `std::expected<T, std::string>` instead. The error type is `std::string` for now — structured error types (e.g. a `SdoError` with `Kind` enum and abort code) are a deliberate future step, deferred until it is clear which callers need to branch on error kind rather than just log or forward the message.
 - Full device control through the API: reading registers, setting EtherCAT state, SII access, etc.
 - Configurable via a JSONC config file (JSON with `//` and `/* */` comments) — timeouts, buffer sizes, and similar parameters. Parsed via nlohmann-json with `ignore_comments = true`; no extra dependency needed.
 - All public functions fully documented.

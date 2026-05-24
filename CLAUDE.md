@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Motion Master v6.0.0** — next-generation motion control software for SOMANET servo drives. This project is a clean-sheet rewrite of the previous `motion_master` codebase; the design rationale and session notes live in `NEXTGEN.md`. Read that file for architectural decisions, class diagrams, and design rationale before making structural changes.
 
 Key design mandates from NEXTGEN.md:
-- No exceptions — use `std::expected<T, std::string>` (C++23 stdlib, no `tl::expected`)
+- No exceptions — use `std::expected<T, std::string>` (C++23 stdlib, no `tl::expected`); error strings are used throughout for now — structured error types are a future improvement once it is clear which callers need to branch on error kind
 - HTTP API + single monitoring WebSocket (no Protobuf, no dual-port setup)
 - Single `Device` abstraction (replaces `VirtualDevice` + `comm::base::Device` overlap from the old codebase)
 - `FieldbusDriver` interface abstracts SOEM and SPoE — `SoemFieldbusDriver` and `SpoeDriver` are the concrete implementations; `FieldbusDriver` owns the mutex that serializes SDO and PDO socket access across threads

@@ -8,6 +8,7 @@
 #include <chrono>
 #include <cstring>
 #include <expected>
+#include <format>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -67,6 +68,38 @@ std::expected<std::vector<uint16_t>, std::string> SoemFieldbusDriver::readStates
   std::ranges::transform(positions, std::back_inserter(result),
                          [this](uint16_t pos) { return ctx_->slavelist[pos].state; });
   return result;
+}
+
+std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(
+    uint16_t slavePosition, uint16_t index, uint8_t subindex) {
+  std::vector<uint8_t> data(4096, 0);
+  int size = static_cast<int>(data.size());
+  int wkc = ecx_SDOread(ctx_.get(), slavePosition, index, subindex, FALSE, &size, data.data(),
+                        EC_TIMEOUTRXM);
+  if (wkc <= 0) {
+    std::string msg =
+        std::format("SDOread slave {} 0x{:04X}:{:02X} failed", slavePosition, index, subindex);
+    ec_errort err{};
+    if (ecx_poperror(ctx_.get(), &err)) {
+      switch (err.Etype) {
+        case EC_ERR_TYPE_SDO_ERROR:
+          msg += std::format(" (SDO abort 0x{:08X})", static_cast<uint32_t>(err.AbortCode));
+          break;
+        case EC_ERR_TYPE_MBX_ERROR:
+          msg += " (mailbox error)";
+          break;
+        case EC_ERR_TYPE_PACKET_ERROR:
+          msg += " (packet/timeout error)";
+          break;
+        default:
+          msg += std::format(" (etype {})", static_cast<int>(err.Etype));
+          break;
+      }
+    }
+    return std::unexpected(msg);
+  }
+  data.resize(size);
+  return data;
 }
 
 std::expected<void, std::string> SoemFieldbusDriver::readRegister(uint16_t slavePosition,

@@ -30,9 +30,7 @@ const btnOutlineCls =
 
 export default function DashboardPage() {
   const queryClient = useQueryClient()
-  const { host, port, setHost, setPort, api, hasScanned, setHasScanned } = useConnection()
-  const [driver, setDriver] = useState<'soem' | 'spoe' | 'igh'>('soem')
-  const [adapter, setAdapter] = useState('')
+  const { host, port, setHost, setPort, api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned } = useConnection()
   const [alState, setAlState] = useState<1 | 2 | 3 | 4 | 8>(8)
 
   const initMutation = useMutation({

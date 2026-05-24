@@ -52,48 +52,41 @@ export default function RootLayout() {
   const devices = devicesQuery.data?.data ?? []
 
   return (
-    <div className="flex flex-col h-screen bg-grey-50 text-grey-900">
-      {/* Window Controls Overlay drag region — 0 px in standalone/browser, fills titlebar area in WCO mode */}
-      <div
-        className="bg-ocean-dark w-full shrink-0"
-        style={{ height: 'env(titlebar-area-height, 0px)', WebkitAppRegion: 'drag' } as React.CSSProperties}
-      />
-      <div className="flex flex-1 min-h-0">
-        {/* Sidebar — Ocean Dark */}
-        <aside className="w-56 shrink-0 bg-ocean-dark flex flex-col border-r border-white/10">
-          <div className="px-5 py-4 border-b border-white/10">
-            <span className="font-display text-sm font-medium uppercase tracking-widest text-white">
-              Motion Master
-            </span>
-            <p className="text-white/30 text-xs font-display tracking-wider mt-0.5">v6.0.0-alpha.1</p>
-          </div>
+    <div className="flex h-screen bg-grey-50 text-grey-900">
+      {/* Sidebar — Ocean Dark */}
+      <aside className="w-56 shrink-0 bg-ocean-dark flex flex-col border-r border-white/10">
+        <div className="px-5 py-4 border-b border-white/10">
+          <span className="font-display text-sm font-medium uppercase tracking-widest text-white">
+            Motion Master
+          </span>
+          <p className="text-white/30 text-xs font-display tracking-wider mt-0.5">v6.0.0-alpha.1</p>
+        </div>
 
-          <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
-            <NavItem to="/" label="Dashboard" />
-            <NavItem to="/log" label="Log" />
-            <NavItem to="/registers" label="Registers" />
+        <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
+          <NavItem to="/" label="Dashboard" />
+          <NavItem to="/log" label="Log" />
+          <NavItem to="/registers" label="Registers" />
 
-            {hasScanned && (
-              <p className="eyebrow px-5 mt-6 mb-1 text-white/40">
-                {devices.length} {devices.length === 1 ? 'device' : 'devices'}
-              </p>
-            )}
+          {hasScanned && (
+            <p className="eyebrow px-5 mt-6 mb-1 text-white/40">
+              {devices.length} {devices.length === 1 ? 'device' : 'devices'}
+            </p>
+          )}
 
-            {devices.map(d => (
-              <DeviceSection key={d.slavePosition} deviceId={String(d.slavePosition)} />
-            ))}
-          </nav>
+          {devices.map(d => (
+            <DeviceSection key={d.slavePosition} deviceId={String(d.slavePosition)} />
+          ))}
+        </nav>
 
-          <div className="px-5 py-3 border-t border-white/10">
-            <p className="text-white/20 text-xs">© {new Date().getFullYear()} Synapticon GmbH</p>
-          </div>
-        </aside>
+        <div className="px-5 py-3 border-t border-white/10">
+          <p className="text-white/20 text-xs">© {new Date().getFullYear()} Synapticon GmbH</p>
+        </div>
+      </aside>
 
-        {/* Content */}
-        <main className="flex-1 overflow-auto bg-white">
-          <Outlet />
-        </main>
-      </div>
+      {/* Content */}
+      <main className="flex-1 overflow-auto bg-white">
+        <Outlet />
+      </main>
 
       <PwaUpdatePrompt />
     </div>

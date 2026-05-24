@@ -124,12 +124,31 @@ All scripts default to the `x64-linux-debug` preset. Pass a preset name as the f
 | `./tools/lint.sh` | Run cpplint (`pip install cpplint` if missing) |
 | `./tools/cppcheck.sh` | Run cppcheck static analysis |
 | `./tools/clean.sh` | Remove the build directory |
+| `./tools/bump-version.sh <version>` | Bump the project semver everywhere (see [Versioning](#versioning)) |
 
 ### Code Quality Tools
 
 - **`format`** — runs `clang-format` over all `.cc`/`.h` sources and rewrites them in-place. Enforces Google style with a 100-column limit as defined in `.clang-format`. CI fails if any file is not already formatted.
 - **`lint`** — runs `cpplint` to check for include order, deprecated constructs, and header guards. Configured via `CPPLINT.cfg`. Naming conventions are enforced in code review, not by this tool.
 - **`cppcheck`** — static analysis that catches bugs the compiler doesn't warn about: null pointer dereferences, out-of-bounds access, uninitialized variables, resource leaks, etc. Runs with `warning,style,performance,portability` checks at `--std=c++23` and exits non-zero on any finding.
+
+## Versioning
+
+All components — C++ backend, React UI, OpenAPI spec, and npm packages — share a single semver. `VERSION` (repo root) is the canonical source; CMake reads it automatically to populate `libs/core/version.h`. Use the bump script to update every location in one shot:
+
+```bash
+./tools/bump-version.sh 6.1.0
+./tools/bump-version.sh 6.1.0-alpha.0
+```
+
+After bumping, commit the changed files, then push a `v<version>` tag to trigger the release workflow:
+
+```bash
+git add -A
+git commit -m "chore: bump version to 6.1.0"
+git tag v6.1.0
+git push && git push --tags
+```
 
 ## CI
 

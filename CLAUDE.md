@@ -58,6 +58,20 @@ Available presets: `x64-linux-debug`, `x64-linux-release`, `x64-windows-debug`, 
 
 Build output goes to `build/<preset>/`. Compiler requirements: C++23, warnings as errors (`-Wall -Wextra -Wpedantic -Werror` on GCC/Clang; `/W4 /WX` on MSVC).
 
+## Versioning
+
+`VERSION` (repo root) is the single source of truth. CMake reads it and propagates the value into the generated `libs/core/version.h` and `Doxyfile` — do not edit those files directly. All other secondary locations are kept in sync by the bump script:
+
+```bash
+./tools/bump-version.sh 6.0.0-alpha.1
+```
+
+Files updated by the script: `VERSION`, `vcpkg.json`, `ui/package.json`, `ui/apps/motion-master/package.json`, `ui/packages/api-client/package.json`, `hil/api/package.json`, `apps/motion_master/swagger.yml`, the `StringConstant` assertion in `libs/core/tests/version_test.cc`, and the sidebar badge in `ui/apps/motion-master/src/layouts/RootLayout.tsx`.
+
+`hil/api/src/mm-api.ts` is auto-generated from `swagger.yml` via `swagger-typescript-api` — regenerate it separately if the API shape changed.
+
+After bumping, commit all changed files, then push a `v<version>` tag to trigger `release.yml`.
+
 ## CI
 
 The workflow in `.github/workflows/build.yml` caches vcpkg binaries with `actions/cache@v5` on `~/.cache/vcpkg/archives`, keyed on OS + `vcpkg.json` hash. The `x-gha` vcpkg binary caching backend was **removed** in the pinned vcpkg version (`56bb241`) — do not use `VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"` or the `actions/github-script` workaround.

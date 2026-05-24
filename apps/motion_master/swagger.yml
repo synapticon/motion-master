@@ -1,7 +1,7 @@
 openapi: "3.1.0"
 info:
   title: Motion Master API
-  version: "6.0.0"
+  version: "6.0.0-alpha.0"
   description: >
     HTTP API for Motion Master motion control software.
     A monitoring WebSocket is also available at /ws — clients fetch the PDO

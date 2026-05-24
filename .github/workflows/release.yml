@@ -53,8 +53,10 @@ jobs:
       - name: Package
         run: |
           dir=build/x64-linux-release/apps/motion_master
+          cp setup.sh "$dir/setup.sh"
+          cp SETUP.md "$dir/SETUP.md"
           archive="motion-master-${GITHUB_REF_NAME}-linux-x64.tar.gz"
-          tar -czf "$archive" -C "$dir" motion-master swagger.yml cert.pem key.pem
+          tar -czf "$archive" -C "$dir" motion-master swagger.yml cert.pem key.pem setup.sh SETUP.md
           echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
 
       - name: Create GitHub Release

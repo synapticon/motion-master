@@ -19,7 +19,6 @@
 #include "comm/fieldbus_driver.h"
 #include "node/device_manager.h"
 
-
 Server::Server(Config config, mm::node::DeviceManager& deviceManager)
     : config_(std::move(config)), deviceManager_(deviceManager) {}
 
@@ -167,8 +166,7 @@ void Server::run() {
                std::string token;
                while (std::getline(ss, token, ',')) {
                  uint16_t pos{};
-                 auto [ptr, ec] =
-                     std::from_chars(token.data(), token.data() + token.size(), pos);
+                 auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), pos);
                  if (ec != std::errc() || ptr != token.data() + token.size()) {
                    res->writeStatus("400 Bad Request")
                        ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)

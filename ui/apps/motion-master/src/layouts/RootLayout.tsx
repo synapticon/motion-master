@@ -59,6 +59,7 @@ export default function RootLayout() {
           <span className="font-display text-sm font-medium uppercase tracking-widest text-white">
             Motion Master
           </span>
+          <p className="text-white/30 text-xs font-display uppercase tracking-wider mt-0.5">v6.0.0</p>
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
@@ -78,9 +79,7 @@ export default function RootLayout() {
         </nav>
 
         <div className="px-5 py-3 border-t border-white/10">
-          <span className="text-white/30 text-xs font-display uppercase tracking-wider">
-            v6.0.0
-          </span>
+          <p className="text-white/20 text-xs">© {new Date().getFullYear()} Synapticon GmbH</p>
         </div>
       </aside>
 

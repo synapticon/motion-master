@@ -18,13 +18,34 @@ function apiError(err: unknown): string {
   return 'Unknown error'
 }
 
-function interpretBytes(bytes: number[]): string | null {
+type Interpretation = { label: string; value: string }
+
+function interpretBytes(bytes: number[]): Interpretation[] {
   const view = new DataView(new Uint8Array(bytes).buffer)
-  if (bytes.length === 1) return `${view.getUint8(0)} (uint8)`
-  if (bytes.length === 2) return `${view.getUint16(0, true)} (uint16 LE)`
-  if (bytes.length === 4) return `${view.getUint32(0, true)} (uint32 LE)`
-  if (bytes.length === 8) return `${view.getBigUint64(0, true).toString()} (uint64 LE)`
-  return null
+  const out: Interpretation[] = []
+
+  if (bytes.length === 1) {
+    out.push({ label: 'int8',  value: String(view.getInt8(0)) })
+    out.push({ label: 'uint8', value: String(view.getUint8(0)) })
+  } else if (bytes.length === 2) {
+    out.push({ label: 'int16 LE',  value: String(view.getInt16(0, true)) })
+    out.push({ label: 'uint16 LE', value: String(view.getUint16(0, true)) })
+  } else if (bytes.length === 4) {
+    out.push({ label: 'int32 LE',   value: String(view.getInt32(0, true)) })
+    out.push({ label: 'uint32 LE',  value: String(view.getUint32(0, true)) })
+    out.push({ label: 'float32 LE', value: String(view.getFloat32(0, true)) })
+  } else if (bytes.length === 8) {
+    out.push({ label: 'int64 LE',   value: view.getBigInt64(0, true).toString() })
+    out.push({ label: 'uint64 LE',  value: view.getBigUint64(0, true).toString() })
+    out.push({ label: 'float64 LE', value: String(view.getFloat64(0, true)) })
+  }
+
+  if (bytes.length > 0 && bytes.every(b => (b >= 0x20 && b <= 0x7e) || b === 0)) {
+    const str = new TextDecoder().decode(new Uint8Array(bytes.filter(b => b !== 0)))
+    out.push({ label: 'string', value: `"${str}"` })
+  }
+
+  return out
 }
 
 function parseHexOrDec(s: string): number | null {
@@ -140,12 +161,12 @@ export default function ParametersPage() {
                   <span className="text-grey-600">Dec:&nbsp;</span>
                   [{result.join(', ')}]
                 </p>
-                {interpretBytes(result) && (
-                  <p className="text-xs font-mono">
-                    <span className="text-grey-600">Value:&nbsp;</span>
-                    {interpretBytes(result)}
+                {interpretBytes(result).map(({ label, value }) => (
+                  <p key={label} className="text-xs font-mono">
+                    <span className="text-grey-600">{label}:&nbsp;</span>
+                    {value}
                   </p>
-                )}
+                ))}
               </div>
             )}
 

@@ -63,6 +63,7 @@ export default function RootLayout() {
 
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
           <NavItem to="/" label="Dashboard" />
+          <NavItem to="/log" label="Log" />
 
           {hasScanned && (
             <p className="eyebrow px-5 mt-6 mb-1 text-white/40">

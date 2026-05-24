@@ -8,12 +8,14 @@ import RegistersPage from './pages/RegistersPage'
 import FoePage from './pages/FoePage'
 import ParametersPage from './pages/ParametersPage'
 import ProcessDataPage from './pages/ProcessDataPage'
+import LogPage from './pages/LogPage'
 
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<RootLayout />}>
         <Route index element={<DashboardPage />} />
+        <Route path="log" element={<LogPage />} />
         <Route path="devices/:deviceId">
           <Route path="ethercat-state" element={<EthercatStatePage />} />
           <Route path="object-dictionary" element={<ObjectDictionaryPage />} />

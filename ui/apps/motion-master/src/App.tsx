@@ -9,6 +9,7 @@ import FoePage from './pages/FoePage'
 import ParametersPage from './pages/ParametersPage'
 import ProcessDataPage from './pages/ProcessDataPage'
 import LogPage from './pages/LogPage'
+import EscRegistersPage from './pages/EscRegistersPage'
 
 export default function App() {
   return (
@@ -16,6 +17,7 @@ export default function App() {
       <Route path="/" element={<RootLayout />}>
         <Route index element={<DashboardPage />} />
         <Route path="log" element={<LogPage />} />
+        <Route path="registers" element={<EscRegistersPage />} />
         <Route path="devices/:deviceId">
           <Route path="ethercat-state" element={<EthercatStatePage />} />
           <Route path="object-dictionary" element={<ObjectDictionaryPage />} />

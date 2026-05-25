@@ -9,6 +9,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <unistd.h>
 #endif
 
 #include <memory>
@@ -43,6 +45,21 @@ std::filesystem::path exeDir() {
 }
 
 GameLoop* gGameLoop = nullptr;  ///< Signal handler target; set before run(), cleared after.
+
+/// @brief Open the given URL in the system default browser.
+/// @details Non-blocking — returns immediately after spawning the browser process.
+///          Uses xdg-open on Linux and ShellExecute on Windows.
+void openInBrowser(const char* url) {
+#ifdef _WIN32
+  ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
+#else
+  pid_t pid = fork();
+  if (pid == 0) {
+    execlp("xdg-open", "xdg-open", url, nullptr);
+    _exit(1);
+  }
+#endif
+}
 
 }  // namespace
 
@@ -152,6 +169,10 @@ int main(int argc, char** argv) {
       },
       deviceManager};
   server.start();
+
+  if (opts.openBrowser) {
+    openInBrowser("https://motion-master.synapticon.com/app/");
+  }
 
   GameLoop game_loop{std::chrono::microseconds{1000}};
   gGameLoop = &game_loop;

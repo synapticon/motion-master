@@ -38,6 +38,8 @@ Options parseOptions(int argc, char** argv) {
                  "Network adapter: MAC (AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF)"
                  " or interface name (eth0)");
   app.add_option("--cors-origin", opts.corsOrigin, "Allowed CORS origin")->capture_default_str();
+  app.add_flag("--open", opts.openBrowser,
+               "Open https://motion-master.synapticon.com/app/ in the default browser after startup");
 
   try {
     app.parse(argc, argv);

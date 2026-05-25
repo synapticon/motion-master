@@ -20,6 +20,7 @@ struct Options {
   std::optional<nlohmann::json> configData;  ///< Parsed config; absent when --config not given.
   /// Allowed CORS origin. Defaults to the production PWA origin.
   std::string corsOrigin{"https://motion-master.synapticon.com"};
+  bool openBrowser{false};  ///< Open https://motion-master.synapticon.com/app/ in browser on start.
 };
 
 /// @brief Parse argv and load the config file into an Options value.

@@ -6,28 +6,33 @@
 # Build:
 #   docker build -t motion-master .
 #
-# Run (self-signed cert auto-generated):
-#   docker run --rm --network host motion-master
-#
 # The server binds to 127.0.0.1 (loopback) by design, so --network host is
 # required — Docker's port-forwarding routes through eth0, not loopback, and
 # would never reach the server.  Pass --port <n> to avoid collisions:
 #   docker run --rm --network host motion-master --port 9443
 #
-# Run with real certs:
-#   docker run --rm --network host \
-#     -e CERT=/certs/cert.pem -e KEY=/certs/key.pem \
-#     -v /path/to/cert.pem:/certs/cert.pem:ro \
-#     -v /path/to/key.pem:/certs/key.pem:ro \
-#     motion-master
+# TLS certificate discovery (same priority as tools/run.sh):
+#   1. -e CERT=<path> -e KEY=<path>  explicit override
+#   2. cert.pem / key.pem baked into the image (release builds only — CI places
+#      them at the repo root before docker build)
+#   3. Mount the acme.sh directory from the host (developer builds):
+#        docker run --rm --network host \
+#          -v "$HOME/.acme.sh/local.motion-master.synapticon.com_ecc:/root/.acme.sh/local.motion-master.synapticon.com_ecc:ro" \
+#          motion-master
+#   4. Self-signed fallback — generated at startup (browser security exception required)
 #
-# RT scheduling: the GameLoop calls pthread_setschedparam(SCHED_FIFO, 80) and
-# mlockall().  Both degrade gracefully — if either call fails the server still
-# starts, but logs a warning and runs without RT guarantees.
+# Capabilities — grant only what is needed:
 #
-# To enable real-time scheduling the HOST kernel must be PREEMPT_RT and the
-# container needs two capabilities:
-#   docker run --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 ...
+#   EtherCAT raw sockets (NET_ADMIN + NET_RAW):
+#     docker run --cap-add NET_ADMIN --cap-add NET_RAW ...
+#
+#   RT scheduling / mlockall (SYS_NICE + IPC_LOCK); HOST kernel must be PREEMPT_RT:
+#     docker run --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 ...
+#
+#   Full EtherCAT + RT:
+#     docker run --cap-add NET_ADMIN --cap-add NET_RAW \
+#                --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 \
+#                --network host motion-master
 #
 # Running with --privileged also works but grants far more than necessary.
 
@@ -56,6 +61,12 @@ ENV CC=gcc-14 CXX=g++-14
 WORKDIR /src
 COPY . .
 
+# cert.pem / key.pem are not committed to git. In release builds they are
+# placed at the repo root by CI before docker build and end up here. In
+# developer builds they are absent; create empty placeholders so the COPY
+# in the runtime stage always has a source file.
+RUN [ -f cert.pem ] || touch cert.pem; [ -f key.pem ] || touch key.pem
+
 # vcpkg binary cache is reused across image rebuilds when building with BuildKit.
 RUN --mount=type=cache,target=/root/.cache/vcpkg/archives \
     cmake --preset x64-linux-release \
@@ -80,7 +91,7 @@ RUN apt-get update -q && apt-get install -y --no-install-recommends \
 COPY --from=build /runtime-libs/ /usr/local/lib/
 RUN ldconfig
 
-WORKDIR /app
+WORKDIR /opt/motion-master
 COPY --from=build /src/build/x64-linux-release/apps/motion_master/motion-master .
 COPY --from=build /src/apps/motion_master/swagger.yml .
 

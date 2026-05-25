@@ -86,6 +86,45 @@ sudo ./setup.sh    # sets capabilities once; re-run after any OS update that res
 ./motion-master --help
 ```
 
+### Docker
+
+```bash
+# Build
+git submodule update --init --recursive
+docker build -t motion-master .
+
+# Release image — certs are baked in, no extra flags needed
+docker run --rm --network host motion-master
+
+# Developer image — mount the acme.sh cert from the host (no browser warning)
+docker run --rm --network host \
+  -v "$HOME/.acme.sh/local.motion-master.synapticon.com_ecc:/root/.acme.sh/local.motion-master.synapticon.com_ecc:ro" \
+  motion-master
+
+# Developer image — self-signed fallback (browser security exception required)
+docker run --rm --network host motion-master
+```
+
+`--network host` is required because the server binds to `127.0.0.1` — Docker's port forwarding routes through `eth0` and never reaches the loopback interface.
+
+**Capabilities** — grant only what you need:
+
+| Capability | Purpose | Flag |
+|---|---|---|
+| `NET_ADMIN`, `NET_RAW` | EtherCAT raw socket access | `--cap-add NET_ADMIN --cap-add NET_RAW` |
+| `SYS_NICE`, `IPC_LOCK` | RT scheduling + `mlockall` (PREEMPT_RT host kernel required) | `--cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1` |
+
+Full EtherCAT + RT example:
+
+```bash
+docker run --rm --network host \
+  --cap-add NET_ADMIN --cap-add NET_RAW \
+  --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 \
+  -v /opt/motion-master/cert.pem:/opt/motion-master/cert.pem:ro \
+  -v /opt/motion-master/key.pem:/opt/motion-master/key.pem:ro \
+  motion-master --driver soem --adapter eth0
+```
+
 ## Local Development
 
 Production releases bundle a real Let's Encrypt TLS certificate for `local.motion-master.synapticon.com`, so the PWA at `https://motion-master.synapticon.com` connects without any browser warning.

@@ -37,18 +37,28 @@
 #       -v /path/to/key.pem:/certs/key.pem:ro \
 #       motion-master
 #
-# Capabilities — grant only what is needed:
+# Capabilities:
+#   Docker drops most Linux capabilities by default. On bare-metal the binary is
+#   stamped with setcap so file capabilities grant the required caps automatically.
+#   Inside a container file capabilities are ignored — use --cap-add instead:
 #
-#   EtherCAT raw sockets (NET_ADMIN + NET_RAW):
-#     docker run --cap-add NET_ADMIN --cap-add NET_RAW ...
+#     CAP_NET_RAW    raw/packet sockets — SOEM EtherCAT frame I/O
+#     CAP_NET_ADMIN  NIC configuration — SOEM promiscuous mode
+#     CAP_SYS_NICE   SCHED_FIFO scheduling — RT game loop
+#     CAP_IPC_LOCK   mlockall() — pin memory for RT (also needs --ulimit memlock=-1)
 #
-#   RT scheduling / mlockall (SYS_NICE + IPC_LOCK); HOST kernel must be PREEMPT_RT:
-#     docker run --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 ...
+#   EtherCAT only:
+#     docker run --cap-add NET_ADMIN --cap-add NET_RAW --network host motion-master \
+#                --driver soem --adapter eth0
+#
+#   RT only (host kernel must be PREEMPT_RT):
+#     docker run --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 \
+#                --network host motion-master
 #
 #   Full EtherCAT + RT:
 #     docker run --cap-add NET_ADMIN --cap-add NET_RAW \
 #                --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 \
-#                --network host motion-master
+#                --network host motion-master --driver soem --adapter eth0
 #
 # Running with --privileged also works but grants far more than necessary.
 

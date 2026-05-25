@@ -83,6 +83,22 @@ Three additional workflows exist alongside `build.yml`:
 - **`release.yml`** — triggered by `v*` tags. Builds with the `x64-linux-release` preset, reads `TLS_CERT` and `TLS_KEY` from secrets, writes them as `cert.pem`/`key.pem` into the build output, then calls `tools/package.sh` to produce a `.deb` and `.rpm`, and creates a GitHub Release with all three artefacts: `motion-master-<version>-linux-x64.tar.gz`, `motion-master-<version>-amd64.deb`, and `motion-master-<version>-x86_64.rpm`. Requires `dpkg-dev` and `rpm` (both installed as CI system dependencies). All packages install to `/opt/motion-master/`; `cert.pem` and `key.pem` are marked as conffiles (deb) / `%config(noreplace)` (rpm) so upgrades never silently overwrite them. On deb, `apt remove` leaves conffiles behind — `apt purge` is required for a full uninstall. On rpm, `dnf remove` removes unmodified config files automatically; modified ones are saved as `.rpmsave`.
 - **`lint.yml`** — runs clang-format and cpplint checks on every push and PR.
 
+## Docker
+
+The `Dockerfile` is a two-stage build (build on `ubuntu:24.04`, minimal runtime image). The binary and swagger.yml land in `/opt/motion-master/` — consistent with the deb/rpm install path. `docker-entrypoint.sh` mirrors the cert discovery order of `tools/run.sh`: CERT/KEY env vars → bundled cert baked into the image → acme.sh mount → self-signed fallback.
+
+**Capabilities** — Docker drops most Linux capabilities by default. On bare-metal `setcap` stamps the binary so file capabilities are granted automatically; inside a container file capabilities are ignored and `--cap-add` is used instead:
+
+| Capability | Purpose |
+|---|---|
+| `CAP_NET_RAW` + `CAP_NET_ADMIN` | SOEM EtherCAT raw sockets and NIC promiscuous mode |
+| `CAP_SYS_NICE` | `SCHED_FIFO` RT scheduling on the game loop thread |
+| `CAP_IPC_LOCK` + `--ulimit memlock=-1` | `mlockall()` to pin process memory for RT |
+
+Missing RT caps produce a warning and the loop runs non-RT. Missing EtherCAT caps cause `POST /api/init` to fail when a SOEM driver is requested. `--privileged` also works but grants far more than necessary.
+
+**Cert baking** — release CI places `cert.pem`/`key.pem` at the repo root before `docker build` so they are baked into the image. Developer builds without certs get empty placeholder files; the entrypoint detects them (non-empty `-s` check) and falls back to acme.sh or self-signed. Users can override expired baked-in certs at runtime by mounting new ones over `/opt/motion-master/cert.pem` and `/opt/motion-master/key.pem` — the volume mount shadows the image file.
+
 ## Architecture
 
 ### Directory Layout

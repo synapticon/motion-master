@@ -134,16 +134,33 @@ docker run --rm --network host \
   motion-master
 ```
 
-**Capabilities** — grant only what you need:
+**Capabilities**
 
-| Capability | Purpose | Flag |
+Docker drops most Linux capabilities by default. On a bare-metal install `postinst`/`setup.sh` stamps the binary with `setcap` so any user can run it and it receives the required capabilities automatically. Inside a container, file capabilities are ignored — you grant the equivalent capabilities to the container process with `--cap-add` at `docker run` time instead.
+
+| Capability | What it unlocks | Required for |
 |---|---|---|
-| `NET_ADMIN`, `NET_RAW` | EtherCAT raw socket access | `--cap-add NET_ADMIN --cap-add NET_RAW` |
-| `SYS_NICE`, `IPC_LOCK` | RT scheduling + `mlockall` (PREEMPT_RT host kernel required) | `--cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1` |
+| `CAP_NET_RAW` | Open raw/packet sockets | SOEM sending/receiving raw EtherCAT frames |
+| `CAP_NET_ADMIN` | Configure network interfaces | SOEM putting the NIC into promiscuous mode |
+| `CAP_SYS_NICE` | Set `SCHED_FIFO` scheduling policy and RT priority | Real-time game loop |
+| `CAP_IPC_LOCK` | Call `mlockall()` to pin process memory | Preventing page faults during RT cycles |
 
-Full EtherCAT + RT example:
+`--ulimit memlock=-1` is also required alongside `CAP_IPC_LOCK` — without it the kernel rejects `mlockall()` even when the capability is present.
+
+The binary degrades gracefully: missing RT caps produce a warning and the loop runs without RT guarantees; missing EtherCAT caps cause `POST /api/init` to fail when a SOEM driver is requested.
 
 ```bash
+# EtherCAT only (no RT requirement on the host kernel)
+docker run --rm --network host \
+  --cap-add NET_ADMIN --cap-add NET_RAW \
+  motion-master --driver soem --adapter eth0
+
+# RT scheduling only (PREEMPT_RT host kernel required)
+docker run --rm --network host \
+  --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 \
+  motion-master
+
+# Full EtherCAT + RT
 docker run --rm --network host \
   --cap-add NET_ADMIN --cap-add NET_RAW \
   --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 \

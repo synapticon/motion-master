@@ -39,7 +39,7 @@ Options parseOptions(int argc, char** argv) {
                  " or interface name (eth0)");
   app.add_option("--cors-origin", opts.corsOrigin, "Allowed CORS origin")->capture_default_str();
   app.add_flag("--open", opts.openBrowser,
-               "Open https://motion-master.synapticon.com/app/ in the default browser after startup");
+               "Open https://motion-master.synapticon.com/app/ in the default browser");
 
   try {
     app.parse(argc, argv);

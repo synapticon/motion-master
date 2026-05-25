@@ -58,17 +58,24 @@ All packages install to `/opt/motion-master/` with a `/usr/local/bin/motion-mast
 ### Debian / Ubuntu
 
 ```bash
-sudo apt install ./motion-master-<version>-amd64.deb
+sudo apt install ./motion-master-<version>-amd64.deb    # install or upgrade
+sudo apt remove motion-master                            # remove (leaves cert.pem / key.pem)
+sudo apt purge motion-master                             # full removal including certs
 ```
 
-The `postinst` script automatically sets the required capabilities (`cap_sys_nice`, `cap_net_admin`, `cap_net_raw`) on the binary.
+The `postinst` script automatically sets the required capabilities (`cap_sys_nice`, `cap_net_admin`, `cap_net_raw`) on the binary. On upgrade the capabilities are re-applied to the new binary automatically.
+
+> **Note:** `apt remove` leaves `cert.pem` and `key.pem` behind as conffiles. Use `apt purge` for a complete uninstall.
 
 ### Fedora / RHEL / openSUSE
 
 ```bash
-sudo dnf install ./motion-master-<version>-x86_64.rpm   # Fedora / RHEL
-sudo zypper install ./motion-master-<version>-x86_64.rpm # openSUSE
+sudo dnf install ./motion-master-<version>-x86_64.rpm   # Fedora / RHEL (install or upgrade)
+sudo zypper install ./motion-master-<version>-x86_64.rpm # openSUSE (install or upgrade)
+sudo dnf remove motion-master                            # full removal
 ```
+
+On uninstall, unmodified `cert.pem` and `key.pem` are removed automatically. If you replaced them with your own, they are saved as `cert.pem.rpmsave` / `key.pem.rpmsave`.
 
 ### Tarball
 

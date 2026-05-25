@@ -40,6 +40,7 @@ All common tasks have wrapper scripts in `tools/`. They default to the `x64-linu
 ./tools/lint.sh                   # cpplint (requires: pip install cpplint)
 ./tools/cppcheck.sh               # cppcheck static analysis
 ./tools/clean.sh                  # remove build/<preset>
+./tools/package.sh [preset]       # build .deb and .rpm packages (cert.pem/key.pem must be in build dir)
 
 # Use a different preset:
 ./tools/configure.sh x64-linux-release
@@ -79,7 +80,7 @@ The workflow in `.github/workflows/build.yml` caches vcpkg binaries with `action
 Three additional workflows exist alongside `build.yml`:
 
 - **`cert-renewal.yml`** — runs on the 1st of every month. Uses `acme.sh` with the `dns_acmedns` plugin against `auth.acme-dns.io` to issue a fresh Let's Encrypt cert for `local.motion-master.synapticon.com` (DNS-01 via CNAME delegation — no manual DNS touch required after the one-time setup). Stores the renewed cert and key as GitHub Secrets `TLS_CERT` and `TLS_KEY`. Requires `ACMEDNS_CONFIG` (acme-dns credentials JSON) and `GH_PAT_SECRETS` (fine-grained PAT with Secrets read/write on this repo) to be set as repository secrets.
-- **`release.yml`** — triggered by `v*` tags. Builds with the `x64-linux-release` preset, reads `TLS_CERT` and `TLS_KEY` from secrets, writes them as `cert.pem`/`key.pem` into the build output, then creates a GitHub Release with `motion-master-<version>-linux-x64.tar.gz` containing the binary, `swagger.yml`, `cert.pem`, and `key.pem`.
+- **`release.yml`** — triggered by `v*` tags. Builds with the `x64-linux-release` preset, reads `TLS_CERT` and `TLS_KEY` from secrets, writes them as `cert.pem`/`key.pem` into the build output, then calls `tools/package.sh` to produce a `.deb` and `.rpm`, and creates a GitHub Release with all three artefacts: `motion-master-<version>-linux-x64.tar.gz`, `motion-master-<version>-amd64.deb`, and `motion-master-<version>-x86_64.rpm`. Requires `dpkg-dev` and `rpm` (both installed as CI system dependencies).
 - **`lint.yml`** — runs clang-format and cpplint checks on every push and PR.
 
 ## Architecture
@@ -100,6 +101,8 @@ motion-master/
     api/               ← HTTP API + WebSocket integration tests (TypeScript / Vitest; Docker-managed)
   cmake/
     lint.cmake         ← lint, cppcheck, format CMake targets
+  packaging/
+    postinst           ← deb postinst script; sets capabilities on /opt/motion-master/motion-master (rpm uses an equivalent %post scriptlet inlined in tools/package.sh)
   extern/
     vcpkg/             ← git submodule
   tools/               ← developer scripts

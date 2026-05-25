@@ -42,6 +42,42 @@ motion-master [OPTIONS]
 
 On Linux, `motion-master` requires raw socket and RT scheduling capabilities. `./tools/build.sh` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw=eip` on the binary after linking — you will be prompted for your password. Without these capabilities the binary still runs but EtherCAT initialisation will fail.
 
+## Installation
+
+Release packages are available on the [Releases](../../releases) page. Every release ships three artefacts:
+
+| Artefact | Format | Install on |
+|---|---|---|
+| `motion-master-<version>-linux-x64.tar.gz` | Tarball | Any Linux x86-64 |
+| `motion-master-<version>-amd64.deb` | Debian package | Ubuntu / Debian |
+| `motion-master-<version>-x86_64.rpm` | RPM package | Fedora / RHEL / openSUSE |
+
+All packages install to `/opt/motion-master/` with a `/usr/local/bin/motion-master` symlink.
+
+### Debian / Ubuntu
+
+```bash
+sudo apt install ./motion-master-<version>-amd64.deb
+```
+
+The `postinst` script automatically sets the required capabilities (`cap_sys_nice`, `cap_net_admin`, `cap_net_raw`) on the binary.
+
+### Fedora / RHEL / openSUSE
+
+```bash
+sudo dnf install ./motion-master-<version>-x86_64.rpm   # Fedora / RHEL
+sudo zypper install ./motion-master-<version>-x86_64.rpm # openSUSE
+```
+
+### Tarball
+
+```bash
+tar -xzf motion-master-<version>-linux-x64.tar.gz
+cd motion-master-<version>-linux-x64
+sudo ./setup.sh    # sets capabilities once; re-run after any OS update that resets them
+./motion-master --help
+```
+
 ## Local Development
 
 Production releases bundle a real Let's Encrypt TLS certificate for `local.motion-master.synapticon.com`, so the PWA at `https://motion-master.synapticon.com` connects without any browser warning.
@@ -125,6 +161,7 @@ All scripts default to the `x64-linux-debug` preset. Pass a preset name as the f
 | `./tools/cppcheck.sh` | Run cppcheck static analysis |
 | `./tools/clean.sh` | Remove the build directory |
 | `./tools/bump-version.sh <version>` | Bump the project semver everywhere (see [Versioning](#versioning)) |
+| `./tools/package.sh [preset]` | Build `.deb` and `.rpm` packages (requires `cert.pem`/`key.pem` in the build dir) |
 
 ### Code Quality Tools
 
@@ -157,7 +194,7 @@ git push && git push --tags
 | `build.yml` | push / PR to `main` | Build, test; vcpkg packages cached in `~/.cache/vcpkg/archives` |
 | `lint.yml` | push / PR to `main` | clang-format + cpplint checks |
 | `cert-renewal.yml` | 1st of every month | Renew Let's Encrypt cert via acme-dns; update `TLS_CERT` / `TLS_KEY` secrets |
-| `release.yml` | `v*` tag push | Build release binary, bundle cert + key from secrets, publish GitHub Release |
+| `release.yml` | `v*` tag push | Build release binary, bundle cert + key from secrets, publish GitHub Release with `.tar.gz`, `.deb`, and `.rpm` packages |
 
 The vcpkg cache key is OS + `vcpkg.json` hash. The first run after a dependency change rebuilds from source; subsequent runs restore from cache.
 

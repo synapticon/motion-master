@@ -92,11 +92,19 @@ sudo ./setup.sh    # sets capabilities once; re-run after any OS update that res
 # Build
 git submodule update --init --recursive
 docker build -t motion-master .
+```
 
-# Release image — certs are baked in, no extra flags needed
+`--network host` is required on all `docker run` commands — the server binds to `127.0.0.1` and Docker's port forwarding never reaches the loopback interface.
+
+**TLS certificates**
+
+Release images have `cert.pem`/`key.pem` baked in (CI places them at the repo root before `docker build`). Developer images built from source fall back to the acme.sh cert or a self-signed cert. The discovery order is the same as `tools/run.sh`:
+
+```bash
+# Release image — bundled cert used automatically
 docker run --rm --network host motion-master
 
-# Developer image — mount the acme.sh cert from the host (no browser warning)
+# Developer image — mount acme.sh cert from host (no browser warning)
 docker run --rm --network host \
   -v "$HOME/.acme.sh/local.motion-master.synapticon.com_ecc:/root/.acme.sh/local.motion-master.synapticon.com_ecc:ro" \
   motion-master
@@ -105,7 +113,26 @@ docker run --rm --network host \
 docker run --rm --network host motion-master
 ```
 
-`--network host` is required because the server binds to `127.0.0.1` — Docker's port forwarding routes through `eth0` and never reaches the loopback interface.
+**Updating an expired cert on an older image**
+
+The bundled cert is renewed monthly, but an older image keeps its original cert. Override it at runtime — the volume mount shadows the baked-in file:
+
+```bash
+docker run --rm --network host \
+  -v /path/to/cert.pem:/opt/motion-master/cert.pem:ro \
+  -v /path/to/key.pem:/opt/motion-master/key.pem:ro \
+  motion-master
+```
+
+Or point to an arbitrary path with env vars:
+
+```bash
+docker run --rm --network host \
+  -e CERT=/certs/cert.pem -e KEY=/certs/key.pem \
+  -v /path/to/cert.pem:/certs/cert.pem:ro \
+  -v /path/to/key.pem:/certs/key.pem:ro \
+  motion-master
+```
 
 **Capabilities** — grant only what you need:
 
@@ -120,8 +147,6 @@ Full EtherCAT + RT example:
 docker run --rm --network host \
   --cap-add NET_ADMIN --cap-add NET_RAW \
   --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 \
-  -v /opt/motion-master/cert.pem:/opt/motion-master/cert.pem:ro \
-  -v /opt/motion-master/key.pem:/opt/motion-master/key.pem:ro \
   motion-master --driver soem --adapter eth0
 ```
 

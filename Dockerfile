@@ -11,15 +11,31 @@
 # would never reach the server.  Pass --port <n> to avoid collisions:
 #   docker run --rm --network host motion-master --port 9443
 #
-# TLS certificate discovery (same priority as tools/run.sh):
-#   1. -e CERT=<path> -e KEY=<path>  explicit override
-#   2. cert.pem / key.pem baked into the image (release builds only — CI places
-#      them at the repo root before docker build)
-#   3. Mount the acme.sh directory from the host (developer builds):
+# TLS certificate discovery order (same as tools/run.sh):
+#   1. CERT / KEY env vars — explicit override, highest priority
+#   2. cert.pem / key.pem baked into the image — present on release images
+#      (CI places them at the repo root before docker build)
+#   3. ~/.acme.sh/local.motion-master.synapticon.com_ecc/ — mount from host
+#      for developer builds:
 #        docker run --rm --network host \
 #          -v "$HOME/.acme.sh/local.motion-master.synapticon.com_ecc:/root/.acme.sh/local.motion-master.synapticon.com_ecc:ro" \
 #          motion-master
 #   4. Self-signed fallback — generated at startup (browser security exception required)
+#
+# Updating expired certs on a release image:
+#   The bundled cert is renewed monthly but an older image will keep its original cert.
+#   Override at runtime by mounting new certs over the bundled path —
+#   the volume shadows the baked-in files:
+#     docker run --rm --network host \
+#       -v /path/to/cert.pem:/opt/motion-master/cert.pem:ro \
+#       -v /path/to/key.pem:/opt/motion-master/key.pem:ro \
+#       motion-master
+#   Or use env vars to point to an arbitrary mount path:
+#     docker run --rm --network host \
+#       -e CERT=/certs/cert.pem -e KEY=/certs/key.pem \
+#       -v /path/to/cert.pem:/certs/cert.pem:ro \
+#       -v /path/to/key.pem:/certs/key.pem:ro \
+#       motion-master
 #
 # Capabilities — grant only what is needed:
 #

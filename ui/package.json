@@ -1,7 +1,7 @@
 {
   "name": "motion-master-ui",
   "private": true,
-  "version": "6.0.0-alpha.2",
+  "version": "6.0.0-alpha.3",
   "scripts": {
     "dev": "pnpm --filter motion-master dev",
     "build": "pnpm --filter @mm/api-client generate && pnpm --filter motion-master build",

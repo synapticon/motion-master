@@ -110,6 +110,19 @@ class FieldbusDriver {
                                                                    uint16_t index,
                                                                    uint8_t subindex) = 0;
 
+  /// @brief Reads a file from the slave via File over EtherCAT (FoE).
+  ///
+  /// Sends an FoE read request for @p filename and collects all data packets from the slave.
+  /// FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is
+  /// responsible for ensuring the device is in a suitable state.
+  /// Called from HTTP handler threads; must not overlap with @c exchangeProcessData.
+  ///
+  /// @param slavePosition  1-based slave position on the bus.
+  /// @param filename       FoE filename as recognised by the slave firmware.
+  /// @return File bytes on success, or an error string if the transfer fails.
+  virtual std::expected<std::vector<uint8_t>, std::string> readFile(
+      uint16_t slavePosition, const std::string& filename) = 0;
+
   /// @brief Reads bytes from an ESC register via a Configured-Address Read (FPRD) datagram.
   ///
   /// @p data.size() bytes are read from register @p address of the slave at @p slavePosition.

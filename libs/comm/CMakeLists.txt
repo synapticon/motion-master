@@ -3,6 +3,7 @@ add_library(comm STATIC
     base.cc
     esc_registers.cc
     fieldbus_driver.cc
+    foe_error_codes.cc
     soem_fieldbus_driver.cc
 )
 add_library(mm::comm ALIAS comm)

@@ -28,6 +28,11 @@ std::expected<std::vector<uint8_t>, std::string> Device::upload(uint16_t index,
   return driver_.readSdo(slavePosition_, index, subindex);
 }
 
+std::expected<std::vector<uint8_t>, std::string> Device::readFile(
+    const std::string& filename) const {
+  return driver_.readFile(slavePosition_, filename);
+}
+
 std::expected<void, std::string> Device::readRegister(uint16_t address,
                                                       std::span<uint8_t> data) const {
   return driver_.readRegister(slavePosition_, address, data);

@@ -47,6 +47,12 @@ class Device {
   /// @return The bytes transferred on success, or an error string if the mailbox transfer fails.
   std::expected<std::vector<uint8_t>, std::string> upload(uint16_t index, uint8_t subindex) const;
 
+  /// @brief Reads a file from this device via File over EtherCAT (FoE).
+  ///
+  /// @param filename  FoE filename as recognised by the slave firmware.
+  /// @return File bytes on success, or an error string if the transfer fails.
+  std::expected<std::vector<uint8_t>, std::string> readFile(const std::string& filename) const;
+
   /// @brief Reads bytes from an ESC register on this device.
   ///
   /// Delegates to the fieldbus driver's @c readRegister using this device's slave position.

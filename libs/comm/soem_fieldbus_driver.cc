@@ -105,6 +105,42 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
   return data;
 }
 
+std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
+    uint16_t slavePosition, const std::string& filename) {
+  constexpr int kMaxSize = 10 * 1024 * 1024;
+  std::vector<uint8_t> data(kMaxSize);
+  int size = kMaxSize;
+  std::string name = filename;  // ecx_FOEread takes non-const char*
+  int wkc =
+      ecx_FOEread(ctx_.get(), slavePosition, name.data(), 0, &size, data.data(), EC_TIMEOUTRXM);
+  if (wkc <= 0) {
+    std::string msg = std::format("FOEread slave {} '{}' failed", slavePosition, filename);
+    ec_errort err{};
+    if (ecx_poperror(ctx_.get(), &err)) {
+      switch (err.Etype) {
+        case EC_ERR_TYPE_FOE_ERROR:
+          msg += std::format(" (FoE error 0x{:08X})", static_cast<uint32_t>(err.AbortCode));
+          break;
+        case EC_ERR_TYPE_FOE_BUF2SMALL:
+          msg += " (buffer too small)";
+          break;
+        case EC_ERR_TYPE_FOE_PACKETNUMBER:
+          msg += " (packet number mismatch)";
+          break;
+        case EC_ERR_TYPE_FOE_FILE_NOTFOUND:
+          msg += " (file not found)";
+          break;
+        default:
+          msg += std::format(" (etype {})", static_cast<int>(err.Etype));
+          break;
+      }
+    }
+    return std::unexpected(msg);
+  }
+  data.resize(size);
+  return data;
+}
+
 std::expected<void, std::string> SoemFieldbusDriver::readRegister(uint16_t slavePosition,
                                                                   uint16_t address,
                                                                   std::span<uint8_t> data) {

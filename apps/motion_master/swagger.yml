@@ -250,6 +250,25 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/EscRegister"
+  /api/meta/foe-error-codes:
+    get:
+      summary: List all known FoE error codes
+      operationId: getFoeErrorCodes
+      description: >
+        Returns the static catalogue of standard File over EtherCAT (FoE) error codes
+        defined in ETG.1000.6 §5.5.  These codes appear in the FoE ERROR packet sent
+        by the slave when a file transfer fails, and are surfaced in the error message
+        returned by the file read endpoint.  Vendor-specific codes outside the 0x8000
+        range are not listed here.
+      responses:
+        "200":
+          description: Array of FoE error code descriptors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/FoeErrorCode"
   /api/devices/{slavePosition}/registers/{address}:
     get:
       summary: Read bytes from an ESC register
@@ -421,6 +440,46 @@ paths:
                     example: [0, 0, 0, 0]
         "400":
           description: slavePosition, index, or subindex is missing or not a valid integer
+        "404":
+          description: No device at the given bus position
+        "500":
+          $ref: "#/components/responses/DriverError"
+  /api/devices/{slavePosition}/files/{filename}:
+    get:
+      summary: Read a file from a device via FoE (File over EtherCAT)
+      operationId: foeReadFile
+      description: >
+        Sends an FoE read request for `filename` to the device at `slavePosition`
+        and returns the raw file bytes.  FoE is available in Boot, Pre-Op, Safe-Op,
+        and Op states (device-dependent); the caller is responsible for ensuring the
+        device is in a suitable state before calling.  The call blocks until the full
+        file has been received or a per-packet timeout of 700 ms is exceeded.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+          description: FoE filename as recognised by the slave firmware
+          example: "firmware.bin"
+      responses:
+        "200":
+          description: Raw file bytes from the device
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: slavePosition is not a valid integer
         "404":
           description: No device at the given bus position
         "500":
@@ -624,6 +683,22 @@ components:
           type: string
           description: Human-readable description from the Beckhoff ESC datasheet
           example: "DL status: EEPROM load ok, link detected, communication established per port"
+    FoeErrorCode:
+      type: object
+      required: [code, name, description]
+      properties:
+        code:
+          type: integer
+          description: 32-bit FoE error code as sent in the FoE ERROR packet (ETG.1000.6 §5.5)
+          example: 32770
+        name:
+          type: string
+          description: Short human-readable name
+          example: "File not found"
+        description:
+          type: string
+          description: Full description of the error condition
+          example: "The requested file does not exist on the slave"
   responses:
     DriverError:
       description: Fieldbus driver returned an error

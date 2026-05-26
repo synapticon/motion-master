@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "comm/al_status_codes.h"
+#include "comm/foe_error_codes.h"
 #include "comm/base.h"
 #include "comm/esc_registers.h"
 #include "comm/fieldbus_driver.h"
@@ -182,6 +183,12 @@ void Server::run() {
              res->writeHeader("Content-Type", "application/json")
                  ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(nlohmann::json(mm::comm::kAlStatusCodes).dump());
+           })
+      .get("/api/meta/foe-error-codes",
+           [this](auto* res, auto* /*req*/) {
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                 ->end(nlohmann::json(mm::comm::kFoeErrorCodes).dump());
            })
       .get("/api/devices/state",
            [this](auto* res, auto* req) {
@@ -394,6 +401,38 @@ void Server::run() {
              res->writeHeader("Content-Type", "application/json")
                  ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(nlohmann::json{{"data", *r}}.dump());
+           })
+      .get("/api/devices/:slavePosition/files/:filename",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p, ec] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+               res->writeStatus("400 Bad Request")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end();
+               return;
+             }
+             std::string filename{req->getParameter("filename")};
+             const auto* device = deviceManager_.findDevice(pos);
+             if (!device) {
+               res->writeStatus("404 Not Found")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end();
+               return;
+             }
+             auto r = device->readFile(filename);
+             if (!r) {
+               res->writeStatus("500 Internal Server Error")
+                   ->writeHeader("Content-Type", "application/json")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end(nlohmann::json{{"error", r.error()}}.dump());
+               return;
+             }
+             res->writeHeader("Content-Type", "application/octet-stream")
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                 ->end(std::string_view{reinterpret_cast<const char*>(r->data()), r->size()});
            })
       .post("/api/init",
             [this](auto* res, auto* /*req*/) {

@@ -34,6 +34,8 @@ motion-master [OPTIONS]
   -p, --port UINT [8443]        HTTP/WebSocket port
       --cert TEXT:FILE          TLS certificate file
       --key TEXT:FILE           TLS private key file
+      --cors-origin TEXT [https://motion-master.synapticon.com]
+                                Value sent in Access-Control-Allow-Origin (use '*' to allow any)
   -d, --driver TEXT             Fieldbus driver: soem (omit to defer initialisation to the HTTP API)
   -l, --log-level TEXT [info]   Log level: trace, debug, info, warn, error
   -a, --adapter TEXT            Network adapter for EtherCAT: interface name or MAC address
@@ -187,6 +189,21 @@ Test the API (add `-k` only when using the self-signed fallback):
 ```bash
 curl -k https://localhost:8443/api/version
 curl -k https://localhost:8443/api/swagger.yml
+```
+
+### CORS
+
+The server sends `Access-Control-Allow-Origin: https://motion-master.synapticon.com` by default so the production PWA can reach a locally running backend. When developing the UI against a different origin (e.g. Vite dev server on `http://localhost:5173`), override it via the `CORS_ORIGIN` env var picked up by `tools/run.sh`, or by passing `--cors-origin` to the binary directly:
+
+```bash
+# Vite dev server
+CORS_ORIGIN=http://localhost:5173 ./tools/run.sh
+
+# Allow any origin (development only — do not use in production)
+CORS_ORIGIN='*' ./tools/run.sh
+
+# Equivalent, calling the binary directly
+./build/x64-linux-debug/apps/motion_master/motion-master --cors-origin http://localhost:5173
 ```
 
 ### Fieldbus lifecycle via API

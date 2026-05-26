@@ -76,17 +76,24 @@ class FieldbusDriver {
   /// After @c stop() returns, @c exchangeProcessData() must not be called again.
   virtual void stop() = 0;
 
+  /// @brief AL Status and AL Status Code for a single slave.
+  struct SlaveStateRaw {
+    uint16_t alStatus;      ///< Raw AL Status register (bits 3:0 = state, bit 4 = error).
+    uint16_t alStatusCode;  ///< AL Status Code register (ETG.1000.6 §6.4.1).
+  };
+
   /// @brief Reads the current AL Status for each slave in @p positions.
   ///
   /// Refreshes slave state from the hardware in one pass, then returns the raw
-  /// AL Status register value for each requested position.  Bits 3:0 encode the
-  /// current state (1=Init, 2=PreOp, 3=Boot, 4=SafeOp, 8=Op); bit 4 is the
-  /// error indicator.
+  /// AL Status register and AL Status Code register for each requested position.
+  /// AL Status bits 3:0 encode the current state (1=Init, 2=PreOp, 3=Boot,
+  /// 4=SafeOp, 8=Op); bit 4 is the error indicator.  AL Status Code is non-zero
+  /// when an error is present and identifies the cause (ETG.1000.6 §6.4.1).
   ///
   /// @param positions  1-based slave positions to read.
-  /// @return Raw AL Status values in the same order as @p positions, or an
+  /// @return Raw state per position in the same order as @p positions, or an
   ///         error string if the hardware read fails.
-  virtual std::expected<std::vector<uint16_t>, std::string> readStates(
+  virtual std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& positions) = 0;
 
   /// @brief Reads an object dictionary entry via CoE SDO upload.

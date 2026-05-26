@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "comm/al_status_codes.h"
 #include "comm/base.h"
 #include "comm/esc_registers.h"
 #include "comm/fieldbus_driver.h"
@@ -45,11 +46,16 @@ void Server::stop() {
   }
 
   if (auto* loop = loop_.load()) {
-    if (auto* token = listen_token_.exchange(nullptr)) {
-      loop->defer([token]() { us_listen_socket_close(0, token); });
-    } else {
-      loop->defer([]() {});
-    }
+    // Close the listen socket then free the loop so us_loop_run() returns
+    // immediately. Freeing from inside a defer callback is intentional: it
+    // closes the dateTimer and the internal wakeup fd (both of which otherwise
+    // keep num_polls > 0 and hold epoll_wait indefinitely).
+    loop->defer([loop, token = listen_token_.exchange(nullptr)]() {
+      if (token) {
+        us_listen_socket_close(0, token);
+      }
+      loop->free();
+    });
   }
 
   if (thread_.joinable()) {
@@ -156,11 +162,17 @@ void Server::run() {
                  ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(body);
            })
-      .get("/api/registers",
+      .get("/api/meta/esc-registers",
            [this](auto* res, auto* /*req*/) {
              res->writeHeader("Content-Type", "application/json")
                  ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(nlohmann::json(mm::comm::kEscRegisters).dump());
+           })
+      .get("/api/meta/al-status-codes",
+           [this](auto* res, auto* /*req*/) {
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                 ->end(nlohmann::json(mm::comm::kAlStatusCodes).dump());
            })
       .get("/api/devices/state",
            [this](auto* res, auto* req) {

@@ -1,4 +1,5 @@
 add_library(comm STATIC
+    al_status_codes.cc
     base.cc
     esc_registers.cc
     fieldbus_driver.cc

@@ -16,8 +16,10 @@ namespace mm::node {
 /// @brief Current AL state snapshot for a single device.
 struct DeviceStateInfo {
   uint16_t slavePosition;  ///< 1-based position on the fieldbus.
-  uint16_t alState;        ///< Current AL state (1=Init, 2=PreOp, 3=Boot, 4=SafeOp, 8=Op).
-  bool error;              ///< True when the AL Status error indicator bit is set.
+  uint16_t alStatus;       ///< Raw AL Status register (bits 3:0 = state, bit 4 = error indicator).
+  uint16_t alState;  ///< AL state decoded from alStatus (1=Init, 2=PreOp, 3=Boot, 4=SafeOp, 8=Op).
+  bool error;        ///< True when the AL Status error indicator bit is set.
+  uint16_t alStatusCode;  ///< AL Status Code (ETG.1000.6 §6.4.1); non-zero when error is true.
 };
 
 /// @brief Serialises a DeviceStateInfo to JSON.

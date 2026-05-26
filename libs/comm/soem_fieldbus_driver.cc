@@ -60,13 +60,15 @@ SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
 
 int SoemFieldbusDriver::slaveCount() const { return ctx_ ? ctx_->slavecount : 0; }
 
-std::expected<std::vector<uint16_t>, std::string> SoemFieldbusDriver::readStates(
-    const std::vector<uint16_t>& positions) {
+std::expected<std::vector<FieldbusDriver::SlaveStateRaw>, std::string>
+SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
   ecx_readstate(ctx_.get());
-  std::vector<uint16_t> result;
+  std::vector<SlaveStateRaw> result;
   result.reserve(positions.size());
-  std::ranges::transform(positions, std::back_inserter(result),
-                         [this](uint16_t pos) { return ctx_->slavelist[pos].state; });
+  std::ranges::transform(positions, std::back_inserter(result), [this](uint16_t pos) {
+    return SlaveStateRaw{.alStatus = ctx_->slavelist[pos].state,
+                         .alStatusCode = ctx_->slavelist[pos].ALstatuscode};
+  });
   return result;
 }
 

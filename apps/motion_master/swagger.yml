@@ -216,7 +216,24 @@ paths:
             text/plain:
               schema:
                 type: string
-  /api/registers:
+  /api/meta/al-status-codes:
+    get:
+      summary: List all known AL Status Codes
+      operationId: getAlStatusCodes
+      description: >
+        Returns the static catalogue of EtherCAT AL Status Codes defined in ETG.1000.6 §6.4.1.
+        These codes appear in the alStatusCode field of the device state response when an error
+        is present and identify the cause of the state transition failure.
+      responses:
+        "200":
+          description: Array of AL Status Code descriptors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AlStatusCode"
+  /api/meta/esc-registers:
     get:
       summary: List all known ESC registers
       operationId: getRegisters
@@ -434,23 +451,36 @@ paths:
                 type: array
                 items:
                   type: object
-                  required: [slavePosition, alState, error]
+                  required: [slavePosition, alStatus, alState, error, alStatusCode]
                   properties:
                     slavePosition:
                       type: integer
                       description: 1-based position on the fieldbus
                       example: 1
+                    alStatus:
+                      type: integer
+                      description: >
+                        Raw AL Status register value (ETG.1000.6 §6.4.1).
+                        Bits 3:0 encode the state; bit 4 is the error indicator.
+                      example: 17
                     alState:
                       type: integer
                       enum: [1, 2, 3, 4, 8]
                       description: >
-                        Current AL state (ETG.1000.6 encoding):
+                        Current AL state decoded from alStatus (ETG.1000.6 encoding):
                         1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
-                      example: 2
+                      example: 1
                     error:
                       type: boolean
-                      description: True when the AL Status error indicator bit is set
-                      example: false
+                      description: True when the AL Status error indicator bit (bit 4) is set
+                      example: true
+                    alStatusCode:
+                      type: integer
+                      description: >
+                        AL Status Code register (ETG.1000.6 §6.4.1).
+                        Non-zero when error is true; identifies the error cause
+                        (e.g. 0x0014 = No valid firmware).
+                      example: 20
         "400":
           description: A `positions` value is not a valid integer
         "500":
@@ -558,6 +588,22 @@ paths:
                       example: 12345
 components:
   schemas:
+    AlStatusCode:
+      type: object
+      required: [code, name, description]
+      properties:
+        code:
+          type: integer
+          description: AL Status Code value (ETG.1000.6 §6.4.1)
+          example: 20
+        name:
+          type: string
+          description: Short human-readable name
+          example: "No valid firmware"
+        description:
+          type: string
+          description: Full description of the error condition
+          example: "No valid firmware is present — the slave needs firmware flashed"
     EscRegister:
       type: object
       required: [address, length, name, description]

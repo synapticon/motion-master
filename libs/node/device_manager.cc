@@ -90,7 +90,11 @@ std::expected<void, std::string> DeviceManager::transitionToState(
 }
 
 void to_json(nlohmann::json& j, const DeviceStateInfo& info) {
-  j = {{"slavePosition", info.slavePosition}, {"alState", info.alState}, {"error", info.error}};
+  j = {{"slavePosition", info.slavePosition},
+       {"alStatus", info.alStatus},
+       {"alState", info.alState},
+       {"error", info.error},
+       {"alStatusCode", info.alStatusCode}};
 }
 
 std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::getDeviceStates(
@@ -111,11 +115,13 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::getDevic
   std::vector<DeviceStateInfo> result;
   result.reserve(targets.size());
   for (std::size_t i = 0; i < targets.size(); ++i) {
-    uint16_t state = (*raw)[i];
+    const auto& raw_state = (*raw)[i];
     result.push_back({
         .slavePosition = targets[i],
-        .alState = static_cast<uint16_t>(state & 0x000Fu),
-        .error = !!(state & 0x0010u),
+        .alStatus = raw_state.alStatus,
+        .alState = static_cast<uint16_t>(raw_state.alStatus & 0x000Fu),
+        .error = !!(raw_state.alStatus & 0x0010u),
+        .alStatusCode = raw_state.alStatusCode,
     });
   }
   return result;

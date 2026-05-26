@@ -58,7 +58,7 @@ class SoemFieldbusDriver : public FieldbusDriver {
   void stop() override;
 
   /// @copydoc FieldbusDriver::readStates
-  std::expected<std::vector<uint16_t>, std::string> readStates(
+  std::expected<std::vector<FieldbusDriver::SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& positions) override;
 
   /// @copydoc FieldbusDriver::readSdo

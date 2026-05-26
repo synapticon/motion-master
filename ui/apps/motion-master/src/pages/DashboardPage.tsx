@@ -34,7 +34,16 @@ export default function DashboardPage() {
   const [alState, setAlState] = useState<1 | 2 | 3 | 4 | 8>(2)
   const AL_STATE_LABEL: Record<number, string> = { 1: 'Init', 2: 'PreOp', 3: 'Boot', 4: 'SafeOp', 8: 'Op' }
 
-  type DeviceState = { alState: number; error: boolean }
+  const alStatusCodesQuery = useQuery({
+    queryKey: ['alStatusCodes'],
+    queryFn: () => api.getAlStatusCodes(),
+    staleTime: Infinity,
+  })
+  const alStatusCodeMap = Object.fromEntries(
+    (alStatusCodesQuery.data?.data ?? []).map(c => [c.code, c])
+  )
+
+  type DeviceState = { alState: number; error: boolean; alStatusCode: number }
   const [deviceStates, setDeviceStates] = useState<Record<number, DeviceState>>({})
   const [readingStates, setReadingStates] = useState(false)
 
@@ -46,7 +55,7 @@ export default function DashboardPage() {
       const res = await api.getDeviceStates({ positions })
       const next: Record<number, DeviceState> = {}
       for (const entry of res.data) {
-        next[entry.slavePosition] = { alState: entry.alState, error: entry.error }
+        next[entry.slavePosition] = { alState: entry.alState, error: entry.error, alStatusCode: entry.alStatusCode }
       }
       setDeviceStates(next)
     } finally {
@@ -127,10 +136,10 @@ export default function DashboardPage() {
         {/* Row 2 — Init + Reset */}
         <section>
           <p className="eyebrow mb-5">Fieldbus</p>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
 
             {/* Init */}
-            <div className="border border-grey-200 p-5 space-y-4">
+            <div className="border border-grey-200 p-5 space-y-4 xl:col-span-3">
               <h3 className="text-sm font-display uppercase tracking-widest">Init</h3>
               <p className="text-xs text-grey-600">
                 Initialize the fieldbus driver with the selected protocol and network adapter. Must be called before scanning.
@@ -200,7 +209,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Reset */}
-            <div className="border border-grey-200 p-5 space-y-4">
+            <div className="border border-grey-200 p-5 space-y-4 xl:col-span-1">
               <h3 className="text-sm font-display uppercase tracking-widest">Reset</h3>
               <p className="text-xs text-grey-600">
                 Reset the fieldbus driver and clear the device list. Init must be performed again afterwards.
@@ -226,10 +235,10 @@ export default function DashboardPage() {
         {/* Row 3 — Scan + Transition to State */}
         <section>
           <p className="eyebrow mb-5">Devices</p>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
 
             {/* Scan + Devices */}
-            <div className="border border-grey-200 p-5 space-y-4">
+            <div className="border border-grey-200 p-5 space-y-4 xl:col-span-3">
               <h3 className="text-sm font-display uppercase tracking-widest">Scan</h3>
               <p className="text-xs text-grey-600">
                 Discover EtherCAT slaves on the bus. Requires a successful init first.
@@ -301,11 +310,24 @@ export default function DashboardPage() {
                               <td className="px-4 py-2 font-mono">{d.serialNumber}</td>
                               <td className="px-4 py-2">
                                 {deviceStates[d.slavePosition] !== undefined
-                                  ? <span className={deviceStates[d.slavePosition].error ? 'text-status-bad' : ''}>
-                                      {AL_STATE_LABEL[deviceStates[d.slavePosition].alState] ?? `0x${deviceStates[d.slavePosition].alState.toString(16).toUpperCase()}`}
-                                      {' '}({deviceStates[d.slavePosition].alState})
-                                      {deviceStates[d.slavePosition].error ? ' !' : ''}
-                                    </span>
+                                  ? (() => {
+                                      const ds = deviceStates[d.slavePosition]
+                                      const stateLabel = AL_STATE_LABEL[ds.alState] ?? `0x${ds.alState.toString(16).toUpperCase()}`
+                                      const errorEntry = ds.error ? (alStatusCodeMap[ds.alStatusCode] ?? null) : null
+                                      return (
+                                        <span className={ds.error ? 'text-status-bad' : ''}>
+                                          {stateLabel} ({ds.alState})
+                                          {errorEntry && (
+                                            <span title={errorEntry.description}>
+                                              {' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} {errorEntry.name}
+                                            </span>
+                                          )}
+                                          {ds.error && !errorEntry && (
+                                            <span>{' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')}</span>
+                                          )}
+                                        </span>
+                                      )
+                                    })()
                                   : '—'}
                               </td>
                             </tr>
@@ -319,7 +341,7 @@ export default function DashboardPage() {
             </div>
 
             {/* Transition to State */}
-            <div className="border border-grey-200 p-5 space-y-4">
+            <div className="border border-grey-200 p-5 space-y-4 xl:col-span-1">
               <h3 className="text-sm font-display uppercase tracking-widest">Transition to State</h3>
               <p className="text-xs text-grey-600">
                 Command all slaves to transition to the selected EtherCAT AL state. Requires a successful scan first.

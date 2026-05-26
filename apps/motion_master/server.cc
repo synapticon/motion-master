@@ -46,15 +46,24 @@ void Server::stop() {
   }
 
   if (auto* loop = loop_.load()) {
-    // Close the listen socket then free the loop so us_loop_run() returns
-    // immediately. Freeing from inside a defer callback is intentional: it
-    // closes the dateTimer and the internal wakeup fd (both of which otherwise
-    // keep num_polls > 0 and hold epoll_wait indefinitely).
-    loop->defer([loop, token = listen_token_.exchange(nullptr)]() {
+    // Close the listen socket and all WebSocket connections from the event-loop
+    // thread so us_loop_run() exits naturally when num_polls reaches 0.
+    // The internal sweep_timer, dateTimer, and wakeup_async are all created with
+    // fallthrough=1, so they do not contribute to num_polls and do not prevent
+    // loop exit. Calling loop->free() from inside wakeupCb would be a
+    // use-after-free: wakeupCb clears the deferred queue after each callback
+    // returns, but free() destroys LoopData (which owns those queues) mid-drain.
+    // The thread-local LoopCleaner calls loop->free() safely at thread exit.
+    loop->defer([this, token = listen_token_.exchange(nullptr)]() {
       if (token) {
         us_listen_socket_close(0, token);
       }
-      loop->free();
+      // Snapshot before iterating: ws->end() triggers the close callback which
+      // erases from connections_.
+      auto snapshot = connections_;
+      for (auto* ws : snapshot) {
+        ws->end(1001);
+      }
     });
   }
 

@@ -34,7 +34,8 @@ inline constexpr auto kFoeErrorCodes = std::to_array<FoeErrorCode>({
     {0x00008002, "Access denied", "Access to the requested file is denied"},
     {0x00008003, "Disk full", "The slave has insufficient storage to complete the transfer"},
     {0x00008004, "Illegal", "Illegal FoE operation"},
-    {0x00008005, "Packet number wrong", "Received a data packet with an unexpected sequence number"},  // NOLINT
+    {0x00008005, "Packet number wrong",
+     "Received a data packet with an unexpected sequence number"},  // NOLINT
     {0x00008006, "Already exists", "The file already exists on the slave"},
     {0x00008007, "No user", "No user is logged in; authentication required"},
     {0x00008008, "Bootstrap only", "This operation is only available in Bootstrap state"},

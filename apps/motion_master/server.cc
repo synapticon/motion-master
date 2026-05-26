@@ -14,10 +14,10 @@
 #include <vector>
 
 #include "comm/al_status_codes.h"
-#include "comm/foe_error_codes.h"
 #include "comm/base.h"
 #include "comm/esc_registers.h"
 #include "comm/fieldbus_driver.h"
+#include "comm/foe_error_codes.h"
 #include "core/util.h"
 #include "node/device_manager.h"
 

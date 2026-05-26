@@ -23,27 +23,24 @@ struct FoeErrorCode {
 /// @param e  FoE error code entry to serialise.
 void to_json(nlohmann::json& j, const FoeErrorCode& e);
 
-/// @brief Catalogue of FoE error codes defined in ETG.1000.6 §5.5.
+/// @brief Catalogue of FoE error codes defined in ETG.1000.6 §5.8.5, Table 93.
 ///
 /// Codes in the 0x8000 range are the standard EtherCAT FoE error codes.
 /// Vendor-specific codes are outside this range and are not listed here.
 inline constexpr auto kFoeErrorCodes = std::to_array<FoeErrorCode>({
-    {0x00000000, "Undefined error", "Unspecified FoE error"},
+    {0x00000000, "Undefined", "Unspecified or vendor-specific FoE error"},
     {0x00008000, "Not defined", "General FoE error with no further classification"},
-    {0x00008001, "Access denied", "The requested file operation is not permitted"},
-    {0x00008002, "File not found", "The requested file does not exist on the slave"},
-    {0x00008003, "Date changed", "The file was modified since the transfer started"},
-    {0x00008004, "Could not delete", "The slave could not delete the file"},
-    {0x00008005, "No access", "Access to the file system is not available"},
-    {0x00008006, "Wrong packet number", "Received a data packet with an unexpected sequence number"},
-    {0x00008007, "Unexpected opcode", "Received an opcode that was not expected at this point"},
-    {0x00008008, "No password", "A password is required but was not provided"},
-    {0x00008009, "No disk space", "The slave has insufficient storage to complete the transfer"},
-    {0x0000800A, "Bootstrap only", "This operation is only available in Bootstrap state"},
-    {0x0000800B, "No valid firmware", "The slave holds no valid firmware image"},
-    {0x0000800C, "Checksum error", "The received file failed its integrity check"},
-    {0x0000800D, "Wrong file header", "The file header does not match what the slave expects"},
-    {0x0000800E, "File type mismatch", "The file type is not compatible with this slave"},
+    {0x00008001, "Not found", "The requested file was not found on the slave"},
+    {0x00008002, "Access denied", "Access to the requested file is denied"},
+    {0x00008003, "Disk full", "The slave has insufficient storage to complete the transfer"},
+    {0x00008004, "Illegal", "Illegal FoE operation"},
+    {0x00008005, "Packet number wrong", "Received a data packet with an unexpected sequence number"},  // NOLINT
+    {0x00008006, "Already exists", "The file already exists on the slave"},
+    {0x00008007, "No user", "No user is logged in; authentication required"},
+    {0x00008008, "Bootstrap only", "This operation is only available in Bootstrap state"},
+    {0x00008009, "Not Bootstrap", "This operation is not available in Bootstrap state"},
+    {0x0000800A, "No rights", "Insufficient rights to perform the requested operation"},
+    {0x0000800B, "Program error", "A program error occurred on the slave"},
 });
 
 }  // namespace mm::comm

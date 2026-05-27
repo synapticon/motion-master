@@ -59,11 +59,18 @@ void Server::stop() {
       if (token) {
         us_listen_socket_close(0, token);
       }
-      // Snapshot before iterating: ws->end() triggers the close callback which
+      // Snapshot before iterating: closing triggers the close callback which
       // erases from connections_.
+      //
+      // close() (hard us_socket_close) — not end() (graceful close frame +
+      // half-close). end() only shuts down the write side and leaves the socket
+      // in the poll set waiting for the peer's close handshake; an idle or
+      // unresponsive client (e.g. the monitoring PWA) never replies, so
+      // num_polls never reaches 0, us_loop_run() never returns, and the join()
+      // below blocks forever. On shutdown we want the connection gone now.
       auto snapshot = connections_;
       for (auto* ws : snapshot) {
-        ws->end(1001);
+        ws->close();
       }
     });
   }

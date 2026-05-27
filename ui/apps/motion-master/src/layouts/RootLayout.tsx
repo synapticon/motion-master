@@ -63,10 +63,12 @@ export default function RootLayout() {
               Motion Master
             </span>
             <span
-              title={online ? 'API online' : 'API offline'}
-              aria-label={online ? 'API online' : 'API offline'}
-              className={`inline-block h-2.5 w-2.5 rounded-full ${
-                online ? 'bg-status-good' : 'bg-status-bad animate-pulse'
+              title={online ? 'API online' : 'API offline — Start motion-master'}
+              aria-label={online ? 'API online' : 'API offline — Start motion-master'}
+              className={`inline-block h-3 w-3 rounded-full ring-2 ring-white ${
+                online
+                  ? 'bg-status-good shadow-[0_0_8px_2px_var(--color-status-good)]'
+                  : 'bg-status-bad shadow-[0_0_8px_2px_var(--color-status-bad)] animate-pulse'
               }`}
             />
           </div>

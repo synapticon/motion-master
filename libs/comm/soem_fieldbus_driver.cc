@@ -124,6 +124,246 @@ int retrySdoInfo(F&& call) {
   return result;
 }
 
+// ValueInfo flags for the SDO Info "Get Entry Description" request, ETG.1000.6 §5.6.3.3.
+constexpr uint8_t kValueInfoAccess = 0x01;
+constexpr uint8_t kValueInfoCategory = 0x02;
+constexpr uint8_t kValueInfoPdoMappable = 0x04;
+constexpr uint8_t kValueInfoUnit = 0x08;
+constexpr uint8_t kValueInfoDefault = 0x10;
+constexpr uint8_t kValueInfoMinimum = 0x20;
+constexpr uint8_t kValueInfoMaximum = 0x40;
+
+constexpr uint8_t kValueInfoBasic = kValueInfoAccess | kValueInfoCategory | kValueInfoPdoMappable;
+constexpr uint8_t kValueInfoExtended = kValueInfoBasic | kValueInfoUnit |
+                                       kValueInfoDefault |  // NOLINT(whitespace/indent_namespace)
+                                       kValueInfoMinimum |  // NOLINT(whitespace/indent_namespace)
+                                       kValueInfoMaximum;   // NOLINT(whitespace/indent_namespace)
+
+/// Parsed result of one "Get Entry Description" exchange.
+struct EntryDescription {
+  uint16_t dataType;
+  uint16_t bitLength;
+  uint16_t access;
+  std::string name;
+  std::optional<uint32_t> unit;
+  std::optional<std::vector<uint8_t>> defaultValue;
+  std::optional<std::vector<uint8_t>> minValue;
+  std::optional<std::vector<uint8_t>> maxValue;
+};
+
+/// Error categories distinguished by @c readEntryDescriptionOnce — only @c kSdoInfoError
+/// is recoverable by retrying with a reduced ValueInfo mask.
+enum class OeError {
+  kMailboxFailure,
+  kSdoInfoError,
+  kUnexpectedResponse,
+  kResponseTruncated,
+};
+
+/// Drops any unread mailbox content so the next exchange starts clean.
+void drainMailbox(ecx_contextt* ctx, uint16_t slave) {
+  ec_mbxbuft* stale = nullptr;
+  ecx_mbxreceive(ctx, slave, &stale, 0);
+  if (stale) {
+    ecx_dropmbx(ctx, stale);
+  }
+}
+
+/// Issues a single CoE SDO Info "Get Entry Description" request and parses the response.
+///
+/// Layout of the request/response payload (offsets relative to the start of the
+/// mailbox buffer; mailbox header is 6 bytes):
+///   6..7    CANOpen header (Service = ECT_COES_SDOINFO in bits 12..15)
+///   8       Opcode (REQ = 0x05, RES = 0x06, SDOINFO_ERROR = 0x07)
+///   9       Reserved
+///   10..11  Fragments
+///   12..13  Index
+///   14      SubIndex
+///   15      ValueInfo (request: requested bits; response: bits the slave honoured)
+///   16..17  DataType         (response only)
+///   18..19  BitLength        (response only)
+///   20..21  ObjAccess        (response only)
+///   22..    Optional fields, then Name. Optional fields appear in this order, each
+///           present only when its bit is set in the response ValueInfo:
+///             Unit (4 bytes)         when bit 0x08
+///             Default (valueSize)    when bit 0x10
+///             Min     (valueSize)    when bit 0x20
+///             Max     (valueSize)    when bit 0x40
+///           where valueSize = ceil(BitLength / 8).
+std::expected<EntryDescription, OeError> readEntryDescriptionOnce(ecx_contextt* ctx, uint16_t slave,
+                                                                  uint16_t index, uint8_t subindex,
+                                                                  uint8_t requestedValueInfo) {
+  drainMailbox(ctx, slave);
+
+  ec_mbxbuft* tx = ecx_getmbx(ctx);
+  if (!tx) {
+    return std::unexpected(OeError::kMailboxFailure);
+  }
+  ec_clearmbx(tx);
+
+  const uint8_t cnt = ec_nextmbxcnt(ctx->slavelist[slave].mbx_cnt);
+  ctx->slavelist[slave].mbx_cnt = cnt;
+
+  uint8_t* tbuf = reinterpret_cast<uint8_t*>(tx);
+  // Mailbox header: length=10 payload bytes, address=0, priority=0, type=COE|(cnt<<4).
+  tbuf[0] = 0x0A;
+  tbuf[1] = 0x00;
+  tbuf[2] = 0x00;
+  tbuf[3] = 0x00;
+  tbuf[4] = 0x00;
+  tbuf[5] = static_cast<uint8_t>(ECT_MBXT_COE | (cnt << 4));
+  // CoE header: Service = SDOINFO in bits 12..15 → 0x8000 little-endian.
+  tbuf[6] = 0x00;
+  tbuf[7] = static_cast<uint8_t>(ECT_COES_SDOINFO << 4);
+  tbuf[8] = ECT_GET_OE_REQ;
+  tbuf[9] = 0x00;
+  tbuf[10] = 0x00;
+  tbuf[11] = 0x00;
+  tbuf[12] = static_cast<uint8_t>(index & 0xFFu);
+  tbuf[13] = static_cast<uint8_t>((index >> 8) & 0xFFu);
+  tbuf[14] = subindex;
+  tbuf[15] = requestedValueInfo;
+
+  int wkc = ecx_mbxsend(ctx, slave, tx, EC_TIMEOUTTXM);
+  if (wkc <= 0) {
+    return std::unexpected(OeError::kMailboxFailure);
+  }
+  // ecx_mbxsend takes ownership of tx on success.
+
+  ec_mbxbuft* rx = nullptr;
+  wkc = ecx_mbxreceive(ctx, slave, &rx, EC_TIMEOUTRXM);
+  if (wkc <= 0 || !rx) {
+    if (rx) {
+      ecx_dropmbx(ctx, rx);
+    }
+    return std::unexpected(OeError::kMailboxFailure);
+  }
+
+  struct MbxGuard {
+    ecx_contextt* ctx;
+    ec_mbxbuft* mbx;
+    ~MbxGuard() {
+      if (mbx) {
+        ecx_dropmbx(ctx, mbx);
+      }
+    }
+  } guard{ctx, rx};
+
+  const uint8_t* rbuf = reinterpret_cast<const uint8_t*>(rx);
+  const uint16_t mbxLen = static_cast<uint16_t>(rbuf[0] | (rbuf[1] << 8));
+  const uint8_t mbxtype = rbuf[5] & 0x0Fu;
+  const uint8_t opcode = rbuf[8] & 0x7Fu;
+
+  if (mbxtype != ECT_MBXT_COE) {
+    return std::unexpected(OeError::kUnexpectedResponse);
+  }
+  if (opcode == ECT_SDOINFO_ERROR) {
+    return std::unexpected(OeError::kSdoInfoError);
+  }
+  if (opcode != ECT_GET_OE_RES) {
+    return std::unexpected(OeError::kUnexpectedResponse);
+  }
+
+  const size_t end = 6u + mbxLen;  // past-the-end byte offset
+  if (end < 22u) {
+    return std::unexpected(OeError::kResponseTruncated);
+  }
+
+  EntryDescription desc{
+      .dataType = static_cast<uint16_t>(rbuf[16] | (rbuf[17] << 8)),
+      .bitLength = static_cast<uint16_t>(rbuf[18] | (rbuf[19] << 8)),
+      .access = static_cast<uint16_t>(rbuf[20] | (rbuf[21] << 8)),
+      .name = {},
+      .unit = std::nullopt,
+      .defaultValue = std::nullopt,
+      .minValue = std::nullopt,
+      .maxValue = std::nullopt,
+  };
+
+  const uint8_t responseValueInfo = rbuf[15];
+  const size_t valueSize = static_cast<size_t>((desc.bitLength + 7u) / 8u);
+  size_t offset = 22;
+
+  if (responseValueInfo & kValueInfoUnit) {
+    if (offset + 4u > end) {
+      return std::unexpected(OeError::kResponseTruncated);
+    }
+    desc.unit = static_cast<uint32_t>(rbuf[offset]) |
+                (static_cast<uint32_t>(rbuf[offset + 1]) << 8) |
+                (static_cast<uint32_t>(rbuf[offset + 2]) << 16) |
+                (static_cast<uint32_t>(rbuf[offset + 3]) << 24);
+    offset += 4u;
+  }
+
+  auto readSlice = [&](std::optional<std::vector<uint8_t>>& dst) -> bool {
+    if (offset + valueSize > end) {
+      return false;
+    }
+    dst = std::vector<uint8_t>(rbuf + offset, rbuf + offset + valueSize);
+    offset += valueSize;
+    return true;
+  };
+
+  if ((responseValueInfo & kValueInfoDefault) && valueSize > 0u) {
+    if (!readSlice(desc.defaultValue)) {
+      return std::unexpected(OeError::kResponseTruncated);
+    }
+  }
+  if ((responseValueInfo & kValueInfoMinimum) && valueSize > 0u) {
+    if (!readSlice(desc.minValue)) {
+      return std::unexpected(OeError::kResponseTruncated);
+    }
+  }
+  if ((responseValueInfo & kValueInfoMaximum) && valueSize > 0u) {
+    if (!readSlice(desc.maxValue)) {
+      return std::unexpected(OeError::kResponseTruncated);
+    }
+  }
+
+  if (offset < end) {
+    size_t nameLen = end - offset;
+    if (nameLen > EC_MAXNAME) {
+      nameLen = EC_MAXNAME;
+    }
+    desc.name.assign(reinterpret_cast<const char*>(rbuf + offset), nameLen);
+  }
+
+  return desc;
+}
+
+/// Reads one entry's description, asking for default/min/max where the slave can
+/// honour it; falls back to the basic mask on @c SDOINFO_ERROR so a slave that
+/// rejects the extended request still yields access/dataType/bitLength/name.
+std::expected<EntryDescription, std::string> readEntryDescription(ecx_contextt* ctx, uint16_t slave,
+                                                                  uint16_t index,
+                                                                  uint8_t subindex) {
+  auto callWithRetries = [&](uint8_t mask) -> std::expected<EntryDescription, OeError> {
+    auto r = readEntryDescriptionOnce(ctx, slave, index, subindex, mask);
+    for (int i = 0; !r && r.error() == OeError::kMailboxFailure && i < kSdoInfoMaxRetries; ++i) {
+      std::this_thread::sleep_for(kSdoInfoRetryDelay);
+      r = readEntryDescriptionOnce(ctx, slave, index, subindex, mask);
+    }
+    return r;
+  };
+
+  auto result = callWithRetries(kValueInfoExtended);
+  if (result) {
+    return std::move(*result);
+  }
+
+  // SDOINFO_ERROR is a definitive "I don't support this mask" — retry once with
+  // the basic mask so we still get access/dataType/bitLength/name.
+  if (result.error() == OeError::kSdoInfoError) {
+    auto fallback = callWithRetries(kValueInfoBasic);
+    if (fallback) {
+      return std::move(*fallback);
+    }
+  }
+
+  return std::unexpected(
+      std::format("GetEntryDescription slave {} 0x{:04X}:{:02X} failed", slave, index, subindex));
+}
+
 }  // namespace
 
 std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectDictionary(
@@ -142,28 +382,24 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
                                          slavePosition, odList.Index[i]));
     }
 
-    ec_OElistt oeList{};
-    if (retrySdoInfo([&] { return ecx_readOE(ctx_.get(), i, &odList, &oeList); }) <= 0) {
-      return std::unexpected(
-          std::format("readOE slave {} index 0x{:04X} failed", slavePosition, odList.Index[i]));
-    }
-
     for (uint8_t sub = 0; sub <= odList.MaxSub[i]; ++sub) {
-      // TODO(msankovic): populate defaultValue/minValue/maxValue via a custom SDO Info
-      // request (ETG.1000.6 §5.6.3 "Get Entry Description" with ValueInfo bits
-      // 0x10/0x20/0x40). SOEM's ecx_readOE hardcodes the request to 0x07 and discards
-      // these fields.
+      auto desc = readEntryDescription(ctx_.get(), slavePosition, odList.Index[i], sub);
+      if (!desc) {
+        spdlog::warn("Device {}: {}", slavePosition, desc.error());
+        continue;
+      }
       entries.push_back(OdEntry{
           .index = odList.Index[i],
           .subindex = sub,
           .objectCode = odList.ObjectCode[i],
-          .dataType = oeList.DataType[sub],
-          .bitLength = oeList.BitLength[sub],
-          .access = oeList.ObjAccess[sub],
-          .name = std::string(oeList.Name[sub]),
-          .defaultValue = std::nullopt,
-          .minValue = std::nullopt,
-          .maxValue = std::nullopt,
+          .dataType = desc->dataType,
+          .bitLength = desc->bitLength,
+          .access = desc->access,
+          .name = std::move(desc->name),
+          .unit = desc->unit,
+          .defaultValue = std::move(desc->defaultValue),
+          .minValue = std::move(desc->minValue),
+          .maxValue = std::move(desc->maxValue),
       });
     }
   }

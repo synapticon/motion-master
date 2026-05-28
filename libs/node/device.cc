@@ -69,7 +69,28 @@ std::expected<void, std::string> Device::initializeParameters(bool readValues) {
         .bitLength = e.bitLength,
         .access = e.access,
         .value = defaultValueForDataType(e.dataType),
+        .unit = e.unit,
+        .defaultValue = std::nullopt,
+        .minValue = std::nullopt,
+        .maxValue = std::nullopt,
     };
+
+    auto decodeRawBytes =
+        [&](const std::optional<std::vector<uint8_t>>& raw) -> std::optional<DeviceParameterValue> {
+      if (!raw) {
+        return std::nullopt;
+      }
+      auto decoded = decodeSdoBytes(e.dataType, *raw);
+      if (!decoded) {
+        spdlog::warn("Device {}: decode 0x{:04X}:{:02X} bound failed: {}", slavePosition_, e.index,
+                     e.subindex, decoded.error());
+        return std::nullopt;
+      }
+      return std::move(*decoded);
+    };
+    p.defaultValue = decodeRawBytes(e.defaultValue);
+    p.minValue = decodeRawBytes(e.minValue);
+    p.maxValue = decodeRawBytes(e.maxValue);
 
     if (readValues) {
       auto bytes = driver_.readSdo(slavePosition_, e.index, e.subindex);

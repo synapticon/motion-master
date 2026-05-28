@@ -867,6 +867,47 @@ components:
               items:
                 type: integer
           example: 12345
+        unit:
+          type: integer
+          description: >-
+            ETG.1004 unit code reported by the slave for this entry.  Absent
+            when the slave does not populate the Unit field of the SDO Info
+            response.  The 32-bit code decomposes into prefix, base SI unit,
+            and exponent per ETG.1004.
+          example: 0
+        defaultValue:
+          description: >-
+            Slave-reported default value, decoded with the same logic as
+            `value`.  Absent when the slave does not report a default.
+          oneOf:
+            - type: integer
+            - type: number
+            - type: string
+            - type: array
+              items:
+                type: integer
+        minValue:
+          description: >-
+            Slave-reported minimum value, decoded with the same logic as
+            `value`.  Absent when the slave does not report a minimum.
+          oneOf:
+            - type: integer
+            - type: number
+            - type: string
+            - type: array
+              items:
+                type: integer
+        maxValue:
+          description: >-
+            Slave-reported maximum value, decoded with the same logic as
+            `value`.  Absent when the slave does not report a maximum.
+          oneOf:
+            - type: integer
+            - type: number
+            - type: string
+            - type: array
+              items:
+                type: integer
   responses:
     DriverError:
       description: Fieldbus driver returned an error

@@ -12,6 +12,7 @@ import LogPage from './pages/LogPage'
 import EscRegistersPage from './pages/EscRegistersPage'
 import AlStatusCodesPage from './pages/AlStatusCodesPage'
 import FoeErrorCodesPage from './pages/FoeErrorCodesPage'
+import DataTypesPage from './pages/DataTypesPage'
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
         <Route path="meta/esc-registers" element={<EscRegistersPage />} />
         <Route path="meta/al-status-codes" element={<AlStatusCodesPage />} />
         <Route path="meta/foe-error-codes" element={<FoeErrorCodesPage />} />
+        <Route path="meta/data-types" element={<DataTypesPage />} />
         <Route path="devices/:deviceId">
           <Route path="ethercat-state" element={<EthercatStatePage />} />
           <Route path="object-dictionary" element={<ObjectDictionaryPage />} />

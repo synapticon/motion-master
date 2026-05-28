@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <expected>
 #include <nlohmann/json_fwd.hpp>
+#include <optional>
 #include <span>
 #include <string>
 #include <variant>
@@ -41,14 +42,18 @@ DeviceParameterValue defaultValueForDataType(uint16_t dataType);
 /// or PDO exchange. @c value is initialised to the type-appropriate zero so
 /// callers can @c std::visit it directly without checking for a read.
 struct DeviceParameter {
-  uint16_t index{};            ///< CoE object index.
-  uint8_t subindex{};          ///< CoE object subindex.
-  std::string name;            ///< Textual description from @c ecx_readOE.
-  uint16_t objectCode{};       ///< OTYPE_VAR / OTYPE_ARRAY / OTYPE_RECORD (ETG.1000.6 §5).
-  uint16_t dataType{};         ///< ETG.1020 data type code (e.g. 0x0007 = UNSIGNED32).
-  uint16_t bitLength{};        ///< Bit length of the value.
-  uint16_t access{};           ///< ObjAccess bitfield (read/write per-state flags).
-  DeviceParameterValue value;  ///< Last-known value; type-appropriate zero before first read.
+  uint16_t index{};              ///< CoE object index.
+  uint8_t subindex{};            ///< CoE object subindex.
+  std::string name;              ///< Textual description from @c ecx_readOE.
+  uint16_t objectCode{};         ///< OTYPE_VAR / OTYPE_ARRAY / OTYPE_RECORD (ETG.1000.6 §5).
+  uint16_t dataType{};           ///< ETG.1020 data type code (e.g. 0x0007 = UNSIGNED32).
+  uint16_t bitLength{};          ///< Bit length of the value.
+  uint16_t access{};             ///< ObjAccess bitfield (read/write per-state flags).
+  DeviceParameterValue value;    ///< Last-known value; type-appropriate zero before first read.
+  std::optional<uint32_t> unit;  ///< ETG.1004 unit code, when reported.
+  std::optional<DeviceParameterValue> defaultValue;  ///< Slave-reported default, when available.
+  std::optional<DeviceParameterValue> minValue;      ///< Slave-reported minimum, when available.
+  std::optional<DeviceParameterValue> maxValue;      ///< Slave-reported maximum, when available.
 
   /// @brief Returns the packed @c (index, subindex) key used in the parameter map.
   uint32_t key() const { return makeParameterKey(index, subindex); }

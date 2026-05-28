@@ -43,13 +43,14 @@ struct SlaveInfo {
 /// slave does not support them. The raw byte form is intentional — decoding into
 /// a typed variant is done at the @c node layer where @c dataType is interpreted.
 struct OdEntry {
-  uint16_t index;       ///< CoE object index.
-  uint8_t subindex;     ///< CoE object subindex.
-  uint16_t objectCode;  ///< OTYPE_VAR / OTYPE_ARRAY / OTYPE_RECORD (ETG.1000.6 §5).
-  uint16_t dataType;    ///< ETG.1020 data type code (e.g. 0x0007 = UNSIGNED32).
-  uint16_t bitLength;   ///< Bit length of the entry.
-  uint16_t access;      ///< ObjAccess bitfield (read/write per AL state).
-  std::string name;     ///< Textual description.
+  uint16_t index;                ///< CoE object index.
+  uint8_t subindex;              ///< CoE object subindex.
+  uint16_t objectCode;           ///< OTYPE_VAR / OTYPE_ARRAY / OTYPE_RECORD (ETG.1000.6 §5).
+  uint16_t dataType;             ///< ETG.1020 data type code (e.g. 0x0007 = UNSIGNED32).
+  uint16_t bitLength;            ///< Bit length of the entry.
+  uint16_t access;               ///< ObjAccess bitfield (read/write per AL state).
+  std::string name;              ///< Textual description.
+  std::optional<uint32_t> unit;  ///< ETG.1004 unit code, if available.
   std::optional<std::vector<uint8_t>> defaultValue;  ///< Raw default-value bytes, if available.
   std::optional<std::vector<uint8_t>> minValue;      ///< Raw minimum-value bytes, if available.
   std::optional<std::vector<uint8_t>> maxValue;      ///< Raw maximum-value bytes, if available.

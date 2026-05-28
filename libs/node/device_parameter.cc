@@ -113,6 +113,17 @@ void to_json(nlohmann::json& j, const DeviceParameter& p) {
       {"bitLength", p.bitLength}, {"access", p.access},
   };
   std::visit([&j](const auto& v) { j["value"] = v; }, p.value);
+  if (p.unit) {
+    j["unit"] = *p.unit;
+  }
+  auto emitValue = [&j](const char* key, const std::optional<DeviceParameterValue>& v) {
+    if (v) {
+      std::visit([&j, key](const auto& x) { j[key] = x; }, *v);
+    }
+  };
+  emitValue("defaultValue", p.defaultValue);
+  emitValue("minValue", p.minValue);
+  emitValue("maxValue", p.maxValue);
 }
 
 }  // namespace mm::node

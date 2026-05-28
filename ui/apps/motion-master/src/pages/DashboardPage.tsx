@@ -320,6 +320,14 @@ export default function DashboardPage() {
                                           {errorEntry && (
                                             <span title={errorEntry.description}>
                                               {' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} {errorEntry.name}
+                                              {errorEntry.terminal && (
+                                                <span
+                                                  className="ml-1 text-grey-600"
+                                                  title="Terminal: the slave cannot reach the requested state by retrying. Re-init, reflash, or power cycle is required."
+                                                >
+                                                  (terminal)
+                                                </span>
+                                              )}
                                             </span>
                                           )}
                                           {ds.error && !errorEntry && (

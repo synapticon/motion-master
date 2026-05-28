@@ -649,7 +649,7 @@ components:
   schemas:
     AlStatusCode:
       type: object
-      required: [code, name, description]
+      required: [code, name, description, terminal]
       properties:
         code:
           type: integer
@@ -663,6 +663,15 @@ components:
           type: string
           description: Full description of the error condition
           example: "No valid firmware is present — the slave needs firmware flashed"
+        terminal:
+          type: boolean
+          description: >-
+            True if a slave reporting this code cannot reach the requested
+            EtherCAT state by retrying. The server abandons the slave
+            immediately during a state transition instead of waiting for
+            timeout; the master must change something (re-init, reflash,
+            power cycle) before another transition attempt can succeed.
+          example: true
     EscRegister:
       type: object
       required: [address, length, name, description]

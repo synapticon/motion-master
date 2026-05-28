@@ -19,6 +19,8 @@
 #include <utility>
 #include <vector>
 
+#include "comm/al_status_codes.h"
+
 namespace mm::comm::soem {
 
 SoemFieldbusDriver::SoemFieldbusDriver(std::string ifname) : ifname_(std::move(ifname)) {}
@@ -282,9 +284,18 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
 
     for (auto it = pending.begin(); it != pending.end();) {
       uint16_t pos = *it;
+      uint16_t state = ctx_->slavelist[pos].state;
+      uint16_t alStatusCode = ctx_->slavelist[pos].ALstatuscode;
       // Exact match required: OP+ERROR (0x18) must not pass as OP (0x08).
-      if (ctx_->slavelist[pos].state == targetRaw) {
+      if (state == targetRaw) {
         spdlog::info("Device {}: reached state 0x{:02X}", pos, targetRaw);
+        it = pending.erase(it);
+      } else if ((state & EC_STATE_ERROR) && isAlStatusCodeTerminal(alStatusCode)) {
+        // Slave reported a terminal AL status code — retrying the same writestate
+        // cannot succeed. Drop it from the pending set immediately so the caller
+        // gets fast feedback instead of spinning until timeout.
+        spdlog::warn("Device {}: terminal AL status 0x{:04X}; cannot reach state 0x{:02X}", pos,
+                     alStatusCode, targetRaw);
         it = pending.erase(it);
       } else {
         ++it;

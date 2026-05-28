@@ -9,6 +9,7 @@ void to_json(nlohmann::json& j, const AlStatusCode& c) {
       {"code", c.code},
       {"name", c.name},
       {"description", c.description},
+      {"terminal", c.terminal},
   };
 }
 

@@ -65,6 +65,10 @@ class SoemFieldbusDriver : public FieldbusDriver {
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t slavePosition, uint16_t index,
                                                            uint8_t subindex) override;
 
+  /// @copydoc FieldbusDriver::readObjectDictionary
+  std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(
+      uint16_t slavePosition) override;
+
   /// @copydoc FieldbusDriver::readFile
   std::expected<std::vector<uint8_t>, std::string> readFile(uint16_t slavePosition,
                                                             const std::string& filename) override;

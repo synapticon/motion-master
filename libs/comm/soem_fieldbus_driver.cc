@@ -107,6 +107,70 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
   return data;
 }
 
+namespace {
+
+// SOEM's SDO Info path occasionally times out on slaves that buffer slowly;
+// retry with a short back-off rather than failing the whole enumeration.
+constexpr int kSdoInfoMaxRetries = 10;
+constexpr auto kSdoInfoRetryDelay = std::chrono::milliseconds(50);
+
+template <typename F>
+int retrySdoInfo(F&& call) {
+  int result = call();
+  for (int i = 0; result <= 0 && i < kSdoInfoMaxRetries; ++i) {
+    std::this_thread::sleep_for(kSdoInfoRetryDelay);
+    result = call();
+  }
+  return result;
+}
+
+}  // namespace
+
+std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectDictionary(
+    uint16_t slavePosition) {
+  ec_ODlistt odList{};
+  if (retrySdoInfo([&] { return ecx_readODlist(ctx_.get(), slavePosition, &odList); }) <= 0) {
+    return std::unexpected(std::format("readODlist slave {} failed after retries", slavePosition));
+  }
+
+  std::vector<OdEntry> entries;
+  entries.reserve(odList.Entries);
+
+  for (uint16_t i = 0; i < odList.Entries; ++i) {
+    if (retrySdoInfo([&] { return ecx_readODdescription(ctx_.get(), i, &odList); }) <= 0) {
+      return std::unexpected(std::format("readODdescription slave {} index 0x{:04X} failed",
+                                         slavePosition, odList.Index[i]));
+    }
+
+    ec_OElistt oeList{};
+    if (retrySdoInfo([&] { return ecx_readOE(ctx_.get(), i, &odList, &oeList); }) <= 0) {
+      return std::unexpected(
+          std::format("readOE slave {} index 0x{:04X} failed", slavePosition, odList.Index[i]));
+    }
+
+    for (uint8_t sub = 0; sub <= odList.MaxSub[i]; ++sub) {
+      // TODO(msankovic): populate defaultValue/minValue/maxValue via a custom SDO Info
+      // request (ETG.1000.6 §5.6.3 "Get Entry Description" with ValueInfo bits
+      // 0x10/0x20/0x40). SOEM's ecx_readOE hardcodes the request to 0x07 and discards
+      // these fields.
+      entries.push_back(OdEntry{
+          .index = odList.Index[i],
+          .subindex = sub,
+          .objectCode = odList.ObjectCode[i],
+          .dataType = oeList.DataType[sub],
+          .bitLength = oeList.BitLength[sub],
+          .access = oeList.ObjAccess[sub],
+          .name = std::string(oeList.Name[sub]),
+          .defaultValue = std::nullopt,
+          .minValue = std::nullopt,
+          .maxValue = std::nullopt,
+      });
+    }
+  }
+
+  return entries;
+}
+
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
     uint16_t slavePosition, const std::string& filename) {
   constexpr int kMaxSize = 10 * 1024 * 1024;

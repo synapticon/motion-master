@@ -5,9 +5,11 @@
 #include <nlohmann/json_fwd.hpp>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
+#include "node/device_parameter.h"
 
 namespace mm::node {
 
@@ -72,6 +74,37 @@ class Device {
   std::expected<void, std::string> writeRegister(uint16_t address,
                                                  std::span<const uint8_t> data) const;
 
+  /// @brief Enumerates the device's CoE object dictionary and populates @c parameters().
+  ///
+  /// Requires the device to be in PRE-OP, SAFE-OP, or OP (mailbox communication
+  /// active). One @c DeviceParameter is created per @c (index, subindex) pair returned
+  /// by the SDO Info service, with @c value pre-initialised to a type-appropriate zero.
+  /// When @p readValues is @c true each entry is additionally read via SDO upload and
+  /// the decoded value stored on the parameter; entries that fail to read keep their
+  /// default value and the call still succeeds (per-entry errors are logged).
+  ///
+  /// Calling this method again replaces the existing parameter map.
+  ///
+  /// @param readValues  When @c true, follow up each entry with an SDO upload.
+  /// @return Void on success, or an error string if the object dictionary enumeration
+  ///         itself fails (the slave does not support SDO Info, or all retries timed out).
+  std::expected<void, std::string> initializeParameters(bool readValues = false);
+
+  /// @brief Returns the parameter map, keyed by @c makeParameterKey(index, subindex).
+  /// Empty until @c initializeParameters() is called.
+  const std::unordered_map<uint32_t, DeviceParameter>& parameters() const;
+
+  /// @brief Returns all parameters sorted ascending by @c (index, subindex).
+  ///
+  /// Copies the map into a vector and sorts on the packed key. O(N log N) — call
+  /// when you need stable iteration order (e.g. JSON serialisation, UI listings)
+  /// rather than O(1) lookup.
+  std::vector<DeviceParameter> parametersOrdered() const;
+
+  /// @brief Looks up a parameter by @c (index, subindex). O(1).
+  /// @return Pointer to the parameter, or @c nullptr if no such entry exists.
+  const DeviceParameter* parameter(uint16_t index, uint8_t subindex) const;
+
  private:
   uint16_t slavePosition_;
   mm::comm::FieldbusDriver& driver_;
@@ -80,6 +113,7 @@ class Device {
   uint32_t productCode_;
   uint32_t revisionNumber_;
   uint32_t serialNumber_;
+  std::unordered_map<uint32_t, DeviceParameter> parameters_;
 };
 
 /// @brief Serialises a Device to JSON.

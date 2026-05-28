@@ -32,6 +32,29 @@ struct SlaveInfo {
   uint32_t serialNumber;    ///< Serial number.
 };
 
+/// @brief Schema of a single object dictionary entry uploaded from a slave.
+///
+/// Populated by @c FieldbusDriver::readObjectDictionary, one entry per @c (index,
+/// subindex) pair. Holds the immutable description only — no current value.
+///
+/// @c defaultValue / @c minValue / @c maxValue carry the raw bytes returned by
+/// the SDO Info "Get Entry Description" service when the slave populates them;
+/// they remain empty when the driver does not request these flags or when the
+/// slave does not support them. The raw byte form is intentional — decoding into
+/// a typed variant is done at the @c node layer where @c dataType is interpreted.
+struct OdEntry {
+  uint16_t index;       ///< CoE object index.
+  uint8_t subindex;     ///< CoE object subindex.
+  uint16_t objectCode;  ///< OTYPE_VAR / OTYPE_ARRAY / OTYPE_RECORD (ETG.1000.6 §5).
+  uint16_t dataType;    ///< ETG.1020 data type code (e.g. 0x0007 = UNSIGNED32).
+  uint16_t bitLength;   ///< Bit length of the entry.
+  uint16_t access;      ///< ObjAccess bitfield (read/write per AL state).
+  std::string name;     ///< Textual description.
+  std::optional<std::vector<uint8_t>> defaultValue;  ///< Raw default-value bytes, if available.
+  std::optional<std::vector<uint8_t>> minValue;      ///< Raw minimum-value bytes, if available.
+  std::optional<std::vector<uint8_t>> maxValue;      ///< Raw maximum-value bytes, if available.
+};
+
 /// @brief Abstract interface for an EtherCAT fieldbus driver.
 ///
 /// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeDriver (SPoE).
@@ -109,6 +132,21 @@ class FieldbusDriver {
   virtual std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t slavePosition,
                                                                    uint16_t index,
                                                                    uint8_t subindex) = 0;
+
+  /// @brief Enumerates the entire CoE object dictionary of a slave via SDO Info.
+  ///
+  /// Performs the "Get Object List" → "Get Object Description" → "Get Entry Description"
+  /// sequence (ETG.1000.6 §5.6) and returns one @c OdEntry per @c (index, subindex) pair.
+  /// The slave must be in PRE-OP, SAFE-OP, or OP — i.e. mailbox communication enabled.
+  /// Many transfers are issued; expect the call to take seconds on a fully populated drive.
+  ///
+  /// Slaves that do not implement the SDO Info service return an error.
+  ///
+  /// @param slavePosition  1-based slave position on the bus.
+  /// @return All OD entries on success, or an error string if any phase of the enumeration
+  ///         fails after the driver's internal retries.
+  virtual std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(
+      uint16_t slavePosition) = 0;
 
   /// @brief Reads a file from the slave via File over EtherCAT (FoE).
   ///

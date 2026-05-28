@@ -127,6 +127,17 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::getDevic
   return result;
 }
 
+std::expected<void, std::string> DeviceManager::initializeDeviceParameters(uint16_t slavePosition,
+                                                                           bool readValues) {
+  auto it = std::find_if(devices_.begin(), devices_.end(), [slavePosition](const Device& d) {
+    return d.slavePosition() == slavePosition;
+  });
+  if (it == devices_.end()) {
+    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
+  }
+  return it->initializeParameters(readValues);
+}
+
 void to_json(nlohmann::json& j, const DeviceManager& dm) { j = dm.devices(); }
 
 }  // namespace mm::node

@@ -18,8 +18,10 @@
 #include "comm/esc_registers.h"
 #include "comm/fieldbus_driver.h"
 #include "comm/foe_error_codes.h"
+#include "comm/object_data_types.h"
 #include "core/util.h"
 #include "node/device_manager.h"
+#include "node/device_parameter.h"
 
 Server::Server(Config config, mm::node::DeviceManager& deviceManager)
     : config_(std::move(config)), deviceManager_(deviceManager) {}
@@ -440,6 +442,61 @@ void Server::run() {
              res->writeHeader("Content-Type", "application/octet-stream")
                  ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(std::string_view{reinterpret_cast<const char*>(r->data()), r->size()});
+           })
+      .post("/api/devices/:slavePosition/parameters/init",
+            [this](auto* res, auto* req) {
+              uint16_t pos{};
+              auto posParam = req->getParameter("slavePosition");
+              auto [p, ec] =
+                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+              if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+                res->writeStatus("400 Bad Request")
+                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                    ->end();
+                return;
+              }
+              auto rv = req->getQuery("readValues");
+              bool readValues = rv == "true" || rv == "1";
+              if (auto r = deviceManager_.initializeDeviceParameters(pos, readValues); !r) {
+                res->writeStatus("500 Internal Server Error")
+                    ->writeHeader("Content-Type", "application/json")
+                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                    ->end(nlohmann::json{{"error", r.error()}}.dump());
+                return;
+              }
+              const auto* device = deviceManager_.findDevice(pos);
+              res->writeHeader("Content-Type", "application/json")
+                  ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                  ->end(nlohmann::json(device->parametersOrdered()).dump());
+            })
+      .get("/api/devices/:slavePosition/parameters",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p, ec] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+               res->writeStatus("400 Bad Request")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end();
+               return;
+             }
+             const auto* device = deviceManager_.findDevice(pos);
+             if (!device) {
+               res->writeStatus("404 Not Found")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end();
+               return;
+             }
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                 ->end(nlohmann::json(device->parametersOrdered()).dump());
+           })
+      .get("/api/meta/data-types",
+           [this](auto* res, auto* /*req*/) {
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                 ->end(nlohmann::json(mm::comm::kObjectDataTypes).dump());
            })
       .post("/api/init",
             [this](auto* res, auto* /*req*/) {

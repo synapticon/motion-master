@@ -269,6 +269,98 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/FoeErrorCode"
+  /api/meta/data-types:
+    get:
+      summary: List all known CoE object dictionary data types
+      operationId: getDataTypes
+      description: >
+        Returns the static catalogue of ETG.1020 data type codes used in CoE object
+        dictionary entries.  Each entry of a `DeviceParameter` carries a `dataType`
+        field whose value is one of the codes listed here.
+      responses:
+        "200":
+          description: Array of data-type descriptors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ObjectDataTypeInfo"
+  /api/devices/{slavePosition}/parameters/init:
+    post:
+      summary: Initialise the parameter list for a device by enumerating its object dictionary
+      operationId: initializeDeviceParameters
+      description: >
+        Enumerates the entire CoE object dictionary of the device at
+        `slavePosition` via the SDO Info service ("Get Object List" → "Get Object
+        Description" → "Get Entry Description") and rebuilds its parameter map.
+        The device must be in PRE-OP, SAFE-OP, or OP (mailbox communication
+        active).  On a fully populated drive the call can take several seconds.
+        When `readValues=true` each entry is additionally read via SDO upload and
+        the decoded value is stored on the parameter; entries that fail to read
+        keep their type-appropriate default and the call still succeeds.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: readValues
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: >-
+            When `true`, perform an SDO upload for every entry and decode the
+            value.  Defaults to `false` — only schema (name, type, access) is
+            populated.
+      responses:
+        "200":
+          description: Parameter list ordered by (index, subindex)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeviceParameter"
+        "400":
+          description: slavePosition is not a valid integer
+        "500":
+          $ref: "#/components/responses/DriverError"
+  /api/devices/{slavePosition}/parameters:
+    get:
+      summary: Read the previously initialised parameter list for a device
+      operationId: getDeviceParameters
+      description: >
+        Returns the parameter list populated by the most recent call to
+        `POST /api/devices/{slavePosition}/parameters/init`.  Empty before the
+        first call.  Entries are ordered ascending by `(index, subindex)`.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: Parameter list ordered by (index, subindex)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeviceParameter"
+        "400":
+          description: slavePosition is not a valid integer
+        "404":
+          description: No device at the given bus position
   /api/devices/{slavePosition}/registers/{address}:
     get:
       summary: Read bytes from an ESC register
@@ -708,6 +800,73 @@ components:
           type: string
           description: Full description of the error condition
           example: "The requested file does not exist on the slave"
+    ObjectDataTypeInfo:
+      type: object
+      required: [code, name, bitSize]
+      properties:
+        code:
+          type: integer
+          description: ETG.1020 data type code
+          example: 7
+        name:
+          type: string
+          description: Symbolic name of the data type
+          example: "UNSIGNED32"
+        bitSize:
+          type: integer
+          description: Declared bit width of one element; 0 for variable-length types
+          example: 32
+    DeviceParameter:
+      type: object
+      required: [index, subindex, name, objectCode, dataType, dataTypeName, bitLength, access, value]
+      properties:
+        index:
+          type: integer
+          description: CoE object index
+          example: 24640
+        subindex:
+          type: integer
+          description: CoE object subindex
+          example: 0
+        name:
+          type: string
+          description: Textual description from the slave's SDO Info "Get Entry Description"
+          example: "Position actual value"
+        objectCode:
+          type: integer
+          description: ETG.1000.6 §5 object code (VAR=7, ARRAY=8, RECORD=9)
+          example: 7
+        dataType:
+          type: integer
+          description: ETG.1020 data type code (e.g. 7 = UNSIGNED32)
+          example: 4
+        dataTypeName:
+          type: string
+          description: Symbolic name of the data type (resolved server-side from `dataType`)
+          example: "INTEGER32"
+        bitLength:
+          type: integer
+          description: Bit length of the entry's value
+          example: 32
+        access:
+          type: integer
+          description: ObjAccess bitfield (read/write per AL state)
+          example: 7
+        value:
+          description: >-
+            Last-known value, decoded according to `dataType`.  Initialised to
+            a type-appropriate zero (0 for numbers, "" for strings, [] for raw
+            bytes) before the first read.  After a successful SDO upload,
+            holds the decoded value; the JSON encoding follows the variant
+            alternative — number, string, or array of byte values.
+          oneOf:
+            - type: integer
+            - type: number
+            - type: string
+            - type: array
+              items:
+                type: integer
+          example: 12345
   responses:
     DriverError:
       description: Fieldbus driver returned an error

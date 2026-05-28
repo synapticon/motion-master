@@ -109,6 +109,17 @@ class DeviceManager {
   std::expected<std::vector<DeviceStateInfo>, std::string> getDeviceStates(
       const std::vector<uint16_t>& positions);
 
+  /// @brief Enumerates the CoE object dictionary of one device and populates its
+  ///        parameter map. See @c Device::initializeParameters for details.
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @param readValues     When @c true, also issue an SDO upload for each entry
+  ///                       and store the decoded value on the parameter.
+  /// @return Void on success, an error string if the device is unknown, or if
+  ///         the OD enumeration itself fails.
+  std::expected<void, std::string> initializeDeviceParameters(uint16_t slavePosition,
+                                                              bool readValues);
+
  private:
   std::unique_ptr<mm::comm::FieldbusDriver> driver_;
   std::vector<Device> devices_;

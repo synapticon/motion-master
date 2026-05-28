@@ -49,30 +49,20 @@ void Server::stop() {
   }
 
   if (auto* loop = loop_.load()) {
-    // Close the listen socket and all WebSocket connections from the event-loop
-    // thread so us_loop_run() exits naturally when num_polls reaches 0.
-    // The internal sweep_timer, dateTimer, and wakeup_async are all created with
-    // fallthrough=1, so they do not contribute to num_polls and do not prevent
-    // loop exit. Calling loop->free() from inside wakeupCb would be a
-    // use-after-free: wakeupCb clears the deferred queue after each callback
-    // returns, but free() destroys LoopData (which owns those queues) mid-drain.
-    // The thread-local LoopCleaner calls loop->free() safely at thread exit.
-    loop->defer([this, token = listen_token_.exchange(nullptr)]() {
-      if (token) {
-        us_listen_socket_close(0, token);
-      }
-      // Snapshot before iterating: closing triggers the close callback which
-      // erases from connections_.
-      //
-      // close() (hard us_socket_close) — not end() (graceful close frame +
-      // half-close). end() only shuts down the write side and leaves the socket
-      // in the poll set waiting for the peer's close handshake; an idle or
-      // unresponsive client (e.g. the monitoring PWA) never replies, so
-      // num_polls never reaches 0, us_loop_run() never returns, and the join()
-      // below blocks forever. On shutdown we want the connection gone now.
-      auto snapshot = connections_;
-      for (auto* ws : snapshot) {
-        ws->close();
+    // App::close() iterates the HTTP context and every WebSocket context and calls
+    // us_socket_context_close on each, which closes the listen socket *and* every
+    // regular socket (incl. idle HTTP keep-alive connections) in those contexts.
+    // Each closed socket lands on the loop's closed_head queue and gets freed in
+    // the next loop_post, dropping num_polls and letting us_loop_run() exit.
+    //
+    // Manually closing only the listen socket leaves keep-alive HTTP connections
+    // alive in httpContext->head_sockets — they aren't tracked in connections_
+    // (which only holds WebSockets), so num_polls stays > 0 and the loop blocks
+    // until each connection hits its idle timeout, hanging shutdown for minutes
+    // after a client has talked to the API.
+    loop->defer([this]() {
+      if (auto* app = app_.load()) {
+        app->close();
       }
     });
   }
@@ -119,10 +109,13 @@ void Server::run() {
     spdlog::debug("WebSocket disconnected, total: {}", connections_.size());
   };
 
-  uWS::SSLApp{uWS::SocketContextOptions{
-                  .key_file_name = config_.keyFile.c_str(),
-                  .cert_file_name = config_.certFile.c_str(),
-              }}
+  uWS::SSLApp app{uWS::SocketContextOptions{
+      .key_file_name = config_.keyFile.c_str(),
+      .cert_file_name = config_.certFile.c_str(),
+  }};
+  app_.store(&app);
+
+  std::move(app)
       .get("/",
            [](auto* res, auto* /*req*/) {
              res->writeHeader("Content-Type", "text/html; charset=utf-8")
@@ -640,7 +633,6 @@ void Server::run() {
       .listen("127.0.0.1", config_.port,
               [this](auto* token) {
                 if (token) {
-                  listen_token_.store(token);
                   spdlog::info("Server listening on port {}", config_.port);
                 } else {
                   spdlog::error("Server failed to listen on port {}", config_.port);
@@ -649,5 +641,6 @@ void Server::run() {
               })
       .run();
 
+  app_.store(nullptr);
   spdlog::debug("Server event loop stopped");
 }

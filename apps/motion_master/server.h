@@ -90,6 +90,6 @@ class Server {
   std::atomic<bool> running_{false};
   std::thread thread_;
   std::atomic<uWS::Loop*> loop_{nullptr};
-  std::atomic<us_listen_socket_t*> listen_token_{nullptr};
+  std::atomic<uWS::SSLApp*> app_{nullptr};
   std::unordered_set<uWS::WebSocket<true, true, WsData>*> connections_;
 };

@@ -83,6 +83,59 @@ function formatAccess(a: number): string {
   return '—'
 }
 
+function formatElapsed(ms: number): string {
+  if (ms < 1000) return `${Math.round(ms)} ms`
+  return `${(ms / 1000).toFixed(2)} s`
+}
+
+function decodeSdoBytes(dataTypeName: string, bytes: number[]): number | string | number[] {
+  const view = new DataView(new Uint8Array(bytes).buffer)
+  switch (dataTypeName) {
+    case 'BOOLEAN':
+    case 'UNSIGNED8':
+    case 'BYTE':
+      if (bytes.length >= 1) return view.getUint8(0)
+      break
+    case 'INTEGER8':
+      if (bytes.length >= 1) return view.getInt8(0)
+      break
+    case 'INTEGER16':
+      if (bytes.length >= 2) return view.getInt16(0, true)
+      break
+    case 'INTEGER32':
+      if (bytes.length >= 4) return view.getInt32(0, true)
+      break
+    case 'UNSIGNED16':
+    case 'WORD':
+      if (bytes.length >= 2) return view.getUint16(0, true)
+      break
+    case 'UNSIGNED32':
+    case 'DWORD':
+      if (bytes.length >= 4) return view.getUint32(0, true)
+      break
+    case 'REAL32':
+      if (bytes.length >= 4) return view.getFloat32(0, true)
+      break
+    case 'REAL64':
+      if (bytes.length >= 8) return view.getFloat64(0, true)
+      break
+    case 'INTEGER64':
+      if (bytes.length >= 8) return Number(view.getBigInt64(0, true))
+      break
+    case 'UNSIGNED64':
+      if (bytes.length >= 8) return Number(view.getBigUint64(0, true))
+      break
+    case 'VISIBLE_STRING':
+    case 'UNICODE_STRING':
+      return new TextDecoder().decode(new Uint8Array(bytes.filter(b => b !== 0)))
+  }
+  return bytes
+}
+
+function paramKey(index: number, subindex: number): string {
+  return `${index}-${subindex}`
+}
+
 export default function ParametersPage() {
   const { deviceId } = useParams()
   const { api } = useConnection()
@@ -97,6 +150,10 @@ export default function ParametersPage() {
 
   const [readValues, setReadValues] = useState(false)
   const [filter, setFilter] = useState('')
+  const [initElapsedMs, setInitElapsedMs] = useState<number | null>(null)
+  const [reloadElapsedMs, setReloadElapsedMs] = useState<number | null>(null)
+  const [refreshingKeys, setRefreshingKeys] = useState<Set<string>>(new Set())
+  const [rowError, setRowError] = useState<{key: string; message: string} | null>(null)
 
   const paramsQueryKey = ['deviceParameters', slavePosition] as const
 
@@ -108,11 +165,53 @@ export default function ParametersPage() {
   })
 
   const initMutation = useMutation({
-    mutationFn: () => api.initializeDeviceParameters(slavePosition, { readValues }),
+    mutationFn: async () => {
+      const start = performance.now()
+      const res = await api.initializeDeviceParameters(slavePosition, { readValues })
+      setInitElapsedMs(performance.now() - start)
+      return res
+    },
+    onMutate: () => {
+      setInitElapsedMs(null)
+      setReloadElapsedMs(null)
+    },
     onSuccess: (res) => {
       queryClient.setQueryData(paramsQueryKey, res)
     },
   })
+
+  async function handleReload() {
+    setReloadElapsedMs(null)
+    setInitElapsedMs(null)
+    const start = performance.now()
+    await paramsQuery.refetch()
+    setReloadElapsedMs(performance.now() - start)
+  }
+
+  async function handleRefreshValue(p: DeviceParameter) {
+    const key = paramKey(p.index, p.subindex)
+    setRefreshingKeys(prev => new Set(prev).add(key))
+    setRowError(null)
+    try {
+      const res = await api.sdoUpload(slavePosition, p.index, p.subindex)
+      const decoded = decodeSdoBytes(p.dataTypeName, res.data.data)
+      queryClient.setQueryData(paramsQueryKey, (prev: typeof paramsQuery.data) => {
+        if (!prev) return prev
+        const next = prev.data.map(x =>
+          x.index === p.index && x.subindex === p.subindex ? { ...x, value: decoded } : x,
+        )
+        return { ...prev, data: next }
+      })
+    } catch (err) {
+      setRowError({ key, message: apiError(err) })
+    } finally {
+      setRefreshingKeys(prev => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+    }
+  }
 
   const params: DeviceParameter[] = paramsQuery.data?.data ?? []
   const initError = initMutation.error ? apiError(initMutation.error) : null
@@ -164,102 +263,6 @@ export default function ParametersPage() {
     <div>
       <DevicePageHeader slavePosition={slavePosition} title="Parameters" />
       <div className="p-4 sm:p-8 space-y-8">
-
-        <section>
-          <p className="eyebrow mb-5">Parameter list</p>
-          <div className="border border-grey-200 p-5 space-y-4">
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="flex items-center gap-2 text-xs text-grey-700 select-none cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={readValues}
-                  onChange={e => setReadValues(e.target.checked)}
-                  className="cursor-pointer"
-                />
-                <span>Read values during init (SDO upload per entry — slower)</span>
-              </label>
-              <div className="flex gap-2 ml-auto">
-                <button
-                  className={btnCls}
-                  disabled={initMutation.isPending}
-                  onClick={() => initMutation.mutate()}
-                >
-                  {initMutation.isPending ? 'Initialising…' : params.length === 0 ? 'Initialize' : 'Re-initialize'}
-                </button>
-                <button
-                  className={btnGhostCls}
-                  disabled={paramsQuery.isFetching || params.length === 0}
-                  onClick={() => paramsQuery.refetch()}
-                  title="Re-fetch the cached parameter list (no SDO Info traffic). Use after values may have changed on the device."
-                >
-                  {paramsQuery.isFetching ? 'Reloading…' : 'Reload'}
-                </button>
-              </div>
-            </div>
-
-            {initError && (
-              <p className="text-xs text-status-bad font-mono">{initError}</p>
-            )}
-
-            {params.length > 0 && (
-              <>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="text"
-                    value={filter}
-                    onChange={e => setFilter(e.target.value)}
-                    placeholder="Filter by name, index, or type…"
-                    className={`${inputCls} max-w-sm`}
-                  />
-                  <span className="text-xs text-grey-500">
-                    {filteredParams.length === params.length
-                      ? `${params.length} entries`
-                      : `${filteredParams.length} / ${params.length}`}
-                  </span>
-                </div>
-
-                <div className="border border-grey-200 overflow-x-auto">
-                  <table className="w-full text-xs border-collapse">
-                    <thead>
-                      <tr className="border-b border-grey-200 bg-grey-50">
-                        {['Address', 'Name', 'Type', 'Bits', 'Access', 'Value', 'Default', 'Min', 'Max', 'Unit'].map(h => (
-                          <th key={h} className="text-left px-3 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filteredParams.map(p => (
-                        <tr key={`${p.index}-${p.subindex}`} className="border-b border-grey-100 last:border-0">
-                          <td className="px-3 py-1.5 font-mono whitespace-nowrap">
-                            {toHex(p.index, 4)}:{p.subindex.toString(16).toUpperCase().padStart(2, '0')}
-                          </td>
-                          <td className="px-3 py-1.5 text-grey-800">{p.name || <span className="text-grey-400">—</span>}</td>
-                          <td className="px-3 py-1.5 font-mono text-grey-700">{p.dataTypeName}</td>
-                          <td className="px-3 py-1.5 font-mono text-grey-700">{p.bitLength}</td>
-                          <td className="px-3 py-1.5 font-mono text-grey-700">{formatAccess(p.access)}</td>
-                          <td className="px-3 py-1.5 font-mono">{formatValue(p.value)}</td>
-                          <td className="px-3 py-1.5 font-mono text-grey-600">{formatValue(p.defaultValue)}</td>
-                          <td className="px-3 py-1.5 font-mono text-grey-600">{formatValue(p.minValue)}</td>
-                          <td className="px-3 py-1.5 font-mono text-grey-600">{formatValue(p.maxValue)}</td>
-                          <td className="px-3 py-1.5 font-mono text-grey-600">{p.unit !== undefined ? toHex(p.unit, 8) : '—'}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-
-            {params.length === 0 && !initMutation.isPending && (
-              <p className="text-xs text-grey-500">
-                No parameters loaded. Click <em>Initialize</em> to enumerate the device's object dictionary
-                (requires the device to be in PRE-OP or higher).
-              </p>
-            )}
-          </div>
-        </section>
 
         <section>
           <p className="eyebrow mb-5">SDO Upload</p>
@@ -322,6 +325,128 @@ export default function ParametersPage() {
               </div>
             )}
 
+          </div>
+        </section>
+
+        <section>
+          <p className="eyebrow mb-5">Parameter list</p>
+          <div className="border border-grey-200 p-5 space-y-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <label className="flex items-center gap-2 text-xs text-grey-700 select-none cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={readValues}
+                  onChange={e => setReadValues(e.target.checked)}
+                  className="cursor-pointer"
+                />
+                <span>Read values during init (SDO upload per entry — slower)</span>
+              </label>
+              <div className="flex items-center gap-2 ml-auto">
+                <button
+                  className={btnCls}
+                  disabled={initMutation.isPending}
+                  onClick={() => initMutation.mutate()}
+                >
+                  {initMutation.isPending ? 'Initialising…' : params.length === 0 ? 'Initialize' : 'Re-initialize'}
+                </button>
+                <button
+                  className={btnGhostCls}
+                  disabled={paramsQuery.isFetching || params.length === 0}
+                  onClick={handleReload}
+                  title="Re-fetch the cached parameter list (no SDO Info traffic). Use after values may have changed on the device."
+                >
+                  {paramsQuery.isFetching ? 'Reloading…' : 'Reload'}
+                </button>
+                {(initElapsedMs !== null || reloadElapsedMs !== null) && (
+                  <span className="text-xs text-grey-500 font-mono whitespace-nowrap">
+                    took {formatElapsed(initElapsedMs ?? reloadElapsedMs!)}
+                  </span>
+                )}
+              </div>
+            </div>
+
+            {initError && (
+              <p className="text-xs text-status-bad font-mono">{initError}</p>
+            )}
+
+            {params.length > 0 && (
+              <>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="text"
+                    value={filter}
+                    onChange={e => setFilter(e.target.value)}
+                    placeholder="Filter by name, index, or type…"
+                    className={`${inputCls} max-w-sm`}
+                  />
+                  <span className="text-xs text-grey-500">
+                    {filteredParams.length === params.length
+                      ? `${params.length} entries`
+                      : `${filteredParams.length} / ${params.length}`}
+                  </span>
+                </div>
+
+                <div className="border border-grey-200 overflow-x-auto">
+                  <table className="w-full text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-grey-200 bg-grey-50">
+                        {['Address', 'Name', 'Type', 'Bits', 'Access', 'Value', 'Default', 'Min', 'Max', 'Unit'].map(h => (
+                          <th key={h} className="text-left px-3 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredParams.map(p => {
+                        const key = paramKey(p.index, p.subindex)
+                        const refreshing = refreshingKeys.has(key)
+                        const cellError = rowError?.key === key ? rowError.message : null
+                        return (
+                          <tr key={key} className="border-b border-grey-100 last:border-0">
+                            <td className="px-3 py-1.5 font-mono whitespace-nowrap">
+                              {toHex(p.index, 4)}:{p.subindex.toString(16).toUpperCase().padStart(2, '0')}
+                            </td>
+                            <td className="px-3 py-1.5 text-grey-800">{p.name || <span className="text-grey-400">—</span>}</td>
+                            <td className="px-3 py-1.5 font-mono text-grey-700">{p.dataTypeName}</td>
+                            <td className="px-3 py-1.5 font-mono text-grey-700">{p.bitLength}</td>
+                            <td className="px-3 py-1.5 font-mono text-grey-700">{formatAccess(p.access)}</td>
+                            <td className="px-3 py-1.5 font-mono">
+                              <div className="flex items-center gap-2">
+                                <span className={cellError ? 'text-status-bad' : ''}>
+                                  {cellError ?? formatValue(p.value)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRefreshValue(p)}
+                                  disabled={refreshing}
+                                  className="text-grey-400 hover:text-syn-red disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer leading-none"
+                                  title="Refresh by SDO upload"
+                                  aria-label="Refresh value"
+                                >
+                                  {refreshing ? '…' : '↻'}
+                                </button>
+                              </div>
+                            </td>
+                            <td className="px-3 py-1.5 font-mono text-grey-600">{formatValue(p.defaultValue)}</td>
+                            <td className="px-3 py-1.5 font-mono text-grey-600">{formatValue(p.minValue)}</td>
+                            <td className="px-3 py-1.5 font-mono text-grey-600">{formatValue(p.maxValue)}</td>
+                            <td className="px-3 py-1.5 font-mono text-grey-600">{p.unit !== undefined ? toHex(p.unit, 8) : '—'}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+
+            {params.length === 0 && !initMutation.isPending && (
+              <p className="text-xs text-grey-500">
+                No parameters loaded. Click <em>Initialize</em> to enumerate the device's object dictionary
+                (requires the device to be in PRE-OP or higher).
+              </p>
+            )}
           </div>
         </section>
 

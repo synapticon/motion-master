@@ -9,6 +9,7 @@ import FoePage from './pages/FoePage'
 import ParametersPage from './pages/ParametersPage'
 import ProcessDataPage from './pages/ProcessDataPage'
 import LogPage from './pages/LogPage'
+import RequestsPage from './pages/RequestsPage'
 import EscRegistersPage from './pages/EscRegistersPage'
 import AlStatusCodesPage from './pages/AlStatusCodesPage'
 import FoeErrorCodesPage from './pages/FoeErrorCodesPage'
@@ -20,6 +21,7 @@ export default function App() {
       <Route path="/" element={<RootLayout />}>
         <Route index element={<DashboardPage />} />
         <Route path="log" element={<LogPage />} />
+        <Route path="requests" element={<RequestsPage />} />
         <Route path="meta/esc-registers" element={<EscRegistersPage />} />
         <Route path="meta/al-status-codes" element={<AlStatusCodesPage />} />
         <Route path="meta/foe-error-codes" element={<FoeErrorCodesPage />} />

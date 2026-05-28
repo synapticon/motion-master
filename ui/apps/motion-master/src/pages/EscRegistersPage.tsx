@@ -2,6 +2,9 @@ import { useQuery } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
 
+const btnOutlineCls =
+  'border border-syn-red text-syn-red px-3 py-1.5 text-xs hover:bg-syn-red hover:text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
+
 export default function EscRegistersPage() {
   const { api } = useConnection()
 
@@ -16,6 +19,15 @@ export default function EscRegistersPage() {
     <div>
       <PageHeader eyebrow="App" title="Registers" />
       <div className="p-4 sm:p-8">
+        <div className="flex justify-end mb-4">
+          <button
+            onClick={() => registersQuery.refetch()}
+            disabled={registersQuery.isFetching}
+            className={btnOutlineCls}
+          >
+            {registersQuery.isFetching ? 'Loading…' : 'Refresh'}
+          </button>
+        </div>
         {registersQuery.isError && (
           <p className="text-xs text-status-bad font-mono">Failed to load registers.</p>
         )}

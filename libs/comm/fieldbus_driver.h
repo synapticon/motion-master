@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <expected>
 #include <functional>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <string>
@@ -62,9 +63,14 @@ struct OdEntry {
 /// @c App instantiates exactly one and injects it into @c DeviceManager and
 /// @c GameLoop.
 ///
-/// The driver owns the mutex that serialises all EtherCAT socket access — both
-/// the real-time PDO path (@c exchangeProcessData, called from the RT thread)
-/// and the SDO path (called from HTTP handler threads).
+/// The driver owns @c socketMutex_, which serialises the control-plane
+/// operations (mailbox/SDO, FoE, ESC register, and state access) amongst
+/// non-RT callers. The real-time PDO path (@c exchangeProcessData) runs
+/// lock-free: SOEM's port layer is internally thread-safe (per-datagram index
+/// allocation plus tx/rx mutexes held only for a single non-blocking poll), and
+/// PDO touches disjoint state (the process-data IOmap) from the control plane
+/// (mailbox pool, slave state). Keeping PDO out of the mutex keeps the RT cycle
+/// unbounded by a slow SDO or object-dictionary enumeration.
 class FieldbusDriver {
  public:
   virtual ~FieldbusDriver() = default;
@@ -212,6 +218,15 @@ class FieldbusDriver {
       EtherCatState targetState, std::chrono::steady_clock::duration timeout,
       std::chrono::steady_clock::duration resendInterval = std::chrono::seconds(2),
       std::function<void()> tick = nullptr, std::function<bool()> shouldAbort = nullptr) = 0;
+
+ protected:
+  /// Serialises control-plane access to the underlying fieldbus context (mailbox
+  /// pool, slave state, manual mailbox sequence counters) amongst non-RT callers.
+  /// Held only for the duration of a single socket transaction — never across a
+  /// sleep, a blocking wait, or a user callback. The PDO path does not take this
+  /// lock (see the class-level note). @c mutable so the @c const accessors
+  /// (@c slaveInfo, @c slaveCount) can lock.
+  mutable std::mutex socketMutex_;
 };
 
 }  // namespace mm::comm

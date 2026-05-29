@@ -11,6 +11,7 @@
 #include <format>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <span>
@@ -28,6 +29,7 @@ SoemFieldbusDriver::SoemFieldbusDriver(std::string ifname) : ifname_(std::move(i
 SoemFieldbusDriver::~SoemFieldbusDriver() {}
 
 std::expected<void, std::string> SoemFieldbusDriver::init() {
+  std::lock_guard<std::mutex> lock(socketMutex_);
   ctx_ = std::make_unique<ecx_contextt>();
   if (!ecx_init(ctx_.get(), ifname_.c_str())) {
     ctx_.reset();
@@ -37,6 +39,7 @@ std::expected<void, std::string> SoemFieldbusDriver::init() {
 }
 
 std::expected<int, std::string> SoemFieldbusDriver::scan() {
+  std::lock_guard<std::mutex> lock(socketMutex_);
   ctx_->manualstatechange = 1;
   int found = ecx_config_init(ctx_.get());
   if (found <= 0) {
@@ -45,11 +48,15 @@ std::expected<int, std::string> SoemFieldbusDriver::scan() {
   return found;
 }
 
+// Intentionally lock-free: the RT PDO cycle relies on SOEM's internally
+// thread-safe port layer rather than socketMutex_, so a slow control-plane
+// transfer can never stall process-data exchange. See FieldbusDriver class doc.
 void SoemFieldbusDriver::exchangeProcessData() {}
 
 void SoemFieldbusDriver::stop() {}
 
 SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
+  std::lock_guard<std::mutex> lock(socketMutex_);
   const auto& s = ctx_->slavelist[position];
   return {
       .name = std::string(s.name),
@@ -60,10 +67,14 @@ SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
   };
 }
 
-int SoemFieldbusDriver::slaveCount() const { return ctx_ ? ctx_->slavecount : 0; }
+int SoemFieldbusDriver::slaveCount() const {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  return ctx_ ? ctx_->slavecount : 0;
+}
 
 std::expected<std::vector<FieldbusDriver::SlaveStateRaw>, std::string>
 SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
   ecx_readstate(ctx_.get());
   std::vector<SlaveStateRaw> result;
   result.reserve(positions.size());
@@ -77,6 +88,7 @@ SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uint16_t slavePosition,
                                                                              uint16_t index,
                                                                              uint8_t subindex) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
   std::vector<uint8_t> data(4096, 0);
   int size = static_cast<int>(data.size());
   int wkc = ecx_SDOread(ctx_.get(), slavePosition, index, subindex, FALSE, &size, data.data(),
@@ -192,7 +204,12 @@ void drainMailbox(ecx_contextt* ctx, uint16_t slave) {
 ///           where valueSize = ceil(BitLength / 8).
 std::expected<EntryDescription, OeError> readEntryDescriptionOnce(ecx_contextt* ctx, uint16_t slave,
                                                                   uint16_t index, uint8_t subindex,
-                                                                  uint8_t requestedValueInfo) {
+                                                                  uint8_t requestedValueInfo,
+                                                                  std::mutex& mtx) {
+  // One atomic mailbox transaction: the drain + getmbx + send + receive + parse
+  // must not interleave with another control-plane mailbox op (the manual
+  // mbx_cnt update and request/response pairing below are not SOEM-guarded).
+  std::lock_guard<std::mutex> lock(mtx);
   drainMailbox(ctx, slave);
 
   ec_mbxbuft* tx = ecx_getmbx(ctx);
@@ -264,7 +281,10 @@ std::expected<EntryDescription, OeError> readEntryDescriptionOnce(ecx_contextt* 
     return std::unexpected(OeError::kUnexpectedResponse);
   }
 
-  const size_t end = 6u + mbxLen;  // past-the-end byte offset
+  // Clamp the past-the-end offset to the physical receive buffer. mbxLen is
+  // slave-supplied; without this clamp a large/garbage length lets the field
+  // reads below (whose only bound is `end`) run past the ec_mbxbuft buffer.
+  const size_t end = std::min(static_cast<size_t>(6u) + mbxLen, sizeof(ec_mbxbuft));
   if (end < 22u) {
     return std::unexpected(OeError::kResponseTruncated);
   }
@@ -335,13 +355,15 @@ std::expected<EntryDescription, OeError> readEntryDescriptionOnce(ecx_contextt* 
 /// honour it; falls back to the basic mask on @c SDOINFO_ERROR so a slave that
 /// rejects the extended request still yields access/dataType/bitLength/name.
 std::expected<EntryDescription, std::string> readEntryDescription(ecx_contextt* ctx, uint16_t slave,
-                                                                  uint16_t index,
-                                                                  uint8_t subindex) {
+                                                                  uint16_t index, uint8_t subindex,
+                                                                  std::mutex& mtx) {
+  // mtx is taken per transaction inside readEntryDescriptionOnce; the retry
+  // sleeps below run unlocked so other control-plane ops can interleave.
   auto callWithRetries = [&](uint8_t mask) -> std::expected<EntryDescription, OeError> {
-    auto r = readEntryDescriptionOnce(ctx, slave, index, subindex, mask);
+    auto r = readEntryDescriptionOnce(ctx, slave, index, subindex, mask, mtx);
     for (int i = 0; !r && r.error() == OeError::kMailboxFailure && i < kSdoInfoMaxRetries; ++i) {
       std::this_thread::sleep_for(kSdoInfoRetryDelay);
-      r = readEntryDescriptionOnce(ctx, slave, index, subindex, mask);
+      r = readEntryDescriptionOnce(ctx, slave, index, subindex, mask, mtx);
     }
     return r;
   };
@@ -368,8 +390,15 @@ std::expected<EntryDescription, std::string> readEntryDescription(ecx_contextt* 
 
 std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectDictionary(
     uint16_t slavePosition) {
+  // Fine-grained locking: socketMutex_ is taken per individual SDO Info
+  // transaction (and released during retrySdoInfo's back-off sleeps), so this
+  // multi-second enumeration never blocks another control-plane caller for more
+  // than a single transfer.
   ec_ODlistt odList{};
-  if (retrySdoInfo([&] { return ecx_readODlist(ctx_.get(), slavePosition, &odList); }) <= 0) {
+  if (retrySdoInfo([&] {
+        std::lock_guard<std::mutex> lock(socketMutex_);
+        return ecx_readODlist(ctx_.get(), slavePosition, &odList);
+      }) <= 0) {
     return std::unexpected(std::format("readODlist slave {} failed after retries", slavePosition));
   }
 
@@ -377,13 +406,17 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
   entries.reserve(odList.Entries);
 
   for (uint16_t i = 0; i < odList.Entries; ++i) {
-    if (retrySdoInfo([&] { return ecx_readODdescription(ctx_.get(), i, &odList); }) <= 0) {
+    if (retrySdoInfo([&] {
+          std::lock_guard<std::mutex> lock(socketMutex_);
+          return ecx_readODdescription(ctx_.get(), i, &odList);
+        }) <= 0) {
       return std::unexpected(std::format("readODdescription slave {} index 0x{:04X} failed",
                                          slavePosition, odList.Index[i]));
     }
 
     for (uint8_t sub = 0; sub <= odList.MaxSub[i]; ++sub) {
-      auto desc = readEntryDescription(ctx_.get(), slavePosition, odList.Index[i], sub);
+      auto desc =
+          readEntryDescription(ctx_.get(), slavePosition, odList.Index[i], sub, socketMutex_);
       if (!desc) {
         spdlog::warn("Device {}: {}", slavePosition, desc.error());
         continue;
@@ -409,6 +442,7 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
 
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
     uint16_t slavePosition, const std::string& filename) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
   constexpr int kMaxSize = 10 * 1024 * 1024;
   std::vector<uint8_t> data(kMaxSize);
   int size = kMaxSize;
@@ -446,6 +480,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
 std::expected<void, std::string> SoemFieldbusDriver::readRegister(uint16_t slavePosition,
                                                                   uint16_t address,
                                                                   std::span<uint8_t> data) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
   uint16_t configAddr = ctx_->slavelist[slavePosition].configadr;
   int wkc = ecx_FPRD(&ctx_->port, configAddr, address, static_cast<uint16_t>(data.size()),
                      data.data(), EC_TIMEOUTRET);
@@ -459,6 +494,7 @@ std::expected<void, std::string> SoemFieldbusDriver::readRegister(uint16_t slave
 std::expected<void, std::string> SoemFieldbusDriver::writeRegister(uint16_t slavePosition,
                                                                    uint16_t address,
                                                                    std::span<const uint8_t> data) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
   uint16_t configAddr = ctx_->slavelist[slavePosition].configadr;
   // ecx_FPWR takes void*, not const void*
   int wkc = ecx_FPWR(&ctx_->port, configAddr, address, static_cast<uint16_t>(data.size()),
@@ -536,20 +572,26 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
                                            std::function<bool()> shouldAbort) {
   const auto targetRaw = static_cast<uint16_t>(targetState);
 
-  ecx_readstate(ctx_.get());
-
+  // socketMutex_ is taken only around the discrete socket transactions below and
+  // is never held across the poll sleep or the tick()/shouldAbort() callbacks, so
+  // a multi-second transition does not block other control-plane callers (and the
+  // PDO tick, being lock-free, never contends here).
   std::set<uint16_t> pending;
-  for (uint16_t pos : positions) {
-    uint16_t state = ctx_->slavelist[pos].state;
-    uint16_t stateClean = state & 0x000Fu;
-    if (!requiredState || stateClean == static_cast<uint16_t>(*requiredState)) {
-      if (stateClean == static_cast<uint16_t>(EtherCatState::Init) &&
-          (targetState == EtherCatState::Boot || targetState == EtherCatState::PreOp)) {
-        updateMailboxSyncManagers(ctx_.get(), pos, targetState);
+  {
+    std::lock_guard<std::mutex> lock(socketMutex_);
+    ecx_readstate(ctx_.get());
+    for (uint16_t pos : positions) {
+      uint16_t state = ctx_->slavelist[pos].state;
+      uint16_t stateClean = state & 0x000Fu;
+      if (!requiredState || stateClean == static_cast<uint16_t>(*requiredState)) {
+        if (stateClean == static_cast<uint16_t>(EtherCatState::Init) &&
+            (targetState == EtherCatState::Boot || targetState == EtherCatState::PreOp)) {
+          updateMailboxSyncManagers(ctx_.get(), pos, targetState);
+        }
+        ctx_->slavelist[pos].state = targetRaw;
+        ecx_writestate(ctx_.get(), pos);
+        pending.insert(pos);
       }
-      ctx_->slavelist[pos].state = targetRaw;
-      ecx_writestate(ctx_.get(), pos);
-      pending.insert(pos);
     }
   }
 
@@ -580,6 +622,9 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
+    // Locked for the rest of this iteration (state read, evaluation, resend) —
+    // released at the loop-body scope exit before the next tick()/sleep.
+    std::lock_guard<std::mutex> lock(socketMutex_);
     ecx_readstate(ctx_.get());
 
     for (auto it = pending.begin(); it != pending.end();) {
@@ -617,6 +662,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
   }
 
   if (!aborted) {
+    std::lock_guard<std::mutex> lock(socketMutex_);
     for (uint16_t pos : pending) {
       spdlog::error("Device {}: failed to reach state 0x{:02X} (AL status: 0x{:04X})", pos,
                     targetRaw, ctx_->slavelist[pos].ALstatuscode);

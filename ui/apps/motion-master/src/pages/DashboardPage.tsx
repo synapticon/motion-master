@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
@@ -128,6 +128,19 @@ export default function DashboardPage() {
     // re-read states afterwards to show where each device actually landed.
     onSuccess: () => refreshDevices(),
   })
+
+  // When the device list first appears without us having read states yet — a page
+  // refresh that restored the session, or navigating back to the dashboard — read
+  // the actual AL states once so the table isn't blank until a manual refresh.
+  // Scan/transition set states themselves, so this only fills the initial gap.
+  const autoReadStates = useRef(false)
+  useEffect(() => {
+    if (autoReadStates.current) return
+    if (devicesQuery.isSuccess && devicesQuery.data.data.length > 0) {
+      autoReadStates.current = true
+      void readStatesFor(devicesQuery.data.data.map(d => d.slavePosition))
+    }
+  }, [devicesQuery.isSuccess, devicesQuery.data]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div>

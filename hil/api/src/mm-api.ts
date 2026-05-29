@@ -408,7 +408,7 @@ export class HttpClient<SecurityDataType = unknown> {
 
 /**
  * @title Motion Master API
- * @version 6.0.0-alpha.11
+ * @version 6.0.0-alpha.12
  * @baseUrl https://local.motion-master.synapticon.com:8443
  *
  * HTTP API for Motion Master motion control software. A monitoring WebSocket is also available at /ws — clients fetch the PDO schema via GET /api/monitoring/pdos and then subscribe to real-time updates.

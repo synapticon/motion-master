@@ -231,10 +231,14 @@ export default function DashboardPage() {
                 <p className="text-status-bad text-xs">{apiError(initMutation.error)}</p>
               )}
               {alreadyInitialized && !initMutation.isSuccess && (
-                <p className="text-grey-600 text-xs">
-                  Fieldbus already initialized — reusing the existing session. Reset first to
-                  re-initialize.
-                </p>
+                <div className="border-l-2 border-status-info bg-status-info/10 px-3 py-2">
+                  <p className="text-xs font-display font-medium uppercase tracking-wide text-status-info">
+                    Fieldbus already initialized
+                  </p>
+                  <p className="text-xs text-grey-700 mt-0.5">
+                    Reusing the existing session. Reset first to re-initialize.
+                  </p>
+                </div>
               )}
             </div>
 

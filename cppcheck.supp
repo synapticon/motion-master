@@ -8,3 +8,9 @@ accessMoved:*/server.cc
 // concludes that waitForNextCycle() could be static.
 functionStatic:*/cyclic_timer_linux.cc
 functionStatic:*/cyclic_timer_windows.cc
+
+// cppcheck 2.20.0 tokenizer limitation: an inline std::expected<...> override in
+// the FakeDriver test double, followed by GTest's TEST() macro (which cppcheck
+// cannot expand without the system header), is misparsed as a syntax error.
+// Both constructs parse fine in isolation; only the combination trips it.
+syntaxError:*/device_manager_test.cc

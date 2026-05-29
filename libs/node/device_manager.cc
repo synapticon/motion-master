@@ -22,7 +22,12 @@ std::expected<void, std::string> DeviceManager::init(
   driver_ = std::move(driver);
   auto result = driver_->init();
   if (!result) {
+    // A failed init must leave us uninitialised — not holding a driver whose
+    // context never opened. Otherwise initialised() would report true and the
+    // next scan()/SDO call would dereference a null context. Dropping it here
+    // also lets the caller simply retry init() without an intervening reset().
     spdlog::error("FieldbusDriver init failed: {}", result.error());
+    driver_.reset();
   } else {
     spdlog::debug("FieldbusDriver initialised");
   }

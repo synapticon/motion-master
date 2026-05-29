@@ -17,3 +17,5 @@ target_link_libraries(node PUBLIC
     nlohmann_json::nlohmann_json
     spdlog::spdlog
 )
+
+add_subdirectory(tests)

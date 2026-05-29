@@ -331,17 +331,33 @@ export default function ParametersPage() {
         <section>
           <p className="eyebrow mb-5">Parameter list</p>
           <div className="border border-grey-200 p-5 space-y-4">
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="flex items-center gap-2 text-xs text-grey-700 select-none cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={readValues}
-                  onChange={e => setReadValues(e.target.checked)}
-                  className="cursor-pointer"
-                />
-                <span>Read values during init (SDO upload per entry — slower)</span>
-              </label>
-              <div className="flex items-center gap-2 ml-auto">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              {params.length > 0 && (
+                <div className="flex items-center gap-3 flex-1 min-w-[12rem]">
+                  <input
+                    type="text"
+                    value={filter}
+                    onChange={e => setFilter(e.target.value)}
+                    placeholder="Filter by name, index, or type…"
+                    className={`${inputCls} max-w-sm`}
+                  />
+                  <span className="text-xs text-grey-500 whitespace-nowrap">
+                    {filteredParams.length === params.length
+                      ? `${params.length} entries`
+                      : `${filteredParams.length} / ${params.length}`}
+                  </span>
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-3 ml-auto">
+                <label className="flex items-center gap-2 text-xs text-grey-700 select-none cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={readValues}
+                    onChange={e => setReadValues(e.target.checked)}
+                    className="cursor-pointer"
+                  />
+                  <span>Read values during init (SDO upload per entry — slower)</span>
+                </label>
                 <button
                   className={btnCls}
                   disabled={initMutation.isPending}
@@ -371,21 +387,6 @@ export default function ParametersPage() {
 
             {params.length > 0 && (
               <>
-                <div className="flex items-center gap-3">
-                  <input
-                    type="text"
-                    value={filter}
-                    onChange={e => setFilter(e.target.value)}
-                    placeholder="Filter by name, index, or type…"
-                    className={`${inputCls} max-w-sm`}
-                  />
-                  <span className="text-xs text-grey-500">
-                    {filteredParams.length === params.length
-                      ? `${params.length} entries`
-                      : `${filteredParams.length} / ${params.length}`}
-                  </span>
-                </div>
-
                 <div className="border border-grey-200 overflow-x-auto">
                   <table className="w-full text-xs border-collapse">
                     <thead>

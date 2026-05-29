@@ -70,6 +70,14 @@ export default function DashboardPage() {
     }
   }
 
+  // Non-destructive refresh: re-read the cached device list and current AL
+  // states. Unlike Scan (ecx_config_init) this issues no bus reconfiguration, so
+  // slaves keep their state (e.g. PRE-OP / OP). The device positions don't change
+  // without a scan, so reading states off the current list is safe.
+  async function refreshDevices() {
+    await Promise.all([devicesQuery.refetch(), readAllStates()])
+  }
+
   const initMutation = useMutation({
     mutationFn: () => api.init({ driver, adapter }),
     onSuccess: () => setAlreadyInitialized(false),
@@ -264,6 +272,8 @@ export default function DashboardPage() {
               <h3 className="text-sm font-display uppercase tracking-widest">Scan</h3>
               <p className="text-xs text-grey-600">
                 Discover EtherCAT slaves on the bus. Requires a successful init first.
+                Re-discovers the bus and resets all slaves to INIT — use Refresh below to
+                update the list and states without disturbing slave state.
               </p>
               <button
                 onClick={() => scanMutation.mutate()}
@@ -286,22 +296,14 @@ export default function DashboardPage() {
                 <div className="pt-2 space-y-2">
                   <div className="flex items-center justify-between">
                     <p className="eyebrow text-xs">Devices</p>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={() => devicesQuery.refetch()}
-                        disabled={devicesQuery.isFetching}
-                        className={btnOutlineCls}
-                      >
-                        {devicesQuery.isFetching ? 'Reading…' : 'Re-read Devices'}
-                      </button>
-                      <button
-                        onClick={readAllStates}
-                        disabled={readingStates || !devicesQuery.data?.data.length}
-                        className={btnOutlineCls}
-                      >
-                        {readingStates ? 'Reading…' : 'Read States'}
-                      </button>
-                    </div>
+                    <button
+                      onClick={refreshDevices}
+                      disabled={devicesQuery.isFetching || readingStates}
+                      className={btnOutlineCls}
+                      title="Re-read the device list and AL states without re-scanning the bus — slaves keep their current state."
+                    >
+                      {devicesQuery.isFetching || readingStates ? 'Refreshing…' : 'Refresh'}
+                    </button>
                   </div>
                   <div className="border border-grey-200 overflow-x-auto">
                     {devicesQuery.isFetching && !devicesQuery.data && (

@@ -155,6 +155,20 @@ paths:
                     example: true
         "400":
           description: Request body is not valid JSON
+        "409":
+          description: >
+            A driver is already initialised. init() is one-shot — call POST /api/reset
+            before initialising again. Clients can use this to distinguish "already
+            connected" (e.g. after a page refresh) from a genuine init failure.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    example: "already initialised — call reset() first"
         "500":
           $ref: "#/components/responses/DriverError"
         "501":

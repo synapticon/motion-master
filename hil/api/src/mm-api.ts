@@ -74,6 +74,83 @@ export interface FoeErrorCode {
   description: string;
 }
 
+export interface ObjectDataTypeInfo {
+  /**
+   * ETG.1020 data type code
+   * @example 7
+   */
+  code: number;
+  /**
+   * Symbolic name of the data type
+   * @example "UNSIGNED32"
+   */
+  name: string;
+  /**
+   * Declared bit width of one element; 0 for variable-length types
+   * @example 32
+   */
+  bitSize: number;
+}
+
+export interface DeviceParameter {
+  /**
+   * CoE object index
+   * @example 24640
+   */
+  index: number;
+  /**
+   * CoE object subindex
+   * @example 0
+   */
+  subindex: number;
+  /**
+   * Textual description from the slave's SDO Info "Get Entry Description"
+   * @example "Position actual value"
+   */
+  name: string;
+  /**
+   * ETG.1000.6 §5 object code (VAR=7, ARRAY=8, RECORD=9)
+   * @example 7
+   */
+  objectCode: number;
+  /**
+   * ETG.1020 data type code (e.g. 7 = UNSIGNED32)
+   * @example 4
+   */
+  dataType: number;
+  /**
+   * Symbolic name of the data type (resolved server-side from `dataType`)
+   * @example "INTEGER32"
+   */
+  dataTypeName: string;
+  /**
+   * Bit length of the entry's value
+   * @example 32
+   */
+  bitLength: number;
+  /**
+   * ObjAccess bitfield (read/write per AL state)
+   * @example 7
+   */
+  access: number;
+  /**
+   * Last-known value, decoded according to `dataType`.  Initialised to a type-appropriate zero (0 for numbers, "" for strings, [] for raw bytes) before the first read.  After a successful SDO upload, holds the decoded value; the JSON encoding follows the variant alternative — number, string, or array of byte values.
+   * @example 12345
+   */
+  value: number | string | number[];
+  /**
+   * ETG.1004 unit code reported by the slave for this entry.  Absent when the slave does not populate the Unit field of the SDO Info response.  The 32-bit code decomposes into prefix, base SI unit, and exponent per ETG.1004.
+   * @example 0
+   */
+  unit?: number;
+  /** Slave-reported default value, decoded with the same logic as `value`.  Absent when the slave does not report a default. */
+  defaultValue?: number | string | number[];
+  /** Slave-reported minimum value, decoded with the same logic as `value`.  Absent when the slave does not report a minimum. */
+  minValue?: number | string | number[];
+  /** Slave-reported maximum value, decoded with the same logic as `value`.  Absent when the slave does not report a maximum. */
+  maxValue?: number | string | number[];
+}
+
 export type QueryParamsType = Record<string | number, any>;
 export type ResponseFormat = keyof Omit<Body, "body" | "bodyUsed">;
 
@@ -331,7 +408,7 @@ export class HttpClient<SecurityDataType = unknown> {
 
 /**
  * @title Motion Master API
- * @version 6.0.0-alpha.8
+ * @version 6.0.0-alpha.11
  * @baseUrl https://local.motion-master.synapticon.com:8443
  *
  * HTTP API for Motion Master motion control software. A monitoring WebSocket is also available at /ws — clients fetch the PDO schema via GET /api/monitoring/pdos and then subscribe to real-time updates.
@@ -455,6 +532,56 @@ export class Api<
         void
       >({
         path: `/api/devices/${slavePosition}`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Enumerates the entire CoE object dictionary of the device at `slavePosition` via the SDO Info service ("Get Object List" → "Get Object Description" → "Get Entry Description") and rebuilds its parameter map. The device must be in PRE-OP, SAFE-OP, or OP (mailbox communication active).  On a fully populated drive the call can take several seconds. When `readValues=true` each entry is additionally read via SDO upload and the decoded value is stored on the parameter; entries that fail to read keep their type-appropriate default and the call still succeeds.
+     *
+     * @name InitializeDeviceParameters
+     * @summary Initialise the parameter list for a device by enumerating its object dictionary
+     * @request POST:/api/devices/{slavePosition}/parameters/init
+     */
+    initializeDeviceParameters: (
+      slavePosition: number,
+      query?: {
+        /**
+         * When `true`, perform an SDO upload for every entry and decode the value.  Defaults to `false` — only schema (name, type, access) is populated.
+         * @default false
+         */
+        readValues?: boolean;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<
+        DeviceParameter[],
+        void | {
+          /**
+           * Human-readable error message from the driver
+           * @example "FPRD slave 1: wkc=0"
+           */
+          error: string;
+        }
+      >({
+        path: `/api/devices/${slavePosition}/parameters/init`,
+        method: "POST",
+        query: query,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Returns the parameter list populated by the most recent call to `POST /api/devices/{slavePosition}/parameters/init`.  Empty before the first call.  Entries are ordered ascending by `(index, subindex)`.
+     *
+     * @name GetDeviceParameters
+     * @summary Read the previously initialised parameter list for a device
+     * @request GET:/api/devices/{slavePosition}/parameters
+     */
+    getDeviceParameters: (slavePosition: number, params: RequestParams = {}) =>
+      this.request<DeviceParameter[], void>({
+        path: `/api/devices/${slavePosition}/parameters`,
         method: "GET",
         format: "json",
         ...params,
@@ -797,13 +924,18 @@ export class Api<
           /** @example true */
           ok: boolean;
         },
-        void | {
-          /**
-           * Human-readable error message from the driver
-           * @example "FPRD slave 1: wkc=0"
-           */
-          error: string;
-        }
+        | void
+        | {
+            /** @example "already initialised — call reset() first" */
+            error: string;
+          }
+        | {
+            /**
+             * Human-readable error message from the driver
+             * @example "FPRD slave 1: wkc=0"
+             */
+            error: string;
+          }
       >({
         path: `/api/init`,
         method: "POST",
@@ -922,6 +1054,21 @@ export class Api<
     getFoeErrorCodes: (params: RequestParams = {}) =>
       this.request<FoeErrorCode[], any>({
         path: `/api/meta/foe-error-codes`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Returns the static catalogue of ETG.1020 data type codes used in CoE object dictionary entries.  Each entry of a `DeviceParameter` carries a `dataType` field whose value is one of the codes listed here.
+     *
+     * @name GetDataTypes
+     * @summary List all known CoE object dictionary data types
+     * @request GET:/api/meta/data-types
+     */
+    getDataTypes: (params: RequestParams = {}) =>
+      this.request<ObjectDataTypeInfo[], any>({
+        path: `/api/meta/data-types`,
         method: "GET",
         format: "json",
         ...params,

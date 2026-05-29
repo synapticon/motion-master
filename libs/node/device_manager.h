@@ -37,11 +37,13 @@ class DeviceManager {
 
   /// @brief Takes ownership of @p driver and initialises it.
   ///
-  /// Must be called before @c scan() and @c pdoExchange(). Any previously
-  /// held driver is replaced.
+  /// Must be called before @c scan() and @c pdoExchange(). One-shot: fails if a
+  /// driver is already held — call @c reset() first. Replacing a live driver
+  /// would dangle the @c FieldbusDriver& that every @c Device holds.
   ///
   /// @param driver  Concrete fieldbus driver to own and operate.
-  /// @return Void on success, or an error string on failure.
+  /// @return Void on success, or an error string if a driver is already held or
+  ///         driver initialisation fails.
   std::expected<void, std::string> init(std::unique_ptr<mm::comm::FieldbusDriver> driver);
 
   /// @brief Scans the bus for nodes and populates the device list.
@@ -58,6 +60,10 @@ class DeviceManager {
   /// @c scan() may be called again. Must not be called while @c pdoExchange()
   /// is running concurrently.
   void reset();
+
+  /// @brief Whether a driver is currently held (i.e. @c init() has succeeded and
+  ///        @c reset() has not since been called).
+  bool initialised() const { return driver_ != nullptr; }
 
   /// @brief Returns the list of discovered devices.
   /// @return Devices in bus order (index 0 = node position 1). Empty before @c scan().

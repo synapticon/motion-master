@@ -21,6 +21,13 @@ function apiError(err: unknown): string {
   return 'Unknown error'
 }
 
+function apiStatus(err: unknown): number | undefined {
+  if (err && typeof err === 'object' && 'status' in err) {
+    return (err as { status?: number }).status
+  }
+  return undefined
+}
+
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
 const btnCls =
@@ -30,7 +37,7 @@ const btnOutlineCls =
 
 export default function DashboardPage() {
   const queryClient = useQueryClient()
-  const { host, port, setHost, setPort, api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned } = useConnection()
+  const { host, port, setHost, setPort, api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, alreadyInitialized, setAlreadyInitialized } = useConnection()
   const [alState, setAlState] = useState<1 | 2 | 3 | 4 | 8>(2)
   const AL_STATE_LABEL: Record<number, string> = { 1: 'Init', 2: 'PreOp', 3: 'Boot', 4: 'SafeOp', 8: 'Op' }
 
@@ -65,12 +72,18 @@ export default function DashboardPage() {
 
   const initMutation = useMutation({
     mutationFn: () => api.init({ driver, adapter }),
+    onSuccess: () => setAlreadyInitialized(false),
+    onError: (err) => {
+      // 409 = already initialized on the server; surface it as info, not an error.
+      if (apiStatus(err) === 409) setAlreadyInitialized(true)
+    },
   })
 
   const resetMutation = useMutation({
     mutationFn: () => api.reset(),
     onSuccess: () => {
       setHasScanned(false)
+      setAlreadyInitialized(false)
       setDeviceStates({})
       queryClient.removeQueries({ queryKey: ['devices'] })
     },
@@ -203,8 +216,14 @@ export default function DashboardPage() {
               {initMutation.isSuccess && (
                 <p className="text-status-good text-xs">Initialized</p>
               )}
-              {initMutation.isError && (
+              {initMutation.isError && apiStatus(initMutation.error) !== 409 && (
                 <p className="text-status-bad text-xs">{apiError(initMutation.error)}</p>
+              )}
+              {alreadyInitialized && !initMutation.isSuccess && (
+                <p className="text-grey-600 text-xs">
+                  Fieldbus already initialized — reusing the existing session. Reset first to
+                  re-initialize.
+                </p>
               )}
             </div>
 

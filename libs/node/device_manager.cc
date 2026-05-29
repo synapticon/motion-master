@@ -13,6 +13,12 @@ namespace mm::node {
 
 std::expected<void, std::string> DeviceManager::init(
     std::unique_ptr<mm::comm::FieldbusDriver> driver) {
+  // init() is a one-shot: replacing a live driver would destroy it while the
+  // Devices in devices_ still hold a FieldbusDriver& to it, leaving every Device
+  // with a dangling reference. Require an explicit reset() between inits instead.
+  if (driver_) {
+    return std::unexpected("already initialised — call reset() before init()");
+  }
   driver_ = std::move(driver);
   auto result = driver_->init();
   if (!result) {

@@ -506,6 +506,17 @@ void Server::run() {
                       ->end();
                   return;
                 }
+                // init() is one-shot — reject a re-init (e.g. a browser refresh
+                // replaying the stored session) with 409 so the client can tell
+                // "already connected" apart from a genuine init failure (500).
+                if (deviceManager_.initialised()) {
+                  res->writeStatus("409 Conflict")
+                      ->writeHeader("Content-Type", "application/json")
+                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                      ->end(nlohmann::json{{"error", "already initialised — call reset() first"}}
+                                .dump());
+                  return;
+                }
                 try {
                   nlohmann::json j =
                       body->empty() ? nlohmann::json::object() : nlohmann::json::parse(*body);

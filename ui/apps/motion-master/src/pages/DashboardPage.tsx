@@ -54,12 +54,14 @@ export default function DashboardPage() {
   const [deviceStates, setDeviceStates] = useState<Record<number, DeviceState>>({})
   const [readingStates, setReadingStates] = useState(false)
 
-  async function readAllStates() {
-    if (!devicesQuery.data) return
+  async function readStatesFor(positions: number[]) {
+    if (positions.length === 0) {
+      setDeviceStates({})
+      return
+    }
     setReadingStates(true)
-    const positions = devicesQuery.data.data.map(d => d.slavePosition).join(',')
     try {
-      const res = await api.getDeviceStates({ positions })
+      const res = await api.getDeviceStates({ positions: positions.join(',') })
       const next: Record<number, DeviceState> = {}
       for (const entry of res.data) {
         next[entry.slavePosition] = { alState: entry.alState, error: entry.error, alStatusCode: entry.alStatusCode }
@@ -70,12 +72,13 @@ export default function DashboardPage() {
     }
   }
 
-  // Non-destructive refresh: re-read the cached device list and current AL
-  // states. Unlike Scan (ecx_config_init) this issues no bus reconfiguration, so
-  // slaves keep their state (e.g. PRE-OP / OP). The device positions don't change
-  // without a scan, so reading states off the current list is safe.
+  // Non-destructive refresh: re-read the device list and current AL states.
+  // Unlike Scan (ecx_config_init) this issues no bus reconfiguration, so slaves
+  // keep their state (e.g. PRE-OP / OP). States are read off the freshly
+  // re-fetched list so a refresh right after a scan reflects the new devices.
   async function refreshDevices() {
-    await Promise.all([devicesQuery.refetch(), readAllStates()])
+    const res = await devicesQuery.refetch()
+    await readStatesFor(res.data?.data.map(d => d.slavePosition) ?? [])
   }
 
   const initMutation = useMutation({
@@ -101,7 +104,9 @@ export default function DashboardPage() {
     mutationFn: () => api.scan(),
     onSuccess: () => {
       setHasScanned(true)
-      setDeviceStates({})
+      // Pull the freshly discovered devices and their actual (post-scan: INIT)
+      // states so the table reflects reality without a manual Refresh.
+      return refreshDevices()
     },
   })
 
@@ -119,6 +124,9 @@ export default function DashboardPage() {
 
   const transitionMutation = useMutation({
     mutationFn: () => api.transitionToState({ state: alState }),
+    // The transition blocks server-side until devices arrive (or time out), so
+    // re-read states afterwards to show where each device actually landed.
+    onSuccess: () => refreshDevices(),
   })
 
   return (

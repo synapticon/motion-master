@@ -5,6 +5,7 @@ export interface RequestEntry {
   method: string
   url: string
   requestBody?: string
+  requestHeaders?: Record<string, string>
   requestedAt: number
   completedAt?: number
   durationMs?: number
@@ -35,12 +36,18 @@ class RequestsStore {
     this.listeners.forEach(l => l())
   }
 
-  start(method: string, url: string, requestBody?: string): number {
+  start(
+    method: string,
+    url: string,
+    requestBody?: string,
+    requestHeaders?: Record<string, string>,
+  ): number {
     const entry: RequestEntry = {
       id: this.nextId++,
       method,
       url,
       requestBody,
+      requestHeaders,
       requestedAt: Date.now(),
     }
     this.entries = [entry, ...this.entries].slice(0, MAX_ENTRIES)
@@ -104,6 +111,33 @@ function bodyToString(body: BodyInit | null | undefined): string | undefined {
   return undefined
 }
 
+function collectHeaders(input: RequestInfo | URL, init?: RequestInit): Record<string, string> {
+  const out: Record<string, string> = {}
+  const add = (h?: HeadersInit): void => {
+    if (!h) {
+      return
+    }
+    if (h instanceof Headers) {
+      h.forEach((v, k) => {
+        out[k.toLowerCase()] = v
+      })
+    } else if (Array.isArray(h)) {
+      for (const [k, v] of h) {
+        out[k.toLowerCase()] = v
+      }
+    } else {
+      for (const [k, v] of Object.entries(h)) {
+        out[k.toLowerCase()] = v
+      }
+    }
+  }
+  if (input instanceof Request) {
+    add(input.headers)
+  }
+  add(init?.headers)
+  return out
+}
+
 export function RequestsProvider({ children }: { children: React.ReactNode }) {
   const installedRef = useRef(false)
 
@@ -129,8 +163,9 @@ export function RequestsProvider({ children }: { children: React.ReactNode }) {
         init?.method ?? (input instanceof Request ? input.method : 'GET')
       ).toUpperCase()
       const requestBody = bodyToString(init?.body)
+      const requestHeaders = collectHeaders(input, init)
       const start = performance.now()
-      const id = store.start(method, url, requestBody)
+      const id = store.start(method, url, requestBody, requestHeaders)
 
       try {
         const response = await original(input, init)

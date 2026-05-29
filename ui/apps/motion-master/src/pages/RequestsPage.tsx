@@ -49,6 +49,54 @@ function pathOf(rawUrl: string): string {
   }
 }
 
+// Wrap a value in single quotes, escaping embedded single quotes the POSIX way ('\'').
+function shSingleQuote(s: string): string {
+  return `'${s.replace(/'/g, "'\\''")}'`
+}
+
+// Headers that fetch/the browser sets itself — pointless (and sometimes invalid) to replay via curl.
+const SKIP_CURL_HEADERS = new Set(['host', 'content-length', 'connection'])
+
+function buildCurl(entry: RequestEntry): string {
+  // -k: the local server may use a self-signed cert on dev machines.
+  const parts = [`curl -k -X ${entry.method} ${shSingleQuote(entry.url)}`]
+  for (const [k, v] of Object.entries(entry.requestHeaders ?? {})) {
+    if (!SKIP_CURL_HEADERS.has(k)) {
+      parts.push(`-H ${shSingleQuote(`${k}: ${v}`)}`)
+    }
+  }
+  if (entry.requestBody) {
+    parts.push(`--data ${shSingleQuote(entry.requestBody)}`)
+  }
+  return parts.join(' \\\n  ')
+}
+
+function CopyCurlButton({ entry }: { entry: RequestEntry }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async (): Promise<void> => {
+    try {
+      await navigator.clipboard.writeText(buildCurl(entry))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      setCopied(false)
+    }
+  }
+
+  const base =
+    'shrink-0 border px-3 py-1.5 text-xs cursor-pointer transition-colors rounded-sm'
+  const state = copied
+    ? 'border-status-good text-status-good'
+    : 'border-grey-300 text-grey-600 hover:border-ocean hover:text-ocean'
+
+  return (
+    <button onClick={handleCopy} className={`${base} ${state}`}>
+      {copied ? '✓ Copied' : 'Copy as cURL'}
+    </button>
+  )
+}
+
 interface FormattedBody {
   text: string
   language: 'json' | 'text'
@@ -77,8 +125,11 @@ function DetailView({ entry }: { entry: RequestEntry }) {
   return (
     <div className="flex flex-col min-h-0 flex-1">
       <div className="px-4 py-3 border-b border-grey-200 space-y-2">
-        <div className="font-mono text-xs break-all">
-          <span className="font-semibold">{entry.method}</span> {entry.url}
+        <div className="flex items-start justify-between gap-3">
+          <div className="font-mono text-xs break-all">
+            <span className="font-semibold">{entry.method}</span> {entry.url}
+          </div>
+          <CopyCurlButton entry={entry} />
         </div>
         <div className="text-xs text-grey-700 grid grid-cols-2 gap-x-4 gap-y-0.5">
           <div>

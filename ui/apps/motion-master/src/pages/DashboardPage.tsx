@@ -37,7 +37,7 @@ const btnOutlineCls =
 
 export default function DashboardPage() {
   const queryClient = useQueryClient()
-  const { host, port, setHost, setPort, api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, alreadyInitialized, setAlreadyInitialized } = useConnection()
+  const { host, port, setHost, setPort, api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, setIsInitialized, alreadyInitialized, setAlreadyInitialized } = useConnection()
   const [alState, setAlState] = useState<1 | 2 | 3 | 4 | 8>(2)
   const AL_STATE_LABEL: Record<number, string> = { 1: 'Init', 2: 'PreOp', 3: 'Boot', 4: 'SafeOp', 8: 'Op' }
 
@@ -79,14 +79,23 @@ export default function DashboardPage() {
   async function refreshDevices() {
     const res = await devicesQuery.refetch()
     await readStatesFor(res.data?.data.map(d => d.slavePosition) ?? [])
+    // Keep the sidebar's shared AL-state query in sync with dashboard actions
+    // (scan / transition / manual refresh).
+    void queryClient.invalidateQueries({ queryKey: ['deviceStates'] })
   }
 
   const initMutation = useMutation({
     mutationFn: () => api.init({ driver, adapter }),
-    onSuccess: () => setAlreadyInitialized(false),
+    onSuccess: () => {
+      setAlreadyInitialized(false)
+      setIsInitialized(true)
+    },
     onError: (err) => {
       // 409 = already initialized on the server; surface it as info, not an error.
-      if (apiStatus(err) === 409) setAlreadyInitialized(true)
+      if (apiStatus(err) === 409) {
+        setAlreadyInitialized(true)
+        setIsInitialized(true)
+      }
     },
   })
 
@@ -94,6 +103,7 @@ export default function DashboardPage() {
     mutationFn: () => api.reset(),
     onSuccess: () => {
       setHasScanned(false)
+      setIsInitialized(false)
       setAlreadyInitialized(false)
       setDeviceStates({})
       queryClient.removeQueries({ queryKey: ['devices'] })

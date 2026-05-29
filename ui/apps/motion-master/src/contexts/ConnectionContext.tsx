@@ -29,6 +29,11 @@ interface ConnectionContextValue {
   setAdapter: (a: string) => void
   hasScanned: boolean
   setHasScanned: (val: boolean) => void
+  /// True once the fieldbus driver is initialized on the server (after a
+  /// successful init, a 409 "already initialized", or a restored session).
+  /// Cleared on reset.
+  isInitialized: boolean
+  setIsInitialized: (val: boolean) => void
   /// True when init() was skipped because the fieldbus was already initialized
   /// on the server (e.g. after a browser refresh that reused the stored session).
   alreadyInitialized: boolean
@@ -44,6 +49,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const [driver, setDriver] = useState<'soem' | 'spoe' | 'igh'>(stored?.driver ?? 'soem')
   const [adapter, setAdapter] = useState(stored?.adapter ?? '')
   const [hasScanned, setHasScannedState] = useState(false)
+  const [isInitialized, setIsInitialized] = useState(false)
   const [alreadyInitialized, setAlreadyInitialized] = useState(false)
 
   const api = useMemo(
@@ -65,7 +71,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
 
   return (
     <ConnectionContext.Provider
-      value={{ host, port, setHost, setPort, api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, alreadyInitialized, setAlreadyInitialized }}
+      value={{ host, port, setHost, setPort, api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, isInitialized, setIsInitialized, alreadyInitialized, setAlreadyInitialized }}
     >
       {children}
     </ConnectionContext.Provider>

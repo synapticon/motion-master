@@ -4,7 +4,7 @@ import { readSession } from '../contexts/ConnectionContext'
 import { useConnection } from '../contexts/ConnectionContext'
 
 export function SessionRestore({ children }: { children: React.ReactNode }) {
-  const { api, setHasScanned, setAlreadyInitialized } = useConnection()
+  const { api, setHasScanned, setIsInitialized, setAlreadyInitialized } = useConnection()
   const queryClient = useQueryClient()
   const attempted = useRef(false)
 
@@ -19,6 +19,7 @@ export function SessionRestore({ children }: { children: React.ReactNode }) {
       // Fresh init succeeded — this is a first connection, so discover the bus.
       .then(() =>
         api.scan().then(() => {
+          setIsInitialized(true)
           setHasScanned(true)
           queryClient.invalidateQueries({ queryKey: ['devices'] })
         }),
@@ -31,6 +32,7 @@ export function SessionRestore({ children }: { children: React.ReactNode }) {
         // the state the user already brought devices to (e.g. PRE-OP).
         if (err && typeof err === 'object' && (err as { status?: number }).status === 409) {
           setAlreadyInitialized(true)
+          setIsInitialized(true)
           setHasScanned(true)
           queryClient.invalidateQueries({ queryKey: ['devices'] })
           return

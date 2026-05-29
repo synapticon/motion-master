@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useParams } from 'react-router'
 import DevicePageHeader from '../components/DevicePageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
+import { downloadBytes } from '../utils/download'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
@@ -100,6 +101,9 @@ export default function FoePage() {
             <div className="flex items-center gap-4 mb-4">
               <p className="eyebrow">Result</p>
               <span className="text-xs text-grey-500 font-mono">{result.length.toLocaleString()} bytes</span>
+              <button onClick={() => downloadBytes(result, filename)} className={btnCls}>
+                Download
+              </button>
               <div className="flex ml-auto">
                 {(['bytes', 'text'] as const).map(v => (
                   <button

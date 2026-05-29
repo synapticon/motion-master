@@ -14,21 +14,27 @@ const btnCls =
 // Synapticon vendor ID — gates the SOMANET-specific filesystem features below.
 const SYNAPTICON_VENDOR_ID = 0x000022d2
 
-// Well-known files present on SOMANET drives. `fs-getlist` and `fs-remove=<file>`
-// are not real files but FoE pseudo-commands the firmware interprets on read.
-const SOMANET_FILES = [
-  '.hardware_description',
-  'config.csv',
-  'cversion',
-  'bversion',
-  'fs-getlist',
-  'logging_curr.log',
-  'logging_prev.log',
-  'plant_model.csv',
-  'SOMANET_CiA_402.xml.zip',
-  'stack_image.svg.zip',
-  'ui.config.json',
+// Well-known files present on SOMANET drives, with whether each may be written
+// back via FoE. `fs-getlist` is not a real file but a pseudo-command the firmware
+// interprets on read (as is `fs-remove=<file>`); it is read-only.
+const SOMANET_FILES: { name: string; write: boolean }[] = [
+  { name: '.hardware_description', write: true },
+  { name: '.factory_config', write: true },
+  { name: '.assembly_config', write: true },
+  { name: 'config.csv', write: true },
+  { name: 'plant_model.csv', write: true },
+  { name: 'ui.config.json', write: true },
+  { name: 'SOMANET_CiA_402.xml.zip', write: true },
+  { name: 'stack_image.svg.zip', write: true },
+  { name: 'cversion', write: false },
+  { name: 'bversion', write: false },
+  { name: 'logging_curr.log', write: false },
+  { name: 'logging_prev.log', write: false },
+  { name: 'fs-getlist', write: false },
 ]
+
+const SOMANET_READ_FILES = SOMANET_FILES.map(f => f.name)
+const SOMANET_WRITE_FILES = SOMANET_FILES.filter(f => f.write).map(f => f.name)
 
 // uWebSockets does not URL-decode path parameters, so encode the filename but
 // keep `=` literal — `fs-remove=config.csv` must reach the backend verbatim.
@@ -59,6 +65,37 @@ function decodeUtf8(bytes: Uint8Array): string | null {
   }
 }
 
+function SomanetFileLinks({
+  files,
+  selected,
+  onPick,
+}: {
+  files: string[]
+  selected: string
+  onPick: (name: string) => void
+}) {
+  return (
+    <div>
+      <p className={labelCls}>SOMANET Files</p>
+      <div className="flex flex-wrap gap-2">
+        {files.map(name => (
+          <button
+            key={name}
+            onClick={() => onPick(name)}
+            className={`px-2 py-1 text-xs border font-mono transition-colors cursor-pointer
+              ${selected === name
+                ? 'bg-grey-900 text-white border-grey-900'
+                : 'border-grey-300 text-grey-700 hover:bg-grey-50'
+              }`}
+          >
+            {name}
+          </button>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function FoePage() {
   const { deviceId } = useParams()
   const { api } = useConnection()
@@ -82,6 +119,12 @@ export default function FoePage() {
   const [listing, setListing] = useState(false)
   const [listError, setListError] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
+
+  const [writeFilename, setWriteFilename] = useState('')
+  const [writeBytes, setWriteBytes] = useState<Uint8Array | null>(null)
+  const [writing, setWriting] = useState(false)
+  const [writeOk, setWriteOk] = useState(false)
+  const [writeError, setWriteError] = useState<string | null>(null)
 
   // Read raw bytes for an arbitrary FoE filename, throwing on a non-OK response.
   async function readRaw(name: string): Promise<Uint8Array> {
@@ -142,6 +185,53 @@ export default function FoePage() {
     }
   }
 
+  function pickWriteFilename(name: string) {
+    setWriteFilename(name)
+    setWriteOk(false)
+    setWriteError(null)
+  }
+
+  async function handleFilePick(file: File | null) {
+    setWriteOk(false)
+    setWriteError(null)
+    if (!file) {
+      setWriteBytes(null)
+      return
+    }
+    const buffer = await file.arrayBuffer()
+    setWriteBytes(new Uint8Array(buffer))
+    setWriteFilename(file.name)
+  }
+
+  async function handleWrite() {
+    if (!writeFilename || writeBytes === null || writing) return
+    const ok = window.confirm(
+      `Write ${writeBytes.length.toLocaleString()} byte(s) to "${writeFilename}" on device ${slavePosition}?\n` +
+        'This overwrites any existing file with that name on the drive.',
+    )
+    if (!ok) return
+    setWriting(true)
+    setWriteOk(false)
+    setWriteError(null)
+    try {
+      const url = `${api.baseUrl}/api/devices/${slavePosition}/files/${encodeFilename(writeFilename)}`
+      const response = await fetch(url, {
+        method: 'PUT',
+        body: new Blob([writeBytes as BlobPart]),
+      })
+      if (!response.ok) {
+        const json = await response.json().catch(() => null)
+        throw new Error(json?.error ?? `HTTP ${response.status}`)
+      }
+      setWriteOk(true)
+      if (isSynapticon && files) handleList()
+    } catch (err) {
+      setWriteError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setWriting(false)
+    }
+  }
+
   async function handleRemove(name: string) {
     if (removing) return
     const ok = window.confirm(
@@ -167,9 +257,12 @@ export default function FoePage() {
       <DevicePageHeader slavePosition={slavePosition} title="FoE" />
       <div className="p-4 sm:p-8 space-y-8">
 
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+
+        {/* Read */}
         <section>
           <p className="eyebrow mb-5">Read File</p>
-          <div className="border border-grey-200 p-5 max-w-xl space-y-4">
+          <div className="border border-grey-200 p-5 space-y-4">
             <div>
               <label className={labelCls}>Filename</label>
               <input
@@ -182,24 +275,7 @@ export default function FoePage() {
               />
             </div>
             {isSynapticon && (
-              <div>
-                <p className={labelCls}>SOMANET Files</p>
-                <div className="flex flex-wrap gap-2">
-                  {SOMANET_FILES.map(name => (
-                    <button
-                      key={name}
-                      onClick={() => pickFilename(name)}
-                      className={`px-2 py-1 text-xs border font-mono transition-colors cursor-pointer
-                        ${filename === name
-                          ? 'bg-grey-900 text-white border-grey-900'
-                          : 'border-grey-300 text-grey-700 hover:bg-grey-50'
-                        }`}
-                    >
-                      {name}
-                    </button>
-                  ))}
-                </div>
-              </div>
+              <SomanetFileLinks files={SOMANET_READ_FILES} selected={filename} onPick={pickFilename} />
             )}
             <button onClick={() => handleRead()} disabled={!filename || reading} className={btnCls}>
               {reading ? 'Reading…' : 'Read'}
@@ -209,6 +285,60 @@ export default function FoePage() {
             )}
           </div>
         </section>
+
+        {/* Write */}
+        <section>
+          <p className="eyebrow mb-5">Write File</p>
+          <div className="border border-grey-200 p-5 space-y-4">
+            <div>
+              <label className={labelCls}>Filename</label>
+              <input
+                type="text"
+                value={writeFilename}
+                onChange={e => pickWriteFilename(e.target.value)}
+                placeholder="e.g. config.csv"
+                className={inputCls}
+              />
+            </div>
+            {isSynapticon && (
+              <SomanetFileLinks
+                files={SOMANET_WRITE_FILES}
+                selected={writeFilename}
+                onPick={pickWriteFilename}
+              />
+            )}
+            <div>
+              <label className={labelCls}>Contents</label>
+              <input
+                type="file"
+                onChange={e => handleFilePick(e.target.files?.[0] ?? null)}
+                className="text-xs text-grey-700 w-full file:mr-3 file:border file:border-grey-300 file:bg-grey-50 file:px-3 file:py-1.5 file:text-xs file:cursor-pointer hover:file:bg-grey-100"
+              />
+              <p className="text-xs text-grey-500 mt-1 font-mono">
+                {writeBytes === null
+                  ? 'Choose a file to upload.'
+                  : `${writeBytes.length.toLocaleString()} byte(s) ready.`}
+              </p>
+            </div>
+            <button
+              onClick={handleWrite}
+              disabled={!writeFilename || writeBytes === null || writing}
+              className={btnCls}
+            >
+              {writing ? 'Writing…' : 'Write'}
+            </button>
+            {writeError && (
+              <p className="text-xs text-status-bad font-mono">{writeError}</p>
+            )}
+            {writeOk && (
+              <p className="text-xs text-status-good font-mono">
+                Wrote {writeBytes?.length.toLocaleString() ?? 0} byte(s) to {writeFilename}.
+              </p>
+            )}
+          </div>
+        </section>
+
+        </div>
 
         {isSynapticon && (
           <section>

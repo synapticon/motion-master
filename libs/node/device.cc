@@ -40,6 +40,11 @@ std::expected<std::vector<uint8_t>, std::string> Device::readFile(
   return driver_.readFile(slavePosition_, filename);
 }
 
+std::expected<void, std::string> Device::writeFile(const std::string& filename,
+                                                   std::span<const uint8_t> data) const {
+  return driver_.writeFile(slavePosition_, filename, data);
+}
+
 std::expected<void, std::string> Device::readRegister(uint16_t address,
                                                       std::span<uint8_t> data) const {
   return driver_.readRegister(slavePosition_, address, data);

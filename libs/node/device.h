@@ -55,6 +55,14 @@ class Device {
   /// @return File bytes on success, or an error string if the transfer fails.
   std::expected<std::vector<uint8_t>, std::string> readFile(const std::string& filename) const;
 
+  /// @brief Writes a file to this device via File over EtherCAT (FoE).
+  ///
+  /// @param filename  FoE filename as recognised by the slave firmware.
+  /// @param data      File bytes to write.
+  /// @return Void on success, or an error string if the transfer fails.
+  std::expected<void, std::string> writeFile(const std::string& filename,
+                                             std::span<const uint8_t> data) const;
+
   /// @brief Reads bytes from an ESC register on this device.
   ///
   /// Delegates to the fieldbus driver's @c readRegister using this device's slave position.

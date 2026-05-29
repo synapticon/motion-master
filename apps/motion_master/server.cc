@@ -436,6 +436,50 @@ void Server::run() {
                  ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(std::string_view{reinterpret_cast<const char*>(r->data()), r->size()});
            })
+      .put("/api/devices/:slavePosition/files/:filename",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p, ec] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             bool posOk = (ec == std::errc() && p == posParam.data() + posParam.size());
+             // req is only valid synchronously — capture the filename before onData.
+             std::string filename{req->getParameter("filename")};
+             auto aborted = std::make_shared<bool>(false);
+             auto body = std::make_shared<std::string>();
+             res->onAborted([aborted]() { *aborted = true; });
+             res->onData([this, res, body, aborted, pos, posOk, filename](std::string_view chunk,
+                                                                          bool last) {
+               body->append(chunk);
+               if (!last) return;
+               if (*aborted) return;
+               if (!posOk) {
+                 res->writeStatus("400 Bad Request")
+                     ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                     ->end();
+                 return;
+               }
+               const auto* device = deviceManager_.findDevice(pos);
+               if (!device) {
+                 res->writeStatus("404 Not Found")
+                     ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                     ->end();
+                 return;
+               }
+               std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(body->data()),
+                                             body->size()};
+               if (auto r = device->writeFile(filename, data); !r) {
+                 res->writeStatus("500 Internal Server Error")
+                     ->writeHeader("Content-Type", "application/json")
+                     ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                     ->end(nlohmann::json{{"error", r.error()}}.dump());
+                 return;
+               }
+               res->writeHeader("Content-Type", "application/json")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end(nlohmann::json{{"ok", true}}.dump());
+             });
+           })
       .post("/api/devices/:slavePosition/parameters/init",
             [this](auto* res, auto* req) {
               uint16_t pos{};

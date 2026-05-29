@@ -41,6 +41,7 @@ std::expected<void, std::string> SoemFieldbusDriver::init() {
     ctx_.reset();
     return std::unexpected("ecx_init failed on " + ifname_ + ": " + std::strerror(errno));
   }
+  spdlog::debug("SOEM init on adapter '{}'", ifname_);
   return {};
 }
 
@@ -51,6 +52,7 @@ std::expected<int, std::string> SoemFieldbusDriver::scan() {
   if (found <= 0) {
     return std::unexpected("ecx_config_init found no slaves on " + ifname_);
   }
+  spdlog::debug("SOEM scan found {} slave(s) on '{}'", found, ifname_);
   return found;
 }
 
@@ -95,6 +97,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
                                                                              uint16_t index,
                                                                              uint8_t subindex) {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  spdlog::debug("SDOread slave {} 0x{:04X}:{:02X}", slavePosition, index, subindex);
   std::vector<uint8_t> data(4096, 0);
   int size = static_cast<int>(data.size());
   int wkc = ecx_SDOread(ctx_.get(), slavePosition, index, subindex, FALSE, &size, data.data(),
@@ -119,9 +122,12 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
           break;
       }
     }
+    spdlog::debug("{}", msg);
     return std::unexpected(msg);
   }
   data.resize(size);
+  spdlog::debug("SDOread slave {} 0x{:04X}:{:02X} ok ({} bytes)", slavePosition, index, subindex,
+                data.size());
   return data;
 }
 
@@ -400,6 +406,7 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
   // transaction (and released during retrySdoInfo's back-off sleeps), so this
   // multi-second enumeration never blocks another control-plane caller for more
   // than a single transfer.
+  spdlog::debug("readObjectDictionary slave {}", slavePosition);
   ec_ODlistt odList{};
   if (retrySdoInfo([&] {
         std::lock_guard<std::mutex> lock(socketMutex_);
@@ -443,12 +450,14 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
     }
   }
 
+  spdlog::debug("readObjectDictionary slave {} ok ({} entries)", slavePosition, entries.size());
   return entries;
 }
 
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
     uint16_t slavePosition, const std::string& filename) {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  spdlog::debug("FOEread slave {} '{}'", slavePosition, filename);
   constexpr int kMaxSize = 10 * 1024 * 1024;
   std::vector<uint8_t> data(kMaxSize);
   int size = kMaxSize;
@@ -477,22 +486,64 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
           break;
       }
     }
+    spdlog::debug("{}", msg);
     return std::unexpected(msg);
   }
   data.resize(size);
+  spdlog::debug("FOEread slave {} '{}' ok ({} bytes)", slavePosition, filename, data.size());
   return data;
+}
+
+std::expected<void, std::string> SoemFieldbusDriver::writeFile(uint16_t slavePosition,
+                                                               const std::string& filename,
+                                                               std::span<const uint8_t> data) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  spdlog::debug("FOEwrite slave {} '{}' ({} bytes)", slavePosition, filename, data.size());
+  std::string name = filename;  // ecx_FOEwrite takes non-const char*
+  int wkc = ecx_FOEwrite(ctx_.get(), slavePosition, name.data(), 0, static_cast<int>(data.size()),
+                         const_cast<uint8_t*>(data.data()), EC_TIMEOUTRXM);
+  if (wkc <= 0) {
+    std::string msg = std::format("FOEwrite slave {} '{}' failed", slavePosition, filename);
+    ec_errort err{};
+    if (ecx_poperror(ctx_.get(), &err)) {
+      switch (err.Etype) {
+        case EC_ERR_TYPE_FOE_ERROR:
+          msg += std::format(" (FoE error 0x{:08X})", static_cast<uint32_t>(err.AbortCode));
+          break;
+        case EC_ERR_TYPE_FOE_BUF2SMALL:
+          msg += " (buffer too small)";
+          break;
+        case EC_ERR_TYPE_FOE_PACKETNUMBER:
+          msg += " (packet number mismatch)";
+          break;
+        case EC_ERR_TYPE_FOE_FILE_NOTFOUND:
+          msg += " (file not found)";
+          break;
+        default:
+          msg += std::format(" (etype {})", static_cast<int>(err.Etype));
+          break;
+      }
+    }
+    spdlog::debug("{}", msg);
+    return std::unexpected(msg);
+  }
+  spdlog::debug("FOEwrite slave {} '{}' ok", slavePosition, filename);
+  return {};
 }
 
 std::expected<void, std::string> SoemFieldbusDriver::readRegister(uint16_t slavePosition,
                                                                   uint16_t address,
                                                                   std::span<uint8_t> data) {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  spdlog::debug("FPRD slave {} 0x{:04X} ({} bytes)", slavePosition, address, data.size());
   uint16_t configAddr = ctx_->slavelist[slavePosition].configadr;
   int wkc = ecx_FPRD(&ctx_->port, configAddr, address, static_cast<uint16_t>(data.size()),
                      data.data(), EC_TIMEOUTRET);
   if (wkc != 1) {
-    return std::unexpected("FPRD slave " + std::to_string(slavePosition) +
-                           ": wkc=" + std::to_string(wkc));
+    std::string msg =
+        "FPRD slave " + std::to_string(slavePosition) + ": wkc=" + std::to_string(wkc);
+    spdlog::debug("{}", msg);
+    return std::unexpected(msg);
   }
   return {};
 }
@@ -501,13 +552,16 @@ std::expected<void, std::string> SoemFieldbusDriver::writeRegister(uint16_t slav
                                                                    uint16_t address,
                                                                    std::span<const uint8_t> data) {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  spdlog::debug("FPWR slave {} 0x{:04X} ({} bytes)", slavePosition, address, data.size());
   uint16_t configAddr = ctx_->slavelist[slavePosition].configadr;
   // ecx_FPWR takes void*, not const void*
   int wkc = ecx_FPWR(&ctx_->port, configAddr, address, static_cast<uint16_t>(data.size()),
                      const_cast<uint8_t*>(data.data()), EC_TIMEOUTRET);
   if (wkc != 1) {
-    return std::unexpected("FPWR slave " + std::to_string(slavePosition) +
-                           ": wkc=" + std::to_string(wkc));
+    std::string msg =
+        "FPWR slave " + std::to_string(slavePosition) + ": wkc=" + std::to_string(wkc);
+    spdlog::debug("{}", msg);
+    return std::unexpected(msg);
   }
   return {};
 }

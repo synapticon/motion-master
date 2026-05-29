@@ -96,6 +96,8 @@ std::expected<void, std::string> DeviceManager::transitionToState(
     std::transform(devices_.begin(), devices_.end(), std::back_inserter(targets),
                    [](const Device& d) { return d.slavePosition(); });
   }
+  spdlog::debug("transitionToState -> 0x{:02X} for {} device(s)", static_cast<int>(targetState),
+                targets.size());
   driver_->transitionToState(targets, std::nullopt, targetState, timeout);
   return {};
 }

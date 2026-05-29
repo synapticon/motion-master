@@ -591,6 +591,54 @@ paths:
           description: No device at the given bus position
         "500":
           $ref: "#/components/responses/DriverError"
+    put:
+      summary: Write a file to a device via FoE (File over EtherCAT)
+      operationId: foeWriteFile
+      description: >
+        Sends an FoE write request for `filename` to the device at `slavePosition`,
+        streaming the raw request body as the file contents.  FoE is available in
+        Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is
+        responsible for ensuring the device is in a suitable state before calling.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+          description: FoE filename as recognised by the slave firmware
+          example: "config.csv"
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: File written successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        "400":
+          description: slavePosition is not a valid integer
+        "404":
+          description: No device at the given bus position
+        "500":
+          $ref: "#/components/responses/DriverError"
   /api/devices/state:
     get:
       summary: Read current AL state for devices

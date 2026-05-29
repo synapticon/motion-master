@@ -28,7 +28,11 @@ export default function LogPage() {
 
   return (
     <div className="flex flex-col h-full">
-      <PageHeader eyebrow="App" title="Log" />
+      <PageHeader
+        eyebrow="App"
+        title="Log"
+        description="View the backend's diagnostic log — the in-memory ring buffer of server-side events, useful for troubleshooting fieldbus and API operations."
+      />
       <div className="p-4 sm:p-8 flex flex-col flex-1 min-h-0 space-y-4">
         <div className="flex items-center justify-between">
           <p className="text-xs text-grey-600">

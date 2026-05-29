@@ -35,6 +35,11 @@ export default function AlStatusCodesPage() {
         {query.isSuccess && (
           <>
             <p className="text-xs text-grey-600 mb-4 max-w-3xl">
+              EtherCAT Application Layer (AL) status codes, assembled from{' '}
+              <span className="font-mono">ETG.1000.6 Table 11</span> — reported by a slave when a
+              requested EtherCAT state transition fails.
+            </p>
+            <p className="text-xs text-grey-600 mb-4 max-w-3xl">
               <span className="font-mono text-status-bad">Terminal</span> codes mean the slave cannot reach the
               requested EtherCAT state by retrying — the master must change something (re-init, reflash, power
               cycle) before another transition attempt can succeed. The server abandons such slaves immediately

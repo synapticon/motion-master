@@ -896,7 +896,7 @@ export class Api<
   };
   init = {
     /**
-     * @description Constructs the requested fieldbus driver, opens the network interface, and makes the driver available for subsequent calls to /api/scan. The request body is optional; omitting it selects the SOEM driver with automatic adapter selection.
+     * @description Constructs the requested fieldbus driver, opens the network interface, and makes the driver available for subsequent calls to /api/scan. The driver defaults to SOEM when omitted. SOEM has no adapter auto-detect: a network adapter must be supplied, otherwise init fails.
      *
      * @name Init
      * @summary Initialise the fieldbus driver
@@ -911,8 +911,7 @@ export class Api<
          */
         driver?: "soem" | "spoe" | "igh";
         /**
-         * Network interface name or MAC address; empty string for auto-detect
-         * @default ""
+         * Network interface name or MAC address. Required for SOEM — there is no auto-detect, so an empty value makes init fail.
          * @example "eth0"
          */
         adapter?: string;

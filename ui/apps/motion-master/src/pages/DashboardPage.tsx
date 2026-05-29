@@ -208,11 +208,14 @@ export default function DashboardPage() {
               </div>
               <button
                 onClick={() => initMutation.mutate()}
-                disabled={initMutation.isPending}
+                disabled={initMutation.isPending || !adapter.trim()}
                 className={btnCls}
               >
                 {initMutation.isPending ? 'Initializing…' : 'Init'}
               </button>
+              {!adapter.trim() && (
+                <p className="text-grey-500 text-xs">Select a network adapter to initialize.</p>
+              )}
               {initMutation.isSuccess && (
                 <p className="text-status-good text-xs">Initialized</p>
               )}

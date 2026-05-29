@@ -121,8 +121,8 @@ paths:
       description: >
         Constructs the requested fieldbus driver, opens the network interface, and
         makes the driver available for subsequent calls to /api/scan.
-        The request body is optional; omitting it selects the SOEM driver with
-        automatic adapter selection.
+        The driver defaults to SOEM when omitted. SOEM has no adapter auto-detect:
+        a network adapter must be supplied, otherwise init fails.
       requestBody:
         required: false
         content:
@@ -138,8 +138,9 @@ paths:
                   example: "soem"
                 adapter:
                   type: string
-                  description: Network interface name or MAC address; empty string for auto-detect
-                  default: ""
+                  description: >
+                    Network interface name or MAC address. Required for SOEM — there is
+                    no auto-detect, so an empty value makes init fail.
                   example: "eth0"
       responses:
         "200":

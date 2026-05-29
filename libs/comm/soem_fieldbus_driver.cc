@@ -30,6 +30,12 @@ SoemFieldbusDriver::~SoemFieldbusDriver() {}
 
 std::expected<void, std::string> SoemFieldbusDriver::init() {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  // SOEM has no auto-detect — an empty interface name would reach ecx_init and
+  // fail with a cryptic "No such device". Reject it up front with a clear error.
+  if (ifname_.empty()) {
+    return std::unexpected(
+        "no network adapter specified — SOEM requires a NIC name or MAC address");
+  }
   ctx_ = std::make_unique<ecx_contextt>();
   if (!ecx_init(ctx_.get(), ifname_.c_str())) {
     ctx_.reset();

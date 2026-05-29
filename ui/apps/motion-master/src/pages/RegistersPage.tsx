@@ -3,6 +3,7 @@ import { useParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import DevicePageHeader from '../components/DevicePageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
+import { parseHexBytes } from '../utils/hex'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
@@ -46,10 +47,23 @@ export default function RegistersPage() {
   const [readResult, setReadResult] = useState<number[] | null>(null)
   const [readError, setReadError] = useState<string | null>(null)
 
+  const [writeAddress, setWriteAddress] = useState('')
+  const [writeValue, setWriteValue] = useState('')
+  const [writing, setWriting] = useState(false)
+  const [writeOk, setWriteOk] = useState(false)
+  const [writeError, setWriteError] = useState<string | null>(null)
+
   const addrNum = parseInt(address, 10)
   const addrHex = isNaN(addrNum) ? '—' : `0x${addrNum.toString(16).toUpperCase().padStart(4, '0')}`
   const lenNum = parseInt(length, 10)
   const canRead = !isNaN(addrNum) && addrNum >= 0 && !isNaN(lenNum) && lenNum >= 1 && !reading
+
+  const writeAddrNum = parseInt(writeAddress, 10)
+  const writeAddrHex = isNaN(writeAddrNum)
+    ? '—'
+    : `0x${writeAddrNum.toString(16).toUpperCase().padStart(4, '0')}`
+  const writeBytes = parseHexBytes(writeValue)
+  const canWrite = !isNaN(writeAddrNum) && writeAddrNum >= 0 && writeBytes !== null && !writing
 
   function selectFromCatalogue(addr: number) {
     const reg = catalogue.find(r => r.address === addr)
@@ -87,6 +101,38 @@ export default function RegistersPage() {
     }
   }
 
+  function handleWriteAddressChange(val: string) {
+    setWriteAddress(val)
+    setWriteOk(false)
+    setWriteError(null)
+  }
+
+  function handleWriteValueChange(val: string) {
+    setWriteValue(val)
+    setWriteOk(false)
+    setWriteError(null)
+  }
+
+  async function handleWrite() {
+    if (!canWrite || writeBytes === null) return
+    const ok = window.confirm(
+      `Write ${writeBytes.length} byte(s) to register ${writeAddrHex} on slave ${slavePosition}?\n` +
+        'Writing ESC registers directly can disrupt device operation.',
+    )
+    if (!ok) return
+    setWriting(true)
+    setWriteOk(false)
+    setWriteError(null)
+    try {
+      await api.writeRegister(slavePosition, writeAddrNum, { data: writeBytes })
+      setWriteOk(true)
+    } catch (err) {
+      setWriteError(apiError(err))
+    } finally {
+      setWriting(false)
+    }
+  }
+
   const selectedInCatalogue = isNaN(addrNum) ? undefined : catalogue.find(r => r.address === addrNum)
 
   return (
@@ -94,10 +140,12 @@ export default function RegistersPage() {
       <DevicePageHeader slavePosition={slavePosition} title="Registers" />
       <div className="p-4 sm:p-8 space-y-8">
 
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+
         {/* Read form */}
         <section>
           <p className="eyebrow mb-5">Read Register</p>
-          <div className="border border-grey-200 p-5 max-w-xl space-y-4">
+          <div className="border border-grey-200 p-5 space-y-4">
 
             <div>
               <label className={labelCls}>Known Register</label>
@@ -173,6 +221,76 @@ export default function RegistersPage() {
             )}
           </div>
         </section>
+
+        {/* Write form */}
+        <section>
+          <p className="eyebrow mb-5">Write Register</p>
+          <div className="border border-grey-200 p-5 space-y-4">
+
+            <div>
+              <label className={labelCls}>Known Register</label>
+              <select
+                className={inputCls}
+                value={catalogue.find(r => r.address === writeAddrNum)?.address ?? ''}
+                onChange={e => handleWriteAddressChange(e.target.value)}
+                disabled={catalogueQuery.isPending}
+              >
+                <option value="">— select a register —</option>
+                {catalogue.map(r => (
+                  <option key={r.address} value={r.address}>
+                    {r.name} · {r.address} / 0x{r.address.toString(16).toUpperCase().padStart(4, '0')} · {r.length}B
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <div>
+              <label className={labelCls}>Address (decimal)</label>
+              <input
+                type="number"
+                min={0}
+                max={65535}
+                value={writeAddress}
+                onChange={e => handleWriteAddressChange(e.target.value)}
+                placeholder="e.g. 272"
+                className={inputCls}
+              />
+              <p className="text-xs text-grey-500 mt-1 font-mono">{writeAddrHex}</p>
+            </div>
+
+            <div>
+              <label className={labelCls}>Value (hex bytes)</label>
+              <input
+                type="text"
+                value={writeValue}
+                onChange={e => handleWriteValueChange(e.target.value)}
+                placeholder="e.g. 0A FF or 0x0AFF"
+                className={`${inputCls} font-mono`}
+              />
+              <p className="text-xs text-grey-500 mt-1 font-mono">
+                {writeBytes === null
+                  ? 'Enter an even number of hex digits.'
+                  : `${writeBytes.length} byte(s): [${writeBytes.join(', ')}]`}
+              </p>
+            </div>
+
+            <button onClick={handleWrite} disabled={!canWrite} className={btnCls}>
+              {writing ? 'Writing…' : 'Write'}
+            </button>
+
+            {writeError && (
+              <p className="text-xs text-status-bad font-mono">{writeError}</p>
+            )}
+
+            {writeOk && (
+              <p className="text-xs text-status-good font-mono">
+                Wrote {writeBytes?.length ?? 0} byte(s) to {writeAddrHex}.
+              </p>
+            )}
+          </div>
+        </section>
+
+        </div>
 
         {/* Register catalogue */}
         <section>

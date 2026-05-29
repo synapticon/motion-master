@@ -18,7 +18,17 @@ export default function AlStatusCodesPage() {
 
   return (
     <div>
-      <PageHeader eyebrow="Meta" title="AL Status Codes" />
+      <PageHeader
+        eyebrow="Meta"
+        title="AL Status Codes"
+        description={
+          <>
+            EtherCAT Application Layer (AL) status codes, assembled from{' '}
+            <span className="font-mono">ETG.1000.6 Table 11</span> — reported by a slave when a
+            requested EtherCAT state transition fails.
+          </>
+        }
+      />
       <div className="p-4 sm:p-8">
         <div className="flex justify-end mb-4">
           <button
@@ -34,11 +44,6 @@ export default function AlStatusCodesPage() {
         )}
         {query.isSuccess && (
           <>
-            <p className="text-xs text-grey-600 mb-4 max-w-3xl">
-              EtherCAT Application Layer (AL) status codes, assembled from{' '}
-              <span className="font-mono">ETG.1000.6 Table 11</span> — reported by a slave when a
-              requested EtherCAT state transition fails.
-            </p>
             <p className="text-xs text-grey-600 mb-4 max-w-3xl">
               <span className="font-mono text-status-bad">Terminal</span> codes mean the slave cannot reach the
               requested EtherCAT state by retrying — the master must change something (re-init, reflash, power

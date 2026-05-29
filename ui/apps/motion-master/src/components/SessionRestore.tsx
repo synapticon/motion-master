@@ -15,21 +15,24 @@ export function SessionRestore({ children }: { children: React.ReactNode }) {
     const session = readSession()
     if (!session) return
 
-    const restore = () =>
-      api.scan().then(() => {
-        setHasScanned(true)
-        queryClient.invalidateQueries({ queryKey: ['devices'] })
-      })
-
     api.init({ driver: session.driver, adapter: session.adapter })
-      .then(restore)
+      // Fresh init succeeded — this is a first connection, so discover the bus.
+      .then(() =>
+        api.scan().then(() => {
+          setHasScanned(true)
+          queryClient.invalidateQueries({ queryKey: ['devices'] })
+        }),
+      )
       .catch((err: unknown) => {
         // 409 = the server is still initialized from before the refresh. The
-        // fieldbus is live, so just re-scan and restore the session rather than
-        // dropping it; flag it so the Dashboard can explain why init was skipped.
+        // fieldbus is live and already scanned, so just re-fetch the existing
+        // device list to restore the view. Do NOT re-scan: ecx_config_init
+        // re-discovers the bus and would reset every slave back to INIT, losing
+        // the state the user already brought devices to (e.g. PRE-OP).
         if (err && typeof err === 'object' && (err as { status?: number }).status === 409) {
           setAlreadyInitialized(true)
-          restore().catch(() => sessionStorage.removeItem('mm:session'))
+          setHasScanned(true)
+          queryClient.invalidateQueries({ queryKey: ['devices'] })
           return
         }
         sessionStorage.removeItem('mm:session')

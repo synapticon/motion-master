@@ -47,6 +47,9 @@ std::expected<void, std::string> SoemFieldbusDriver::init() {
 
 std::expected<int, std::string> SoemFieldbusDriver::scan() {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  // ecx_config_init reprograms every slave's mailbox SMs to PRE-OP sizes and hands
+  // EEPROM back to the PDI, so any prior BOOT-SM tracking is now stale.
+  bootMailboxSlaves_.clear();
   ctx_->manualstatechange = 1;
   int found = ecx_config_init(ctx_.get());
   if (found <= 0) {
@@ -639,6 +642,14 @@ void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState 
           slave, wkc0, wkc1);
     }
   }
+
+  // Both EEPROM read paths above (the combined ecx_readeeprom in the BOOT branch and the
+  // split ecx_readeeprom1/2 in the PRE-OP branch) call ecx_eeprom2master and leave EEPROM
+  // control with the master — neither restores it. Some slaves' PDI needs EEPROM access to
+  // complete the state change and will silently stay in INIT (AL status 0x0000) if locked
+  // out, so hand control back to the PDI before the caller issues writestate. This mirrors
+  // ecx_config_init, which also leaves EEPROM with the PDI before requesting a state change.
+  ecx_eeprom2pdi(ctx, slave);
 }
 
 void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& positions,
@@ -662,9 +673,20 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
       uint16_t state = ctx_->slavelist[pos].state;
       uint16_t stateClean = state & 0x000Fu;
       if (!requiredState || stateClean == static_cast<uint16_t>(*requiredState)) {
-        if (stateClean == static_cast<uint16_t>(EtherCatState::Init) &&
-            (targetState == EtherCatState::Boot || targetState == EtherCatState::PreOp)) {
-          updateMailboxSyncManagers(ctx_.get(), pos, targetState);
+        // Mailbox sync managers only need reprogramming when leaving INIT, and only in
+        // two cases: entering BOOT (which uses larger BOOT-specific mailbox SMs), or
+        // entering PRE-OP from a slave that still holds stale BOOT SMs (i.e. one we drove
+        // into BOOT earlier, e.g. for a firmware download). On a plain fresh-scan
+        // INIT→PRE-OP the SMs ecx_config_init already programmed are correct, and touching
+        // them here is both redundant and harmful (it seizes EEPROM from the slave's PDI).
+        if (stateClean == static_cast<uint16_t>(EtherCatState::Init)) {
+          if (targetState == EtherCatState::Boot) {
+            updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::Boot);
+            bootMailboxSlaves_.insert(pos);
+          } else if (targetState == EtherCatState::PreOp && bootMailboxSlaves_.contains(pos)) {
+            updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::PreOp);
+            bootMailboxSlaves_.erase(pos);
+          }
         }
         ctx_->slavelist[pos].state = targetRaw;
         ecx_writestate(ctx_.get(), pos);

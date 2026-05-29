@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -109,6 +110,13 @@ class SoemFieldbusDriver : public FieldbusDriver {
   // allocated and null until init() succeeds.
   std::unique_ptr<ecx_context> ctx_;
   uint8_t map_[4096]{};
+  // 1-based positions whose context currently holds BOOT-sized mailbox sync
+  // managers (set when we drive a slave into BOOT). ecx_config_init programs the
+  // correct PRE-OP mailbox SMs for every slave during scan(), so a fresh-scan
+  // INIT→PRE-OP needs no reprogramming; only a slave returning from BOOT (e.g.
+  // after a firmware download) carries stale BOOT SMs that must be reset.
+  // Guarded by socketMutex_. Cleared by scan() (which re-runs ecx_config_init).
+  std::set<uint16_t> bootMailboxSlaves_;
 };
 
 }  // namespace mm::comm::soem

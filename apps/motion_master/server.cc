@@ -661,18 +661,30 @@ void Server::run() {
                   return;
                 }
                 auto targetState = static_cast<S>(stateVal);
-                if (auto r = deviceManager_.transitionToState(positions, targetState,
-                                                              std::chrono::milliseconds(timeoutMs));
-                    !r) {
+                auto r = deviceManager_.transitionToState(positions, targetState,
+                                                          std::chrono::milliseconds(timeoutMs));
+                if (!r) {
                   res->writeStatus("500 Internal Server Error")
                       ->writeHeader("Content-Type", "application/json")
                       ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                       ->end(nlohmann::json{{"error", r.error()}}.dump());
                   return;
                 }
+                // Report each device's settled state plus whether it reached the target, and
+                // set the top-level "ok" only when every device did — so the UI no longer
+                // reads success while the logs show a device stuck short of the target.
+                bool allReached = true;
+                nlohmann::json devices = nlohmann::json::array();
+                for (const auto& info : *r) {
+                  bool reached = !info.error && info.alState == stateVal;
+                  allReached = allReached && reached;
+                  nlohmann::json d = info;
+                  d["reached"] = reached;
+                  devices.push_back(std::move(d));
+                }
                 res->writeHeader("Content-Type", "application/json")
                     ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                    ->end(nlohmann::json{{"ok", true}}.dump());
+                    ->end(nlohmann::json{{"ok", allReached}, {"devices", devices}}.dump());
               });
             })
       .options("/api/*",

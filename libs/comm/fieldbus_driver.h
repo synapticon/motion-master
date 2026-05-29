@@ -216,7 +216,8 @@ class FieldbusDriver {
   ///
   /// The call polls at ~100 ms intervals, re-sending the command to lagging devices every
   /// @p resendInterval.  Devices that do not arrive in time are logged at error level; no
-  /// exception is thrown.
+  /// exception is thrown.  The outcome per device is not returned here — read it back via
+  /// @c readStates after the call (this is what @c DeviceManager::transitionToState does).
   ///
   /// @param positions       1-based device positions to target.
   /// @param requiredState   Pre-filter: only command devices whose current state equals this

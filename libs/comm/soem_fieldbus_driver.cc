@@ -588,10 +588,19 @@ void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState 
                  ctx->slavelist[slave].mbx_wo, ctx->slavelist[slave].mbx_l,
                  ctx->slavelist[slave].mbx_ro, ctx->slavelist[slave].mbx_rl);
 
-    ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM0, sizeof(ec_smt),
-             &ctx->slavelist[slave].SM[0], EC_TIMEOUTRET);
-    ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM1, sizeof(ec_smt),
-             &ctx->slavelist[slave].SM[1], EC_TIMEOUTRET);
+    int wkc0 = ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM0, sizeof(ec_smt),
+                        &ctx->slavelist[slave].SM[0], EC_TIMEOUTRET);
+    int wkc1 = ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM1, sizeof(ec_smt),
+                        &ctx->slavelist[slave].SM[1], EC_TIMEOUTRET);
+    if (wkc0 != 1 || wkc1 != 1) {
+      // A failed SM write leaves stale/invalid mailbox config in the ESC; the slave then
+      // refuses the state change — often silently (AL status 0x0000) rather than with a
+      // mailbox-config error code. Surface it so it is not mistaken for a slave-side fault.
+      spdlog::warn(
+          "Device {}: BOOT mailbox SM write incomplete (SM0 wkc={}, SM1 wkc={}) — "
+          "slave may refuse the transition",
+          slave, wkc0, wkc1);
+    }
 
   } else if (targetState == EtherCatState::PreOp) {
     // PRE-OP SMs come from the standard SII mailbox entries, not the BOOT entries.
@@ -616,10 +625,19 @@ void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState 
                  ctx->slavelist[slave].mbx_wo, ctx->slavelist[slave].mbx_l,
                  ctx->slavelist[slave].mbx_ro, ctx->slavelist[slave].mbx_rl);
 
-    ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM0, sizeof(ec_smt),
-             &ctx->slavelist[slave].SM[0], EC_TIMEOUTRET);
-    ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM1, sizeof(ec_smt),
-             &ctx->slavelist[slave].SM[1], EC_TIMEOUTRET);
+    int wkc0 = ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM0, sizeof(ec_smt),
+                        &ctx->slavelist[slave].SM[0], EC_TIMEOUTRET);
+    int wkc1 = ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM1, sizeof(ec_smt),
+                        &ctx->slavelist[slave].SM[1], EC_TIMEOUTRET);
+    if (wkc0 != 1 || wkc1 != 1) {
+      // A failed SM write leaves stale/invalid mailbox config in the ESC; the slave then
+      // refuses the state change — often silently (AL status 0x0000) rather than with a
+      // mailbox-config error code. Surface it so it is not mistaken for a slave-side fault.
+      spdlog::warn(
+          "Device {}: PRE-OP mailbox SM write incomplete (SM0 wkc={}, SM1 wkc={}) — "
+          "slave may refuse the transition",
+          slave, wkc0, wkc1);
+    }
   }
 }
 

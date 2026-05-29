@@ -11,6 +11,23 @@
 
 namespace mm::node {
 
+namespace {
+
+/// Decodes a raw AL Status read-back into the API-facing DeviceStateInfo:
+/// bits 3:0 are the state, bit 4 is the error indicator.
+DeviceStateInfo decodeState(uint16_t slavePosition,
+                            const mm::comm::FieldbusDriver::SlaveStateRaw& raw) {
+  return {
+      .slavePosition = slavePosition,
+      .alStatus = raw.alStatus,
+      .alState = static_cast<uint16_t>(raw.alStatus & 0x000Fu),
+      .error = !!(raw.alStatus & 0x0010u),
+      .alStatusCode = raw.alStatusCode,
+  };
+}
+
+}  // namespace
+
 std::expected<void, std::string> DeviceManager::init(
     std::unique_ptr<mm::comm::FieldbusDriver> driver) {
   // init() is a one-shot: replacing a live driver would destroy it while the
@@ -81,7 +98,7 @@ void DeviceManager::pdoExchange() {
   }
 }
 
-std::expected<void, std::string> DeviceManager::transitionToState(
+std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transitionToState(
     const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
     std::chrono::steady_clock::duration timeout) {
   if (!driver_) {
@@ -99,7 +116,19 @@ std::expected<void, std::string> DeviceManager::transitionToState(
   spdlog::debug("transitionToState -> 0x{:02X} for {} device(s)", static_cast<int>(targetState),
                 targets.size());
   driver_->transitionToState(targets, std::nullopt, targetState, timeout);
-  return {};
+
+  // The driver call only logs failures, so read the settled state back and return it.
+  // Callers derive "reached the target" as (!error && alState == targetState) per device.
+  auto raw = driver_->readStates(targets);
+  if (!raw) {
+    return std::unexpected(raw.error());
+  }
+  std::vector<DeviceStateInfo> result;
+  result.reserve(targets.size());
+  for (std::size_t i = 0; i < targets.size(); ++i) {
+    result.push_back(decodeState(targets[i], (*raw)[i]));
+  }
+  return result;
 }
 
 void to_json(nlohmann::json& j, const DeviceStateInfo& info) {
@@ -128,14 +157,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::getDevic
   std::vector<DeviceStateInfo> result;
   result.reserve(targets.size());
   for (std::size_t i = 0; i < targets.size(); ++i) {
-    const auto& raw_state = (*raw)[i];
-    result.push_back({
-        .slavePosition = targets[i],
-        .alStatus = raw_state.alStatus,
-        .alState = static_cast<uint16_t>(raw_state.alStatus & 0x000Fu),
-        .error = !!(raw_state.alStatus & 0x0010u),
-        .alStatusCode = raw_state.alStatusCode,
-    });
+    result.push_back(decodeState(targets[i], (*raw)[i]));
   }
   return result;
 }

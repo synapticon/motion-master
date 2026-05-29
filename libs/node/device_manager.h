@@ -88,21 +88,25 @@ class DeviceManager {
   void pdoExchange();
 
   /// @brief Transitions a set of devices to @p targetState, blocking until all arrive or
-  ///        @p timeout elapses.
+  ///        @p timeout elapses, and reports the final state of each.
   ///
-  /// If @p positions is empty, all discovered devices are targeted. Devices that do not
-  /// arrive within @p timeout are logged at error level; the call still returns successfully.
+  /// If @p positions is empty, all discovered devices are targeted. After the transition
+  /// settles, the final AL state of every targeted device is read back and returned — so
+  /// callers see exactly where each device ended up rather than a bare success flag. A
+  /// device reached the target when its returned snapshot has @c error clear and
+  /// @c alState equal to @p targetState; otherwise @c alStatusCode explains why.
   ///
   /// Must be called after both @c init() and @c scan().
   ///
   /// @param positions    1-based slave positions to transition; empty = all devices.
   /// @param targetState  Desired EtherCAT AL state.
   /// @param timeout      Maximum time to wait for all devices.
-  /// @return Void on success, or an error string if no driver is initialised or no devices
-  ///         have been discovered.
-  std::expected<void, std::string> transitionToState(const std::vector<uint16_t>& positions,
-                                                     mm::comm::EtherCatState targetState,
-                                                     std::chrono::steady_clock::duration timeout);
+  /// @return The final state snapshot of each targeted device (in the order targeted), or an
+  ///         error string if no driver is initialised, no devices have been discovered, or the
+  ///         final state read-back fails.
+  std::expected<std::vector<DeviceStateInfo>, std::string> transitionToState(
+      const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
+      std::chrono::steady_clock::duration timeout);
 
   /// @brief Reads the current AL state for a set of devices.
   ///

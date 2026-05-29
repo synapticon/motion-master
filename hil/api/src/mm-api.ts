@@ -733,6 +733,39 @@ export class Api<
       }),
 
     /**
+     * @description Sends an FoE write request for `filename` to the device at `slavePosition`, streaming the raw request body as the file contents.  FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is responsible for ensuring the device is in a suitable state before calling.
+     *
+     * @name FoeWriteFile
+     * @summary Write a file to a device via FoE (File over EtherCAT)
+     * @request PUT:/api/devices/{slavePosition}/files/{filename}
+     */
+    foeWriteFile: (
+      slavePosition: number,
+      filename: string,
+      data: File,
+      params: RequestParams = {},
+    ) =>
+      this.request<
+        {
+          /** @example true */
+          ok?: boolean;
+        },
+        void | {
+          /**
+           * Human-readable error message from the driver
+           * @example "FPRD slave 1: wkc=0"
+           */
+          error: string;
+        }
+      >({
+        path: `/api/devices/${slavePosition}/files/${filename}`,
+        method: "PUT",
+        body: data,
+        format: "json",
+        ...params,
+      }),
+
+    /**
      * @description Reads the current EtherCAT Application Layer state for one or more devices. Omit the `positions` query parameter to query all discovered devices.
      *
      * @name GetDeviceStates
@@ -793,7 +826,7 @@ export class Api<
       }),
 
     /**
-     * @description Commands one or more devices to the requested EtherCAT Application Layer state and blocks until all targeted devices arrive or the timeout elapses. Devices that do not arrive in time are logged at error level; the call still returns 200. Omit `positions` or pass an empty array to target all discovered devices. State values are the standard AL state register encodings from ETG.1000.6: 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
+     * @description Commands one or more devices to the requested EtherCAT Application Layer state and blocks until all targeted devices arrive or the timeout elapses. The settled state of every targeted device is then read back and returned in `devices`, each with a `reached` flag; `ok` is true only when every device reached the target. A device that did not reach it carries an `alStatusCode` explaining why. Omit `positions` or pass an empty array to target all discovered devices. State values are the standard AL state register encodings from ETG.1000.6: 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
      *
      * @name TransitionToState
      * @summary Transition devices to an EtherCAT AL state
@@ -822,8 +855,44 @@ export class Api<
     ) =>
       this.request<
         {
-          /** @example true */
+          /**
+           * True only when every targeted device reached the target state.
+           * @example true
+           */
           ok: boolean;
+          /** Settled state of each targeted device, in the order targeted. */
+          devices: {
+            /**
+             * 1-based position on the fieldbus
+             * @example 1
+             */
+            slavePosition: number;
+            /**
+             * Raw AL Status register value (ETG.1000.6 §6.4.1). Bits 3:0 encode the state; bit 4 is the error indicator.
+             * @example 2
+             */
+            alStatus: number;
+            /**
+             * Current AL state decoded from alStatus (ETG.1000.6 encoding): 1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+             * @example 2
+             */
+            alState: 1 | 2 | 3 | 4 | 8;
+            /**
+             * True when the AL Status error indicator bit (bit 4) is set
+             * @example false
+             */
+            error: boolean;
+            /**
+             * AL Status Code register (ETG.1000.6 §6.4.1). Non-zero when error is true; identifies the error cause (e.g. 0x0014 = No valid firmware).
+             * @example 0
+             */
+            alStatusCode: number;
+            /**
+             * True when this device reached the requested target state (error clear and alState equal to the requested state).
+             * @example true
+             */
+            reached: boolean;
+          }[];
         },
         void | {
           /**

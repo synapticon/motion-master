@@ -39,8 +39,8 @@ class FakeDriver : public FieldbusDriver {
   void stop() override {}
 
   std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
-      const std::vector<uint16_t>&) override {
-    return std::vector<SlaveStateRaw>{};
+      const std::vector<uint16_t>& positions) override {
+    return std::vector<SlaveStateRaw>(positions.size(), SlaveStateRaw{});
   }
 
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t, uint8_t) override {

@@ -704,9 +704,11 @@ paths:
       operationId: transitionToState
       description: >
         Commands one or more devices to the requested EtherCAT Application Layer state
-        and blocks until all targeted devices arrive or the timeout elapses.
-        Devices that do not arrive in time are logged at error level; the call still
-        returns 200. Omit `positions` or pass an empty array to target all discovered devices.
+        and blocks until all targeted devices arrive or the timeout elapses. The settled
+        state of every targeted device is then read back and returned in `devices`, each
+        with a `reached` flag; `ok` is true only when every device reached the target.
+        A device that did not reach it carries an `alStatusCode` explaining why.
+        Omit `positions` or pass an empty array to target all discovered devices.
         State values are the standard AL state register encodings from ETG.1000.6:
         1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
       requestBody:
@@ -741,18 +743,60 @@ paths:
       responses:
         "200":
           description: >
-            Transition command completed. All targeted devices may or may not have
-            reached the target state within the timeout; check device state via
-            GET /api/devices/state.
+            Transition command completed and the settled state of each targeted device
+            was read back. `ok` is true only when every device reached the target state
+            within the timeout; otherwise inspect `devices` to see which fell short and why.
           content:
             application/json:
               schema:
                 type: object
-                required: [ok]
+                required: [ok, devices]
                 properties:
                   ok:
                     type: boolean
+                    description: True only when every targeted device reached the target state.
                     example: true
+                  devices:
+                    type: array
+                    description: Settled state of each targeted device, in the order targeted.
+                    items:
+                      type: object
+                      required: [slavePosition, alStatus, alState, error, alStatusCode, reached]
+                      properties:
+                        slavePosition:
+                          type: integer
+                          description: 1-based position on the fieldbus
+                          example: 1
+                        alStatus:
+                          type: integer
+                          description: >
+                            Raw AL Status register value (ETG.1000.6 §6.4.1).
+                            Bits 3:0 encode the state; bit 4 is the error indicator.
+                          example: 2
+                        alState:
+                          type: integer
+                          enum: [1, 2, 3, 4, 8]
+                          description: >
+                            Current AL state decoded from alStatus (ETG.1000.6 encoding):
+                            1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+                          example: 2
+                        error:
+                          type: boolean
+                          description: True when the AL Status error indicator bit (bit 4) is set
+                          example: false
+                        alStatusCode:
+                          type: integer
+                          description: >
+                            AL Status Code register (ETG.1000.6 §6.4.1).
+                            Non-zero when error is true; identifies the error cause
+                            (e.g. 0x0014 = No valid firmware).
+                          example: 0
+                        reached:
+                          type: boolean
+                          description: >
+                            True when this device reached the requested target state
+                            (error clear and alState equal to the requested state).
+                          example: true
         "400":
           description: Request body is malformed or `state` is not a valid AL state value
         "500":

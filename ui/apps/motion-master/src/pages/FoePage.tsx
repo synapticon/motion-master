@@ -10,6 +10,12 @@ const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
 const btnCls =
   'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
+const btnOutlineCls =
+  'border border-grey-300 text-grey-700 px-4 py-2 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
+
+// Reading this FoE pseudo-command unlocks the drive's filesystem for writing.
+// DD1317 is the fixed unlock key the firmware expects.
+const SOMANET_UNLOCK_COMMAND = 'fs-stackunlock=DD1317'
 
 // Synapticon vendor ID — gates the SOMANET-specific filesystem features below.
 const SYNAPTICON_VENDOR_ID = 0x000022d2
@@ -126,6 +132,10 @@ export default function FoePage() {
   const [writeOk, setWriteOk] = useState(false)
   const [writeError, setWriteError] = useState<string | null>(null)
 
+  const [unlocking, setUnlocking] = useState(false)
+  const [unlockOk, setUnlockOk] = useState(false)
+  const [unlockError, setUnlockError] = useState<string | null>(null)
+
   // Read raw bytes for an arbitrary FoE filename, throwing on a non-OK response.
   async function readRaw(name: string): Promise<Uint8Array> {
     const url = `${api.baseUrl}/api/devices/${slavePosition}/files/${encodeFilename(name)}`
@@ -203,6 +213,21 @@ export default function FoePage() {
     setWriteFilename(file.name)
   }
 
+  async function handleUnlock() {
+    if (unlocking) return
+    setUnlocking(true)
+    setUnlockOk(false)
+    setUnlockError(null)
+    try {
+      await readRaw(SOMANET_UNLOCK_COMMAND)
+      setUnlockOk(true)
+    } catch (err) {
+      setUnlockError(err instanceof Error ? err.message : 'Unknown error')
+    } finally {
+      setUnlocking(false)
+    }
+  }
+
   async function handleWrite() {
     if (!writeFilename || writeBytes === null || writing) return
     const ok = window.confirm(
@@ -229,6 +254,8 @@ export default function FoePage() {
       setWriteError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setWriting(false)
+      // The write consumes the unlock — the drive re-locks afterwards.
+      setUnlockOk(false)
     }
   }
 
@@ -290,6 +317,26 @@ export default function FoePage() {
         <section>
           <p className="eyebrow mb-5">Write File</p>
           <div className="border border-grey-200 p-5 space-y-4">
+            {isSynapticon && (
+              <div className="border-b border-grey-100 pb-4">
+                <label className={labelCls}>Stack Unlock</label>
+                <button onClick={handleUnlock} disabled={unlocking} className={btnOutlineCls}>
+                  {unlocking ? 'Unlocking…' : 'Unlock for Writing'}
+                </button>
+                <p className="text-xs text-grey-500 mt-2">
+                  Some files are locked. The unlock applies to a single write only — the drive
+                  re-locks afterwards, so unlock immediately before each write.
+                </p>
+                {unlockError && (
+                  <p className="text-xs text-status-bad font-mono mt-2">{unlockError}</p>
+                )}
+                {unlockOk && (
+                  <p className="text-xs text-status-good font-mono mt-2">
+                    Unlocked — the next write is permitted.
+                  </p>
+                )}
+              </div>
+            )}
             <div>
               <label className={labelCls}>Filename</label>
               <input

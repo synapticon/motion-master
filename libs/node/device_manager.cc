@@ -128,6 +128,31 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   for (std::size_t i = 0; i < targets.size(); ++i) {
     result.push_back(decodeState(targets[i], (*raw)[i]));
   }
+
+  // Reconcile module idents once a device reaches PRE-OP. A modular drive whose
+  // Configured Module Ident List (0xF030) disagrees with its Detected list (0xF050)
+  // reports a mismatch and refuses to leave PRE-OP; copying detected into configured
+  // clears it. SDO mailbox is only available in PRE-OP+, so this is the earliest point
+  // the write is possible. Best-effort: failures are logged, never fatal to the transition.
+  if (targetState == mm::comm::EtherCatState::PreOp) {
+    for (const auto& info : result) {
+      if (info.error || info.alState != static_cast<uint16_t>(mm::comm::EtherCatState::PreOp)) {
+        continue;
+      }
+      const Device* device = findDevice(info.slavePosition);
+      if (!device) {
+        continue;
+      }
+      auto reconciled = reconcileDetectedModules(*device);
+      if (!reconciled) {
+        spdlog::warn("Device {}: module ident reconcile failed: {}", info.slavePosition,
+                     reconciled.error());
+      } else if (*reconciled > 0) {
+        spdlog::info("Device {}: reconciled {} module slot(s)", info.slavePosition, *reconciled);
+      }
+    }
+  }
+
   return result;
 }
 

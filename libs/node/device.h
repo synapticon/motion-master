@@ -49,6 +49,17 @@ class Device {
   /// @return The bytes transferred on success, or an error string if the mailbox transfer fails.
   std::expected<std::vector<uint8_t>, std::string> upload(uint16_t index, uint8_t subindex) const;
 
+  /// @brief Downloads (writes) an object dictionary entry to the device (CoE SDO download).
+  ///
+  /// Requires the device to be in PRE-OP, SAFE-OP, or OP (mailbox communication active).
+  ///
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @param data      Bytes to write; size must match the object's length.
+  /// @return Void on success, or an error string if the mailbox transfer fails.
+  std::expected<void, std::string> download(uint16_t index, uint8_t subindex,
+                                            std::span<const uint8_t> data) const;
+
   /// @brief Reads a file from this device via File over EtherCAT (FoE).
   ///
   /// @param filename  FoE filename as recognised by the slave firmware.
@@ -134,5 +145,24 @@ class Device {
 /// @param j  Output JSON value.
 /// @param d  Device to serialise.
 void to_json(nlohmann::json& j, const Device& d);
+
+/// @brief Reconciles a device's Configured Module Ident List with its Detected list.
+///
+/// Walks the EtherCAT Modular Device Profile objects (ETG.5001): for every populated
+/// slot in the Detected Module Ident List (@c 0xF050) it writes the detected ident into
+/// the matching subindex of the Configured Module Ident List (@c 0xF030). A drive whose
+/// configured and detected lists disagree reports a module mismatch and refuses to leave
+/// PRE-OP; copying detected into configured clears it.
+///
+/// The device must be in PRE-OP or higher (SDO mailbox active) — @c 0xF030 is writable
+/// in PRE-OP. Vendor-neutral: keyed only on the standard MDP objects, never on vendor ID.
+/// Best-effort and idempotent: a device that does not implement @c 0xF050 (i.e. is not
+/// modular) is treated as success with zero slots written, and slots whose configured
+/// entry already matches the detected one are left untouched.
+///
+/// @param device  Target device; must have mailbox communication active (PRE-OP+).
+/// @return The number of configured-list subindices written, or an error string naming
+///         the slot(s) whose write to @c 0xF030 failed.
+std::expected<int, std::string> reconcileDetectedModules(const Device& device);
 
 }  // namespace mm::node

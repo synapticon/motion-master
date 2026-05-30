@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <memory>
 #include <set>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -65,6 +66,11 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// @copydoc FieldbusDriver::readSdo
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t slavePosition, uint16_t index,
                                                            uint8_t subindex) override;
+
+  /// @copydoc FieldbusDriver::writeSdo
+  std::expected<void, std::string> writeSdo(uint16_t slavePosition, uint16_t index,
+                                            uint8_t subindex,
+                                            std::span<const uint8_t> data) override;
 
   /// @copydoc FieldbusDriver::readObjectDictionary
   std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(

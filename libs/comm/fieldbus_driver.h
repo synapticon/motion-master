@@ -140,6 +140,22 @@ class FieldbusDriver {
                                                                    uint16_t index,
                                                                    uint8_t subindex) = 0;
 
+  /// @brief Writes an object dictionary entry to a slave (CoE SDO download).
+  ///
+  /// Performs a mailbox SDO download of @p data to (@p index, @p subindex). The slave
+  /// must be in PRE-OP, SAFE-OP, or OP (mailbox communication active).
+  /// Called from non-RT (HTTP handler) threads; serialized with other control-plane
+  /// operations via the driver's socket mutex. Must not overlap with @c exchangeProcessData.
+  ///
+  /// @param slavePosition  1-based slave position on the bus.
+  /// @param index          CoE object index.
+  /// @param subindex       CoE object subindex.
+  /// @param data           Bytes to write; size must match the object's length.
+  /// @return Void on success, or an error string if the mailbox transfer fails.
+  virtual std::expected<void, std::string> writeSdo(uint16_t slavePosition, uint16_t index,
+                                                    uint8_t subindex,
+                                                    std::span<const uint8_t> data) = 0;
+
   /// @brief Enumerates the entire CoE object dictionary of a slave via SDO Info.
   ///
   /// Performs the "Get Object List" → "Get Object Description" → "Get Entry Description"

@@ -47,6 +47,11 @@ class FakeDriver : public FieldbusDriver {
     return std::vector<uint8_t>{};
   }
 
+  std::expected<void, std::string> writeSdo(uint16_t, uint16_t, uint8_t,
+                                            std::span<const uint8_t>) override {
+    return {};
+  }
+
   std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
     return std::vector<OdEntry>{};
   }

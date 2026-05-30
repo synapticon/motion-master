@@ -134,6 +134,43 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
   return data;
 }
 
+std::expected<void, std::string> SoemFieldbusDriver::writeSdo(uint16_t slavePosition,
+                                                              uint16_t index, uint8_t subindex,
+                                                              std::span<const uint8_t> data) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  spdlog::debug("SDOwrite slave {} 0x{:04X}:{:02X} ({} bytes)", slavePosition, index, subindex,
+                data.size());
+  // ecx_SDOwrite takes void*, not const void*.
+  int wkc =
+      ecx_SDOwrite(ctx_.get(), slavePosition, index, subindex, FALSE, static_cast<int>(data.size()),
+                   const_cast<uint8_t*>(data.data()), EC_TIMEOUTRXM);
+  if (wkc <= 0) {
+    std::string msg =
+        std::format("SDOwrite slave {} 0x{:04X}:{:02X} failed", slavePosition, index, subindex);
+    ec_errort err{};
+    if (ecx_poperror(ctx_.get(), &err)) {
+      switch (err.Etype) {
+        case EC_ERR_TYPE_SDO_ERROR:
+          msg += std::format(" (SDO abort 0x{:08X})", static_cast<uint32_t>(err.AbortCode));
+          break;
+        case EC_ERR_TYPE_MBX_ERROR:
+          msg += " (mailbox error)";
+          break;
+        case EC_ERR_TYPE_PACKET_ERROR:
+          msg += " (packet/timeout error)";
+          break;
+        default:
+          msg += std::format(" (etype {})", static_cast<int>(err.Etype));
+          break;
+      }
+    }
+    spdlog::debug("{}", msg);
+    return std::unexpected(msg);
+  }
+  spdlog::debug("SDOwrite slave {} 0x{:04X}:{:02X} ok", slavePosition, index, subindex);
+  return {};
+}
+
 namespace {
 
 // SOEM's SDO Info path occasionally times out on slaves that buffer slowly;

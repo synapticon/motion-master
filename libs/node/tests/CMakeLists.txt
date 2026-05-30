@@ -1,6 +1,7 @@
 find_package(GTest CONFIG REQUIRED)
 
 add_executable(mm_node_tests
+    device_test.cc
     device_manager_test.cc
 )
 

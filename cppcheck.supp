@@ -14,3 +14,4 @@ functionStatic:*/cyclic_timer_windows.cc
 // cannot expand without the system header), is misparsed as a syntax error.
 // Both constructs parse fine in isolation; only the combination trips it.
 syntaxError:*/device_manager_test.cc
+syntaxError:*/device_test.cc

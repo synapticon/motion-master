@@ -69,6 +69,9 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+        // Scalar's bundled OpenAPI reference pushes the main chunk past the
+        // 2 MiB workbox default; raise the precache ceiling to 10 MiB.
+        maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/local\.motion-master\.synapticon\.com:8443\//,

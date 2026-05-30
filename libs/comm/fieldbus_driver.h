@@ -38,11 +38,14 @@ struct SlaveInfo {
 /// Populated by @c FieldbusDriver::readObjectDictionary, one entry per @c (index,
 /// subindex) pair. Holds the immutable description only — no current value.
 ///
-/// @c defaultValue / @c minValue / @c maxValue carry the raw bytes returned by
-/// the SDO Info "Get Entry Description" service when the slave populates them;
-/// they remain empty when the driver does not request these flags or when the
-/// slave does not support them. The raw byte form is intentional — decoding into
-/// a typed variant is done at the @c node layer where @c dataType is interpreted.
+/// @c unit / @c defaultValue / @c minValue / @c maxValue carry the raw bytes for
+/// the optional metadata when a source populates them; the raw byte form is
+/// intentional — decoding into a typed variant is done at the @c node layer where
+/// @c dataType is interpreted. The SOEM driver currently leaves them empty: it
+/// reads entries with the basic-info "Get Entry Description" request only, because
+/// SOMANET firmware echoes the extended ValueInfo bits without the matching
+/// payload, which corrupts the trailing name. If these are ever needed, source
+/// them from the object-dictionary description metadata rather than this service.
 struct OdEntry {
   uint16_t index;                ///< CoE object index.
   uint8_t subindex;              ///< CoE object subindex.

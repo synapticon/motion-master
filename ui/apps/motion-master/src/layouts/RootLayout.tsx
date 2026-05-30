@@ -178,6 +178,7 @@ export default function RootLayout() {
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
+          <NavItem to="/api-docs" label="API Docs" />
           <NavItem to="/" label="Dashboard" />
           <NavItem to="/log" label="Log" />
           <NavItem to="/requests" label="Requests" />
@@ -186,10 +187,10 @@ export default function RootLayout() {
             <>
               <p className="eyebrow px-5 mt-6 mb-1 text-white/40">Meta</p>
               <div className="pl-3">
-                <NavItem to="/meta/esc-registers" label="ESC Registers" />
                 <NavItem to="/meta/al-status-codes" label="AL Status Codes" />
-                <NavItem to="/meta/foe-error-codes" label="FoE Error Codes" />
                 <NavItem to="/meta/data-types" label="Data Types" />
+                <NavItem to="/meta/esc-registers" label="ESC Registers" />
+                <NavItem to="/meta/foe-error-codes" label="FoE Error Codes" />
               </div>
             </>
           )}

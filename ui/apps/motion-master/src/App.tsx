@@ -14,6 +14,7 @@ import EscRegistersPage from './pages/EscRegistersPage'
 import AlStatusCodesPage from './pages/AlStatusCodesPage'
 import FoeErrorCodesPage from './pages/FoeErrorCodesPage'
 import DataTypesPage from './pages/DataTypesPage'
+import ApiDocsPage from './pages/ApiDocsPage'
 
 export default function App() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
         <Route index element={<DashboardPage />} />
         <Route path="log" element={<LogPage />} />
         <Route path="requests" element={<RequestsPage />} />
+        <Route path="api-docs" element={<ApiDocsPage />} />
         <Route path="meta/esc-registers" element={<EscRegistersPage />} />
         <Route path="meta/al-status-codes" element={<AlStatusCodesPage />} />
         <Route path="meta/foe-error-codes" element={<FoeErrorCodesPage />} />

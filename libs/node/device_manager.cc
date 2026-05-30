@@ -92,6 +92,26 @@ const Device* DeviceManager::findDevice(uint16_t slavePosition) const {
   return it != devices_.end() ? &*it : nullptr;
 }
 
+Device* DeviceManager::findDevice(uint16_t slavePosition) {
+  auto it = std::find_if(devices_.begin(), devices_.end(), [slavePosition](const Device& d) {
+    return d.slavePosition() == slavePosition;
+  });
+  return it != devices_.end() ? &*it : nullptr;
+}
+
+void DeviceManager::updateOnline(const DeviceStateInfo& info) {
+  Device* device = findDevice(info.slavePosition);
+  if (!device) {
+    return;
+  }
+  using mm::comm::EtherCatState;
+  const bool mailbox =
+      !info.error && (info.alState == static_cast<uint16_t>(EtherCatState::PreOp) ||
+                      info.alState == static_cast<uint16_t>(EtherCatState::SafeOp) ||
+                      info.alState == static_cast<uint16_t>(EtherCatState::Op));
+  device->setOnline(mailbox);
+}
+
 void DeviceManager::pdoExchange() {
   if (driver_) {
     driver_->exchangeProcessData();
@@ -127,6 +147,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   result.reserve(targets.size());
   for (std::size_t i = 0; i < targets.size(); ++i) {
     result.push_back(decodeState(targets[i], (*raw)[i]));
+    updateOnline(result.back());
   }
 
   // Reconcile module idents once a device reaches PRE-OP. A modular drive whose
@@ -183,6 +204,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::getDevic
   result.reserve(targets.size());
   for (std::size_t i = 0; i < targets.size(); ++i) {
     result.push_back(decodeState(targets[i], (*raw)[i]));
+    updateOnline(result.back());
   }
   return result;
 }
@@ -196,6 +218,26 @@ std::expected<void, std::string> DeviceManager::initializeDeviceParameters(uint1
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
   }
   return it->initializeParameters(readValues);
+}
+
+std::expected<DeviceParameterValue, std::string> DeviceManager::readDeviceParameter(
+    uint16_t slavePosition, uint16_t index, uint8_t subindex) {
+  Device* device = findDevice(slavePosition);
+  if (!device) {
+    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
+  }
+  return device->readParameter(index, subindex);
+}
+
+std::expected<void, std::string> DeviceManager::writeDeviceParameter(uint16_t slavePosition,
+                                                                     uint16_t index,
+                                                                     uint8_t subindex,
+                                                                     DeviceParameterValue value) {
+  Device* device = findDevice(slavePosition);
+  if (!device) {
+    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
+  }
+  return device->writeParameter(index, subindex, std::move(value));
 }
 
 void to_json(nlohmann::json& j, const DeviceManager& dm) { j = dm.devices(); }

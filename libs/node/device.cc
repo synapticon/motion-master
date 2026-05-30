@@ -30,6 +30,8 @@ uint32_t Device::vendorId() const { return vendorId_; }
 uint32_t Device::productCode() const { return productCode_; }
 uint32_t Device::revisionNumber() const { return revisionNumber_; }
 uint32_t Device::serialNumber() const { return serialNumber_; }
+bool Device::online() const { return online_; }
+void Device::setOnline(bool value) { online_ = value; }
 
 std::expected<std::vector<uint8_t>, std::string> Device::upload(uint16_t index,
                                                                 uint8_t subindex) const {
@@ -104,11 +106,12 @@ std::expected<void, std::string> Device::initializeParameters(bool readValues) {
     p.maxValue = decodeRawBytes(e.maxValue);
 
     if (readValues) {
-      auto bytes = driver_.readSdo(slavePosition_, e.index, e.subindex);
+      auto bytes = upload(e.index, e.subindex);
       if (bytes) {
         auto decoded = decodeSdoBytes(e.dataType, *bytes);
         if (decoded) {
           p.value = std::move(*decoded);
+          p.syncState = SyncState::Synced;
         } else {
           spdlog::warn("Device {}: decode 0x{:04X}:{:02X} failed: {}", slavePosition_, e.index,
                        e.subindex, decoded.error());
@@ -143,6 +146,64 @@ std::vector<DeviceParameter> Device::parametersOrdered() const {
 const DeviceParameter* Device::parameter(uint16_t index, uint8_t subindex) const {
   auto it = parameters_.find(makeParameterKey(index, subindex));
   return it != parameters_.end() ? &it->second : nullptr;
+}
+
+DeviceParameter* Device::findParameter(uint16_t index, uint8_t subindex) {
+  auto it = parameters_.find(makeParameterKey(index, subindex));
+  return it != parameters_.end() ? &it->second : nullptr;
+}
+
+std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t index,
+                                                                       uint8_t subindex) {
+  DeviceParameter* p = findParameter(index, subindex);
+  if (!p) {
+    return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
+                                       slavePosition_, index, subindex));
+  }
+  if (!online_) {
+    return p->value;  // offline: serve the cached value, never touch the bus
+  }
+  auto bytes = upload(index, subindex);
+  if (!bytes) {
+    return std::unexpected(bytes.error());
+  }
+  auto decoded = decodeSdoBytes(p->dataType, *bytes);
+  if (!decoded) {
+    return std::unexpected(decoded.error());
+  }
+  p->value = std::move(*decoded);
+  p->syncState = SyncState::Synced;
+  return p->value;
+}
+
+std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t subindex,
+                                                        DeviceParameterValue value) {
+  DeviceParameter* p = findParameter(index, subindex);
+  if (!p) {
+    return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
+                                       slavePosition_, index, subindex));
+  }
+  // Cache-first: coerce and store into the cached parameter before any bus access, so the
+  // cache always reflects the latest intended value regardless of online state.
+  if (auto set = p->setValue(value); !set) {
+    return std::unexpected(set.error());
+  }
+  if (!online_) {
+    // Offline edit: hold the change in the cache, to be flushed when the device returns.
+    p->syncState = SyncState::Pending;
+    return {};
+  }
+  auto bytes = encodeSdoBytes(p->dataType, p->value);
+  if (!bytes) {
+    p->syncState = SyncState::Pending;
+    return std::unexpected(bytes.error());
+  }
+  if (auto w = download(index, subindex, *bytes); !w) {
+    p->syncState = SyncState::Pending;
+    return std::unexpected(w.error());
+  }
+  p->syncState = SyncState::Synced;
+  return {};
 }
 
 void to_json(nlohmann::json& j, const Device& d) {

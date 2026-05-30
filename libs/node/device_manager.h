@@ -75,6 +75,12 @@ class DeviceManager {
   /// @return Pointer to the matching @c Device, or @c nullptr if not found.
   const Device* findDevice(uint16_t slavePosition) const;
 
+  /// @brief Mutable overload of @c findDevice.
+  ///
+  /// Hands back a writable @c Device so SDK callers can drive it directly —
+  /// e.g. @c dm.findDevice(1)->writeValue(0x2030, 1, 123). @c nullptr if not found.
+  Device* findDevice(uint16_t slavePosition);
+
   /// @brief Exchanges process data with all nodes.
   ///
   /// Called once per @c GameLoop cycle. No-op when no driver is initialised.
@@ -130,7 +136,45 @@ class DeviceManager {
   std::expected<void, std::string> initializeDeviceParameters(uint16_t slavePosition,
                                                               bool readValues);
 
+  /// @brief Convenience: finds a device by position and reads one of its parameters.
+  ///
+  /// Equivalent to @c findDevice(slavePosition)->readParameter(index, subindex) — see
+  /// @c Device::readParameter for the online/offline semantics. Saves callers a manual
+  /// lookup when they only have a position.
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @param index          CoE object index.
+  /// @param subindex       CoE object subindex.
+  /// @return The value, or an error string if the device or parameter is unknown, or the
+  ///         (online) SDO upload fails.
+  std::expected<DeviceParameterValue, std::string> readDeviceParameter(uint16_t slavePosition,
+                                                                       uint16_t index,
+                                                                       uint8_t subindex);
+
+  /// @brief Convenience: finds a device by position and writes one of its parameters.
+  ///
+  /// Equivalent to @c findDevice(slavePosition)->writeParameter(index, subindex, value) —
+  /// see @c Device::writeParameter for the online/offline semantics (offline edits succeed
+  /// and are held as @c SyncState::Pending).
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @param index          CoE object index.
+  /// @param subindex       CoE object subindex.
+  /// @param value          Value to set; coerced to the parameter's declared type.
+  /// @return Void on success, or an error string if the device or parameter is unknown,
+  ///         the value cannot be coerced, or an online download fails.
+  std::expected<void, std::string> writeDeviceParameter(uint16_t slavePosition, uint16_t index,
+                                                        uint8_t subindex,
+                                                        DeviceParameterValue value);
+
  private:
+  /// @brief Updates a device's online flag from a freshly-read AL state.
+  ///
+  /// Online means the SDO mailbox is available — AL state PRE-OP, SAFE-OP, or OP with no
+  /// error indicator. INIT and BOOT (and any error state) count as offline. No-op if the
+  /// device is unknown.
+  void updateOnline(const DeviceStateInfo& info);
+
   std::unique_ptr<mm::comm::FieldbusDriver> driver_;
   std::vector<Device> devices_;
 };

@@ -16,6 +16,7 @@ using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
 using mm::comm::SlaveInfo;
 using mm::node::DeviceManager;
+using mm::node::DeviceParameterValue;
 
 /// Minimal FieldbusDriver test double. init() returns a configurable result;
 /// scan() reports a configurable slave count. Every other method is a trivial
@@ -24,6 +25,9 @@ class FakeDriver : public FieldbusDriver {
  public:
   explicit FakeDriver(bool initSucceeds, int slaves = 1)
       : initSucceeds_(initSucceeds), slaves_(slaves) {}
+
+  /// AL Status reported by readStates() for every queried slave (bits 3:0 = state).
+  uint16_t reportState = 0;
 
   std::expected<void, std::string> init() override {
     if (!initSucceeds_) {
@@ -40,7 +44,8 @@ class FakeDriver : public FieldbusDriver {
 
   std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& positions) override {
-    return std::vector<SlaveStateRaw>(positions.size(), SlaveStateRaw{});
+    return std::vector<SlaveStateRaw>(positions.size(),
+                                      SlaveStateRaw{.alStatus = reportState, .alStatusCode = 0});
   }
 
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t, uint8_t) override {
@@ -135,6 +140,52 @@ TEST(DeviceManagerInit, SecondInitWhileInitialisedIsRejected) {
   dm.reset();
   EXPECT_FALSE(dm.initialised());
   EXPECT_TRUE(dm.init(std::make_unique<FakeDriver>(true)).has_value());
+}
+
+TEST(DeviceManagerOnline, PreOpStateMarksDeviceOnline) {
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->reportState = static_cast<uint16_t>(EtherCatState::PreOp);
+  FakeDriver* raw = driver.get();  // dm keeps ownership; raw stays valid
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  // Devices start offline until a state read establishes mailbox availability.
+  ASSERT_NE(dm.findDevice(1), nullptr);
+  EXPECT_FALSE(dm.findDevice(1)->online());
+
+  ASSERT_TRUE(dm.getDeviceStates({}).has_value());
+  EXPECT_TRUE(dm.findDevice(1)->online());
+
+  // Dropping back to INIT must flip the device offline again.
+  raw->reportState = static_cast<uint16_t>(EtherCatState::Init);
+  ASSERT_TRUE(dm.getDeviceStates({}).has_value());
+  EXPECT_FALSE(dm.findDevice(1)->online());
+}
+
+TEST(DeviceManagerDelegates, UnknownDeviceErrors) {
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true, 1)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  // Position 99 does not exist — the find-and-delegate path must report it, not crash.
+  EXPECT_FALSE(dm.readDeviceParameter(99, 0x6064, 0x00).has_value());
+  EXPECT_FALSE(
+      dm.writeDeviceParameter(99, 0x6064, 0x00, DeviceParameterValue{uint32_t{1}}).has_value());
+}
+
+TEST(DeviceManagerOnline, InitStateKeepsDeviceOffline) {
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->reportState = static_cast<uint16_t>(EtherCatState::Init);
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.getDeviceStates({}).has_value());
+
+  ASSERT_NE(dm.findDevice(1), nullptr);
+  EXPECT_FALSE(dm.findDevice(1)->online());
 }
 
 }  // namespace

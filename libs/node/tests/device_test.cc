@@ -23,7 +23,12 @@ using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
 using mm::comm::SlaveInfo;
 using mm::node::Device;
+using mm::node::DeviceParameterValue;
 using mm::node::reconcileDetectedModules;
+using mm::node::SyncState;
+
+// ETG.1020 UNSIGNED32 data type code, used by the parameter read/write tests.
+constexpr uint16_t kU32 = 0x0007;
 
 /// FieldbusDriver test double for SDO exchange: readSdo answers from a programmed
 /// map keyed by (index, subindex); writeSdo records every download and can be told
@@ -42,6 +47,8 @@ class SdoFakeDriver : public FieldbusDriver {
   std::vector<Write> writes;
   /// (index, subindex) pairs whose download must fail.
   std::set<uint32_t> failWrites;
+  /// Object dictionary entries returned by readObjectDictionary().
+  std::vector<OdEntry> ods;
 
   static uint32_t key(uint16_t index, uint8_t subindex) {
     return (static_cast<uint32_t>(index) << 8) | subindex;
@@ -49,6 +56,14 @@ class SdoFakeDriver : public FieldbusDriver {
 
   void programRead(uint16_t index, uint8_t subindex, std::vector<uint8_t> bytes) {
     reads[key(index, subindex)] = std::move(bytes);
+  }
+
+  void programOd(uint16_t index, uint8_t subindex, uint16_t dataType) {
+    OdEntry e{};
+    e.index = index;
+    e.subindex = subindex;
+    e.dataType = dataType;
+    ods.push_back(e);
   }
 
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t index,
@@ -82,7 +97,7 @@ class SdoFakeDriver : public FieldbusDriver {
   }
 
   std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
-    return std::vector<OdEntry>{};
+    return ods;
   }
 
   std::expected<std::vector<uint8_t>, std::string> readFile(uint16_t, const std::string&) override {
@@ -229,6 +244,153 @@ TEST(ReconcileDetectedModules, ReportsWriteFailureNamingTheSlot) {
   auto result = reconcileDetectedModules(device);
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("slot 1"), std::string::npos);
+}
+
+// Little-endian 4-byte encoding of a 32-bit value.
+std::vector<uint8_t> u32le(uint32_t v) {
+  return {static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v >> 16),
+          static_cast<uint8_t>(v >> 24)};
+}
+
+// Builds a device with a single UNSIGNED32 parameter at 0x6065:00 (Unknown sync state).
+Device deviceWithU32Param(SdoFakeDriver& driver) {
+  driver.programOd(0x6065, 0x00, kU32);
+  Device device(1, driver);
+  EXPECT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  return device;
+}
+
+TEST(DeviceReadParameter, OnlineUpdatesCacheAndMarksSynced) {
+  SdoFakeDriver driver;
+  Device device = deviceWithU32Param(driver);
+  device.setOnline(true);
+  driver.programRead(0x6065, 0x00, u32le(16));
+
+  auto v = device.readParameter(0x6065, 0x00);
+  ASSERT_TRUE(v.has_value());
+  EXPECT_EQ(*v, DeviceParameterValue{uint32_t{16}});
+
+  const auto* p = device.parameter(0x6065, 0x00);
+  ASSERT_NE(p, nullptr);
+  EXPECT_EQ(p->value, DeviceParameterValue{uint32_t{16}});
+  EXPECT_EQ(p->syncState, SyncState::Synced);
+}
+
+TEST(DeviceReadParameter, OfflineServesCacheWithoutBusAccess) {
+  SdoFakeDriver driver;
+  Device device = deviceWithU32Param(driver);
+  // Device stays offline (default). A device-side value of 16 is programmed but must
+  // NOT be returned — the cached default (0) is served instead.
+  driver.programRead(0x6065, 0x00, u32le(16));
+
+  auto v = device.readParameter(0x6065, 0x00);
+  ASSERT_TRUE(v.has_value());
+  EXPECT_EQ(*v, DeviceParameterValue{uint32_t{0}});
+
+  const auto* p = device.parameter(0x6065, 0x00);
+  ASSERT_NE(p, nullptr);
+  EXPECT_EQ(p->syncState, SyncState::Unknown);
+}
+
+TEST(DeviceReadParameter, UnknownParameterErrors) {
+  SdoFakeDriver driver;
+  Device device = deviceWithU32Param(driver);
+  device.setOnline(true);
+  EXPECT_FALSE(device.readParameter(0x1234, 0x00).has_value());
+}
+
+TEST(DeviceWriteParameter, OnlineDownloadsAndMarksSynced) {
+  SdoFakeDriver driver;
+  Device device = deviceWithU32Param(driver);
+  device.setOnline(true);
+
+  auto w = device.writeParameter(0x6065, 0x00, DeviceParameterValue{uint32_t{123}});
+  ASSERT_TRUE(w.has_value());
+
+  ASSERT_EQ(driver.writes.size(), 1u);
+  EXPECT_EQ(driver.writes[0].index, 0x6065);
+  EXPECT_EQ(driver.writes[0].subindex, 0x00);
+  EXPECT_EQ(driver.writes[0].data, u32le(123));
+
+  const auto* p = device.parameter(0x6065, 0x00);
+  ASSERT_NE(p, nullptr);
+  EXPECT_EQ(p->value, DeviceParameterValue{uint32_t{123}});
+  EXPECT_EQ(p->syncState, SyncState::Synced);
+}
+
+TEST(DeviceWriteParameter, OfflineCachesAsPendingAndSucceeds) {
+  SdoFakeDriver driver;
+  Device device = deviceWithU32Param(driver);
+  // Offline (default): the write succeeds, updates the cache, and touches no hardware.
+
+  auto w = device.writeParameter(0x6065, 0x00, DeviceParameterValue{uint32_t{55}});
+  ASSERT_TRUE(w.has_value());
+  EXPECT_TRUE(driver.writes.empty());
+
+  const auto* p = device.parameter(0x6065, 0x00);
+  ASSERT_NE(p, nullptr);
+  EXPECT_EQ(p->value, DeviceParameterValue{uint32_t{55}});
+  EXPECT_EQ(p->syncState, SyncState::Pending);
+}
+
+TEST(DeviceWriteParameter, OnlineDownloadFailureMarksPendingAndReturnsError) {
+  SdoFakeDriver driver;
+  Device device = deviceWithU32Param(driver);
+  device.setOnline(true);
+  driver.failWrites.insert(SdoFakeDriver::key(0x6065, 0x00));
+
+  auto w = device.writeParameter(0x6065, 0x00, DeviceParameterValue{uint32_t{77}});
+  EXPECT_FALSE(w.has_value());
+
+  const auto* p = device.parameter(0x6065, 0x00);
+  ASSERT_NE(p, nullptr);
+  // Cache still reflects the attempted value; flagged Pending for a later re-write.
+  EXPECT_EQ(p->value, DeviceParameterValue{uint32_t{77}});
+  EXPECT_EQ(p->syncState, SyncState::Pending);
+}
+
+TEST(DeviceWriteParameter, CoercesValueIntoDeclaredType) {
+  SdoFakeDriver driver;
+  Device device = deviceWithU32Param(driver);
+  device.setOnline(true);
+
+  // Plain int literal — must be coerced to UNSIGNED32 and encoded as 4 bytes.
+  auto w = device.writeParameter(0x6065, 0x00, DeviceParameterValue{9});
+  ASSERT_TRUE(w.has_value());
+  ASSERT_EQ(driver.writes.size(), 1u);
+  EXPECT_EQ(driver.writes[0].data, u32le(9));
+
+  const auto* p = device.parameter(0x6065, 0x00);
+  ASSERT_NE(p, nullptr);
+  EXPECT_TRUE(std::holds_alternative<uint32_t>(p->value));
+}
+
+TEST(DeviceWriteParameter, UnknownParameterErrors) {
+  SdoFakeDriver driver;
+  Device device = deviceWithU32Param(driver);
+  device.setOnline(true);
+  EXPECT_FALSE(device.writeParameter(0x1234, 0x00, DeviceParameterValue{uint32_t{1}}).has_value());
+  EXPECT_TRUE(driver.writes.empty());
+}
+
+TEST(DeviceTypedHelpers, WriteValueAndReadValueRoundTrip) {
+  SdoFakeDriver driver;
+  Device device = deviceWithU32Param(driver);
+  device.setOnline(true);
+
+  // Terse write: a bare int literal, coerced to the declared UNSIGNED32 and encoded.
+  ASSERT_TRUE(device.writeValue(0x6065, 0x00, 42).has_value());
+  ASSERT_EQ(driver.writes.size(), 1u);
+  EXPECT_EQ(driver.writes[0].data, u32le(42));
+
+  // Terse typed read (device echoes 42 back).
+  driver.programRead(0x6065, 0x00, u32le(42));
+  auto v = device.readValue<uint32_t>(0x6065, 0x00);
+  ASSERT_TRUE(v.has_value());
+  EXPECT_EQ(*v, 42u);
+
+  // A type-mismatched read is rejected.
+  EXPECT_FALSE(device.readValue<int32_t>(0x6065, 0x00).has_value());
 }
 
 }  // namespace

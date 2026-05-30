@@ -2,10 +2,12 @@
 
 #include <cstdint>
 #include <expected>
+#include <format>
 #include <nlohmann/json_fwd.hpp>
 #include <span>
 #include <string>
 #include <unordered_map>
+#include <variant>
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
@@ -41,6 +43,16 @@ class Device {
 
   /// @brief Serial number from EEPROM.
   uint32_t serialNumber() const;
+
+  /// @brief Whether the device currently has an active SDO mailbox (PRE-OP, SAFE-OP, or OP).
+  ///
+  /// Defaults to @c false until a state read sets it. When @c false the device is treated
+  /// as offline: @c readParameter / @c writeParameter operate on the cached value only and
+  /// never touch the bus. Set by @c DeviceManager from AL-state reads — not inferred here.
+  bool online() const;
+
+  /// @brief Sets the online flag. Called by @c DeviceManager after reading AL state.
+  void setOnline(bool value);
 
   /// @brief Uploads an object dictionary entry from the device (CoE SDO upload).
   ///
@@ -124,7 +136,84 @@ class Device {
   /// @return Pointer to the parameter, or @c nullptr if no such entry exists.
   const DeviceParameter* parameter(uint16_t index, uint8_t subindex) const;
 
+  /// @brief Reads a parameter value, keeping the cached store in sync.
+  ///
+  /// When @c online(), uploads via SDO, decodes, stores the value (marking it
+  /// @c SyncState::Synced) and returns it. When offline, returns the cached value
+  /// without touching the bus. The parameter must already exist in the map (populated
+  /// by @c initializeParameters).
+  ///
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @return The (possibly freshly read) value, or an error string if the parameter is
+  ///         unknown or, when online, the SDO upload / decode fails.
+  std::expected<DeviceParameterValue, std::string> readParameter(uint16_t index, uint8_t subindex);
+
+  /// @brief Writes a parameter value, always updating the cache first.
+  ///
+  /// @p value is coerced into the parameter's declared data type and stored in the cache
+  /// (the cache is the source of truth). Then:
+  /// - online: the value is encoded and downloaded via SDO. On success the parameter is
+  ///   marked @c SyncState::Synced; on download failure it is marked @c SyncState::Pending
+  ///   and the error is returned.
+  /// - offline: the parameter is marked @c SyncState::Pending and the call succeeds — the
+  ///   edit lives in the cache until the device comes back online and it is re-written.
+  ///
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @param value     Value to set; coerced to the parameter's type.
+  /// @return Void on success (including the offline cache-only case), or an error string
+  ///         if the parameter is unknown, @p value cannot be coerced, or an online
+  ///         download fails.
+  std::expected<void, std::string> writeParameter(uint16_t index, uint8_t subindex,
+                                                  DeviceParameterValue value);
+
+  /// @brief Typed convenience wrapper for @c writeParameter.
+  ///
+  /// Lets callers pass a bare value without constructing a @c DeviceParameterValue —
+  /// e.g. @c device.writeValue(0x2030, 1, 123). @p value is coerced into the
+  /// parameter's declared type, so the literal's own type need not match the object's
+  /// width. Online / offline behaviour is exactly that of @c writeParameter.
+  ///
+  /// @tparam T        Any type a @c DeviceParameterValue can hold (integers, floats,
+  ///                  @c std::string, @c std::vector<uint8_t>).
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @param value     Value to write; coerced to the parameter's type.
+  /// @return Void on success (including the offline cache-only case), or an error string.
+  template <typename T>
+  std::expected<void, std::string> writeValue(uint16_t index, uint8_t subindex, T value) {
+    return writeParameter(index, subindex, DeviceParameterValue{value});
+  }
+
+  /// @brief Typed convenience wrapper for @c readParameter.
+  ///
+  /// Refreshes the value from the device when online (otherwise serves the cache) and
+  /// returns it as @p T — e.g. @c device.readValue<int32_t>(0x6064, 0). The request is
+  /// type-exact; use @c parameter(index, subindex)->numeric() when you only need a number.
+  ///
+  /// @tparam T        The expected variant alternative.
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @return The value as @p T, or an error string if the parameter is unknown, the read
+  ///         fails, or the stored value is not a @p T.
+  template <typename T>
+  std::expected<T, std::string> readValue(uint16_t index, uint8_t subindex) {
+    auto v = readParameter(index, subindex);
+    if (!v) {
+      return std::unexpected(v.error());
+    }
+    if (const auto* p = std::get_if<T>(&*v)) {
+      return *p;
+    }
+    return std::unexpected(
+        std::format("parameter 0x{:04X}:{:02X} holds a different type", index, subindex));
+  }
+
  private:
+  /// @brief Mutable parameter lookup by @c (index, subindex). O(1); @c nullptr if absent.
+  DeviceParameter* findParameter(uint16_t index, uint8_t subindex);
+
   uint16_t slavePosition_;
   mm::comm::FieldbusDriver& driver_;
   std::string name_;
@@ -132,6 +221,7 @@ class Device {
   uint32_t productCode_;
   uint32_t revisionNumber_;
   uint32_t serialNumber_;
+  bool online_ = false;
   std::unordered_map<uint32_t, DeviceParameter> parameters_;
 };
 

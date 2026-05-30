@@ -125,6 +125,21 @@ class DeviceManager {
   std::expected<std::vector<DeviceStateInfo>, std::string> getDeviceStates(
       const std::vector<uint16_t>& positions);
 
+  /// @brief Reports whether a single device is currently online.
+  ///
+  /// Performs a live AL-state read for @p slavePosition and returns whether the device
+  /// has an active SDO mailbox — AL state PRE-OP, SAFE-OP, or OP with no error indicator.
+  /// INIT, BOOT, and any error state count as offline. Updates the device's cached online
+  /// flag as a side effect, exactly as @c getDeviceStates does. Reading one position at a
+  /// time lets a single missing device report offline without disturbing the others.
+  ///
+  /// Must be called after both @c init() and @c scan().
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @return @c true if online, @c false if offline, or an error string if no driver is
+  ///         initialised, the device is unknown, or the hardware read fails.
+  std::expected<bool, std::string> isDeviceOnline(uint16_t slavePosition);
+
   /// @brief Enumerates the CoE object dictionary of one device and populates its
   ///        parameter map. See @c Device::initializeParameters for details.
   ///

@@ -114,6 +114,50 @@ paths:
           description: slavePosition is not a valid integer
         "404":
           description: No device at the given bus position
+  /api/devices/{slavePosition}/online:
+    get:
+      summary: Check whether a device is online
+      operationId: getDeviceOnline
+      description: >
+        Performs a live AL-state read for the device and reports whether it currently
+        has an active SDO mailbox — i.e. it is in PRE-OP, SAFE-OP, or OP with no error
+        indicator set. INIT, BOOT, and any error state are reported as offline. The
+        device must already be known from a prior scan. Reading one device at a time
+        means a single missing device reports offline without failing the others.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: Online status of the device
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [slavePosition, online]
+                properties:
+                  slavePosition:
+                    type: integer
+                    description: 1-based position on the fieldbus
+                    example: 1
+                  online:
+                    type: boolean
+                    description: >
+                      True when the device has an active SDO mailbox (PRE-OP, SAFE-OP,
+                      or OP with no error indicator); false otherwise.
+                    example: true
+        "400":
+          description: slavePosition is not a valid integer
+        "404":
+          description: No device at the given bus position
+        "500":
+          $ref: "#/components/responses/DriverError"
   /api/init:
     post:
       summary: Initialise the fieldbus driver
@@ -925,7 +969,7 @@ components:
           example: 32
     DeviceParameter:
       type: object
-      required: [index, subindex, name, objectCode, dataType, dataTypeName, bitLength, access, value]
+      required: [index, subindex, name, objectCode, dataType, dataTypeName, bitLength, access, value, syncState]
       properties:
         index:
           type: integer
@@ -1015,6 +1059,15 @@ components:
             - type: array
               items:
                 type: integer
+        syncState:
+          type: string
+          enum: [unknown, synced, pending]
+          description: >-
+            Freshness of `value` relative to the device. `synced` — matches the
+            device (last successful read or write); `pending` — set locally while
+            offline or after a failed write, not yet confirmed on the device;
+            `unknown` — never read, `value` is the type-appropriate default.
+          example: "synced"
   responses:
     DriverError:
       description: Fieldbus driver returned an error

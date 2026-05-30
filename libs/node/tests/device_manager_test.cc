@@ -188,4 +188,36 @@ TEST(DeviceManagerOnline, InitStateKeepsDeviceOffline) {
   EXPECT_FALSE(dm.findDevice(1)->online());
 }
 
+TEST(DeviceManagerOnline, IsDeviceOnlineReflectsLiveState) {
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->reportState = static_cast<uint16_t>(EtherCatState::Op);
+  FakeDriver* raw = driver.get();  // dm keeps ownership; raw stays valid
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  // A device in OP with no error is online; the probe also syncs the cached flag.
+  auto onlineResult = dm.isDeviceOnline(1);
+  ASSERT_TRUE(onlineResult.has_value());
+  EXPECT_TRUE(*onlineResult);
+  EXPECT_TRUE(dm.findDevice(1)->online());
+
+  // Falling back to INIT (no mailbox) flips the probe to offline.
+  raw->reportState = static_cast<uint16_t>(EtherCatState::Init);
+  auto offlineResult = dm.isDeviceOnline(1);
+  ASSERT_TRUE(offlineResult.has_value());
+  EXPECT_FALSE(*offlineResult);
+  EXPECT_FALSE(dm.findDevice(1)->online());
+}
+
+TEST(DeviceManagerOnline, IsDeviceOnlineRejectsUnknownDevice) {
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true, 1)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  // Position 99 does not exist — report it rather than touching the bus or crashing.
+  EXPECT_FALSE(dm.isDeviceOnline(99).has_value());
+}
+
 }  // namespace

@@ -136,6 +136,39 @@ function paramKey(index: number, subindex: number): string {
   return `${index}-${subindex}`
 }
 
+// Freshness of the cached value relative to the device, rendered as a labelled badge.
+// Each state carries a title explaining it; the help cursor signals the tooltip.
+function SyncBadge({ state }: { state: DeviceParameter['syncState'] }) {
+  if (state === 'synced') {
+    return (
+      <span
+        title="Synced — value matches the device (last successful read or write)"
+        className="inline-block px-1.5 py-0.5 rounded-sm text-[10px] uppercase tracking-wide font-display cursor-help bg-status-good/10 text-status-good"
+      >
+        Synced
+      </span>
+    )
+  }
+  if (state === 'pending') {
+    return (
+      <span
+        title="Pending — set locally while offline or after a failed write, not yet confirmed on the device"
+        className="inline-block px-1.5 py-0.5 rounded-sm text-[10px] uppercase tracking-wide font-display cursor-help bg-status-warn/25 text-grey-800"
+      >
+        Pending
+      </span>
+    )
+  }
+  return (
+    <span
+      title="Unknown — never read; value is the type-appropriate default"
+      className="inline-block px-1.5 py-0.5 rounded-sm text-[10px] uppercase tracking-wide font-display cursor-help bg-grey-100 text-grey-500"
+    >
+      Unknown
+    </span>
+  )
+}
+
 export default function ParametersPage() {
   const { deviceId } = useParams()
   const { api } = useConnection()
@@ -198,7 +231,9 @@ export default function ParametersPage() {
       queryClient.setQueryData(paramsQueryKey, (prev: typeof paramsQuery.data) => {
         if (!prev) return prev
         const next = prev.data.map(x =>
-          x.index === p.index && x.subindex === p.subindex ? { ...x, value: decoded } : x,
+          x.index === p.index && x.subindex === p.subindex
+            ? { ...x, value: decoded, syncState: 'synced' as const }
+            : x,
         )
         return { ...prev, data: next }
       })
@@ -391,7 +426,7 @@ export default function ParametersPage() {
                   <table className="w-full text-xs border-collapse">
                     <thead>
                       <tr className="border-b border-grey-200 bg-grey-50">
-                        {['Address', 'Name', 'Type', 'Bits', 'Access', 'Value', 'Default', 'Min', 'Max', 'Unit'].map(h => (
+                        {['Address', 'Name', 'Type', 'Bits', 'Access', 'Value', 'Sync', 'Default', 'Min', 'Max', 'Unit'].map(h => (
                           <th key={h} className="text-left px-3 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
                             {h}
                           </th>
@@ -429,6 +464,7 @@ export default function ParametersPage() {
                                 </button>
                               </div>
                             </td>
+                            <td className="px-3 py-1.5 whitespace-nowrap"><SyncBadge state={p.syncState} /></td>
                             <td className="px-3 py-1.5 font-mono text-grey-600">{formatValue(p.defaultValue)}</td>
                             <td className="px-3 py-1.5 font-mono text-grey-600">{formatValue(p.minValue)}</td>
                             <td className="px-3 py-1.5 font-mono text-grey-600">{formatValue(p.maxValue)}</td>

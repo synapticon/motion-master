@@ -209,6 +209,22 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::getDevic
   return result;
 }
 
+std::expected<bool, std::string> DeviceManager::isDeviceOnline(uint16_t slavePosition) {
+  if (!driver_) {
+    return std::unexpected("no driver — call init() first");
+  }
+  const Device* device = findDevice(slavePosition);
+  if (!device) {
+    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
+  }
+  // Reading the single position keeps the cached online flag in sync (via updateOnline)
+  // and reuses the one place that defines "online", rather than duplicating the rule here.
+  if (auto states = getDeviceStates({slavePosition}); !states) {
+    return std::unexpected(states.error());
+  }
+  return device->online();
+}
+
 std::expected<void, std::string> DeviceManager::initializeDeviceParameters(uint16_t slavePosition,
                                                                            bool readValues) {
   auto it = std::find_if(devices_.begin(), devices_.end(), [slavePosition](const Device& d) {

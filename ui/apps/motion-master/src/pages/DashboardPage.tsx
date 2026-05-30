@@ -79,9 +79,11 @@ export default function DashboardPage() {
   async function refreshDevices() {
     const res = await devicesQuery.refetch()
     await readStatesFor(res.data?.data.map(d => d.slavePosition) ?? [])
-    // Keep the sidebar's shared AL-state query in sync with dashboard actions
-    // (scan / transition / manual refresh).
+    // Keep the sidebar's shared queries in sync with dashboard actions
+    // (scan / transition / manual refresh): AL state and the per-device online probe,
+    // since a transition to/from INIT changes whether the mailbox is available.
     void queryClient.invalidateQueries({ queryKey: ['deviceStates'] })
+    void queryClient.invalidateQueries({ queryKey: ['deviceOnline'] })
   }
 
   const initMutation = useMutation({

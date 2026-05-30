@@ -252,6 +252,35 @@ void Server::run() {
                  ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(nlohmann::json(*device).dump());
            })
+      .get("/api/devices/:slavePosition/online",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto param = req->getParameter("slavePosition");
+             auto [ptr, ec] = std::from_chars(param.data(), param.data() + param.size(), pos);
+             if (ec != std::errc() || ptr != param.data() + param.size()) {
+               res->writeStatus("400 Bad Request")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end();
+               return;
+             }
+             if (!deviceManager_.findDevice(pos)) {
+               res->writeStatus("404 Not Found")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end();
+               return;
+             }
+             auto r = deviceManager_.isDeviceOnline(pos);
+             if (!r) {
+               res->writeStatus("500 Internal Server Error")
+                   ->writeHeader("Content-Type", "application/json")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end(nlohmann::json{{"error", r.error()}}.dump());
+               return;
+             }
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                 ->end(nlohmann::json{{"slavePosition", pos}, {"online", *r}}.dump());
+           })
       .get("/api/devices/:slavePosition/registers/:address",
            [this](auto* res, auto* req) {
              uint16_t pos{};

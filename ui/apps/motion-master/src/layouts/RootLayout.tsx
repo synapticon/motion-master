@@ -1,5 +1,5 @@
 import { NavLink, Outlet } from 'react-router'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
 import { useConnection } from '../contexts/ConnectionContext'
 import { useApiHealth } from '../hooks/useApiHealth'
@@ -24,6 +24,11 @@ interface DeviceState {
   error: boolean
 }
 
+function alStateLabel(state?: DeviceState): string | null {
+  if (!state) return null
+  return AL_STATE_LABEL[state.alState] ?? `0x${state.alState.toString(16)}`
+}
+
 function NavItem({ to, label }: { to: string; label: string }) {
   return (
     <NavLink
@@ -41,21 +46,72 @@ function NavItem({ to, label }: { to: string; label: string }) {
   )
 }
 
-function DeviceSection({ deviceId, state }: { deviceId: string; state?: DeviceState }) {
+function DeviceSection({
+  deviceId,
+  name,
+  state,
+}: {
+  deviceId: string
+  name?: string
+  state?: DeviceState
+}) {
+  const { api } = useConnection()
+
+  // Live presence probe. Read per-device (not batched) so one missing device reports
+  // offline without disturbing the others. `null` while the first read is in flight.
+  const onlineQuery = useQuery({
+    queryKey: ['deviceOnline', deviceId],
+    queryFn: () => api.getDeviceOnline(Number(deviceId)),
+  })
+  const online: boolean | null = onlineQuery.data?.data?.online ?? null
+  const statusLabel = online === null ? 'Checking…' : online ? 'Online' : 'Offline'
+  const stateLabel = alStateLabel(state)
+
   return (
     <div className="mt-6">
-      <div className="px-5 mb-2 flex items-baseline justify-between gap-2">
-        <p className="eyebrow">Device {deviceId}</p>
-        {state && (
-          <span
-            className={`text-xs font-display tracking-wider ${
-              state.error ? 'text-status-warn' : 'text-white/50'
-            }`}
-          >
-            {AL_STATE_LABEL[state.alState] ?? `0x${state.alState.toString(16)}`}
-            {state.error && ' · error'}
-          </span>
+      <div className="px-5 mb-2">
+        {/* Identity */}
+        <p className="eyebrow truncate">Device {deviceId}</p>
+        {name && (
+          <p className="text-white/30 text-[11px] tracking-wide truncate" title={name}>
+            {name}
+          </p>
         )}
+
+        {/* Status — online presence on the left, AL state on the right */}
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 min-w-0">
+            <span
+              title={statusLabel}
+              aria-label={statusLabel}
+              className={`inline-block h-2 w-2 shrink-0 rounded-full ring-2 ring-white ${
+                online === null
+                  ? 'bg-white/30 animate-pulse'
+                  : online
+                    ? 'bg-status-good shadow-[0_0_6px_1px_var(--color-status-good)]'
+                    : 'bg-status-bad shadow-[0_0_6px_1px_var(--color-status-bad)]'
+              }`}
+            />
+            <span
+              className={`text-xs font-display tracking-wider ${
+                online ? 'text-white/70' : 'text-white/40'
+              }`}
+            >
+              {statusLabel}
+            </span>
+          </span>
+          {stateLabel && (
+            <span
+              title={`AL state${state?.error ? ' — error indicator set' : ''}`}
+              className={`shrink-0 px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider ${
+                state?.error ? 'bg-status-warn/15 text-status-warn' : 'bg-white/10 text-white/60'
+              }`}
+            >
+              {stateLabel}
+              {state?.error && ' · err'}
+            </span>
+          )}
+        </div>
       </div>
       <div className="pl-3">
         {deviceLinks.map(({ to, label }) => (
@@ -69,6 +125,7 @@ function DeviceSection({ deviceId, state }: { deviceId: string; state?: DeviceSt
 export default function RootLayout() {
   const { api, hasScanned, isInitialized } = useConnection()
   const online = useApiHealth(api)
+  const queryClient = useQueryClient()
 
   const devicesQuery = useQuery({
     queryKey: ['devices'],
@@ -92,7 +149,10 @@ export default function RootLayout() {
 
   async function refreshAll() {
     const res = await devicesQuery.refetch()
-    if ((res.data?.data.length ?? 0) > 0) await statesQuery.refetch()
+    if ((res.data?.data.length ?? 0) > 0) {
+      await statesQuery.refetch()
+      await queryClient.invalidateQueries({ queryKey: ['deviceOnline'] })
+    }
   }
 
   return (
@@ -188,6 +248,7 @@ export default function RootLayout() {
               <DeviceSection
                 key={d.slavePosition}
                 deviceId={String(d.slavePosition)}
+                name={d.name}
                 state={stateByPosition.get(d.slavePosition)}
               />
             ))}

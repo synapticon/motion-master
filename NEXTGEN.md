@@ -678,3 +678,29 @@ The planned firmware update flow is:
 4. Future `DeviceManager::reintegrate(slavePosition)` will: re-run `ec_config_map()` for that slave's io map slot, refresh the `Device`'s parameter list from the updated OD, then call `transitionToState` to bring it back to Op.
 
 Step 4 is not yet implemented. `transitionToState` as shipped covers steps 1 and 3.
+
+## Session 2026-05-30 — Module ident reconcile (CoE Modular Device Profile)
+
+**Problem.** A modular EtherCAT slave exposes two CoE Modular Device Profile lists (ETG.5001): the **Detected Module Ident List** (`0xF050`, what is physically plugged into each slot) and the **Configured Module Ident List** (`0xF030`, what the master expects). When the two disagree the slave reports a module mismatch and refuses to leave PRE-OP. With no ENI and no pre-engineered expected configuration, Motion Master's job is "talk to whatever drive is on the bus", so the configured list is meaningless to us — we clear the mismatch by copying detected into configured.
+
+**`FieldbusDriver::writeSdo`.** SDO download was missing from the driver interface (only `readSdo` existed). Added:
+
+```cpp
+virtual std::expected<void, std::string> writeSdo(
+    uint16_t slavePosition, uint16_t index, uint8_t subindex,
+    std::span<const uint8_t> data) = 0;
+```
+
+`std::span<const uint8_t>` for the payload (read-only view, zero-copy, binds to vector/array/slice — matching `writeFile`/`writeRegister`), versus `readSdo` returning an owned `std::vector<uint8_t>`. `SoemFieldbusDriver::writeSdo` wraps `ecx_SDOwrite` under `socketMutex_` with the same SDO/mailbox/packet error decoding as `readSdo`. `Device::download(index, subindex, data)` is the per-device wrapper, mirroring `upload`.
+
+**`reconcileDetectedModules(const Device&)`** — a free function in `mm::node` (declared in `device.h`):
+
+1. Read `0xF050:00` (slot count). A slave with no detected-module list is simply not modular → return `0`, not an error.
+2. For each slot `1..N`: read the detected ident `0xF050:sub`; skip empty (all-zero) and malformed (non-4-byte) entries; skip slots whose `0xF030:sub` already matches; otherwise write the detected ident into `0xF030:sub`.
+3. Return the number of slots written, or an error string naming the slot(s) whose write failed.
+
+Idempotent (the already-matches skip means re-running is a no-op) and **vendor-neutral**. This is the one notable departure from the "Somanet specifics live in `namespace somanet`" rule: the function is keyed purely on the standard MDP objects and never branches on vendor ID, so it belongs in the generic `mm::node` layer, not in `somanet`. It generalises the older single-slot, Synapticon-labelled approach to any modular EtherCAT device while still covering the Somanet case.
+
+**Where it runs.** Wired into `DeviceManager::transitionToState`: when the target is PRE-OP, after the transition settles, the reconcile runs for every device that actually reached PRE-OP (`!error && alState == PreOp`). PRE-OP is the earliest point the write is possible — `0xF030`/`0xF050` are SDO mailbox objects, unavailable in INIT, and the mismatch must be cleared before SAFE-OP. Decided to make it **always-on** (no config flag, no separate HTTP route) and **best-effort**: failures are logged at warn level but never fail the transition.
+
+**Open question — persistence.** The `0xF030` write is volatile on some firmwares (they require a `0x1010` store, or re-evaluate the list every boot). The current design re-runs on every PRE-OP transition, so it is self-healing regardless. If a mismatch is observed to reappear after a power cycle on real hardware, add an explicit store; until then the per-transition reconcile is sufficient and avoids unnecessary EEPROM wear.

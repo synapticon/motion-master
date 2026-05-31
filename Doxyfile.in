@@ -39,3 +39,12 @@ WARN_NO_PARAMDOC       = YES
 
 BUILTIN_STL_SUPPORT    = YES
 CLANG_ASSISTED_PARSING = NO
+
+# Graphviz-rendered inheritance & collaboration graphs
+HAVE_DOT               = YES
+DOT_IMAGE_FORMAT       = svg
+INTERACTIVE_SVG        = YES
+DOT_TRANSPARENT        = YES
+CLASS_GRAPH            = YES
+COLLABORATION_GRAPH    = YES
+DOT_MULTI_TARGETS      = YES

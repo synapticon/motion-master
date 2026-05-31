@@ -4,6 +4,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { DeviceParameter } from '@mm/api-client'
 import DevicePageHeader from '../components/DevicePageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
+import {
+  SDO_TYPES,
+  SDO_TYPE_HINT,
+  type SdoType,
+  encodeSdoValue,
+  decodeSdoBytes,
+  interpretSdoBytes,
+} from '../utils/sdo'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
@@ -13,43 +21,25 @@ const btnGhostCls =
   'border border-grey-300 text-grey-700 px-4 py-2 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
 
 function apiError(err: unknown): string {
-  if (err && typeof err === 'object' && 'error' in err) {
-    const inner = (err as { error: unknown }).error
-    if (inner && typeof inner === 'object' && 'error' in inner) {
-      return String((inner as { error: unknown }).error)
+  if (err && typeof err === 'object') {
+    if ('error' in err) {
+      const inner = (err as { error: unknown }).error
+      // Structured driver error: { error: { error: "message" } }
+      if (inner && typeof inner === 'object' && 'error' in inner) {
+        return String((inner as { error: unknown }).error)
+      }
+      if (typeof inner === 'string') return inner
+    }
+    // Non-OK response with no JSON error body (e.g. an unmatched route → 404).
+    // Surface the HTTP status so the cause is diagnosable instead of opaque.
+    if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
+      const { status } = err as { status: number }
+      const statusText =
+        'statusText' in err ? String((err as { statusText: unknown }).statusText) : ''
+      return `HTTP ${status}${statusText ? ` ${statusText}` : ''}`
     }
   }
   return 'Unknown error'
-}
-
-type Interpretation = { label: string; value: string }
-
-function interpretBytes(bytes: number[]): Interpretation[] {
-  const view = new DataView(new Uint8Array(bytes).buffer)
-  const out: Interpretation[] = []
-
-  if (bytes.length === 1) {
-    out.push({ label: 'int8',  value: String(view.getInt8(0)) })
-    out.push({ label: 'uint8', value: String(view.getUint8(0)) })
-  } else if (bytes.length === 2) {
-    out.push({ label: 'int16 LE',  value: String(view.getInt16(0, true)) })
-    out.push({ label: 'uint16 LE', value: String(view.getUint16(0, true)) })
-  } else if (bytes.length === 4) {
-    out.push({ label: 'int32 LE',   value: String(view.getInt32(0, true)) })
-    out.push({ label: 'uint32 LE',  value: String(view.getUint32(0, true)) })
-    out.push({ label: 'float32 LE', value: String(view.getFloat32(0, true)) })
-  } else if (bytes.length === 8) {
-    out.push({ label: 'int64 LE',   value: view.getBigInt64(0, true).toString() })
-    out.push({ label: 'uint64 LE',  value: view.getBigUint64(0, true).toString() })
-    out.push({ label: 'float64 LE', value: String(view.getFloat64(0, true)) })
-  }
-
-  if (bytes.length > 0 && bytes.every(b => (b >= 0x20 && b <= 0x7e) || b === 0)) {
-    const str = new TextDecoder().decode(new Uint8Array(bytes.filter(b => b !== 0)))
-    out.push({ label: 'string', value: `"${str}"` })
-  }
-
-  return out
 }
 
 function parseHexOrDec(s: string): number | null {
@@ -86,50 +76,6 @@ function formatAccess(a: number): string {
 function formatElapsed(ms: number): string {
   if (ms < 1000) return `${Math.round(ms)} ms`
   return `${(ms / 1000).toFixed(2)} s`
-}
-
-function decodeSdoBytes(dataTypeName: string, bytes: number[]): number | string | number[] {
-  const view = new DataView(new Uint8Array(bytes).buffer)
-  switch (dataTypeName) {
-    case 'BOOLEAN':
-    case 'UNSIGNED8':
-    case 'BYTE':
-      if (bytes.length >= 1) return view.getUint8(0)
-      break
-    case 'INTEGER8':
-      if (bytes.length >= 1) return view.getInt8(0)
-      break
-    case 'INTEGER16':
-      if (bytes.length >= 2) return view.getInt16(0, true)
-      break
-    case 'INTEGER32':
-      if (bytes.length >= 4) return view.getInt32(0, true)
-      break
-    case 'UNSIGNED16':
-    case 'WORD':
-      if (bytes.length >= 2) return view.getUint16(0, true)
-      break
-    case 'UNSIGNED32':
-    case 'DWORD':
-      if (bytes.length >= 4) return view.getUint32(0, true)
-      break
-    case 'REAL32':
-      if (bytes.length >= 4) return view.getFloat32(0, true)
-      break
-    case 'REAL64':
-      if (bytes.length >= 8) return view.getFloat64(0, true)
-      break
-    case 'INTEGER64':
-      if (bytes.length >= 8) return Number(view.getBigInt64(0, true))
-      break
-    case 'UNSIGNED64':
-      if (bytes.length >= 8) return Number(view.getBigUint64(0, true))
-      break
-    case 'VISIBLE_STRING':
-    case 'UNICODE_STRING':
-      return new TextDecoder().decode(new Uint8Array(bytes.filter(b => b !== 0)))
-  }
-  return bytes
 }
 
 function paramKey(index: number, subindex: number): string {
@@ -180,6 +126,14 @@ export default function ParametersPage() {
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState<number[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+
+  const [dlIndex, setDlIndex] = useState('')
+  const [dlSubindex, setDlSubindex] = useState('0')
+  const [dlType, setDlType] = useState<SdoType>('uint32')
+  const [dlValue, setDlValue] = useState('')
+  const [downloading, setDownloading] = useState(false)
+  const [dlOk, setDlOk] = useState<number[] | null>(null)
+  const [dlError, setDlError] = useState<string | null>(null)
 
   const [readValues, setReadValues] = useState(false)
   const [filter, setFilter] = useState('')
@@ -294,14 +248,47 @@ export default function ParametersPage() {
     }
   }
 
+  const dlIndexNum = parseHexOrDec(dlIndex)
+  const dlSubindexNum = parseHexOrDec(dlSubindex)
+  const dlIndexValid = dlIndexNum !== null && dlIndexNum >= 0 && dlIndexNum <= 0xffff
+  const dlSubindexValid = dlSubindexNum !== null && dlSubindexNum >= 0 && dlSubindexNum <= 0xff
+
+  const encoded = encodeSdoValue(dlType, dlValue)
+  const encodedBytes = 'bytes' in encoded ? encoded.bytes : null
+  // Only surface an encoding error once the user has typed something.
+  const encodeError = 'error' in encoded && dlValue.trim() !== '' ? encoded.error : null
+  const canDownload = dlIndexValid && dlSubindexValid && encodedBytes !== null && !downloading
+
+  function clearDownloadStatus() {
+    setDlOk(null)
+    setDlError(null)
+  }
+
+  async function handleDownload() {
+    if (!canDownload || !encodedBytes) return
+    setDownloading(true)
+    setDlOk(null)
+    setDlError(null)
+    try {
+      await api.sdoDownload(slavePosition, dlIndexNum!, dlSubindexNum!, { data: encodedBytes })
+      setDlOk(encodedBytes)
+    } catch (err) {
+      setDlError(apiError(err))
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   return (
     <div>
       <DevicePageHeader slavePosition={slavePosition} title="Parameters" />
       <div className="p-4 sm:p-8 space-y-8">
 
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+
         <section>
           <p className="eyebrow mb-5">SDO Upload</p>
-          <div className="border border-grey-200 p-5 max-w-xl space-y-4">
+          <div className="border border-grey-200 p-5 space-y-4">
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -351,7 +338,7 @@ export default function ParametersPage() {
                   <span className="text-grey-600">Dec:&nbsp;</span>
                   [{result.join(', ')}]
                 </p>
-                {interpretBytes(result).map(({ label, value }) => (
+                {interpretSdoBytes(result).map(({ label, value }) => (
                   <p key={label} className="text-xs font-mono">
                     <span className="text-grey-600">{label}:&nbsp;</span>
                     {value}
@@ -362,6 +349,108 @@ export default function ParametersPage() {
 
           </div>
         </section>
+
+        <section>
+          <p className="eyebrow mb-5">SDO Download</p>
+          <div className="border border-grey-200 p-5 space-y-4">
+
+            <p className="text-xs text-grey-500">
+              Writes raw bytes straight to the device's object dictionary (CoE SDO download).
+              The cached value in the parameter list below is <strong>not</strong> updated —
+              read it back with the row's <span className="font-mono">↻</span> to confirm.
+            </p>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Index (hex or dec)</label>
+                <input
+                  type="text"
+                  value={dlIndex}
+                  onChange={e => { setDlIndex(e.target.value); clearDownloadStatus() }}
+                  placeholder="e.g. 0x6060 or 24672"
+                  className={inputCls}
+                />
+                <p className="text-xs text-grey-500 mt-1 font-mono">
+                  {dlIndexValid ? toHex(dlIndexNum!, 4) : '—'}
+                </p>
+              </div>
+              <div>
+                <label className={labelCls}>Subindex (hex or dec)</label>
+                <input
+                  type="text"
+                  value={dlSubindex}
+                  onChange={e => { setDlSubindex(e.target.value); clearDownloadStatus() }}
+                  placeholder="e.g. 0x00 or 0"
+                  className={inputCls}
+                />
+                <p className="text-xs text-grey-500 mt-1 font-mono">
+                  {dlSubindexValid ? toHex(dlSubindexNum!, 2) : '—'}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className={labelCls}>Type</label>
+                <select
+                  value={dlType}
+                  onChange={e => { setDlType(e.target.value as SdoType); clearDownloadStatus() }}
+                  className={`${inputCls} cursor-pointer`}
+                >
+                  {SDO_TYPES.map(t => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className={labelCls}>Value</label>
+                <input
+                  type="text"
+                  value={dlValue}
+                  onChange={e => { setDlValue(e.target.value); clearDownloadStatus() }}
+                  placeholder={SDO_TYPE_HINT[dlType]}
+                  className={inputCls}
+                />
+                <p className="text-xs mt-1 font-mono">
+                  {encodeError ? (
+                    <span className="text-status-bad">{encodeError}</span>
+                  ) : (
+                    <span className="text-grey-500">
+                      {encodedBytes
+                        ? `${encodedBytes.length} B · ${encodedBytes.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}`
+                        : '—'}
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+
+            <button onClick={handleDownload} disabled={!canDownload} className={btnCls}>
+              {downloading ? 'Downloading…' : 'Download'}
+            </button>
+
+            {dlError && (
+              <p className="text-xs text-status-bad font-mono">{dlError}</p>
+            )}
+
+            {dlOk && (
+              <div className="border border-grey-200 p-3 space-y-1 bg-grey-50">
+                <p className="text-xs text-status-good uppercase tracking-wide mb-2">Wrote {dlOk.length} byte{dlOk.length === 1 ? '' : 's'}</p>
+                <p className="text-xs font-mono">
+                  <span className="text-grey-600">Hex:&nbsp;</span>
+                  {dlOk.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}
+                </p>
+                <p className="text-xs font-mono">
+                  <span className="text-grey-600">Dec:&nbsp;</span>
+                  [{dlOk.join(', ')}]
+                </p>
+              </div>
+            )}
+
+          </div>
+        </section>
+
+        </div>
 
         <section>
           <p className="eyebrow mb-5">Parameter list</p>
@@ -418,6 +507,14 @@ export default function ParametersPage() {
 
             {initError && (
               <p className="text-xs text-status-bad font-mono">{initError}</p>
+            )}
+
+            {params.length > 0 && (
+              <p className="text-xs text-grey-500">
+                Values are cached from the last read, not live. <strong>Reload</strong> re-fetches
+                the cache (no bus traffic); a row's <span className="font-mono">↻</span> reads that
+                one value live from the device via SDO upload.
+              </p>
             )}
 
             {params.length > 0 && (

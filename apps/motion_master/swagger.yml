@@ -668,6 +668,76 @@ paths:
           description: No device at the given bus position
         "500":
           $ref: "#/components/responses/DriverError"
+    put:
+      summary: Download an object dictionary entry to a device (CoE SDO download)
+      operationId: sdoDownload
+      description: >
+        Performs a CoE SDO download — writes the raw bytes in the request body to
+        object `index:subindex` on the device at `slavePosition`. The byte count must
+        match the object's length. Requires the device to be in PRE-OP, SAFE-OP, or OP
+        (mailbox communication active). Both `index` and `subindex` accept decimal or
+        hexadecimal notation; prefix with `0x` for hex (e.g. `0x6064` or `24676`).
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 65535
+          description: CoE object index in decimal (e.g. 24676 for 0x6064)
+          example: 24676
+        - name: subindex
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 255
+          description: CoE object subindex in decimal
+          example: 0
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data]
+              properties:
+                data:
+                  type: array
+                  items:
+                    type: integer
+                    minimum: 0
+                    maximum: 255
+                  description: Object bytes to write (little-endian, must match the object length)
+                  example: [100, 0, 0, 0]
+      responses:
+        "200":
+          description: Download completed successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        "400":
+          description: slavePosition, index, or subindex is invalid, or the request body is malformed
+        "404":
+          description: No device at the given bus position
+        "500":
+          $ref: "#/components/responses/DriverError"
   /api/devices/{slavePosition}/files/{filename}:
     get:
       summary: Read a file from a device via FoE (File over EtherCAT)

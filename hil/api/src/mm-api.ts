@@ -149,6 +149,11 @@ export interface DeviceParameter {
   minValue?: number | string | number[];
   /** Slave-reported maximum value, decoded with the same logic as `value`.  Absent when the slave does not report a maximum. */
   maxValue?: number | string | number[];
+  /**
+   * Freshness of `value` relative to the device. `synced` — matches the device (last successful read or write); `pending` — set locally while offline or after a failed write, not yet confirmed on the device; `unknown` — never read, `value` is the type-appropriate default.
+   * @example "synced"
+   */
+  syncState: "unknown" | "synced" | "pending";
 }
 
 export type QueryParamsType = Record<string | number, any>;
@@ -408,10 +413,85 @@ export class HttpClient<SecurityDataType = unknown> {
 
 /**
  * @title Motion Master API
- * @version 6.0.0-alpha.12
+ * @version 6.0.0-alpha.14
  * @baseUrl https://local.motion-master.synapticon.com:8443
  *
- * HTTP API for Motion Master motion control software. A monitoring WebSocket is also available at /ws — clients fetch the PDO schema via GET /api/monitoring/pdos and then subscribe to real-time updates.
+ * Motion Master is the motion-control software for Synapticon SOMANET servo
+ * drives. This HTTP API drives the EtherCAT fieldbus end to end: bring up a
+ * driver, discover the slaves on the bus, command AL state transitions, and
+ * read or write the object dictionary, ESC registers, parameters, and files of
+ * each device. A companion monitoring WebSocket streams live process data.
+ *
+ * ## Getting started
+ *
+ * The fieldbus is controlled through an explicit lifecycle — the driver is not
+ * created until you ask for it, so a fresh instance has no open network
+ * interface:
+ *
+ * 1. **Init** — `POST /api/init` constructs a fieldbus driver (`soem`, `spoe`,
+ *    or `igh`) and opens the network interface. SOEM has no adapter
+ *    auto-detect, so an adapter name or MAC address is required. `init` is
+ *    one-shot: a second call returns `409` until you reset.
+ * 2. **Scan** — `POST /api/scan` discovers the slaves on the bus and configures
+ *    their sync managers and FMMUs. Slaves are left in the `INIT` state.
+ * 3. **Transition** — `POST /api/devices/state` moves the bus to a target AL
+ *    state (`PreOp`, `SafeOp`, `Op`, …); `GET /api/devices/state` reads where
+ *    each slave currently sits.
+ * 4. **Reset** — `POST /api/reset` tears the driver down and clears the device
+ *    list. `init` must be called again afterwards.
+ *
+ * `GET /api/adapters` lists the network interfaces available on the host, to
+ * help pick the adapter for step 1.
+ *
+ * ## Working with devices
+ *
+ * Once the bus has been scanned, each slave is addressed by its bus position
+ * (`slavePosition`). The per-device endpoints cover the common service-plane
+ * operations:
+ *
+ * - **Object dictionary (CoE)** — `GET …/sdo/{index}/{subindex}` uploads a
+ *   single entry; `POST …/parameters/init` enumerates the full dictionary and
+ *   `GET …/parameters` reads the cached result.
+ * - **ESC registers** — `GET`/`PUT …/registers/{address}` read and write raw
+ *   EtherCAT Slave Controller register bytes.
+ * - **Files (FoE)** — `GET`/`PUT …/files/{filename}` transfer files to and from
+ *   the device over File-over-EtherCAT (firmware, configuration, logs).
+ * - **Presence** — `GET …/online` probes whether a device still answers on the
+ *   bus.
+ *
+ * The `/api/meta/*` endpoints expose static reference tables — AL status codes,
+ * ESC register definitions, FoE error codes, and CoE data types — so clients
+ * can decode numeric values without hard-coding them.
+ *
+ * ## Monitoring WebSocket
+ *
+ * A monitoring WebSocket is available at `/ws`. Real-time messages use a
+ * positionally-ordered array of numbers rather than keyed objects, to keep the
+ * high-frequency path small (~40 values at a 1 ms cycle). Clients fetch the
+ * schema once via `GET /api/monitoring/pdos` and cache it; the array order is
+ * stable for the lifetime of a monitoring session. Two message types are sent:
+ *
+ * ```json
+ * {"type": "monitoring", "topic": "pdos", "data": [1234567890, 39, 0, 12345]}
+ * {"type": "notification", "data": {"event": "slaves_changed"}}
+ * ```
+ *
+ * ## Networking, TLS, and CORS
+ *
+ * The server binds to `127.0.0.1:8443` and is reached at
+ * `https://local.motion-master.synapticon.com:8443` (a DNS record that resolves
+ * to localhost), with a real, publicly-trusted TLS certificate bundled in every
+ * release. CORS allows the single origin
+ * `https://motion-master.synapticon.com`, the hosted progressive web app.
+ *
+ * ## Conventions
+ *
+ * - **Errors** — failures return the matching HTTP status with a JSON body of
+ *   the form `{ "error": "<message>" }`. The message is a human-readable string;
+ *   `409` on `init` specifically signals "already initialised" so a client can
+ *   tell a reconnect from a real failure.
+ * - **Spec** — this document is served live at `GET /api/swagger.yml`, and the
+ *   running version at `GET /api/version`.
  */
 export class Api<
   SecurityDataType extends unknown,
@@ -532,6 +612,41 @@ export class Api<
         void
       >({
         path: `/api/devices/${slavePosition}`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Performs a live AL-state read for the device and reports whether it currently has an active SDO mailbox — i.e. it is in PRE-OP, SAFE-OP, or OP with no error indicator set. INIT, BOOT, and any error state are reported as offline. The device must already be known from a prior scan. Reading one device at a time means a single missing device reports offline without failing the others.
+     *
+     * @name GetDeviceOnline
+     * @summary Check whether a device is online
+     * @request GET:/api/devices/{slavePosition}/online
+     */
+    getDeviceOnline: (slavePosition: number, params: RequestParams = {}) =>
+      this.request<
+        {
+          /**
+           * 1-based position on the fieldbus
+           * @example 1
+           */
+          slavePosition: number;
+          /**
+           * True when the device has an active SDO mailbox (PRE-OP, SAFE-OP, or OP with no error indicator); false otherwise.
+           * @example true
+           */
+          online: boolean;
+        },
+        void | {
+          /**
+           * Human-readable error message from the driver
+           * @example "FPRD slave 1: wkc=0"
+           */
+          error: string;
+        }
+      >({
+        path: `/api/devices/${slavePosition}/online`,
         method: "GET",
         format: "json",
         ...params,

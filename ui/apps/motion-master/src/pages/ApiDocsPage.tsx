@@ -190,6 +190,8 @@ export default function ApiDocsPage() {
           // Default the code samples to Python with the requests library.
           defaultHttpClient: { targetKey: 'python', clientKey: 'requests' },
           showOperationId: true,
+          // Keep the first tag collapsed on load instead of auto-expanding it.
+          defaultOpenFirstTag: false,
           // Scalar's native download button can't be steered to a specific
           // filename, so it stays hidden — we inject our own into the intro.
           hideDownloadButton: true,

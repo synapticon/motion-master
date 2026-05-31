@@ -35,9 +35,9 @@ const btnCls =
 const btnOutlineCls =
   'border border-syn-red text-syn-red px-3 py-1.5 text-xs hover:bg-syn-red hover:text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
 
-export default function DashboardPage() {
+export default function FieldbusPage() {
   const queryClient = useQueryClient()
-  const { host, port, setHost, setPort, api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, setIsInitialized, alreadyInitialized, setAlreadyInitialized } = useConnection()
+  const { api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, setIsInitialized, alreadyInitialized, setAlreadyInitialized } = useConnection()
   const [alState, setAlState] = useState<1 | 2 | 3 | 4 | 8>(2)
   const AL_STATE_LABEL: Record<number, string> = { 1: 'Init', 2: 'PreOp', 3: 'Boot', 4: 'SafeOp', 8: 'Op' }
 
@@ -79,7 +79,7 @@ export default function DashboardPage() {
   async function refreshDevices() {
     const res = await devicesQuery.refetch()
     await readStatesFor(res.data?.data.map(d => d.slavePosition) ?? [])
-    // Keep the sidebar's shared queries in sync with dashboard actions
+    // Keep the sidebar's shared queries in sync with fieldbus actions
     // (scan / transition / manual refresh): AL state and the per-device online probe,
     // since a transition to/from INIT changes whether the mailbox is available.
     void queryClient.invalidateQueries({ queryKey: ['deviceStates'] })
@@ -142,7 +142,7 @@ export default function DashboardPage() {
   })
 
   // When the device list first appears without us having read states yet — a page
-  // refresh that restored the session, or navigating back to the dashboard — read
+  // refresh that restored the session, or navigating back to the fieldbus page — read
   // the actual AL states once so the table isn't blank until a manual refresh.
   // Scan/transition set states themselves, so this only fills the initial gap.
   const autoReadStates = useRef(false)
@@ -158,42 +158,12 @@ export default function DashboardPage() {
     <div>
       <PageHeader
         eyebrow="App"
-        title="Dashboard"
-        description="Connect to the Motion Master backend, initialize the EtherCAT fieldbus, scan for slave devices, and command AL state transitions across the bus."
+        title="Fieldbus"
+        description="Initialize the EtherCAT fieldbus, scan for slave devices, and command AL state transitions across the bus."
       />
       <div className="p-4 sm:p-8 space-y-8">
-        {/* Row 1 — Connection */}
+        {/* Row 1 — Init + Reset */}
         <section>
-          <p className="eyebrow mb-5">Connection</p>
-          <div className="border border-grey-200 p-5">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className={labelCls}>Host</label>
-                <input
-                  type="text"
-                  value={host}
-                  onChange={e => setHost(e.target.value)}
-                  placeholder="local.motion-master.synapticon.com"
-                  className={inputCls}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>Port</label>
-                <input
-                  type="text"
-                  value={port}
-                  onChange={e => setPort(e.target.value)}
-                  placeholder="8443"
-                  className={inputCls}
-                />
-              </div>
-            </div>
-          </div>
-        </section>
-
-        {/* Row 2 — Init + Reset */}
-        <section>
-          <p className="eyebrow mb-5">Fieldbus</p>
           <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
 
             {/* Init */}
@@ -303,9 +273,8 @@ export default function DashboardPage() {
           </div>
         </section>
 
-        {/* Row 3 — Scan + Transition to State */}
+        {/* Row 2 — Scan + Transition to State */}
         <section>
-          <p className="eyebrow mb-5">Devices</p>
           <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
 
             {/* Scan + Devices */}
@@ -376,31 +345,31 @@ export default function DashboardPage() {
                               <td className="px-4 py-2">
                                 {deviceStates[d.slavePosition] !== undefined
                                   ? (() => {
-                                      const ds = deviceStates[d.slavePosition]
-                                      const stateLabel = AL_STATE_LABEL[ds.alState] ?? `0x${ds.alState.toString(16).toUpperCase()}`
-                                      const errorEntry = ds.error ? (alStatusCodeMap[ds.alStatusCode] ?? null) : null
-                                      return (
-                                        <span className={ds.error ? 'text-status-bad' : ''}>
-                                          {stateLabel} ({ds.alState})
-                                          {errorEntry && (
-                                            <span title={errorEntry.description}>
-                                              {' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} {errorEntry.name}
-                                              {errorEntry.terminal && (
-                                                <span
-                                                  className="ml-1 text-grey-600"
-                                                  title="Terminal: the slave cannot reach the requested state by retrying. Re-init, reflash, or power cycle is required."
-                                                >
-                                                  (terminal)
-                                                </span>
-                                              )}
-                                            </span>
-                                          )}
-                                          {ds.error && !errorEntry && (
-                                            <span>{' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')}</span>
-                                          )}
-                                        </span>
-                                      )
-                                    })()
+                                    const ds = deviceStates[d.slavePosition]
+                                    const stateLabel = AL_STATE_LABEL[ds.alState] ?? `0x${ds.alState.toString(16).toUpperCase()}`
+                                    const errorEntry = ds.error ? (alStatusCodeMap[ds.alStatusCode] ?? null) : null
+                                    return (
+                                      <span className={ds.error ? 'text-status-bad' : ''}>
+                                        {stateLabel} ({ds.alState})
+                                        {errorEntry && (
+                                          <span title={errorEntry.description}>
+                                            {' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} {errorEntry.name}
+                                            {errorEntry.terminal && (
+                                              <span
+                                                className="ml-1 text-grey-600"
+                                                title="Terminal: the slave cannot reach the requested state by retrying. Re-init, reflash, or power cycle is required."
+                                              >
+                                                (terminal)
+                                              </span>
+                                            )}
+                                          </span>
+                                        )}
+                                        {ds.error && !errorEntry && (
+                                          <span>{' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')}</span>
+                                        )}
+                                      </span>
+                                    )
+                                  })()
                                   : '—'}
                               </td>
                             </tr>

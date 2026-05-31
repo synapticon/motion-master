@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
@@ -5,10 +6,10 @@ import { useConnection } from '../contexts/ConnectionContext'
 import { useApiHealth } from '../hooks/useApiHealth'
 
 const deviceLinks = [
-  { to: 'foe',        label: 'FoE' },
+  { to: 'foe', label: 'FoE' },
   { to: 'parameters', label: 'Parameters' },
-  { to: 'registers',  label: 'Registers' },
-  { to: 'sii',        label: 'SII' },
+  { to: 'registers', label: 'Registers' },
+  { to: 'sii', label: 'SII' },
 ]
 
 const AL_STATE_LABEL: Record<number, string> = {
@@ -29,15 +30,15 @@ function alStateLabel(state?: DeviceState): string | null {
   return AL_STATE_LABEL[state.alState] ?? `0x${state.alState.toString(16)}`
 }
 
-function NavItem({ to, label }: { to: string; label: string }) {
+function NavItem({ to, label, end }: { to: string; label: string; end?: boolean }) {
   return (
     <NavLink
       to={to}
+      end={end}
       className={({ isActive }) =>
-        `block px-5 py-2 text-xs font-display uppercase tracking-widest border-l-2 transition-colors ${
-          isActive
-            ? 'border-syn-red text-white bg-white/10'
-            : 'border-transparent text-white/60 hover:text-white hover:border-white/30'
+        `block px-5 py-2 text-xs font-display uppercase tracking-widest border-l-2 transition-colors ${isActive
+          ? 'border-syn-red text-white bg-white/10'
+          : 'border-transparent text-white/60 hover:text-white hover:border-white/30'
         }`
       }
     >
@@ -84,18 +85,16 @@ function DeviceSection({
             <span
               title={statusLabel}
               aria-label={statusLabel}
-              className={`inline-block h-2 w-2 shrink-0 rounded-full ring-2 ring-white ${
-                online === null
-                  ? 'bg-white/30 animate-pulse'
-                  : online
-                    ? 'bg-status-good shadow-[0_0_6px_1px_var(--color-status-good)]'
-                    : 'bg-status-bad shadow-[0_0_6px_1px_var(--color-status-bad)]'
-              }`}
+              className={`inline-block h-2 w-2 shrink-0 rounded-full ring-2 ring-white ${online === null
+                ? 'bg-white/30 animate-pulse'
+                : online
+                  ? 'bg-status-good shadow-[0_0_6px_1px_var(--color-status-good)]'
+                  : 'bg-status-bad shadow-[0_0_6px_1px_var(--color-status-bad)]'
+                }`}
             />
             <span
-              className={`text-xs font-display tracking-wider ${
-                online ? 'text-white/70' : 'text-white/40'
-              }`}
+              className={`text-xs font-display tracking-wider ${online ? 'text-white/70' : 'text-white/40'
+                }`}
             >
               {statusLabel}
             </span>
@@ -103,9 +102,8 @@ function DeviceSection({
           {stateLabel && (
             <span
               title={`AL state${state?.error ? ' — error indicator set' : ''}`}
-              className={`shrink-0 px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider ${
-                state?.error ? 'bg-status-warn/15 text-status-warn' : 'bg-white/10 text-white/60'
-              }`}
+              className={`shrink-0 px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider ${state?.error ? 'bg-status-warn/15 text-status-warn' : 'bg-white/10 text-white/60'
+                }`}
             >
               {stateLabel}
               {state?.error && ' · err'}
@@ -126,6 +124,7 @@ export default function RootLayout() {
   const { api, hasScanned, isInitialized } = useConnection()
   const online = useApiHealth(api)
   const queryClient = useQueryClient()
+  const [metaOpen, setMetaOpen] = useState(false)
 
   const devicesQuery = useQuery({
     queryKey: ['devices'],
@@ -145,13 +144,23 @@ export default function RootLayout() {
     (statesQuery.data?.data ?? []).map(s => [s.slavePosition, s]),
   )
 
-  const refreshing = devicesQuery.isFetching || statesQuery.isFetching
+  // `spinning` keeps the icon turning for at least one full rotation even when a
+  // localhost refetch resolves in milliseconds — otherwise the spin is imperceptible.
+  const [spinning, setSpinning] = useState(false)
+  const refreshing = spinning || devicesQuery.isFetching || statesQuery.isFetching
 
   async function refreshAll() {
-    const res = await devicesQuery.refetch()
-    if ((res.data?.data.length ?? 0) > 0) {
-      await statesQuery.refetch()
-      await queryClient.invalidateQueries({ queryKey: ['deviceOnline'] })
+    setSpinning(true)
+    const start = performance.now()
+    try {
+      const res = await devicesQuery.refetch()
+      if ((res.data?.data.length ?? 0) > 0) {
+        await statesQuery.refetch()
+        await queryClient.invalidateQueries({ queryKey: ['deviceOnline'] })
+      }
+    } finally {
+      const remaining = Math.max(0, 900 - (performance.now() - start))
+      setTimeout(() => setSpinning(false), remaining)
     }
   }
 
@@ -167,11 +176,10 @@ export default function RootLayout() {
             <span
               title={online ? 'API online' : 'API offline — Start motion-master'}
               aria-label={online ? 'API online' : 'API offline — Start motion-master'}
-              className={`inline-block h-3 w-3 rounded-full ring-2 ring-white ${
-                online
-                  ? 'bg-status-good shadow-[0_0_8px_2px_var(--color-status-good)]'
-                  : 'bg-status-bad shadow-[0_0_8px_2px_var(--color-status-bad)] animate-pulse'
-              }`}
+              className={`inline-block h-3 w-3 rounded-full ring-2 ring-white ${online
+                ? 'bg-status-good shadow-[0_0_8px_2px_var(--color-status-good)]'
+                : 'bg-status-bad shadow-[0_0_8px_2px_var(--color-status-bad)] animate-pulse'
+                }`}
             />
           </div>
           <p className="text-white/30 text-xs font-display tracking-wider mt-0.5">v6.0.0-alpha.14</p>
@@ -179,20 +187,44 @@ export default function RootLayout() {
 
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
           <NavItem to="/api-docs" label="API Docs" />
-          <NavItem to="/" label="Dashboard" />
+          <NavItem to="/" label="Connection" end />
+          <NavItem to="/fieldbus" label="Fieldbus" />
           <NavItem to="/log" label="Log" />
           <NavItem to="/requests" label="Requests" />
 
           {online && (
-            <>
-              <p className="eyebrow px-5 mt-6 mb-1 text-white/40">Meta</p>
-              <div className="pl-3">
-                <NavItem to="/meta/al-status-codes" label="AL Status Codes" />
-                <NavItem to="/meta/data-types" label="Data Types" />
-                <NavItem to="/meta/esc-registers" label="ESC Registers" />
-                <NavItem to="/meta/foe-error-codes" label="FoE Error Codes" />
-              </div>
-            </>
+            <div className="mt-6">
+              <button
+                type="button"
+                onClick={() => setMetaOpen(o => !o)}
+                aria-expanded={metaOpen}
+                className="group w-full flex items-center justify-between px-5 mb-1 cursor-pointer"
+              >
+                <span className="eyebrow text-white/40 group-hover:text-white/70 transition-colors">
+                  Meta
+                </span>
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  className={`h-3.5 w-3.5 text-white/40 group-hover:text-white/70 transition-transform ${metaOpen ? 'rotate-180' : ''
+                    }`}
+                >
+                  <path d="m6 9 6 6 6-6" />
+                </svg>
+              </button>
+              {metaOpen && (
+                <div className="pl-3">
+                  <NavItem to="/meta/al-status-codes" label="AL Status Codes" />
+                  <NavItem to="/meta/data-types" label="Data Types" />
+                  <NavItem to="/meta/esc-registers" label="ESC Registers" />
+                  <NavItem to="/meta/foe-error-codes" label="FoE Error Codes" />
+                </div>
+              )}
+            </div>
           )}
 
           {online && (
@@ -204,8 +236,8 @@ export default function RootLayout() {
                     type="button"
                     onClick={refreshAll}
                     disabled={refreshing}
-                    title="Refresh all devices"
-                    aria-label="Refresh all devices"
+                    title="Refresh all devices — re-read the device list and AL states without re-scanning the bus (slaves keep their current state)"
+                    aria-label="Refresh all devices — re-read the device list and AL states without re-scanning the bus"
                     className="text-white/40 hover:text-white disabled:opacity-40 disabled:cursor-default cursor-pointer transition-colors"
                   >
                     <svg
@@ -215,7 +247,7 @@ export default function RootLayout() {
                       strokeWidth="2"
                       strokeLinecap="round"
                       strokeLinejoin="round"
-                      className="h-3.5 w-3.5"
+                      className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`}
                     >
                       <path d="M21 12a9 9 0 1 1-2.64-6.36" />
                       <path d="M21 3v6h-6" />
@@ -225,13 +257,12 @@ export default function RootLayout() {
               </div>
               <div className="flex items-center gap-2">
                 <span
-                  className={`inline-block h-2 w-2 shrink-0 rounded-full ring-2 ring-white ${
-                    !isInitialized
-                      ? 'bg-white/30'
-                      : hasScanned
-                        ? 'bg-status-good shadow-[0_0_6px_1px_var(--color-status-good)]'
-                        : 'bg-status-warn shadow-[0_0_6px_1px_var(--color-status-warn)]'
-                  }`}
+                  className={`inline-block h-2 w-2 shrink-0 rounded-full ring-2 ring-white ${!isInitialized
+                    ? 'bg-white/30'
+                    : hasScanned
+                      ? 'bg-status-good shadow-[0_0_6px_1px_var(--color-status-good)]'
+                      : 'bg-status-warn shadow-[0_0_6px_1px_var(--color-status-warn)]'
+                    }`}
                 />
                 <span className="text-xs font-display tracking-wider text-white/70">
                   {!isInitialized

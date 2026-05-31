@@ -48,11 +48,9 @@ export async function setup() {
   execFileSync('docker', ['build', '-t', IMAGE_NAME, repoRoot], { stdio: 'inherit' });
 
   console.log('[global-setup] Starting container…');
-  execFileSync(
-    'docker',
-    ['run', '-d', '--rm', '--network', 'host', '--name', CONTAINER_NAME, IMAGE_NAME],
-    { stdio: 'inherit' },
-  );
+  execFileSync('docker', ['run', '-d', '--rm', '--network', 'host', '--name', CONTAINER_NAME, IMAGE_NAME], {
+    stdio: 'inherit',
+  });
   containerStarted = true;
 
   console.log('[global-setup] Waiting for API…');

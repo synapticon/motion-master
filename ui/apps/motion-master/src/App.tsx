@@ -1,6 +1,7 @@
 import { Routes, Route } from 'react-router'
 import RootLayout from './layouts/RootLayout'
-import DashboardPage from './pages/DashboardPage'
+import ConnectionPage from './pages/ConnectionPage'
+import FieldbusPage from './pages/FieldbusPage'
 import EthercatStatePage from './pages/EthercatStatePage'
 import ObjectDictionaryPage from './pages/ObjectDictionaryPage'
 import SiiPage from './pages/SiiPage'
@@ -20,7 +21,8 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<RootLayout />}>
-        <Route index element={<DashboardPage />} />
+        <Route index element={<ConnectionPage />} />
+        <Route path="fieldbus" element={<FieldbusPage />} />
         <Route path="log" element={<LogPage />} />
         <Route path="requests" element={<RequestsPage />} />
         <Route path="api-docs" element={<ApiDocsPage />} />

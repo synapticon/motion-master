@@ -39,6 +39,7 @@ All common tasks have wrapper scripts in `tools/`. They default to the `x64-linu
 ./tools/format.sh                 # clang-format all sources
 ./tools/lint.sh                   # cpplint (requires: pip install cpplint)
 ./tools/cppcheck.sh               # cppcheck static analysis
+./tools/check.sh                  # format + cppcheck + lint in sequence
 ./tools/clean.sh                  # remove build/<preset>
 ./tools/package.sh [preset]       # build .deb and .rpm packages (cert.pem/key.pem must be in build dir)
 

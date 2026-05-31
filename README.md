@@ -265,6 +265,7 @@ All scripts default to the `x64-linux-debug` preset. Pass a preset name as the f
 | `./tools/format.sh` | Auto-format all sources with clang-format |
 | `./tools/lint.sh` | Run cpplint (`pip install cpplint` if missing) |
 | `./tools/cppcheck.sh` | Run cppcheck static analysis |
+| `./tools/check.sh` | Run format, cppcheck, and lint in sequence |
 | `./tools/clean.sh` | Remove the build directory |
 | `./tools/bump-version.sh <version>` | Bump the project semver everywhere (see [Versioning](#versioning)) |
 | `./tools/package.sh [preset]` | Build `.deb` and `.rpm` packages (requires `cert.pem`/`key.pem` in the build dir) |

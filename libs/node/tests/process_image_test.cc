@@ -396,6 +396,53 @@ TEST(DeviceManagerProcessData, MappingConfiguredAndTornDownReactingToState) {
   EXPECT_EQ(busPtr->lastOutputs.size(), 6u);
 }
 
+TEST(DeviceManagerProcessData, SubsetDownKeepsOthersExchangingAndRejoinRemaps) {
+  // A subset of the bus can be taken down (firmware download / manual PDO re-map) while the rest
+  // keep exchanging; bringing it back re-maps the whole bus, since its PDO layout may have changed.
+  const auto kTimeout = std::chrono::milliseconds(10);
+  auto bus = std::make_unique<FakeBus>();
+  programMapping(*bus);  // position-agnostic mapping for both devices
+  bus->slaves = 2;
+  bus->layout.outputBytes = 12;
+  bus->layout.inputBytes = 12;
+  bus->layout.expectedWkc = 6;
+  bus->layout.slaves = {SlaveIo{.slavePosition = 1,
+                                .outputOffset = 0,
+                                .outputBytes = 6,
+                                .inputOffset = 0,
+                                .inputBytes = 6},
+                        SlaveIo{.slavePosition = 2,
+                                .outputOffset = 6,
+                                .outputBytes = 6,
+                                .inputOffset = 6,
+                                .inputBytes = 6}};
+  bus->slaveStates[1] = static_cast<uint16_t>(EtherCatState::Op);
+  bus->slaveStates[2] = static_cast<uint16_t>(EtherCatState::Op);
+  bus->wkc = 6;
+  FakeBus* busPtr = bus.get();
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  EXPECT_TRUE(dm.processDataConfigured());
+  EXPECT_EQ(dm.processImageInfo().generations, 1u);
+
+  // Take device 2 down to PRE-OP. Device 1 stays in OP, so the whole-bus image is kept — no
+  // teardown, no re-map — and the staying device keeps exchanging. (Before the fix this nulled
+  // the single whole-bus image and silently stopped exchange for device 1 too.)
+  ASSERT_TRUE(dm.transitionToState({2}, EtherCatState::PreOp, kTimeout).has_value());
+  EXPECT_TRUE(dm.processDataConfigured());
+  EXPECT_EQ(dm.processImageInfo().generations, 1u);
+
+  // Model device 2 now sitting in PRE-OP, then bring it back to OP: rejoining from a non-exchange
+  // state re-maps the whole bus (a new image generation), since its PDO layout may have changed.
+  busPtr->slaveStates[2] = static_cast<uint16_t>(EtherCatState::PreOp);
+  ASSERT_TRUE(dm.transitionToState({2}, EtherCatState::Op, kTimeout).has_value());
+  EXPECT_TRUE(dm.processDataConfigured());
+  EXPECT_EQ(dm.processImageInfo().generations, 2u);
+}
+
 TEST(DeviceManagerProcessData, MixedStatesRoutePerDeviceBetweenPdoAndSdo) {
   // Two devices share one whole-bus mapping, but device 1 stays in PRE-OP while device 2 is
   // in OP. Device 2's params come from the process image; device 1's must come over SDO, not

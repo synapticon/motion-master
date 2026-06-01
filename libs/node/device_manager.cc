@@ -405,22 +405,46 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   std::vector<uint16_t> targets = std::move(*resolved);
 
   // React to the requested state. Process data is exchanged only in SAFE-OP and OP, so Motion
-  // Master configures or tears down the mapping around the user-driven AL transition:
-  //  - entering SAFE-OP/OP without a published image (first time, or after a device returned
-  //    from a firmware download): map and publish now, while the mailbox is up in PRE-OP, so
-  //    FMMUs are programmed before the transition and exchange can resume on the next cycle;
-  //  - leaving the exchanging states (down to PRE-OP/BOOT, e.g. for a download): stop exchange
-  //    and drop the image. Under the whole-bus model this pauses exchange for every device.
+  // Master maps/re-maps or tears down the whole-bus image around the user-driven AL transition.
+  // A subset of the bus can be taken down (firmware download in BOOT, or a manual PDO re-map in
+  // PRE-OP) while the devices staying in SAFE-OP/OP keep exchanging; a device rejoining triggers
+  // a re-map because its firmware may carry a different PDO layout.
   const bool exchangeState =
       targetState == mm::comm::EtherCatState::SafeOp || targetState == mm::comm::EtherCatState::Op;
-  if (exchangeState && !processDataConfigured()) {
-    if (auto r = configureProcessData(); !r) {
-      return std::unexpected("auto-configure process data failed: " + r.error());
+  if (exchangeState) {
+    // Entering an exchange state. Re-map when there is no image yet, or when any targeted device
+    // is (re)joining from a non-exchange state — it must be added to the whole-bus image and its
+    // PDO mapping re-read (a firmware update or manual re-map may have changed it). A device
+    // already exchanging being re-commanded (SAFE-OP -> OP) needs no re-map; the published image
+    // still describes it. Re-mapping briefly pauses exchange for the whole bus (stopExchange
+    // inside configureProcessData) — the accepted cost of bringing a device back online.
+    const bool anyJoining = std::ranges::any_of(targets, [this](uint16_t pos) {
+      const Device* d = findDevice(pos);
+      return d && !d->exchangesProcessData();
+    });
+    if (!processDataConfigured() || anyJoining) {
+      if (auto r = configureProcessData(); !r) {
+        return std::unexpected("auto-configure process data failed: " + r.error());
+      }
     }
-  } else if (!exchangeState && processDataConfigured()) {
-    spdlog::info("Stopping process data exchange before transition to 0x{:02X}",
-                 static_cast<int>(targetState));
-    stopExchange();
+  } else if (processDataConfigured()) {
+    // Leaving the exchange states. Tear the whole-bus image down only when no device will remain
+    // exchanging afterwards; otherwise keep it published so the devices staying in SAFE-OP/OP
+    // keep running while the targeted ones drop out. The targeted devices' working-counter share
+    // is removed by the updateExpectedWkc() below, so health still reflects the live bus.
+    const bool anyStays = std::ranges::any_of(devices_, [this, &targets](const Device& d) {
+      const bool targeted = std::ranges::find(targets, d.slavePosition()) != targets.end();
+      return !targeted && d.exchangesProcessData();
+    });
+    if (anyStays) {
+      spdlog::info(
+          "Transition to 0x{:02X} leaves other devices in SAFE-OP/OP — keeping the process image",
+          static_cast<int>(targetState));
+    } else {
+      spdlog::info("Stopping process data exchange before transition to 0x{:02X}",
+                   static_cast<int>(targetState));
+      stopExchange();
+    }
   }
 
   spdlog::debug("transitionToState -> 0x{:02X} for {} device(s)", static_cast<int>(targetState),

@@ -162,6 +162,68 @@ PdoLayout SoemFieldbusDriver::processDataLayout() {
   return layout;
 }
 
+std::vector<SlaveConfig> SoemFieldbusDriver::busConfig() const {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::vector<SlaveConfig> out;
+  if (!ctx_) {
+    return out;
+  }
+  // All of this is cached in the slavelist by ecx_config_init / ecx_config_map_group — what the
+  // master programmed into each ESC. No bus I/O; a pure read of SOEM's in-memory configuration.
+  out.reserve(static_cast<size_t>(ctx_->slavecount));
+  for (int i = 1; i <= ctx_->slavecount; ++i) {
+    const auto& s = ctx_->slavelist[i];
+    SlaveConfig c{};
+    c.slavePosition = static_cast<uint16_t>(i);
+    c.configuredAddress = s.configadr;
+    c.aliasAddress = s.aliasadr;
+    c.outputBits = s.Obits;
+    c.inputBits = s.Ibits;
+    c.mailbox = {.writeLength = s.mbx_l,
+                 .writeOffset = s.mbx_wo,
+                 .readLength = s.mbx_rl,
+                 .readOffset = s.mbx_ro,
+                 .protocols = s.mbx_proto};
+    c.dc = {.capable = s.hasdc != 0,
+            .active = s.DCactive != 0,
+            .propagationDelay = s.pdelay,
+            .cycleTime = s.DCcycle,
+            .shift = s.DCshift};
+    // Skip wholly-unused SMs/FMMUs (no window, no type) so the snapshot lists only what is
+    // actually configured; the index field preserves the real SM/FMMU number for the reader.
+    for (int j = 0; j < EC_MAXSM; ++j) {
+      if (s.SM[j].SMlength == 0 && s.SMtype[j] == 0) {
+        continue;
+      }
+      c.syncManagers.push_back(SyncManagerConfig{
+          .index = static_cast<uint8_t>(j),
+          .physicalStart = s.SM[j].StartAddr,
+          .length = s.SM[j].SMlength,
+          .flags = s.SM[j].SMflags,
+          .type = s.SMtype[j],
+      });
+    }
+    for (int j = 0; j < EC_MAXFMMU; ++j) {
+      if (s.FMMU[j].LogLength == 0 && s.FMMU[j].FMMUactive == 0) {
+        continue;
+      }
+      c.fmmus.push_back(FmmuConfig{
+          .index = static_cast<uint8_t>(j),
+          .logicalStart = s.FMMU[j].LogStart,
+          .length = s.FMMU[j].LogLength,
+          .logicalStartBit = s.FMMU[j].LogStartbit,
+          .logicalEndBit = s.FMMU[j].LogEndbit,
+          .physicalStart = s.FMMU[j].PhysStart,
+          .physicalStartBit = s.FMMU[j].PhysStartBit,
+          .type = s.FMMU[j].FMMUtype,
+          .active = s.FMMU[j].FMMUactive,
+      });
+    }
+    out.push_back(std::move(c));
+  }
+  return out;
+}
+
 // Intentionally lock-free: the RT PDO cycle relies on SOEM's internally
 // thread-safe port layer rather than socketMutex_, so a slow control-plane
 // transfer can never stall process-data exchange. See FieldbusDriver class doc.

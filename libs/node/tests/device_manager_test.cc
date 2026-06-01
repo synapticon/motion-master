@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <span>
 #include <string>
 #include <utility>
@@ -30,6 +31,12 @@ class FakeDriver : public FieldbusDriver {
   /// AL Status reported by readStates() for every queried slave (bits 3:0 = state).
   uint16_t reportState = 0;
 
+  /// Name returned by slaveInfo() for every position (drives Device::name()).
+  std::string deviceName;
+
+  /// Returned verbatim by busConfig() — empty unless a test populates it.
+  std::vector<mm::comm::SlaveConfig> busConfigData;
+
   std::expected<void, std::string> init() override {
     if (!initSucceeds_) {
       return std::unexpected("fake init failure");
@@ -39,9 +46,16 @@ class FakeDriver : public FieldbusDriver {
 
   std::expected<int, std::string> scan() override { return slaves_; }
 
-  SlaveInfo slaveInfo(uint16_t) const override { return {}; }
+  SlaveInfo slaveInfo(uint16_t) const override {
+    return {.name = deviceName,
+            .vendorId = 0,
+            .productCode = 0,
+            .revisionNumber = 0,
+            .serialNumber = 0};
+  }
   std::expected<void, std::string> configureProcessData() override { return {}; }
   mm::comm::PdoLayout processDataLayout() override { return {}; }
+  std::vector<mm::comm::SlaveConfig> busConfig() const override { return busConfigData; }
   int exchangeProcessData(std::span<const uint8_t>, std::span<uint8_t>) override { return 0; }
   void stop() override {}
 
@@ -226,6 +240,54 @@ TEST(DeviceManagerOnline, IsDeviceOnlineRejectsUnknownDevice) {
 
   // Position 99 does not exist — report it rather than touching the bus or crashing.
   EXPECT_FALSE(dm.isDeviceOnline(99).has_value());
+}
+
+TEST(DeviceManagerBusConfig, EnrichesDriverConfigWithDeviceName) {
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->deviceName = "Axis A";
+  mm::comm::SlaveConfig cfg{};
+  cfg.slavePosition = 1;
+  cfg.configuredAddress = 0x1001;
+  cfg.outputBits = 96;
+  cfg.inputBits = 128;
+  cfg.syncManagers.push_back(mm::comm::SyncManagerConfig{
+      .index = 2, .physicalStart = 0x1100, .length = 12, .flags = 0x10024, .type = 3});
+  cfg.fmmus.push_back(mm::comm::FmmuConfig{.index = 0,
+                                           .logicalStart = 0,
+                                           .length = 12,
+                                           .logicalStartBit = 0,
+                                           .logicalEndBit = 7,
+                                           .physicalStart = 0x1100,
+                                           .physicalStartBit = 0,
+                                           .type = 1,
+                                           .active = 1});
+  driver->busConfigData = {cfg};
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  // busConfig() passes the driver's per-slave config through and attaches the device name.
+  auto config = dm.busConfig();
+  ASSERT_EQ(config.size(), 1u);
+  EXPECT_EQ(config[0].deviceName, "Axis A");
+  EXPECT_EQ(config[0].config.slavePosition, 1);
+  ASSERT_EQ(config[0].config.syncManagers.size(), 1u);
+  EXPECT_EQ(config[0].config.syncManagers[0].type, 3);
+  ASSERT_EQ(config[0].config.fmmus.size(), 1u);
+  EXPECT_EQ(config[0].config.fmmus[0].type, 1);
+
+  // to_json exposes the resolved name and the nested SM/FMMU arrays.
+  nlohmann::json j = config[0];
+  EXPECT_EQ(j.at("deviceName"), "Axis A");
+  ASSERT_EQ(j.at("syncManagers").size(), 1u);
+  EXPECT_EQ(j.at("syncManagers")[0].at("type"), 3);
+  EXPECT_EQ(j.at("fmmus")[0].at("active"), true);
+}
+
+TEST(DeviceManagerBusConfig, EmptyWithoutDriver) {
+  DeviceManager dm;
+  EXPECT_TRUE(dm.busConfig().empty());
 }
 
 }  // namespace

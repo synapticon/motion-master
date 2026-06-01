@@ -59,6 +59,9 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// @copydoc FieldbusDriver::processDataLayout
   PdoLayout processDataLayout() override;
 
+  /// @copydoc FieldbusDriver::busConfig
+  std::vector<SlaveConfig> busConfig() const override;
+
   /// @brief Copies @p outputs into the IOmap, sends and receives, copies inputs back out.
   ///
   /// Called once per @c GameLoop cycle.  Must not be called before

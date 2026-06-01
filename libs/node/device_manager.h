@@ -74,6 +74,19 @@ void to_json(nlohmann::json& j, const ProcessImageObjectInfo& obj);
 /// @brief Serialises a ProcessImageInfo to JSON.
 void to_json(nlohmann::json& j, const ProcessImageInfo& info);
 
+/// @brief A slave's static ESC configuration plus its resolved device name.
+///
+/// API-facing wrapper around @c mm::comm::SlaveConfig that adds the human-readable device
+/// name (from the device set, empty when no matching device is known), built by
+/// @c DeviceManager::busConfig on the (non-RT) caller's thread.
+struct SlaveConfigInfo {
+  mm::comm::SlaveConfig config;  ///< Raw ESC configuration as captured by the driver.
+  std::string deviceName;        ///< Device name for this slave position, empty if unknown.
+};
+
+/// @brief Serialises a SlaveConfigInfo (and its nested SM/FMMU/mailbox/DC) to JSON.
+void to_json(nlohmann::json& j, const SlaveConfigInfo& info);
+
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.
 ///
 /// The driver is not required at construction — call @c init() to supply one.
@@ -203,6 +216,13 @@ class DeviceManager {
   /// generations. Returns @c configured false with empty object lists when no image is
   /// published. Runs on the (non-RT) caller's thread; reads the published image lock-free.
   ProcessImageInfo processImageInfo() const;
+
+  /// @brief Snapshots each slave's static ESC configuration (SM, FMMU, mailbox, DC) for the API.
+  ///
+  /// Passes through the driver's cached configuration (no bus I/O) and resolves each slave's
+  /// device name. Returns an empty vector when no driver is set or the transport has no ESC
+  /// (e.g. SPoE). Runs on the (non-RT) caller's thread.
+  std::vector<SlaveConfigInfo> busConfig() const;
 
   /// @brief Transitions a set of devices to @p targetState, blocking until all arrive or
   ///        @p timeout elapses, and reports the final state of each.

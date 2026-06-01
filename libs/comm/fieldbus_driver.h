@@ -102,6 +102,76 @@ struct PdoLayout {
   int expectedWkc = 0;  ///< Working counter when every slave exchanges (outputs×2 + inputs).
 };
 
+/// @brief One Sync Manager's configuration as programmed on a slave's ESC.
+///
+/// A Sync Manager guards a window of the slave's physical memory and governs how the master
+/// and the slave's application exchange it (mailbox handshake or buffered process data).
+struct SyncManagerConfig {
+  uint8_t index;           ///< SM number (0..7).
+  uint16_t physicalStart;  ///< Physical ESC memory start address the SM guards.
+  uint16_t length;         ///< Length of the guarded window in bytes.
+  uint32_t flags;          ///< Raw SM control/flags register (buffer mode, direction, watchdog).
+  uint8_t type;            ///< 0=unused, 1=MbxOut, 2=MbxIn, 3=Outputs, 4=Inputs.
+};
+
+/// @brief One FMMU's configuration as programmed on a slave's ESC.
+///
+/// A Fieldbus Memory Management Unit maps a span of the bus-wide logical address space onto a
+/// window of the slave's physical memory (typically the process-data Sync Manager), translating
+/// the master's logical reads/writes into local accesses.
+struct FmmuConfig {
+  uint8_t index;             ///< FMMU number (0..3).
+  uint32_t logicalStart;     ///< Logical (bus-wide) start address.
+  uint16_t length;           ///< Mapped length in bytes.
+  uint8_t logicalStartBit;   ///< Start bit within the first logical byte.
+  uint8_t logicalEndBit;     ///< End bit within the last logical byte.
+  uint16_t physicalStart;    ///< Physical ESC start address (ties the FMMU to a Sync Manager).
+  uint8_t physicalStartBit;  ///< Start bit within the first physical byte.
+  uint8_t type;              ///< ESC FMMU type: 1=read (inputs/TxPDO), 2=write (outputs/RxPDO).
+  uint8_t active;            ///< Non-zero when the FMMU is active.
+};
+
+/// @brief Mailbox configuration for a slave (the CoE/FoE/EoE/SoE transport windows).
+struct MailboxConfig {
+  uint16_t writeLength;  ///< Write (master→slave) mailbox length in bytes; 0 if no mailbox.
+  uint16_t writeOffset;  ///< Write mailbox physical ESC offset.
+  uint16_t readLength;   ///< Read (slave→master) mailbox length in bytes.
+  uint16_t readOffset;   ///< Read mailbox physical ESC offset.
+  uint16_t protocols;    ///< Supported-protocol bits: 0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE, 0x10
+                         ///< SoE, 0x20 VoE.
+};
+
+/// @brief Distributed-clock configuration for a slave.
+///
+/// Populated by @c configureProcessData (which runs @c ecx_configdc). @c active is false for
+/// the SM-synchronous / free-run bring-up this driver uses — DC is measured but no SYNC0 pulse
+/// is generated.
+struct DcConfig {
+  bool capable;              ///< Slave has distributed-clock hardware.
+  bool active;               ///< SYNC0 generation enabled.
+  int32_t propagationDelay;  ///< Measured propagation delay (ns).
+  int32_t cycleTime;         ///< DC cycle time (ns).
+  int32_t shift;             ///< Shift from the cycle-modulus boundary (ns).
+};
+
+/// @brief Static ESC configuration snapshot for one slave, captured by @c configureProcessData.
+///
+/// Describes what the master programmed into the slave's EtherCAT Slave Controller: its address,
+/// process-data sizes, mailbox, distributed clock, and active Sync Managers and FMMUs. This is an
+/// EtherCAT-ESC concept; transports without an ESC (e.g. SPoE) report no slaves (see
+/// @c FieldbusDriver::busConfig).
+struct SlaveConfig {
+  uint16_t slavePosition;      ///< 1-based bus position.
+  uint16_t configuredAddress;  ///< Station (configured) address assigned during scan.
+  uint16_t aliasAddress;       ///< Configured station alias from EEPROM.
+  uint16_t outputBits;         ///< Mapped output (master→slave) bits.
+  uint16_t inputBits;          ///< Mapped input (slave→master) bits.
+  MailboxConfig mailbox;       ///< Mailbox transport windows.
+  DcConfig dc;                 ///< Distributed-clock configuration.
+  std::vector<SyncManagerConfig> syncManagers;  ///< Configured Sync Managers, by index.
+  std::vector<FmmuConfig> fmmus;                ///< Configured FMMUs, by index.
+};
+
 /// @brief Abstract interface for an EtherCAT fieldbus driver.
 ///
 /// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeDriver (SPoE).
@@ -166,6 +236,17 @@ class FieldbusDriver {
   /// @c configureProcessData or @c stop.  Before a successful @c configureProcessData the
   /// layout is empty (zero-sized spans, no slaves).
   virtual PdoLayout processDataLayout() = 0;
+
+  /// @brief Returns the static ESC configuration of every slave, captured by the last scan.
+  ///
+  /// A diagnostic snapshot (Sync Managers, FMMUs, mailbox, distributed clock, addresses) of what
+  /// the master programmed into each slave's EtherCAT Slave Controller. Read from cached state —
+  /// no bus I/O — and valid once @c scan()/@c configureProcessData() have run. Optional capability:
+  /// the default returns an empty vector for transports without an ESC (e.g. SPoE); the SOEM
+  /// driver overrides it.
+  ///
+  /// @return Per-slave configuration in bus order, or an empty vector if unsupported / unscanned.
+  virtual std::vector<SlaveConfig> busConfig() const { return {}; }
 
   /// @brief Exchanges one cycle of process data: sends @p outputs, receives into @p inputs.
   ///

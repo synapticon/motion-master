@@ -320,6 +320,23 @@ ProcessImageInfo DeviceManager::processImageInfo() const {
   return info;
 }
 
+std::vector<SlaveConfigInfo> DeviceManager::busConfig() const {
+  std::vector<SlaveConfigInfo> out;
+  if (!driver_) {
+    return out;
+  }
+  auto configs = driver_->busConfig();
+  out.reserve(configs.size());
+  for (auto& c : configs) {
+    std::string name;
+    if (const Device* device = findDevice(c.slavePosition)) {
+      name = device->name();
+    }
+    out.push_back(SlaveConfigInfo{.config = std::move(c), .deviceName = std::move(name)});
+  }
+  return out;
+}
+
 void DeviceManager::updateExpectedWkc() {
   using mm::comm::EtherCatState;
   // SOEM's working-counter model: per output-mapped slave +2, per input-mapped slave +1. In
@@ -600,6 +617,52 @@ void to_json(nlohmann::json& j, const ProcessImageInfo& info) {
        {"generations", info.generations},
        {"outputs", info.outputs},
        {"inputs", info.inputs}};
+}
+
+void to_json(nlohmann::json& j, const SlaveConfigInfo& info) {
+  const auto& c = info.config;
+  nlohmann::json syncManagers = nlohmann::json::array();
+  std::transform(c.syncManagers.begin(), c.syncManagers.end(), std::back_inserter(syncManagers),
+                 [](const mm::comm::SyncManagerConfig& sm) {
+                   return nlohmann::json{{"index", sm.index},
+                                         {"physicalStart", sm.physicalStart},
+                                         {"length", sm.length},
+                                         {"flags", sm.flags},
+                                         {"type", sm.type}};
+                 });
+  nlohmann::json fmmus = nlohmann::json::array();
+  std::transform(c.fmmus.begin(), c.fmmus.end(), std::back_inserter(fmmus),
+                 [](const mm::comm::FmmuConfig& f) {
+                   return nlohmann::json{{"index", f.index},
+                                         {"logicalStart", f.logicalStart},
+                                         {"length", f.length},
+                                         {"logicalStartBit", f.logicalStartBit},
+                                         {"logicalEndBit", f.logicalEndBit},
+                                         {"physicalStart", f.physicalStart},
+                                         {"physicalStartBit", f.physicalStartBit},
+                                         {"type", f.type},
+                                         {"active", f.active != 0}};
+                 });
+  j = {{"slavePosition", c.slavePosition},
+       {"deviceName", info.deviceName},
+       {"configuredAddress", c.configuredAddress},
+       {"aliasAddress", c.aliasAddress},
+       {"outputBits", c.outputBits},
+       {"inputBits", c.inputBits},
+       {"mailbox",
+        {{"writeLength", c.mailbox.writeLength},
+         {"writeOffset", c.mailbox.writeOffset},
+         {"readLength", c.mailbox.readLength},
+         {"readOffset", c.mailbox.readOffset},
+         {"protocols", c.mailbox.protocols}}},
+       {"dc",
+        {{"capable", c.dc.capable},
+         {"active", c.dc.active},
+         {"propagationDelay", c.dc.propagationDelay},
+         {"cycleTime", c.dc.cycleTime},
+         {"shift", c.dc.shift}}},
+       {"syncManagers", syncManagers},
+       {"fmmus", fmmus}};
 }
 
 void to_json(nlohmann::json& j, const DeviceManager& dm) { j = dm.devices(); }

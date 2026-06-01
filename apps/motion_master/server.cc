@@ -236,6 +236,12 @@ void Server::run() {
                  ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(nlohmann::json(deviceManager_.processImageInfo()).dump());
            })
+      .get("/api/bus-config",
+           [this](auto* res, auto* /*req*/) {
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                 ->end(nlohmann::json(deviceManager_.busConfig()).dump());
+           })
       .get("/api/devices/:slavePosition",
            [this](auto* res, auto* req) {
              uint16_t pos{};

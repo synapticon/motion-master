@@ -1098,6 +1098,28 @@ paths:
                     description: Input-mapped objects (TxPDO), in image order
                     items:
                       $ref: "#/components/schemas/ProcessImageObject"
+  /api/bus-config:
+    get:
+      summary: Inspect each slave's static EtherCAT Slave Controller configuration
+      description: >-
+        Returns the static ESC configuration the master programmed into every
+        slave during the last scan: station/alias addresses, mapped process-data
+        sizes, the mailbox transport windows, the distributed-clock setup, and the
+        configured Sync Managers and FMMUs. Read from cached state with no bus I/O
+        and valid once the bus has been scanned. The list is empty before any scan,
+        or when the active transport has no ESC (e.g. SPoE). Numeric fields (SM/FMMU
+        type, mailbox protocol bits, SM flags) are raw register values; the client
+        decodes them. `deviceName` is empty when no known device occupies the slave.
+      operationId: getBusConfig
+      responses:
+        "200":
+          description: Per-slave ESC configuration, in bus order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SlaveConfig"
 components:
   schemas:
     ProcessImageObject:
@@ -1130,6 +1152,164 @@ components:
           type: integer
           description: Width of the value in bits
           example: 32
+    SyncManagerConfig:
+      type: object
+      required: [index, physicalStart, length, flags, type]
+      properties:
+        index:
+          type: integer
+          description: Sync Manager number (0–7)
+          example: 2
+        physicalStart:
+          type: integer
+          description: Physical ESC memory start address the SM guards
+          example: 4352
+        length:
+          type: integer
+          description: Length of the guarded window in bytes
+          example: 12
+        flags:
+          type: integer
+          description: >-
+            Raw SM control/flags register (buffer mode, direction, watchdog,
+            enable) — decoded by the client
+          example: 100100
+        type:
+          type: integer
+          description: "0 unused, 1 MbxOut, 2 MbxIn, 3 Outputs, 4 Inputs"
+          example: 3
+    FmmuConfig:
+      type: object
+      required:
+        [index, logicalStart, length, logicalStartBit, logicalEndBit,
+         physicalStart, physicalStartBit, type, active]
+      properties:
+        index:
+          type: integer
+          description: FMMU number (0–3)
+          example: 0
+        logicalStart:
+          type: integer
+          description: Logical (bus-wide) start address
+          example: 0
+        length:
+          type: integer
+          description: Mapped length in bytes
+          example: 12
+        logicalStartBit:
+          type: integer
+          description: Start bit within the first logical byte
+          example: 0
+        logicalEndBit:
+          type: integer
+          description: End bit within the last logical byte
+          example: 7
+        physicalStart:
+          type: integer
+          description: Physical ESC start address (ties the FMMU to a Sync Manager)
+          example: 4352
+        physicalStartBit:
+          type: integer
+          description: Start bit within the first physical byte
+          example: 0
+        type:
+          type: integer
+          description: "ESC FMMU type: 1 read (inputs/TxPDO), 2 write (outputs/RxPDO)"
+          example: 2
+        active:
+          type: boolean
+          description: Whether the FMMU is active
+          example: true
+    SlaveConfig:
+      type: object
+      required:
+        [slavePosition, deviceName, configuredAddress, aliasAddress, outputBits,
+         inputBits, mailbox, dc, syncManagers, fmmus]
+      properties:
+        slavePosition:
+          type: integer
+          description: 1-based bus position
+          example: 1
+        deviceName:
+          type: string
+          description: Device name for this slave position, empty if unknown
+          example: "SOMANET Node"
+        configuredAddress:
+          type: integer
+          description: Station (configured) address assigned during scan
+          example: 4097
+        aliasAddress:
+          type: integer
+          description: Configured station alias from EEPROM
+          example: 0
+        outputBits:
+          type: integer
+          description: Mapped output (master→slave) bits
+          example: 96
+        inputBits:
+          type: integer
+          description: Mapped input (slave→master) bits
+          example: 128
+        mailbox:
+          type: object
+          required: [writeLength, writeOffset, readLength, readOffset, protocols]
+          properties:
+            writeLength:
+              type: integer
+              description: Write (master→slave) mailbox length in bytes; 0 if none
+              example: 128
+            writeOffset:
+              type: integer
+              description: Write mailbox physical ESC offset
+              example: 4096
+            readLength:
+              type: integer
+              description: Read (slave→master) mailbox length in bytes
+              example: 128
+            readOffset:
+              type: integer
+              description: Read mailbox physical ESC offset
+              example: 4224
+            protocols:
+              type: integer
+              description: >-
+                Supported-protocol bits (0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE,
+                0x10 SoE, 0x20 VoE) — decoded by the client
+              example: 14
+        dc:
+          type: object
+          required: [capable, active, propagationDelay, cycleTime, shift]
+          properties:
+            capable:
+              type: boolean
+              description: Slave has distributed-clock hardware
+              example: true
+            active:
+              type: boolean
+              description: SYNC0 generation enabled (false for SM-synchronous bring-up)
+              example: false
+            propagationDelay:
+              type: integer
+              description: Measured propagation delay in nanoseconds
+              example: 300
+            cycleTime:
+              type: integer
+              description: DC cycle time in nanoseconds
+              example: 0
+            shift:
+              type: integer
+              description: Shift from the cycle-modulus boundary in nanoseconds
+              example: 0
+        syncManagers:
+          type: array
+          description: Configured Sync Managers, by index
+          items:
+            $ref: "#/components/schemas/SyncManagerConfig"
+        fmmus:
+          type: array
+          description: Configured FMMUs, by index
+          items:
+            $ref: "#/components/schemas/FmmuConfig"
     AlStatusCode:
       type: object
       required: [code, name, description, terminal]

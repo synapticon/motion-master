@@ -191,8 +191,11 @@ std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIn
   }
   const uint8_t pdoCount = readU8(*countBytes);
 
-  for (uint8_t i = 1; i <= pdoCount; ++i) {
-    auto pdoIndexBytes = upload(assignmentIndex, i);
+  // The loop counter is wider than pdoCount's uint8_t on purpose: a device reporting 255 here
+  // would make a `uint8_t i <= 255` guard permanently true (i wraps 255->0), spinning forever.
+  // The subindex argument is narrowed back to uint8_t at the call.
+  for (unsigned i = 1; i <= pdoCount; ++i) {
+    auto pdoIndexBytes = upload(assignmentIndex, static_cast<uint8_t>(i));
     if (!pdoIndexBytes) {
       return std::unexpected(std::format("0x{:04X}:{:02X} (PDO assignment) read failed: {}",
                                          assignmentIndex, i, pdoIndexBytes.error()));
@@ -210,8 +213,9 @@ std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIn
     }
     const uint8_t entryCount = readU8(*entryCountBytes);
 
-    for (uint8_t e = 1; e <= entryCount; ++e) {
-      auto entryBytes = upload(mappingIndex, e);
+    // Wider counter for the same reason as the outer loop: entryCount == 255 must still terminate.
+    for (unsigned e = 1; e <= entryCount; ++e) {
+      auto entryBytes = upload(mappingIndex, static_cast<uint8_t>(e));
       if (!entryBytes) {
         return std::unexpected(std::format("0x{:04X}:{:02X} (PDO mapping entry) read failed: {}",
                                            mappingIndex, e, entryBytes.error()));
@@ -381,7 +385,11 @@ std::expected<int, std::string> reconcileDetectedModules(const Device& device) {
 
   int written = 0;
   std::string failures;
-  for (uint16_t sub = 1; sub <= slots; ++sub) {
+  // CoE subindices are 8-bit, so there are at most 255 module slots. Capping the (wider) counter
+  // at 255 both terminates — a `uint16_t sub <= 0xFFFF` guard would wrap and spin forever on a
+  // device reporting 65535 — and avoids truncating the subindex argument for sub > 255.
+  const unsigned slotCount = std::min<unsigned>(slots, 0xFFu);
+  for (unsigned sub = 1; sub <= slotCount; ++sub) {
     auto detected = device.upload(kDetectedModuleIdentList, static_cast<uint8_t>(sub));
     if (!detected || detected->size() != sizeof(uint32_t)) {
       continue;

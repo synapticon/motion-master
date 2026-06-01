@@ -484,4 +484,20 @@ TEST(DeviceReadPdoMappings, UnreadableMappingObjectIsAnError) {
   EXPECT_NE(result.error().find("1600"), std::string::npos);
 }
 
+TEST(DeviceReadPdoMappings, MaxAssignmentCountTerminates) {
+  // Regression: subindex 0 reporting 255 (the uint8_t max) must not wrap the loop counter.
+  // With a `uint8_t i` the guard `i <= 255` is permanently true and i wraps 255->0; the
+  // widened counter iterates exactly 255 (here all-unused) slots and then terminates.
+  SdoFakeDriver driver;
+  driver.programRead(0x1C12, 0x00, u8le(255));
+  for (unsigned s = 1; s <= 255; ++s) {
+    driver.programRead(0x1C12, static_cast<uint8_t>(s), u16le(0));  // unused assignment slot
+  }
+  Device device(1, driver);
+
+  auto result = device.readPdoMappings();
+  ASSERT_TRUE(result.has_value());
+  EXPECT_TRUE(device.pdoMappings().outputs.empty());
+}
+
 }  // namespace

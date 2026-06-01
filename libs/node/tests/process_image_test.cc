@@ -227,6 +227,27 @@ TEST(BuildProcessImage, RejectsMappingWiderThanItsWindow) {
   EXPECT_FALSE(image.has_value());
 }
 
+TEST(BuildProcessImage, RejectsImageLargerThanCapacity) {
+  // A driver layout whose image exceeds the fixed ProcessBuffer capacity must be rejected at the
+  // shared chokepoint — not left to produce out-of-bounds spans in exchangeProcessData. The size
+  // guard runs before any per-device work, so an empty device set is enough to exercise it.
+  std::vector<Device> devices;
+  PdoLayout layout;
+
+  layout.outputBytes = mm::comm::kMaxProcessImageBytes + 1;
+  layout.inputBytes = 0;
+  EXPECT_FALSE(buildProcessImage(layout, devices).has_value());
+
+  layout.outputBytes = 0;
+  layout.inputBytes = mm::comm::kMaxProcessImageBytes + 1;
+  EXPECT_FALSE(buildProcessImage(layout, devices).has_value());
+
+  // Exactly at capacity is accepted (no devices/mappings here, so an empty image).
+  layout.outputBytes = mm::comm::kMaxProcessImageBytes;
+  layout.inputBytes = mm::comm::kMaxProcessImageBytes;
+  EXPECT_TRUE(buildProcessImage(layout, devices).has_value());
+}
+
 TEST(DeviceManagerProcessData, ConfigurePublishesAndExchangePublishesInputs) {
   auto bus = std::make_unique<FakeBus>();
   programMapping(*bus);

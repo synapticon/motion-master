@@ -373,6 +373,20 @@ class DeviceManager {
                                                         DeviceParameterValue value);
 
  private:
+  /// @brief Resolves a caller-supplied position list to validated bus positions.
+  ///
+  /// An empty list expands to every discovered device (in bus order). A non-empty list is
+  /// validated against the device set — any position that is not a discovered device is
+  /// rejected — so untrusted caller input can never reach the driver's slave-indexed
+  /// accessors (which index a fixed-size slave array without bounds-checking) out of range.
+  /// Call with a driver held; the device set defines the valid range.
+  ///
+  /// @param positions  1-based slave positions, or empty for all devices.
+  /// @return The validated positions (or all device positions when empty), or an error
+  ///         string naming the first position that is not a discovered device.
+  std::expected<std::vector<uint16_t>, std::string> resolveTargets(
+      const std::vector<uint16_t>& positions) const;
+
   /// @brief Recomputes the expected working counter from the devices' current AL states and
   ///        PDO presence. Called after configure and after each state transition.
   void updateExpectedWkc();

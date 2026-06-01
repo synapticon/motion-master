@@ -337,6 +337,28 @@ std::vector<SlaveConfigInfo> DeviceManager::busConfig() const {
   return out;
 }
 
+std::expected<std::vector<uint16_t>, std::string> DeviceManager::resolveTargets(
+    const std::vector<uint16_t>& positions) const {
+  if (positions.empty()) {
+    std::vector<uint16_t> all;
+    all.reserve(devices_.size());
+    std::transform(devices_.begin(), devices_.end(), std::back_inserter(all),
+                   [](const Device& d) { return d.slavePosition(); });
+    return all;
+  }
+  // Validate every caller-supplied position against the device set before it reaches the
+  // driver: the slave-indexed driver accessors (slaveState, readStates, readDiagnostics,
+  // readDcSync, transitionToState) index a fixed-size slavelist without bounds-checking, so an
+  // unknown/out-of-range position would be an out-of-bounds read (and, for a state change, a
+  // write to a bogus station). Reject it here, mirroring the 404 the single-device routes give.
+  auto unknown =
+      std::ranges::find_if(positions, [this](uint16_t pos) { return findDevice(pos) == nullptr; });
+  if (unknown != positions.end()) {
+    return std::unexpected("unknown device position " + std::to_string(*unknown));
+  }
+  return positions;
+}
+
 void DeviceManager::updateExpectedWkc() {
   using mm::comm::EtherCatState;
   // SOEM's working-counter model: per output-mapped slave +2, per input-mapped slave +1. In
@@ -372,12 +394,11 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   if (devices_.empty()) {
     return std::unexpected("no devices — call scan() first");
   }
-  std::vector<uint16_t> targets = positions;
-  if (targets.empty()) {
-    targets.reserve(devices_.size());
-    std::transform(devices_.begin(), devices_.end(), std::back_inserter(targets),
-                   [](const Device& d) { return d.slavePosition(); });
+  auto resolved = resolveTargets(positions);
+  if (!resolved) {
+    return std::unexpected(resolved.error());
   }
+  std::vector<uint16_t> targets = std::move(*resolved);
 
   // React to the requested state. Process data is exchanged only in SAFE-OP and OP, so Motion
   // Master configures or tears down the mapping around the user-driven AL transition:
@@ -458,12 +479,11 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::getDevic
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
   }
-  std::vector<uint16_t> targets = positions;
-  if (targets.empty()) {
-    targets.reserve(devices_.size());
-    std::transform(devices_.begin(), devices_.end(), std::back_inserter(targets),
-                   [](const Device& d) { return d.slavePosition(); });
+  auto resolved = resolveTargets(positions);
+  if (!resolved) {
+    return std::unexpected(resolved.error());
   }
+  std::vector<uint16_t> targets = std::move(*resolved);
   auto raw = driver_->readStates(targets);
   if (!raw) {
     return std::unexpected(raw.error());
@@ -481,12 +501,11 @@ std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> DeviceManager::ge
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
   }
-  std::vector<uint16_t> targets = positions;
-  if (targets.empty()) {
-    targets.reserve(devices_.size());
-    std::transform(devices_.begin(), devices_.end(), std::back_inserter(targets),
-                   [](const Device& d) { return d.slavePosition(); });
+  auto resolved = resolveTargets(positions);
+  if (!resolved) {
+    return std::unexpected(resolved.error());
   }
+  std::vector<uint16_t> targets = std::move(*resolved);
   auto raw = driver_->readDiagnostics(targets);
   if (!raw) {
     return std::unexpected(raw.error());
@@ -508,12 +527,11 @@ std::expected<std::vector<DcSyncInfo>, std::string> DeviceManager::getDcSync(
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
   }
-  std::vector<uint16_t> targets = positions;
-  if (targets.empty()) {
-    targets.reserve(devices_.size());
-    std::transform(devices_.begin(), devices_.end(), std::back_inserter(targets),
-                   [](const Device& d) { return d.slavePosition(); });
+  auto resolved = resolveTargets(positions);
+  if (!resolved) {
+    return std::unexpected(resolved.error());
   }
+  std::vector<uint16_t> targets = std::move(*resolved);
   auto raw = driver_->readDcSync(targets);
   if (!raw) {
     return std::unexpected(raw.error());

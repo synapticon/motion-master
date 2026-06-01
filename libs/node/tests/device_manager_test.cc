@@ -387,4 +387,27 @@ TEST(DeviceManagerDcSync, ErrorsWithoutDriver) {
   EXPECT_FALSE(dm.getDcSync({}).has_value());
 }
 
+TEST(DeviceManagerPositions, BulkMethodsRejectUnknownPosition) {
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true, 1)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  // Only position 1 was discovered. A caller-supplied position outside the device set must be
+  // rejected up front (mirroring the single-device 404) — never forwarded to the driver, where
+  // it would index a fixed-size slave array out of bounds. Regression for the unvalidated
+  // positions path through getDeviceStates / getDeviceDiagnostics / getDcSync / transitionToState.
+  EXPECT_FALSE(dm.getDeviceStates({99}).has_value());
+  EXPECT_FALSE(dm.getDeviceDiagnostics({99}).has_value());
+  EXPECT_FALSE(dm.getDcSync({99}).has_value());
+  EXPECT_FALSE(
+      dm.transitionToState({99}, EtherCatState::PreOp, std::chrono::milliseconds(0)).has_value());
+
+  // A mix of valid and invalid is still rejected — the whole request fails on the unknown one.
+  EXPECT_FALSE(dm.getDeviceStates({1, 99}).has_value());
+
+  // The empty list (all devices) and the known position still succeed.
+  EXPECT_TRUE(dm.getDeviceStates({}).has_value());
+  EXPECT_TRUE(dm.getDeviceStates({1}).has_value());
+}
+
 }  // namespace

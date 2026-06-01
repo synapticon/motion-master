@@ -206,6 +206,12 @@ GET /api/monitoring/pdos → [{"index": "6064:00", "name": "actual_position"}, .
 
 The array order is stable for the lifetime of a monitoring session. Up to 5 simultaneous clients; ~40 × 32-bit values per message ≈ 450 bytes at 1 ms cycles.
 
+### Fieldbus Capability Surface
+
+What the fieldbus exposes today, and what is deliberately deferred. **Bus-level** (sidebar group *Fieldbus*): Control (AL state), Configuration (static SM/FMMU/DC/mailbox/addresses), Process Image (PDO layout + WKC health), Diagnostics (live ESC error counters / link / watchdog), DC Sync (live distributed-clock deviation — system-time difference 0x092C). **Per-device**: FoE, Parameters (CoE object dictionary + SDO), Registers (ESC read/write), SII (EEPROM read).
+
+Deferred fieldbus work is catalogued in NEXTGEN.md (session 2026-06-01), ranked by value-vs-effort — read it before adding a new fieldbus view rather than re-deriving the list. Top of the queue: a **topology / cabling map** (near-pure presentation of data SOEM already caches — `topology`/`activeports`/`parent`/`parentport` + the per-port link state Diagnostics already reads) and a **master-side frame/WKC health timeline** (catches intermittent faults a point-in-time WKC reading misses). Lower priority / higher risk: CoE Diagnosis History (0x10F3), device-locate blink, DC SYNC0 activation, PDO remapping, SII write. Out of scope for SOMANET: cable redundancy and the non-CoE mailbox protocols (EoE/SoE/AoE/VoE).
+
 ### CiA402 / Somanet
 
 `Device → Cia402Drive` via inheritance (is-a relationship, shallow). **No** `Cia402Drive → SomanetDevice` inheritance — Somanet-specific OD access is free functions in `namespace somanet`; multi-step procedures (encoder calibration, auto-tuning) are `ICyclicTask` implementations that take a `Cia402Drive&`.

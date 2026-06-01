@@ -704,3 +704,28 @@ Idempotent (the already-matches skip means re-running is a no-op) and **vendor-n
 **Where it runs.** Wired into `DeviceManager::transitionToState`: when the target is PRE-OP, after the transition settles, the reconcile runs for every device that actually reached PRE-OP (`!error && alState == PreOp`). PRE-OP is the earliest point the write is possible — `0xF030`/`0xF050` are SDO mailbox objects, unavailable in INIT, and the mismatch must be cleared before SAFE-OP. Decided to make it **always-on** (no config flag, no separate HTTP route) and **best-effort**: failures are logged at warn level but never fail the transition.
 
 **Open question — persistence.** The `0xF030` write is volatile on some firmwares (they require a `0x1010` store, or re-evaluate the list every boot). The current design re-runs on every PRE-OP transition, so it is self-healing regardless. If a mismatch is observed to reappear after a power cycle on real hardware, add an explicit store; until then the per-transition reconcile is sufficient and avoids unnecessary EEPROM wear.
+
+## Session 2026-06-01 — DC sync diagnostics, and the remaining fieldbus surface
+
+**DC sync health page.** Added a distributed-clock synchronisation diagnostic alongside the existing bus-health (ESC error-counter) one. `FieldbusDriver::readDcSync(positions)` (default "unsupported" for ESC-less transports; SOEM override) reads each DC-capable slave's **system-time delay (0x0928)** and **system-time difference (0x092C)** in one 8-byte FPRD. The reference clock is the first `hasdc` slave (SOEM elects it in `ecx_configdc`); its own difference is zero. 0x092C decodes as bits 0–30 magnitude + bit 31 sign → a signed-nanosecond deviation (positive = local clock ahead of the reference). Surfaced end-to-end: `mm::comm::DcSyncDiagnostics` → `DeviceManager::getDcSync` + `DcSyncInfo`(+`to_json`) → `GET /api/dc-sync?positions=` → a polling **"DC Sync"** page under the **Fieldbus** sidebar group.
+
+The figures are meaningful only while exchanging in SAFE-OP/OP: this stack runs DC in **free-run** (`ecx_configdc` measures and elects a reference, but `ecx_dcsync0` is deliberately *not* called — no SYNC0 pulse), yet `ecx_send_processdata` still distributes the reference system time via the cyclic FRMW, so the slaves' drift-compensation loops run and 0x092C converges toward zero. A value that stays large or grows means a slave is not locked.
+
+**Roadmap — fieldbus capabilities not yet exposed.** The exposed surface is now bus-level Control / Configuration / Process Image / Diagnostics / DC Sync, plus per-device FoE / Parameters (CoE OD + SDO) / Registers (ESC) / SII (EEPROM read). What remains, ranked by value-vs-effort, deferred for a later session:
+
+*Tier 1 — high value, mostly presentation of data the driver already caches (read-only, no RT):*
+1. **Topology / cabling map.** SOEM already caches per-slave `topology`, `activeports`, `consumedports`, `parent`, `parentport`, `entryport`, and the `DCnext`/`DCprevious` chain (`extern/.../soem/ec_main.h`). Combined with the per-port link state already read in Diagnostics (DL Status 0x0110), this renders the physical bus tree — line/ring/branch, hot-connect groups, which port connects to which neighbour. The view a field engineer reaches for first; spots a miscabled port instantly. Shape: a `busTopology()` driver method (cached read) + a tree/graph UI.
+2. **Frame / WKC health timeline (master-side).** Process Image shows `lastWkc`/`expectedWkc` as a point value; the GameLoop gets a WKC every cycle. Accumulate master-side stats over time — WKC-mismatch count, lost frames, longest cycle overrun, "drops in the last minute" — to catch *intermittent* faults a point-in-time reading walks past. Distinct from the slave-side ESC counters. Pairs with the delta-tracking follow-up already noted for the Diagnostics page.
+
+*Tier 2 — genuinely new information, moderate effort, read-mostly:*
+3. **Diagnosis History — CoE 0x10F3 (ETG.1020).** The standardised per-slave event log: a ring buffer of timestamped diagnostic messages the slave itself recorded (error/warning/info + parameters) — the slave's own words, categorically different from the master-side counters. Built entirely on the existing SDO read; the work is decoding the message format. Confirm SOMANET firmware populates 0x10F3 before committing to it.
+4. **Explicit device identification ("locate"/blink).** Command a slave to flash its ID LED so a tech can physically find it in a rack. Small, installer-friendly.
+
+*Tier 3 — real capability, but write/RT/risk; deliberate actions, not toggles:*
+5. **DC SYNC0 activation** (`ecx_dcsync0`) — turn on true DC-synchronous operation with configurable cycle/shift. The natural *control* counterpart to the DC Sync diagnostic above; what you'd do for tight coordinated multi-axis motion. RT implications.
+6. **PDO remapping** — let the user change *which* objects are in the cyclic image (write `0x1C12`/`0x1C13` + the `0x160x`/`0x1A0x` mapping objects in PRE-OP), not just view the existing mapping. Most involved.
+7. **SII / station-alias write** (`ecx_siiwrite`) — assign station aliases / reflash EEPROM. Higher risk; SII is read-only today.
+
+*Out of scope for SOMANET (absence is correct, not a gap):* cable redundancy, and the non-CoE mailbox protocols (EoE / SoE / AoE / VoE) — SOMANET is CoE-only.
+
+Top pick when revisited: the **topology map** (#1) — near-pure presentation of already-cached data; **frame-health timeline** (#2) a close second, as it closes the one operational blind spot (intermittent faults).

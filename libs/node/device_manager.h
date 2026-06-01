@@ -100,6 +100,19 @@ struct DeviceDiagnosticsInfo {
 /// @brief Serialises a DeviceDiagnosticsInfo (and its nested per-port counters) to JSON.
 void to_json(nlohmann::json& j, const DeviceDiagnosticsInfo& info);
 
+/// @brief A slave's live distributed-clock sync status plus its resolved device name.
+///
+/// API-facing wrapper around @c mm::comm::DcSyncDiagnostics that adds the human-readable device
+/// name (from the device set, empty when no matching device is known), built by
+/// @c DeviceManager::getDcSync on the (non-RT) caller's thread.
+struct DcSyncInfo {
+  mm::comm::DcSyncDiagnostics dcSync;  ///< Decoded DC sync status as read by the driver.
+  std::string deviceName;              ///< Device name for this slave position, empty if unknown.
+};
+
+/// @brief Serialises a DcSyncInfo to JSON.
+void to_json(nlohmann::json& j, const DcSyncInfo& info);
+
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.
 ///
 /// The driver is not required at construction — call @c init() to supply one.
@@ -283,6 +296,23 @@ class DeviceManager {
   /// @return Per-device diagnostics in the order targeted, or an error string if no driver is
   ///         initialised, the transport has no ESC, or a register read fails.
   std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> getDeviceDiagnostics(
+      const std::vector<uint16_t>& positions);
+
+  /// @brief Reads live distributed-clock synchronisation status for a set of devices, resolving
+  ///        each slave's device name.
+  ///
+  /// If @p positions is empty, all discovered devices are queried. Forwards to
+  /// @c FieldbusDriver::readDcSync (FPRD reads — not cached) and wraps each result with its device
+  /// name. The system-time difference is meaningful only while the bus is exchanging in
+  /// SAFE-OP/OP; a page polls this and watches for a slave whose deviation from the reference
+  /// clock stays large or grows rather than converging toward zero.
+  ///
+  /// Must be called after both @c init() and @c scan().
+  ///
+  /// @param positions  1-based slave positions to query; empty = all devices.
+  /// @return Per-device DC sync status in the order targeted, or an error string if no driver is
+  ///         initialised, the transport has no ESC, or a register read fails.
+  std::expected<std::vector<DcSyncInfo>, std::string> getDcSync(
       const std::vector<uint16_t>& positions);
 
   /// @brief Reports whether a single device is currently online.

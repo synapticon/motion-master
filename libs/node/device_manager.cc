@@ -503,6 +503,33 @@ std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> DeviceManager::ge
   return result;
 }
 
+std::expected<std::vector<DcSyncInfo>, std::string> DeviceManager::getDcSync(
+    const std::vector<uint16_t>& positions) {
+  if (!driver_) {
+    return std::unexpected("no driver — call init() first");
+  }
+  std::vector<uint16_t> targets = positions;
+  if (targets.empty()) {
+    targets.reserve(devices_.size());
+    std::transform(devices_.begin(), devices_.end(), std::back_inserter(targets),
+                   [](const Device& d) { return d.slavePosition(); });
+  }
+  auto raw = driver_->readDcSync(targets);
+  if (!raw) {
+    return std::unexpected(raw.error());
+  }
+  std::vector<DcSyncInfo> result;
+  result.reserve(raw->size());
+  for (auto& d : *raw) {
+    std::string name;
+    if (const Device* device = findDevice(d.slavePosition)) {
+      name = device->name();
+    }
+    result.push_back(DcSyncInfo{.dcSync = d, .deviceName = std::move(name)});
+  }
+  return result;
+}
+
 std::expected<bool, std::string> DeviceManager::isDeviceOnline(uint16_t slavePosition) {
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
@@ -712,6 +739,16 @@ void to_json(nlohmann::json& j, const DeviceDiagnosticsInfo& info) {
        {"pdiError", d.pdiError},
        {"processDataWatchdog", d.processDataWatchdog},
        {"pdiWatchdog", d.pdiWatchdog}};
+}
+
+void to_json(nlohmann::json& j, const DcSyncInfo& info) {
+  const auto& d = info.dcSync;
+  j = {{"slavePosition", d.slavePosition},
+       {"deviceName", info.deviceName},
+       {"dcCapable", d.dcCapable},
+       {"referenceClock", d.referenceClock},
+       {"propagationDelay", d.propagationDelay},
+       {"systemTimeDifference", d.systemTimeDifference}};
 }
 
 void to_json(nlohmann::json& j, const DeviceManager& dm) { j = dm.devices(); }

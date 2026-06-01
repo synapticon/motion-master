@@ -210,6 +210,29 @@ struct SlaveDiagnostics {
   uint8_t pdiWatchdog;          ///< PDI watchdog expirations (0x0443).
 };
 
+/// @brief Live distributed-clock synchronisation status for one slave, read from its ESC.
+///
+/// A point-in-time snapshot of how tightly each slave's distributed-clock unit is tracking the
+/// bus reference clock. Produced by @c FieldbusDriver::readDcSync via FPRD reads of the DC
+/// registers (system-time delay 0x0928 and system-time difference 0x092C) — live, not cached.
+///
+/// The reference clock (the first DC-capable slave) defines bus time; every other DC slave
+/// continuously corrects its local clock toward it. @c systemTimeDifference is the live
+/// deviation: it converges toward zero once the bus has been exchanging process data long
+/// enough for the slaves' drift-compensation loops to settle, and a value that stays large or
+/// grows means a slave is not locked to the reference. The figure is only meaningful while the
+/// bus is exchanging in SAFE-OP/OP, since the master distributes the reference time in the
+/// cyclic frame. Non-DC slaves report @c dcCapable false and zeroed values.
+struct DcSyncDiagnostics {
+  uint16_t slavePosition;        ///< 1-based bus position.
+  bool dcCapable;                ///< Slave has distributed-clock hardware (cached @c hasdc).
+  bool referenceClock;           ///< This slave is the DC reference clock (first DC-capable slave).
+  int32_t propagationDelay;      ///< System-time delay / propagation delay (0x0928), ns.
+  int32_t systemTimeDifference;  ///< Signed deviation of the local system time from the reference
+                                 ///< (0x092C), ns. Positive = local clock ahead of the reference,
+                                 ///< negative = behind; zero on the reference clock itself.
+};
+
 /// @brief Abstract interface for an EtherCAT fieldbus driver.
 ///
 /// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeDriver (SPoE).
@@ -346,6 +369,28 @@ class FieldbusDriver {
   virtual std::expected<std::vector<SlaveDiagnostics>, std::string> readDiagnostics(
       const std::vector<uint16_t>& /*positions*/) {
     return std::unexpected("diagnostics not supported by this transport");
+  }
+
+  /// @brief Reads live distributed-clock synchronisation status for each slave in @p positions.
+  ///
+  /// Performs FPRD reads of the DC system-time delay (0x0928) and system-time difference (0x092C)
+  /// registers for every DC-capable slave and decodes the signed deviation of each slave's local
+  /// clock from the bus reference. The reference clock is the first DC-capable slave; its own
+  /// difference is zero. Values are meaningful only while the bus is exchanging process data in
+  /// SAFE-OP/OP (the reference time is distributed in the cyclic frame), and the difference
+  /// converges toward zero as the slaves' drift-compensation loops settle — poll this and watch
+  /// for one that stays large or grows. Serialised with other control-plane operations via the
+  /// socket mutex; must not overlap with @c exchangeProcessData.
+  ///
+  /// Optional capability: the default returns an error for transports without an ESC (e.g. SPoE);
+  /// the SOEM driver overrides it.
+  ///
+  /// @param positions  1-based slave positions to read.
+  /// @return Decoded DC sync status per position in the same order as @p positions, or an error
+  ///         string if the transport has no ESC or a register read fails.
+  virtual std::expected<std::vector<DcSyncDiagnostics>, std::string> readDcSync(
+      const std::vector<uint16_t>& /*positions*/) {
+    return std::unexpected("distributed-clock diagnostics not supported by this transport");
   }
 
   /// @brief Reads an object dictionary entry via CoE SDO upload.

@@ -851,6 +851,44 @@ paths:
           description: A `positions` value is not a valid integer
         "500":
           $ref: "#/components/responses/DriverError"
+  /api/dc-sync:
+    get:
+      summary: Read live distributed-clock synchronisation status for devices
+      operationId: getDcSync
+      description: >
+        Reads each slave's distributed-clock unit live from its EtherCAT Slave Controller
+        (system-time delay 0x0928 and system-time difference 0x092C) via FPRD. The reference clock
+        is the first DC-capable slave; every other DC slave continuously corrects its local clock
+        toward it, and `systemTimeDifference` is the live deviation in nanoseconds. The figure is
+        meaningful only while the bus is exchanging process data in SAFE-OP/OP (the reference time
+        is distributed in the cyclic frame) and converges toward zero as the slaves' drift loops
+        settle — poll this endpoint and watch for a slave whose deviation stays large or grows
+        rather than an absolute value. Non-DC slaves report `dcCapable` false with zeroed values.
+        Omit `positions` to query all discovered devices. Returns 500 for transports without an ESC
+        (e.g. SPoE).
+      parameters:
+        - name: positions
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Comma-separated list of 1-based slave positions to query (e.g. `1,2,3`).
+            Omit to query all discovered devices.
+          example: "1,2"
+      responses:
+        "200":
+          description: Decoded DC sync status for each queried device
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DcSyncStatus"
+        "400":
+          description: A `positions` value is not a valid integer
+        "500":
+          $ref: "#/components/responses/DriverError"
   /api/devices/state:
     get:
       summary: Read current AL state for devices
@@ -1407,6 +1445,42 @@ components:
         pdiWatchdog:
           type: integer
           description: "PDI watchdog expirations (0x0443)"
+          example: 0
+    DcSyncStatus:
+      type: object
+      required:
+        [slavePosition, deviceName, dcCapable, referenceClock, propagationDelay,
+         systemTimeDifference]
+      properties:
+        slavePosition:
+          type: integer
+          description: 1-based position on the fieldbus
+          example: 1
+        deviceName:
+          type: string
+          description: Device name for this slave position, empty if unknown
+          example: "SOMANET Node"
+        dcCapable:
+          type: boolean
+          description: Slave has distributed-clock hardware
+          example: true
+        referenceClock:
+          type: boolean
+          description: >-
+            This slave is the DC reference clock (the first DC-capable slave) — it defines bus
+            time, so its own systemTimeDifference is zero
+          example: false
+        propagationDelay:
+          type: integer
+          description: "System-time delay / propagation delay (0x0928), nanoseconds"
+          example: 300
+        systemTimeDifference:
+          type: integer
+          description: >-
+            Signed deviation of the local system time from the reference clock (0x092C), in
+            nanoseconds. Positive = local clock ahead of the reference, negative = behind; zero on
+            the reference clock. Meaningful only while exchanging in SAFE-OP/OP; converges toward
+            zero as the drift-compensation loop settles
           example: 0
     AlStatusCode:
       type: object

@@ -346,6 +346,64 @@ std::expected<std::vector<SlaveDiagnostics>, std::string> SoemFieldbusDriver::re
   return result;
 }
 
+std::expected<std::vector<DcSyncDiagnostics>, std::string> SoemFieldbusDriver::readDcSync(
+    const std::vector<uint16_t>& positions) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
+
+  // The reference clock is the first DC-capable slave in bus order — SOEM elects it during
+  // ecx_configdc and distributes its system time to the rest in the cyclic frame. Find it once so
+  // each queried slave can be flagged; its own system-time difference is zero by definition.
+  uint16_t referencePos = 0;
+  for (int i = 1; i <= ctx_->slavecount; ++i) {
+    if (ctx_->slavelist[i].hasdc != 0) {
+      referencePos = static_cast<uint16_t>(i);
+      break;
+    }
+  }
+
+  std::vector<DcSyncDiagnostics> result;
+  result.reserve(positions.size());
+  for (uint16_t pos : positions) {
+    DcSyncDiagnostics d{};
+    d.slavePosition = pos;
+    d.dcCapable = ctx_->slavelist[pos].hasdc != 0;
+    d.referenceClock = (pos == referencePos);
+    if (!d.dcCapable) {
+      // Non-DC slave: no DC unit, so the registers carry no meaningful time — report zeroed.
+      result.push_back(d);
+      continue;
+    }
+
+    // System-time delay (0x0928, 4 bytes) and system-time difference (0x092C, 4 bytes) are
+    // contiguous — read both in one FPRD. Both are little-endian on the wire.
+    const uint16_t configAddr = ctx_->slavelist[pos].configadr;
+    std::array<uint8_t, 8> dc{};
+    if (ecx_FPRD(&ctx_->port, configAddr, 0x0928, static_cast<uint16_t>(dc.size()), dc.data(),
+                 EC_TIMEOUTRET) != 1) {
+      return std::unexpected(std::format("FPRD slave {} DC sync registers (0x0928) failed", pos));
+    }
+
+    const uint32_t delay = dc[0] | (static_cast<uint32_t>(dc[1]) << 8) |
+                           (static_cast<uint32_t>(dc[2]) << 16) |
+                           (static_cast<uint32_t>(dc[3]) << 24);
+    const uint32_t diffRaw = dc[4] | (static_cast<uint32_t>(dc[5]) << 8) |
+                             (static_cast<uint32_t>(dc[6]) << 16) |
+                             (static_cast<uint32_t>(dc[7]) << 24);
+
+    // System-time difference (0x092C): bits 0–30 are the mean deviation magnitude in ns; bit 31 is
+    // the sign — set when the local copy of the system time is smaller than the reference (the
+    // local clock is behind). Map to a signed figure where positive = ahead, negative = behind.
+    const int32_t magnitude = static_cast<int32_t>(diffRaw & 0x7FFFFFFFu);
+    d.propagationDelay = static_cast<int32_t>(delay);
+    d.systemTimeDifference = (diffRaw & 0x80000000u) ? -magnitude : magnitude;
+    result.push_back(d);
+  }
+  return result;
+}
+
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uint16_t slavePosition,
                                                                              uint16_t index,
                                                                              uint8_t subindex) {

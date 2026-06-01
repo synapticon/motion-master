@@ -205,6 +205,7 @@ export default function RootLayout() {
           <NavItem to="/bus-config" label="Configuration" />
           <NavItem to="/process-image" label="Process Image" />
           <NavItem to="/bus-diagnostics" label="Diagnostics" />
+          <NavItem to="/dc-sync" label="DC Sync" />
 
           <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Server</p>
           <NavItem to="/log" label="Log" />

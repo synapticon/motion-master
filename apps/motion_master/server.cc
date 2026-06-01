@@ -256,6 +256,38 @@ void Server::run() {
                  ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(nlohmann::json(*r).dump());
            })
+      .get("/api/dc-sync",
+           [this](auto* res, auto* req) {
+             std::vector<uint16_t> positions;
+             auto posParam = req->getQuery("positions");
+             if (!posParam.empty()) {
+               std::string posStr(posParam);
+               std::istringstream ss(posStr);
+               std::string token;
+               while (std::getline(ss, token, ',')) {
+                 uint16_t pos{};
+                 auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), pos);
+                 if (ec != std::errc() || ptr != token.data() + token.size()) {
+                   res->writeStatus("400 Bad Request")
+                       ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                       ->end();
+                   return;
+                 }
+                 positions.push_back(pos);
+               }
+             }
+             auto r = deviceManager_.getDcSync(positions);
+             if (!r) {
+               res->writeStatus("500 Internal Server Error")
+                   ->writeHeader("Content-Type", "application/json")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end(nlohmann::json{{"error", r.error()}}.dump());
+               return;
+             }
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                 ->end(nlohmann::json(*r).dump());
+           })
       .get("/api/devices",
            [this](auto* res, auto* /*req*/) {
              res->writeHeader("Content-Type", "application/json")

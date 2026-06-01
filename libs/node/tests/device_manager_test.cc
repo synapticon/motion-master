@@ -41,6 +41,9 @@ class FakeDriver : public FieldbusDriver {
   /// Returned verbatim by readDiagnostics() — empty unless a test populates it.
   std::vector<mm::comm::SlaveDiagnostics> diagnosticsData;
 
+  /// Returned verbatim by readDcSync() — empty unless a test populates it.
+  std::vector<mm::comm::DcSyncDiagnostics> dcSyncData;
+
   std::expected<void, std::string> init() override {
     if (!initSucceeds_) {
       return std::unexpected("fake init failure");
@@ -76,6 +79,11 @@ class FakeDriver : public FieldbusDriver {
   std::expected<std::vector<SlaveDiagnostics>, std::string> readDiagnostics(
       const std::vector<uint16_t>&) override {
     return diagnosticsData;
+  }
+
+  std::expected<std::vector<mm::comm::DcSyncDiagnostics>, std::string> readDcSync(
+      const std::vector<uint16_t>&) override {
+    return dcSyncData;
   }
 
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t, uint8_t) override {
@@ -341,6 +349,42 @@ TEST(DeviceManagerDiagnostics, EnrichesDriverDiagnosticsWithDeviceName) {
 TEST(DeviceManagerDiagnostics, ErrorsWithoutDriver) {
   DeviceManager dm;
   EXPECT_FALSE(dm.getDeviceDiagnostics({}).has_value());
+}
+
+TEST(DeviceManagerDcSync, EnrichesDriverDcSyncWithDeviceName) {
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->deviceName = "Axis A";
+  driver->dcSyncData = {mm::comm::DcSyncDiagnostics{.slavePosition = 1,
+                                                    .dcCapable = true,
+                                                    .referenceClock = true,
+                                                    .propagationDelay = 300,
+                                                    .systemTimeDifference = -42}};
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  // getDcSync() passes the driver's per-slave DC status through and attaches the resolved name.
+  auto result = dm.getDcSync({});
+  ASSERT_TRUE(result.has_value());
+  ASSERT_EQ(result->size(), 1u);
+  EXPECT_EQ((*result)[0].deviceName, "Axis A");
+  EXPECT_EQ((*result)[0].dcSync.slavePosition, 1);
+  EXPECT_TRUE((*result)[0].dcSync.referenceClock);
+  EXPECT_EQ((*result)[0].dcSync.systemTimeDifference, -42);
+
+  // to_json exposes the resolved name alongside the decoded DC fields.
+  nlohmann::json j = (*result)[0];
+  EXPECT_EQ(j.at("deviceName"), "Axis A");
+  EXPECT_EQ(j.at("dcCapable"), true);
+  EXPECT_EQ(j.at("referenceClock"), true);
+  EXPECT_EQ(j.at("propagationDelay"), 300);
+  EXPECT_EQ(j.at("systemTimeDifference"), -42);
+}
+
+TEST(DeviceManagerDcSync, ErrorsWithoutDriver) {
+  DeviceManager dm;
+  EXPECT_FALSE(dm.getDcSync({}).has_value());
 }
 
 }  // namespace

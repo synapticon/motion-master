@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -172,6 +173,43 @@ struct SlaveConfig {
   std::vector<FmmuConfig> fmmus;                ///< Configured FMMUs, by index.
 };
 
+/// @brief Per-port link state and error counters decoded from a slave's ESC.
+///
+/// Each EtherCAT Slave Controller has up to four physical ports; the counters are 8-bit and
+/// saturate at 255 (they do not wrap) and are cleared only by a power cycle or an explicit
+/// write — so callers interpret them as a monotonic "errors since reset" figure and watch for
+/// a rising delta rather than an absolute value. Link state is decoded from DL Status (0x0110);
+/// the counters come from the error-counter block (0x0300–0x0313).
+struct PortDiagnostics {
+  bool linkUp;             ///< Physical link detected on this port (DL Status link bit).
+  bool loopClosed;         ///< Loop closed on this port (no downstream slave, or port disabled).
+  bool communication;      ///< Stable communication established on this port (DL Status).
+  uint8_t invalidFrame;    ///< Invalid-frame counter: frames with a bad FCS/structure (0x0300+).
+  uint8_t rxError;         ///< Physical-layer RX error counter: RX_ER from the PHY (0x0301+).
+  uint8_t forwardedError;  ///< Forwarded RX error counter: errors flagged by an upstream ESC
+                           ///< (0x0308+). Pinpoints the segment where corruption began.
+  uint8_t lostLink;        ///< Lost-link counter: link-down events on this port (0x0310+).
+};
+
+/// @brief Decoded health diagnostics for one slave, read live from its ESC registers.
+///
+/// A point-in-time snapshot of the link-quality and watchdog counters that surface a degrading
+/// bus before it drops out of OP. Produced by @c FieldbusDriver::readDiagnostics via FPRD reads
+/// (unlike @c busConfig, which is a cached snapshot — these are live). The per-port counters
+/// localise a fault to a specific cable/connector; the watchdog counters distinguish a slave
+/// that stopped receiving process data from a master-side problem.
+struct SlaveDiagnostics {
+  uint16_t slavePosition;                ///< 1-based bus position.
+  std::array<PortDiagnostics, 4> ports;  ///< Per-port link state and error counters (ports 0–3).
+  uint8_t processingUnitError;           ///< ECAT processing-unit error counter (0x030C): datagrams
+                                         ///< that reached the processing unit malformed.
+  uint8_t pdiError;             ///< PDI error counter (0x030D): problems on the slave-local
+                                ///< process-data interface.
+  uint8_t processDataWatchdog;  ///< Process-data (SM) watchdog expirations (0x0442): the
+                                ///< slave stopped seeing fresh outputs.
+  uint8_t pdiWatchdog;          ///< PDI watchdog expirations (0x0443).
+};
+
 /// @brief Abstract interface for an EtherCAT fieldbus driver.
 ///
 /// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeDriver (SPoE).
@@ -289,6 +327,26 @@ class FieldbusDriver {
   ///         error string if the hardware read fails.
   virtual std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& positions) = 0;
+
+  /// @brief Reads live link-quality and watchdog diagnostics for each slave in @p positions.
+  ///
+  /// Performs FPRD reads of the DL Status (0x0110), error-counter (0x0300–0x0313), and watchdog
+  /// (0x0440–0x0443) ESC register blocks for every requested slave and returns the decoded
+  /// counters. The counters are monotonic since the last clear (power cycle / explicit write), so
+  /// callers compare successive snapshots and alert on a rising delta — a single non-zero value is
+  /// historical, a climbing one is an active fault. Serialised with other control-plane operations
+  /// via the socket mutex; must not overlap with @c exchangeProcessData.
+  ///
+  /// Optional capability: the default returns an error for transports without an ESC (e.g. SPoE);
+  /// the SOEM driver overrides it.
+  ///
+  /// @param positions  1-based slave positions to read.
+  /// @return Decoded diagnostics per position in the same order as @p positions, or an error
+  ///         string if the transport has no ESC or a register read fails.
+  virtual std::expected<std::vector<SlaveDiagnostics>, std::string> readDiagnostics(
+      const std::vector<uint16_t>& /*positions*/) {
+    return std::unexpected("diagnostics not supported by this transport");
+  }
 
   /// @brief Reads an object dictionary entry via CoE SDO upload.
   ///

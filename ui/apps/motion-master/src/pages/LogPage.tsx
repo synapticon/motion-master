@@ -29,7 +29,7 @@ export default function LogPage() {
   return (
     <div className="flex flex-col h-full">
       <PageHeader
-        eyebrow="Diagnostics"
+        eyebrow="Server"
         title="Log"
         description="View the backend's diagnostic log — the in-memory ring buffer of server-side events (up to 100 000 entries), useful for troubleshooting fieldbus and API operations."
       />

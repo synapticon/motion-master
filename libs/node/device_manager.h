@@ -87,6 +87,19 @@ struct SlaveConfigInfo {
 /// @brief Serialises a SlaveConfigInfo (and its nested SM/FMMU/mailbox/DC) to JSON.
 void to_json(nlohmann::json& j, const SlaveConfigInfo& info);
 
+/// @brief A slave's live ESC health diagnostics plus its resolved device name.
+///
+/// API-facing wrapper around @c mm::comm::SlaveDiagnostics that adds the human-readable device
+/// name (from the device set, empty when no matching device is known), built by
+/// @c DeviceManager::getDeviceDiagnostics on the (non-RT) caller's thread.
+struct DeviceDiagnosticsInfo {
+  mm::comm::SlaveDiagnostics diagnostics;  ///< Decoded ESC counters as read by the driver.
+  std::string deviceName;  ///< Device name for this slave position, empty if unknown.
+};
+
+/// @brief Serialises a DeviceDiagnosticsInfo (and its nested per-port counters) to JSON.
+void to_json(nlohmann::json& j, const DeviceDiagnosticsInfo& info);
+
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.
 ///
 /// The driver is not required at construction — call @c init() to supply one.
@@ -254,6 +267,22 @@ class DeviceManager {
   /// @return AL state snapshot per device, or an error string if the driver is
   ///         not initialised or the hardware read fails.
   std::expected<std::vector<DeviceStateInfo>, std::string> getDeviceStates(
+      const std::vector<uint16_t>& positions);
+
+  /// @brief Reads live ESC health diagnostics (link quality, error counters, watchdogs) for a set
+  ///        of devices, resolving each slave's device name.
+  ///
+  /// If @p positions is empty, all discovered devices are queried. Forwards to
+  /// @c FieldbusDriver::readDiagnostics (FPRD reads — not cached) and wraps each result with its
+  /// device name. The returned counters are monotonic since the last clear, so a diagnostics page
+  /// polls this and watches for a rising delta rather than an absolute value.
+  ///
+  /// Must be called after both @c init() and @c scan().
+  ///
+  /// @param positions  1-based slave positions to query; empty = all devices.
+  /// @return Per-device diagnostics in the order targeted, or an error string if no driver is
+  ///         initialised, the transport has no ESC, or a register read fails.
+  std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> getDeviceDiagnostics(
       const std::vector<uint16_t>& positions);
 
   /// @brief Reports whether a single device is currently online.

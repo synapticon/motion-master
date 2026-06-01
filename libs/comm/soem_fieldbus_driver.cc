@@ -4,6 +4,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
@@ -282,6 +283,66 @@ SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
     return SlaveStateRaw{.alStatus = ctx_->slavelist[pos].state,
                          .alStatusCode = ctx_->slavelist[pos].ALstatuscode};
   });
+  return result;
+}
+
+std::expected<std::vector<SlaveDiagnostics>, std::string> SoemFieldbusDriver::readDiagnostics(
+    const std::vector<uint16_t>& positions) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
+  std::vector<SlaveDiagnostics> result;
+  result.reserve(positions.size());
+  for (uint16_t pos : positions) {
+    const uint16_t configAddr = ctx_->slavelist[pos].configadr;
+
+    // DL Status (0x0110): link/loop/communication per port. Bits 4–7 = link on ports 0–3; for
+    // port p, bit (8 + 2p) = loop closed, bit (9 + 2p) = communication established.
+    uint16_t dlStatus = 0;
+    if (ecx_FPRD(&ctx_->port, configAddr, 0x0110, sizeof(dlStatus), &dlStatus, EC_TIMEOUTRET) !=
+        1) {
+      return std::unexpected(std::format("FPRD slave {} DL status (0x0110) failed", pos));
+    }
+
+    // Error-counter block (0x0300–0x0313), read contiguously in one datagram:
+    //   [0..7]   RX error counter   — per port: byte 2p = invalid frame, byte 2p+1 = RX error
+    //   [8..11]  forwarded RX error — 1 byte per port
+    //   [12]     processing-unit error (0x030C)   [13] PDI error (0x030D)   [14,15] reserved
+    //   [16..19] lost-link counter  — 1 byte per port
+    std::array<uint8_t, 20> errs{};
+    if (ecx_FPRD(&ctx_->port, configAddr, 0x0300, static_cast<uint16_t>(errs.size()), errs.data(),
+                 EC_TIMEOUTRET) != 1) {
+      return std::unexpected(std::format("FPRD slave {} error counters (0x0300) failed", pos));
+    }
+
+    // Watchdog block (0x0440–0x0443): [0,1] PD watchdog status, [2] PD watchdog expirations
+    // (0x0442), [3] PDI watchdog expirations (0x0443).
+    std::array<uint8_t, 4> wd{};
+    if (ecx_FPRD(&ctx_->port, configAddr, 0x0440, static_cast<uint16_t>(wd.size()), wd.data(),
+                 EC_TIMEOUTRET) != 1) {
+      return std::unexpected(std::format("FPRD slave {} watchdog (0x0440) failed", pos));
+    }
+
+    SlaveDiagnostics d{};
+    d.slavePosition = pos;
+    for (int p = 0; p < 4; ++p) {
+      d.ports[p] = PortDiagnostics{
+          .linkUp = (dlStatus & (1u << (4 + p))) != 0,
+          .loopClosed = (dlStatus & (1u << (8 + 2 * p))) != 0,
+          .communication = (dlStatus & (1u << (9 + 2 * p))) != 0,
+          .invalidFrame = errs[2 * p],
+          .rxError = errs[2 * p + 1],
+          .forwardedError = errs[8 + p],
+          .lostLink = errs[16 + p],
+      };
+    }
+    d.processingUnitError = errs[12];
+    d.pdiError = errs[13];
+    d.processDataWatchdog = wd[2];
+    d.pdiWatchdog = wd[3];
+    result.push_back(d);
+  }
   return result;
 }
 

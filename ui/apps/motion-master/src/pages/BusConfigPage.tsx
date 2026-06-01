@@ -239,7 +239,7 @@ export default function BusConfigPage() {
   return (
     <div>
       <PageHeader
-        eyebrow="Bus"
+        eyebrow="Fieldbus"
         title="Configuration"
         description={
           <>

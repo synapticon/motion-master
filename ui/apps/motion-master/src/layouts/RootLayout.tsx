@@ -200,12 +200,13 @@ export default function RootLayout() {
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
           <NavItem to="/" label="Connection" end />
 
-          <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Bus</p>
-          <NavItem to="/fieldbus" label="Fieldbus" />
+          <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Fieldbus</p>
+          <NavItem to="/fieldbus" label="Control" />
           <NavItem to="/bus-config" label="Configuration" />
           <NavItem to="/process-image" label="Process Image" />
+          <NavItem to="/bus-diagnostics" label="Diagnostics" />
 
-          <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Diagnostics</p>
+          <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Server</p>
           <NavItem to="/log" label="Log" />
           <NavItem to="/requests" label="Requests" />
 

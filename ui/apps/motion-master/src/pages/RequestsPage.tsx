@@ -190,7 +190,7 @@ export default function RequestsPage() {
   return (
     <div className="flex flex-col h-full">
       <PageHeader
-        eyebrow="Diagnostics"
+        eyebrow="Server"
         title="Requests"
         description="Inspect HTTP requests this app has made to the backend — method, status, timing, headers, and bodies — and copy any request as a cURL command to reproduce it."
       />

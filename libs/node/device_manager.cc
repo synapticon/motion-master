@@ -476,6 +476,33 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::getDevic
   return result;
 }
 
+std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> DeviceManager::getDeviceDiagnostics(
+    const std::vector<uint16_t>& positions) {
+  if (!driver_) {
+    return std::unexpected("no driver — call init() first");
+  }
+  std::vector<uint16_t> targets = positions;
+  if (targets.empty()) {
+    targets.reserve(devices_.size());
+    std::transform(devices_.begin(), devices_.end(), std::back_inserter(targets),
+                   [](const Device& d) { return d.slavePosition(); });
+  }
+  auto raw = driver_->readDiagnostics(targets);
+  if (!raw) {
+    return std::unexpected(raw.error());
+  }
+  std::vector<DeviceDiagnosticsInfo> result;
+  result.reserve(raw->size());
+  for (auto& d : *raw) {
+    std::string name;
+    if (const Device* device = findDevice(d.slavePosition)) {
+      name = device->name();
+    }
+    result.push_back(DeviceDiagnosticsInfo{.diagnostics = d, .deviceName = std::move(name)});
+  }
+  return result;
+}
+
 std::expected<bool, std::string> DeviceManager::isDeviceOnline(uint16_t slavePosition) {
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
@@ -663,6 +690,28 @@ void to_json(nlohmann::json& j, const SlaveConfigInfo& info) {
          {"shift", c.dc.shift}}},
        {"syncManagers", syncManagers},
        {"fmmus", fmmus}};
+}
+
+void to_json(nlohmann::json& j, const DeviceDiagnosticsInfo& info) {
+  const auto& d = info.diagnostics;
+  nlohmann::json ports = nlohmann::json::array();
+  std::transform(d.ports.begin(), d.ports.end(), std::back_inserter(ports),
+                 [](const mm::comm::PortDiagnostics& p) {
+                   return nlohmann::json{{"linkUp", p.linkUp},
+                                         {"loopClosed", p.loopClosed},
+                                         {"communication", p.communication},
+                                         {"invalidFrame", p.invalidFrame},
+                                         {"rxError", p.rxError},
+                                         {"forwardedError", p.forwardedError},
+                                         {"lostLink", p.lostLink}};
+                 });
+  j = {{"slavePosition", d.slavePosition},
+       {"deviceName", info.deviceName},
+       {"ports", ports},
+       {"processingUnitError", d.processingUnitError},
+       {"pdiError", d.pdiError},
+       {"processDataWatchdog", d.processDataWatchdog},
+       {"pdiWatchdog", d.pdiWatchdog}};
 }
 
 void to_json(nlohmann::json& j, const DeviceManager& dm) { j = dm.devices(); }

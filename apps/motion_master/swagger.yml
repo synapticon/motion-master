@@ -815,6 +815,42 @@ paths:
           description: No device at the given bus position
         "500":
           $ref: "#/components/responses/DriverError"
+  /api/devices/diagnostics:
+    get:
+      summary: Read live ESC health diagnostics for devices
+      operationId: getDeviceDiagnostics
+      description: >
+        Reads live link-quality and watchdog diagnostics from each slave's EtherCAT Slave
+        Controller (DL Status 0x0110, error-counter block 0x0300–0x0313, watchdog block
+        0x0440–0x0443) via FPRD. Counters are 8-bit, saturate at 255, and are cleared only by a
+        power cycle or explicit write — poll this endpoint and watch for a rising delta rather than
+        an absolute value. The per-port counters localise a degrading link to a specific
+        cable/connector; the watchdog counters distinguish a slave that stopped receiving process
+        data from a master-side problem. Omit `positions` to query all discovered devices.
+        Returns 500 for transports without an ESC (e.g. SPoE).
+      parameters:
+        - name: positions
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Comma-separated list of 1-based slave positions to query (e.g. `1,2,3`).
+            Omit to query all discovered devices.
+          example: "1,2"
+      responses:
+        "200":
+          description: Decoded ESC diagnostics for each queried device
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeviceDiagnostics"
+        "400":
+          description: A `positions` value is not a valid integer
+        "500":
+          $ref: "#/components/responses/DriverError"
   /api/devices/state:
     get:
       summary: Read current AL state for devices
@@ -1299,6 +1335,79 @@ components:
           description: Configured FMMUs, by index
           items:
             $ref: "#/components/schemas/FmmuConfig"
+    PortDiagnostics:
+      type: object
+      required:
+        [linkUp, loopClosed, communication, invalidFrame, rxError, forwardedError, lostLink]
+      properties:
+        linkUp:
+          type: boolean
+          description: Physical link detected on this port (DL Status link bit)
+          example: true
+        loopClosed:
+          type: boolean
+          description: Loop closed on this port (no downstream slave, or port disabled)
+          example: false
+        communication:
+          type: boolean
+          description: Stable communication established on this port
+          example: true
+        invalidFrame:
+          type: integer
+          description: >-
+            Invalid-frame counter (0x0300+): frames with a bad FCS/structure. 8-bit, saturates
+            at 255; watch for a rising delta rather than the absolute value
+          example: 0
+        rxError:
+          type: integer
+          description: "Physical-layer RX error counter (0x0301+): RX_ER asserted by the PHY"
+          example: 0
+        forwardedError:
+          type: integer
+          description: >-
+            Forwarded RX error counter (0x0308+): errors first flagged by an upstream ESC —
+            pinpoints the segment where corruption began
+          example: 0
+        lostLink:
+          type: integer
+          description: "Lost-link counter (0x0310+): link-down events on this port"
+          example: 0
+    DeviceDiagnostics:
+      type: object
+      required:
+        [slavePosition, deviceName, ports, processingUnitError, pdiError,
+         processDataWatchdog, pdiWatchdog]
+      properties:
+        slavePosition:
+          type: integer
+          description: 1-based position on the fieldbus
+          example: 1
+        deviceName:
+          type: string
+          description: Device name for this slave position, empty if unknown
+          example: "SOMANET Node"
+        ports:
+          type: array
+          description: Per-port link state and error counters (ports 0–3, in order)
+          items:
+            $ref: "#/components/schemas/PortDiagnostics"
+        processingUnitError:
+          type: integer
+          description: "ECAT processing-unit error counter (0x030C): datagrams reaching the unit malformed"
+          example: 0
+        pdiError:
+          type: integer
+          description: "PDI error counter (0x030D): problems on the slave-local process-data interface"
+          example: 0
+        processDataWatchdog:
+          type: integer
+          description: >-
+            Process-data (SM) watchdog expirations (0x0442): the slave stopped seeing fresh outputs
+          example: 0
+        pdiWatchdog:
+          type: integer
+          description: "PDI watchdog expirations (0x0443)"
+          example: 0
     AlStatusCode:
       type: object
       required: [code, name, description, terminal]

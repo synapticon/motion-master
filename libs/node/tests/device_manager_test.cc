@@ -16,6 +16,7 @@ namespace {
 using mm::comm::EtherCatState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
+using mm::comm::SlaveDiagnostics;
 using mm::comm::SlaveInfo;
 using mm::node::DeviceManager;
 using mm::node::DeviceParameterValue;
@@ -36,6 +37,9 @@ class FakeDriver : public FieldbusDriver {
 
   /// Returned verbatim by busConfig() — empty unless a test populates it.
   std::vector<mm::comm::SlaveConfig> busConfigData;
+
+  /// Returned verbatim by readDiagnostics() — empty unless a test populates it.
+  std::vector<mm::comm::SlaveDiagnostics> diagnosticsData;
 
   std::expected<void, std::string> init() override {
     if (!initSucceeds_) {
@@ -68,6 +72,11 @@ class FakeDriver : public FieldbusDriver {
   }
 
   uint16_t slaveState(uint16_t) const override { return cachedState_; }
+
+  std::expected<std::vector<SlaveDiagnostics>, std::string> readDiagnostics(
+      const std::vector<uint16_t>&) override {
+    return diagnosticsData;
+  }
 
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t, uint8_t) override {
     return std::vector<uint8_t>{};
@@ -288,6 +297,50 @@ TEST(DeviceManagerBusConfig, EnrichesDriverConfigWithDeviceName) {
 TEST(DeviceManagerBusConfig, EmptyWithoutDriver) {
   DeviceManager dm;
   EXPECT_TRUE(dm.busConfig().empty());
+}
+
+TEST(DeviceManagerDiagnostics, EnrichesDriverDiagnosticsWithDeviceName) {
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->deviceName = "Axis A";
+  mm::comm::SlaveDiagnostics diag{};
+  diag.slavePosition = 1;
+  diag.ports[0] = mm::comm::PortDiagnostics{.linkUp = true,
+                                            .loopClosed = false,
+                                            .communication = true,
+                                            .invalidFrame = 3,
+                                            .rxError = 1,
+                                            .forwardedError = 0,
+                                            .lostLink = 2};
+  diag.processingUnitError = 7;
+  diag.pdiWatchdog = 5;
+  driver->diagnosticsData = {diag};
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  // getDeviceDiagnostics() passes the driver's per-slave counters through and attaches the name.
+  auto result = dm.getDeviceDiagnostics({});
+  ASSERT_TRUE(result.has_value());
+  ASSERT_EQ(result->size(), 1u);
+  EXPECT_EQ((*result)[0].deviceName, "Axis A");
+  EXPECT_EQ((*result)[0].diagnostics.slavePosition, 1);
+  EXPECT_EQ((*result)[0].diagnostics.ports[0].invalidFrame, 3);
+  EXPECT_EQ((*result)[0].diagnostics.processingUnitError, 7);
+
+  // to_json exposes the resolved name, the per-port array, and the scalar counters.
+  nlohmann::json j = (*result)[0];
+  EXPECT_EQ(j.at("deviceName"), "Axis A");
+  ASSERT_EQ(j.at("ports").size(), 4u);
+  EXPECT_EQ(j.at("ports")[0].at("linkUp"), true);
+  EXPECT_EQ(j.at("ports")[0].at("lostLink"), 2);
+  EXPECT_EQ(j.at("processingUnitError"), 7);
+  EXPECT_EQ(j.at("pdiWatchdog"), 5);
+}
+
+TEST(DeviceManagerDiagnostics, ErrorsWithoutDriver) {
+  DeviceManager dm;
+  EXPECT_FALSE(dm.getDeviceDiagnostics({}).has_value());
 }
 
 }  // namespace

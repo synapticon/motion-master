@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -76,11 +77,9 @@ TEST(SeqLockTest, ConcurrentReadersNeverSeeATornValue) {
       while (!stop.load(std::memory_order_relaxed)) {
         lock.load(p);
         const uint64_t first = p.words[0];
-        for (uint64_t w : p.words) {
-          if (w != first) {
-            tornSeen[r].store(true, std::memory_order_relaxed);
-            break;
-          }
+        if (std::any_of(p.words.begin(), p.words.end(),
+                        [first](uint64_t w) { return w != first; })) {
+          tornSeen[r].store(true, std::memory_order_relaxed);
         }
         lastSeen[r].store(first, std::memory_order_relaxed);
       }

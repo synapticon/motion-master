@@ -106,17 +106,6 @@ paths:
                       type: string
                       description: OS interface name (e.g. eth0 on Linux, \\Device\\NPF_{GUID} on Windows)
                       example: "eth0"
-  /api/swagger.yml:
-    get:
-      summary: OpenAPI specification
-      operationId: getSwaggerYml
-      responses:
-        "200":
-          description: This OpenAPI specification in YAML format
-          content:
-            text/yaml:
-              schema:
-                type: string
   /api/version:
     get:
       summary: Get Motion Master version

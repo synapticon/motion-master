@@ -185,7 +185,7 @@ export default function RootLayout() {
               title={
                 online
                   ? `API online — the Motion Master HTTP server is reachable at https://${host}:${port}`
-                  : `API offline — no response from https://${host}:${port}. Start motion-master (./tools/run.sh) and accept the TLS certificate.`
+                  : `API offline — no response from https://${host}:${port}. Make sure Motion Master is installed and running on your system, then accept its TLS certificate.`
               }
               aria-label={online ? 'API online' : 'API offline'}
               className={`inline-block h-3 w-3 cursor-help rounded-full ring-2 ring-white ${online

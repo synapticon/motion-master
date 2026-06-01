@@ -375,11 +375,10 @@ std::expected<std::vector<uint16_t>, std::string> DeviceManager::resolveTargets(
 }
 
 void DeviceManager::updateExpectedWkc() {
-  using mm::comm::EtherCatState;
-  // SOEM's working-counter model: per output-mapped slave +2, per input-mapped slave +1. In
-  // SAFE-OP only the input sync manager is active, so outputs do not count; in PRE-OP/below a
-  // slave does not contribute at all. Summing over current states yields the WKC expected from
-  // a partially-operational bus — the figure a health check must compare against.
+  // Sum each non-errored device's working-counter contribution for its current AL state and PDO
+  // presence. The protocol rule (how outputs/inputs and SAFE-OP/OP map to a WKC increment) lives
+  // in the comm layer; here we only know each device's live state and whether it maps any PDO, so
+  // the figure tracks a partially-operational bus — what a health check compares against.
   int expected = 0;
   if (driver_) {
     for (const auto& device : devices_) {
@@ -387,14 +386,9 @@ void DeviceManager::updateExpectedWkc() {
       if (mm::comm::alHasError(status)) {
         continue;  // error indicator set — treat as not contributing
       }
-      const EtherCatState state = mm::comm::alState(status);
-      const bool hasOutputs = device.pdoMappings().outputBits > 0;
-      const bool hasInputs = device.pdoMappings().inputBits > 0;
-      if (state == EtherCatState::Op) {
-        expected += (hasOutputs ? 2 : 0) + (hasInputs ? 1 : 0);
-      } else if (state == EtherCatState::SafeOp) {
-        expected += hasInputs ? 1 : 0;
-      }
+      expected += mm::comm::workingCounterContribution(mm::comm::alState(status),
+                                                       device.pdoMappings().outputBits > 0,
+                                                       device.pdoMappings().inputBits > 0);
     }
   }
   pd_->expectedWkc.store(expected, std::memory_order_relaxed);

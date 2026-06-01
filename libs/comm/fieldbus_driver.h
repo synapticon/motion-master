@@ -48,6 +48,30 @@ inline EtherCatState alState(uint16_t alStatus) {
 /// @brief Returns whether the AL Status error indicator (bit 4 of register 0x0130) is set.
 inline bool alHasError(uint16_t alStatus) { return (alStatus & 0x0010u) != 0; }
 
+/// @brief Working-counter contribution of one slave for a given AL state and PDO presence.
+///
+/// EtherCAT increments the working counter per successful datagram access: a slave exchanging
+/// outputs contributes 2 (the process-data LRW both reads and writes its output region) and
+/// inputs contribute 1.  Process data flows only in SAFE-OP (inputs only) and OP (outputs +
+/// inputs); below that a slave does not contribute.  Summed across the bus this is the WKC a
+/// (possibly partially operational) bus is expected to produce — the figure a health check
+/// compares the live working counter against.  The protocol rule lives here, with the other AL
+/// vocabulary, rather than in the transport-agnostic node layer.
+///
+/// @param state       Current AL state of the slave.
+/// @param hasOutputs  Whether the slave has any mapped output (RxPDO) bits.
+/// @param hasInputs   Whether the slave has any mapped input (TxPDO) bits.
+inline int workingCounterContribution(EtherCatState state, bool hasOutputs, bool hasInputs) {
+  switch (state) {
+    case EtherCatState::Op:
+      return (hasOutputs ? 2 : 0) + (hasInputs ? 1 : 0);
+    case EtherCatState::SafeOp:
+      return hasInputs ? 1 : 0;
+    default:
+      return 0;
+  }
+}
+
 /// @brief Immutable identity fields read from a slave's EEPROM during configuration.
 struct SlaveInfo {
   std::string name;         ///< Human-readable name from SII.

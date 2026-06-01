@@ -29,6 +29,8 @@ using mm::node::SyncState;
 
 // ETG.1020 UNSIGNED32 data type code, used by the parameter read/write tests.
 constexpr uint16_t kU32 = 0x0007;
+// PRE-OP AL state — used to bring the fake "online" (mailbox available) for SDO tests.
+constexpr uint16_t kPreOp = static_cast<uint16_t>(EtherCatState::PreOp);
 
 /// FieldbusDriver test double for SDO exchange: readSdo answers from a programmed
 /// map keyed by (index, subindex); writeSdo records every download and can be told
@@ -49,6 +51,8 @@ class SdoFakeDriver : public FieldbusDriver {
   std::set<uint32_t> failWrites;
   /// Object dictionary entries returned by readObjectDictionary().
   std::vector<OdEntry> ods;
+  /// Cached AL status returned by slaveState() (what online()/exchangesProcessData read).
+  uint16_t state = 0;
 
   static uint32_t key(uint16_t index, uint8_t subindex) {
     return (static_cast<uint32_t>(index) << 8) | subindex;
@@ -88,7 +92,10 @@ class SdoFakeDriver : public FieldbusDriver {
   std::expected<void, std::string> init() override { return {}; }
   std::expected<int, std::string> scan() override { return 0; }
   SlaveInfo slaveInfo(uint16_t) const override { return {}; }
-  void exchangeProcessData() override {}
+  uint16_t slaveState(uint16_t) const override { return state; }
+  std::expected<void, std::string> configureProcessData() override { return {}; }
+  mm::comm::PdoLayout processDataLayout() override { return {}; }
+  int exchangeProcessData(std::span<const uint8_t>, std::span<uint8_t>) override { return 0; }
   void stop() override {}
 
   std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
@@ -263,7 +270,7 @@ Device deviceWithU32Param(SdoFakeDriver& driver) {
 TEST(DeviceReadParameter, OnlineUpdatesCacheAndMarksSynced) {
   SdoFakeDriver driver;
   Device device = deviceWithU32Param(driver);
-  device.setOnline(true);
+  driver.state = kPreOp;
   driver.programRead(0x6065, 0x00, u32le(16));
 
   auto v = device.readParameter(0x6065, 0x00);
@@ -295,14 +302,14 @@ TEST(DeviceReadParameter, OfflineServesCacheWithoutBusAccess) {
 TEST(DeviceReadParameter, UnknownParameterErrors) {
   SdoFakeDriver driver;
   Device device = deviceWithU32Param(driver);
-  device.setOnline(true);
+  driver.state = kPreOp;
   EXPECT_FALSE(device.readParameter(0x1234, 0x00).has_value());
 }
 
 TEST(DeviceWriteParameter, OnlineDownloadsAndMarksSynced) {
   SdoFakeDriver driver;
   Device device = deviceWithU32Param(driver);
-  device.setOnline(true);
+  driver.state = kPreOp;
 
   auto w = device.writeParameter(0x6065, 0x00, DeviceParameterValue{uint32_t{123}});
   ASSERT_TRUE(w.has_value());
@@ -336,7 +343,7 @@ TEST(DeviceWriteParameter, OfflineCachesAsPendingAndSucceeds) {
 TEST(DeviceWriteParameter, OnlineDownloadFailureMarksPendingAndReturnsError) {
   SdoFakeDriver driver;
   Device device = deviceWithU32Param(driver);
-  device.setOnline(true);
+  driver.state = kPreOp;
   driver.failWrites.insert(SdoFakeDriver::key(0x6065, 0x00));
 
   auto w = device.writeParameter(0x6065, 0x00, DeviceParameterValue{uint32_t{77}});
@@ -352,7 +359,7 @@ TEST(DeviceWriteParameter, OnlineDownloadFailureMarksPendingAndReturnsError) {
 TEST(DeviceWriteParameter, CoercesValueIntoDeclaredType) {
   SdoFakeDriver driver;
   Device device = deviceWithU32Param(driver);
-  device.setOnline(true);
+  driver.state = kPreOp;
 
   // Plain int literal — must be coerced to UNSIGNED32 and encoded as 4 bytes.
   auto w = device.writeParameter(0x6065, 0x00, DeviceParameterValue{9});
@@ -368,7 +375,7 @@ TEST(DeviceWriteParameter, CoercesValueIntoDeclaredType) {
 TEST(DeviceWriteParameter, UnknownParameterErrors) {
   SdoFakeDriver driver;
   Device device = deviceWithU32Param(driver);
-  device.setOnline(true);
+  driver.state = kPreOp;
   EXPECT_FALSE(device.writeParameter(0x1234, 0x00, DeviceParameterValue{uint32_t{1}}).has_value());
   EXPECT_TRUE(driver.writes.empty());
 }
@@ -376,7 +383,7 @@ TEST(DeviceWriteParameter, UnknownParameterErrors) {
 TEST(DeviceTypedHelpers, WriteValueAndReadValueRoundTrip) {
   SdoFakeDriver driver;
   Device device = deviceWithU32Param(driver);
-  device.setOnline(true);
+  driver.state = kPreOp;
 
   // Terse write: a bare int literal, coerced to the declared UNSIGNED32 and encoded.
   ASSERT_TRUE(device.writeValue(0x6065, 0x00, 42).has_value());
@@ -391,6 +398,90 @@ TEST(DeviceTypedHelpers, WriteValueAndReadValueRoundTrip) {
 
   // A type-mismatched read is rejected.
   EXPECT_FALSE(device.readValue<int32_t>(0x6065, 0x00).has_value());
+}
+
+// --- readPdoMappings ---------------------------------------------------------
+
+std::vector<uint8_t> u8le(uint8_t v) { return {v}; }
+std::vector<uint8_t> u16le(uint16_t v) {
+  return {static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8)};
+}
+// A packed PDO mapping entry: index in bits 31..16, subindex 15..8, bit length 7..0.
+std::vector<uint8_t> pdoEntry(uint16_t index, uint8_t subindex, uint8_t bits) {
+  return u32le((static_cast<uint32_t>(index) << 16) | (static_cast<uint32_t>(subindex) << 8) |
+               bits);
+}
+
+// Programs a CiA402-style mapping: one RxPDO (controlword + modes + target position) and one
+// TxPDO (statusword + actual position + an alignment gap).
+void programCia402Mapping(SdoFakeDriver& driver) {
+  // 0x1C12 → 0x1600 : outputs (RxPDO)
+  driver.programRead(0x1C12, 0x00, u8le(1));
+  driver.programRead(0x1C12, 0x01, u16le(0x1600));
+  driver.programRead(0x1600, 0x00, u8le(3));
+  driver.programRead(0x1600, 0x01, pdoEntry(0x6040, 0x00, 16));  // controlword
+  driver.programRead(0x1600, 0x02, pdoEntry(0x6060, 0x00, 8));   // modes of operation
+  driver.programRead(0x1600, 0x03, pdoEntry(0x607A, 0x00, 32));  // target position
+  // 0x1C13 → 0x1A00 : inputs (TxPDO)
+  driver.programRead(0x1C13, 0x00, u8le(1));
+  driver.programRead(0x1C13, 0x01, u16le(0x1A00));
+  driver.programRead(0x1A00, 0x00, u8le(3));
+  driver.programRead(0x1A00, 0x01, pdoEntry(0x6041, 0x00, 16));  // statusword
+  driver.programRead(0x1A00, 0x02, pdoEntry(0x6064, 0x00, 32));  // position actual value
+  driver.programRead(0x1A00, 0x03, pdoEntry(0x0000, 0x00, 8));   // alignment gap
+}
+
+TEST(DeviceReadPdoMappings, BuildsEntriesWithAccumulatedBitOffsets) {
+  SdoFakeDriver driver;
+  programCia402Mapping(driver);
+  Device device(1, driver);
+
+  ASSERT_TRUE(device.readPdoMappings().has_value());
+  const auto& m = device.pdoMappings();
+
+  ASSERT_EQ(m.outputs.size(), 3u);
+  EXPECT_EQ(m.outputs[0].index, 0x6040);
+  EXPECT_EQ(m.outputs[0].bitLength, 16u);
+  EXPECT_EQ(m.outputs[0].bitOffset, 0u);
+  EXPECT_EQ(m.outputs[1].index, 0x6060);
+  EXPECT_EQ(m.outputs[1].bitOffset, 16u);
+  EXPECT_EQ(m.outputs[2].index, 0x607A);
+  EXPECT_EQ(m.outputs[2].bitOffset, 24u);
+  EXPECT_EQ(m.outputBits, 56u);
+
+  ASSERT_EQ(m.inputs.size(), 3u);
+  EXPECT_EQ(m.inputs[0].index, 0x6041);
+  EXPECT_EQ(m.inputs[0].bitOffset, 0u);
+  EXPECT_EQ(m.inputs[1].index, 0x6064);
+  EXPECT_EQ(m.inputs[1].bitOffset, 16u);
+  // Alignment gap is kept (index 0) so the offset math stays self-contained.
+  EXPECT_EQ(m.inputs[2].index, 0x0000);
+  EXPECT_EQ(m.inputs[2].bitLength, 8u);
+  EXPECT_EQ(m.inputs[2].bitOffset, 48u);
+  EXPECT_EQ(m.inputBits, 56u);
+}
+
+TEST(DeviceReadPdoMappings, AbsentAssignmentObjectYieldsEmptyMapping) {
+  SdoFakeDriver driver;  // nothing programmed — 0x1C12/0x1C13 reads fail
+  Device device(1, driver);
+
+  ASSERT_TRUE(device.readPdoMappings().has_value());
+  EXPECT_TRUE(device.pdoMappings().outputs.empty());
+  EXPECT_TRUE(device.pdoMappings().inputs.empty());
+  EXPECT_EQ(device.pdoMappings().outputBits, 0u);
+  EXPECT_EQ(device.pdoMappings().inputBits, 0u);
+}
+
+TEST(DeviceReadPdoMappings, UnreadableMappingObjectIsAnError) {
+  SdoFakeDriver driver;
+  // Assignment points at 0x1600 but its content is never programmed.
+  driver.programRead(0x1C12, 0x00, u8le(1));
+  driver.programRead(0x1C12, 0x01, u16le(0x1600));
+  Device device(1, driver);
+
+  auto result = device.readPdoMappings();
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("1600"), std::string::npos);
 }
 
 }  // namespace

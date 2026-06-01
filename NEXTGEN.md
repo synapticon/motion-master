@@ -97,9 +97,9 @@ App  (composition root, owns everything)
  │     │     ├── owns: DeviceParameter[] (index/subindex → DeviceParameterValue variant)
  │     │     ├── owns: PdoMappings
  │     │     └── owns: Cia402StateMachine  (only if Cia402Drive)
- │     └── init(unique_ptr<FieldbusDriver>), scan(), reset(), pdoExchange(), state transitions
+ │     └── init(unique_ptr<FieldbusDriver>), scan(), reset(), exchangeProcessData(), state transitions
  ├── GameLoop  (RT thread, SCHED_FIFO, 1ms)
- │     ├── uses: DeviceManager    (calls pdoExchange each cycle; no-op when driver is null)
+ │     ├── uses: DeviceManager    (calls exchangeProcessData each cycle; no-op when driver is null)
  │     ├── writes: Device parameters via seqlock
  │     └── runs: ICyclicTask[]
  │           ├── Watchdog           → NotificationBus
@@ -156,7 +156,7 @@ using DeviceParameterValue = std::variant<
 
 **Dependency injection**
 
-`App` is the only place that instantiates concrete types. `FieldbusDriver` is injected into `DeviceManager` and `NetworkScanner`; `DeviceManager` passes a `FieldbusDriver&` into each `Device` it creates. `GameLoop` and `HttpServer` both receive a `DeviceManager&` — `GameLoop` calls `pdoExchange`, `HttpServer` calls SDO/file/state methods. Inject `NotificationBus` into `Watchdog`, `DeviceManager`, `WebSocketServer`.
+`App` is the only place that instantiates concrete types. `FieldbusDriver` is injected into `DeviceManager` and `NetworkScanner`; `DeviceManager` passes a `FieldbusDriver&` into each `Device` it creates. `GameLoop` and `HttpServer` both receive a `DeviceManager&` — `GameLoop` calls `exchangeProcessData`, `HttpServer` calls SDO/file/state methods. Inject `NotificationBus` into `Watchdog`, `DeviceManager`, `WebSocketServer`.
 
 ---
 
@@ -341,7 +341,7 @@ void GameLoop::run() {
     while (running) {
         timer.waitForNextCycle();
 
-        deviceManager_.pdoExchange();
+        deviceManager_.exchangeProcessData();
         updateDeviceParameters();   // write fresh PDO values into devices (seqlock)
 
         for (auto* task : tasks_) {
@@ -592,11 +592,11 @@ Previously the app required `--driver` and could not start without a functioning
 
 **GameLoop start**
 
-The GameLoop starts unconditionally regardless of whether a driver is present. `pdoExchange()` is a no-op when `driver_` is null, so the loop runs safely in the uninitialised state.
+The GameLoop starts unconditionally regardless of whether a driver is present. `exchangeProcessData()` is a no-op when `driver_` is null, so the loop runs safely in the uninitialised state.
 
 **Thread safety — open issue**
 
-`POST /api/init`, `POST /api/scan`, and `POST /api/reset` run on the HTTP server thread and mutate `driver_` and `devices_`. `pdoExchange()` runs on the RT GameLoop thread and reads both. There is currently no lock guarding this boundary. This is safe only because `pdoExchange()` is not yet wired into the GameLoop. Before enabling live PDO exchange, the loop must be stopped (or drained for one cycle) before `init()` or `reset()` is called via the API.
+`POST /api/init`, `POST /api/scan`, and `POST /api/reset` run on the HTTP server thread and mutate `driver_` and `devices_`. `exchangeProcessData()` runs on the RT GameLoop thread and reads both. There is currently no lock guarding this boundary. This is safe only because `exchangeProcessData()` is not yet wired into the GameLoop. Before enabling live PDO exchange, the loop must be stopped (or drained for one cycle) before `init()` or `reset()` is called via the API.
 
 ---
 

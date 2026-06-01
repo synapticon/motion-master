@@ -2,6 +2,7 @@ add_library(node STATIC
     device.cc
     device_manager.cc
     device_parameter.cc
+    process_image.cc
 )
 add_library(mm::node ALIAS node)
 

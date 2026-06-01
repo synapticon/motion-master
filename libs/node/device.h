@@ -12,6 +12,7 @@
 
 #include "comm/fieldbus_driver.h"
 #include "node/device_parameter.h"
+#include "node/pdo_mapping.h"
 
 namespace mm::node {
 
@@ -44,15 +45,24 @@ class Device {
   /// @brief Serial number from EEPROM.
   uint32_t serialNumber() const;
 
-  /// @brief Whether the device currently has an active SDO mailbox (PRE-OP, SAFE-OP, or OP).
+  /// @brief Whether the device currently has an active SDO mailbox (PRE-OP, SAFE-OP, or OP,
+  ///        error bit clear).
   ///
-  /// Defaults to @c false until a state read sets it. When @c false the device is treated
-  /// as offline: @c readParameter / @c writeParameter operate on the cached value only and
-  /// never touch the bus. Set by @c DeviceManager from AL-state reads — not inferred here.
+  /// Derived live from the fieldbus driver's cached AL status (@c FieldbusDriver::slaveState)
+  /// — no copy is stored here. When @c false the device is treated as offline:
+  /// @c readParameter / @c writeParameter operate on the cached value only and never touch
+  /// the bus. Reflects the last state the driver read; call @c DeviceManager::getDeviceStates
+  /// to refresh from the hardware.
   bool online() const;
 
-  /// @brief Sets the online flag. Called by @c DeviceManager after reading AL state.
-  void setOnline(bool value);
+  /// @brief Whether the device is in a process-data-exchanging state (SAFE-OP or OP, error
+  ///        bit clear).
+  ///
+  /// Derived live from the driver's cached AL status. When @c false (INIT / PRE-OP / BOOT)
+  /// the device does not participate in the LRW cycle, so its region of the process image is
+  /// stale — PDO-mapped parameter access must use SDO, not the shared buffers. Lets a
+  /// partially-operational bus route each device correctly.
+  bool exchangesProcessData() const;
 
   /// @brief Uploads an object dictionary entry from the device (CoE SDO upload).
   ///
@@ -120,6 +130,40 @@ class Device {
   /// @return Void on success, or an error string if the object dictionary enumeration
   ///         itself fails (the slave does not support SDO Info, or all retries timed out).
   std::expected<void, std::string> initializeParameters(bool readValues = false);
+
+  /// @brief Reads the device's PDO mapping from its assignment and mapping objects.
+  ///
+  /// Walks the PDO assignment objects (@c 0x1C12 for outputs/RxPDO, @c 0x1C13 for
+  /// inputs/TxPDO) and the mapping objects they reference (@c 0x16xx / @c 0x1Axx) via SDO
+  /// upload, producing one @c PdoMappingEntry per mapped object with its bit offset and
+  /// width within the slave's process-data window.  Requires the device to be in PRE-OP,
+  /// SAFE-OP, or OP (mailbox communication active).
+  ///
+  /// A direction whose assignment object is absent or assigns nothing yields an empty list
+  /// for that direction (the device simply has no PDOs in it) and is not an error.  Calling
+  /// this again replaces the existing mapping.
+  ///
+  /// @return Void on success, or an error string if a mapping object referenced by an
+  ///         assignment cannot be read (an inconsistent mapping the caller must not exchange).
+  std::expected<void, std::string> readPdoMappings();
+
+  /// @brief Returns the device's PDO mapping. Empty until @c readPdoMappings() succeeds.
+  const PdoMappings& pdoMappings() const;
+
+  /// @brief Sets a parameter's cached value without any bus access.
+  ///
+  /// Coerces @p value into the parameter's declared type, stores it, and marks it
+  /// @c SyncState::Synced.  Used to reflect a value obtained out-of-band — e.g. one decoded
+  /// from the process image by @c DeviceManager — back into the cache so @c DeviceParameter
+  /// stays the source of truth.  The parameter must already exist.
+  ///
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @param value     Value to store; coerced to the parameter's declared type.
+  /// @return Void on success, or an error string if the parameter is unknown or @p value
+  ///         cannot be coerced to its type.
+  std::expected<void, std::string> setCachedValue(uint16_t index, uint8_t subindex,
+                                                  DeviceParameterValue value);
 
   /// @brief Returns the parameter map, keyed by @c makeParameterKey(index, subindex).
   /// Empty until @c initializeParameters() is called.
@@ -214,6 +258,17 @@ class Device {
   /// @brief Mutable parameter lookup by @c (index, subindex). O(1); @c nullptr if absent.
   DeviceParameter* findParameter(uint16_t index, uint8_t subindex);
 
+  /// @brief Reads one PDO direction: the assignment object and the mapping objects it
+  ///        references, appending entries to @p out and accumulating the bit offset.
+  ///
+  /// @param assignmentIndex  @c 0x1C12 (outputs/RxPDO) or @c 0x1C13 (inputs/TxPDO).
+  /// @param out              Destination entry list (cleared first).
+  /// @param totalBits        Set to the total mapped width across all entries.
+  /// @return Void on success, or an error string if a referenced mapping object fails to read.
+  std::expected<void, std::string> readPdoAssignment(uint16_t assignmentIndex,
+                                                     std::vector<PdoMappingEntry>& out,
+                                                     uint32_t& totalBits);
+
   uint16_t slavePosition_;
   mm::comm::FieldbusDriver& driver_;
   std::string name_;
@@ -221,8 +276,8 @@ class Device {
   uint32_t productCode_;
   uint32_t revisionNumber_;
   uint32_t serialNumber_;
-  bool online_ = false;
   std::unordered_map<uint32_t, DeviceParameter> parameters_;
+  PdoMappings pdoMappings_;
 };
 
 /// @brief Serialises a Device to JSON.

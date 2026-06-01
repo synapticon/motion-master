@@ -30,8 +30,28 @@ uint32_t Device::vendorId() const { return vendorId_; }
 uint32_t Device::productCode() const { return productCode_; }
 uint32_t Device::revisionNumber() const { return revisionNumber_; }
 uint32_t Device::serialNumber() const { return serialNumber_; }
-bool Device::online() const { return online_; }
-void Device::setOnline(bool value) { online_ = value; }
+namespace {
+// AL state (bits 3:0) and error indicator (bit 4) of a raw AL Status register.
+uint16_t alState(uint16_t alStatus) { return alStatus & 0x000Fu; }
+bool alError(uint16_t alStatus) { return (alStatus & 0x0010u) != 0; }
+}  // namespace
+
+bool Device::online() const {
+  using mm::comm::EtherCatState;
+  const uint16_t status = driver_.slaveState(slavePosition_);
+  const uint16_t state = alState(status);
+  return !alError(status) && (state == static_cast<uint16_t>(EtherCatState::PreOp) ||
+                              state == static_cast<uint16_t>(EtherCatState::SafeOp) ||
+                              state == static_cast<uint16_t>(EtherCatState::Op));
+}
+
+bool Device::exchangesProcessData() const {
+  using mm::comm::EtherCatState;
+  const uint16_t status = driver_.slaveState(slavePosition_);
+  const uint16_t state = alState(status);
+  return !alError(status) && (state == static_cast<uint16_t>(EtherCatState::SafeOp) ||
+                              state == static_cast<uint16_t>(EtherCatState::Op));
+}
 
 std::expected<std::vector<uint8_t>, std::string> Device::upload(uint16_t index,
                                                                 uint8_t subindex) const {
@@ -132,6 +152,117 @@ const std::unordered_map<uint32_t, DeviceParameter>& Device::parameters() const 
   return parameters_;
 }
 
+namespace {
+
+// Little-endian integer readers over a raw SDO byte buffer. A short buffer reads as if
+// zero-padded — defensive against a slave returning fewer bytes than the type implies.
+uint8_t readU8(const std::vector<uint8_t>& b) { return b.empty() ? uint8_t{0} : b[0]; }
+
+uint16_t readU16(const std::vector<uint8_t>& b) {
+  uint16_t v = 0;
+  for (size_t i = 0; i < 2 && i < b.size(); ++i) {
+    v |= static_cast<uint16_t>(b[i]) << (8 * i);
+  }
+  return v;
+}
+
+uint32_t readU32(const std::vector<uint8_t>& b) {
+  uint32_t v = 0;
+  for (size_t i = 0; i < 4 && i < b.size(); ++i) {
+    v |= static_cast<uint32_t>(b[i]) << (8 * i);
+  }
+  return v;
+}
+
+}  // namespace
+
+std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIndex,
+                                                           std::vector<PdoMappingEntry>& out,
+                                                           uint32_t& totalBits) {
+  out.clear();
+  totalBits = 0;
+
+  // Subindex 0 of the assignment object is the count of assigned PDO mapping objects. A
+  // device with no PDOs in this direction may not implement the object at all — treat a
+  // failed read (or a zero count) as "no entries here", which is not an error.
+  auto countBytes = upload(assignmentIndex, 0);
+  if (!countBytes) {
+    return {};
+  }
+  const uint8_t pdoCount = readU8(*countBytes);
+
+  for (uint8_t i = 1; i <= pdoCount; ++i) {
+    auto pdoIndexBytes = upload(assignmentIndex, i);
+    if (!pdoIndexBytes) {
+      return std::unexpected(std::format("0x{:04X}:{:02X} (PDO assignment) read failed: {}",
+                                         assignmentIndex, i, pdoIndexBytes.error()));
+    }
+    const uint16_t mappingIndex = readU16(*pdoIndexBytes);
+    if (mappingIndex == 0) {
+      continue;  // unused assignment slot
+    }
+
+    // Subindex 0 of the mapping object is the count of mapped entries.
+    auto entryCountBytes = upload(mappingIndex, 0);
+    if (!entryCountBytes) {
+      return std::unexpected(std::format("0x{:04X}:00 (PDO mapping) read failed: {}", mappingIndex,
+                                         entryCountBytes.error()));
+    }
+    const uint8_t entryCount = readU8(*entryCountBytes);
+
+    for (uint8_t e = 1; e <= entryCount; ++e) {
+      auto entryBytes = upload(mappingIndex, e);
+      if (!entryBytes) {
+        return std::unexpected(std::format("0x{:04X}:{:02X} (PDO mapping entry) read failed: {}",
+                                           mappingIndex, e, entryBytes.error()));
+      }
+      // Packed entry (ETG.1000.6 §5.6.7.4.7): bits 31..16 = object index,
+      // 15..8 = subindex, 7..0 = bit length. An index of 0 is an alignment gap.
+      const uint32_t packed = readU32(*entryBytes);
+      PdoMappingEntry entry{
+          .index = static_cast<uint16_t>(packed >> 16),
+          .subindex = static_cast<uint8_t>((packed >> 8) & 0xFF),
+          .bitLength = static_cast<uint16_t>(packed & 0xFF),
+          .bitOffset = totalBits,
+      };
+      totalBits += entry.bitLength;
+      out.push_back(entry);
+    }
+  }
+  return {};
+}
+
+std::expected<void, std::string> Device::readPdoMappings() {
+  PdoMappings mappings;
+  if (auto r = readPdoAssignment(0x1C12, mappings.outputs, mappings.outputBits); !r) {
+    return std::unexpected(r.error());
+  }
+  if (auto r = readPdoAssignment(0x1C13, mappings.inputs, mappings.inputBits); !r) {
+    return std::unexpected(r.error());
+  }
+  pdoMappings_ = std::move(mappings);
+  spdlog::debug("Device {}: PDO mapping - {} output entries ({} bits), {} input entries ({} bits)",
+                slavePosition_, pdoMappings_.outputs.size(), pdoMappings_.outputBits,
+                pdoMappings_.inputs.size(), pdoMappings_.inputBits);
+  return {};
+}
+
+const PdoMappings& Device::pdoMappings() const { return pdoMappings_; }
+
+std::expected<void, std::string> Device::setCachedValue(uint16_t index, uint8_t subindex,
+                                                        DeviceParameterValue value) {
+  DeviceParameter* p = findParameter(index, subindex);
+  if (!p) {
+    return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
+                                       slavePosition_, index, subindex));
+  }
+  if (auto set = p->setValue(std::move(value)); !set) {
+    return std::unexpected(set.error());
+  }
+  p->syncState = SyncState::Synced;
+  return {};
+}
+
 std::vector<DeviceParameter> Device::parametersOrdered() const {
   std::vector<DeviceParameter> ordered;
   ordered.reserve(parameters_.size());
@@ -160,7 +291,7 @@ std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t 
     return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
                                        slavePosition_, index, subindex));
   }
-  if (!online_) {
+  if (!online()) {
     return p->value;  // offline: serve the cached value, never touch the bus
   }
   auto bytes = upload(index, subindex);
@@ -188,7 +319,7 @@ std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t 
   if (auto set = p->setValue(value); !set) {
     return std::unexpected(set.error());
   }
-  if (!online_) {
+  if (!online()) {
     // Offline edit: hold the change in the cache, to be flushed when the device returns.
     p->syncState = SyncState::Pending;
     return {};

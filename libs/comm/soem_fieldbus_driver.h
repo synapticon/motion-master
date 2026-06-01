@@ -50,11 +50,24 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// @param position  1-based slave position on the bus.
   SlaveInfo slaveInfo(uint16_t position) const override;
 
-  /// @brief Sends output PDOs and receives input PDOs in one LRW frame.
+  /// @copydoc FieldbusDriver::slaveState
+  uint16_t slaveState(uint16_t position) const override;
+
+  /// @copydoc FieldbusDriver::configureProcessData
+  std::expected<void, std::string> configureProcessData() override;
+
+  /// @copydoc FieldbusDriver::processDataLayout
+  PdoLayout processDataLayout() override;
+
+  /// @brief Copies @p outputs into the IOmap, sends and receives, copies inputs back out.
   ///
-  /// Called once per @c GameLoop cycle.  Must not be called before a successful
-  /// @c init() or after @c stop().
-  void exchangeProcessData() override;
+  /// Called once per @c GameLoop cycle.  Must not be called before
+  /// @c configureProcessData() or after @c stop().
+  ///
+  /// @param outputs  Output image to send; size must equal @c PdoLayout::outputBytes.
+  /// @param inputs   Buffer receiving the input image; size must equal @c PdoLayout::inputBytes.
+  /// @return The transaction working counter, or 0 if not initialised.
+  int exchangeProcessData(std::span<const uint8_t> outputs, std::span<uint8_t> inputs) override;
 
   /// @brief Closes the NIC and releases all driver resources.
   void stop() override;

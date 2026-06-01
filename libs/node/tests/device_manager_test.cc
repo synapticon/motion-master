@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -39,14 +40,20 @@ class FakeDriver : public FieldbusDriver {
   std::expected<int, std::string> scan() override { return slaves_; }
 
   SlaveInfo slaveInfo(uint16_t) const override { return {}; }
-  void exchangeProcessData() override {}
+  std::expected<void, std::string> configureProcessData() override { return {}; }
+  mm::comm::PdoLayout processDataLayout() override { return {}; }
+  int exchangeProcessData(std::span<const uint8_t>, std::span<uint8_t>) override { return 0; }
   void stop() override {}
 
   std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& positions) override {
+    // Mimic ecx_readstate: a read refreshes the cached state that slaveState() returns.
+    cachedState_ = reportState;
     return std::vector<SlaveStateRaw>(positions.size(),
                                       SlaveStateRaw{.alStatus = reportState, .alStatusCode = 0});
   }
+
+  uint16_t slaveState(uint16_t) const override { return cachedState_; }
 
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t, uint8_t) override {
     return std::vector<uint8_t>{};
@@ -86,6 +93,7 @@ class FakeDriver : public FieldbusDriver {
  private:
   bool initSucceeds_;
   int slaves_;
+  uint16_t cachedState_ = 0;  // refreshed by readStates(); returned by slaveState()
 };
 
 TEST(DeviceManagerInit, SuccessfulInitMarksInitialised) {

@@ -13,7 +13,7 @@ Key design mandates from NEXTGEN.md:
 - `FieldbusDriver` interface abstracts SOEM and SPoE — `SoemFieldbusDriver` and `SpoeDriver` are the concrete implementations; `FieldbusDriver` owns `socketMutex_`, which serializes the **control-plane** operations (mailbox/SDO, FoE, ESC register, state access) amongst non-RT callers. The **PDO path (`exchangeProcessData`) runs lock-free** — SOEM's port layer is internally thread-safe (per-datagram index allocation + tx/rx mutexes held only for a single non-blocking poll, with cooperative frame demux) and PDO touches disjoint state (the process-data IOmap) from the control plane, so the RT cycle is never blocked by a slow SDO or object-dictionary enumeration. The lock is held for one socket transaction only — never across a sleep, a blocking wait, or a user callback (so `readObjectDictionary` and `transitionToState` lock per transaction, not for their whole multi-second duration)
 - `DeviceManager` owns `FieldbusDriver` via `unique_ptr<FieldbusDriver>` (null until `init()` is called) — the driver is constructed by `main.cc` and transferred via `DeviceManager::init(unique_ptr<FieldbusDriver>)`; `DeviceManager` never references concrete driver types
 - No service layer — SDO read/write, file transfer, and state control are methods on `Device` and `DeviceManager`; `HttpServer` and `GameLoop` both take a `DeviceManager&` directly
-- `GameLoop` calls `deviceManager_.pdoExchange()` — it has no knowledge of `FieldbusDriver`; `pdoExchange()` is a no-op when the driver is null so the loop always starts unconditionally
+- `GameLoop` calls `deviceManager_.exchangeProcessData()` — it has no knowledge of `FieldbusDriver`; `exchangeProcessData()` is a no-op when the driver is null so the loop always starts unconditionally
 - `DeviceManager` owns slave discovery and network scanning via `FieldbusDriver` — there is no separate `NetworkScanner`
 - `App` is the only place that instantiates concrete types (dependency injection at the composition root); `Server::Config` carries an `InitDriverFn` callback wired in `main.cc` so `POST /api/init` can create a driver without the server knowing concrete types
 - Namespaces mirror directory layout (`mm::core`, `mm::comm::soem`, `mm::node`, `mm::api`); do not use C++20 modules
@@ -140,9 +140,9 @@ App  (composition root, owns everything)
  │     │     ├── owns: DeviceParameter[] (index/subindex → DeviceParameterValue variant)
  │     │     ├── owns: PdoMappings
  │     │     └── owns: Cia402StateMachine  (only if Cia402Drive)
- │     └── init(unique_ptr<FieldbusDriver>), scan(), reset(), pdoExchange(), transitionToState()
+ │     └── init(unique_ptr<FieldbusDriver>), scan(), reset(), exchangeProcessData(), transitionToState()
  ├── GameLoop  (RT thread, SCHED_FIFO, 1ms)
- │     ├── uses: DeviceManager    (calls pdoExchange each cycle; no-op when driver is null)
+ │     ├── uses: DeviceManager    (calls exchangeProcessData each cycle; no-op when driver is null)
  │     ├── writes: Device parameters via seqlock
  │     └── runs: ICyclicTask[]  (Watchdog, MonitorPublisher)
  ├── HttpServer
@@ -170,11 +170,13 @@ Use `std::visit` for type dispatch on `DeviceParameterValue`. `DeviceParameter` 
 
 `GameLoop::run()` blocks the **main thread** — this IS the RT thread. All other subsystems start their own threads before `run()` is called. Shutdown via signal sets an atomic flag checked after each cycle.
 
-`GameLoop` calls `deviceManager_.pdoExchange()` each cycle — it has no direct knowledge of `FieldbusDriver`. HTTP handlers call SDO methods on `DeviceManager`/`Device` from their own threads; `FieldbusDriver` serializes all socket access via its internal mutex.
+`GameLoop` calls `deviceManager_.exchangeProcessData()` each cycle via a `ProcessDataTask` (a `CyclicTask` adapter, so `GameLoop` has no knowledge of `DeviceManager` internals or `FieldbusDriver`). It is a no-op until a process image is published, so the loop runs unconditionally. HTTP handlers call SDO methods on `DeviceManager`/`Device` from their own threads; `FieldbusDriver` serializes all socket access via its internal mutex.
 
-PDO values are shared between the RT loop and HTTP/monitoring readers via a **seqlock** (odd seq = write in progress; even = stable). At ~100 PDO values / 400 bytes at 1 ms cycles, the retry path is effectively never triggered.
+PDO values are shared between the RT loop and HTTP/monitoring readers via a **seqlock** (`libs/core/seqlock.h`, odd seq = write in progress; even = stable). At ~100 PDO values / 400 bytes at 1 ms cycles, the retry path is effectively never triggered. The output staging buffer is a second seqlock written by non-RT callers (serialized among themselves by a mutex) and read by the RT loop.
 
-**Thread safety caveat — `init`/`reset` vs `pdoExchange`:** `POST /api/init`, `POST /api/scan`, and `POST /api/reset` run on the HTTP server thread and mutate `DeviceManager::driver_` and `devices_`. `pdoExchange()` runs on the RT GameLoop thread and reads both. There is currently no lock guarding this boundary. This is safe only because `pdoExchange()` is not yet wired into the GameLoop. Before enabling live PDO exchange, the loop must be stopped (or at least drained for one cycle) before `init()` or `reset()` is called via the API.
+**Reactive mapping.** Changing AL states is the user's job (via `POST /api/state`); Motion Master *reacts* in `DeviceManager::transitionToState`: entering SAFE-OP/OP with no published image auto-runs `configureProcessData()` (`ecx_config_map_group` → read each device's PDO mapping → `buildProcessImage` → publish), and leaving those states tears the image down. A device taken to BOOT for a firmware download and brought back up therefore re-maps the whole bus automatically; under the whole-bus model this briefly pauses exchange for every device.
+
+**`init`/`reset`/`configureProcessData` vs `exchangeProcessData`:** the first three run on the HTTP thread and mutate `DeviceManager::driver_`/`devices_` and the IOmap; `exchangeProcessData()` runs on the RT loop. The boundary is guarded by an atomically-published process-image pointer (RT reads it lock-free; control-plane operations publish `nullptr` first so exchange becomes a no-op) plus `stopExchange()`, which drains an in-flight cycle (bounded wait on an `exchanging` flag) before re-mapping or tearing down. Published images are retained until `reset()` so the RT thread never reads a freed image.
 
 Cycle timer: `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...)` on Linux (absolute mode to prevent drift accumulation); `CreateWaitableTimerEx` with `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` on Windows.
 

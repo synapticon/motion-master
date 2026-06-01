@@ -59,10 +59,109 @@ std::expected<int, std::string> SoemFieldbusDriver::scan() {
   return found;
 }
 
+namespace {
+
+// Estimates the smallest standard GameLoop cycle period that keeps EtherCAT wire
+// utilisation under ~50%, leaving headroom for scheduling jitter, the master's own
+// per-cycle work, and mailbox/SDO traffic interleaved between process-data frames.
+// Pure wire-physics estimate for 100 Mbit EtherCAT — informational only.
+std::chrono::microseconds recommendedCyclePeriod(uint32_t processBytes, int slaveCount) {
+  if (processBytes == 0) {
+    return std::chrono::microseconds(0);
+  }
+  // Usable process data per standard Ethernet frame after EtherCAT + datagram headers.
+  constexpr uint32_t kUsablePerFrame = 1486;
+  // Per-frame wire overhead: preamble + Ethernet header/FCS + inter-frame gap + framing.
+  constexpr uint32_t kFrameOverhead = 50;
+  const uint32_t frames = (processBytes + kUsablePerFrame - 1) / kUsablePerFrame;
+  const uint32_t wireBytes = processBytes + frames * kFrameOverhead;
+  // 100 Mbit/s = 100 bits/µs, so (wire bytes × 8) / 100 = microseconds on the wire.
+  const double txUs = (wireBytes * 8.0) / 100.0;
+  // Frame forwarding through the slave chain, both directions (~0.6 µs per slave).
+  const double ringUs = slaveCount * 0.6;
+  const double neededUs = (txUs + ringUs) / 0.5;  // target ≤ 50% bus utilisation
+  for (int64_t step : {125, 250, 500, 1000, 2000, 4000, 8000}) {
+    if (neededUs <= static_cast<double>(step)) {
+      return std::chrono::microseconds(step);
+    }
+  }
+  // Beyond the largest standard step — round up to the next whole millisecond.
+  return std::chrono::microseconds(static_cast<int64_t>((neededUs + 999.0) / 1000.0) * 1000);
+}
+
+}  // namespace
+
+std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("configureProcessData: driver not initialised");
+  }
+  const int usedSize = ecx_config_map_group(ctx_.get(), map_, 0);
+  if (usedSize <= 0) {
+    return std::unexpected("ecx_config_map_group mapped no process data");
+  }
+  if (static_cast<size_t>(usedSize) > sizeof(map_)) {
+    return std::unexpected(
+        std::format("process image {} bytes exceeds IOmap capacity {} bytes — reduce mapped PDOs",
+                    usedSize, sizeof(map_)));
+  }
+  const auto& grp = ctx_->grouplist[0];
+  const auto period = recommendedCyclePeriod(grp.Obytes + grp.Ibytes, ctx_->slavecount);
+  spdlog::info(
+      "Process data mapped: {} bytes (out {}, in {}) across {} slave(s); "
+      "recommended GameLoop cycle >= {} us ({:.1f} ms)",
+      usedSize, grp.Obytes, grp.Ibytes, ctx_->slavecount, period.count(), period.count() / 1000.0);
+  return {};
+}
+
+PdoLayout SoemFieldbusDriver::processDataLayout() {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  PdoLayout layout;
+  if (!ctx_) {
+    return layout;
+  }
+  const auto& grp = ctx_->grouplist[0];
+  layout.outputBytes = grp.Obytes;
+  layout.inputBytes = grp.Ibytes;
+  layout.expectedWkc = grp.outputsWKC * 2 + grp.inputsWKC;
+  layout.slaves.reserve(static_cast<size_t>(ctx_->slavecount));
+  for (int i = 1; i <= ctx_->slavecount; ++i) {
+    const auto& s = ctx_->slavelist[i];
+    // SOEM lays the IOmap out as [all outputs | all inputs]; Ooffset is already relative to
+    // the output image (which starts at 0), Ioffset is absolute so rebase it onto the input
+    // image. Sub-byte-only directions report 0 bytes and get a 0 offset.
+    layout.slaves.push_back(SlaveIo{
+        .slavePosition = static_cast<uint16_t>(i),
+        .outputOffset = s.Obytes ? s.Ooffset : 0,
+        .outputBytes = s.Obytes,
+        .inputOffset = s.Ibytes ? s.Ioffset - grp.Obytes : 0,
+        .inputBytes = s.Ibytes,
+    });
+  }
+  return layout;
+}
+
 // Intentionally lock-free: the RT PDO cycle relies on SOEM's internally
 // thread-safe port layer rather than socketMutex_, so a slow control-plane
 // transfer can never stall process-data exchange. See FieldbusDriver class doc.
-void SoemFieldbusDriver::exchangeProcessData() {}
+int SoemFieldbusDriver::exchangeProcessData(std::span<const uint8_t> outputs,
+                                            std::span<uint8_t> inputs) {
+  if (!ctx_) {
+    return 0;
+  }
+  const auto& grp = ctx_->grouplist[0];
+  // Copy the caller's output image into the IOmap, exchange, copy the input image back out.
+  // std::min guards against a caller buffer that disagrees with the mapped size.
+  if (!outputs.empty() && grp.Obytes > 0) {
+    std::memcpy(map_, outputs.data(), std::min<size_t>(outputs.size(), grp.Obytes));
+  }
+  ecx_send_processdata(ctx_.get());
+  const int wkc = ecx_receive_processdata(ctx_.get(), EC_TIMEOUTRET);
+  if (!inputs.empty() && grp.Ibytes > 0) {
+    std::memcpy(inputs.data(), map_ + grp.Obytes, std::min<size_t>(inputs.size(), grp.Ibytes));
+  }
+  return wkc;
+}
 
 void SoemFieldbusDriver::stop() {}
 
@@ -81,6 +180,13 @@ SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
 int SoemFieldbusDriver::slaveCount() const {
   std::lock_guard<std::mutex> lock(socketMutex_);
   return ctx_ ? ctx_->slavecount : 0;
+}
+
+uint16_t SoemFieldbusDriver::slaveState(uint16_t position) const {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  // SOEM caches the AL status in slavelist[].state, refreshed by ecx_readstate (via
+  // readStates) and ecx_writestate (via transitionToState). No bus I/O here.
+  return ctx_ ? ctx_->slavelist[position].state : 0;
 }
 
 std::expected<std::vector<FieldbusDriver::SlaveStateRaw>, std::string>

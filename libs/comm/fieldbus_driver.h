@@ -1,6 +1,7 @@
 #pragma once
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <functional>
@@ -11,6 +12,16 @@
 #include <vector>
 
 namespace mm::comm {
+
+/// @brief Maximum size in bytes of the combined process-data image (all outputs + all inputs).
+///
+/// Sizes the driver's IOmap buffer and bounds the process-data snapshots layered on top
+/// of it.  At 32 fully-loaded SOMANET axes (~160 bytes per direction) the image is ~10 KB;
+/// 32 KB leaves ample headroom.  A bus whose mapped image exceeds this is rejected by
+/// @c configureProcessData().  This is not a practical limit: on 100 Mbit EtherCAT an image
+/// that large already forces a many-millisecond cycle, so the cap sits well clear of any
+/// realistic configuration.
+inline constexpr std::size_t kMaxProcessImageBytes = 32768;
 
 /// @brief EtherCAT Application Layer state values.
 ///
@@ -60,6 +71,37 @@ struct OdEntry {
   std::optional<std::vector<uint8_t>> maxValue;      ///< Raw maximum-value bytes, if available.
 };
 
+/// @brief One slave's input and output windows within the process-data images.
+///
+/// @c outputOffset is relative to the start of the output image; @c inputOffset is relative
+/// to the start of the input image (the two images are exchanged separately — see
+/// @c exchangeProcessData).  A direction with fewer than 8 mapped bits reports a byte count
+/// of 0 and an offset of 0.
+struct SlaveIo {
+  uint16_t slavePosition;  ///< 1-based bus position.
+  uint32_t outputOffset;   ///< Byte offset of this slave's outputs within the output image.
+  uint32_t outputBytes;    ///< Output byte count for this slave.
+  uint32_t inputOffset;    ///< Byte offset of this slave's inputs within the input image.
+  uint32_t inputBytes;     ///< Input byte count for this slave.
+};
+
+/// @brief Layout of the process-data images, produced by @c configureProcessData.
+///
+/// Transport-independent description of how mapped objects are placed within the flat
+/// output and input images the caller exchanges each cycle.  The output image (master→slave)
+/// is @c outputBytes long and the input image (slave→master) is @c inputBytes long; each
+/// slave's window within them is given by @c slaves.  The node layer combines these per-slave
+/// windows with the per-object bit offsets it reads from the PDO assignment to locate
+/// individual values.  The driver exposes no caller-visible memory — the images themselves
+/// are owned by the caller and passed to @c exchangeProcessData, so the abstraction holds
+/// equally for a memory-mapped master (SOEM, IgH) and a message-based transport (SPoE).
+struct PdoLayout {
+  uint32_t outputBytes = 0;     ///< Size of the output image (master→slave).
+  uint32_t inputBytes = 0;      ///< Size of the input image (slave→master).
+  std::vector<SlaveIo> slaves;  ///< Per-slave windows, in bus order.
+  int expectedWkc = 0;  ///< Working counter when every slave exchanges (outputs×2 + inputs).
+};
+
 /// @brief Abstract interface for an EtherCAT fieldbus driver.
 ///
 /// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeDriver (SPoE).
@@ -97,12 +139,50 @@ class FieldbusDriver {
   /// @param position  1-based slave position on the bus.
   virtual SlaveInfo slaveInfo(uint16_t position) const = 0;
 
-  /// @brief Exchanges process data with all slaves in one EtherCAT LRW frame.
+  /// @brief Returns the last-known AL status for a slave without any bus I/O.
   ///
-  /// Called once per @c GameLoop cycle.  Must complete within the cycle budget;
-  /// timing jitter here propagates directly to control latency.  Must not be
-  /// called before a successful @c init() or after @c stop().
-  virtual void exchangeProcessData() = 0;
+  /// Returns the cached AL Status register (bits 3:0 = state, bit 4 = error) from the most
+  /// recent @c readStates() or state transition — no network round trip. Returns 0 before any
+  /// state is known. Call @c readStates() to refresh the cache from the hardware. Lets callers
+  /// (e.g. @c Device) derive online / exchanging status without a redundant cached copy.
+  virtual uint16_t slaveState(uint16_t position) const = 0;
+
+  /// @brief Maps the process data and lays out the IOmap (one-time, control-plane).
+  ///
+  /// Reads each slave's active PDO assignment, computes the process image, programs the
+  /// FMMUs, and fills the driver-owned IOmap.  Slaves must be in PRE-OP (mailbox active)
+  /// so the assignment can be read.  Run again to re-map after the slave set changes (e.g.
+  /// a device returning from a firmware download) — the previous @c PdoLayout is invalidated.
+  /// Serialised with other control-plane operations via the socket mutex; must not overlap
+  /// with @c exchangeProcessData.
+  ///
+  /// @return Void on success, or an error string if no driver is initialised, no process
+  ///         data is mapped, or the image exceeds @c kMaxProcessImageBytes.
+  virtual std::expected<void, std::string> configureProcessData() = 0;
+
+  /// @brief Returns the current process-data layout established by @c configureProcessData.
+  ///
+  /// The returned spans alias the driver-owned IOmap and remain valid until the next
+  /// @c configureProcessData or @c stop.  Before a successful @c configureProcessData the
+  /// layout is empty (zero-sized spans, no slaves).
+  virtual PdoLayout processDataLayout() = 0;
+
+  /// @brief Exchanges one cycle of process data: sends @p outputs, receives into @p inputs.
+  ///
+  /// The caller owns both images; the driver translates them to and from its transport (an
+  /// IOmap copy for SOEM/IgH, message (de)serialisation for SPoE).  @p outputs.size() must
+  /// equal @c PdoLayout::outputBytes and @p inputs.size() must equal @c PdoLayout::inputBytes.
+  /// Called once per @c GameLoop cycle.  Runs lock-free (does not take the socket mutex) —
+  /// see the class-level note.  Must complete within the cycle budget; timing jitter here
+  /// propagates directly to control latency.  Must not be called before
+  /// @c configureProcessData or after @c stop.
+  ///
+  /// @param outputs  Output image to send (master→slave); not retained past the call.
+  /// @param inputs   Buffer that receives the input image (slave→master).
+  /// @return The working counter for the transaction.  Compare against
+  ///         @c PdoLayout::expectedWkc: a lower value means one or more slaves did not
+  ///         contribute this cycle.  Returns 0 when no driver is initialised.
+  virtual int exchangeProcessData(std::span<const uint8_t> outputs, std::span<uint8_t> inputs) = 0;
 
   /// @brief Transitions all slaves to INIT state and closes the network interface.
   ///

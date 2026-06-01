@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <cstddef>
 #include <format>
 #include <memory>
 #include <mutex>
@@ -65,6 +66,13 @@ DeviceStateInfo decodeState(uint16_t slavePosition,
       .alStatusCode = raw.alStatusCode,
   };
 }
+
+/// Number of leading bytes of a ProcessBuffer that are live for an image of @p imageBytes: the
+/// size field plus the active byte prefix. The process-data seqlocks copy only these, so the
+/// per-cycle traffic is proportional to the real image (a few hundred bytes) rather than the full
+/// kMaxProcessImageBytes capacity (~32 KB). @p imageBytes is bounded by configureProcessData, and
+/// the seqlock clamps the count to sizeof(ProcessBuffer) regardless.
+size_t liveBufferBytes(uint32_t imageBytes) { return offsetof(ProcessBuffer, bytes) + imageBytes; }
 
 }  // namespace
 
@@ -226,8 +234,11 @@ void DeviceManager::exchangeProcessData() {
     return;  // not mapped yet, or torn down mid-flight — back out without touching the IOmap
   }
   // Load staged outputs, exchange one cycle, publish the received inputs. The scratch buffers
-  // are touched only on this (RT) thread; the seqlocks hand data to/from non-RT readers.
-  pd_->outputStaging.load(pd_->outScratch);
+  // are touched only on this (RT) thread; the seqlocks hand data to/from non-RT readers. Both
+  // copies move only the live prefix (the published image size, which is stable) rather than the
+  // full kMaxProcessImageBytes capacity, keeping per-cycle memory traffic proportional to the
+  // real image.
+  pd_->outputStaging.load(pd_->outScratch, liveBufferBytes(image->outputBytes));
   const int wkc = driver_->exchangeProcessData(
       std::span<const uint8_t>(pd_->outScratch.bytes.data(), image->outputBytes),
       std::span<uint8_t>(pd_->inScratch.bytes.data(), image->inputBytes));
@@ -236,7 +247,7 @@ void DeviceManager::exchangeProcessData() {
   // bytes in the IOmap, so this may republish stale data — readers gate on the working counter
   // below (processDataHealthy()) rather than here, since skipping the store would only leave an
   // even older snapshot in the seqlock and still expose nothing about freshness.
-  pd_->inputSnapshot.store(pd_->inScratch);
+  pd_->inputSnapshot.store(pd_->inScratch, liveBufferBytes(image->inputBytes));
   // Publish the working counter for health checks; expectedWkc is maintained off the RT path.
   pd_->lastWkc.store(wkc, std::memory_order_relaxed);
   pd_->exchanging.store(false, std::memory_order_release);
@@ -614,9 +625,15 @@ std::optional<std::vector<uint8_t>> DeviceManager::readPdoValue(uint16_t slavePo
   if (!loc) {
     return std::nullopt;
   }
-  // Inputs live in the latest snapshot; outputs in the staging buffer (what is being sent).
-  const ProcessBuffer buffer =
-      loc->isOutput ? pd_->outputStaging.load() : pd_->inputSnapshot.load();
+  // Inputs live in the latest snapshot; outputs in the staging buffer (what is being sent). Copy
+  // only the live prefix (the published image size) rather than the full capacity.
+  const size_t live = liveBufferBytes(loc->isOutput ? image->outputBytes : image->inputBytes);
+  ProcessBuffer buffer;
+  if (loc->isOutput) {
+    pd_->outputStaging.load(buffer, live);
+  } else {
+    pd_->inputSnapshot.load(buffer, live);
+  }
   return extractBits(std::span<const uint8_t>(buffer.bytes.data(), buffer.size), loc->bitOffset,
                      loc->bitLength);
 }
@@ -631,13 +648,15 @@ bool DeviceManager::writePdoValue(uint16_t slavePosition, uint16_t index, uint8_
   if (!loc || !loc->isOutput) {
     return false;  // only outputs are writable from the master
   }
-  // Read-modify-write the staging buffer; serialise against other non-RT writers.
+  // Read-modify-write the staging buffer; serialise against other non-RT writers. Copy only the
+  // live prefix (the published output image size) rather than the full capacity.
+  const size_t live = liveBufferBytes(image->outputBytes);
   std::lock_guard<std::mutex> lock(pd_->stagingMutex);
   ProcessBuffer buffer;
-  pd_->outputStaging.load(buffer);
+  pd_->outputStaging.load(buffer, live);
   insertBits(std::span<uint8_t>(buffer.bytes.data(), buffer.size), loc->bitOffset, loc->bitLength,
              bytes);
-  pd_->outputStaging.store(buffer);
+  pd_->outputStaging.store(buffer, live);
   return true;
 }
 

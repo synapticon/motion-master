@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <thread>
 #include <vector>
@@ -121,4 +122,43 @@ TEST(SeqLockTest, LargeProcessImagePayloadRoundTrips) {
   lock.load(out);
   EXPECT_EQ(out.size, in.size);
   EXPECT_EQ(out.bytes, in.bytes);
+}
+
+// The prefix store/load overloads copy only the leading bytes the caller names: the live region
+// round-trips while the destination's tail is left intact, so the per-cycle copy is proportional
+// to the real image rather than the full fixed capacity.
+TEST(SeqLockTest, PrefixStoreAndLoadCopyOnlyTheLeadingBytes) {
+  struct Buf {
+    uint32_t size;
+    std::array<uint8_t, 4096> bytes;
+  };
+  static_assert(std::is_trivially_copyable_v<Buf>);
+
+  SeqLock<Buf> lock;
+  Buf in{};
+  in.size = 3;
+  in.bytes[0] = 0xAA;
+  in.bytes[1] = 0xBB;
+  in.bytes[2] = 0xCC;
+  in.bytes[3] = 0xDD;                            // beyond the live prefix — must not be published
+  const size_t live = offsetof(Buf, bytes) + 3;  // size field + 3 live bytes
+  lock.store(in, live);
+
+  Buf out{};
+  out.bytes[3] = 0x99;  // pre-existing tail content the prefix load must leave intact
+  lock.load(out, live);
+  EXPECT_EQ(out.size, 3u);
+  EXPECT_EQ(out.bytes[0], 0xAA);
+  EXPECT_EQ(out.bytes[1], 0xBB);
+  EXPECT_EQ(out.bytes[2], 0xCC);
+  EXPECT_EQ(out.bytes[3], 0x99);  // untouched by the prefix copy
+}
+
+// A byte count larger than the payload is clamped, never over-reading or over-writing.
+TEST(SeqLockTest, PrefixCountIsClampedToPayloadSize) {
+  SeqLock<uint32_t> lock;
+  lock.store(0x12345678u, 999);  // clamped to sizeof(uint32_t)
+  uint32_t out = 0;
+  lock.load(out, 999);
+  EXPECT_EQ(out, 0x12345678u);
 }

@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <type_traits>
 
 namespace mm::core {
@@ -78,6 +80,49 @@ class SeqLock {
         continue;  // write in progress — do not even copy
       }
       out = value_;
+      std::atomic_thread_fence(std::memory_order_acquire);  // copy before re-reading counter
+      after = seq_.load(std::memory_order_relaxed);
+    } while ((before & 1u) || before != after);
+  }
+
+  /// @brief Publishes only the first @p bytes of @p value.  Single-writer only.
+  ///
+  /// For payloads where only a leading prefix is live — e.g. a length-prefixed buffer sized to a
+  /// large fixed capacity but usually carrying far less — copying just that prefix keeps the
+  /// publish cost proportional to the real data instead of the full capacity.  @p bytes must come
+  /// from a source independent of the payload (it is *not* read from @p value), so a torn in-band
+  /// length can never widen the copy; it is clamped to @c sizeof(T) regardless.  Bytes of the
+  /// stored value beyond @p bytes are left unchanged and must not be relied on by consumers.
+  ///
+  /// @param value  Snapshot whose leading @p bytes to publish.
+  /// @param bytes  Number of leading bytes to copy (clamped to @c sizeof(T)).
+  void store(const T& value, size_t bytes) {
+    const size_t n = bytes < sizeof(T) ? bytes : sizeof(T);
+    const uint32_t s = seq_.load(std::memory_order_relaxed);
+    seq_.store(s + 1, std::memory_order_relaxed);         // odd: write in progress
+    std::atomic_thread_fence(std::memory_order_release);  // odd marker before data
+    std::memcpy(&value_, &value, n);
+    std::atomic_thread_fence(std::memory_order_release);  // data before even marker
+    seq_.store(s + 2, std::memory_order_relaxed);         // even: stable
+  }
+
+  /// @brief Copies the first @p bytes of the latest stable snapshot into @p out.
+  ///
+  /// The prefix counterpart of @c load(T&): see @c store(const T&, size_t) for when this applies.
+  /// @p bytes is clamped to @c sizeof(T); bytes of @p out beyond @p bytes are left unchanged.
+  ///
+  /// @param out    Destination for the snapshot prefix.
+  /// @param bytes  Number of leading bytes to copy (clamped to @c sizeof(T)).
+  void load(T& out, size_t bytes) const {
+    const size_t n = bytes < sizeof(T) ? bytes : sizeof(T);
+    uint32_t before;
+    uint32_t after;
+    do {
+      before = seq_.load(std::memory_order_acquire);
+      if (before & 1u) {
+        continue;  // write in progress — do not even copy
+      }
+      std::memcpy(&out, &value_, n);
       std::atomic_thread_fence(std::memory_order_acquire);  // copy before re-reading counter
       after = seq_.load(std::memory_order_relaxed);
     } while ((before & 1u) || before != after);

@@ -2,11 +2,8 @@ import { useQuery } from '@tanstack/react-query'
 import type { SlaveConfig, SyncManagerConfig, FmmuConfig } from '@mm/api-client'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
-
-const btnOutlineCls =
-  'border border-syn-red text-syn-red px-3 py-1.5 text-xs hover:bg-syn-red hover:text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
-
-const hex = (n: number, width = 4) => `0x${n.toString(16).toUpperCase().padStart(width, '0')}`
+import { formatHex } from '../utils/hex'
+import { btnOutline } from '../utils/styles'
 
 // SOEM SMtype: 0 unused, 1 MbxOut, 2 MbxIn, 3 Outputs, 4 Inputs.
 const SM_TYPE: Record<number, string> = {
@@ -91,9 +88,9 @@ function SyncManagerTable({ entries }: { entries: SyncManagerConfig[] }) {
             <tr key={sm.index} className="border-b border-grey-100 last:border-0">
               <td className="px-4 py-2 font-mono">SM{sm.index}</td>
               <td className="px-4 py-2 text-grey-700">{SM_TYPE[sm.type] ?? `Type ${sm.type}`}</td>
-              <td className="px-4 py-2 font-mono">{hex(sm.physicalStart)}</td>
+              <td className="px-4 py-2 font-mono">{formatHex(sm.physicalStart)}</td>
               <td className="px-4 py-2 font-mono">{sm.length} B</td>
-              <td className="px-4 py-2 font-mono text-grey-500">{hex(sm.flags, 8)}</td>
+              <td className="px-4 py-2 font-mono text-grey-500">{formatHex(sm.flags, 8)}</td>
             </tr>
           ))}
         </tbody>
@@ -135,11 +132,11 @@ function FmmuTable({ entries }: { entries: FmmuConfig[] }) {
               <td className="px-4 py-2 font-mono">FMMU{f.index}</td>
               <td className="px-4 py-2 text-grey-700">{fmmuType(f)}</td>
               <td className="px-4 py-2 font-mono">
-                {hex(f.logicalStart, 8)}.{f.logicalStartBit}–{f.logicalEndBit}
+                {formatHex(f.logicalStart, 8)}.{f.logicalStartBit}–{f.logicalEndBit}
               </td>
               <td className="px-4 py-2 font-mono">{f.length} B</td>
               <td className="px-4 py-2 font-mono">
-                {hex(f.physicalStart)}.{f.physicalStartBit}
+                {formatHex(f.physicalStart)}.{f.physicalStartBit}
               </td>
               <td className="px-4 py-2">
                 {f.active ? (
@@ -169,11 +166,11 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
           className="font-mono text-[11px] text-grey-500 cursor-help"
           title="Station (configured) address assigned during scan"
         >
-          @ {hex(slave.configuredAddress)}
+          @ {formatHex(slave.configuredAddress)}
         </span>
         {slave.aliasAddress > 0 && (
           <span className="font-mono text-[11px] text-grey-500" title="Configured station alias">
-            alias {hex(slave.aliasAddress)}
+            alias {formatHex(slave.aliasAddress)}
           </span>
         )}
       </header>
@@ -254,7 +251,7 @@ export default function BusConfigPage() {
           <button
             onClick={() => query.refetch()}
             disabled={query.isFetching}
-            className={btnOutlineCls}
+            className={btnOutline}
           >
             {query.isFetching ? 'Loading…' : 'Refresh'}
           </button>

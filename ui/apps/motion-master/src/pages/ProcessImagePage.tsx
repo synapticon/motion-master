@@ -2,12 +2,8 @@ import { useQuery } from '@tanstack/react-query'
 import type { ProcessImageObject } from '@mm/api-client'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
-
-const btnOutlineCls =
-  'border border-syn-red text-syn-red px-3 py-1.5 text-xs hover:bg-syn-red hover:text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
-
-const hex4 = (n: number) => `0x${n.toString(16).toUpperCase().padStart(4, '0')}`
-const hex2 = (n: number) => n.toString(16).toUpperCase().padStart(2, '0')
+import { formatHex } from '../utils/hex'
+import { btnOutline } from '../utils/styles'
 
 function Stat({
   label,
@@ -107,7 +103,7 @@ function MappingTable({
                     {deviceName(e.slavePosition)}
                   </td>
                   <td className="px-4 py-2 font-mono whitespace-nowrap">
-                    {hex4(e.index)}:{hex2(e.subindex)}
+                    {formatHex(e.index)}:{formatHex(e.subindex, 2, false)}
                   </td>
                   <td className="px-4 py-2 text-grey-800 truncate" title={e.name}>
                     {e.name || <span className="text-grey-400">—</span>}
@@ -164,7 +160,7 @@ export default function ProcessImagePage() {
           <button
             onClick={() => query.refetch()}
             disabled={query.isFetching}
-            className={btnOutlineCls}
+            className={btnOutline}
           >
             {query.isFetching ? 'Loading…' : 'Refresh'}
           </button>

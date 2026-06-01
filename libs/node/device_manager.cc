@@ -22,8 +22,12 @@ namespace mm::node {
 /// RT process-data runtime state (see the forward declaration in the header). The image
 /// pointer is published with release / read with acquire; the seqlocks carry the flat output
 /// and input images across the RT/non-RT boundary; the scratch buffers are touched only on
-/// the RT thread. Published images are retained in @c generations so the RT thread never
-/// reads a freed image — they are reclaimed only by reset(), when the loop is stopped.
+/// the RT thread. Published images are retained in @c generations so no reader ever sees a
+/// freed image. stopExchange() drains the RT reader before a re-map, but the non-RT readers
+/// (readPdoValue() and the SDO read/write paths) load @c image lock-free with no such
+/// handshake, so a freed-on-republish image would dangle under them. Retaining every
+/// generation until reset() — when the loop is stopped — sidesteps reclamation tracking for
+/// all readers, RT and non-RT alike.
 struct ProcessData {
   std::atomic<const ProcessImage*> image{nullptr};
   std::vector<std::shared_ptr<const ProcessImage>> generations;
@@ -92,6 +96,14 @@ std::expected<int, std::string> DeviceManager::scan() {
     spdlog::error("scan() called with no driver — call init() first");
     return std::unexpected("no driver — call init() first");
   }
+  // A re-scan reprograms the whole SOEM context (ecx_config_init rebuilds the slavelist, sync
+  // managers, and FMMUs) and replaces the device set, invalidating the current process image.
+  // Unpublish and drain the RT cycle first — exactly as reset()/configureProcessData() do — so
+  // exchangeProcessData() is a no-op and the RT loop is no longer touching the IOmap while the
+  // driver rebuilds it. Then reclaim the now-stale image generations (safe once exchange is
+  // gated off); a fresh image is published when the bus is next brought into SAFE-OP/OP.
+  stopExchange();
+  pd_->generations.clear();
   auto result = driver_->scan();
   if (!result) {
     spdlog::error("FieldbusDriver scan failed: {}", result.error());
@@ -197,12 +209,22 @@ std::expected<void, std::string> DeviceManager::configureProcessData() {
 }
 
 void DeviceManager::exchangeProcessData() {
-  const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
-  if (!driver_ || image == nullptr) {
-    return;  // not mapped yet — safe no-op so the GameLoop can call this every cycle
+  if (!driver_) {
+    return;  // no driver — safe no-op so the GameLoop can call this every cycle
   }
-  // Mark the cycle in flight so stopExchange() can drain it before a re-map/teardown.
-  pd_->exchanging.store(true, std::memory_order_release);
+  // Raise the in-flight flag BEFORE reading the published image, then re-read the image: this
+  // closes the race against stopExchange(), which stores nullptr and then waits on this flag.
+  // Both the flag store and the image load are sequentially consistent so they cannot be
+  // reordered against stopExchange()'s image store / flag load (a StoreLoad pair that only
+  // seq_cst prevents). The total order then guarantees that for any concurrent teardown either
+  // we observe the null image and back out here, or stopExchange() observes the flag and drains
+  // us — never both missing each other and letting us touch a half-remapped IOmap.
+  pd_->exchanging.store(true, std::memory_order_seq_cst);
+  const ProcessImage* image = pd_->image.load(std::memory_order_seq_cst);
+  if (image == nullptr) {
+    pd_->exchanging.store(false, std::memory_order_release);
+    return;  // not mapped yet, or torn down mid-flight — back out without touching the IOmap
+  }
   // Load staged outputs, exchange one cycle, publish the received inputs. The scratch buffers
   // are touched only on this (RT) thread; the seqlocks hand data to/from non-RT readers.
   pd_->outputStaging.load(pd_->outScratch);
@@ -217,12 +239,15 @@ void DeviceManager::exchangeProcessData() {
 }
 
 void DeviceManager::stopExchange() {
-  pd_->image.store(nullptr, std::memory_order_release);
-  // Drain an in-flight exchange cycle: once the image is null the RT thread will not start a
-  // new one, so we only wait out the at-most-one cycle already past the null check. Bounded so
-  // a stalled/absent RT loop can never hang a control-plane call.
+  pd_->image.store(nullptr, std::memory_order_seq_cst);
+  // Drain an in-flight exchange cycle. Both operations here are sequentially consistent so they
+  // pair with exchangeProcessData()'s seq_cst flag-store / image-load: once we have stored the
+  // null image, any RT cycle that has already raised the flag is visible to this load, and any
+  // RT cycle that has not yet raised it will observe the null image and back out. We therefore
+  // only wait out the at-most-one cycle already in flight. Bounded so a stalled/absent RT loop
+  // can never hang a control-plane call.
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
-  while (pd_->exchanging.load(std::memory_order_acquire) &&
+  while (pd_->exchanging.load(std::memory_order_seq_cst) &&
          std::chrono::steady_clock::now() < deadline) {
     std::this_thread::yield();
   }
@@ -245,6 +270,54 @@ int DeviceManager::expectedWorkingCounter() const {
 bool DeviceManager::processDataHealthy() const {
   return processDataConfigured() && pd_->lastWkc.load(std::memory_order_relaxed) >=
                                         pd_->expectedWkc.load(std::memory_order_relaxed);
+}
+
+ProcessImageInfo DeviceManager::processImageInfo() const {
+  ProcessImageInfo info{};
+  info.lastWkc = pd_->lastWkc.load(std::memory_order_relaxed);
+  info.expectedWkc = pd_->expectedWkc.load(std::memory_order_relaxed);
+  // generations is mutated only by configureProcessData()/reset(), both on the control-plane
+  // thread that also calls this accessor — so the size read needs no synchronisation.
+  info.generations = pd_->generations.size();
+
+  const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
+  info.configured = image != nullptr;
+  info.healthy = info.configured && info.lastWkc >= info.expectedWkc;
+
+  // Describe the live image when exchanging; otherwise fall back to the most recent retained
+  // generation so a bus that has dropped out of SAFE-OP/OP (image torn down, but generations
+  // kept until reset()) still shows what it last mapped. `configured` tells the caller which it
+  // is, so a stale layout is never mistaken for an active one.
+  const ProcessImage* describe = image;
+  if (describe == nullptr && !pd_->generations.empty()) {
+    describe = pd_->generations.back().get();
+  }
+  if (describe == nullptr) {
+    return info;
+  }
+  info.outputBytes = describe->outputBytes;
+  info.inputBytes = describe->inputBytes;
+
+  // Resolve each entry's name from the owning device's parameter map (empty when its object
+  // dictionary has not been enumerated — PDO mappings are read independently of OD enumeration).
+  auto flatten = [this](const std::vector<ProcessImageEntry>& entries) {
+    std::vector<ProcessImageObjectInfo> out;
+    out.reserve(entries.size());
+    for (const auto& e : entries) {
+      std::string name;
+      if (const Device* device = findDevice(e.slavePosition)) {
+        if (const DeviceParameter* p = device->parameter(e.index, e.subindex)) {
+          name = p->name;
+        }
+      }
+      out.push_back(
+          {e.slavePosition, e.index, e.subindex, std::move(name), e.bitOffset, e.bitLength});
+    }
+    return out;
+  };
+  info.outputs = flatten(describe->outputs);
+  info.inputs = flatten(describe->inputs);
+  return info;
 }
 
 void DeviceManager::updateExpectedWkc() {
@@ -509,6 +582,24 @@ std::expected<void, std::string> DeviceManager::writeDeviceParameter(uint16_t sl
     }
   }
   return device->writeParameter(index, subindex, std::move(value));
+}
+
+void to_json(nlohmann::json& j, const ProcessImageObjectInfo& obj) {
+  j = {{"slavePosition", obj.slavePosition}, {"index", obj.index},
+       {"subindex", obj.subindex},           {"name", obj.name},
+       {"bitOffset", obj.bitOffset},         {"bitLength", obj.bitLength}};
+}
+
+void to_json(nlohmann::json& j, const ProcessImageInfo& info) {
+  j = {{"configured", info.configured},
+       {"outputBytes", info.outputBytes},
+       {"inputBytes", info.inputBytes},
+       {"expectedWkc", info.expectedWkc},
+       {"lastWkc", info.lastWkc},
+       {"healthy", info.healthy},
+       {"generations", info.generations},
+       {"outputs", info.outputs},
+       {"inputs", info.inputs}};
 }
 
 void to_json(nlohmann::json& j, const DeviceManager& dm) { j = dm.devices(); }

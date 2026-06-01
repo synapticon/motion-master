@@ -1031,8 +1031,105 @@ paths:
                       format: int64
                       description: Serial number from EEPROM
                       example: 12345
+  /api/process-image:
+    get:
+      summary: Inspect the published EtherCAT process image
+      description: >-
+        Returns the whole-bus process image: the byte sizes of each direction,
+        the expected and last working counters and overall health, the number of
+        retained image generations (one per re-map since the last reset), and
+        every mapped object resolved to its absolute bit offset. While an image
+        is live `configured` is true and the layout describes it. When no image
+        is published (no device is in SAFE-OP/OP) but at least one generation has
+        been mapped, `configured` is false and the layout describes the most
+        recent retained generation — the last-known mapping — so a bus that has
+        dropped out of SAFE-OP/OP stays inspectable; `lastWkc` then holds the
+        final exchange value and working-counter health does not apply. The
+        object lists are empty only before any image has ever been mapped. Object
+        `name` is populated only for devices whose object dictionary has been
+        enumerated.
+      operationId: getProcessImage
+      responses:
+        "200":
+          description: The published process image and its runtime health
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  [configured, outputBytes, inputBytes, expectedWkc, lastWkc, healthy,
+                   generations, outputs, inputs]
+                properties:
+                  configured:
+                    type: boolean
+                    description: Whether an image is currently published for exchange
+                    example: true
+                  outputBytes:
+                    type: integer
+                    description: Size of the output image (master→slave) in bytes
+                    example: 12
+                  inputBytes:
+                    type: integer
+                    description: Size of the input image (slave→master) in bytes
+                    example: 16
+                  expectedWkc:
+                    type: integer
+                    description: Working counter expected from the devices currently exchanging
+                    example: 3
+                  lastWkc:
+                    type: integer
+                    description: Working counter from the most recent exchange (0 before any)
+                    example: 3
+                  healthy:
+                    type: boolean
+                    description: Whether the last working counter meets the expected value
+                    example: true
+                  generations:
+                    type: integer
+                    description: Number of process images retained since the last reset
+                    example: 1
+                  outputs:
+                    type: array
+                    description: Output-mapped objects (RxPDO), in image order
+                    items:
+                      $ref: "#/components/schemas/ProcessImageObject"
+                  inputs:
+                    type: array
+                    description: Input-mapped objects (TxPDO), in image order
+                    items:
+                      $ref: "#/components/schemas/ProcessImageObject"
 components:
   schemas:
+    ProcessImageObject:
+      type: object
+      required: [slavePosition, index, subindex, name, bitOffset, bitLength]
+      properties:
+        slavePosition:
+          type: integer
+          description: 1-based bus position of the owning device
+          example: 1
+        index:
+          type: integer
+          description: CoE object index
+          example: 24640
+        subindex:
+          type: integer
+          description: CoE object subindex
+          example: 0
+        name:
+          type: string
+          description: >-
+            Object name resolved from the device's parameter map; empty when the
+            object dictionary has not been enumerated for that device
+          example: "Target position"
+        bitOffset:
+          type: integer
+          description: Absolute bit offset within the direction's image
+          example: 32
+        bitLength:
+          type: integer
+          description: Width of the value in bits
+          example: 32
     AlStatusCode:
       type: object
       required: [code, name, description, terminal]

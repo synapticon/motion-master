@@ -13,6 +13,7 @@ const deviceLinks = [
 ]
 
 const AL_STATE_LABEL: Record<number, string> = {
+  0: 'None', // No state — slave lost / powered off (SOEM reports state 0).
   1: 'Init',
   2: 'PreOp',
   3: 'Boot',
@@ -102,7 +103,7 @@ function DeviceSection({
           {stateLabel && (
             <span
               title={`AL state${state?.error ? ' — error indicator set' : ''}`}
-              className={`shrink-0 px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider ${state?.error ? 'bg-status-warn/15 text-status-warn' : 'bg-white/10 text-white/60'
+              className={`shrink-0 cursor-help px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider ${state?.error ? 'bg-status-warn/15 text-status-warn' : 'bg-white/10 text-white/60'
                 }`}
             >
               {stateLabel}
@@ -189,6 +190,9 @@ export default function RootLayout() {
           <NavItem to="/api-docs" label="API Docs" />
           <NavItem to="/" label="Connection" end />
           <NavItem to="/fieldbus" label="Fieldbus" />
+          <div className="pl-3">
+            <NavItem to="/process-image" label="Process Image" />
+          </div>
           <NavItem to="/log" label="Log" />
           <NavItem to="/requests" label="Requests" />
 

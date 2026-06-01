@@ -128,7 +128,12 @@ class SoemFieldbusDriver : public FieldbusDriver {
   // ecx_contextt is several hundred KB (EC_MAXSLAVE slave entries) — heap-
   // allocated and null until init() succeeds.
   std::unique_ptr<ecx_context> ctx_;
-  uint8_t map_[4096]{};
+  // EtherCAT IOmap: ecx_config_map_group lays the whole bus's process data out here as
+  // [all outputs | all inputs]. Sized to kMaxProcessImageBytes so it matches the cap
+  // configureProcessData() enforces and the ProcessBuffer snapshots layered on top — the
+  // three must agree, or a bus the rest of the stack accepts would overflow or be rejected
+  // here. At ~160 bytes per direction per SOMANET axis this holds ~100 fully-loaded axes.
+  uint8_t map_[kMaxProcessImageBytes]{};
   // 1-based positions whose context currently holds BOOT-sized mailbox sync
   // managers (set when we drive a slave into BOOT). ecx_config_init programs the
   // correct PRE-OP mailbox SMs for every slave during scan(), so a fresh-scan

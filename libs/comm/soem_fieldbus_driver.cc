@@ -96,6 +96,18 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
   if (!ctx_) {
     return std::unexpected("configureProcessData: driver not initialised");
   }
+  // ecx_config_map_group only assigns each slave's outputs/inputs IOmap pointer when it is still
+  // null (`if (!slavelist[slave].outputs)`); it recomputes Obits/Ibits/Obytes and the group
+  // pointers unconditionally, but the per-slave pointers stick. On a re-map (a device returning
+  // from a firmware download re-runs this without an intervening scan/ecx_config_init, which is
+  // the only thing that memsets the slavelist) those pointers therefore retain their first-map
+  // values, so processDataLayout()'s `slave.outputs - group.outputs` would yield offsets for the
+  // old layout if the new firmware's PDO mapping changed size or order. Null them first so SOEM
+  // recomputes them against the freshly mapped IOmap — exactly what a clean scan would do.
+  for (int i = 1; i <= ctx_->slavecount; ++i) {
+    ctx_->slavelist[i].outputs = nullptr;
+    ctx_->slavelist[i].inputs = nullptr;
+  }
   const int usedSize = ecx_config_map_group(ctx_.get(), map_, 0);
   if (usedSize <= 0) {
     return std::unexpected("ecx_config_map_group mapped no process data");
@@ -105,6 +117,12 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
         std::format("process image {} bytes exceeds IOmap capacity {} bytes — reduce mapped PDOs",
                     usedSize, sizeof(map_)));
   }
+  // Initialise the Distributed Clocks system: measure propagation delays and elect a reference
+  // clock. We deliberately do not call ecx_dcsync0, so process data stays SM-synchronous
+  // (free-run), driven by the GameLoop's software cycle — DC is initialised but no SYNC0 pulse
+  // is generated, matching how the bus was brought up previously.
+  const bool dc = ecx_configdc(ctx_.get());
+  spdlog::info("Distributed clock configured; DC-capable slaves present: {}", dc ? "yes" : "no");
   const auto& grp = ctx_->grouplist[0];
   const auto period = recommendedCyclePeriod(grp.Obytes + grp.Ibytes, ctx_->slavecount);
   spdlog::info(
@@ -127,14 +145,17 @@ PdoLayout SoemFieldbusDriver::processDataLayout() {
   layout.slaves.reserve(static_cast<size_t>(ctx_->slavecount));
   for (int i = 1; i <= ctx_->slavecount; ++i) {
     const auto& s = ctx_->slavelist[i];
-    // SOEM lays the IOmap out as [all outputs | all inputs]; Ooffset is already relative to
-    // the output image (which starts at 0), Ioffset is absolute so rebase it onto the input
-    // image. Sub-byte-only directions report 0 bytes and get a 0 offset.
+    // SOEM never populates the per-slave Ooffset/Ioffset fields — only the outputs/inputs
+    // pointers into the IOmap — so reading those offsets yields 0 and a single slave's inputs
+    // wrap to -Obytes. Derive each window's offset within its direction's image from the
+    // pointers instead: the group's outputs pointer is the output image base and its inputs
+    // pointer is the input image base (IOmap laid out as [all outputs | all inputs]). A
+    // sub-byte-only direction reports 0 bytes; its pointer is never set, so it gets a 0 offset.
     layout.slaves.push_back(SlaveIo{
         .slavePosition = static_cast<uint16_t>(i),
-        .outputOffset = s.Obytes ? s.Ooffset : 0,
+        .outputOffset = s.Obytes ? static_cast<uint32_t>(s.outputs - grp.outputs) : 0,
         .outputBytes = s.Obytes,
-        .inputOffset = s.Ibytes ? s.Ioffset - grp.Obytes : 0,
+        .inputOffset = s.Ibytes ? static_cast<uint32_t>(s.inputs - grp.inputs) : 0,
         .inputBytes = s.Ibytes,
     });
   }
@@ -599,6 +620,10 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
   auto deadline = std::chrono::steady_clock::now() + timeout;
   auto lastResend = std::chrono::steady_clock::now();
   bool aborted = false;
+  // Slaves whose error bit we have already reported. The AL status code a slave latches the
+  // instant it raises the error bit is often more specific than the one it settles on by the
+  // timeout, so log it once on first sight rather than only at the end.
+  std::set<uint16_t> errorReported;
 
   while (!pending.empty() && std::chrono::steady_clock::now() < deadline) {
     if (shouldAbort && shouldAbort()) {
@@ -632,6 +657,18 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
       uint16_t pos = *it;
       uint16_t state = ctx_->slavelist[pos].state;
       uint16_t alStatusCode = ctx_->slavelist[pos].ALstatuscode;
+      // First time we see the error bit for this slave, report the AL status + code immediately
+      // (the transient code is the most diagnostic). Logged once so a slow transition does not
+      // spam the same line every poll.
+      if ((state & EC_STATE_ERROR) && !errorReported.contains(pos)) {
+        errorReported.insert(pos);
+        std::string_view name = alStatusCodeName(alStatusCode);
+        spdlog::warn(
+            "Device {}: error bit set while reaching state 0x{:02X} — AL status 0x{:04X}, "
+            "code 0x{:04X} ({})",
+            pos, targetRaw, state, alStatusCode,
+            name.empty() ? "unknown — not in ETG.1000.6" : name);
+      }
       // Exact match required: OP+ERROR (0x18) must not pass as OP (0x08).
       if (state == targetRaw) {
         spdlog::info("Device {}: reached state 0x{:02X}", pos, targetRaw);
@@ -665,8 +702,17 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
   if (!aborted) {
     std::lock_guard<std::mutex> lock(socketMutex_);
     for (uint16_t pos : pending) {
-      spdlog::error("Device {}: failed to reach state 0x{:02X} (AL status: 0x{:04X})", pos,
-                    targetRaw, ctx_->slavelist[pos].ALstatuscode);
+      // Report both registers: the AL Status (0x0130 — actual state + error bit, so the slave's
+      // real position is visible rather than just the requested target) and the AL Status Code
+      // (0x0134). Decode the code's name, flagging it as unknown when it falls outside the
+      // standard table — a code with no name is usually vendor-specific or a stale read, which
+      // is itself diagnostic and must not be mistaken for a defined error.
+      uint16_t alStatus = ctx_->slavelist[pos].state;
+      uint16_t alStatusCode = ctx_->slavelist[pos].ALstatuscode;
+      std::string_view name = alStatusCodeName(alStatusCode);
+      spdlog::error(
+          "Device {}: failed to reach state 0x{:02X} — AL status 0x{:04X}, code 0x{:04X} ({})", pos,
+          targetRaw, alStatus, alStatusCode, name.empty() ? "unknown — not in ETG.1000.6" : name);
     }
   }
 }

@@ -343,7 +343,7 @@ export default function FieldbusPage() {
                               <td className="px-4 py-2 font-mono">0x{d.revisionNumber.toString(16).toUpperCase()}</td>
                               <td className="px-4 py-2 font-mono">{d.serialNumber}</td>
                               <td className="px-4 py-2">
-                                {deviceStates[d.slavePosition] !== undefined
+                                {deviceStates[d.slavePosition] !== undefined && deviceStates[d.slavePosition].alState !== 0
                                   ? (() => {
                                     const ds = deviceStates[d.slavePosition]
                                     const stateLabel = AL_STATE_LABEL[ds.alState] ?? `0x${ds.alState.toString(16).toUpperCase()}`
@@ -352,11 +352,11 @@ export default function FieldbusPage() {
                                       <span className={ds.error ? 'text-status-bad' : ''}>
                                         {stateLabel} ({ds.alState})
                                         {errorEntry && (
-                                          <span title={errorEntry.description}>
+                                          <span className="cursor-help" title={errorEntry.description}>
                                             {' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} {errorEntry.name}
                                             {errorEntry.terminal && (
                                               <span
-                                                className="ml-1 text-grey-600"
+                                                className="ml-1 cursor-help text-grey-600"
                                                 title="Terminal: the slave cannot reach the requested state by retrying. Re-init, reflash, or power cycle is required."
                                               >
                                                 (terminal)

@@ -33,6 +33,47 @@ struct DeviceStateInfo {
 /// @brief Serialises a DeviceStateInfo to JSON.
 void to_json(nlohmann::json& j, const DeviceStateInfo& info);
 
+/// @brief One mapped object in the published process image, with its name resolved.
+///
+/// A flattened, API-facing view of a @c ProcessImageEntry: the raw entry plus the textual
+/// name looked up from the owning device's parameter map (empty when the object dictionary
+/// has not been enumerated for that device).
+struct ProcessImageObjectInfo {
+  uint16_t slavePosition;  ///< 1-based bus position of the owning device.
+  uint16_t index;          ///< CoE object index.
+  uint8_t subindex;        ///< CoE object subindex.
+  std::string name;        ///< Object name, or empty if the OD has not been enumerated.
+  uint32_t bitOffset;      ///< Absolute bit offset within the direction's image.
+  uint16_t bitLength;      ///< Width of the value in bits.
+};
+
+/// @brief API-facing snapshot of the currently published process image and its runtime health.
+///
+/// Built on the calling (non-RT) thread by @c DeviceManager::processImageInfo. When an image is
+/// live (@c configured true) the layout describes it. When no image is published (@c configured
+/// false) but generations have been mapped since the last reset(), the byte sizes and object
+/// lists describe the most recent retained generation — the last-known layout — so a bus that has
+/// dropped out of SAFE-OP/OP remains inspectable; @c lastWkc then holds the final exchange value
+/// while @c expectedWkc reflects the now-idle bus. The lists are empty only before any image has
+/// ever been mapped.
+struct ProcessImageInfo {
+  bool configured;          ///< Whether an image is currently published for exchange.
+  uint32_t outputBytes;     ///< Size of the output image (master→slave).
+  uint32_t inputBytes;      ///< Size of the input image (slave→master).
+  int expectedWkc;          ///< Working counter expected from the devices currently exchanging.
+  int lastWkc;              ///< Working counter from the most recent exchange (0 before any).
+  bool healthy;             ///< Whether the last working counter meets the expected value.
+  std::size_t generations;  ///< Number of process images retained since the last reset().
+  std::vector<ProcessImageObjectInfo> outputs;  ///< Output-mapped objects in image order.
+  std::vector<ProcessImageObjectInfo> inputs;   ///< Input-mapped objects in image order.
+};
+
+/// @brief Serialises a ProcessImageObjectInfo to JSON.
+void to_json(nlohmann::json& j, const ProcessImageObjectInfo& obj);
+
+/// @brief Serialises a ProcessImageInfo to JSON.
+void to_json(nlohmann::json& j, const ProcessImageInfo& info);
+
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.
 ///
 /// The driver is not required at construction — call @c init() to supply one.
@@ -153,6 +194,15 @@ class DeviceManager {
   /// expected value. A drop below expected means a device that should be in SAFE-OP/OP stopped
   /// contributing (cable, fault, or an unexpected state change).
   bool processDataHealthy() const;
+
+  /// @brief Snapshots the published process image and its runtime health for the API.
+  ///
+  /// Resolves every mapped object to an absolute bit offset and a name (looked up from each
+  /// device's parameter map, empty if the OD has not been enumerated) and reports the byte
+  /// sizes, expected/last working counter, health, and the number of retained image
+  /// generations. Returns @c configured false with empty object lists when no image is
+  /// published. Runs on the (non-RT) caller's thread; reads the published image lock-free.
+  ProcessImageInfo processImageInfo() const;
 
   /// @brief Transitions a set of devices to @p targetState, blocking until all arrive or
   ///        @p timeout elapses, and reports the final state of each.

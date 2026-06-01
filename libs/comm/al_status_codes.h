@@ -105,4 +105,16 @@ constexpr bool isAlStatusCodeTerminal(uint16_t code) {
   return it != kAlStatusCodes.end() && it->terminal;
 }
 
+/// @brief Returns the short name for @p code, or an empty view if @p code is not a known
+///        ETG.1000.6 AL Status Code.
+///
+/// An empty result is the signal that a slave reported a code outside the standard table —
+/// vendor-specific, or a stale/garbage read — which a caller should flag rather than present
+/// as a decoded error.
+constexpr std::string_view alStatusCodeName(uint16_t code) {
+  const auto it = std::find_if(kAlStatusCodes.begin(), kAlStatusCodes.end(),
+                               [code](const AlStatusCode& entry) { return entry.code == code; });
+  return it != kAlStatusCodes.end() ? it->name : std::string_view{};
+}
+
 }  // namespace mm::comm

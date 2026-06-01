@@ -8,8 +8,10 @@
 #include <fstream>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -22,6 +24,39 @@
 #include "core/util.h"
 #include "node/device_manager.h"
 #include "node/device_parameter.h"
+
+namespace {
+
+// Parses the optional comma-separated "positions" query into 1-based slave positions. An absent
+// or empty parameter yields an empty vector (which the device manager reads as "all devices"). On
+// a malformed token it writes a 400 (with the CORS header) to @p res and returns nullopt — the
+// caller must return immediately without writing a further response.
+template <typename Res, typename Req>
+std::optional<std::vector<uint16_t>> parsePositions(Res* res, Req* req,
+                                                    std::string_view corsOrigin) {
+  std::vector<uint16_t> positions;
+  auto posParam = req->getQuery("positions");
+  if (posParam.empty()) {
+    return positions;
+  }
+  std::string posStr(posParam);
+  std::istringstream ss(posStr);
+  std::string token;
+  while (std::getline(ss, token, ',')) {
+    uint16_t pos{};
+    auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), pos);
+    if (ec != std::errc() || ptr != token.data() + token.size()) {
+      res->writeStatus("400 Bad Request")
+          ->writeHeader("Access-Control-Allow-Origin", corsOrigin)
+          ->end();
+      return std::nullopt;
+    }
+    positions.push_back(pos);
+  }
+  return positions;
+}
+
+}  // namespace
 
 Server::Server(Config config, mm::node::DeviceManager& deviceManager)
     : config_(std::move(config)), deviceManager_(deviceManager) {}
@@ -194,25 +229,11 @@ void Server::run() {
            })
       .get("/api/devices/state",
            [this](auto* res, auto* req) {
-             std::vector<uint16_t> positions;
-             auto posParam = req->getQuery("positions");
-             if (!posParam.empty()) {
-               std::string posStr(posParam);
-               std::istringstream ss(posStr);
-               std::string token;
-               while (std::getline(ss, token, ',')) {
-                 uint16_t pos{};
-                 auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), pos);
-                 if (ec != std::errc() || ptr != token.data() + token.size()) {
-                   res->writeStatus("400 Bad Request")
-                       ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                       ->end();
-                   return;
-                 }
-                 positions.push_back(pos);
-               }
+             auto positions = parsePositions(res, req, config_.corsOrigin);
+             if (!positions) {
+               return;  // parsePositions already wrote the 400 response
              }
-             auto r = deviceManager_.getDeviceStates(positions);
+             auto r = deviceManager_.getDeviceStates(*positions);
              if (!r) {
                res->writeStatus("500 Internal Server Error")
                    ->writeHeader("Content-Type", "application/json")
@@ -226,25 +247,11 @@ void Server::run() {
            })
       .get("/api/devices/diagnostics",
            [this](auto* res, auto* req) {
-             std::vector<uint16_t> positions;
-             auto posParam = req->getQuery("positions");
-             if (!posParam.empty()) {
-               std::string posStr(posParam);
-               std::istringstream ss(posStr);
-               std::string token;
-               while (std::getline(ss, token, ',')) {
-                 uint16_t pos{};
-                 auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), pos);
-                 if (ec != std::errc() || ptr != token.data() + token.size()) {
-                   res->writeStatus("400 Bad Request")
-                       ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                       ->end();
-                   return;
-                 }
-                 positions.push_back(pos);
-               }
+             auto positions = parsePositions(res, req, config_.corsOrigin);
+             if (!positions) {
+               return;  // parsePositions already wrote the 400 response
              }
-             auto r = deviceManager_.getDeviceDiagnostics(positions);
+             auto r = deviceManager_.getDeviceDiagnostics(*positions);
              if (!r) {
                res->writeStatus("500 Internal Server Error")
                    ->writeHeader("Content-Type", "application/json")
@@ -258,25 +265,11 @@ void Server::run() {
            })
       .get("/api/dc-sync",
            [this](auto* res, auto* req) {
-             std::vector<uint16_t> positions;
-             auto posParam = req->getQuery("positions");
-             if (!posParam.empty()) {
-               std::string posStr(posParam);
-               std::istringstream ss(posStr);
-               std::string token;
-               while (std::getline(ss, token, ',')) {
-                 uint16_t pos{};
-                 auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), pos);
-                 if (ec != std::errc() || ptr != token.data() + token.size()) {
-                   res->writeStatus("400 Bad Request")
-                       ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                       ->end();
-                   return;
-                 }
-                 positions.push_back(pos);
-               }
+             auto positions = parsePositions(res, req, config_.corsOrigin);
+             if (!positions) {
+               return;  // parsePositions already wrote the 400 response
              }
-             auto r = deviceManager_.getDcSync(positions);
+             auto r = deviceManager_.getDcSync(*positions);
              if (!r) {
                res->writeStatus("500 Internal Server Error")
                    ->writeHeader("Content-Type", "application/json")

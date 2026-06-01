@@ -232,6 +232,10 @@ void DeviceManager::exchangeProcessData() {
       std::span<const uint8_t>(pd_->outScratch.bytes.data(), image->outputBytes),
       std::span<uint8_t>(pd_->inScratch.bytes.data(), image->inputBytes));
   pd_->inScratch.size = image->inputBytes;
+  // Always publish the latest snapshot. On a lost or partial frame the driver leaves the prior
+  // bytes in the IOmap, so this may republish stale data — readers gate on the working counter
+  // below (processDataHealthy()) rather than here, since skipping the store would only leave an
+  // even older snapshot in the seqlock and still expose nothing about freshness.
   pd_->inputSnapshot.store(pd_->inScratch);
   // Publish the working counter for health checks; expectedWkc is maintained off the RT path.
   pd_->lastWkc.store(wkc, std::memory_order_relaxed);
@@ -619,10 +623,14 @@ std::expected<DeviceParameterValue, std::string> DeviceManager::readDeviceParame
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
   }
-  // Use the process image only for a device actually exchanging (SAFE-OP/OP). A device left in
-  // PRE-OP on a partially-operational bus is in the image but not filling its region, so its
-  // value must come over SDO — not from the stale buffer.
-  if (device->exchangesProcessData()) {
+  // Use the process image only for a device actually exchanging (SAFE-OP/OP) AND only while the
+  // bus is healthy. A device left in PRE-OP on a partially-operational bus is in the image but
+  // not filling its region; and on a lost or partial frame the input snapshot still holds the
+  // previous cycle's bytes (the IOmap is not refreshed when the working counter falls short), so
+  // trusting it would serve stale data as a live value. In either case the value must come over
+  // SDO — the authoritative read, which for a genuinely faulted device fails and surfaces the
+  // problem rather than returning a confident-but-wrong last-good figure.
+  if (device->exchangesProcessData() && processDataHealthy()) {
     // The live value lives in the process data — decode it and reflect it into the cached
     // DeviceParameter (which stays the source of truth).
     if (auto bytes = readPdoValue(slavePosition, index, subindex); bytes) {

@@ -309,6 +309,7 @@ TEST(DeviceManagerProcessData, WriteStagesOutputAndReadPullsInput) {
   auto bus = makeCia402Bus();
   // Statusword 0x0237, actual position 0x11223344 — little-endian in the input image.
   bus->cannedInputs = {0x37, 0x02, 0x44, 0x33, 0x22, 0x11};
+  bus->wkc = 3;  // OP device (outputs + inputs) fully contributing — a healthy bus
   FakeBus* busPtr = bus.get();
 
   DeviceManager dm;
@@ -425,6 +426,7 @@ TEST(DeviceManagerProcessData, MixedStatesRoutePerDeviceBetweenPdoAndSdo) {
   bus->program(0x6041, 0x00, u16le(0xABCD));  // distinct SDO value for device 1's statusword
   bus->slaveStates[1] = static_cast<uint16_t>(EtherCatState::PreOp);
   bus->slaveStates[2] = static_cast<uint16_t>(EtherCatState::Op);
+  bus->wkc = 3;  // only device 2 (OP) contributes, so 3 == expected: a healthy bus
 
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
@@ -471,6 +473,38 @@ TEST(DeviceManagerProcessData, WorkingCounterHealthReflectsParticipation) {
   dm.exchangeProcessData();
   EXPECT_EQ(dm.lastWorkingCounter(), 1);
   EXPECT_FALSE(dm.processDataHealthy());
+}
+
+TEST(DeviceManagerProcessData, UnhealthyWorkingCounterReadsFallBackToSdo) {
+  // Regression: on a lost or partial frame the driver leaves the prior cycle's bytes in the
+  // IOmap, so the input snapshot is stale. A read must not serve that stale value as live — it
+  // falls back to the authoritative SDO upload, which reflects the device's real state.
+  auto bus = makeCia402Bus();                    // single device in OP, expected WKC 3
+  bus->cannedInputs = {0x37, 0x02, 0, 0, 0, 0};  // statusword 0x0237 sits in the input image
+  bus->program(0x6041, 0x00, u16le(0xABCD));     // distinct authoritative SDO value
+  bus->wkc = 1;                                  // below expected 3 → a slave dropped out
+  FakeBus* busPtr = bus.get();
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  dm.exchangeProcessData();
+  ASSERT_FALSE(dm.processDataHealthy());
+
+  // Unhealthy bus: the read ignores the stale 0x0237 snapshot and uses the SDO value.
+  auto stale = dm.readDeviceParameter(1, 0x6041, 0x00);
+  ASSERT_TRUE(stale.has_value());
+  EXPECT_EQ(std::get<uint16_t>(*stale), 0xABCD);
+
+  // Once the working counter recovers, the read serves the live snapshot value again.
+  busPtr->wkc = 3;
+  dm.exchangeProcessData();
+  ASSERT_TRUE(dm.processDataHealthy());
+  auto live = dm.readDeviceParameter(1, 0x6041, 0x00);
+  ASSERT_TRUE(live.has_value());
+  EXPECT_EQ(std::get<uint16_t>(*live), 0x0237);
 }
 
 }  // namespace

@@ -61,8 +61,8 @@ DeviceStateInfo decodeState(uint16_t slavePosition,
   return {
       .slavePosition = slavePosition,
       .alStatus = raw.alStatus,
-      .alState = static_cast<uint16_t>(raw.alStatus & 0x000Fu),
-      .error = !!(raw.alStatus & 0x0010u),
+      .alState = static_cast<uint16_t>(mm::comm::alState(raw.alStatus)),
+      .error = mm::comm::alHasError(raw.alStatus),
       .alStatusCode = raw.alStatusCode,
   };
 }
@@ -384,15 +384,15 @@ void DeviceManager::updateExpectedWkc() {
   if (driver_) {
     for (const auto& device : devices_) {
       const uint16_t status = driver_->slaveState(device.slavePosition());
-      if (status & 0x0010u) {
+      if (mm::comm::alHasError(status)) {
         continue;  // error indicator set — treat as not contributing
       }
-      const uint16_t state = status & 0x000Fu;
+      const EtherCatState state = mm::comm::alState(status);
       const bool hasOutputs = device.pdoMappings().outputBits > 0;
       const bool hasInputs = device.pdoMappings().inputBits > 0;
-      if (state == static_cast<uint16_t>(EtherCatState::Op)) {
+      if (state == EtherCatState::Op) {
         expected += (hasOutputs ? 2 : 0) + (hasInputs ? 1 : 0);
-      } else if (state == static_cast<uint16_t>(EtherCatState::SafeOp)) {
+      } else if (state == EtherCatState::SafeOp) {
         expected += hasInputs ? 1 : 0;
       }
     }

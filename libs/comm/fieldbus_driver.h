@@ -36,6 +36,18 @@ enum class EtherCatState : uint16_t {
   Op = 0x08,      ///< OPERATIONAL — full PDO exchange.
 };
 
+/// @brief Extracts the AL state (bits 3:0) from a raw AL Status register value (0x0130).
+///
+/// The single place the AL Status register layout is decoded: the low nibble is the current
+/// state, bit 4 is the error indicator (see @c alHasError). Callers compare the result against
+/// @c EtherCatState rather than re-masking the raw register.
+inline EtherCatState alState(uint16_t alStatus) {
+  return static_cast<EtherCatState>(alStatus & 0x000Fu);
+}
+
+/// @brief Returns whether the AL Status error indicator (bit 4 of register 0x0130) is set.
+inline bool alHasError(uint16_t alStatus) { return (alStatus & 0x0010u) != 0; }
+
 /// @brief Immutable identity fields read from a slave's EEPROM during configuration.
 struct SlaveInfo {
   std::string name;         ///< Human-readable name from SII.

@@ -30,27 +30,22 @@ uint32_t Device::vendorId() const { return vendorId_; }
 uint32_t Device::productCode() const { return productCode_; }
 uint32_t Device::revisionNumber() const { return revisionNumber_; }
 uint32_t Device::serialNumber() const { return serialNumber_; }
-namespace {
-// AL state (bits 3:0) and error indicator (bit 4) of a raw AL Status register.
-uint16_t alState(uint16_t alStatus) { return alStatus & 0x000Fu; }
-bool alError(uint16_t alStatus) { return (alStatus & 0x0010u) != 0; }
-}  // namespace
 
 bool Device::online() const {
   using mm::comm::EtherCatState;
   const uint16_t status = driver_.slaveState(slavePosition_);
-  const uint16_t state = alState(status);
-  return !alError(status) && (state == static_cast<uint16_t>(EtherCatState::PreOp) ||
-                              state == static_cast<uint16_t>(EtherCatState::SafeOp) ||
-                              state == static_cast<uint16_t>(EtherCatState::Op));
+  const EtherCatState state = mm::comm::alState(status);
+  return !mm::comm::alHasError(status) &&
+         (state == EtherCatState::PreOp || state == EtherCatState::SafeOp ||
+          state == EtherCatState::Op);
 }
 
 bool Device::exchangesProcessData() const {
   using mm::comm::EtherCatState;
   const uint16_t status = driver_.slaveState(slavePosition_);
-  const uint16_t state = alState(status);
-  return !alError(status) && (state == static_cast<uint16_t>(EtherCatState::SafeOp) ||
-                              state == static_cast<uint16_t>(EtherCatState::Op));
+  const EtherCatState state = mm::comm::alState(status);
+  return !mm::comm::alHasError(status) &&
+         (state == EtherCatState::SafeOp || state == EtherCatState::Op);
 }
 
 std::expected<std::vector<uint8_t>, std::string> Device::upload(uint16_t index,

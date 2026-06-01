@@ -148,7 +148,7 @@ export default function ProcessImagePage() {
   return (
     <div>
       <PageHeader
-        eyebrow="Fieldbus"
+        eyebrow="Bus"
         title="Process Image"
         description={
           <>

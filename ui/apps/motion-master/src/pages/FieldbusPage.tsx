@@ -157,7 +157,7 @@ export default function FieldbusPage() {
   return (
     <div>
       <PageHeader
-        eyebrow="App"
+        eyebrow="Bus"
         title="Fieldbus"
         description="Initialize the EtherCAT fieldbus, scan for slave devices, and command AL state transitions across the bus."
       />

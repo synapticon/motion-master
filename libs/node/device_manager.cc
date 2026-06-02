@@ -10,6 +10,7 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 #include <string>
 #include <thread>
@@ -78,6 +79,7 @@ size_t liveBufferBytes(uint32_t imageBytes) { return offsetof(ProcessBuffer, byt
 
 std::expected<void, std::string> DeviceManager::init(
     std::unique_ptr<mm::comm::FieldbusDriver> driver) {
+  std::unique_lock lock(busMutex_);
   // init() is a one-shot: replacing a live driver would destroy it while the
   // Devices in devices_ still hold a FieldbusDriver& to it, leaving every Device
   // with a dangling reference. Require an explicit reset() between inits instead.
@@ -100,6 +102,7 @@ std::expected<void, std::string> DeviceManager::init(
 }
 
 std::expected<int, std::string> DeviceManager::scan() {
+  std::unique_lock lock(busMutex_);
   if (!driver_) {
     spdlog::error("scan() called with no driver — call init() first");
     return std::unexpected("no driver — call init() first");
@@ -121,6 +124,9 @@ std::expected<int, std::string> DeviceManager::scan() {
   for (uint16_t pos = 1; pos <= static_cast<uint16_t>(*result); ++pos) {
     devices_.emplace_back(pos, *driver_);
   }
+  // The device set was rebuilt: positions may now name different devices. Bump the generation
+  // so off-thread consumers (monitoring) that pinned to a position re-validate it.
+  topologyGeneration_.fetch_add(1, std::memory_order_relaxed);
   spdlog::info("Found {} slave(s)", *result);
   for (const auto& device : devices_) {
     spdlog::info("  [{:2}] {} — vendor: {:#010x}  product: {:#010x}  rev: {:#010x}  serial: {}",
@@ -131,17 +137,25 @@ std::expected<int, std::string> DeviceManager::scan() {
 }
 
 void DeviceManager::reset() {
+  std::unique_lock lock(busMutex_);
   // Unpublish the image and drain any in-flight cycle so a concurrent exchangeProcessData
   // becomes a no-op, then reclaim every retained image generation (safe now that exchange is
   // gated off).
   stopExchange();
   pd_->generations.clear();
   devices_.clear();  // drop device references to driver before stopping
+  // The device set is gone: bump the generation so off-thread consumers re-validate (and find
+  // their positions no longer resolve).
+  topologyGeneration_.fetch_add(1, std::memory_order_relaxed);
   if (driver_) {
     driver_->stop();
     driver_.reset();
     spdlog::info("DeviceManager reset");
   }
+}
+
+uint64_t DeviceManager::topologyGeneration() const {
+  return topologyGeneration_.load(std::memory_order_relaxed);
 }
 
 const std::vector<Device>& DeviceManager::devices() const { return devices_; }
@@ -161,6 +175,11 @@ Device* DeviceManager::findDevice(uint16_t slavePosition) {
 }
 
 std::expected<void, std::string> DeviceManager::configureProcessData() {
+  std::unique_lock lock(busMutex_);
+  return remapProcessImage();
+}
+
+std::expected<void, std::string> DeviceManager::remapProcessImage() {
   if (!driver_) {
     return std::unexpected("configureProcessData: no driver — call init() first");
   }
@@ -397,6 +416,7 @@ void DeviceManager::updateExpectedWkc() {
 std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transitionToState(
     const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
     std::chrono::steady_clock::duration timeout) {
+  std::unique_lock lock(busMutex_);
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -428,7 +448,9 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
       return d && !d->exchangesProcessData();
     });
     if (!processDataConfigured() || anyJoining) {
-      if (auto r = configureProcessData(); !r) {
+      // Already holding busMutex_ exclusively — call the mapping primitive directly, not the
+      // public configureProcessData (which would re-acquire the non-recursive lock and deadlock).
+      if (auto r = remapProcessImage(); !r) {
         return std::unexpected("auto-configure process data failed: " + r.error());
       }
     }
@@ -656,6 +678,9 @@ bool DeviceManager::writePdoValue(uint16_t slavePosition, uint16_t index, uint8_
 
 std::expected<DeviceParameterValue, std::string> DeviceManager::readDeviceParameter(
     uint16_t slavePosition, uint16_t index, uint8_t subindex) {
+  // Shared lock: this is the entry point monitoring calls from its own threads, so it must be
+  // serialised against the exclusive mutators (init/scan/reset/…) that rebuild devices_/driver_.
+  std::shared_lock lock(busMutex_);
   Device* device = findDevice(slavePosition);
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
@@ -693,6 +718,9 @@ std::expected<void, std::string> DeviceManager::writeDeviceParameter(uint16_t sl
                                                                      uint16_t index,
                                                                      uint8_t subindex,
                                                                      DeviceParameterValue value) {
+  // Shared lock: serialise against the exclusive mutators that rebuild devices_/driver_, so a
+  // write that lands here off the control-plane thread can never see a half-torn device set.
+  std::shared_lock lock(busMutex_);
   Device* device = findDevice(slavePosition);
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");

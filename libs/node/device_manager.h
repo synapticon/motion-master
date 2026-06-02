@@ -1,11 +1,13 @@
 #pragma once
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <expected>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
 #include <optional>
+#include <shared_mutex>
 #include <span>
 #include <string>
 #include <vector>
@@ -170,7 +172,20 @@ class DeviceManager {
   ///
   /// Hands back a writable @c Device so SDK callers can drive it directly —
   /// e.g. @c dm.findDevice(1)->writeValue(0x2030, 1, 123). @c nullptr if not found.
+  ///
+  /// @warning Not internally synchronised: call on the control-plane (server) thread, or
+  /// while holding @c busMutex_. Off-thread consumers (monitoring) must go through the
+  /// position-based methods such as @c readDeviceParameter, which look the device up under the
+  /// lock and never hand out a pointer that @c scan / @c reset could dangle.
   Device* findDevice(uint16_t slavePosition);
+
+  /// @brief Monotonic counter bumped every time the device set is rebuilt (@c scan / @c reset).
+  ///
+  /// An off-thread consumer that pinned work to a device position records this value and
+  /// compares it on each use: a change means the topology was re-scanned (or cleared) and a
+  /// previously-valid position may now name a different device or none at all, so the consumer
+  /// must re-validate. Lock-free (atomic). Starts at 0; the first @c scan makes it 1.
+  uint64_t topologyGeneration() const;
 
   /// @brief Maps process data and publishes the process image for exchange.
   ///
@@ -373,6 +388,16 @@ class DeviceManager {
                                                         DeviceParameterValue value);
 
  private:
+  /// @brief (Re)maps the whole-bus process image and publishes it for exchange.
+  ///
+  /// The core mapping primitive: drains exchange, has the driver map the IOmap, re-reads each
+  /// device's PDO mapping, builds the @c ProcessImage, seeds the output staging from cached
+  /// parameter values, and publishes the image. **The caller must hold @c busMutex_
+  /// exclusively.** Two callers compose it: the public @c configureProcessData (takes the lock,
+  /// then calls this) and @c transitionToState (already holds the lock when a (re)joining
+  /// device requires a re-map).
+  std::expected<void, std::string> remapProcessImage();
+
   /// @brief Resolves a caller-supplied position list to validated bus positions.
   ///
   /// An empty list expands to every discovered device (in bus order). A non-empty list is
@@ -412,6 +437,16 @@ class DeviceManager {
   bool writePdoValue(uint16_t slavePosition, uint16_t index, uint8_t subindex,
                      std::span<const uint8_t> bytes);
 
+  // Guards the non-RT mutable state — driver_, devices_, and the retained image generations —
+  // against the off-RT monitoring threads. Control-plane mutators (init/scan/reset/
+  // configureProcessData/transitionToState) take it exclusively; the position-based value
+  // reads called from other threads (readDeviceParameter/writeDeviceParameter) take it shared.
+  // The RT exchangeProcessData() never takes it (it is gated by the atomic image pointer
+  // instead), so the lock never touches the real-time path. Lock order, where both are taken:
+  // busMutex_ (here) before any Device-level paramMutex_.
+  mutable std::shared_mutex busMutex_;
+  // Bumped under the exclusive lock on every scan()/reset(); see topologyGeneration().
+  std::atomic<uint64_t> topologyGeneration_{0};
   std::unique_ptr<mm::comm::FieldbusDriver> driver_;
   std::vector<Device> devices_;
   std::unique_ptr<ProcessData> pd_;

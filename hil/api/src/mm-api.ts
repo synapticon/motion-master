@@ -10,6 +10,312 @@
  * ---------------------------------------------------------------
  */
 
+export interface ProcessImageObject {
+  /**
+   * 1-based bus position of the owning device
+   * @example 1
+   */
+  slavePosition: number;
+  /**
+   * CoE object index
+   * @example 24640
+   */
+  index: number;
+  /**
+   * CoE object subindex
+   * @example 0
+   */
+  subindex: number;
+  /**
+   * Object name resolved from the device's parameter map; empty when the object dictionary has not been enumerated for that device
+   * @example "Target position"
+   */
+  name: string;
+  /**
+   * Absolute bit offset within the direction's image
+   * @example 32
+   */
+  bitOffset: number;
+  /**
+   * Width of the value in bits
+   * @example 32
+   */
+  bitLength: number;
+}
+
+export interface SyncManagerConfig {
+  /**
+   * Sync Manager number (0–7)
+   * @example 2
+   */
+  index: number;
+  /**
+   * Physical ESC memory start address the SM guards
+   * @example 4352
+   */
+  physicalStart: number;
+  /**
+   * Length of the guarded window in bytes
+   * @example 12
+   */
+  length: number;
+  /**
+   * Raw SM control/flags register (buffer mode, direction, watchdog, enable) — decoded by the client
+   * @example 100100
+   */
+  flags: number;
+  /**
+   * 0 unused, 1 MbxOut, 2 MbxIn, 3 Outputs, 4 Inputs
+   * @example 3
+   */
+  type: number;
+}
+
+export interface FmmuConfig {
+  /**
+   * FMMU number (0–3)
+   * @example 0
+   */
+  index: number;
+  /**
+   * Logical (bus-wide) start address
+   * @example 0
+   */
+  logicalStart: number;
+  /**
+   * Mapped length in bytes
+   * @example 12
+   */
+  length: number;
+  /**
+   * Start bit within the first logical byte
+   * @example 0
+   */
+  logicalStartBit: number;
+  /**
+   * End bit within the last logical byte
+   * @example 7
+   */
+  logicalEndBit: number;
+  /**
+   * Physical ESC start address (ties the FMMU to a Sync Manager)
+   * @example 4352
+   */
+  physicalStart: number;
+  /**
+   * Start bit within the first physical byte
+   * @example 0
+   */
+  physicalStartBit: number;
+  /**
+   * ESC FMMU type: 1 read (inputs/TxPDO), 2 write (outputs/RxPDO)
+   * @example 2
+   */
+  type: number;
+  /**
+   * Whether the FMMU is active
+   * @example true
+   */
+  active: boolean;
+}
+
+export interface SlaveConfig {
+  /**
+   * 1-based bus position
+   * @example 1
+   */
+  slavePosition: number;
+  /**
+   * Device name for this slave position, empty if unknown
+   * @example "SOMANET Node"
+   */
+  deviceName: string;
+  /**
+   * Station (configured) address assigned during scan
+   * @example 4097
+   */
+  configuredAddress: number;
+  /**
+   * Configured station alias from EEPROM
+   * @example 0
+   */
+  aliasAddress: number;
+  /**
+   * Mapped output (master→slave) bits
+   * @example 96
+   */
+  outputBits: number;
+  /**
+   * Mapped input (slave→master) bits
+   * @example 128
+   */
+  inputBits: number;
+  mailbox: {
+    /**
+     * Write (master→slave) mailbox length in bytes; 0 if none
+     * @example 128
+     */
+    writeLength: number;
+    /**
+     * Write mailbox physical ESC offset
+     * @example 4096
+     */
+    writeOffset: number;
+    /**
+     * Read (slave→master) mailbox length in bytes
+     * @example 128
+     */
+    readLength: number;
+    /**
+     * Read mailbox physical ESC offset
+     * @example 4224
+     */
+    readOffset: number;
+    /**
+     * Supported-protocol bits (0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE, 0x10 SoE, 0x20 VoE) — decoded by the client
+     * @example 14
+     */
+    protocols: number;
+  };
+  dc: {
+    /**
+     * Slave has distributed-clock hardware
+     * @example true
+     */
+    capable: boolean;
+    /**
+     * SYNC0 generation enabled (false for SM-synchronous bring-up)
+     * @example false
+     */
+    active: boolean;
+    /**
+     * Measured propagation delay in nanoseconds
+     * @example 300
+     */
+    propagationDelay: number;
+    /**
+     * DC cycle time in nanoseconds
+     * @example 0
+     */
+    cycleTime: number;
+    /**
+     * Shift from the cycle-modulus boundary in nanoseconds
+     * @example 0
+     */
+    shift: number;
+  };
+  /** Configured Sync Managers, by index */
+  syncManagers: SyncManagerConfig[];
+  /** Configured FMMUs, by index */
+  fmmus: FmmuConfig[];
+}
+
+export interface PortDiagnostics {
+  /**
+   * Physical link detected on this port (DL Status link bit)
+   * @example true
+   */
+  linkUp: boolean;
+  /**
+   * Loop closed on this port (no downstream slave, or port disabled)
+   * @example false
+   */
+  loopClosed: boolean;
+  /**
+   * Stable communication established on this port
+   * @example true
+   */
+  communication: boolean;
+  /**
+   * Invalid-frame counter (0x0300+): frames with a bad FCS/structure. 8-bit, saturates at 255; watch for a rising delta rather than the absolute value
+   * @example 0
+   */
+  invalidFrame: number;
+  /**
+   * Physical-layer RX error counter (0x0301+): RX_ER asserted by the PHY
+   * @example 0
+   */
+  rxError: number;
+  /**
+   * Forwarded RX error counter (0x0308+): errors first flagged by an upstream ESC — pinpoints the segment where corruption began
+   * @example 0
+   */
+  forwardedError: number;
+  /**
+   * Lost-link counter (0x0310+): link-down events on this port
+   * @example 0
+   */
+  lostLink: number;
+}
+
+export interface DeviceDiagnostics {
+  /**
+   * 1-based position on the fieldbus
+   * @example 1
+   */
+  slavePosition: number;
+  /**
+   * Device name for this slave position, empty if unknown
+   * @example "SOMANET Node"
+   */
+  deviceName: string;
+  /** Per-port link state and error counters (ports 0–3, in order) */
+  ports: PortDiagnostics[];
+  /**
+   * ECAT processing-unit error counter (0x030C): datagrams reaching the unit malformed
+   * @example 0
+   */
+  processingUnitError: number;
+  /**
+   * PDI error counter (0x030D): problems on the slave-local process-data interface
+   * @example 0
+   */
+  pdiError: number;
+  /**
+   * Process-data (SM) watchdog expirations (0x0442): the slave stopped seeing fresh outputs
+   * @example 0
+   */
+  processDataWatchdog: number;
+  /**
+   * PDI watchdog expirations (0x0443)
+   * @example 0
+   */
+  pdiWatchdog: number;
+}
+
+export interface DcSyncStatus {
+  /**
+   * 1-based position on the fieldbus
+   * @example 1
+   */
+  slavePosition: number;
+  /**
+   * Device name for this slave position, empty if unknown
+   * @example "SOMANET Node"
+   */
+  deviceName: string;
+  /**
+   * Slave has distributed-clock hardware
+   * @example true
+   */
+  dcCapable: boolean;
+  /**
+   * This slave is the DC reference clock (the first DC-capable slave) — it defines bus time, so its own systemTimeDifference is zero
+   * @example false
+   */
+  referenceClock: boolean;
+  /**
+   * System-time delay / propagation delay (0x0928), nanoseconds
+   * @example 300
+   */
+  propagationDelay: number;
+  /**
+   * Signed deviation of the local system time from the reference clock (0x092C), in nanoseconds. Positive = local clock ahead of the reference, negative = behind; zero on the reference clock. Meaningful only while exchanging in SAFE-OP/OP; converges toward zero as the drift-compensation loop settles
+   * @example 0
+   */
+  systemTimeDifference: number;
+}
+
 export interface AlStatusCode {
   /**
    * AL Status Code value (ETG.1000.6 §6.4.1)
@@ -413,7 +719,7 @@ export class HttpClient<SecurityDataType = unknown> {
 
 /**
  * @title Motion Master API
- * @version 6.0.0-alpha.14
+ * @version 6.0.0-alpha.15
  * @baseUrl https://local.motion-master.synapticon.com:8443
  *
  * Motion Master is the motion-control software for Synapticon SOMANET servo
@@ -821,6 +1127,47 @@ export class Api<
       }),
 
     /**
+     * @description Performs a CoE SDO download — writes the raw bytes in the request body to object `index:subindex` on the device at `slavePosition`. The byte count must match the object's length. Requires the device to be in PRE-OP, SAFE-OP, or OP (mailbox communication active). Both `index` and `subindex` accept decimal or hexadecimal notation; prefix with `0x` for hex (e.g. `0x6064` or `24676`).
+     *
+     * @name SdoDownload
+     * @summary Download an object dictionary entry to a device (CoE SDO download)
+     * @request PUT:/api/devices/{slavePosition}/sdo/{index}/{subindex}
+     */
+    sdoDownload: (
+      slavePosition: number,
+      index: number,
+      subindex: number,
+      data: {
+        /**
+         * Object bytes to write (little-endian, must match the object length)
+         * @example [100,0,0,0]
+         */
+        data: number[];
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<
+        {
+          /** @example true */
+          ok: boolean;
+        },
+        void | {
+          /**
+           * Human-readable error message from the driver
+           * @example "FPRD slave 1: wkc=0"
+           */
+          error: string;
+        }
+      >({
+        path: `/api/devices/${slavePosition}/sdo/${index}/${subindex}`,
+        method: "PUT",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
      * @description Sends an FoE read request for `filename` to the device at `slavePosition` and returns the raw file bytes.  FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is responsible for ensuring the device is in a suitable state before calling.  The call blocks until the full file has been received or a per-packet timeout of 700 ms is exceeded.
      *
      * @name FoeReadFile
@@ -876,6 +1223,40 @@ export class Api<
         path: `/api/devices/${slavePosition}/files/${filename}`,
         method: "PUT",
         body: data,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Reads live link-quality and watchdog diagnostics from each slave's EtherCAT Slave Controller (DL Status 0x0110, error-counter block 0x0300–0x0313, watchdog block 0x0440–0x0443) via FPRD. Counters are 8-bit, saturate at 255, and are cleared only by a power cycle or explicit write — poll this endpoint and watch for a rising delta rather than an absolute value. The per-port counters localise a degrading link to a specific cable/connector; the watchdog counters distinguish a slave that stopped receiving process data from a master-side problem. Omit `positions` to query all discovered devices. Returns 500 for transports without an ESC (e.g. SPoE).
+     *
+     * @name GetDeviceDiagnostics
+     * @summary Read live ESC health diagnostics for devices
+     * @request GET:/api/devices/diagnostics
+     */
+    getDeviceDiagnostics: (
+      query?: {
+        /**
+         * Comma-separated list of 1-based slave positions to query (e.g. `1,2,3`). Omit to query all discovered devices.
+         * @example "1,2"
+         */
+        positions?: string;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<
+        DeviceDiagnostics[],
+        void | {
+          /**
+           * Human-readable error message from the driver
+           * @example "FPRD slave 1: wkc=0"
+           */
+          error: string;
+        }
+      >({
+        path: `/api/devices/diagnostics`,
+        method: "GET",
+        query: query,
         format: "json",
         ...params,
       }),
@@ -1252,6 +1633,116 @@ export class Api<
     getDataTypes: (params: RequestParams = {}) =>
       this.request<ObjectDataTypeInfo[], any>({
         path: `/api/meta/data-types`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+  };
+  dcSync = {
+    /**
+     * @description Reads each slave's distributed-clock unit live from its EtherCAT Slave Controller (system-time delay 0x0928 and system-time difference 0x092C) via FPRD. The reference clock is the first DC-capable slave; every other DC slave continuously corrects its local clock toward it, and `systemTimeDifference` is the live deviation in nanoseconds. The figure is meaningful only while the bus is exchanging process data in SAFE-OP/OP (the reference time is distributed in the cyclic frame) and converges toward zero as the slaves' drift loops settle — poll this endpoint and watch for a slave whose deviation stays large or grows rather than an absolute value. Non-DC slaves report `dcCapable` false with zeroed values. Omit `positions` to query all discovered devices. Returns 500 for transports without an ESC (e.g. SPoE).
+     *
+     * @name GetDcSync
+     * @summary Read live distributed-clock synchronisation status for devices
+     * @request GET:/api/dc-sync
+     */
+    getDcSync: (
+      query?: {
+        /**
+         * Comma-separated list of 1-based slave positions to query (e.g. `1,2,3`). Omit to query all discovered devices.
+         * @example "1,2"
+         */
+        positions?: string;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<
+        DcSyncStatus[],
+        void | {
+          /**
+           * Human-readable error message from the driver
+           * @example "FPRD slave 1: wkc=0"
+           */
+          error: string;
+        }
+      >({
+        path: `/api/dc-sync`,
+        method: "GET",
+        query: query,
+        format: "json",
+        ...params,
+      }),
+  };
+  processImage = {
+    /**
+     * @description Returns the whole-bus process image: the byte sizes of each direction, the expected and last working counters and overall health, the number of retained image generations (one per re-map since the last reset), and every mapped object resolved to its absolute bit offset. While an image is live `configured` is true and the layout describes it. When no image is published (no device is in SAFE-OP/OP) but at least one generation has been mapped, `configured` is false and the layout describes the most recent retained generation — the last-known mapping — so a bus that has dropped out of SAFE-OP/OP stays inspectable; `lastWkc` then holds the final exchange value and working-counter health does not apply. The object lists are empty only before any image has ever been mapped. Object `name` is populated only for devices whose object dictionary has been enumerated.
+     *
+     * @name GetProcessImage
+     * @summary Inspect the published EtherCAT process image
+     * @request GET:/api/process-image
+     */
+    getProcessImage: (params: RequestParams = {}) =>
+      this.request<
+        {
+          /**
+           * Whether an image is currently published for exchange
+           * @example true
+           */
+          configured: boolean;
+          /**
+           * Size of the output image (master→slave) in bytes
+           * @example 12
+           */
+          outputBytes: number;
+          /**
+           * Size of the input image (slave→master) in bytes
+           * @example 16
+           */
+          inputBytes: number;
+          /**
+           * Working counter expected from the devices currently exchanging
+           * @example 3
+           */
+          expectedWkc: number;
+          /**
+           * Working counter from the most recent exchange (0 before any)
+           * @example 3
+           */
+          lastWkc: number;
+          /**
+           * Whether the last working counter meets the expected value
+           * @example true
+           */
+          healthy: boolean;
+          /**
+           * Number of process images retained since the last reset
+           * @example 1
+           */
+          generations: number;
+          /** Output-mapped objects (RxPDO), in image order */
+          outputs: ProcessImageObject[];
+          /** Input-mapped objects (TxPDO), in image order */
+          inputs: ProcessImageObject[];
+        },
+        any
+      >({
+        path: `/api/process-image`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+  };
+  busConfig = {
+    /**
+     * @description Returns the static ESC configuration the master programmed into every slave during the last scan: station/alias addresses, mapped process-data sizes, the mailbox transport windows, the distributed-clock setup, and the configured Sync Managers and FMMUs. Read from cached state with no bus I/O and valid once the bus has been scanned. The list is empty before any scan, or when the active transport has no ESC (e.g. SPoE). Numeric fields (SM/FMMU type, mailbox protocol bits, SM flags) are raw register values; the client decodes them. `deviceName` is empty when no known device occupies the slave.
+     *
+     * @name GetBusConfig
+     * @summary Inspect each slave's static EtherCAT Slave Controller configuration
+     * @request GET:/api/bus-config
+     */
+    getBusConfig: (params: RequestParams = {}) =>
+      this.request<SlaveConfig[], any>({
+        path: `/api/bus-config`,
         method: "GET",
         format: "json",
         ...params,

@@ -1,10 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
-preset="${1:-x64-linux-debug}"
-cmake --build --preset "$preset" "${@:2}"
+
+# By default the build does NOT stamp capabilities, so it needs no sudo — suitable for CI
+# and automated agents. Pass --setcap to run the privileged setcap step the binary needs to
+# open raw EtherCAT sockets and use RT scheduling when run against hardware. Everything else
+# is forwarded to the build (first positional = preset, the rest = extra cmake args).
+setcap=0
+args=()
+for arg in "$@"; do
+    case "$arg" in
+        --setcap) setcap=1 ;;
+        *) args+=("$arg") ;;
+    esac
+done
+
+preset="${args[0]:-x64-linux-debug}"
+cmake --build --preset "$preset" "${args[@]:1}"
 
 binary="build/${preset}/apps/motion_master/motion-master"
-if [[ -x "$binary" ]]; then
+if [[ -x "$binary" && "$setcap" -eq 1 ]]; then
     echo "Setting capabilities on $binary (sudo required)..."
     sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw=eip "$binary"
 fi

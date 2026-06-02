@@ -3,7 +3,9 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <string>
 
+using mm::core::isUrlSafeId;
 using mm::core::parseHexOrDec;
 
 TEST(ParseHexOrDecTest, DecimalUint16) {
@@ -46,4 +48,34 @@ TEST(ParseHexOrDecTest, RejectsNegative) { EXPECT_EQ(parseHexOrDec<uint16_t>("-1
 
 TEST(ParseHexOrDecTest, RejectsBareHexPrefix) {
   EXPECT_EQ(parseHexOrDec<uint16_t>("0x"), std::nullopt);
+}
+
+TEST(IsUrlSafeIdTest, AcceptsTypicalIds) {
+  EXPECT_TRUE(isUrlSafeId("left-leg"));
+  EXPECT_TRUE(isUrlSafeId("Left_Leg.1"));
+  EXPECT_TRUE(isUrlSafeId("a"));
+  EXPECT_TRUE(isUrlSafeId("axis-0_actual.position-2"));
+}
+
+TEST(IsUrlSafeIdTest, AcceptsBoundaryLengths) {
+  EXPECT_TRUE(isUrlSafeId(std::string(1, 'x')));
+  EXPECT_TRUE(isUrlSafeId(std::string(64, 'x')));
+  EXPECT_FALSE(isUrlSafeId(std::string(65, 'x')));
+}
+
+TEST(IsUrlSafeIdTest, RejectsEmpty) { EXPECT_FALSE(isUrlSafeId("")); }
+
+TEST(IsUrlSafeIdTest, RejectsDisallowedCharacters) {
+  EXPECT_FALSE(isUrlSafeId("left/leg"));
+  EXPECT_FALSE(isUrlSafeId("left leg"));
+  EXPECT_FALSE(isUrlSafeId("left%20leg"));
+  EXPECT_FALSE(isUrlSafeId("left?leg"));
+  EXPECT_FALSE(isUrlSafeId("left#leg"));
+  EXPECT_FALSE(isUrlSafeId("leg:1"));
+  EXPECT_FALSE(isUrlSafeId("über"));
+}
+
+TEST(IsUrlSafeIdTest, IsCaseSensitiveAndDistinct) {
+  EXPECT_TRUE(isUrlSafeId("Motor"));
+  EXPECT_TRUE(isUrlSafeId("motor"));
 }

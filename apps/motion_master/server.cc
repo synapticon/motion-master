@@ -56,6 +56,30 @@ std::optional<std::vector<uint16_t>> parsePositions(Res* res, Req* req,
   return positions;
 }
 
+// Writes @p body as a 200 application/json response with the CORS header.
+template <typename Res>
+void sendJson(Res* res, std::string_view corsOrigin, const nlohmann::json& body) {
+  res->writeHeader("Content-Type", "application/json")
+      ->writeHeader("Access-Control-Allow-Origin", corsOrigin)
+      ->end(body.dump());
+}
+
+// Writes a @p status response carrying a {"error": message} JSON body and the CORS header.
+template <typename Res>
+void sendError(Res* res, std::string_view status, std::string_view corsOrigin,
+               std::string_view message) {
+  res->writeStatus(status)
+      ->writeHeader("Content-Type", "application/json")
+      ->writeHeader("Access-Control-Allow-Origin", corsOrigin)
+      ->end(nlohmann::json{{"error", std::string(message)}}.dump());
+}
+
+// Writes a bare @p status response (no body) with the CORS header.
+template <typename Res>
+void sendStatus(Res* res, std::string_view status, std::string_view corsOrigin) {
+  res->writeStatus(status)->writeHeader("Access-Control-Allow-Origin", corsOrigin)->end();
+}
+
 }  // namespace
 
 Server::Server(Config config, mm::node::DeviceManager& deviceManager)
@@ -187,15 +211,11 @@ void Server::run() {
              for (const auto& [mac, name] : adapterMap) {
                arr.push_back({{"mac", mac}, {"name", name}});
              }
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(arr.dump());
+             sendJson(res, config_.corsOrigin, arr);
            })
       .get("/api/version",
            [this](auto* res, auto* /*req*/) {
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json{{"version", config_.version}}.dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json{{"version", config_.version}});
            })
       .get("/api/log",
            [this](auto* res, auto* /*req*/) {
@@ -211,21 +231,15 @@ void Server::run() {
            })
       .get("/api/meta/esc-registers",
            [this](auto* res, auto* /*req*/) {
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json(mm::comm::kEscRegisters).dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json(mm::comm::kEscRegisters));
            })
       .get("/api/meta/al-status-codes",
            [this](auto* res, auto* /*req*/) {
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json(mm::comm::kAlStatusCodes).dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json(mm::comm::kAlStatusCodes));
            })
       .get("/api/meta/foe-error-codes",
            [this](auto* res, auto* /*req*/) {
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json(mm::comm::kFoeErrorCodes).dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json(mm::comm::kFoeErrorCodes));
            })
       .get("/api/devices/state",
            [this](auto* res, auto* req) {
@@ -235,15 +249,10 @@ void Server::run() {
              }
              auto r = deviceManager_.getDeviceStates(*positions);
              if (!r) {
-               res->writeStatus("500 Internal Server Error")
-                   ->writeHeader("Content-Type", "application/json")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end(nlohmann::json{{"error", r.error()}}.dump());
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                return;
              }
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json(*r).dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json(*r));
            })
       .get("/api/devices/diagnostics",
            [this](auto* res, auto* req) {
@@ -253,15 +262,10 @@ void Server::run() {
              }
              auto r = deviceManager_.getDeviceDiagnostics(*positions);
              if (!r) {
-               res->writeStatus("500 Internal Server Error")
-                   ->writeHeader("Content-Type", "application/json")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end(nlohmann::json{{"error", r.error()}}.dump());
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                return;
              }
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json(*r).dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json(*r));
            })
       .get("/api/dc-sync",
            [this](auto* res, auto* req) {
@@ -271,33 +275,22 @@ void Server::run() {
              }
              auto r = deviceManager_.getDcSync(*positions);
              if (!r) {
-               res->writeStatus("500 Internal Server Error")
-                   ->writeHeader("Content-Type", "application/json")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end(nlohmann::json{{"error", r.error()}}.dump());
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                return;
              }
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json(*r).dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json(*r));
            })
       .get("/api/devices",
            [this](auto* res, auto* /*req*/) {
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json(deviceManager_).dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json(deviceManager_));
            })
       .get("/api/process-image",
            [this](auto* res, auto* /*req*/) {
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json(deviceManager_.processImageInfo()).dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json(deviceManager_.processImageInfo()));
            })
       .get("/api/bus-config",
            [this](auto* res, auto* /*req*/) {
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json(deviceManager_.busConfig()).dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json(deviceManager_.busConfig()));
            })
       .get("/api/devices/:slavePosition",
            [this](auto* res, auto* req) {
@@ -305,21 +298,15 @@ void Server::run() {
              auto param = req->getParameter("slavePosition");
              auto [ptr, ec] = std::from_chars(param.data(), param.data() + param.size(), pos);
              if (ec != std::errc() || ptr != param.data() + param.size()) {
-               res->writeStatus("400 Bad Request")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
                return;
              }
              const auto* device = deviceManager_.findDevice(pos);
              if (!device) {
-               res->writeStatus("404 Not Found")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
                return;
              }
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json(*device).dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json(*device));
            })
       .get("/api/devices/:slavePosition/online",
            [this](auto* res, auto* req) {
@@ -327,28 +314,20 @@ void Server::run() {
              auto param = req->getParameter("slavePosition");
              auto [ptr, ec] = std::from_chars(param.data(), param.data() + param.size(), pos);
              if (ec != std::errc() || ptr != param.data() + param.size()) {
-               res->writeStatus("400 Bad Request")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
                return;
              }
              if (!deviceManager_.findDevice(pos)) {
-               res->writeStatus("404 Not Found")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
                return;
              }
              auto r = deviceManager_.isDeviceOnline(pos);
              if (!r) {
-               res->writeStatus("500 Internal Server Error")
-                   ->writeHeader("Content-Type", "application/json")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end(nlohmann::json{{"error", r.error()}}.dump());
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                return;
              }
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json{{"slavePosition", pos}, {"online", *r}}.dump());
+             sendJson(res, config_.corsOrigin,
+                      nlohmann::json{{"slavePosition", pos}, {"online", *r}});
            })
       .get("/api/devices/:slavePosition/registers/:address",
            [this](auto* res, auto* req) {
@@ -357,9 +336,7 @@ void Server::run() {
              auto [p1, ec1] =
                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
              if (ec1 != std::errc() || p1 != posParam.data() + posParam.size()) {
-               res->writeStatus("400 Bad Request")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
                return;
              }
              uint16_t address{};
@@ -367,9 +344,7 @@ void Server::run() {
              auto [p2, ec2] =
                  std::from_chars(addrParam.data(), addrParam.data() + addrParam.size(), address);
              if (ec2 != std::errc() || p2 != addrParam.data() + addrParam.size()) {
-               res->writeStatus("400 Bad Request")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
                return;
              }
              uint16_t length{};
@@ -377,29 +352,20 @@ void Server::run() {
              auto [p3, ec3] =
                  std::from_chars(lenParam.data(), lenParam.data() + lenParam.size(), length);
              if (ec3 != std::errc() || p3 != lenParam.data() + lenParam.size() || length == 0) {
-               res->writeStatus("400 Bad Request")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
                return;
              }
              const auto* device = deviceManager_.findDevice(pos);
              if (!device) {
-               res->writeStatus("404 Not Found")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
                return;
              }
              std::vector<uint8_t> buf(length);
              if (auto r = device->readRegister(address, buf); !r) {
-               res->writeStatus("500 Internal Server Error")
-                   ->writeHeader("Content-Type", "application/json")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end(nlohmann::json{{"error", r.error()}}.dump());
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                return;
              }
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json{{"data", buf}}.dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json{{"data", buf}});
            })
       .post("/api/devices/:slavePosition/registers/:address",
             [this](auto* res, auto* req) {
@@ -422,9 +388,7 @@ void Server::run() {
                 if (!last) return;
                 if (*aborted) return;
                 if (!posOk || !addrOk) {
-                  res->writeStatus("400 Bad Request")
-                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                      ->end();
+                  sendStatus(res, "400 Bad Request", config_.corsOrigin);
                   return;
                 }
                 std::vector<uint8_t> data;
@@ -432,29 +396,19 @@ void Server::run() {
                   nlohmann::json j = nlohmann::json::parse(*body);
                   data = j.at("data").get<std::vector<uint8_t>>();
                 } catch (const nlohmann::json::exception& e) {
-                  res->writeStatus("400 Bad Request")
-                      ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                      ->end(nlohmann::json{{"error", e.what()}}.dump());
+                  sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
                   return;
                 }
                 const auto* device = deviceManager_.findDevice(pos);
                 if (!device) {
-                  res->writeStatus("404 Not Found")
-                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                      ->end();
+                  sendStatus(res, "404 Not Found", config_.corsOrigin);
                   return;
                 }
                 if (auto r = device->writeRegister(address, data); !r) {
-                  res->writeStatus("500 Internal Server Error")
-                      ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                      ->end(nlohmann::json{{"error", r.error()}}.dump());
+                  sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                   return;
                 }
-                res->writeHeader("Content-Type", "application/json")
-                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                    ->end(nlohmann::json{{"ok", true}}.dump());
+                sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
               });
             })
       .get("/api/devices/:slavePosition/sdo/:index/:subindex",
@@ -464,43 +418,30 @@ void Server::run() {
              auto [p1, ec1] =
                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
              if (ec1 != std::errc() || p1 != posParam.data() + posParam.size()) {
-               res->writeStatus("400 Bad Request")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
                return;
              }
              auto index = mm::core::parseHexOrDec<uint16_t>(req->getParameter("index"));
              if (!index) {
-               res->writeStatus("400 Bad Request")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
                return;
              }
              auto subindex = mm::core::parseHexOrDec<uint8_t>(req->getParameter("subindex"));
              if (!subindex) {
-               res->writeStatus("400 Bad Request")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
                return;
              }
              const auto* device = deviceManager_.findDevice(pos);
              if (!device) {
-               res->writeStatus("404 Not Found")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
                return;
              }
              auto r = device->upload(*index, *subindex);
              if (!r) {
-               res->writeStatus("500 Internal Server Error")
-                   ->writeHeader("Content-Type", "application/json")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end(nlohmann::json{{"error", r.error()}}.dump());
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                return;
              }
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json{{"data", *r}}.dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json{{"data", *r}});
            })
       .put("/api/devices/:slavePosition/sdo/:index/:subindex",
            [this](auto* res, auto* req) {
@@ -521,9 +462,7 @@ void Server::run() {
                if (!last) return;
                if (*aborted) return;
                if (!posOk || !index || !subindex) {
-                 res->writeStatus("400 Bad Request")
-                     ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                     ->end();
+                 sendStatus(res, "400 Bad Request", config_.corsOrigin);
                  return;
                }
                std::vector<uint8_t> data;
@@ -531,29 +470,19 @@ void Server::run() {
                  nlohmann::json j = nlohmann::json::parse(*body);
                  data = j.at("data").get<std::vector<uint8_t>>();
                } catch (const nlohmann::json::exception& e) {
-                 res->writeStatus("400 Bad Request")
-                     ->writeHeader("Content-Type", "application/json")
-                     ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                     ->end(nlohmann::json{{"error", e.what()}}.dump());
+                 sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
                  return;
                }
                const auto* device = deviceManager_.findDevice(pos);
                if (!device) {
-                 res->writeStatus("404 Not Found")
-                     ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                     ->end();
+                 sendStatus(res, "404 Not Found", config_.corsOrigin);
                  return;
                }
                if (auto r = device->download(*index, *subindex, data); !r) {
-                 res->writeStatus("500 Internal Server Error")
-                     ->writeHeader("Content-Type", "application/json")
-                     ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                     ->end(nlohmann::json{{"error", r.error()}}.dump());
+                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                  return;
                }
-               res->writeHeader("Content-Type", "application/json")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end(nlohmann::json{{"ok", true}}.dump());
+               sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
              });
            })
       .get("/api/devices/:slavePosition/files/:filename",
@@ -563,25 +492,18 @@ void Server::run() {
              auto [p, ec] =
                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
              if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-               res->writeStatus("400 Bad Request")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
                return;
              }
              std::string filename{req->getParameter("filename")};
              const auto* device = deviceManager_.findDevice(pos);
              if (!device) {
-               res->writeStatus("404 Not Found")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
                return;
              }
              auto r = device->readFile(filename);
              if (!r) {
-               res->writeStatus("500 Internal Server Error")
-                   ->writeHeader("Content-Type", "application/json")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end(nlohmann::json{{"error", r.error()}}.dump());
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                return;
              }
              res->writeHeader("Content-Type", "application/octet-stream")
@@ -606,30 +528,21 @@ void Server::run() {
                if (!last) return;
                if (*aborted) return;
                if (!posOk) {
-                 res->writeStatus("400 Bad Request")
-                     ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                     ->end();
+                 sendStatus(res, "400 Bad Request", config_.corsOrigin);
                  return;
                }
                const auto* device = deviceManager_.findDevice(pos);
                if (!device) {
-                 res->writeStatus("404 Not Found")
-                     ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                     ->end();
+                 sendStatus(res, "404 Not Found", config_.corsOrigin);
                  return;
                }
                std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(body->data()),
                                              body->size()};
                if (auto r = device->writeFile(filename, data); !r) {
-                 res->writeStatus("500 Internal Server Error")
-                     ->writeHeader("Content-Type", "application/json")
-                     ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                     ->end(nlohmann::json{{"error", r.error()}}.dump());
+                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                  return;
                }
-               res->writeHeader("Content-Type", "application/json")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end(nlohmann::json{{"ok", true}}.dump());
+               sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
              });
            })
       .post("/api/devices/:slavePosition/parameters/init",
@@ -639,24 +552,17 @@ void Server::run() {
               auto [p, ec] =
                   std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
               if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-                res->writeStatus("400 Bad Request")
-                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                    ->end();
+                sendStatus(res, "400 Bad Request", config_.corsOrigin);
                 return;
               }
               auto rv = req->getQuery("readValues");
               bool readValues = rv == "true" || rv == "1";
               if (auto r = deviceManager_.initializeDeviceParameters(pos, readValues); !r) {
-                res->writeStatus("500 Internal Server Error")
-                    ->writeHeader("Content-Type", "application/json")
-                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                    ->end(nlohmann::json{{"error", r.error()}}.dump());
+                sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                 return;
               }
               const auto* device = deviceManager_.findDevice(pos);
-              res->writeHeader("Content-Type", "application/json")
-                  ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                  ->end(nlohmann::json(device->parametersOrdered()).dump());
+              sendJson(res, config_.corsOrigin, nlohmann::json(device->parametersOrdered()));
             })
       .get("/api/devices/:slavePosition/parameters",
            [this](auto* res, auto* req) {
@@ -665,27 +571,19 @@ void Server::run() {
              auto [p, ec] =
                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
              if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-               res->writeStatus("400 Bad Request")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
                return;
              }
              const auto* device = deviceManager_.findDevice(pos);
              if (!device) {
-               res->writeStatus("404 Not Found")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end();
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
                return;
              }
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json(device->parametersOrdered()).dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json(device->parametersOrdered()));
            })
       .get("/api/meta/data-types",
            [this](auto* res, auto* /*req*/) {
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(nlohmann::json(mm::comm::kObjectDataTypes).dump());
+             sendJson(res, config_.corsOrigin, nlohmann::json(mm::comm::kObjectDataTypes));
            })
       .post("/api/init",
             [this](auto* res, auto* /*req*/) {
@@ -697,20 +595,15 @@ void Server::run() {
                 if (!last) return;
                 if (*aborted) return;
                 if (!config_.initDriver) {
-                  res->writeStatus("501 Not Implemented")
-                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                      ->end();
+                  sendStatus(res, "501 Not Implemented", config_.corsOrigin);
                   return;
                 }
                 // init() is one-shot — reject a re-init (e.g. a browser refresh
                 // replaying the stored session) with 409 so the client can tell
                 // "already connected" apart from a genuine init failure (500).
                 if (deviceManager_.initialised()) {
-                  res->writeStatus("409 Conflict")
-                      ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                      ->end(nlohmann::json{{"error", "already initialised — call reset() first"}}
-                                .dump());
+                  sendError(res, "409 Conflict", config_.corsOrigin,
+                            "already initialised — call reset() first");
                   return;
                 }
                 try {
@@ -719,20 +612,12 @@ void Server::run() {
                   std::string driver = j.value("driver", "soem");
                   std::string adapter = j.value("adapter", "");
                   if (auto r = config_.initDriver(driver, adapter); !r) {
-                    res->writeStatus("500 Internal Server Error")
-                        ->writeHeader("Content-Type", "application/json")
-                        ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                        ->end(nlohmann::json{{"error", r.error()}}.dump());
+                    sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                     return;
                   }
-                  res->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                      ->end(nlohmann::json{{"ok", true}}.dump());
+                  sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
                 } catch (const nlohmann::json::exception& e) {
-                  res->writeStatus("400 Bad Request")
-                      ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                      ->end(nlohmann::json{{"error", e.what()}}.dump());
+                  sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
                 }
               });
             })
@@ -744,15 +629,10 @@ void Server::run() {
                 if (!last) return;
                 if (*aborted) return;
                 if (auto r = deviceManager_.scan(); !r) {
-                  res->writeStatus("500 Internal Server Error")
-                      ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                      ->end(nlohmann::json{{"error", r.error()}}.dump());
+                  sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                   return;
                 } else {
-                  res->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                      ->end(nlohmann::json{{"slaves", *r}}.dump());
+                  sendJson(res, config_.corsOrigin, nlohmann::json{{"slaves", *r}});
                 }
               });
             })
@@ -764,9 +644,7 @@ void Server::run() {
                 if (!last) return;
                 if (*aborted) return;
                 deviceManager_.reset();
-                res->writeHeader("Content-Type", "application/json")
-                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                    ->end(nlohmann::json{{"ok", true}}.dump());
+                sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
               });
             })
       .post("/api/devices/state",
@@ -791,10 +669,7 @@ void Server::run() {
                     timeoutMs = j["timeout"].get<int>();
                   }
                 } catch (const nlohmann::json::exception& e) {
-                  res->writeStatus("400 Bad Request")
-                      ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                      ->end(nlohmann::json{{"error", e.what()}}.dump());
+                  sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
                   return;
                 }
                 using S = mm::comm::EtherCatState;
@@ -803,23 +678,16 @@ void Server::run() {
                     stateVal != static_cast<uint16_t>(S::Boot) &&
                     stateVal != static_cast<uint16_t>(S::SafeOp) &&
                     stateVal != static_cast<uint16_t>(S::Op)) {
-                  res->writeStatus("400 Bad Request")
-                      ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                      ->end(nlohmann::json{{"error",
-                                            "invalid state: use 1 (Init), 2 (PreOp),"
-                                            " 3 (Boot), 4 (SafeOp), or 8 (Op)"}}
-                                .dump());
+                  sendError(
+                      res, "400 Bad Request", config_.corsOrigin,
+                      "invalid state: use 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), or 8 (Op)");
                   return;
                 }
                 auto targetState = static_cast<S>(stateVal);
                 auto r = deviceManager_.transitionToState(positions, targetState,
                                                           std::chrono::milliseconds(timeoutMs));
                 if (!r) {
-                  res->writeStatus("500 Internal Server Error")
-                      ->writeHeader("Content-Type", "application/json")
-                      ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                      ->end(nlohmann::json{{"error", r.error()}}.dump());
+                  sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                   return;
                 }
                 // Report each device's settled state plus whether it reached the target, and
@@ -834,9 +702,8 @@ void Server::run() {
                   d["reached"] = reached;
                   devices.push_back(std::move(d));
                 }
-                res->writeHeader("Content-Type", "application/json")
-                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                    ->end(nlohmann::json{{"ok", allReached}, {"devices", devices}}.dump());
+                sendJson(res, config_.corsOrigin,
+                         nlohmann::json{{"ok", allReached}, {"devices", devices}});
               });
             })
       .options("/api/*",

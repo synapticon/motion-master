@@ -1,8 +1,15 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import type uPlot from 'uplot'
 import type { DeviceParameter, Monitoring } from '@mm/api-client'
+import MonitoringChart from '../components/MonitoringChart'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
+import {
+  MonitoringSocketProvider,
+  type SampleRows,
+  useMonitoringSocket,
+} from '../contexts/MonitoringSocketContext'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
@@ -59,7 +66,8 @@ interface ParamRowState {
 const emptyRow: ParamRowState = { devicePosition: '', index: '', subindex: '' }
 
 export default function MonitoringsPage() {
-  const { api, hasScanned } = useConnection()
+  const { api, hasScanned, host, port } = useConnection()
+  const wsUrl = `wss://${host}:${port}/ws`
   const queryClient = useQueryClient()
 
   const devicesQuery = useQuery({
@@ -135,17 +143,19 @@ export default function MonitoringsPage() {
         {monitorings.length === 0 ? (
           <p className="text-sm text-grey-500">No monitorings yet. Create one above.</p>
         ) : (
-          <div className="space-y-4">
-            {monitorings.map((m) => (
-              <MonitoringCard
-                key={m.topic}
-                monitoring={m}
-                nameByKey={nameByKey}
-                onDelete={() => deleteMutation.mutate(m.topic)}
-                deleting={deleteMutation.isPending && deleteMutation.variables === m.topic}
-              />
-            ))}
-          </div>
+          <MonitoringSocketProvider url={wsUrl}>
+            <div className="space-y-4">
+              {monitorings.map((m) => (
+                <MonitoringCard
+                  key={m.topic}
+                  monitoring={m}
+                  nameByKey={nameByKey}
+                  onDelete={() => deleteMutation.mutate(m.topic)}
+                  deleting={deleteMutation.isPending && deleteMutation.variables === m.topic}
+                />
+              ))}
+            </div>
+          </MonitoringSocketProvider>
         )}
       </div>
     </div>
@@ -165,6 +175,71 @@ function MonitoringCard({
   onDelete: () => void
   deleting: boolean
 }) {
+  const { subscribe } = useMonitoringSocket()
+  const params = monitoring.parameters
+  const seriesCount = params.length
+
+  const [playing, setPlaying] = useState(true)
+  const playingRef = useRef(true)
+  useEffect(() => {
+    playingRef.current = playing
+  }, [playing])
+
+  const [retention, setRetention] = useState(10000)
+  const retentionRef = useRef(10000)
+  useEffect(() => {
+    retentionRef.current = retention
+  }, [retention])
+
+  // Live buffer kept in refs (mutated in place for speed); a fresh outer tuple is pushed to
+  // `data` state each batch so the chart's setData runs without copying the whole buffer.
+  const xsRef = useRef<number[]>([])
+  const ysRef = useRef<(number | null)[][]>(params.map(() => []))
+  const [data, setData] = useState<uPlot.AlignedData>(
+    () => [[], ...params.map(() => [])] as uPlot.AlignedData,
+  )
+  const [count, setCount] = useState(0)
+
+  // Stable across list refetches (which hand back new param objects): keyed on the content
+  // signature so the chart isn't torn down every poll. Names live in the table below.
+  const sig = useMemo(
+    () => params.map((p) => `${p.devicePosition}:${p.index}:${p.subindex}`).join('|'),
+    [params],
+  )
+  const labels = useMemo(
+    () => params.map((p) => `${p.devicePosition}·${toHex(p.index, 4)}:${toHex(p.subindex, 2).slice(2)}`),
+    [sig],
+  )
+
+  useEffect(() => {
+    const onBatch = (rows: SampleRows) => {
+      if (!playingRef.current) return
+      for (const row of rows) {
+        const ts = typeof row[0] === 'number' ? row[0] : 0
+        xsRef.current.push(ts / 1000)
+        for (let i = 0; i < seriesCount; i++) {
+          const v = row[i + 1]
+          ysRef.current[i].push(typeof v === 'number' ? v : null)
+        }
+      }
+      const overflow = xsRef.current.length - retentionRef.current
+      if (overflow > 0) {
+        xsRef.current.splice(0, overflow)
+        for (const ys of ysRef.current) ys.splice(0, overflow)
+      }
+      setData([xsRef.current, ...ysRef.current] as uPlot.AlignedData)
+      setCount(xsRef.current.length)
+    }
+    return subscribe(monitoring.topic, onBatch)
+  }, [subscribe, monitoring.topic, seriesCount])
+
+  function clear() {
+    xsRef.current = []
+    ysRef.current = params.map(() => [])
+    setData([[], ...params.map(() => [])] as uPlot.AlignedData)
+    setCount(0)
+  }
+
   return (
     <div className="border border-grey-200 bg-white">
       <div className="flex items-start justify-between px-5 py-3 border-b border-grey-100">
@@ -212,6 +287,35 @@ function MonitoringCard({
           })}
         </tbody>
       </table>
+
+      <div className="px-5 py-3 border-t border-grey-100">
+        <div className="flex flex-wrap items-center gap-3 mb-3">
+          <button type="button" className={btnGhostCls} onClick={() => setPlaying((p) => !p)}>
+            {playing ? 'Pause' : 'Resume'}
+          </button>
+          <button type="button" className={btnGhostCls} onClick={clear}>
+            Clear
+          </button>
+          <label className="text-xs text-grey-500 flex items-center gap-1.5">
+            Retain
+            <input
+              className="border border-grey-300 px-2 py-1 text-xs w-24 bg-white"
+              value={retention}
+              inputMode="numeric"
+              onChange={(e) => {
+                const n = Number(e.target.value)
+                if (Number.isFinite(n) && n > 0) setRetention(Math.floor(n))
+              }}
+            />
+            samples
+          </label>
+          <span className="text-xs text-grey-400 ml-auto">
+            {count.toLocaleString()} / {retention.toLocaleString()} samples ·{' '}
+            {playing ? 'live' : 'paused'}
+          </span>
+        </div>
+        <MonitoringChart data={data} labels={labels} />
+      </div>
     </div>
   )
 }

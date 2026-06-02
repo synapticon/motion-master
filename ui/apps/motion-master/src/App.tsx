@@ -10,6 +10,7 @@ import FoePage from './pages/FoePage'
 import ParametersPage from './pages/ParametersPage'
 import ProcessDataPage from './pages/ProcessDataPage'
 import ProcessImagePage from './pages/ProcessImagePage'
+import MonitoringsPage from './pages/MonitoringsPage'
 import BusConfigPage from './pages/BusConfigPage'
 import BusDiagnosticsPage from './pages/BusDiagnosticsPage'
 import DcSyncPage from './pages/DcSyncPage'
@@ -31,6 +32,7 @@ export default function App() {
         <Route path="bus-config" element={<BusConfigPage />} />
         <Route path="bus-diagnostics" element={<BusDiagnosticsPage />} />
         <Route path="dc-sync" element={<DcSyncPage />} />
+        <Route path="monitorings" element={<MonitoringsPage />} />
         <Route path="log" element={<LogPage />} />
         <Route path="requests" element={<RequestsPage />} />
         <Route path="api-docs" element={<ApiDocsPage />} />

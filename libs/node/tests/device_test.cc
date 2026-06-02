@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -11,6 +12,7 @@
 #include <set>
 #include <span>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -498,6 +500,77 @@ TEST(DeviceReadPdoMappings, MaxAssignmentCountTerminates) {
   auto result = device.readPdoMappings();
   ASSERT_TRUE(result.has_value());
   EXPECT_TRUE(device.pdoMappings().outputs.empty());
+}
+
+// --- cache thread-safety -----------------------------------------------------
+
+// Hammers one parameter's cache from several threads at once: SDO refreshes
+// (readParameter, online), raw-byte decodes (setValueFromBytes, the process-image path), and
+// ordered snapshots (parametersOrdered). Each operation must stay internally consistent and
+// the final cached value must be one a writer stored — never torn. Most valuable under a
+// thread sanitizer, but also a plain deadlock/corruption smoke test.
+TEST(DeviceCacheConcurrency, ConcurrentReadsAndCacheUpdatesAreSafe) {
+  SdoFakeDriver driver;
+  Device device = deviceWithU32Param(driver);
+  driver.state = kPreOp;                        // online, so readParameter uploads
+  driver.programRead(0x6065, 0x00, u32le(16));  // value an SDO refresh caches
+
+  constexpr int kThreads = 4;
+  constexpr int kIters = 2000;
+  std::atomic<bool> go{false};
+  std::atomic<int> failures{0};
+  std::vector<std::thread> workers;
+
+  for (int t = 0; t < kThreads; ++t) {
+    workers.emplace_back([&] {
+      while (!go.load()) {
+        std::this_thread::yield();
+      }
+      for (int i = 0; i < kIters; ++i) {
+        auto v = device.readParameter(0x6065, 0x00);
+        if (!v || *v != DeviceParameterValue{uint32_t{16}}) {
+          failures.fetch_add(1);
+        }
+      }
+    });
+  }
+  for (int t = 0; t < kThreads; ++t) {
+    workers.emplace_back([&] {
+      const auto bytes = u32le(99);
+      while (!go.load()) {
+        std::this_thread::yield();
+      }
+      for (int i = 0; i < kIters; ++i) {
+        auto v = device.setValueFromBytes(0x6065, 0x00, bytes);
+        if (!v || *v != DeviceParameterValue{uint32_t{99}}) {
+          failures.fetch_add(1);
+        }
+      }
+    });
+  }
+  for (int t = 0; t < 2; ++t) {
+    workers.emplace_back([&] {
+      while (!go.load()) {
+        std::this_thread::yield();
+      }
+      for (int i = 0; i < kIters; ++i) {
+        if (device.parametersOrdered().size() != 1) {
+          failures.fetch_add(1);
+        }
+      }
+    });
+  }
+
+  go.store(true);
+  for (auto& w : workers) {
+    w.join();
+  }
+
+  EXPECT_EQ(failures.load(), 0);
+  const auto* p = device.parameter(0x6065, 0x00);
+  ASSERT_NE(p, nullptr);
+  EXPECT_TRUE(p->value == DeviceParameterValue{uint32_t{16}} ||
+              p->value == DeviceParameterValue{uint32_t{99}});
 }
 
 }  // namespace

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <format>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <unordered_map>
@@ -15,7 +16,9 @@
 namespace mm::node {
 
 Device::Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver)
-    : slavePosition_(slavePosition), driver_(driver) {
+    : slavePosition_(slavePosition),
+      driver_(driver),
+      parametersMutex_(std::make_unique<std::mutex>()) {
   auto info = driver_.slaveInfo(slavePosition);
   name_ = std::move(info.name);
   vendorId_ = info.vendorId;
@@ -84,8 +87,11 @@ std::expected<void, std::string> Device::initializeParameters(bool readValues) {
     return std::unexpected(entries.error());
   }
 
-  parameters_.clear();
-  parameters_.reserve(entries->size());
+  // Build into a local map (the per-entry SDO uploads below are slow and must not hold the
+  // cache lock — that would stall a concurrent sampler cached-read for the whole enumeration),
+  // then swap it in under the lock in one move at the end.
+  std::unordered_map<uint32_t, DeviceParameter> built;
+  built.reserve(entries->size());
 
   for (const auto& e : *entries) {
     DeviceParameter p{
@@ -137,9 +143,12 @@ std::expected<void, std::string> Device::initializeParameters(bool readValues) {
       }
     }
 
-    parameters_.emplace(p.key(), std::move(p));
+    built.emplace(p.key(), std::move(p));
   }
 
+  // Publish the freshly-built map in one move under the lock.
+  std::lock_guard<std::mutex> lock(*parametersMutex_);
+  parameters_ = std::move(built);
   return {};
 }
 
@@ -248,8 +257,9 @@ std::expected<void, std::string> Device::readPdoMappings() {
 
 const PdoMappings& Device::pdoMappings() const { return pdoMappings_; }
 
-std::expected<void, std::string> Device::setCachedValue(uint16_t index, uint8_t subindex,
-                                                        DeviceParameterValue value) {
+std::expected<void, std::string> Device::setValue(uint16_t index, uint8_t subindex,
+                                                  DeviceParameterValue value) {
+  std::lock_guard<std::mutex> lock(*parametersMutex_);
   DeviceParameter* p = findParameter(index, subindex);
   if (!p) {
     return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
@@ -262,7 +272,38 @@ std::expected<void, std::string> Device::setCachedValue(uint16_t index, uint8_t 
   return {};
 }
 
+std::expected<DeviceParameterValue, std::string> Device::setValueFromBytes(
+    uint16_t index, uint8_t subindex, std::span<const uint8_t> bytes) {
+  std::lock_guard<std::mutex> lock(*parametersMutex_);
+  DeviceParameter* p = findParameter(index, subindex);
+  if (!p) {
+    return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
+                                       slavePosition_, index, subindex));
+  }
+  auto decoded = decodeSdoBytes(p->dataType, bytes);
+  if (!decoded) {
+    return std::unexpected(decoded.error());
+  }
+  if (auto set = p->setValue(*decoded); !set) {
+    return std::unexpected(set.error());
+  }
+  p->syncState = SyncState::Synced;
+  return p->value;
+}
+
+std::expected<std::vector<uint8_t>, std::string> Device::valueAsBytes(uint16_t index,
+                                                                      uint8_t subindex) const {
+  std::lock_guard<std::mutex> lock(*parametersMutex_);
+  const DeviceParameter* p = parameter(index, subindex);
+  if (!p) {
+    return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
+                                       slavePosition_, index, subindex));
+  }
+  return encodeSdoBytes(p->dataType, p->value);
+}
+
 std::vector<DeviceParameter> Device::parametersOrdered() const {
+  std::lock_guard<std::mutex> lock(*parametersMutex_);
   std::vector<DeviceParameter> ordered;
   ordered.reserve(parameters_.size());
   for (const auto& [key, p] : parameters_) {
@@ -285,6 +326,10 @@ DeviceParameter* Device::findParameter(uint16_t index, uint8_t subindex) {
 
 std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t index,
                                                                        uint8_t subindex) {
+  // Held across the upload below: one mailbox round-trip, so a concurrent cached read of this
+  // device waits at most that long. The map cannot be rehashed (by initializeParameters) while
+  // we hold it, so the p pointer stays valid across the bus call.
+  std::lock_guard<std::mutex> lock(*parametersMutex_);
   DeviceParameter* p = findParameter(index, subindex);
   if (!p) {
     return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
@@ -308,6 +353,8 @@ std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t 
 
 std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t subindex,
                                                         DeviceParameterValue value) {
+  // Held across the download below (one mailbox round-trip), like readParameter.
+  std::lock_guard<std::mutex> lock(*parametersMutex_);
   DeviceParameter* p = findParameter(index, subindex);
   if (!p) {
     return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",

@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <memory>
+#include <mutex>
 #include <nlohmann/json_fwd.hpp>
 #include <span>
 #include <string>
@@ -150,20 +152,48 @@ class Device {
   /// @brief Returns the device's PDO mapping. Empty until @c readPdoMappings() succeeds.
   const PdoMappings& pdoMappings() const;
 
-  /// @brief Sets a parameter's cached value without any bus access.
+  /// @brief Stores a parameter's value locally, without any bus access (the typed setter).
   ///
   /// Coerces @p value into the parameter's declared type, stores it, and marks it
   /// @c SyncState::Synced.  Used to reflect a value obtained out-of-band — e.g. one decoded
-  /// from the process image by @c DeviceManager — back into the cache so @c DeviceParameter
-  /// stays the source of truth.  The parameter must already exist.
+  /// from the process image by @c DeviceManager — so @c DeviceParameter stays the source of
+  /// truth.  The parameter must already exist.  Unlike @c writeParameter this never touches the
+  /// wire; it is the typed counterpart of @c setValueFromBytes.
   ///
   /// @param index     CoE object index.
   /// @param subindex  CoE object subindex.
   /// @param value     Value to store; coerced to the parameter's declared type.
   /// @return Void on success, or an error string if the parameter is unknown or @p value
   ///         cannot be coerced to its type.
-  std::expected<void, std::string> setCachedValue(uint16_t index, uint8_t subindex,
-                                                  DeviceParameterValue value);
+  std::expected<void, std::string> setValue(uint16_t index, uint8_t subindex,
+                                            DeviceParameterValue value);
+
+  /// @brief Sets the parameter's value from its raw on-the-wire bytes (the bytes-domain setter).
+  ///
+  /// The byte-input counterpart of @c setValue: decodes @p bytes with the parameter's
+  /// declared data type, stores the result (marking it @c SyncState::Synced), and returns the
+  /// decoded value — all under @c parametersMutex_ so the data-type lookup, decode, and store are
+  /// one atomic step. @p bytes are the LSB-aligned little-endian encoding of the object's value;
+  /// the source is irrelevant (a slice of the process image, an SDO upload, a test fixture).
+  ///
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @param bytes     Raw LSB-aligned little-endian value bytes.
+  /// @return The decoded value, or an error string if the parameter is unknown or decoding fails.
+  std::expected<DeviceParameterValue, std::string> setValueFromBytes(
+      uint16_t index, uint8_t subindex, std::span<const uint8_t> bytes);
+
+  /// @brief Returns the parameter's value as its raw on-the-wire bytes (the bytes-domain getter).
+  ///
+  /// Reads the stored value and its declared data type under @c parametersMutex_ and encodes them,
+  /// so a caller can stage the current setpoint into the output image without reaching into the
+  /// parameter map itself. The encode counterpart of @c setValueFromBytes.
+  ///
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @return The encoded bytes, or an error string if the parameter is unknown or encoding fails.
+  std::expected<std::vector<uint8_t>, std::string> valueAsBytes(uint16_t index,
+                                                                uint8_t subindex) const;
 
   /// @brief Returns the parameter map, keyed by @c makeParameterKey(index, subindex).
   /// Empty until @c initializeParameters() is called.
@@ -276,6 +306,16 @@ class Device {
   uint32_t productCode_;
   uint32_t revisionNumber_;
   uint32_t serialNumber_;
+  // Guards parameters_ against the off-RT monitoring threads (the refresher refreshes cached
+  // values, the sampler reads them) racing the control-plane thread. Held only briefly — across
+  // a cache read/write, or a single mailbox transaction in read/writeParameter; never across the
+  // multi-entry object-dictionary enumeration, which builds a local map and swaps it in under
+  // the lock. Lock order, where both are taken: DeviceManager::busMutex_ before this.
+  //
+  // Held by unique_ptr because std::mutex is neither movable nor copyable, and Device is moved
+  // into DeviceManager's std::vector<Device> (which relocates on growth). The indirection keeps
+  // Device move-constructible (the pointer moves); a Device is never copied, only moved.
+  std::unique_ptr<std::mutex> parametersMutex_;
   std::unordered_map<uint32_t, DeviceParameter> parameters_;
   PdoMappings pdoMappings_;
 };

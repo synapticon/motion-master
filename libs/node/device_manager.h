@@ -443,7 +443,7 @@ class DeviceManager {
   // reads called from other threads (readDeviceParameter/writeDeviceParameter) take it shared.
   // The RT exchangeProcessData() never takes it (it is gated by the atomic image pointer
   // instead), so the lock never touches the real-time path. Lock order, where both are taken:
-  // busMutex_ (here) before any Device-level paramMutex_.
+  // busMutex_ (here) before any Device-level parametersMutex_.
   mutable std::shared_mutex busMutex_;
   // Bumped under the exclusive lock on every scan()/reset(); see topologyGeneration().
   std::atomic<uint64_t> topologyGeneration_{0};

@@ -694,21 +694,9 @@ std::expected<DeviceParameterValue, std::string> DeviceManager::readDeviceParame
   // problem rather than returning a confident-but-wrong last-good figure.
   if (device->exchangesProcessData() && processDataHealthy()) {
     // The live value lives in the process data — decode it and reflect it into the cached
-    // DeviceParameter (which stays the source of truth).
+    // DeviceParameter (which stays the source of truth), thread-safely under the cache lock.
     if (auto bytes = readPdoValue(slavePosition, index, subindex); bytes) {
-      const DeviceParameter* p = device->parameter(index, subindex);
-      if (!p) {
-        return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
-                                           slavePosition, index, subindex));
-      }
-      auto decoded = decodeSdoBytes(p->dataType, *bytes);
-      if (!decoded) {
-        return std::unexpected(decoded.error());
-      }
-      if (auto set = device->setCachedValue(index, subindex, *decoded); !set) {
-        return std::unexpected(set.error());
-      }
-      return *decoded;
+      return device->setValueFromBytes(index, subindex, *bytes);
     }
   }
   return device->readParameter(index, subindex);
@@ -731,11 +719,10 @@ std::expected<void, std::string> DeviceManager::writeDeviceParameter(uint16_t sl
   const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
   if (image && device->exchangesProcessData()) {
     if (auto loc = image->find(slavePosition, index, subindex); loc && loc->isOutput) {
-      if (auto set = device->setCachedValue(index, subindex, std::move(value)); !set) {
+      if (auto set = device->setValue(index, subindex, std::move(value)); !set) {
         return std::unexpected(set.error());
       }
-      const DeviceParameter* p = device->parameter(index, subindex);
-      auto bytes = encodeSdoBytes(p->dataType, p->value);
+      auto bytes = device->valueAsBytes(index, subindex);
       if (!bytes) {
         return std::unexpected(bytes.error());
       }

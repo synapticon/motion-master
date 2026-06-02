@@ -13,6 +13,7 @@ const deviceLinks = [
 ]
 
 const AL_STATE_LABEL: Record<number, string> = {
+  0: 'None', // No state — slave lost / powered off (SOEM reports state 0).
   1: 'Init',
   2: 'PreOp',
   3: 'Boot',
@@ -66,6 +67,12 @@ function DeviceSection({
   })
   const online: boolean | null = onlineQuery.data?.data?.online ?? null
   const statusLabel = online === null ? 'Checking…' : online ? 'Online' : 'Offline'
+  const statusTitle =
+    online === null
+      ? 'Checking… — probing whether the device responds on the bus'
+      : online
+        ? 'Online — the device answers live presence probes (mailbox reachable in PRE-OP or above)'
+        : 'Offline — the device is not responding (in INIT, powered off, unplugged, or it left the bus)'
   const stateLabel = alStateLabel(state)
 
   return (
@@ -83,9 +90,9 @@ function DeviceSection({
         <div className="mt-1.5 flex items-center justify-between gap-2">
           <span className="flex items-center gap-1.5 min-w-0">
             <span
-              title={statusLabel}
+              title={statusTitle}
               aria-label={statusLabel}
-              className={`inline-block h-2 w-2 shrink-0 rounded-full ring-2 ring-white ${online === null
+              className={`inline-block h-2 w-2 shrink-0 cursor-help rounded-full ring-2 ring-white ${online === null
                 ? 'bg-white/30 animate-pulse'
                 : online
                   ? 'bg-status-good shadow-[0_0_6px_1px_var(--color-status-good)]'
@@ -93,7 +100,8 @@ function DeviceSection({
                 }`}
             />
             <span
-              className={`text-xs font-display tracking-wider ${online ? 'text-white/70' : 'text-white/40'
+              title={statusTitle}
+              className={`text-xs font-display tracking-wider cursor-help ${online ? 'text-white/70' : 'text-white/40'
                 }`}
             >
               {statusLabel}
@@ -102,7 +110,7 @@ function DeviceSection({
           {stateLabel && (
             <span
               title={`AL state${state?.error ? ' — error indicator set' : ''}`}
-              className={`shrink-0 px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider ${state?.error ? 'bg-status-warn/15 text-status-warn' : 'bg-white/10 text-white/60'
+              className={`shrink-0 cursor-help px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider ${state?.error ? 'bg-status-warn/15 text-status-warn' : 'bg-white/10 text-white/60'
                 }`}
             >
               {stateLabel}
@@ -121,7 +129,7 @@ function DeviceSection({
 }
 
 export default function RootLayout() {
-  const { api, hasScanned, isInitialized } = useConnection()
+  const { api, host, port, hasScanned, isInitialized } = useConnection()
   const online = useApiHealth(api)
   const queryClient = useQueryClient()
   const [metaOpen, setMetaOpen] = useState(false)
@@ -174,9 +182,13 @@ export default function RootLayout() {
               Motion Master
             </span>
             <span
-              title={online ? 'API online' : 'API offline — Start motion-master'}
-              aria-label={online ? 'API online' : 'API offline — Start motion-master'}
-              className={`inline-block h-3 w-3 rounded-full ring-2 ring-white ${online
+              title={
+                online
+                  ? `API online — the Motion Master HTTP server is reachable at https://${host}:${port}`
+                  : `API offline — no response from https://${host}:${port}. Make sure Motion Master is installed and running on your system, then accept its TLS certificate.`
+              }
+              aria-label={online ? 'API online' : 'API offline'}
+              className={`inline-block h-3 w-3 cursor-help rounded-full ring-2 ring-white ${online
                 ? 'bg-status-good shadow-[0_0_8px_2px_var(--color-status-good)]'
                 : 'bg-status-bad shadow-[0_0_8px_2px_var(--color-status-bad)] animate-pulse'
                 }`}
@@ -186,11 +198,21 @@ export default function RootLayout() {
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
-          <NavItem to="/api-docs" label="API Docs" />
           <NavItem to="/" label="Connection" end />
-          <NavItem to="/fieldbus" label="Fieldbus" />
+
+          <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Fieldbus</p>
+          <NavItem to="/fieldbus" label="Control" />
+          <NavItem to="/bus-config" label="Configuration" />
+          <NavItem to="/process-image" label="Process Image" />
+          <NavItem to="/bus-diagnostics" label="Diagnostics" />
+          <NavItem to="/dc-sync" label="DC Sync" />
+
+          <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Server</p>
           <NavItem to="/log" label="Log" />
           <NavItem to="/requests" label="Requests" />
+
+          <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Reference</p>
+          <NavItem to="/api-docs" label="API Docs" />
 
           {online && (
             <div className="mt-6">
@@ -255,7 +277,16 @@ export default function RootLayout() {
                   </button>
                 )}
               </div>
-              <div className="flex items-center gap-2">
+              <div
+                className="flex items-center gap-2 cursor-help"
+                title={
+                  !isInitialized
+                    ? 'Not initialized — no fieldbus driver is loaded. Initialize one on the Fieldbus page.'
+                    : hasScanned
+                      ? `Scanned — the bus was enumerated and ${devices.length} ${devices.length === 1 ? 'device is' : 'devices are'} present.`
+                      : 'Initialized, not scanned — a driver is loaded but the bus has not been scanned yet, so no devices are known. Scan to discover them.'
+                }
+              >
                 <span
                   className={`inline-block h-2 w-2 shrink-0 rounded-full ring-2 ring-white ${!isInitialized
                     ? 'bg-white/30'

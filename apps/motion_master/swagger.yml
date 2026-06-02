@@ -826,6 +826,80 @@ paths:
           description: No device at the given bus position
         "500":
           $ref: "#/components/responses/DriverError"
+  /api/devices/diagnostics:
+    get:
+      summary: Read live ESC health diagnostics for devices
+      operationId: getDeviceDiagnostics
+      description: >
+        Reads live link-quality and watchdog diagnostics from each slave's EtherCAT Slave
+        Controller (DL Status 0x0110, error-counter block 0x0300–0x0313, watchdog block
+        0x0440–0x0443) via FPRD. Counters are 8-bit, saturate at 255, and are cleared only by a
+        power cycle or explicit write — poll this endpoint and watch for a rising delta rather than
+        an absolute value. The per-port counters localise a degrading link to a specific
+        cable/connector; the watchdog counters distinguish a slave that stopped receiving process
+        data from a master-side problem. Omit `positions` to query all discovered devices.
+        Returns 500 for transports without an ESC (e.g. SPoE).
+      parameters:
+        - name: positions
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Comma-separated list of 1-based slave positions to query (e.g. `1,2,3`).
+            Omit to query all discovered devices.
+          example: "1,2"
+      responses:
+        "200":
+          description: Decoded ESC diagnostics for each queried device
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeviceDiagnostics"
+        "400":
+          description: A `positions` value is not a valid integer
+        "500":
+          $ref: "#/components/responses/DriverError"
+  /api/dc-sync:
+    get:
+      summary: Read live distributed-clock synchronisation status for devices
+      operationId: getDcSync
+      description: >
+        Reads each slave's distributed-clock unit live from its EtherCAT Slave Controller
+        (system-time delay 0x0928 and system-time difference 0x092C) via FPRD. The reference clock
+        is the first DC-capable slave; every other DC slave continuously corrects its local clock
+        toward it, and `systemTimeDifference` is the live deviation in nanoseconds. The figure is
+        meaningful only while the bus is exchanging process data in SAFE-OP/OP (the reference time
+        is distributed in the cyclic frame) and converges toward zero as the slaves' drift loops
+        settle — poll this endpoint and watch for a slave whose deviation stays large or grows
+        rather than an absolute value. Non-DC slaves report `dcCapable` false with zeroed values.
+        Omit `positions` to query all discovered devices. Returns 500 for transports without an ESC
+        (e.g. SPoE).
+      parameters:
+        - name: positions
+          in: query
+          required: false
+          schema:
+            type: string
+          description: >
+            Comma-separated list of 1-based slave positions to query (e.g. `1,2,3`).
+            Omit to query all discovered devices.
+          example: "1,2"
+      responses:
+        "200":
+          description: Decoded DC sync status for each queried device
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DcSyncStatus"
+        "400":
+          description: A `positions` value is not a valid integer
+        "500":
+          $ref: "#/components/responses/DriverError"
   /api/devices/state:
     get:
       summary: Read current AL state for devices
@@ -1031,8 +1105,394 @@ paths:
                       format: int64
                       description: Serial number from EEPROM
                       example: 12345
+  /api/process-image:
+    get:
+      summary: Inspect the published EtherCAT process image
+      description: >-
+        Returns the whole-bus process image: the byte sizes of each direction,
+        the expected and last working counters and overall health, the number of
+        retained image generations (one per re-map since the last reset), and
+        every mapped object resolved to its absolute bit offset. While an image
+        is live `configured` is true and the layout describes it. When no image
+        is published (no device is in SAFE-OP/OP) but at least one generation has
+        been mapped, `configured` is false and the layout describes the most
+        recent retained generation — the last-known mapping — so a bus that has
+        dropped out of SAFE-OP/OP stays inspectable; `lastWkc` then holds the
+        final exchange value and working-counter health does not apply. The
+        object lists are empty only before any image has ever been mapped. Object
+        `name` is populated only for devices whose object dictionary has been
+        enumerated.
+      operationId: getProcessImage
+      responses:
+        "200":
+          description: The published process image and its runtime health
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  [configured, outputBytes, inputBytes, expectedWkc, lastWkc, healthy,
+                   generations, outputs, inputs]
+                properties:
+                  configured:
+                    type: boolean
+                    description: Whether an image is currently published for exchange
+                    example: true
+                  outputBytes:
+                    type: integer
+                    description: Size of the output image (master→slave) in bytes
+                    example: 12
+                  inputBytes:
+                    type: integer
+                    description: Size of the input image (slave→master) in bytes
+                    example: 16
+                  expectedWkc:
+                    type: integer
+                    description: Working counter expected from the devices currently exchanging
+                    example: 3
+                  lastWkc:
+                    type: integer
+                    description: Working counter from the most recent exchange (0 before any)
+                    example: 3
+                  healthy:
+                    type: boolean
+                    description: Whether the last working counter meets the expected value
+                    example: true
+                  generations:
+                    type: integer
+                    description: Number of process images retained since the last reset
+                    example: 1
+                  outputs:
+                    type: array
+                    description: Output-mapped objects (RxPDO), in image order
+                    items:
+                      $ref: "#/components/schemas/ProcessImageObject"
+                  inputs:
+                    type: array
+                    description: Input-mapped objects (TxPDO), in image order
+                    items:
+                      $ref: "#/components/schemas/ProcessImageObject"
+  /api/bus-config:
+    get:
+      summary: Inspect each slave's static EtherCAT Slave Controller configuration
+      description: >-
+        Returns the static ESC configuration the master programmed into every
+        slave during the last scan: station/alias addresses, mapped process-data
+        sizes, the mailbox transport windows, the distributed-clock setup, and the
+        configured Sync Managers and FMMUs. Read from cached state with no bus I/O
+        and valid once the bus has been scanned. The list is empty before any scan,
+        or when the active transport has no ESC (e.g. SPoE). Numeric fields (SM/FMMU
+        type, mailbox protocol bits, SM flags) are raw register values; the client
+        decodes them. `deviceName` is empty when no known device occupies the slave.
+      operationId: getBusConfig
+      responses:
+        "200":
+          description: Per-slave ESC configuration, in bus order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SlaveConfig"
 components:
   schemas:
+    ProcessImageObject:
+      type: object
+      required: [slavePosition, index, subindex, name, bitOffset, bitLength]
+      properties:
+        slavePosition:
+          type: integer
+          description: 1-based bus position of the owning device
+          example: 1
+        index:
+          type: integer
+          description: CoE object index
+          example: 24640
+        subindex:
+          type: integer
+          description: CoE object subindex
+          example: 0
+        name:
+          type: string
+          description: >-
+            Object name resolved from the device's parameter map; empty when the
+            object dictionary has not been enumerated for that device
+          example: "Target position"
+        bitOffset:
+          type: integer
+          description: Absolute bit offset within the direction's image
+          example: 32
+        bitLength:
+          type: integer
+          description: Width of the value in bits
+          example: 32
+    SyncManagerConfig:
+      type: object
+      required: [index, physicalStart, length, flags, type]
+      properties:
+        index:
+          type: integer
+          description: Sync Manager number (0–7)
+          example: 2
+        physicalStart:
+          type: integer
+          description: Physical ESC memory start address the SM guards
+          example: 4352
+        length:
+          type: integer
+          description: Length of the guarded window in bytes
+          example: 12
+        flags:
+          type: integer
+          description: >-
+            Raw SM control/flags register (buffer mode, direction, watchdog,
+            enable) — decoded by the client
+          example: 100100
+        type:
+          type: integer
+          description: "0 unused, 1 MbxOut, 2 MbxIn, 3 Outputs, 4 Inputs"
+          example: 3
+    FmmuConfig:
+      type: object
+      required:
+        [index, logicalStart, length, logicalStartBit, logicalEndBit,
+         physicalStart, physicalStartBit, type, active]
+      properties:
+        index:
+          type: integer
+          description: FMMU number (0–3)
+          example: 0
+        logicalStart:
+          type: integer
+          description: Logical (bus-wide) start address
+          example: 0
+        length:
+          type: integer
+          description: Mapped length in bytes
+          example: 12
+        logicalStartBit:
+          type: integer
+          description: Start bit within the first logical byte
+          example: 0
+        logicalEndBit:
+          type: integer
+          description: End bit within the last logical byte
+          example: 7
+        physicalStart:
+          type: integer
+          description: Physical ESC start address (ties the FMMU to a Sync Manager)
+          example: 4352
+        physicalStartBit:
+          type: integer
+          description: Start bit within the first physical byte
+          example: 0
+        type:
+          type: integer
+          description: "ESC FMMU type: 1 read (inputs/TxPDO), 2 write (outputs/RxPDO)"
+          example: 2
+        active:
+          type: boolean
+          description: Whether the FMMU is active
+          example: true
+    SlaveConfig:
+      type: object
+      required:
+        [slavePosition, deviceName, configuredAddress, aliasAddress, outputBits,
+         inputBits, mailbox, dc, syncManagers, fmmus]
+      properties:
+        slavePosition:
+          type: integer
+          description: 1-based bus position
+          example: 1
+        deviceName:
+          type: string
+          description: Device name for this slave position, empty if unknown
+          example: "SOMANET Node"
+        configuredAddress:
+          type: integer
+          description: Station (configured) address assigned during scan
+          example: 4097
+        aliasAddress:
+          type: integer
+          description: Configured station alias from EEPROM
+          example: 0
+        outputBits:
+          type: integer
+          description: Mapped output (master→slave) bits
+          example: 96
+        inputBits:
+          type: integer
+          description: Mapped input (slave→master) bits
+          example: 128
+        mailbox:
+          type: object
+          required: [writeLength, writeOffset, readLength, readOffset, protocols]
+          properties:
+            writeLength:
+              type: integer
+              description: Write (master→slave) mailbox length in bytes; 0 if none
+              example: 128
+            writeOffset:
+              type: integer
+              description: Write mailbox physical ESC offset
+              example: 4096
+            readLength:
+              type: integer
+              description: Read (slave→master) mailbox length in bytes
+              example: 128
+            readOffset:
+              type: integer
+              description: Read mailbox physical ESC offset
+              example: 4224
+            protocols:
+              type: integer
+              description: >-
+                Supported-protocol bits (0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE,
+                0x10 SoE, 0x20 VoE) — decoded by the client
+              example: 14
+        dc:
+          type: object
+          required: [capable, active, propagationDelay, cycleTime, shift]
+          properties:
+            capable:
+              type: boolean
+              description: Slave has distributed-clock hardware
+              example: true
+            active:
+              type: boolean
+              description: SYNC0 generation enabled (false for SM-synchronous bring-up)
+              example: false
+            propagationDelay:
+              type: integer
+              description: Measured propagation delay in nanoseconds
+              example: 300
+            cycleTime:
+              type: integer
+              description: DC cycle time in nanoseconds
+              example: 0
+            shift:
+              type: integer
+              description: Shift from the cycle-modulus boundary in nanoseconds
+              example: 0
+        syncManagers:
+          type: array
+          description: Configured Sync Managers, by index
+          items:
+            $ref: "#/components/schemas/SyncManagerConfig"
+        fmmus:
+          type: array
+          description: Configured FMMUs, by index
+          items:
+            $ref: "#/components/schemas/FmmuConfig"
+    PortDiagnostics:
+      type: object
+      required:
+        [linkUp, loopClosed, communication, invalidFrame, rxError, forwardedError, lostLink]
+      properties:
+        linkUp:
+          type: boolean
+          description: Physical link detected on this port (DL Status link bit)
+          example: true
+        loopClosed:
+          type: boolean
+          description: Loop closed on this port (no downstream slave, or port disabled)
+          example: false
+        communication:
+          type: boolean
+          description: Stable communication established on this port
+          example: true
+        invalidFrame:
+          type: integer
+          description: >-
+            Invalid-frame counter (0x0300+): frames with a bad FCS/structure. 8-bit, saturates
+            at 255; watch for a rising delta rather than the absolute value
+          example: 0
+        rxError:
+          type: integer
+          description: "Physical-layer RX error counter (0x0301+): RX_ER asserted by the PHY"
+          example: 0
+        forwardedError:
+          type: integer
+          description: >-
+            Forwarded RX error counter (0x0308+): errors first flagged by an upstream ESC —
+            pinpoints the segment where corruption began
+          example: 0
+        lostLink:
+          type: integer
+          description: "Lost-link counter (0x0310+): link-down events on this port"
+          example: 0
+    DeviceDiagnostics:
+      type: object
+      required:
+        [slavePosition, deviceName, ports, processingUnitError, pdiError,
+         processDataWatchdog, pdiWatchdog]
+      properties:
+        slavePosition:
+          type: integer
+          description: 1-based position on the fieldbus
+          example: 1
+        deviceName:
+          type: string
+          description: Device name for this slave position, empty if unknown
+          example: "SOMANET Node"
+        ports:
+          type: array
+          description: Per-port link state and error counters (ports 0–3, in order)
+          items:
+            $ref: "#/components/schemas/PortDiagnostics"
+        processingUnitError:
+          type: integer
+          description: "ECAT processing-unit error counter (0x030C): datagrams reaching the unit malformed"
+          example: 0
+        pdiError:
+          type: integer
+          description: "PDI error counter (0x030D): problems on the slave-local process-data interface"
+          example: 0
+        processDataWatchdog:
+          type: integer
+          description: >-
+            Process-data (SM) watchdog expirations (0x0442): the slave stopped seeing fresh outputs
+          example: 0
+        pdiWatchdog:
+          type: integer
+          description: "PDI watchdog expirations (0x0443)"
+          example: 0
+    DcSyncStatus:
+      type: object
+      required:
+        [slavePosition, deviceName, dcCapable, referenceClock, propagationDelay,
+         systemTimeDifference]
+      properties:
+        slavePosition:
+          type: integer
+          description: 1-based position on the fieldbus
+          example: 1
+        deviceName:
+          type: string
+          description: Device name for this slave position, empty if unknown
+          example: "SOMANET Node"
+        dcCapable:
+          type: boolean
+          description: Slave has distributed-clock hardware
+          example: true
+        referenceClock:
+          type: boolean
+          description: >-
+            This slave is the DC reference clock (the first DC-capable slave) — it defines bus
+            time, so its own systemTimeDifference is zero
+          example: false
+        propagationDelay:
+          type: integer
+          description: "System-time delay / propagation delay (0x0928), nanoseconds"
+          example: 300
+        systemTimeDifference:
+          type: integer
+          description: >-
+            Signed deviation of the local system time from the reference clock (0x092C), in
+            nanoseconds. Positive = local clock ahead of the reference, negative = behind; zero on
+            the reference clock. Meaningful only while exchanging in SAFE-OP/OP; converges toward
+            zero as the drift-compensation loop settles
+          example: 0
     AlStatusCode:
       type: object
       required: [code, name, description, terminal]

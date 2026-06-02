@@ -21,6 +21,7 @@
 #include "game_loop.h"
 #include "node/device_manager.h"
 #include "options.h"
+#include "process_data_task.h"
 #include "ring_log_sink.h"
 #include "server.h"
 
@@ -175,6 +176,13 @@ int main(int argc, char** argv) {
   }
 
   GameLoop game_loop{std::chrono::microseconds{1000}};
+
+  // Exchange process data every cycle. No-op until devices are mapped and brought into
+  // SAFE-OP/OP via the API, at which point DeviceManager publishes the image and the loop
+  // begins driving PDO automatically.
+  ProcessDataTask processDataTask{deviceManager};
+  game_loop.addTask(&processDataTask);
+
   gGameLoop = &game_loop;
 
   std::signal(SIGINT, [](int) {

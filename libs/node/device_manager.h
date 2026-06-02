@@ -5,13 +5,21 @@
 #include <expected>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
+#include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
 #include "node/device.h"
+#include "node/process_image.h"
 
 namespace mm::node {
+
+/// @brief Holds the RT process-data runtime state (seqlock buffers, the published image
+///        pointer, and scratch). Defined in the .cc — pimpl'd so its non-movable SeqLock
+///        members and large fixed buffers stay out of the header.
+struct ProcessData;
 
 /// @brief Current AL state snapshot for a single device.
 struct DeviceStateInfo {
@@ -25,19 +33,102 @@ struct DeviceStateInfo {
 /// @brief Serialises a DeviceStateInfo to JSON.
 void to_json(nlohmann::json& j, const DeviceStateInfo& info);
 
+/// @brief One mapped object in the published process image, with its name resolved.
+///
+/// A flattened, API-facing view of a @c ProcessImageEntry: the raw entry plus the textual
+/// name looked up from the owning device's parameter map (empty when the object dictionary
+/// has not been enumerated for that device).
+struct ProcessImageObjectInfo {
+  uint16_t slavePosition;  ///< 1-based bus position of the owning device.
+  uint16_t index;          ///< CoE object index.
+  uint8_t subindex;        ///< CoE object subindex.
+  std::string name;        ///< Object name, or empty if the OD has not been enumerated.
+  uint32_t bitOffset;      ///< Absolute bit offset within the direction's image.
+  uint16_t bitLength;      ///< Width of the value in bits.
+};
+
+/// @brief API-facing snapshot of the currently published process image and its runtime health.
+///
+/// Built on the calling (non-RT) thread by @c DeviceManager::processImageInfo. When an image is
+/// live (@c configured true) the layout describes it. When no image is published (@c configured
+/// false) but generations have been mapped since the last reset(), the byte sizes and object
+/// lists describe the most recent retained generation — the last-known layout — so a bus that has
+/// dropped out of SAFE-OP/OP remains inspectable; @c lastWkc then holds the final exchange value
+/// while @c expectedWkc reflects the now-idle bus. The lists are empty only before any image has
+/// ever been mapped.
+struct ProcessImageInfo {
+  bool configured;          ///< Whether an image is currently published for exchange.
+  uint32_t outputBytes;     ///< Size of the output image (master→slave).
+  uint32_t inputBytes;      ///< Size of the input image (slave→master).
+  int expectedWkc;          ///< Working counter expected from the devices currently exchanging.
+  int lastWkc;              ///< Working counter from the most recent exchange (0 before any).
+  bool healthy;             ///< Whether the last working counter meets the expected value.
+  std::size_t generations;  ///< Number of process images retained since the last reset().
+  std::vector<ProcessImageObjectInfo> outputs;  ///< Output-mapped objects in image order.
+  std::vector<ProcessImageObjectInfo> inputs;   ///< Input-mapped objects in image order.
+};
+
+/// @brief Serialises a ProcessImageObjectInfo to JSON.
+void to_json(nlohmann::json& j, const ProcessImageObjectInfo& obj);
+
+/// @brief Serialises a ProcessImageInfo to JSON.
+void to_json(nlohmann::json& j, const ProcessImageInfo& info);
+
+/// @brief A slave's static ESC configuration plus its resolved device name.
+///
+/// API-facing wrapper around @c mm::comm::SlaveConfig that adds the human-readable device
+/// name (from the device set, empty when no matching device is known), built by
+/// @c DeviceManager::busConfig on the (non-RT) caller's thread.
+struct SlaveConfigInfo {
+  mm::comm::SlaveConfig config;  ///< Raw ESC configuration as captured by the driver.
+  std::string deviceName;        ///< Device name for this slave position, empty if unknown.
+};
+
+/// @brief Serialises a SlaveConfigInfo (and its nested SM/FMMU/mailbox/DC) to JSON.
+void to_json(nlohmann::json& j, const SlaveConfigInfo& info);
+
+/// @brief A slave's live ESC health diagnostics plus its resolved device name.
+///
+/// API-facing wrapper around @c mm::comm::SlaveDiagnostics that adds the human-readable device
+/// name (from the device set, empty when no matching device is known), built by
+/// @c DeviceManager::getDeviceDiagnostics on the (non-RT) caller's thread.
+struct DeviceDiagnosticsInfo {
+  mm::comm::SlaveDiagnostics diagnostics;  ///< Decoded ESC counters as read by the driver.
+  std::string deviceName;  ///< Device name for this slave position, empty if unknown.
+};
+
+/// @brief Serialises a DeviceDiagnosticsInfo (and its nested per-port counters) to JSON.
+void to_json(nlohmann::json& j, const DeviceDiagnosticsInfo& info);
+
+/// @brief A slave's live distributed-clock sync status plus its resolved device name.
+///
+/// API-facing wrapper around @c mm::comm::DcSyncDiagnostics that adds the human-readable device
+/// name (from the device set, empty when no matching device is known), built by
+/// @c DeviceManager::getDcSync on the (non-RT) caller's thread.
+struct DcSyncInfo {
+  mm::comm::DcSyncDiagnostics dcSync;  ///< Decoded DC sync status as read by the driver.
+  std::string deviceName;              ///< Device name for this slave position, empty if unknown.
+};
+
+/// @brief Serialises a DcSyncInfo to JSON.
+void to_json(nlohmann::json& j, const DcSyncInfo& info);
+
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.
 ///
 /// The driver is not required at construction — call @c init() to supply one.
 /// This allows the app to start without a driver and be initialised later via
-/// the HTTP API. Injected into @c GameLoop (for @c pdoExchange) and
+/// the HTTP API. Injected into @c GameLoop (for @c exchangeProcessData) and
 /// @c HttpServer (for SDO/state operations).
 class DeviceManager {
  public:
-  DeviceManager() = default;
+  DeviceManager();
+
+  /// @brief Defined out-of-line so @c unique_ptr<ProcessData> can hold an incomplete type.
+  ~DeviceManager();
 
   /// @brief Takes ownership of @p driver and initialises it.
   ///
-  /// Must be called before @c scan() and @c pdoExchange(). One-shot: fails if a
+  /// Must be called before @c scan() and @c exchangeProcessData(). One-shot: fails if a
   /// driver is already held — call @c reset() first. Replacing a live driver
   /// would dangle the @c FieldbusDriver& that every @c Device holds.
   ///
@@ -57,7 +148,7 @@ class DeviceManager {
   ///
   /// Transitions all slaves to INIT state, closes the network interface, and
   /// removes all @c Device objects. After this returns, @c init() and
-  /// @c scan() may be called again. Must not be called while @c pdoExchange()
+  /// @c scan() may be called again. Must not be called while @c exchangeProcessData()
   /// is running concurrently.
   void reset();
 
@@ -81,17 +172,83 @@ class DeviceManager {
   /// e.g. @c dm.findDevice(1)->writeValue(0x2030, 1, 123). @c nullptr if not found.
   Device* findDevice(uint16_t slavePosition);
 
-  /// @brief Exchanges process data with all nodes.
+  /// @brief Maps process data and publishes the process image for exchange.
   ///
-  /// Called once per @c GameLoop cycle. No-op when no driver is initialised.
+  /// Calls @c FieldbusDriver::configureProcessData (which maps the IOmap and lays out the
+  /// FMMUs), reads each device's PDO mapping via SDO, assembles a @c ProcessImage that
+  /// resolves every mapped object to an absolute position, zero-initialises the output
+  /// staging buffer, and publishes the image so @c exchangeProcessData begins exchanging.
+  /// All devices must be in PRE-OP (mailbox active) for the mapping reads to succeed.
   ///
-  /// @warning @c pdoExchange() runs on the RT GameLoop thread while @c init(),
-  ///          @c scan(), and @c reset() may be called from the HTTP server thread.
-  ///          There is currently no lock guarding @c driver_ or @c devices_ across
-  ///          that boundary.  This is safe only because @c pdoExchange() is not yet
-  ///          wired into the GameLoop.  Before enabling PDO exchange, stop the loop
-  ///          (or drain one cycle) before calling @c init() / @c reset() via the API.
-  void pdoExchange();
+  /// Re-runnable: a later call (e.g. after a device returns from a firmware download)
+  /// re-maps the whole bus and republishes. While re-mapping it first unpublishes the image
+  /// so @c exchangeProcessData becomes a no-op; call it with the GameLoop stopped or drained,
+  /// as for @c init / @c reset (see the @c exchangeProcessData warning).
+  ///
+  /// @return Void on success, or an error string if no driver is initialised, no devices
+  ///         have been discovered, the driver mapping fails, a device's mapping cannot be
+  ///         read, or the assembled image is inconsistent with the driver layout.
+  std::expected<void, std::string> configureProcessData();
+
+  /// @brief Exchanges one cycle of process data: sends staged outputs, captures inputs.
+  ///
+  /// Loads the output image from the output-staging seqlock, calls
+  /// @c FieldbusDriver::exchangeProcessData, and publishes the received input image to the
+  /// input-snapshot seqlock.  No-op until @c configureProcessData has published an image, so
+  /// the GameLoop can call it unconditionally every cycle.  Runs on the RT thread and takes
+  /// no lock.
+  ///
+  /// @warning @c exchangeProcessData() runs on the RT GameLoop thread while @c init(),
+  ///          @c scan(), @c reset(), and @c configureProcessData() may be called from the
+  ///          HTTP server thread.  The published-image pointer gates exchange off during a
+  ///          re-map, but @c driver_ / @c devices_ themselves are not otherwise locked across
+  ///          that boundary.  Stop the loop (or drain one cycle) before calling @c init() /
+  ///          @c reset() / @c configureProcessData() via the API.
+  void exchangeProcessData();
+
+  /// @brief Returns a snapshot of the latest input image (slave→master).
+  ///
+  /// Reads the input-snapshot seqlock without blocking the RT writer.  Empty (@c size 0)
+  /// until the first @c exchangeProcessData after @c configureProcessData.  Intended for the
+  /// monitoring/WebSocket path and value read-back.
+  ProcessBuffer inputSnapshot() const;
+
+  /// @brief Whether @c configureProcessData has published a process image for exchange.
+  bool processDataConfigured() const;
+
+  /// @brief The working counter from the most recent process-data exchange (0 before any).
+  int lastWorkingCounter() const;
+
+  /// @brief The working counter expected from the devices currently exchanging (SAFE-OP/OP).
+  ///
+  /// Computed from each device's PDO presence and current AL state, so it tracks a partially
+  /// operational bus: an OP device with outputs and inputs contributes 3, a SAFE-OP device
+  /// contributes 1 (inputs only), and PRE-OP/below contribute 0. Recomputed on configure and
+  /// on each state transition — not the whole-bus all-OP figure.
+  int expectedWorkingCounter() const;
+
+  /// @brief Whether every device that should be exchanging is contributing to the cycle.
+  ///
+  /// True when process data is configured and the last working counter is at least the
+  /// expected value. A drop below expected means a device that should be in SAFE-OP/OP stopped
+  /// contributing (cable, fault, or an unexpected state change).
+  bool processDataHealthy() const;
+
+  /// @brief Snapshots the published process image and its runtime health for the API.
+  ///
+  /// Resolves every mapped object to an absolute bit offset and a name (looked up from each
+  /// device's parameter map, empty if the OD has not been enumerated) and reports the byte
+  /// sizes, expected/last working counter, health, and the number of retained image
+  /// generations. Returns @c configured false with empty object lists when no image is
+  /// published. Runs on the (non-RT) caller's thread; reads the published image lock-free.
+  ProcessImageInfo processImageInfo() const;
+
+  /// @brief Snapshots each slave's static ESC configuration (SM, FMMU, mailbox, DC) for the API.
+  ///
+  /// Passes through the driver's cached configuration (no bus I/O) and resolves each slave's
+  /// device name. Returns an empty vector when no driver is set or the transport has no ESC
+  /// (e.g. SPoE). Runs on the (non-RT) caller's thread.
+  std::vector<SlaveConfigInfo> busConfig() const;
 
   /// @brief Transitions a set of devices to @p targetState, blocking until all arrive or
   ///        @p timeout elapses, and reports the final state of each.
@@ -123,6 +280,39 @@ class DeviceManager {
   /// @return AL state snapshot per device, or an error string if the driver is
   ///         not initialised or the hardware read fails.
   std::expected<std::vector<DeviceStateInfo>, std::string> getDeviceStates(
+      const std::vector<uint16_t>& positions);
+
+  /// @brief Reads live ESC health diagnostics (link quality, error counters, watchdogs) for a set
+  ///        of devices, resolving each slave's device name.
+  ///
+  /// If @p positions is empty, all discovered devices are queried. Forwards to
+  /// @c FieldbusDriver::readDiagnostics (FPRD reads — not cached) and wraps each result with its
+  /// device name. The returned counters are monotonic since the last clear, so a diagnostics page
+  /// polls this and watches for a rising delta rather than an absolute value.
+  ///
+  /// Must be called after both @c init() and @c scan().
+  ///
+  /// @param positions  1-based slave positions to query; empty = all devices.
+  /// @return Per-device diagnostics in the order targeted, or an error string if no driver is
+  ///         initialised, the transport has no ESC, or a register read fails.
+  std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> getDeviceDiagnostics(
+      const std::vector<uint16_t>& positions);
+
+  /// @brief Reads live distributed-clock synchronisation status for a set of devices, resolving
+  ///        each slave's device name.
+  ///
+  /// If @p positions is empty, all discovered devices are queried. Forwards to
+  /// @c FieldbusDriver::readDcSync (FPRD reads — not cached) and wraps each result with its device
+  /// name. The system-time difference is meaningful only while the bus is exchanging in
+  /// SAFE-OP/OP; a page polls this and watches for a slave whose deviation from the reference
+  /// clock stays large or grows rather than converging toward zero.
+  ///
+  /// Must be called after both @c init() and @c scan().
+  ///
+  /// @param positions  1-based slave positions to query; empty = all devices.
+  /// @return Per-device DC sync status in the order targeted, or an error string if no driver is
+  ///         initialised, the transport has no ESC, or a register read fails.
+  std::expected<std::vector<DcSyncInfo>, std::string> getDcSync(
       const std::vector<uint16_t>& positions);
 
   /// @brief Reports whether a single device is currently online.
@@ -183,15 +373,48 @@ class DeviceManager {
                                                         DeviceParameterValue value);
 
  private:
-  /// @brief Updates a device's online flag from a freshly-read AL state.
+  /// @brief Resolves a caller-supplied position list to validated bus positions.
   ///
-  /// Online means the SDO mailbox is available — AL state PRE-OP, SAFE-OP, or OP with no
-  /// error indicator. INIT and BOOT (and any error state) count as offline. No-op if the
-  /// device is unknown.
-  void updateOnline(const DeviceStateInfo& info);
+  /// An empty list expands to every discovered device (in bus order). A non-empty list is
+  /// validated against the device set — any position that is not a discovered device is
+  /// rejected — so untrusted caller input can never reach the driver's slave-indexed
+  /// accessors (which index a fixed-size slave array without bounds-checking) out of range.
+  /// Call with a driver held; the device set defines the valid range.
+  ///
+  /// @param positions  1-based slave positions, or empty for all devices.
+  /// @return The validated positions (or all device positions when empty), or an error
+  ///         string naming the first position that is not a discovered device.
+  std::expected<std::vector<uint16_t>, std::string> resolveTargets(
+      const std::vector<uint16_t>& positions) const;
+
+  /// @brief Recomputes the expected working counter from the devices' current AL states and
+  ///        PDO presence. Called after configure and after each state transition.
+  void updateExpectedWkc();
+
+  /// @brief Unpublishes the process image and waits for any in-flight exchange cycle to finish.
+  ///
+  /// After this returns, @c exchangeProcessData is a no-op and the RT thread is no longer
+  /// touching the driver's IOmap, so it is safe to re-map or tear down. Bounded wait.
+  void stopExchange();
+
+  /// @brief Reads a PDO-mapped object's current bytes from the published process image.
+  ///
+  /// Inputs come from the input snapshot, outputs from the output staging buffer; bytes are
+  /// little-endian and LSB-aligned (SDO encoding). @c nullopt when the object is not mapped
+  /// or no image is published. Backs the read hook installed on each @c Device.
+  std::optional<std::vector<uint8_t>> readPdoValue(uint16_t slavePosition, uint16_t index,
+                                                   uint8_t subindex) const;
+
+  /// @brief Stages a PDO output object's bytes into the output image.
+  ///
+  /// @return @c true if the object is output-mapped and was staged; @c false otherwise.
+  /// Backs the write hook installed on each @c Device.
+  bool writePdoValue(uint16_t slavePosition, uint16_t index, uint8_t subindex,
+                     std::span<const uint8_t> bytes);
 
   std::unique_ptr<mm::comm::FieldbusDriver> driver_;
   std::vector<Device> devices_;
+  std::unique_ptr<ProcessData> pd_;
 };
 
 /// @brief Serialises all devices in a DeviceManager to a JSON array.

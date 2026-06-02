@@ -226,12 +226,12 @@ curl -k -X POST https://localhost:8443/api/scan
 curl -k https://localhost:8443/api/devices
 
 # 5. Transition all devices to Op state (state values: 1=Init, 2=PreOp, 3=Boot, 4=SafeOp, 8=Op)
-curl -k -X POST https://localhost:8443/api/state \
+curl -k -X POST https://localhost:8443/api/devices/state \
      -H 'Content-Type: application/json' \
      -d '{"state":8}'
 
 # 6. Transition specific devices, with a custom timeout
-curl -k -X POST https://localhost:8443/api/state \
+curl -k -X POST https://localhost:8443/api/devices/state \
      -H 'Content-Type: application/json' \
      -d '{"state":2,"positions":[1,2],"timeout":3000}'
 
@@ -251,6 +251,31 @@ Fetch the monitoring schema to interpret the `data` array:
 ```bash
 curl -k https://localhost:8443/api/monitoring/pdos
 ```
+
+### Bus inspection
+
+Read-only endpoints expose the configured bus state and live health — none of them reconfigure the bus:
+
+```bash
+# Per-slave ESC configuration captured at scan (Sync Managers, FMMUs, mailbox, distributed clock)
+curl -k https://localhost:8443/api/bus-config
+
+# Process-image layout: every PDO-mapped object resolved to a bit offset, plus working-counter health
+curl -k https://localhost:8443/api/process-image
+
+# Current AL state of every device (1=Init, 2=PreOp, 3=Boot, 4=SafeOp, 8=Op)
+curl -k https://localhost:8443/api/devices/state
+
+# Live link diagnostics from each slave's EtherCAT Slave Controller: per-port error counters
+# (invalid frame, RX / forwarded errors, lost link), link state, and watchdog expirations. The
+# counters are cumulative — watch for a rising delta to localise a degrading cable or connector.
+curl -k https://localhost:8443/api/devices/diagnostics
+
+# The device queries accept a positions filter
+curl -k 'https://localhost:8443/api/devices/diagnostics?positions=1,2'
+```
+
+In the web UI these are the **Fieldbus** group's pages — Control (init / scan / state), Configuration, Process Image, and Diagnostics.
 
 ## Developer Scripts
 

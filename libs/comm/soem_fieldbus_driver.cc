@@ -4,6 +4,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <array>
 #include <cerrno>
 #include <chrono>
 #include <cstring>
@@ -59,10 +60,192 @@ std::expected<int, std::string> SoemFieldbusDriver::scan() {
   return found;
 }
 
+namespace {
+
+// Estimates the smallest standard GameLoop cycle period that keeps EtherCAT wire
+// utilisation under ~50%, leaving headroom for scheduling jitter, the master's own
+// per-cycle work, and mailbox/SDO traffic interleaved between process-data frames.
+// Pure wire-physics estimate for 100 Mbit EtherCAT — informational only.
+std::chrono::microseconds recommendedCyclePeriod(uint32_t processBytes, int slaveCount) {
+  if (processBytes == 0) {
+    return std::chrono::microseconds(0);
+  }
+  // Usable process data per standard Ethernet frame after EtherCAT + datagram headers.
+  constexpr uint32_t kUsablePerFrame = 1486;
+  // Per-frame wire overhead: preamble + Ethernet header/FCS + inter-frame gap + framing.
+  constexpr uint32_t kFrameOverhead = 50;
+  const uint32_t frames = (processBytes + kUsablePerFrame - 1) / kUsablePerFrame;
+  const uint32_t wireBytes = processBytes + frames * kFrameOverhead;
+  // 100 Mbit/s = 100 bits/µs, so (wire bytes × 8) / 100 = microseconds on the wire.
+  const double txUs = (wireBytes * 8.0) / 100.0;
+  // Frame forwarding through the slave chain, both directions (~0.6 µs per slave).
+  const double ringUs = slaveCount * 0.6;
+  const double neededUs = (txUs + ringUs) / 0.5;  // target ≤ 50% bus utilisation
+  for (int64_t step : {125, 250, 500, 1000, 2000, 4000, 8000}) {
+    if (neededUs <= static_cast<double>(step)) {
+      return std::chrono::microseconds(step);
+    }
+  }
+  // Beyond the largest standard step — round up to the next whole millisecond.
+  return std::chrono::microseconds(static_cast<int64_t>((neededUs + 999.0) / 1000.0) * 1000);
+}
+
+}  // namespace
+
+std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("configureProcessData: driver not initialised");
+  }
+  // ecx_config_map_group only assigns each slave's outputs/inputs IOmap pointer when it is still
+  // null (`if (!slavelist[slave].outputs)`); it recomputes Obits/Ibits/Obytes and the group
+  // pointers unconditionally, but the per-slave pointers stick. On a re-map (a device returning
+  // from a firmware download re-runs this without an intervening scan/ecx_config_init, which is
+  // the only thing that memsets the slavelist) those pointers therefore retain their first-map
+  // values, so processDataLayout()'s `slave.outputs - group.outputs` would yield offsets for the
+  // old layout if the new firmware's PDO mapping changed size or order. Null them first so SOEM
+  // recomputes them against the freshly mapped IOmap — exactly what a clean scan would do.
+  for (int i = 1; i <= ctx_->slavecount; ++i) {
+    ctx_->slavelist[i].outputs = nullptr;
+    ctx_->slavelist[i].inputs = nullptr;
+  }
+  const int usedSize = ecx_config_map_group(ctx_.get(), map_, 0);
+  if (usedSize <= 0) {
+    return std::unexpected("ecx_config_map_group mapped no process data");
+  }
+  if (static_cast<size_t>(usedSize) > sizeof(map_)) {
+    return std::unexpected(
+        std::format("process image {} bytes exceeds IOmap capacity {} bytes — reduce mapped PDOs",
+                    usedSize, sizeof(map_)));
+  }
+  // Initialise the Distributed Clocks system: measure propagation delays and elect a reference
+  // clock. We deliberately do not call ecx_dcsync0, so process data stays SM-synchronous
+  // (free-run), driven by the GameLoop's software cycle — DC is initialised but no SYNC0 pulse
+  // is generated, matching how the bus was brought up previously.
+  const bool dc = ecx_configdc(ctx_.get());
+  spdlog::info("Distributed clock configured; DC-capable slaves present: {}", dc ? "yes" : "no");
+  const auto& grp = ctx_->grouplist[0];
+  const auto period = recommendedCyclePeriod(grp.Obytes + grp.Ibytes, ctx_->slavecount);
+  spdlog::info(
+      "Process data mapped: {} bytes (out {}, in {}) across {} slave(s); "
+      "recommended GameLoop cycle >= {} us ({:.1f} ms)",
+      usedSize, grp.Obytes, grp.Ibytes, ctx_->slavecount, period.count(), period.count() / 1000.0);
+  return {};
+}
+
+PdoLayout SoemFieldbusDriver::processDataLayout() {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  PdoLayout layout;
+  if (!ctx_) {
+    return layout;
+  }
+  const auto& grp = ctx_->grouplist[0];
+  layout.outputBytes = grp.Obytes;
+  layout.inputBytes = grp.Ibytes;
+  layout.expectedWkc = grp.outputsWKC * 2 + grp.inputsWKC;
+  layout.slaves.reserve(static_cast<size_t>(ctx_->slavecount));
+  for (int i = 1; i <= ctx_->slavecount; ++i) {
+    const auto& s = ctx_->slavelist[i];
+    // SOEM never populates the per-slave Ooffset/Ioffset fields — only the outputs/inputs
+    // pointers into the IOmap — so reading those offsets yields 0 and a single slave's inputs
+    // wrap to -Obytes. Derive each window's offset within its direction's image from the
+    // pointers instead: the group's outputs pointer is the output image base and its inputs
+    // pointer is the input image base (IOmap laid out as [all outputs | all inputs]). A
+    // sub-byte-only direction reports 0 bytes; its pointer is never set, so it gets a 0 offset.
+    layout.slaves.push_back(SlaveIo{
+        .slavePosition = static_cast<uint16_t>(i),
+        .outputOffset = s.Obytes ? static_cast<uint32_t>(s.outputs - grp.outputs) : 0,
+        .outputBytes = s.Obytes,
+        .inputOffset = s.Ibytes ? static_cast<uint32_t>(s.inputs - grp.inputs) : 0,
+        .inputBytes = s.Ibytes,
+    });
+  }
+  return layout;
+}
+
+std::vector<SlaveConfig> SoemFieldbusDriver::busConfig() const {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::vector<SlaveConfig> out;
+  if (!ctx_) {
+    return out;
+  }
+  // All of this is cached in the slavelist by ecx_config_init / ecx_config_map_group — what the
+  // master programmed into each ESC. No bus I/O; a pure read of SOEM's in-memory configuration.
+  out.reserve(static_cast<size_t>(ctx_->slavecount));
+  for (int i = 1; i <= ctx_->slavecount; ++i) {
+    const auto& s = ctx_->slavelist[i];
+    SlaveConfig c{};
+    c.slavePosition = static_cast<uint16_t>(i);
+    c.configuredAddress = s.configadr;
+    c.aliasAddress = s.aliasadr;
+    c.outputBits = s.Obits;
+    c.inputBits = s.Ibits;
+    c.mailbox = {.writeLength = s.mbx_l,
+                 .writeOffset = s.mbx_wo,
+                 .readLength = s.mbx_rl,
+                 .readOffset = s.mbx_ro,
+                 .protocols = s.mbx_proto};
+    c.dc = {.capable = s.hasdc != 0,
+            .active = s.DCactive != 0,
+            .propagationDelay = s.pdelay,
+            .cycleTime = s.DCcycle,
+            .shift = s.DCshift};
+    // Skip wholly-unused SMs/FMMUs (no window, no type) so the snapshot lists only what is
+    // actually configured; the index field preserves the real SM/FMMU number for the reader.
+    for (int j = 0; j < EC_MAXSM; ++j) {
+      if (s.SM[j].SMlength == 0 && s.SMtype[j] == 0) {
+        continue;
+      }
+      c.syncManagers.push_back(SyncManagerConfig{
+          .index = static_cast<uint8_t>(j),
+          .physicalStart = s.SM[j].StartAddr,
+          .length = s.SM[j].SMlength,
+          .flags = s.SM[j].SMflags,
+          .type = s.SMtype[j],
+      });
+    }
+    for (int j = 0; j < EC_MAXFMMU; ++j) {
+      if (s.FMMU[j].LogLength == 0 && s.FMMU[j].FMMUactive == 0) {
+        continue;
+      }
+      c.fmmus.push_back(FmmuConfig{
+          .index = static_cast<uint8_t>(j),
+          .logicalStart = s.FMMU[j].LogStart,
+          .length = s.FMMU[j].LogLength,
+          .logicalStartBit = s.FMMU[j].LogStartbit,
+          .logicalEndBit = s.FMMU[j].LogEndbit,
+          .physicalStart = s.FMMU[j].PhysStart,
+          .physicalStartBit = s.FMMU[j].PhysStartBit,
+          .type = s.FMMU[j].FMMUtype,
+          .active = s.FMMU[j].FMMUactive,
+      });
+    }
+    out.push_back(std::move(c));
+  }
+  return out;
+}
+
 // Intentionally lock-free: the RT PDO cycle relies on SOEM's internally
 // thread-safe port layer rather than socketMutex_, so a slow control-plane
 // transfer can never stall process-data exchange. See FieldbusDriver class doc.
-void SoemFieldbusDriver::exchangeProcessData() {}
+int SoemFieldbusDriver::exchangeProcessData(std::span<const uint8_t> outputs,
+                                            std::span<uint8_t> inputs) {
+  if (!ctx_) {
+    return 0;
+  }
+  const auto& grp = ctx_->grouplist[0];
+  // Copy the caller's output image into the IOmap, exchange, copy the input image back out.
+  // std::min guards against a caller buffer that disagrees with the mapped size.
+  if (!outputs.empty() && grp.Obytes > 0) {
+    std::memcpy(map_, outputs.data(), std::min<size_t>(outputs.size(), grp.Obytes));
+  }
+  ecx_send_processdata(ctx_.get());
+  const int wkc = ecx_receive_processdata(ctx_.get(), EC_TIMEOUTRET);
+  if (!inputs.empty() && grp.Ibytes > 0) {
+    std::memcpy(inputs.data(), map_ + grp.Obytes, std::min<size_t>(inputs.size(), grp.Ibytes));
+  }
+  return wkc;
+}
 
 void SoemFieldbusDriver::stop() {}
 
@@ -83,6 +266,13 @@ int SoemFieldbusDriver::slaveCount() const {
   return ctx_ ? ctx_->slavecount : 0;
 }
 
+uint16_t SoemFieldbusDriver::slaveState(uint16_t position) const {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  // SOEM caches the AL status in slavelist[].state, refreshed by ecx_readstate (via
+  // readStates) and ecx_writestate (via transitionToState). No bus I/O here.
+  return ctx_ ? ctx_->slavelist[position].state : 0;
+}
+
 std::expected<std::vector<FieldbusDriver::SlaveStateRaw>, std::string>
 SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
   std::lock_guard<std::mutex> lock(socketMutex_);
@@ -93,6 +283,124 @@ SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
     return SlaveStateRaw{.alStatus = ctx_->slavelist[pos].state,
                          .alStatusCode = ctx_->slavelist[pos].ALstatuscode};
   });
+  return result;
+}
+
+std::expected<std::vector<SlaveDiagnostics>, std::string> SoemFieldbusDriver::readDiagnostics(
+    const std::vector<uint16_t>& positions) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
+  std::vector<SlaveDiagnostics> result;
+  result.reserve(positions.size());
+  for (uint16_t pos : positions) {
+    const uint16_t configAddr = ctx_->slavelist[pos].configadr;
+
+    // DL Status (0x0110): link/loop/communication per port. Bits 4–7 = link on ports 0–3; for
+    // port p, bit (8 + 2p) = loop closed, bit (9 + 2p) = communication established.
+    uint16_t dlStatus = 0;
+    if (ecx_FPRD(&ctx_->port, configAddr, 0x0110, sizeof(dlStatus), &dlStatus, EC_TIMEOUTRET) !=
+        1) {
+      return std::unexpected(std::format("FPRD slave {} DL status (0x0110) failed", pos));
+    }
+
+    // Error-counter block (0x0300–0x0313), read contiguously in one datagram:
+    //   [0..7]   RX error counter   — per port: byte 2p = invalid frame, byte 2p+1 = RX error
+    //   [8..11]  forwarded RX error — 1 byte per port
+    //   [12]     processing-unit error (0x030C)   [13] PDI error (0x030D)   [14,15] reserved
+    //   [16..19] lost-link counter  — 1 byte per port
+    std::array<uint8_t, 20> errs{};
+    if (ecx_FPRD(&ctx_->port, configAddr, 0x0300, static_cast<uint16_t>(errs.size()), errs.data(),
+                 EC_TIMEOUTRET) != 1) {
+      return std::unexpected(std::format("FPRD slave {} error counters (0x0300) failed", pos));
+    }
+
+    // Watchdog block (0x0440–0x0443): [0,1] PD watchdog status, [2] PD watchdog expirations
+    // (0x0442), [3] PDI watchdog expirations (0x0443).
+    std::array<uint8_t, 4> wd{};
+    if (ecx_FPRD(&ctx_->port, configAddr, 0x0440, static_cast<uint16_t>(wd.size()), wd.data(),
+                 EC_TIMEOUTRET) != 1) {
+      return std::unexpected(std::format("FPRD slave {} watchdog (0x0440) failed", pos));
+    }
+
+    SlaveDiagnostics d{};
+    d.slavePosition = pos;
+    for (int p = 0; p < 4; ++p) {
+      d.ports[p] = PortDiagnostics{
+          .linkUp = (dlStatus & (1u << (4 + p))) != 0,
+          .loopClosed = (dlStatus & (1u << (8 + 2 * p))) != 0,
+          .communication = (dlStatus & (1u << (9 + 2 * p))) != 0,
+          .invalidFrame = errs[2 * p],
+          .rxError = errs[2 * p + 1],
+          .forwardedError = errs[8 + p],
+          .lostLink = errs[16 + p],
+      };
+    }
+    d.processingUnitError = errs[12];
+    d.pdiError = errs[13];
+    d.processDataWatchdog = wd[2];
+    d.pdiWatchdog = wd[3];
+    result.push_back(d);
+  }
+  return result;
+}
+
+std::expected<std::vector<DcSyncDiagnostics>, std::string> SoemFieldbusDriver::readDcSync(
+    const std::vector<uint16_t>& positions) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
+
+  // The reference clock is the first DC-capable slave in bus order — SOEM elects it during
+  // ecx_configdc and distributes its system time to the rest in the cyclic frame. Find it once so
+  // each queried slave can be flagged; its own system-time difference is zero by definition.
+  uint16_t referencePos = 0;
+  for (int i = 1; i <= ctx_->slavecount; ++i) {
+    if (ctx_->slavelist[i].hasdc != 0) {
+      referencePos = static_cast<uint16_t>(i);
+      break;
+    }
+  }
+
+  std::vector<DcSyncDiagnostics> result;
+  result.reserve(positions.size());
+  for (uint16_t pos : positions) {
+    DcSyncDiagnostics d{};
+    d.slavePosition = pos;
+    d.dcCapable = ctx_->slavelist[pos].hasdc != 0;
+    d.referenceClock = (pos == referencePos);
+    if (!d.dcCapable) {
+      // Non-DC slave: no DC unit, so the registers carry no meaningful time — report zeroed.
+      result.push_back(d);
+      continue;
+    }
+
+    // System-time delay (0x0928, 4 bytes) and system-time difference (0x092C, 4 bytes) are
+    // contiguous — read both in one FPRD. Both are little-endian on the wire.
+    const uint16_t configAddr = ctx_->slavelist[pos].configadr;
+    std::array<uint8_t, 8> dc{};
+    if (ecx_FPRD(&ctx_->port, configAddr, 0x0928, static_cast<uint16_t>(dc.size()), dc.data(),
+                 EC_TIMEOUTRET) != 1) {
+      return std::unexpected(std::format("FPRD slave {} DC sync registers (0x0928) failed", pos));
+    }
+
+    const uint32_t delay = dc[0] | (static_cast<uint32_t>(dc[1]) << 8) |
+                           (static_cast<uint32_t>(dc[2]) << 16) |
+                           (static_cast<uint32_t>(dc[3]) << 24);
+    const uint32_t diffRaw = dc[4] | (static_cast<uint32_t>(dc[5]) << 8) |
+                             (static_cast<uint32_t>(dc[6]) << 16) |
+                             (static_cast<uint32_t>(dc[7]) << 24);
+
+    // System-time difference (0x092C): bits 0–30 are the mean deviation magnitude in ns; bit 31 is
+    // the sign — set when the local copy of the system time is smaller than the reference (the
+    // local clock is behind). Map to a signed figure where positive = ahead, negative = behind.
+    const int32_t magnitude = static_cast<int32_t>(diffRaw & 0x7FFFFFFFu);
+    d.propagationDelay = static_cast<int32_t>(delay);
+    d.systemTimeDifference = (diffRaw & 0x80000000u) ? -magnitude : magnitude;
+    result.push_back(d);
+  }
   return result;
 }
 
@@ -493,6 +801,10 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
   auto deadline = std::chrono::steady_clock::now() + timeout;
   auto lastResend = std::chrono::steady_clock::now();
   bool aborted = false;
+  // Slaves whose error bit we have already reported. The AL status code a slave latches the
+  // instant it raises the error bit is often more specific than the one it settles on by the
+  // timeout, so log it once on first sight rather than only at the end.
+  std::set<uint16_t> errorReported;
 
   while (!pending.empty() && std::chrono::steady_clock::now() < deadline) {
     if (shouldAbort && shouldAbort()) {
@@ -526,6 +838,18 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
       uint16_t pos = *it;
       uint16_t state = ctx_->slavelist[pos].state;
       uint16_t alStatusCode = ctx_->slavelist[pos].ALstatuscode;
+      // First time we see the error bit for this slave, report the AL status + code immediately
+      // (the transient code is the most diagnostic). Logged once so a slow transition does not
+      // spam the same line every poll.
+      if ((state & EC_STATE_ERROR) && !errorReported.contains(pos)) {
+        errorReported.insert(pos);
+        std::string_view name = alStatusCodeName(alStatusCode);
+        spdlog::warn(
+            "Device {}: error bit set while reaching state 0x{:02X} — AL status 0x{:04X}, "
+            "code 0x{:04X} ({})",
+            pos, targetRaw, state, alStatusCode,
+            name.empty() ? "unknown — not in ETG.1000.6" : name);
+      }
       // Exact match required: OP+ERROR (0x18) must not pass as OP (0x08).
       if (state == targetRaw) {
         spdlog::info("Device {}: reached state 0x{:02X}", pos, targetRaw);
@@ -559,8 +883,17 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
   if (!aborted) {
     std::lock_guard<std::mutex> lock(socketMutex_);
     for (uint16_t pos : pending) {
-      spdlog::error("Device {}: failed to reach state 0x{:02X} (AL status: 0x{:04X})", pos,
-                    targetRaw, ctx_->slavelist[pos].ALstatuscode);
+      // Report both registers: the AL Status (0x0130 — actual state + error bit, so the slave's
+      // real position is visible rather than just the requested target) and the AL Status Code
+      // (0x0134). Decode the code's name, flagging it as unknown when it falls outside the
+      // standard table — a code with no name is usually vendor-specific or a stale read, which
+      // is itself diagnostic and must not be mistaken for a defined error.
+      uint16_t alStatus = ctx_->slavelist[pos].state;
+      uint16_t alStatusCode = ctx_->slavelist[pos].ALstatuscode;
+      std::string_view name = alStatusCodeName(alStatusCode);
+      spdlog::error(
+          "Device {}: failed to reach state 0x{:02X} — AL status 0x{:04X}, code 0x{:04X} ({})", pos,
+          targetRaw, alStatus, alStatusCode, name.empty() ? "unknown — not in ETG.1000.6" : name);
     }
   }
 }

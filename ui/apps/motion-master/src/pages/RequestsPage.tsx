@@ -1,9 +1,7 @@
 import { useMemo, useState } from 'react'
 import PageHeader from '../components/PageHeader'
 import { isHealthPollUrl, useRequests, type RequestEntry } from '../contexts/RequestsContext'
-
-const btnOutlineCls =
-  'border border-syn-red text-syn-red px-3 py-1.5 text-xs hover:bg-syn-red hover:text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
+import { btnOutline } from '../utils/styles'
 
 function StatusBadge({ status, error }: { status?: number; error?: string }) {
   let color = 'bg-grey-100 text-grey-500'
@@ -190,7 +188,7 @@ export default function RequestsPage() {
   return (
     <div className="flex flex-col h-full">
       <PageHeader
-        eyebrow="App"
+        eyebrow="Server"
         title="Requests"
         description="Inspect HTTP requests this app has made to the backend — method, status, timing, headers, and bodies — and copy any request as a cURL command to reproduce it."
       />
@@ -212,7 +210,7 @@ export default function RequestsPage() {
             <button
               onClick={clear}
               disabled={entries.length === 0}
-              className={btnOutlineCls}
+              className={btnOutline}
             >
               Clear
             </button>

@@ -50,17 +50,41 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// @param position  1-based slave position on the bus.
   SlaveInfo slaveInfo(uint16_t position) const override;
 
-  /// @brief Sends output PDOs and receives input PDOs in one LRW frame.
+  /// @copydoc FieldbusDriver::slaveState
+  uint16_t slaveState(uint16_t position) const override;
+
+  /// @copydoc FieldbusDriver::configureProcessData
+  std::expected<void, std::string> configureProcessData() override;
+
+  /// @copydoc FieldbusDriver::processDataLayout
+  PdoLayout processDataLayout() override;
+
+  /// @copydoc FieldbusDriver::busConfig
+  std::vector<SlaveConfig> busConfig() const override;
+
+  /// @brief Copies @p outputs into the IOmap, sends and receives, copies inputs back out.
   ///
-  /// Called once per @c GameLoop cycle.  Must not be called before a successful
-  /// @c init() or after @c stop().
-  void exchangeProcessData() override;
+  /// Called once per @c GameLoop cycle.  Must not be called before
+  /// @c configureProcessData() or after @c stop().
+  ///
+  /// @param outputs  Output image to send; size must equal @c PdoLayout::outputBytes.
+  /// @param inputs   Buffer receiving the input image; size must equal @c PdoLayout::inputBytes.
+  /// @return The transaction working counter, or 0 if not initialised.
+  int exchangeProcessData(std::span<const uint8_t> outputs, std::span<uint8_t> inputs) override;
 
   /// @brief Closes the NIC and releases all driver resources.
   void stop() override;
 
   /// @copydoc FieldbusDriver::readStates
   std::expected<std::vector<FieldbusDriver::SlaveStateRaw>, std::string> readStates(
+      const std::vector<uint16_t>& positions) override;
+
+  /// @copydoc FieldbusDriver::readDiagnostics
+  std::expected<std::vector<SlaveDiagnostics>, std::string> readDiagnostics(
+      const std::vector<uint16_t>& positions) override;
+
+  /// @copydoc FieldbusDriver::readDcSync
+  std::expected<std::vector<DcSyncDiagnostics>, std::string> readDcSync(
       const std::vector<uint16_t>& positions) override;
 
   /// @copydoc FieldbusDriver::readSdo
@@ -115,7 +139,12 @@ class SoemFieldbusDriver : public FieldbusDriver {
   // ecx_contextt is several hundred KB (EC_MAXSLAVE slave entries) — heap-
   // allocated and null until init() succeeds.
   std::unique_ptr<ecx_context> ctx_;
-  uint8_t map_[4096]{};
+  // EtherCAT IOmap: ecx_config_map_group lays the whole bus's process data out here as
+  // [all outputs | all inputs]. Sized to kMaxProcessImageBytes so it matches the cap
+  // configureProcessData() enforces and the ProcessBuffer snapshots layered on top — the
+  // three must agree, or a bus the rest of the stack accepts would overflow or be rejected
+  // here. At ~160 bytes per direction per SOMANET axis this holds ~100 fully-loaded axes.
+  uint8_t map_[kMaxProcessImageBytes]{};
   // 1-based positions whose context currently holds BOOT-sized mailbox sync
   // managers (set when we drive a slave into BOOT). ecx_config_init programs the
   // correct PRE-OP mailbox SMs for every slave during scan(), so a fresh-scan

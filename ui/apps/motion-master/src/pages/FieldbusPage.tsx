@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
+import { btnOutline } from '../utils/styles'
 
 const AL_STATES = [
   { value: 1 as const, label: 'Init' },
@@ -32,8 +33,6 @@ const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
 const btnCls =
   'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full transition-colors'
-const btnOutlineCls =
-  'border border-syn-red text-syn-red px-3 py-1.5 text-xs hover:bg-syn-red hover:text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
 
 export default function FieldbusPage() {
   const queryClient = useQueryClient()
@@ -157,8 +156,8 @@ export default function FieldbusPage() {
   return (
     <div>
       <PageHeader
-        eyebrow="App"
-        title="Fieldbus"
+        eyebrow="Fieldbus"
+        title="Control"
         description="Initialize the EtherCAT fieldbus, scan for slave devices, and command AL state transitions across the bus."
       />
       <div className="p-4 sm:p-8 space-y-8">
@@ -197,7 +196,7 @@ export default function FieldbusPage() {
                   <button
                     onClick={() => adaptersQuery.refetch()}
                     disabled={adaptersQuery.isFetching}
-                    className={`${btnOutlineCls} w-full mt-2`}
+                    className={`${btnOutline} w-full mt-2`}
                   >
                     {adaptersQuery.isFetching ? 'Reading…' : 'Read Adapters'}
                   </button>
@@ -309,7 +308,7 @@ export default function FieldbusPage() {
                     <button
                       onClick={refreshDevices}
                       disabled={devicesQuery.isFetching || readingStates}
-                      className={btnOutlineCls}
+                      className={btnOutline}
                       title="Re-read the device list and AL states without re-scanning the bus — slaves keep their current state."
                     >
                       {devicesQuery.isFetching || readingStates ? 'Refreshing…' : 'Refresh'}
@@ -343,7 +342,7 @@ export default function FieldbusPage() {
                               <td className="px-4 py-2 font-mono">0x{d.revisionNumber.toString(16).toUpperCase()}</td>
                               <td className="px-4 py-2 font-mono">{d.serialNumber}</td>
                               <td className="px-4 py-2">
-                                {deviceStates[d.slavePosition] !== undefined
+                                {deviceStates[d.slavePosition] !== undefined && deviceStates[d.slavePosition].alState !== 0
                                   ? (() => {
                                     const ds = deviceStates[d.slavePosition]
                                     const stateLabel = AL_STATE_LABEL[ds.alState] ?? `0x${ds.alState.toString(16).toUpperCase()}`
@@ -352,11 +351,11 @@ export default function FieldbusPage() {
                                       <span className={ds.error ? 'text-status-bad' : ''}>
                                         {stateLabel} ({ds.alState})
                                         {errorEntry && (
-                                          <span title={errorEntry.description}>
+                                          <span className="cursor-help" title={errorEntry.description}>
                                             {' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} {errorEntry.name}
                                             {errorEntry.terminal && (
                                               <span
-                                                className="ml-1 text-grey-600"
+                                                className="ml-1 cursor-help text-grey-600"
                                                 title="Terminal: the slave cannot reach the requested state by retrying. Re-init, reflash, or power cycle is required."
                                               >
                                                 (terminal)

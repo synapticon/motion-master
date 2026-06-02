@@ -9,6 +9,10 @@ import RegistersPage from './pages/RegistersPage'
 import FoePage from './pages/FoePage'
 import ParametersPage from './pages/ParametersPage'
 import ProcessDataPage from './pages/ProcessDataPage'
+import ProcessImagePage from './pages/ProcessImagePage'
+import BusConfigPage from './pages/BusConfigPage'
+import BusDiagnosticsPage from './pages/BusDiagnosticsPage'
+import DcSyncPage from './pages/DcSyncPage'
 import LogPage from './pages/LogPage'
 import RequestsPage from './pages/RequestsPage'
 import EscRegistersPage from './pages/EscRegistersPage'
@@ -23,6 +27,10 @@ export default function App() {
       <Route path="/" element={<RootLayout />}>
         <Route index element={<ConnectionPage />} />
         <Route path="fieldbus" element={<FieldbusPage />} />
+        <Route path="process-image" element={<ProcessImagePage />} />
+        <Route path="bus-config" element={<BusConfigPage />} />
+        <Route path="bus-diagnostics" element={<BusDiagnosticsPage />} />
+        <Route path="dc-sync" element={<DcSyncPage />} />
         <Route path="log" element={<LogPage />} />
         <Route path="requests" element={<RequestsPage />} />
         <Route path="api-docs" element={<ApiDocsPage />} />

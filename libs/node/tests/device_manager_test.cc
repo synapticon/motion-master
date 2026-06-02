@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <nlohmann/json.hpp>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -14,6 +16,7 @@ namespace {
 using mm::comm::EtherCatState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
+using mm::comm::SlaveDiagnostics;
 using mm::comm::SlaveInfo;
 using mm::node::DeviceManager;
 using mm::node::DeviceParameterValue;
@@ -29,6 +32,18 @@ class FakeDriver : public FieldbusDriver {
   /// AL Status reported by readStates() for every queried slave (bits 3:0 = state).
   uint16_t reportState = 0;
 
+  /// Name returned by slaveInfo() for every position (drives Device::name()).
+  std::string deviceName;
+
+  /// Returned verbatim by busConfig() — empty unless a test populates it.
+  std::vector<mm::comm::SlaveConfig> busConfigData;
+
+  /// Returned verbatim by readDiagnostics() — empty unless a test populates it.
+  std::vector<mm::comm::SlaveDiagnostics> diagnosticsData;
+
+  /// Returned verbatim by readDcSync() — empty unless a test populates it.
+  std::vector<mm::comm::DcSyncDiagnostics> dcSyncData;
+
   std::expected<void, std::string> init() override {
     if (!initSucceeds_) {
       return std::unexpected("fake init failure");
@@ -38,14 +53,37 @@ class FakeDriver : public FieldbusDriver {
 
   std::expected<int, std::string> scan() override { return slaves_; }
 
-  SlaveInfo slaveInfo(uint16_t) const override { return {}; }
-  void exchangeProcessData() override {}
+  SlaveInfo slaveInfo(uint16_t) const override {
+    return {.name = deviceName,
+            .vendorId = 0,
+            .productCode = 0,
+            .revisionNumber = 0,
+            .serialNumber = 0};
+  }
+  std::expected<void, std::string> configureProcessData() override { return {}; }
+  mm::comm::PdoLayout processDataLayout() override { return {}; }
+  std::vector<mm::comm::SlaveConfig> busConfig() const override { return busConfigData; }
+  int exchangeProcessData(std::span<const uint8_t>, std::span<uint8_t>) override { return 0; }
   void stop() override {}
 
   std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& positions) override {
+    // Mimic ecx_readstate: a read refreshes the cached state that slaveState() returns.
+    cachedState_ = reportState;
     return std::vector<SlaveStateRaw>(positions.size(),
                                       SlaveStateRaw{.alStatus = reportState, .alStatusCode = 0});
+  }
+
+  uint16_t slaveState(uint16_t) const override { return cachedState_; }
+
+  std::expected<std::vector<SlaveDiagnostics>, std::string> readDiagnostics(
+      const std::vector<uint16_t>&) override {
+    return diagnosticsData;
+  }
+
+  std::expected<std::vector<mm::comm::DcSyncDiagnostics>, std::string> readDcSync(
+      const std::vector<uint16_t>&) override {
+    return dcSyncData;
   }
 
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t, uint8_t) override {
@@ -86,6 +124,7 @@ class FakeDriver : public FieldbusDriver {
  private:
   bool initSucceeds_;
   int slaves_;
+  uint16_t cachedState_ = 0;  // refreshed by readStates(); returned by slaveState()
 };
 
 TEST(DeviceManagerInit, SuccessfulInitMarksInitialised) {
@@ -218,6 +257,157 @@ TEST(DeviceManagerOnline, IsDeviceOnlineRejectsUnknownDevice) {
 
   // Position 99 does not exist — report it rather than touching the bus or crashing.
   EXPECT_FALSE(dm.isDeviceOnline(99).has_value());
+}
+
+TEST(DeviceManagerBusConfig, EnrichesDriverConfigWithDeviceName) {
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->deviceName = "Axis A";
+  mm::comm::SlaveConfig cfg{};
+  cfg.slavePosition = 1;
+  cfg.configuredAddress = 0x1001;
+  cfg.outputBits = 96;
+  cfg.inputBits = 128;
+  cfg.syncManagers.push_back(mm::comm::SyncManagerConfig{
+      .index = 2, .physicalStart = 0x1100, .length = 12, .flags = 0x10024, .type = 3});
+  cfg.fmmus.push_back(mm::comm::FmmuConfig{.index = 0,
+                                           .logicalStart = 0,
+                                           .length = 12,
+                                           .logicalStartBit = 0,
+                                           .logicalEndBit = 7,
+                                           .physicalStart = 0x1100,
+                                           .physicalStartBit = 0,
+                                           .type = 1,
+                                           .active = 1});
+  driver->busConfigData = {cfg};
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  // busConfig() passes the driver's per-slave config through and attaches the device name.
+  auto config = dm.busConfig();
+  ASSERT_EQ(config.size(), 1u);
+  EXPECT_EQ(config[0].deviceName, "Axis A");
+  EXPECT_EQ(config[0].config.slavePosition, 1);
+  ASSERT_EQ(config[0].config.syncManagers.size(), 1u);
+  EXPECT_EQ(config[0].config.syncManagers[0].type, 3);
+  ASSERT_EQ(config[0].config.fmmus.size(), 1u);
+  EXPECT_EQ(config[0].config.fmmus[0].type, 1);
+
+  // to_json exposes the resolved name and the nested SM/FMMU arrays.
+  nlohmann::json j = config[0];
+  EXPECT_EQ(j.at("deviceName"), "Axis A");
+  ASSERT_EQ(j.at("syncManagers").size(), 1u);
+  EXPECT_EQ(j.at("syncManagers")[0].at("type"), 3);
+  EXPECT_EQ(j.at("fmmus")[0].at("active"), true);
+}
+
+TEST(DeviceManagerBusConfig, EmptyWithoutDriver) {
+  DeviceManager dm;
+  EXPECT_TRUE(dm.busConfig().empty());
+}
+
+TEST(DeviceManagerDiagnostics, EnrichesDriverDiagnosticsWithDeviceName) {
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->deviceName = "Axis A";
+  mm::comm::SlaveDiagnostics diag{};
+  diag.slavePosition = 1;
+  diag.ports[0] = mm::comm::PortDiagnostics{.linkUp = true,
+                                            .loopClosed = false,
+                                            .communication = true,
+                                            .invalidFrame = 3,
+                                            .rxError = 1,
+                                            .forwardedError = 0,
+                                            .lostLink = 2};
+  diag.processingUnitError = 7;
+  diag.pdiWatchdog = 5;
+  driver->diagnosticsData = {diag};
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  // getDeviceDiagnostics() passes the driver's per-slave counters through and attaches the name.
+  auto result = dm.getDeviceDiagnostics({});
+  ASSERT_TRUE(result.has_value());
+  ASSERT_EQ(result->size(), 1u);
+  EXPECT_EQ((*result)[0].deviceName, "Axis A");
+  EXPECT_EQ((*result)[0].diagnostics.slavePosition, 1);
+  EXPECT_EQ((*result)[0].diagnostics.ports[0].invalidFrame, 3);
+  EXPECT_EQ((*result)[0].diagnostics.processingUnitError, 7);
+
+  // to_json exposes the resolved name, the per-port array, and the scalar counters.
+  nlohmann::json j = (*result)[0];
+  EXPECT_EQ(j.at("deviceName"), "Axis A");
+  ASSERT_EQ(j.at("ports").size(), 4u);
+  EXPECT_EQ(j.at("ports")[0].at("linkUp"), true);
+  EXPECT_EQ(j.at("ports")[0].at("lostLink"), 2);
+  EXPECT_EQ(j.at("processingUnitError"), 7);
+  EXPECT_EQ(j.at("pdiWatchdog"), 5);
+}
+
+TEST(DeviceManagerDiagnostics, ErrorsWithoutDriver) {
+  DeviceManager dm;
+  EXPECT_FALSE(dm.getDeviceDiagnostics({}).has_value());
+}
+
+TEST(DeviceManagerDcSync, EnrichesDriverDcSyncWithDeviceName) {
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->deviceName = "Axis A";
+  driver->dcSyncData = {mm::comm::DcSyncDiagnostics{.slavePosition = 1,
+                                                    .dcCapable = true,
+                                                    .referenceClock = true,
+                                                    .propagationDelay = 300,
+                                                    .systemTimeDifference = -42}};
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  // getDcSync() passes the driver's per-slave DC status through and attaches the resolved name.
+  auto result = dm.getDcSync({});
+  ASSERT_TRUE(result.has_value());
+  ASSERT_EQ(result->size(), 1u);
+  EXPECT_EQ((*result)[0].deviceName, "Axis A");
+  EXPECT_EQ((*result)[0].dcSync.slavePosition, 1);
+  EXPECT_TRUE((*result)[0].dcSync.referenceClock);
+  EXPECT_EQ((*result)[0].dcSync.systemTimeDifference, -42);
+
+  // to_json exposes the resolved name alongside the decoded DC fields.
+  nlohmann::json j = (*result)[0];
+  EXPECT_EQ(j.at("deviceName"), "Axis A");
+  EXPECT_EQ(j.at("dcCapable"), true);
+  EXPECT_EQ(j.at("referenceClock"), true);
+  EXPECT_EQ(j.at("propagationDelay"), 300);
+  EXPECT_EQ(j.at("systemTimeDifference"), -42);
+}
+
+TEST(DeviceManagerDcSync, ErrorsWithoutDriver) {
+  DeviceManager dm;
+  EXPECT_FALSE(dm.getDcSync({}).has_value());
+}
+
+TEST(DeviceManagerPositions, BulkMethodsRejectUnknownPosition) {
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true, 1)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  // Only position 1 was discovered. A caller-supplied position outside the device set must be
+  // rejected up front (mirroring the single-device 404) — never forwarded to the driver, where
+  // it would index a fixed-size slave array out of bounds. Regression for the unvalidated
+  // positions path through getDeviceStates / getDeviceDiagnostics / getDcSync / transitionToState.
+  EXPECT_FALSE(dm.getDeviceStates({99}).has_value());
+  EXPECT_FALSE(dm.getDeviceDiagnostics({99}).has_value());
+  EXPECT_FALSE(dm.getDcSync({99}).has_value());
+  EXPECT_FALSE(
+      dm.transitionToState({99}, EtherCatState::PreOp, std::chrono::milliseconds(0)).has_value());
+
+  // A mix of valid and invalid is still rejected — the whole request fails on the unknown one.
+  EXPECT_FALSE(dm.getDeviceStates({1, 99}).has_value());
+
+  // The empty list (all devices) and the known position still succeed.
+  EXPECT_TRUE(dm.getDeviceStates({}).has_value());
+  EXPECT_TRUE(dm.getDeviceStates({1}).has_value());
 }
 
 }  // namespace

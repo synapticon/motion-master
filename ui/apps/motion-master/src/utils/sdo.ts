@@ -107,7 +107,11 @@ export function interpretSdoBytes(bytes: number[]): SdoInterpretation[] {
   }
 
   if (bytes.length > 0 && bytes.every(b => (b >= 0x20 && b <= 0x7e) || b === 0)) {
-    const str = new TextDecoder().decode(new Uint8Array(bytes.filter(b => b !== 0)))
+    // VISIBLE_STRING is space-padded to a fixed width and may carry a terminating
+    // NUL — neither is significant, so strip trailing 0x20/0x00 before display.
+    let len = bytes.length
+    while (len > 0 && (bytes[len - 1] === 0x00 || bytes[len - 1] === 0x20)) len--
+    const str = new TextDecoder().decode(new Uint8Array(bytes.slice(0, len).filter(b => b !== 0)))
     out.push({ label: 'string', value: `"${str}"` })
   }
 

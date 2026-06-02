@@ -12,8 +12,9 @@ functionStatic:*/cyclic_timer_windows.cc
 // cppcheck 2.20.0 tokenizer limitation: GTest's TEST() macro (which cppcheck
 // cannot expand without the system header) is misparsed as a syntax error when it
 // is the first construct inside an anonymous namespace — the layout these node
-// tests use to keep their FakeDriver test doubles TU-local. All three files
+// tests use to keep their FakeDriver test doubles TU-local. These files
 // compile cleanly with the real toolchain (verified with g++ -fsyntax-only).
 syntaxError:*/device_manager_test.cc
 syntaxError:*/device_test.cc
 syntaxError:*/device_parameter_test.cc
+syntaxError:*/process_image_test.cc

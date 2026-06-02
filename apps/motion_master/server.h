@@ -80,6 +80,17 @@ class Server {
   /// @param json  Serialised JSON string.  Moved into the deferred closure.
   void broadcast(std::string json);
 
+  /// @brief Publishes a JSON message to the WebSocket clients subscribed to @p topic.
+  ///
+  /// Uses uWebSockets' native topic pub/sub, so only clients that sent @c {"subscribe":"<topic>"}
+  /// receive it (publishing to a topic with no subscribers is a cheap no-op).  Like broadcast(),
+  /// the send is deferred onto the event loop, so this is safe to call from any thread — in
+  /// particular the monitoring sampler thread.
+  ///
+  /// @param topic  Topic to publish under (a monitoring id).  Moved into the deferred closure.
+  /// @param json   Serialised JSON string.  Moved into the deferred closure.
+  void publish(std::string topic, std::string json);
+
  private:
   struct WsData {};
 

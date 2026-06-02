@@ -22,6 +22,7 @@
 #include "comm/foe_error_codes.h"
 #include "comm/object_data_types.h"
 #include "core/util.h"
+#include "monitoring_api.h"
 #include "node/device_manager.h"
 #include "node/device_parameter.h"
 
@@ -141,6 +142,19 @@ void Server::broadcast(std::string json) {
   }
 }
 
+void Server::publish(std::string topic, std::string json) {
+  // Deliver only to clients subscribed to this topic, via uWebSockets' native pub/sub. Deferred
+  // onto the event loop (like broadcast) so any thread — the monitoring sampler here — can call it
+  // without touching the app off-loop.
+  if (auto* loop = loop_.load()) {
+    loop->defer([this, topic = std::move(topic), json = std::move(json)]() {
+      if (auto* app = app_.load()) {
+        app->publish(topic, json, uWS::OpCode::TEXT);
+      }
+    });
+  }
+}
+
 void Server::run() {
   // Read once at startup: the spec is static for the lifetime of the server, and
   // failing early here surfaces a missing file before any client connects.
@@ -166,6 +180,17 @@ void Server::run() {
   ws_behavior.close = [this](auto* ws, int /*code*/, std::string_view /*msg*/) {
     connections_.erase(ws);
     spdlog::debug("WebSocket disconnected, total: {}", connections_.size());
+  };
+  // Inbound control messages let a client opt into the monitoring topics it cares about. uWS
+  // removes the socket from all its topics automatically on close, so there is nothing to undo.
+  ws_behavior.message = [](auto* ws, std::string_view message, uWS::OpCode /*opCode*/) {
+    if (auto cmd = mm::parseWsCommand(message)) {
+      if (cmd->action == mm::WsCommand::Action::Subscribe) {
+        ws->subscribe(cmd->topic);
+      } else {
+        ws->unsubscribe(cmd->topic);
+      }
+    }
   };
 
   uWS::SSLApp app{uWS::SocketContextOptions{

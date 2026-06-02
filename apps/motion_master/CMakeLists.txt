@@ -7,6 +7,7 @@ add_executable(motion_master
     options.cc
     server.cc
     game_loop.cc
+    monitoring_api.cc
 )
 
 set_target_properties(motion_master PROPERTIES OUTPUT_NAME "motion-master")

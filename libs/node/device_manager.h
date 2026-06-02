@@ -438,6 +438,14 @@ class DeviceManager {
   std::optional<PdoSampleSpec> pdoSampleSpec(uint16_t slavePosition, uint16_t index,
                                              uint8_t subindex) const;
 
+  /// @brief Whether the device at @p slavePosition is currently exchanging (SAFE-OP/OP).
+  ///        Thread-safe; reads the driver's cached AL state, no bus I/O.
+  ///
+  /// The monitoring sampler's per-device live gate: only an exchanging device has live process
+  /// data, so a non-exchanging device's parameters sample @c null. @c false for an unknown
+  /// position.
+  bool deviceExchangesProcessData(uint16_t slavePosition) const;
+
  private:
   /// @brief (Re)maps the whole-bus process image and publishes it for exchange.
   ///

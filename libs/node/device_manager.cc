@@ -718,6 +718,12 @@ std::optional<DeviceManager::PdoSampleSpec> DeviceManager::pdoSampleSpec(uint16_
   return PdoSampleSpec{loc->isOutput, loc->bitOffset, loc->bitLength, *dataType};
 }
 
+bool DeviceManager::deviceExchangesProcessData(uint16_t slavePosition) const {
+  std::shared_lock lock(busMutex_);
+  const Device* device = findDevice(slavePosition);
+  return device != nullptr && device->exchangesProcessData();
+}
+
 std::expected<DeviceParameterValue, std::string> DeviceManager::readDeviceParameter(
     uint16_t slavePosition, uint16_t index, uint8_t subindex) {
   // Shared lock: this is the entry point monitoring calls from its own threads, so it must be

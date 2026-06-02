@@ -3,6 +3,7 @@ add_library(node STATIC
     device_manager.cc
     device_parameter.cc
     monitoring.cc
+    monitoring_manager.cc
     parameter_refresher.cc
     process_image.cc
 )

@@ -1,9 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
-
-const btnOutlineCls =
-  'border border-syn-red text-syn-red px-3 py-1.5 text-xs hover:bg-syn-red hover:text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
+import { btnOutline } from '../utils/styles'
 
 export default function DataTypesPage() {
   const { api } = useConnection()
@@ -36,7 +34,7 @@ export default function DataTypesPage() {
           <button
             onClick={() => query.refetch()}
             disabled={query.isFetching}
-            className={btnOutlineCls}
+            className={btnOutline}
           >
             {query.isFetching ? 'Loading…' : 'Refresh'}
           </button>

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
+import { btnOutline } from '../utils/styles'
 
 const AL_STATES = [
   { value: 1 as const, label: 'Init' },
@@ -32,8 +33,6 @@ const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
 const btnCls =
   'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full transition-colors'
-const btnOutlineCls =
-  'border border-syn-red text-syn-red px-3 py-1.5 text-xs hover:bg-syn-red hover:text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
 
 export default function FieldbusPage() {
   const queryClient = useQueryClient()
@@ -197,7 +196,7 @@ export default function FieldbusPage() {
                   <button
                     onClick={() => adaptersQuery.refetch()}
                     disabled={adaptersQuery.isFetching}
-                    className={`${btnOutlineCls} w-full mt-2`}
+                    className={`${btnOutline} w-full mt-2`}
                   >
                     {adaptersQuery.isFetching ? 'Reading…' : 'Read Adapters'}
                   </button>
@@ -309,7 +308,7 @@ export default function FieldbusPage() {
                     <button
                       onClick={refreshDevices}
                       disabled={devicesQuery.isFetching || readingStates}
-                      className={btnOutlineCls}
+                      className={btnOutline}
                       title="Re-read the device list and AL states without re-scanning the bus — slaves keep their current state."
                     >
                       {devicesQuery.isFetching || readingStates ? 'Refreshing…' : 'Refresh'}

@@ -12,6 +12,7 @@
 
 namespace mm::node {
 class DeviceManager;
+class MonitoringManager;
 }  // namespace mm::node
 
 /// @brief Combined HTTPS + WebSocket server.
@@ -55,9 +56,12 @@ class Server {
   };
 
   /// @brief Constructs the server with the given configuration.
-  /// @param config         Server parameters.  The config is copied internally.
-  /// @param deviceManager  Device list source; lifetime must exceed that of this object.
-  Server(Config config, mm::node::DeviceManager& deviceManager);
+  /// @param config             Server parameters.  The config is copied internally.
+  /// @param deviceManager      Device list source; lifetime must exceed that of this object.
+  /// @param monitoringManager  Monitoring registry backing the `/api/monitorings` routes; lifetime
+  ///                           must exceed that of this object.
+  Server(Config config, mm::node::DeviceManager& deviceManager,
+         mm::node::MonitoringManager& monitoringManager);
 
   /// @brief Destructor.  Calls stop() if the server is still running.
   ~Server();
@@ -98,6 +102,7 @@ class Server {
 
   Config config_;
   mm::node::DeviceManager& deviceManager_;
+  mm::node::MonitoringManager& monitoringManager_;
   std::atomic<bool> running_{false};
   std::thread thread_;
   std::atomic<uWS::Loop*> loop_{nullptr};

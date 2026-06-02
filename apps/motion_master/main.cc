@@ -20,6 +20,7 @@
 #include "core/version.h"
 #include "game_loop.h"
 #include "node/device_manager.h"
+#include "node/monitoring_manager.h"
 #include "options.h"
 #include "process_data_task.h"
 #include "ring_log_sink.h"
@@ -145,6 +146,10 @@ int main(int argc, char** argv) {
 
   auto swaggerFile = (exeDir() / "swagger.yml").string();
 
+  // Owns the monitoring registry plus its background SDO-refresher and sampler threads. Wired to
+  // the server below so the HTTP routes reach it and sampled batches publish over the WebSocket.
+  mm::node::MonitoringManager monitoringManager{deviceManager};
+
   Server server{
       Server::Config{
           .port = opts.port,
@@ -168,8 +173,15 @@ int main(int argc, char** argv) {
           .getLog = [ringLogSink]() { return ringLogSink->entries(); },
           .corsOrigin = opts.corsOrigin,
       },
-      deviceManager};
+      deviceManager, monitoringManager};
   server.start();
+
+  // Publish each sampled batch to the WebSocket topic named after its monitoring, then start the
+  // sampler + refresher threads. (Not added to the RT GameLoop — sampling runs off the RT thread.)
+  monitoringManager.setPublish([&server](std::string topic, std::string json) {
+    server.publish(std::move(topic), std::move(json));
+  });
+  monitoringManager.start();
 
   if (opts.openBrowser) {
     openInBrowser("https://motion-master.synapticon.com/app/");
@@ -199,6 +211,7 @@ int main(int argc, char** argv) {
   game_loop.run();  // main thread IS the RT loop — blocks until stop()
 
   gGameLoop = nullptr;
+  monitoringManager.stop();  // stop sampling/publishing before the server loop goes away
   server.stop();
 
   spdlog::info("Shutting down");

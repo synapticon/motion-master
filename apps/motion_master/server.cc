@@ -25,6 +25,7 @@
 #include "monitoring_api.h"
 #include "node/device_manager.h"
 #include "node/device_parameter.h"
+#include "node/monitoring_manager.h"
 
 namespace {
 
@@ -83,8 +84,11 @@ void sendStatus(Res* res, std::string_view status, std::string_view corsOrigin) 
 
 }  // namespace
 
-Server::Server(Config config, mm::node::DeviceManager& deviceManager)
-    : config_(std::move(config)), deviceManager_(deviceManager) {}
+Server::Server(Config config, mm::node::DeviceManager& deviceManager,
+               mm::node::MonitoringManager& monitoringManager)
+    : config_(std::move(config)),
+      deviceManager_(deviceManager),
+      monitoringManager_(monitoringManager) {}
 
 Server::~Server() {
   stop();
@@ -731,6 +735,70 @@ void Server::run() {
                          nlohmann::json{{"ok", allReached}, {"devices", devices}});
               });
             })
+      .post("/api/monitorings",
+            [this](auto* res, auto* /*req*/) {
+              auto aborted = std::make_shared<bool>(false);
+              auto body = std::make_shared<std::string>();
+              res->onAborted([aborted]() { *aborted = true; });
+              res->onData([this, res, body, aborted](std::string_view chunk, bool last) {
+                body->append(chunk);
+                if (!last) {
+                  return;
+                }
+                if (*aborted) {
+                  return;
+                }
+                nlohmann::json j;
+                try {
+                  j = body->empty() ? nlohmann::json::object() : nlohmann::json::parse(*body);
+                } catch (const nlohmann::json::exception& e) {
+                  sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
+                  return;
+                }
+                auto config = mm::parseMonitoringRequest(j);
+                if (!config) {
+                  sendError(res, "400 Bad Request", config_.corsOrigin, config.error());
+                  return;
+                }
+                // Existence is the one conflict (409); every other rejection is a bad request.
+                if (monitoringManager_.get(config->topic)) {
+                  sendError(res, "409 Conflict", config_.corsOrigin,
+                            "monitoring '" + config->topic + "' already exists");
+                  return;
+                }
+                auto created = monitoringManager_.create(*config);
+                if (!created) {
+                  sendError(res, "400 Bad Request", config_.corsOrigin, created.error());
+                  return;
+                }
+                auto resource = monitoringManager_.get(config->topic);
+                res->writeStatus("201 Created")
+                    ->writeHeader("Content-Type", "application/json")
+                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                    ->end(resource->dump());
+              });
+            })
+      .get("/api/monitorings",
+           [this](auto* res, auto* /*req*/) {
+             sendJson(res, config_.corsOrigin, monitoringManager_.list());
+           })
+      .get("/api/monitorings/:topic",
+           [this](auto* res, auto* req) {
+             auto resource = monitoringManager_.get(std::string(req->getParameter("topic")));
+             if (!resource) {
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
+               return;
+             }
+             sendJson(res, config_.corsOrigin, *resource);
+           })
+      .del("/api/monitorings/:topic",
+           [this](auto* res, auto* req) {
+             if (monitoringManager_.remove(std::string(req->getParameter("topic")))) {
+               sendStatus(res, "204 No Content", config_.corsOrigin);
+             } else {
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
+             }
+           })
       .options("/api/*",
                [this](auto* res, auto* /*req*/) {
                  res->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)

@@ -1,8 +1,12 @@
 #pragma once
 
+#include <expected>
+#include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
+
+#include "node/monitoring.h"
 
 namespace mm {
 
@@ -24,5 +28,21 @@ struct WsCommand {
 /// @param message  The raw WebSocket text frame.
 /// @return The parsed command, or @c nullopt if @p message is not a valid (un)subscribe request.
 std::optional<WsCommand> parseWsCommand(std::string_view message);
+
+/// @brief Parses a @c POST @c /api/monitorings request body into a @c Monitoring config.
+///
+/// Expected shape:
+/// @code
+/// { "topic": "left-leg", "name": "Left Leg" (optional),
+///   "interval": 1000, "bufferSize": 16,
+///   "parameters": [[devicePosition, index, subindex], ...] }
+/// @endcode
+/// Each parameter is a three-element array of integers. This checks only the request *shape*
+/// (presence, JSON types, ranges) and converts it; semantic validation (URL-safe/reserved topic,
+/// interval/bufferSize bounds, parameter sourcing) is @c MonitoringManager::create's job.
+///
+/// @param body  The parsed request body.
+/// @return The configuration, or an error string naming the first shape problem.
+std::expected<mm::node::Monitoring, std::string> parseMonitoringRequest(const nlohmann::json& body);
 
 }  // namespace mm

@@ -6,6 +6,7 @@
 #include <memory>
 #include <mutex>
 #include <nlohmann/json_fwd.hpp>
+#include <optional>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -208,7 +209,33 @@ class Device {
 
   /// @brief Looks up a parameter by @c (index, subindex). O(1).
   /// @return Pointer to the parameter, or @c nullptr if no such entry exists.
+  ///
+  /// @warning Returns a raw pointer into the parameter map; not synchronised against the cache
+  /// lock. Call on the control-plane thread only. Off-thread readers use the thread-safe
+  /// @c value / @c dataType getters below, which return copies under the lock.
   const DeviceParameter* parameter(uint16_t index, uint8_t subindex) const;
+
+  /// @brief Returns a copy of a parameter's cached value (the typed cache getter), no bus access.
+  ///
+  /// The read counterpart of @c setValue, and thread-safe (taken under the cache lock) so the
+  /// monitoring sampler can read it concurrently with refresher/control-plane writes. Returns
+  /// the last value stored by a read/refresh; it does not itself touch the bus.
+  ///
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @return The cached value, or @c nullopt if the parameter is unknown.
+  std::optional<DeviceParameterValue> value(uint16_t index, uint8_t subindex) const;
+
+  /// @brief Returns a parameter's declared ETG.1020 data-type code, thread-safely (cache lock).
+  ///
+  /// The data type is immutable once @c initializeParameters has populated the entry, but the
+  /// map itself can be rebuilt off the caller's thread, so reading it under the lock is the safe
+  /// way for an off-thread consumer (e.g. capturing a PDO decode spec) to obtain it.
+  ///
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @return The data-type code, or @c nullopt if the parameter is unknown.
+  std::optional<uint16_t> dataType(uint16_t index, uint8_t subindex) const;
 
   /// @brief Reads a parameter value, keeping the cached store in sync.
   ///

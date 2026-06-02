@@ -228,8 +228,23 @@ class DeviceManager {
   /// monitoring/WebSocket path and value read-back.
   ProcessBuffer inputSnapshot() const;
 
+  /// @brief Returns a snapshot of the staged output image (master→slave).
+  ///
+  /// The output counterpart of @c inputSnapshot: reads the output-staging seqlock without
+  /// blocking the RT reader. Lets the monitoring sampler decode output (RxPDO) objects — the
+  /// setpoints being sent — from the same coherent buffer mechanism as inputs.
+  ProcessBuffer outputSnapshot() const;
+
   /// @brief Whether @c configureProcessData has published a process image for exchange.
   bool processDataConfigured() const;
+
+  /// @brief Monotonic counter bumped every time a new process image is published (each (re)map).
+  ///
+  /// A consumer that captured per-object layout (bit offsets/lengths) from the image compares
+  /// this on each use: a change means the bus was re-mapped and offsets may have shifted, so the
+  /// captured layout must be refreshed. Lock-free (atomic). Distinct from @c topologyGeneration
+  /// (scan/reset), which signals the device set itself changed.
+  uint64_t processImageGeneration() const;
 
   /// @brief The working counter from the most recent process-data exchange (0 before any).
   int lastWorkingCounter() const;
@@ -387,6 +402,42 @@ class DeviceManager {
                                                         uint8_t subindex,
                                                         DeviceParameterValue value);
 
+  // --- Off-thread sampling read surface (for monitoring) ---
+  //
+  // These let the monitoring sampler read live values from its own thread without ever blocking
+  // on the bus: SDO objects from the (refresher-fed) cache via value(); PDO objects decoded by
+  // the caller from inputSnapshot()/outputSnapshot() using the layout pdoSampleSpec() captures.
+  // Thread-safe; they hand back copies, never device pointers.
+
+  /// @brief Returns a copy of a parameter's cached value, no bus access. Thread-safe.
+  ///
+  /// For monitoring's SDO objects: the value the @c ParameterRefresher last wrote to the cache.
+  ///
+  /// @return The cached value, or @c nullopt if the device or parameter is unknown.
+  std::optional<DeviceParameterValue> value(uint16_t slavePosition, uint16_t index,
+                                            uint8_t subindex) const;
+
+  /// @brief Everything needed to decode one PDO object from a raw process-image snapshot:
+  ///        which image it lives in, where, and how wide / what type.
+  struct PdoSampleSpec {
+    bool isOutput;       ///< True if the object is in the output image (RxPDO), false for input.
+    uint32_t bitOffset;  ///< Absolute bit offset within that direction's image.
+    uint16_t bitLength;  ///< Width of the value in bits.
+    uint16_t dataType;   ///< ETG.1020 data-type code, for decoding the extracted bytes.
+  };
+
+  /// @brief Resolves a PDO-mapped object's decode spec from the published image. Thread-safe.
+  ///
+  /// The sampler captures this once per PDO parameter (and re-captures when
+  /// @c processImageGeneration changes), then per tick reads the matching snapshot
+  /// (@c inputSnapshot / @c outputSnapshot) and runs @c extractBits + @c decodeSdoBytes itself —
+  /// so the bus is never touched on the sampling path and a whole sample comes from one snapshot.
+  ///
+  /// @return The spec, or @c nullopt if no image is published, the object is not PDO-mapped, or
+  ///         its data type is unknown (object dictionary not enumerated).
+  std::optional<PdoSampleSpec> pdoSampleSpec(uint16_t slavePosition, uint16_t index,
+                                             uint8_t subindex) const;
+
  private:
   /// @brief (Re)maps the whole-bus process image and publishes it for exchange.
   ///
@@ -447,6 +498,8 @@ class DeviceManager {
   mutable std::shared_mutex busMutex_;
   // Bumped under the exclusive lock on every scan()/reset(); see topologyGeneration().
   std::atomic<uint64_t> topologyGeneration_{0};
+  // Bumped every time remapProcessImage() publishes a new image; see processImageGeneration().
+  std::atomic<uint64_t> processImageGeneration_{0};
   std::unique_ptr<mm::comm::FieldbusDriver> driver_;
   std::vector<Device> devices_;
   std::unique_ptr<ProcessData> pd_;

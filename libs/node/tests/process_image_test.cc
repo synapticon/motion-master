@@ -575,4 +575,84 @@ TEST(DeviceManagerProcessData, UnhealthyWorkingCounterReadsFallBackToSdo) {
   EXPECT_EQ(std::get<uint16_t>(*live), 0x0237);
 }
 
+// --- Step 5a: off-thread sampling read surface ------------------------------
+
+TEST(DeviceManagerSampling, PdoSampleSpecResolvesInputAndOutputObjects) {
+  auto bus = makeCia402Bus();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+
+  // Actual position (TxPDO input): 32 bits at offset 16 in the input image, INTEGER32.
+  auto in = dm.pdoSampleSpec(1, 0x6064, 0x00);
+  ASSERT_TRUE(in.has_value());
+  EXPECT_FALSE(in->isOutput);
+  EXPECT_EQ(in->bitOffset, 16u);
+  EXPECT_EQ(in->bitLength, 32u);
+  EXPECT_EQ(in->dataType, kI32);
+
+  // Controlword (RxPDO output): 16 bits at offset 0 in the output image, UNSIGNED16.
+  auto out = dm.pdoSampleSpec(1, 0x6040, 0x00);
+  ASSERT_TRUE(out.has_value());
+  EXPECT_TRUE(out->isOutput);
+  EXPECT_EQ(out->bitOffset, 0u);
+  EXPECT_EQ(out->bitLength, 16u);
+  EXPECT_EQ(out->dataType, kU16);
+}
+
+TEST(DeviceManagerSampling, PdoSampleSpecRejectsUnmappedAndUnconfigured) {
+  auto bus = makeCia402Bus();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+
+  // No image published yet → nullopt.
+  EXPECT_FALSE(dm.pdoSampleSpec(1, 0x6064, 0x00).has_value());
+
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  // An object that is not PDO-mapped → nullopt.
+  EXPECT_FALSE(dm.pdoSampleSpec(1, 0x6065, 0x00).has_value());
+  // Unknown device → nullopt.
+  EXPECT_FALSE(dm.pdoSampleSpec(99, 0x6064, 0x00).has_value());
+}
+
+TEST(DeviceManagerSampling, ProcessImageGenerationBumpsOnEachMap) {
+  auto bus = makeCia402Bus();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+
+  const uint64_t before = dm.processImageGeneration();
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  const uint64_t afterFirst = dm.processImageGeneration();
+  EXPECT_GT(afterFirst, before);
+  ASSERT_TRUE(dm.configureProcessData().has_value());  // re-map
+  EXPECT_GT(dm.processImageGeneration(), afterFirst);
+}
+
+TEST(DeviceManagerSampling, ValueReturnsCachedValueWithoutBus) {
+  auto bus = makeCia402Bus();
+  FakeBus* busPtr = bus.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+
+  // Seed the cache via an offline write (no bus), then read it back through value().
+  busPtr->state = static_cast<uint16_t>(EtherCatState::Init);  // offline → cache-only write
+  ASSERT_TRUE(
+      dm.writeDeviceParameter(1, 0x6041, 0x00, DeviceParameterValue{uint16_t{0xBEEF}}).has_value());
+
+  auto v = dm.value(1, 0x6041, 0x00);
+  ASSERT_TRUE(v.has_value());
+  EXPECT_EQ(std::get<uint16_t>(*v), 0xBEEF);
+
+  EXPECT_FALSE(dm.value(1, 0x1234, 0x00).has_value());   // unknown parameter
+  EXPECT_FALSE(dm.value(99, 0x6041, 0x00).has_value());  // unknown device
+}
+
 }  // namespace

@@ -229,6 +229,9 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
   auto shared = std::make_shared<const ProcessImage>(std::move(*image));
   pd_->generations.push_back(shared);
   pd_->image.store(shared.get(), std::memory_order_release);
+  // A new image is published: object offsets may differ from the previous one, so signal
+  // consumers that captured the layout (the monitoring sampler) to re-capture it.
+  processImageGeneration_.fetch_add(1, std::memory_order_relaxed);
   updateExpectedWkc();
   spdlog::info("Process data configured: {} output bytes, {} input bytes, expected WKC {}",
                shared->outputBytes, shared->inputBytes, shared->expectedWkc);
@@ -289,8 +292,14 @@ void DeviceManager::stopExchange() {
 
 ProcessBuffer DeviceManager::inputSnapshot() const { return pd_->inputSnapshot.load(); }
 
+ProcessBuffer DeviceManager::outputSnapshot() const { return pd_->outputStaging.load(); }
+
 bool DeviceManager::processDataConfigured() const {
   return pd_->image.load(std::memory_order_acquire) != nullptr;
+}
+
+uint64_t DeviceManager::processImageGeneration() const {
+  return processImageGeneration_.load(std::memory_order_relaxed);
 }
 
 int DeviceManager::lastWorkingCounter() const {
@@ -674,6 +683,39 @@ bool DeviceManager::writePdoValue(uint16_t slavePosition, uint16_t index, uint8_
              bytes);
   pd_->outputStaging.store(buffer, live);
   return true;
+}
+
+std::optional<DeviceParameterValue> DeviceManager::value(uint16_t slavePosition, uint16_t index,
+                                                         uint8_t subindex) const {
+  std::shared_lock lock(busMutex_);
+  const Device* device = findDevice(slavePosition);
+  if (!device) {
+    return std::nullopt;
+  }
+  return device->value(index, subindex);
+}
+
+std::optional<DeviceManager::PdoSampleSpec> DeviceManager::pdoSampleSpec(uint16_t slavePosition,
+                                                                         uint16_t index,
+                                                                         uint8_t subindex) const {
+  std::shared_lock lock(busMutex_);
+  const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
+  if (!image) {
+    return std::nullopt;
+  }
+  auto loc = image->find(slavePosition, index, subindex);
+  if (!loc) {
+    return std::nullopt;  // not PDO-mapped in the published image
+  }
+  const Device* device = findDevice(slavePosition);
+  if (!device) {
+    return std::nullopt;
+  }
+  auto dataType = device->dataType(index, subindex);
+  if (!dataType) {
+    return std::nullopt;  // object dictionary not enumerated → cannot decode
+  }
+  return PdoSampleSpec{loc->isOutput, loc->bitOffset, loc->bitLength, *dataType};
 }
 
 std::expected<DeviceParameterValue, std::string> DeviceManager::readDeviceParameter(

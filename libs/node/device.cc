@@ -319,6 +319,24 @@ const DeviceParameter* Device::parameter(uint16_t index, uint8_t subindex) const
   return it != parameters_.end() ? &it->second : nullptr;
 }
 
+std::optional<DeviceParameterValue> Device::value(uint16_t index, uint8_t subindex) const {
+  std::lock_guard<std::mutex> lock(*parametersMutex_);
+  const DeviceParameter* p = parameter(index, subindex);
+  if (!p) {
+    return std::nullopt;
+  }
+  return p->value;
+}
+
+std::optional<uint16_t> Device::dataType(uint16_t index, uint8_t subindex) const {
+  std::lock_guard<std::mutex> lock(*parametersMutex_);
+  const DeviceParameter* p = parameter(index, subindex);
+  if (!p) {
+    return std::nullopt;
+  }
+  return p->dataType;
+}
+
 DeviceParameter* Device::findParameter(uint16_t index, uint8_t subindex) {
   auto it = parameters_.find(makeParameterKey(index, subindex));
   return it != parameters_.end() ? &it->second : nullptr;

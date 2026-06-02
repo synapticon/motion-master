@@ -5,6 +5,7 @@ add_executable(mm_node_tests
     device_test.cc
     device_manager_test.cc
     monitoring_test.cc
+    parameter_refresher_test.cc
     process_image_test.cc
 )
 

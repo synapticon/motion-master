@@ -3,6 +3,7 @@ add_library(node STATIC
     device_manager.cc
     device_parameter.cc
     monitoring.cc
+    parameter_refresher.cc
     process_image.cc
 )
 add_library(mm::node ALIAS node)

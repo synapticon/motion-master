@@ -18,4 +18,5 @@ syntaxError:*/device_manager_test.cc
 syntaxError:*/device_test.cc
 syntaxError:*/device_parameter_test.cc
 syntaxError:*/monitoring_test.cc
+syntaxError:*/parameter_refresher_test.cc
 syntaxError:*/process_image_test.cc

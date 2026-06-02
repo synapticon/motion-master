@@ -29,3 +29,5 @@ if(NOT WIN32)
   target_link_libraries(motion_master PRIVATE Threads::Threads)
 
 endif()
+
+add_subdirectory(tests)

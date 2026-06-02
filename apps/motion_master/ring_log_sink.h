@@ -2,7 +2,9 @@
 
 #include <spdlog/sinks/base_sink.h>
 
+#include <cstddef>
 #include <deque>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>

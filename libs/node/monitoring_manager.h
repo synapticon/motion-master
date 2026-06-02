@@ -1,5 +1,7 @@
 #pragma once
 
+#include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -9,6 +11,7 @@
 #include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "node/device_manager.h"
@@ -118,6 +121,7 @@ class MonitoringManager {
     std::vector<ParamPlan> plans;
     std::vector<Sample> batch;
     uint64_t imageGeneration = 0;  // processImageGeneration the PDO specs were captured under
+    std::chrono::steady_clock::time_point nextDue{};  // default (epoch) => due on the next wake
   };
 
   void sampleEntry(Entry& entry);          // assumes mutex_ held
@@ -125,11 +129,18 @@ class MonitoringManager {
   void flush(Entry& entry);                // publish batch + clear; assumes mutex_ held
   nlohmann::json resourceJson(const Entry& entry) const;  // assumes mutex_ held
 
+  /// @brief Sampler thread body: waits until the nearest monitoring is due (or an
+  ///        acquire/remove/stop wakes it), then samples every due monitoring and reschedules it.
+  void run();
+
   DeviceManager& deviceManager_;
   ParameterRefresher refresher_;
-  mutable std::mutex mutex_;
+  mutable std::mutex mutex_;    ///< Guards entries_ and running_.
+  std::condition_variable cv_;  ///< Wakes the sampler thread on create/remove/stop.
   std::map<std::string, Entry> entries_;
   PublishFn publish_;
+  bool running_ = false;  ///< Whether the sampler thread should keep looping.
+  std::thread thread_;
 };
 
 }  // namespace mm::node

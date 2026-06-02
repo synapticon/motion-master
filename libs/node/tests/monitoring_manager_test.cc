@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -12,6 +13,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -154,7 +156,8 @@ std::unique_ptr<FakeBus> makeBus() {
   bus->programOd(0x607A, 0x00, kI32);
   bus->programOd(0x6041, 0x00, kU16);
   bus->programOd(0x6064, 0x00, kI32);
-  bus->programOd(0x2030, 0x01, kU32);  // SDO-only (not PDO-mapped)
+  bus->programOd(0x2030, 0x01, kU32);    // SDO-only (not PDO-mapped)
+  bus->program(0x2030, 0x01, u32le(0));  // so a background refresher SDO read succeeds
   bus->layout.outputBytes = 6;
   bus->layout.inputBytes = 6;
   bus->layout.expectedWkc = 3;
@@ -291,6 +294,30 @@ TEST(MonitoringManagerTest, RemoveReleasesSdoAndForgetsMonitoring) {
   EXPECT_EQ(manager.polledSdoCount(), 0u);  // temperature no longer polled
   EXPECT_FALSE(manager.get("axis").has_value());
   EXPECT_FALSE(manager.remove("axis"));  // already gone
+}
+
+TEST(MonitoringManagerTest, SchedulerThreadSamplesAndPublishes) {
+  DeviceManager dm;
+  setUp(dm);
+  MonitoringManager manager(dm);
+  std::atomic<int> publishCount{0};
+  manager.setPublish(
+      [&](std::string, std::string) { publishCount.fetch_add(1, std::memory_order_relaxed); });
+
+  Monitoring m = axisConfig();
+  m.interval = std::chrono::milliseconds{1};  // ~16 ms between batches (bufferSize 16)
+  ASSERT_TRUE(manager.create(m).has_value());
+  manager.start();
+
+  // Wait (bounded) for the sampler thread to flush at least one batch.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+  while (publishCount.load(std::memory_order_relaxed) == 0 &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds{5});
+  }
+  manager.stop();
+
+  EXPECT_GE(publishCount.load(std::memory_order_relaxed), 1);
 }
 
 }  // namespace

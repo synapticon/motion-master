@@ -1,11 +1,13 @@
 #include "node/monitoring_manager.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <format>
 #include <nlohmann/json.hpp>
 #include <span>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <utility>
 #include <variant>
@@ -102,6 +104,7 @@ std::expected<Monitoring, std::string> MonitoringManager::create(Monitoring conf
   entry.plans = std::move(plans);
   entry.imageGeneration = deviceManager_.processImageGeneration();
   entries_.emplace(config.topic, std::move(entry));
+  cv_.notify_one();  // wake the sampler thread to pick up the new monitoring (due immediately)
   return config;
 }
 
@@ -117,6 +120,7 @@ bool MonitoringManager::remove(const std::string& topic) {
     }
   }
   entries_.erase(it);
+  cv_.notify_one();  // wake the sampler thread to recompute the nearest deadline
   return true;
 }
 
@@ -138,9 +142,53 @@ nlohmann::json MonitoringManager::list() const {
   return array;
 }
 
-void MonitoringManager::start() { refresher_.start(); }
+void MonitoringManager::start() {
+  refresher_.start();
+  std::unique_lock<std::mutex> lock(mutex_);
+  if (running_) {
+    return;
+  }
+  running_ = true;
+  lock.unlock();
+  thread_ = std::thread([this] { run(); });
+}
 
-void MonitoringManager::stop() { refresher_.stop(); }
+void MonitoringManager::stop() {
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    running_ = false;
+  }
+  cv_.notify_all();
+  if (thread_.joinable()) {
+    thread_.join();
+  }
+  refresher_.stop();
+}
+
+void MonitoringManager::run() {
+  std::unique_lock<std::mutex> lock(mutex_);
+  while (running_) {
+    if (entries_.empty()) {
+      cv_.wait(lock);  // nothing to sample — sleep until a create (or stop) wakes us
+      continue;
+    }
+    const auto now = std::chrono::steady_clock::now();
+    auto nearest = std::chrono::steady_clock::time_point::max();
+    for (const auto& [topic, entry] : entries_) {
+      nearest = std::min(nearest, entry.nextDue);
+    }
+    if (nearest <= now) {
+      for (auto& [topic, entry] : entries_) {
+        if (entry.nextDue <= now) {
+          sampleEntry(entry);
+          entry.nextDue = now + entry.config.interval;  // reschedule from now (no catch-up burst)
+        }
+      }
+    } else {
+      cv_.wait_until(lock, nearest);  // wake at the deadline, or earlier on create/remove/stop
+    }
+  }
+}
 
 void MonitoringManager::sampleAll() {
   std::lock_guard<std::mutex> lock(mutex_);

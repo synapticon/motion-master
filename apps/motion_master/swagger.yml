@@ -52,16 +52,25 @@ info:
 
     ## Monitoring WebSocket
 
-    A monitoring WebSocket is available at `/ws`. Real-time messages use a
-    positionally-ordered array of numbers rather than keyed objects, to keep the
-    high-frequency path small (~40 values at a 1 ms cycle). Clients fetch the
-    schema once via `GET /api/monitoring/pdos` and cache it; the array order is
-    stable for the lifetime of a monitoring session. Two message types are sent:
+    A monitoring WebSocket is available at `/ws`. A client creates a monitoring
+    with `POST /api/monitorings` (a topic, sampling interval, buffer size, and a
+    list of parameters), then subscribes to its topic over the socket by sending
+    `{"subscribe":"<topic>"}` (and `{"unsubscribe":"<topic>"}` to stop). The server
+    samples the parameters off the real-time thread, accumulates `bufferSize` rows,
+    and publishes each batch to that topic — delivered only to the clients
+    subscribed to it. The messages:
 
     ```json
-    {"type": "monitoring", "topic": "pdos", "data": [1234567890, 39, 0, 12345]}
+    {"type": "monitoring", "topic": "left-leg", "data": [[1735821000123, 39000, 41], ...]}
     {"type": "notification", "data": {"event": "slaves_changed"}}
     ```
+
+    `data` is an array of sample rows; each row is `[timestampMs, v0, v1, ...]`
+    whose values are positionally ordered by the monitoring's `parameters` (fetch
+    the order, and how each value is sourced, via `GET /api/monitorings/{topic}`).
+    A value is `null` while its owning device is not exchanging (SAFE-OP/OP).
+    Numbers beyond 2^53 lose precision in a JS client; the targeted values are
+    32-bit integers and floats.
 
     ## Networking, TLS, and CORS
 
@@ -1194,8 +1203,179 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SlaveConfig"
+  /api/monitorings:
+    get:
+      summary: List all monitorings
+      operationId: listMonitorings
+      description: >
+        Returns every registered monitoring as a resource — its configuration plus, per
+        parameter, how its value is sourced, and the current buffer fill.
+      responses:
+        "200":
+          description: All monitorings, in topic order
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Monitoring"
+    post:
+      summary: Create a monitoring
+      operationId: createMonitoring
+      description: >
+        Registers a monitoring and starts sampling it off the real-time thread. Each parameter is
+        classified once against the published process image: PDO-mapped objects are decoded from
+        the live image; the rest are polled over SDO in the background. Create monitorings after
+        the bus is operational so PDO objects are recognised as PDO. Monitoring is live-only — a
+        parameter samples `null` while its owning device is not exchanging (SAFE-OP/OP).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [topic, interval, bufferSize, parameters]
+              properties:
+                topic:
+                  type: string
+                  pattern: "^[A-Za-z0-9._-]{1,64}$"
+                  description: URL-safe unique id; also the WebSocket topic. The name `pdos` is reserved.
+                  example: "left-leg"
+                name:
+                  type: string
+                  description: Optional human-readable label.
+                  example: "Left Leg"
+                interval:
+                  type: integer
+                  minimum: 1
+                  description: Sampling period in milliseconds.
+                  example: 1000
+                bufferSize:
+                  type: integer
+                  minimum: 16
+                  description: Samples accumulated before a batch is published over the WebSocket.
+                  example: 16
+                parameters:
+                  type: array
+                  minItems: 1
+                  description: Objects to sample, each as `[devicePosition, index, subindex]`.
+                  items:
+                    type: array
+                    minItems: 3
+                    maxItems: 3
+                    items:
+                      type: integer
+                  example: [[1, 8240, 1], [1, 24676, 0]]
+      responses:
+        "201":
+          description: Monitoring created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Monitoring"
+        "400":
+          description: >
+            Invalid request — malformed body, non-URL-safe or reserved topic, interval < 1,
+            bufferSize < 16, empty parameters, or a parameter that is neither PDO-mapped nor in
+            the device's object dictionary.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "409":
+          description: A monitoring with this topic already exists
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+  /api/monitorings/{topic}:
+    parameters:
+      - name: topic
+        in: path
+        required: true
+        schema:
+          type: string
+        description: The monitoring's topic.
+    get:
+      summary: Get a monitoring
+      operationId: getMonitoring
+      responses:
+        "200":
+          description: The monitoring resource
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Monitoring"
+        "404":
+          description: No monitoring with this topic
+    delete:
+      summary: Delete a monitoring
+      operationId: deleteMonitoring
+      description: >
+        Stops sampling and releases the monitoring's SDO parameters from the shared refresher — an
+        object no remaining monitoring needs stops being polled.
+      responses:
+        "204":
+          description: Monitoring deleted
+        "404":
+          description: No monitoring with this topic
 components:
   schemas:
+    Monitoring:
+      type: object
+      description: A monitoring's configuration plus its current runtime status.
+      required: [topic, interval, bufferSize, parameters, bufferFill]
+      properties:
+        topic:
+          type: string
+          example: "left-leg"
+        name:
+          type: string
+          description: Present only when a label was supplied at creation.
+          example: "Left Leg"
+        interval:
+          type: integer
+          description: Sampling period in milliseconds.
+          example: 1000
+        bufferSize:
+          type: integer
+          description: Samples per published batch.
+          example: 16
+        bufferFill:
+          type: integer
+          description: Rows currently accumulated toward the next batch.
+          example: 7
+        parameters:
+          type: array
+          description: The sampled objects, in the positional order of each WebSocket sample row.
+          items:
+            type: object
+            required: [devicePosition, index, subindex, source]
+            properties:
+              devicePosition:
+                type: integer
+                example: 1
+              index:
+                type: integer
+                example: 24676
+              subindex:
+                type: integer
+                example: 0
+              source:
+                type: string
+                enum: [pdo, sdo]
+                description: >
+                  How the value is sourced — `pdo` (decoded from the live process image) or `sdo`
+                  (polled in the background and read from cache).
+                example: "pdo"
     ProcessImageObject:
       type: object
       required: [slavePosition, index, subindex, name, bitOffset, bitLength]

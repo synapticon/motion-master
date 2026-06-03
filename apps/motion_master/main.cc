@@ -14,6 +14,9 @@
 // clang-format on
 #else
 #include <unistd.h>
+#ifdef __APPLE__
+#include <mach-o/dyld.h>  // _NSGetExecutablePath — macOS has no /proc/self/exe
+#endif
 #endif
 
 #include <memory>
@@ -37,6 +40,7 @@ namespace {
 ///
 ///          **Platform behaviour**
 ///          - Linux: resolves `/proc/self/exe` via `std::filesystem::canonical`.
+///          - macOS: queries the path via `_NSGetExecutablePath` (no `/proc`).
 ///          - Windows: queries the path via `GetModuleFileNameW`.
 /// @return Absolute path to the executable's parent directory.
 std::filesystem::path exeDir() {
@@ -44,6 +48,14 @@ std::filesystem::path exeDir() {
   wchar_t buf[MAX_PATH];
   GetModuleFileNameW(nullptr, buf, MAX_PATH);
   return std::filesystem::path{buf}.parent_path();
+#elif defined(__APPLE__)
+  // First call reports the required buffer size (including the null terminator).
+  uint32_t size = 0;
+  _NSGetExecutablePath(nullptr, &size);
+  std::string buf(size, '\0');
+  _NSGetExecutablePath(buf.data(), &size);
+  // The returned path may contain symlinks or `..`; canonical() resolves them.
+  return std::filesystem::canonical(buf.c_str()).parent_path();
 #else
   return std::filesystem::canonical("/proc/self/exe").parent_path();
 #endif

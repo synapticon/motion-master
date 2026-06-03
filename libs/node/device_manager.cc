@@ -457,10 +457,42 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
       return d && !d->exchangesProcessData();
     });
     if (!processDataConfigured() || anyJoining) {
+      // Re-mapping rebuilds the single whole-bus IOmap in one shot, so remapProcessImage()
+      // pauses PDO for *every* device — including ones meant to stay in OP — for the duration
+      // of stopExchange() plus the per-device SDO reads it does. A device in OP that misses
+      // process data past its sync-manager watchdog timeout faults itself to SAFE-OP+error. To
+      // avoid that, deliberately drop any staying-in-OP device to SAFE-OP first (a missed frame
+      // in SAFE-OP is harmless — outputs are not applied there), re-map, then climb them back to
+      // OP. The GameLoop resumes feeding PDO the instant the new image is published, so the climb
+      // back is fed normally and needs no separate PDO tick.
+      std::vector<uint16_t> opStayers;
+      for (const Device& d : devices_) {
+        const bool targeted = std::ranges::find(targets, d.slavePosition()) != targets.end();
+        if (!targeted && mm::comm::alState(driver_->slaveState(d.slavePosition())) ==
+                             mm::comm::EtherCatState::Op) {
+          opStayers.push_back(d.slavePosition());
+        }
+      }
+      if (!opStayers.empty()) {
+        spdlog::info(
+            "Re-map pauses the whole bus — dropping {} staying OP device(s) to SAFE-OP first to "
+            "avoid a sync-manager watchdog fault",
+            opStayers.size());
+        driver_->transitionToState(opStayers, std::nullopt, mm::comm::EtherCatState::SafeOp,
+                                   timeout);
+      }
+
       // Already holding busMutex_ exclusively — call the mapping primitive directly, not the
       // public configureProcessData (which would re-acquire the non-recursive lock and deadlock).
       if (auto r = remapProcessImage(); !r) {
         return std::unexpected("auto-configure process data failed: " + r.error());
+      }
+
+      // Restore the staying devices to OP. The freshly published image already describes them, so
+      // no further re-map is needed; the running GameLoop feeds PDO during the wait.
+      if (!opStayers.empty()) {
+        driver_->transitionToState(opStayers, mm::comm::EtherCatState::SafeOp,
+                                   mm::comm::EtherCatState::Op, timeout);
       }
     }
   } else if (processDataConfigured()) {

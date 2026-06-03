@@ -1,8 +1,14 @@
-#include <soem/soem.h>
-
+// clang-format off
+// On Windows, <soem/soem.h> drags in the bundled WinPcap headers, which
+// #define inline -> __inline. A C++ stdlib header included afterwards then trips
+// MSVC's xkeycheck.h ("forbids macroizing the keyword inline"). Include the
+// stdlib headers first so they are parsed before that macro exists.
 #include <cerrno>
 #include <cstring>
 #include <print>
+
+#include <soem/soem.h>
+// clang-format on
 
 namespace {
 

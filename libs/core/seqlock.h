@@ -73,7 +73,7 @@ class SeqLock {
   /// @param out  Destination for the snapshot.
   void load(T& out) const {
     uint32_t before;
-    uint32_t after;
+    uint32_t after = 0;  // init: MSVC C4701 can't see the `continue` path leaves it unread
     do {
       before = seq_.load(std::memory_order_acquire);
       if (before & 1u) {
@@ -116,7 +116,7 @@ class SeqLock {
   void load(T& out, size_t bytes) const {
     const size_t n = bytes < sizeof(T) ? bytes : sizeof(T);
     uint32_t before;
-    uint32_t after;
+    uint32_t after = 0;  // init: MSVC C4701 can't see the `continue` path leaves it unread
     do {
       before = seq_.load(std::memory_order_acquire);
       if (before & 1u) {

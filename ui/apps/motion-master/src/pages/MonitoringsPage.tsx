@@ -117,7 +117,7 @@ export default function MonitoringsPage() {
   if (!hasScanned) {
     return (
       <div>
-        <PageHeader eyebrow="Monitoring" title="Monitorings" />
+        <PageHeader eyebrow="Data" title="Monitorings" />
         <p className="px-8 py-6 text-sm text-grey-600">
           Connect and scan the bus to create and view monitorings.
         </p>
@@ -128,7 +128,7 @@ export default function MonitoringsPage() {
   return (
     <div>
       <PageHeader
-        eyebrow="Monitoring"
+        eyebrow="Data"
         title="Monitorings"
         description="Record drive parameters over time. PDO-mapped objects are read live from the process image; others are polled over SDO. Monitoring collects only while a device is in SAFE-OP/OP."
       />
@@ -329,9 +329,8 @@ function SourceBadge({ source }: { source: string }) {
           ? 'PDO — decoded live from the process image each tick'
           : 'SDO — polled in the background and read from cache'
       }
-      className={`px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider uppercase ${
-        pdo ? 'bg-ocean/10 text-ocean' : 'bg-grey-100 text-grey-600'
-      }`}
+      className={`px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider uppercase ${pdo ? 'bg-ocean/10 text-ocean' : 'bg-grey-100 text-grey-600'
+        }`}
     >
       {source}
     </span>

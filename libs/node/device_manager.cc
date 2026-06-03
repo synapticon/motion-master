@@ -500,7 +500,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
     // exchanging afterwards; otherwise keep it published so the devices staying in SAFE-OP/OP
     // keep running while the targeted ones drop out. The targeted devices' working-counter share
     // is removed by the updateExpectedWkc() below, so health still reflects the live bus.
-    const bool anyStays = std::ranges::any_of(devices_, [this, &targets](const Device& d) {
+    const bool anyStays = std::ranges::any_of(devices_, [&targets](const Device& d) {
       const bool targeted = std::ranges::find(targets, d.slavePosition()) != targets.end();
       return !targeted && d.exchangesProcessData();
     });

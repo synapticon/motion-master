@@ -10,6 +10,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(MSVC)
   add_compile_options(/W4 /WX /utf-8)
+  # Standard C functions (strerror, etc.) trip MSVC's C4996 "unsafe" deprecation,
+  # which /WX makes fatal. The POSIX/C names are portable and intended here.
+  add_compile_definitions(_CRT_SECURE_NO_WARNINGS)
 else()
   add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()

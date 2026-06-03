@@ -9,9 +9,16 @@
 #include <string>
 
 #ifdef _WIN32
-#include <iphlpapi.h>
-#include <windows.h>
+// clang-format off
+// Include order is significant on Windows: <winsock2.h> must precede <windows.h>
+// (which otherwise pulls in the conflicting winsock v1), and <iphlpapi.h> needs
+// the winsock2 types. clang-format would otherwise sort these alphabetically and
+// break the build, so the ordering is pinned here.
 #include <winsock2.h>
+#include <ws2tcpip.h>
+#include <windows.h>
+#include <iphlpapi.h>
+// clang-format on
 
 #include <iomanip>
 #include <sstream>

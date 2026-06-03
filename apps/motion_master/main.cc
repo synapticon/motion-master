@@ -8,7 +8,10 @@
 #include <utility>
 
 #ifdef _WIN32
+// clang-format off
 #include <windows.h>
+#include <shellapi.h>  // ShellExecuteA — not pulled in by <windows.h> under WIN32_LEAN_AND_MEAN
+// clang-format on
 #else
 #include <unistd.h>
 #endif

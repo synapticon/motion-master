@@ -678,14 +678,17 @@ namespace {
 // of that base. One tick = 40 ns × (divider + 2). A zero time register disables the watchdog.
 constexpr uint16_t kWatchdogDividerReg = 0x0400;
 constexpr uint16_t kWatchdogTimePdReg = 0x0420;
+constexpr uint16_t kWatchdogStatusPdReg = 0x0440;  // bit 0: 1 = running, 0 = expired.
 constexpr int64_t kEscClockNs = 40;  // ESC reference clock period feeding the watchdog divider.
 
 int64_t watchdogTickNs(uint16_t divider) {
   return kEscClockNs * (static_cast<int64_t>(divider) + 2);
 }
 
-mm::comm::ProcessDataWatchdogConfig decodeWatchdog(uint16_t divider, uint16_t ticks) {
+mm::comm::ProcessDataWatchdogConfig decodeWatchdog(uint16_t divider, uint16_t ticks,
+                                                   uint16_t status) {
   return {.enabled = ticks != 0,
+          .running = (status & 0x0001u) != 0,
           .timeout = std::chrono::nanoseconds(watchdogTickNs(divider) * ticks),
           .divider = divider,
           .ticks = ticks};
@@ -710,7 +713,13 @@ std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::proces
     return std::unexpected(
         std::format("FPRD slave {} PD watchdog time (0x0420) failed", slavePosition));
   }
-  return decodeWatchdog(divider, ticks);
+  uint16_t status = 0;
+  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogStatusPdReg, sizeof(status), &status,
+               EC_TIMEOUTRET) != 1) {
+    return std::unexpected(
+        std::format("FPRD slave {} PD watchdog status (0x0440) failed", slavePosition));
+  }
+  return decodeWatchdog(divider, ticks, status);
 }
 
 std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::setProcessDataWatchdog(
@@ -750,7 +759,15 @@ std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::setPro
   }
   spdlog::info("Device {}: process-data watchdog set to {} ns ({} ticks @ {} ns/tick)",
                slavePosition, tickNs * ticks, ticks, tickNs);
-  return decodeWatchdog(divider, ticks);
+  // Read back the status so the caller sees whether the freshly programmed watchdog is running
+  // (it counts down only once process data is flowing).
+  uint16_t status = 0;
+  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogStatusPdReg, sizeof(status), &status,
+               EC_TIMEOUTRET) != 1) {
+    return std::unexpected(
+        std::format("FPRD slave {} PD watchdog status (0x0440) failed", slavePosition));
+  }
+  return decodeWatchdog(divider, ticks, status);
 }
 
 // BOOT and PRE-OP use different mailbox sizes (e.g. 1024 vs 128 bytes on Integro

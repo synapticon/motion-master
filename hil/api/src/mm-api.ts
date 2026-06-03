@@ -23,6 +23,11 @@ export interface ProcessDataWatchdog {
    */
   enabled: boolean;
   /**
+   * Live status register (0x0440 bit 0): true = the watchdog is counting, false = expired or disabled. Meaningful only when enabled; it counts down only while process data flows.
+   * @example true
+   */
+  running: boolean;
+  /**
    * Configured timeout in nanoseconds: ticks × 40 ns × (divider + 2).
    * @example 100000000
    */

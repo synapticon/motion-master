@@ -45,8 +45,11 @@ class FakeDriver : public FieldbusDriver {
   std::vector<mm::comm::DcSyncDiagnostics> dcSyncData;
 
   /// Returned by processDataWatchdog(); also the echo base for setProcessDataWatchdog().
-  mm::comm::ProcessDataWatchdogConfig watchdogConfig{
-      .enabled = true, .timeout = std::chrono::milliseconds(100), .divider = 2498, .ticks = 1000};
+  mm::comm::ProcessDataWatchdogConfig watchdogConfig{.enabled = true,
+                                                     .running = true,
+                                                     .timeout = std::chrono::milliseconds(100),
+                                                     .divider = 2498,
+                                                     .ticks = 1000};
 
   /// Records the last setProcessDataWatchdog() call so tests can assert the forwarded arguments.
   uint16_t lastWatchdogPosition = 0;
@@ -239,8 +242,11 @@ TEST(DeviceManagerDelegates, UnknownDeviceErrors) {
 
 TEST(DeviceManagerWatchdog, GetReturnsDriverConfig) {
   auto driver = std::make_unique<FakeDriver>(true, 1);
-  driver->watchdogConfig = {
-      .enabled = true, .timeout = std::chrono::milliseconds(200), .divider = 2498, .ticks = 2000};
+  driver->watchdogConfig = {.enabled = true,
+                            .running = true,
+                            .timeout = std::chrono::milliseconds(200),
+                            .divider = 2498,
+                            .ticks = 2000};
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::move(driver)).has_value());
   ASSERT_TRUE(dm.scan().has_value());

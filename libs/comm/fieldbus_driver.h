@@ -279,6 +279,8 @@ struct DcSyncDiagnostics {
 /// @c setProcessDataWatchdog.
 struct ProcessDataWatchdogConfig {
   bool enabled;                      ///< False when the time register (0x0420) is zero.
+  bool running;                      ///< Live status (0x0440 bit 0): true = counting, false =
+                                     ///< expired or disabled. Meaningful only while @c enabled.
   std::chrono::nanoseconds timeout;  ///< Decoded timeout: ticks × 40 ns × (divider + 2).
   uint16_t divider;                  ///< Raw 0x0400 divider (shared with the PDI watchdog).
   uint16_t ticks;                    ///< Raw 0x0420 process-data watchdog time register.
@@ -544,11 +546,12 @@ class FieldbusDriver {
 
   /// @brief Reads the process-data (sync-manager) watchdog configuration of one slave.
   ///
-  /// FPRD-reads the watchdog divider (0x0400) and process-data watchdog time (0x0420) ESC
-  /// registers and decodes the timeout as @c ticks × 40 ns × (divider + 2). A zero time register
+  /// FPRD-reads the watchdog divider (0x0400), process-data watchdog time (0x0420), and
+  /// process-data watchdog status (0x0440) ESC registers, decoding the timeout as
+  /// @c ticks × 40 ns × (divider + 2) plus the live running/expired status. A zero time register
   /// means the watchdog is disabled. Unlike @c readDiagnostics (which returns the expiration
-  /// counter), this returns the configured timeout itself. Serialised via the socket mutex; must
-  /// not overlap with @c exchangeProcessData.
+  /// counter), this returns the configured timeout and its current run state. Serialised via the
+  /// socket mutex; must not overlap with @c exchangeProcessData.
   ///
   /// Optional capability: the default returns an error for transports without an ESC (e.g. SPoE);
   /// the SOEM driver overrides it.

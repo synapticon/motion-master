@@ -88,6 +88,7 @@ void sendStatus(Res* res, std::string_view status, std::string_view corsOrigin) 
 nlohmann::json watchdogJson(uint16_t slavePosition, const mm::comm::ProcessDataWatchdogConfig& wd) {
   return {{"slavePosition", slavePosition},
           {"enabled", wd.enabled},
+          {"running", wd.running},
           {"timeoutNs", wd.timeout.count()},
           {"timeoutMs", static_cast<double>(wd.timeout.count()) / 1e6},
           {"divider", wd.divider},

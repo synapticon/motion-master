@@ -131,11 +131,24 @@ function PortTable({ ports }: { ports: PortDiagnostics[] }) {
   )
 }
 
-// The PD watchdog timeout is the knob behind the "PD watchdog" expiration counter above it:
-// raising it lets a device tolerate the brief whole-bus PDO pause of a re-map without faulting.
-// Per-device (config lives in the slave's ESC), so it has its own query/mutation, not the page's
-// bulk diagnostics fetch. A 0 ms timeout disables the watchdog.
-function WatchdogControl({ slavePosition }: { slavePosition: number }) {
+// A read-only labelled cell for the watchdog status/config breakdown.
+function Stat({ label, value, hint, cls }: { label: string; value: string; hint?: string; cls?: string }) {
+  return (
+    <div title={hint} className={hint ? 'cursor-help' : undefined}>
+      <p className="text-[10px] uppercase tracking-wide text-grey-500 font-display">{label}</p>
+      <p className={`font-mono text-sm mt-0.5 ${cls ?? 'text-grey-800'}`}>{value}</p>
+    </div>
+  )
+}
+
+// The PD watchdog is the dead-man's switch behind the "PD watchdog" expiration counter above it:
+// a device in OP that misses process data past this timeout faults itself to SAFE-OP+error, and
+// raising it lets a device tolerate the brief whole-bus PDO pause of a re-map. This panel shows how
+// the timeout is configured (ticks × the divider's time base) and its live run state, and lets the
+// user change it. Per-device (config lives in the slave's ESC), so its own query/mutation rather
+// than the page's bulk diagnostics fetch; polls on the same 2 s cadence so the run state stays
+// live. A 0 ms timeout disables the watchdog.
+function WatchdogControl({ slavePosition, expirations }: { slavePosition: number; expirations: number }) {
   const { api } = useConnection()
   const queryClient = useQueryClient()
   // null = follow the fetched value; a string = the user is editing.
@@ -144,6 +157,7 @@ function WatchdogControl({ slavePosition }: { slavePosition: number }) {
   const query = useQuery({
     queryKey: ['watchdog', slavePosition],
     queryFn: () => api.getProcessDataWatchdog(slavePosition).then(r => r.data),
+    refetchInterval: 2000,
   })
 
   const mutation = useMutation({
@@ -160,19 +174,57 @@ function WatchdogControl({ slavePosition }: { slavePosition: number }) {
   const value = Number(shown)
   const canSet = shown !== '' && Number.isFinite(value) && value >= 0 && !mutation.isPending
 
+  // Live run state: disabled (ticks 0), running (counting), or expired (timed out / not yet fed).
+  const state = !wd ? '' : !wd.enabled ? 'Disabled' : wd.running ? 'Running' : 'Expired'
+  const stateCls = !wd
+    ? ''
+    : !wd.enabled
+      ? 'text-grey-500'
+      : wd.running
+        ? 'text-status-good'
+        : 'text-status-bad font-bold'
+  // The divider sets the tick length: 40 ns × (divider + 2). Shown so the timeout derivation
+  // (ticks × this base) is transparent.
+  const tickBaseUs = wd ? Number(((40 * (wd.divider + 2)) / 1000).toFixed(3)) : 0
+
   return (
     <div className="space-y-2">
-      <p className="eyebrow">Process-data watchdog timeout</p>
+      <p className="eyebrow">Process-data watchdog</p>
       {query.isError ? (
         <p className="text-xs text-grey-500">Not available on this transport.</p>
-      ) : query.isPending ? (
+      ) : query.isPending || !wd ? (
         <p className="text-xs text-grey-600">Loading…</p>
       ) : (
         <>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 border border-grey-200 p-3 bg-grey-50">
+            <Stat
+              label="State"
+              value={state}
+              cls={stateCls}
+              hint="Status register 0x0440 bit 0: running = counting, expired = timed out (or not yet fed), disabled = timeout 0"
+            />
+            <Stat
+              label="Timeout"
+              value={wd.enabled ? `${formatMs(wd.timeoutMs)} ms` : 'disabled'}
+              hint="Process-data watchdog timeout (0x0420 × the tick base). On expiry a device in OP drops to SAFE-OP+error."
+            />
+            <Stat
+              label="Derivation"
+              value={`${wd.ticks} × ${tickBaseUs} µs`}
+              hint={`${wd.ticks} ticks (0x0420) × ${tickBaseUs} µs tick base, where base = 40 ns × (divider ${wd.divider} + 2)`}
+            />
+            <Stat
+              label="Expirations"
+              value={String(expirations)}
+              cls={expirations > 0 ? 'text-status-bad font-bold' : 'text-grey-800'}
+              hint="Cumulative process-data watchdog expirations (0x0442) since the last power cycle"
+            />
+          </div>
+
           <div className="flex flex-wrap items-end gap-3">
             <div>
               <label className="text-[10px] uppercase tracking-wide text-grey-500 font-display block mb-1">
-                Timeout (ms) · 0 disables
+                Set timeout (ms) · 0 disables
               </label>
               <input
                 type="number"
@@ -186,17 +238,14 @@ function WatchdogControl({ slavePosition }: { slavePosition: number }) {
             <button onClick={() => mutation.mutate(value)} disabled={!canSet} className={btnOutline}>
               {mutation.isPending ? 'Setting…' : 'Set'}
             </button>
-            <p className="text-xs text-grey-500 font-mono">
-              {wd!.enabled ? `current ${formatMs(wd!.timeoutMs)} ms` : 'disabled'} · {wd!.ticks} ticks
-              @ divider {wd!.divider}
-            </p>
           </div>
+
           {mutation.isError && (
             <p className="text-xs text-status-bad font-mono">{apiError(mutation.error)}</p>
           )}
           {mutation.isSuccess && draft === null && (
             <p className="text-xs text-status-good font-mono">
-              Programmed {wd!.enabled ? `${formatMs(wd!.timeoutMs)} ms` : 'disabled'} (rounded to the
+              Programmed {wd.enabled ? `${formatMs(wd.timeoutMs)} ms` : 'disabled'} (rounded to the
               tick base).
             </p>
           )}
@@ -225,7 +274,8 @@ function DeviceCard({ device }: { device: DeviceDiagnostics }) {
       </header>
 
       <div className="p-4 space-y-5">
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {/* PD watchdog expirations live in the watchdog panel below, alongside its config/state. */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <Field
             label="Processing-unit err"
             value={device.processingUnitError}
@@ -237,18 +287,16 @@ function DeviceCard({ device }: { device: DeviceDiagnostics }) {
             hint="PDI error counter (0x030D): problems on the slave-local process-data interface"
           />
           <Field
-            label="PD watchdog"
-            value={device.processDataWatchdog}
-            hint="Process-data (SM) watchdog expirations (0x0442): the slave stopped seeing fresh outputs"
-          />
-          <Field
             label="PDI watchdog"
             value={device.pdiWatchdog}
             hint="PDI watchdog expirations (0x0443)"
           />
         </div>
 
-        <WatchdogControl slavePosition={device.slavePosition} />
+        <WatchdogControl
+          slavePosition={device.slavePosition}
+          expirations={device.processDataWatchdog}
+        />
 
         <div className="space-y-2">
           <p className="eyebrow">Ports</p>

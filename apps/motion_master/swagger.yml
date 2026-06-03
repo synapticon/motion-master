@@ -1414,7 +1414,7 @@ components:
       description: >
         A device's process-data (sync-manager) watchdog configuration, decoded from the watchdog
         divider (0x0400) and process-data watchdog time (0x0420) ESC registers.
-      required: [slavePosition, enabled, timeoutNs, timeoutMs, divider, ticks]
+      required: [slavePosition, enabled, running, timeoutNs, timeoutMs, divider, ticks]
       properties:
         slavePosition:
           type: integer
@@ -1423,6 +1423,12 @@ components:
         enabled:
           type: boolean
           description: False when the time register (ticks) is 0, i.e. the watchdog is disabled.
+          example: true
+        running:
+          type: boolean
+          description: >
+            Live status register (0x0440 bit 0): true = the watchdog is counting, false = expired
+            or disabled. Meaningful only when enabled; it counts down only while process data flows.
           example: true
         timeoutNs:
           type: integer

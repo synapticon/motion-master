@@ -46,7 +46,12 @@ class RingLogSink : public spdlog::sinks::base_sink<Mutex> {
     spdlog::memory_buf_t formatted;
     this->formatter_->format(msg, formatted);
     std::string entry{formatted.data(), formatted.size()};
+    // Strip the trailing end-of-line. spdlog uses "\n" on POSIX and "\r\n" on
+    // Windows, so drop the newline and any preceding carriage return.
     if (!entry.empty() && entry.back() == '\n') {
+      entry.pop_back();
+    }
+    if (!entry.empty() && entry.back() == '\r') {
       entry.pop_back();
     }
     if (buffer_.size() >= capacity_) {

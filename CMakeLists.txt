@@ -29,6 +29,15 @@ enable_testing()
 # Runtime still requires the Npcap driver itself (npcap.com); the installer prompts.
 if(WIN32)
   set(NPCAP_SDK_PATH "${CMAKE_SOURCE_DIR}/extern/npcap-sdk-1.16")
+  # Reusable target carrying the Npcap headers + import libs. Anything that
+  # consumes <soem/soem.h> (which pulls in the win32 nicdrv.h -> <pcap.h>) links
+  # this — comm and the playground scratch app both build against soem directly.
+  add_library(npcap INTERFACE)
+  add_library(mm::npcap ALIAS npcap)
+  target_include_directories(npcap INTERFACE "${NPCAP_SDK_PATH}/Include")
+  target_link_libraries(npcap INTERFACE
+      "${NPCAP_SDK_PATH}/Lib/x64/wpcap.lib"
+      "${NPCAP_SDK_PATH}/Lib/x64/Packet.lib")
 endif()
 
 add_subdirectory(libs/core)

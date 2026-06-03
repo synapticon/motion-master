@@ -24,14 +24,9 @@ target_link_libraries(comm PUBLIC
     spdlog::spdlog
 )
 
-# Windows: SOEM's NIC driver is built against Npcap. Resolve <pcap.h> and the
-# wpcap/Packet import libs from the vendored SDK (extern/npcap-sdk-1.16) at a
-# stable in-repo path. PUBLIC so consumers that pull in <soem/soem.h> (which
-# includes the win32 nicdrv.h -> <pcap.h>) and the final executables inherit both.
+# Windows: SOEM's NIC driver builds against Npcap. Pull in <pcap.h> and the
+# wpcap/Packet import libs via the shared mm::npcap target (see root CMakeLists).
+# PUBLIC so consumers of <soem/soem.h> and the final executables inherit both.
 if(WIN32)
-  target_include_directories(comm PUBLIC ${NPCAP_SDK_PATH}/Include)
-  target_link_libraries(comm PUBLIC
-      ${NPCAP_SDK_PATH}/Lib/x64/wpcap.lib
-      ${NPCAP_SDK_PATH}/Lib/x64/Packet.lib
-  )
+  target_link_libraries(comm PUBLIC mm::npcap)
 endif()

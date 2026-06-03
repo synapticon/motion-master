@@ -19,6 +19,25 @@ file(COPY "${SOURCE_PATH}/contrib/oshw/macosx" DESTINATION "${SOURCE_PATH}/oshw"
 file(COPY "${CMAKE_CURRENT_LIST_DIR}/files/osal_macosx/" DESTINATION "${SOURCE_PATH}/osal/macosx")
 file(COPY "${CMAKE_CURRENT_LIST_DIR}/files/Darwin.cmake" DESTINATION "${SOURCE_PATH}/cmake")
 
+# Windows: upstream links the bundled wpcap import libs by ABSOLUTE buildtree
+# path, which gets baked into the exported soemConfig and vanishes once vcpkg
+# restores SOEM from its binary cache — breaking every consumer's link. Drop
+# those two lines; motion-master links wpcap/Packet from the vendored Npcap SDK
+# (extern/npcap-sdk-1.16) at a stable path instead (see libs/comm). ws2_32/winmm
+# stay — they are always on the linker search path.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/cmake/Windows.cmake"
+"target_link_libraries(soem PUBLIC
+  \${WPCAP_LIB_PATH}/wpcap.lib
+  \${WPCAP_LIB_PATH}/Packet.lib
+  ws2_32.lib
+  winmm.lib
+)"
+"target_link_libraries(soem PUBLIC
+  ws2_32.lib
+  winmm.lib
+)")
+
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS
@@ -29,16 +48,6 @@ vcpkg_cmake_install()
 vcpkg_copy_pdbs()
 
 vcpkg_cmake_config_fixup(CONFIG_PATH "cmake")
-
-# Windows: the win32 nicdrv.h (installed to include/soem) #includes <pcap.h>,
-# but SOEM only puts the bundled wpcap headers on its own build include path
-# (BUILD_INTERFACE), so they are not installed and downstream consumers of
-# <soem/soem.h> cannot find pcap.h.  Install the bundled wpcap headers into the
-# package include root so they resolve.  (Runtime still needs Npcap installed.)
-if(VCPKG_TARGET_IS_WINDOWS)
-    file(COPY "${SOURCE_PATH}/oshw/win32/wpcap/Include/"
-         DESTINATION "${CURRENT_PACKAGES_DIR}/include")
-endif()
 
 file(REMOVE_RECURSE
     "${CURRENT_PACKAGES_DIR}/bin"

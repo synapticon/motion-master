@@ -22,6 +22,15 @@ endif()
 
 enable_testing()
 
+# SOEM's EtherCAT NIC driver on Windows talks to Npcap. We vendor the Npcap SDK
+# (headers + import libs) at a fixed in-repo path so consumers link it from a
+# stable location — SOEM's own bundled copy lives in the vcpkg buildtree, which
+# does not survive binary-cache restores. comm wires it up (see libs/comm).
+# Runtime still requires the Npcap driver itself (npcap.com); the installer prompts.
+if(WIN32)
+  set(NPCAP_SDK_PATH "${CMAKE_SOURCE_DIR}/extern/npcap-sdk-1.16")
+endif()
+
 add_subdirectory(libs/core)
 add_subdirectory(libs/comm)
 add_subdirectory(libs/node)

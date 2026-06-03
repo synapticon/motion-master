@@ -127,7 +127,7 @@ class MonitoringManager {
   void sampleEntry(Entry& entry);          // assumes mutex_ held
   void recaptureIfRemapped(Entry& entry);  // re-capture PDO specs; assumes mutex_ held
   void flush(Entry& entry);                // publish batch + clear; assumes mutex_ held
-  nlohmann::json resourceJson(const Entry& entry) const;  // assumes mutex_ held
+  static nlohmann::json resourceJson(const Entry& entry);  // assumes mutex_ held
 
   /// @brief Sampler thread body: waits until the nearest monitoring is due (or an
   ///        acquire/remove/stop wakes it), then samples every due monitoring and reschedules it.

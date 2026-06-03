@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <format>
+#include <iterator>
 #include <nlohmann/json.hpp>
 #include <span>
 #include <string>
@@ -270,9 +271,8 @@ void MonitoringManager::flush(Entry& entry) {
     for (const auto& sample : entry.batch) {
       auto row = nlohmann::json::array();
       row.push_back(sample.timestampMs);
-      for (const auto& value : sample.values) {
-        row.push_back(valueToJson(value));
-      }
+      std::transform(sample.values.begin(), sample.values.end(), std::back_inserter(row),
+                     valueToJson);
       data.push_back(std::move(row));
     }
     const nlohmann::json envelope = {
@@ -282,16 +282,17 @@ void MonitoringManager::flush(Entry& entry) {
   entry.batch.clear();
 }
 
-nlohmann::json MonitoringManager::resourceJson(const Entry& entry) const {
+nlohmann::json MonitoringManager::resourceJson(const Entry& entry) {
   nlohmann::json j = entry.config;  // {topic, name?, interval, bufferSize, parameters:[...]}
   // Replace the bare parameter list with one annotated by how each value is sourced (for the UI).
   auto parameters = nlohmann::json::array();
-  for (const auto& plan : entry.plans) {
-    parameters.push_back({{"devicePosition", plan.devicePosition},
-                          {"index", plan.index},
-                          {"subindex", plan.subindex},
-                          {"source", plan.source == Source::Pdo ? "pdo" : "sdo"}});
-  }
+  std::transform(entry.plans.begin(), entry.plans.end(), std::back_inserter(parameters),
+                 [](const auto& plan) {
+                   return nlohmann::json{{"devicePosition", plan.devicePosition},
+                                         {"index", plan.index},
+                                         {"subindex", plan.subindex},
+                                         {"source", plan.source == Source::Pdo ? "pdo" : "sdo"}};
+                 });
   j["parameters"] = std::move(parameters);
   j["bufferFill"] = entry.batch.size();
   return j;

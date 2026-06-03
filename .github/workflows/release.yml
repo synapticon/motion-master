@@ -55,7 +55,7 @@ jobs:
           dir=build/x64-linux-release/apps/motion_master
           cp setup.sh "$dir/setup.sh"
           cp SETUP.md "$dir/SETUP.md"
-          tar -czf "motion-master-${GITHUB_REF_NAME}-linux-x64.tar.gz" \
+          tar -czf "motion-master-${GITHUB_REF_NAME#v}-linux-x64.tar.gz" \
             -C "$dir" motion-master cert.pem key.pem setup.sh SETUP.md
 
       - name: Create deb and rpm
@@ -124,7 +124,7 @@ jobs:
           # Build one flat string[] for -Path (mixing literals with a FileInfo[] expression
           # confuses Compress-Archive); use the DLLs' full paths.
           $files = @("$dir/motion-master.exe","$dir/cert.pem","$dir/key.pem","SETUP.md") + $dlls.FullName
-          $zip = "motion-master-$env:GITHUB_REF_NAME-windows-x64.zip"
+          $zip = "motion-master-$($env:GITHUB_REF_NAME -replace '^v','')-windows-x64.zip"
           Compress-Archive -Force -DestinationPath $zip -Path $files
 
       - name: Upload artifact
@@ -178,7 +178,7 @@ jobs:
         run: |
           dir=build/arm64-osx-release/apps/motion_master
           cp SETUP.md "$dir/SETUP.md"
-          tar -czf "motion-master-${GITHUB_REF_NAME}-macos-arm64.tar.gz" \
+          tar -czf "motion-master-${GITHUB_REF_NAME#v}-macos-arm64.tar.gz" \
             -C "$dir" motion-master cert.pem key.pem SETUP.md
 
       - name: Upload artifact

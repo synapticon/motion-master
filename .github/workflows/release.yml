@@ -116,13 +116,16 @@ jobs:
         shell: pwsh
         run: |
           $dir = "build/x64-windows-release/apps/motion_master"
-          # x64-windows is a dynamic triplet, so bundle the vcpkg runtime DLLs next
-          # to the exe (openssl, zlib, fmt, ...). wpcap.dll comes from Npcap at runtime.
-          Copy-Item "build/x64-windows-release/vcpkg_installed/x64-windows/bin/*.dll" $dir -ErrorAction SilentlyContinue
-          Copy-Item "SETUP.md" $dir
+          $bin = "build/x64-windows-release/vcpkg_installed/x64-windows/bin"
+          # x64-windows is a dynamic triplet, so bundle the vcpkg runtime DLLs (openssl,
+          # zlib, fmt, spdlog, ...). Exclude test-only libs (gtest/gmock); wpcap.dll comes
+          # from the Npcap driver at runtime.
+          $dlls = Get-ChildItem "$bin/*.dll" | Where-Object { $_.Name -notmatch 'gtest|gmock' }
+          # Build one flat string[] for -Path (mixing literals with a FileInfo[] expression
+          # confuses Compress-Archive); use the DLLs' full paths.
+          $files = @("$dir/motion-master.exe","$dir/cert.pem","$dir/key.pem","SETUP.md") + $dlls.FullName
           $zip = "motion-master-$env:GITHUB_REF_NAME-windows-x64.zip"
-          Compress-Archive -Force -DestinationPath $zip -Path `
-            "$dir/motion-master.exe","$dir/cert.pem","$dir/key.pem","$dir/SETUP.md",(Get-Item "$dir/*.dll")
+          Compress-Archive -Force -DestinationPath $zip -Path $files
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

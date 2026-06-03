@@ -4,6 +4,8 @@ configure_file(version.h.in "${CMAKE_CURRENT_BINARY_DIR}/version.h")
 
 if(WIN32)
   set(CYCLIC_TIMER_SRC cyclic_timer_windows.cc)
+elseif(APPLE)
+  set(CYCLIC_TIMER_SRC cyclic_timer_macos.cc)
 else()
   set(CYCLIC_TIMER_SRC cyclic_timer_linux.cc)
 endif()

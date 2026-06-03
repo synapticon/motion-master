@@ -8,6 +8,7 @@ accessMoved:*/server.cc
 // concludes that waitForNextCycle() could be static.
 functionStatic:*/cyclic_timer_linux.cc
 functionStatic:*/cyclic_timer_windows.cc
+functionStatic:*/cyclic_timer_macos.cc
 
 // cppcheck 2.20.0 tokenizer limitation: GTest's TEST() macro (which cppcheck
 // cannot expand without the system header) is misparsed as a syntax error when it

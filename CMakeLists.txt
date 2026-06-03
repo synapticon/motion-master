@@ -25,3 +25,8 @@ add_subdirectory(hil)
 
 include(cmake/lint.cmake)
 include(cmake/docs.cmake)
+
+# Windows installer (CPack/NSIS).  Linux packaging stays in tools/package.sh.
+if(WIN32)
+  include(cmake/packaging-windows.cmake)
+endif()

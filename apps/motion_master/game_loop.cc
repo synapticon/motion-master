@@ -7,6 +7,8 @@
 #ifndef _WIN32
 #include <pthread.h>
 #include <sched.h>
+#endif
+#ifdef __linux__
 #include <sys/mman.h>
 #endif
 
@@ -19,8 +21,10 @@ void setRealtimePriority() {
   if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &param) != 0) {
     spdlog::warn("GameLoop: failed to set SCHED_FIFO — running without RT scheduling");
   }
+#endif
+#ifdef __linux__
   // Prevents the kernel from faulting in pages mid-cycle, which would
-  // introduce unbounded latency spikes.
+  // introduce unbounded latency spikes.  macOS has no mlockall().
   if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
     spdlog::warn("GameLoop: failed to lock memory pages — page faults may cause jitter");
   }

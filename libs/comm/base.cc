@@ -16,6 +16,16 @@
 #include <iomanip>
 #include <sstream>
 #pragma comment(lib, "IPHLPAPI.lib")
+#elif defined(__APPLE__)
+#include <ifaddrs.h>
+#include <net/if.h>
+#include <net/if_dl.h>
+#include <netinet/in.h>
+#include <soem/soem.h>
+#include <sys/socket.h>
+#include <unistd.h>
+
+#include <cstring>
 #else
 #include <linux/if.h>
 #include <netinet/in.h>
@@ -124,6 +134,27 @@ std::map<std::string, std::string> mapMacAddressesToInterfaces() {
     if (pAddresses) {
       HeapFree(hHeap, 0x00, pAddresses);
     }
+  }
+#elif defined(__APPLE__)
+  // macOS has no SIOCGIFHWADDR; link-layer (MAC) addresses come from
+  // getifaddrs() via the AF_LINK / sockaddr_dl entries.
+  struct ifaddrs* ifaddr = nullptr;
+  if (getifaddrs(&ifaddr) == 0) {
+    for (const struct ifaddrs* ifa = ifaddr; ifa != nullptr; ifa = ifa->ifa_next) {
+      if (ifa->ifa_addr == nullptr || ifa->ifa_addr->sa_family != AF_LINK) {
+        continue;
+      }
+      const auto* sdl = reinterpret_cast<const struct sockaddr_dl*>(ifa->ifa_addr);
+      if (sdl->sdl_alen != 6) {
+        continue;
+      }
+      const auto* hw = reinterpret_cast<const unsigned char*>(LLADDR(sdl));
+      char mac[18];
+      snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", hw[0], hw[1], hw[2], hw[3], hw[4],
+               hw[5]);
+      map[mac] = ifa->ifa_name;
+    }
+    freeifaddrs(ifaddr);
   }
 #else
   ec_adaptert* adapter = ec_find_adapters();

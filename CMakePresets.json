@@ -69,6 +69,38 @@
       }
     },
     {
+      "name": "arm64-osx-debug",
+      "inherits": "base",
+      "displayName": "macOS ARM64 Debug (Apple Silicon)",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "arm64-osx",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "13.0"
+      }
+    },
+    {
+      "name": "arm64-osx-release",
+      "inherits": "base",
+      "displayName": "macOS ARM64 Release (Apple Silicon)",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Darwin"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "VCPKG_TARGET_TRIPLET": "arm64-osx",
+        "CMAKE_OSX_ARCHITECTURES": "arm64",
+        "CMAKE_OSX_DEPLOYMENT_TARGET": "13.0"
+      }
+    },
+    {
       "name": "arm64-linux-debug",
       "inherits": "base",
       "displayName": "Linux ARM64 Debug (native)",
@@ -143,6 +175,14 @@
     {
       "name": "x64-windows-release",
       "configurePreset": "x64-windows-release"
+    },
+    {
+      "name": "arm64-osx-debug",
+      "configurePreset": "arm64-osx-debug"
+    },
+    {
+      "name": "arm64-osx-release",
+      "configurePreset": "arm64-osx-release"
     },
     {
       "name": "arm64-linux-debug",

@@ -1,0 +1,46 @@
+name: Build & Test (macOS)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    # macos-14 is Apple Silicon (arm64) — the only macOS target we support.
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      # std::expected (C++23) needs a recent libc++; pin the latest stable Xcode.
+      - name: Select latest Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install CMake 4.x + Ninja
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: "~4.0.0"
+
+      - name: Configure
+        run: cmake --preset arm64-osx-debug
+
+      - name: Build
+        run: cmake --build --preset arm64-osx-debug
+
+      - name: Test
+        run: ctest --test-dir build/arm64-osx-debug --output-on-failure

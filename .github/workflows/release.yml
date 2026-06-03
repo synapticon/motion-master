@@ -6,9 +6,9 @@ on:
       - 'v*'
 
 jobs:
-  release:
+  # ── Linux x64: .tar.gz + .deb + .rpm ───────────────────────────────────────
+  linux:
     runs-on: ubuntu-24.04
-
     steps:
       - uses: actions/checkout@v6
         with:
@@ -50,27 +50,151 @@ jobs:
           echo "$TLS_CERT" > "$dir/cert.pem"
           echo "$TLS_KEY"  > "$dir/key.pem"
 
-      - name: Package
+      - name: Package tarball
         run: |
           dir=build/x64-linux-release/apps/motion_master
           cp setup.sh "$dir/setup.sh"
           cp SETUP.md "$dir/SETUP.md"
-          archive="motion-master-${GITHUB_REF_NAME}-linux-x64.tar.gz"
-          tar -czf "$archive" -C "$dir" motion-master swagger.yml cert.pem key.pem setup.sh SETUP.md
-          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
+          tar -czf "motion-master-${GITHUB_REF_NAME}-linux-x64.tar.gz" \
+            -C "$dir" motion-master swagger.yml cert.pem key.pem setup.sh SETUP.md
 
-      - name: Create packages
+      - name: Create deb and rpm
+        run: ./tools/package.sh x64-linux-release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: |
+            motion-master-*-linux-x64.tar.gz
+            motion-master-*-amd64.deb
+            motion-master-*-x86_64.rpm
+
+  # ── Windows x64: NSIS installer (.exe) ─────────────────────────────────────
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v5
+        with:
+          path: ~/AppData/Local/vcpkg/archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Install CMake 4.x + Ninja
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: "~4.0.0"
+
+      - name: Set up MSVC environment
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Install NSIS
+        run: choco install nsis -y --no-progress
+
+      - name: Configure
+        run: cmake --preset x64-windows-release
+
+      - name: Build
+        run: cmake --build --preset x64-windows-release
+
+      - name: Bundle TLS certificate and key
+        shell: bash
+        env:
+          TLS_CERT: ${{ secrets.TLS_CERT }}
+          TLS_KEY: ${{ secrets.TLS_KEY }}
         run: |
-          version=$(cat VERSION)
-          ./tools/package.sh x64-linux-release
-          echo "DEB=motion-master-${version}-amd64.deb" >> "$GITHUB_ENV"
-          echo "RPM=motion-master-${version}-x86_64.rpm" >> "$GITHUB_ENV"
+          dir=build/x64-windows-release/apps/motion_master
+          echo "$TLS_CERT" > "$dir/cert.pem"
+          echo "$TLS_KEY"  > "$dir/key.pem"
+
+      - name: Build NSIS installer
+        run: cpack -G NSIS --config build/x64-windows-release/CPackConfig.cmake
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: motion-master-*-windows-x64-setup.exe
+
+  # ── macOS Apple Silicon (arm64): .tar.gz ───────────────────────────────────
+  macos:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Select latest Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      - name: Install CMake 4.x + Ninja
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: "~4.0.0"
+
+      - name: Configure
+        run: cmake --preset arm64-osx-release
+
+      - name: Build
+        run: cmake --build --preset arm64-osx-release
+
+      - name: Bundle TLS certificate and key
+        env:
+          TLS_CERT: ${{ secrets.TLS_CERT }}
+          TLS_KEY: ${{ secrets.TLS_KEY }}
+        run: |
+          dir=build/arm64-osx-release/apps/motion_master
+          echo "$TLS_CERT" > "$dir/cert.pem"
+          echo "$TLS_KEY"  > "$dir/key.pem"
+
+      - name: Package tarball
+        run: |
+          dir=build/arm64-osx-release/apps/motion_master
+          cp SETUP.md "$dir/SETUP.md"
+          tar -czf "motion-master-${GITHUB_REF_NAME}-macos-arm64.tar.gz" \
+            -C "$dir" motion-master swagger.yml cert.pem key.pem SETUP.md
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos
+          path: motion-master-*-macos-arm64.tar.gz
+
+  # ── Publish the GitHub Release with all platform artifacts ─────────────────
+  release:
+    needs: [linux, windows, macos]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
 
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
             --title "$GITHUB_REF_NAME" \
             --generate-notes \
-            "$ARCHIVE" "$DEB" "$RPM"
+            dist/*

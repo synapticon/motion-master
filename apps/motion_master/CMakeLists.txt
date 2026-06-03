@@ -31,4 +31,17 @@ if(NOT WIN32)
 
 endif()
 
+# Windows install layout for the CPack/NSIS installer (see cmake/packaging-windows.cmake).
+# Everything lands flat in the install root, mirroring the deb/rpm /opt/motion-master layout.
+# cert.pem/key.pem are bundled by release CI before `cpack`; OPTIONAL so a local
+# `cpack` without them still succeeds.
+if(WIN32)
+  install(TARGETS motion_master RUNTIME DESTINATION .)
+  install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/swagger.yml" DESTINATION .)
+  install(FILES
+      "${CMAKE_CURRENT_BINARY_DIR}/cert.pem"
+      "${CMAKE_CURRENT_BINARY_DIR}/key.pem"
+      DESTINATION . OPTIONAL)
+endif()
+
 add_subdirectory(tests)

@@ -50,14 +50,18 @@ GameLoop* gGameLoop = nullptr;  ///< Signal handler target; set before run(), cl
 
 /// @brief Open the given URL in the system default browser.
 /// @details Non-blocking — returns immediately after spawning the browser process.
-///          Uses xdg-open on Linux and ShellExecute on Windows.
+///          Uses xdg-open on Linux, `open` on macOS, and ShellExecute on Windows.
 void openInBrowser(const char* url) {
 #ifdef _WIN32
   ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
 #else
   pid_t pid = fork();
   if (pid == 0) {
+#ifdef __APPLE__
+    execlp("open", "open", url, nullptr);
+#else
     execlp("xdg-open", "xdg-open", url, nullptr);
+#endif
     _exit(1);
   }
 #endif

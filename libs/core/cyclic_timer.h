@@ -18,6 +18,8 @@ namespace mm::core {
 ///   `SCHED_FIFO` priority on a `CONFIG_PREEMPT_RT` kernel.
 /// - Windows: `CreateWaitableTimerEx` with
 ///   `CREATE_WAITABLE_TIMER_HIGH_RESOLUTION` (requires Windows 10 1803+).
+/// - macOS: `mach_wait_until()` against an absolute `mach_absolute_time()`
+///   deadline (Darwin has no `clock_nanosleep`).
 ///
 /// Not copyable — each instance owns its own deadline state.
 class CyclicTimer {

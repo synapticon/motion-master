@@ -34,6 +34,10 @@
 *.a
 *.lib
 
+# Vendored Npcap SDK import libraries are committed despite the *.lib rule above —
+# they are needed to link the Windows build.
+!extern/npcap-sdk-1.16/Lib/x64/*.lib
+
 # Executables
 *.exe
 *.out

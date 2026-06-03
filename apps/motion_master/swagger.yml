@@ -618,6 +618,86 @@ paths:
           description: No device at the given bus position
         "500":
           $ref: "#/components/responses/DriverError"
+  /api/devices/{slavePosition}/watchdog:
+    get:
+      summary: Read the process-data (sync-manager) watchdog configuration
+      operationId: getProcessDataWatchdog
+      description: >
+        Reads the process-data watchdog timeout the slave at `slavePosition` is configured with,
+        decoded from the watchdog divider (0x0400) and process-data watchdog time (0x0420) ESC
+        registers. This is the configured timeout itself, not the expiration counter exposed by
+        `GET /api/devices/diagnostics`. A device in OP that misses process data past this timeout
+        faults itself to SAFE-OP+error; raising it lets a device tolerate the brief PDO pause of a
+        whole-bus re-map.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: Decoded watchdog configuration
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessDataWatchdog"
+        "400":
+          description: slavePosition is not a valid integer
+        "404":
+          description: No device at the given bus position
+        "500":
+          $ref: "#/components/responses/DriverError"
+    put:
+      summary: Set the process-data (sync-manager) watchdog timeout
+      operationId: setProcessDataWatchdog
+      description: >
+        Sets the process-data watchdog timeout of the slave at `slavePosition`, writing the
+        process-data watchdog time register (0x0420). The device's watchdog divider (0x0400) is
+        left untouched (it is shared with the PDI watchdog), so the achieved timeout is rounded to
+        that divider's tick base — the response reports the value actually programmed. A
+        `timeoutMs` of 0 disables the watchdog. The write persists across re-maps and re-scans
+        until the ESC reloads EEPROM (power cycle).
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [timeoutMs]
+              properties:
+                timeoutMs:
+                  type: number
+                  minimum: 0
+                  description: Desired watchdog timeout in milliseconds; 0 disables the watchdog
+                  example: 200
+      responses:
+        "200":
+          description: Watchdog configuration actually programmed (timeout rounded to the tick base)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProcessDataWatchdog"
+        "400":
+          description: >
+            slavePosition is not a valid integer, the body is malformed, timeoutMs is negative, or
+            the requested timeout exceeds what the device's watchdog divider can represent
+        "404":
+          description: No device at the given bus position
+        "500":
+          $ref: "#/components/responses/DriverError"
   /api/devices/{slavePosition}/sdo/{index}/{subindex}:
     get:
       summary: Upload an object dictionary entry from a device (CoE SDO upload)
@@ -1329,6 +1409,37 @@ paths:
           description: No monitoring with this topic
 components:
   schemas:
+    ProcessDataWatchdog:
+      type: object
+      description: >
+        A device's process-data (sync-manager) watchdog configuration, decoded from the watchdog
+        divider (0x0400) and process-data watchdog time (0x0420) ESC registers.
+      required: [slavePosition, enabled, timeoutNs, timeoutMs, divider, ticks]
+      properties:
+        slavePosition:
+          type: integer
+          description: 1-based position of the device on the fieldbus.
+          example: 1
+        enabled:
+          type: boolean
+          description: False when the time register (ticks) is 0, i.e. the watchdog is disabled.
+          example: true
+        timeoutNs:
+          type: integer
+          description: "Configured timeout in nanoseconds: ticks × 40 ns × (divider + 2)."
+          example: 100000000
+        timeoutMs:
+          type: number
+          description: The same timeout in milliseconds (convenience for display/editing).
+          example: 100
+        divider:
+          type: integer
+          description: Raw watchdog divider register (0x0400); shared with the PDI watchdog.
+          example: 2498
+        ticks:
+          type: integer
+          description: Raw process-data watchdog time register (0x0420), in watchdog ticks.
+          example: 1000
     Monitoring:
       type: object
       description: A monitoring's configuration plus its current runtime status.

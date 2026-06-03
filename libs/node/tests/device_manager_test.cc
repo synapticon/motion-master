@@ -44,6 +44,14 @@ class FakeDriver : public FieldbusDriver {
   /// Returned verbatim by readDcSync() — empty unless a test populates it.
   std::vector<mm::comm::DcSyncDiagnostics> dcSyncData;
 
+  /// Returned by processDataWatchdog(); also the echo base for setProcessDataWatchdog().
+  mm::comm::ProcessDataWatchdogConfig watchdogConfig{
+      .enabled = true, .timeout = std::chrono::milliseconds(100), .divider = 2498, .ticks = 1000};
+
+  /// Records the last setProcessDataWatchdog() call so tests can assert the forwarded arguments.
+  uint16_t lastWatchdogPosition = 0;
+  std::chrono::nanoseconds lastWatchdogTimeout{0};
+
   std::expected<void, std::string> init() override {
     if (!initSucceeds_) {
       return std::unexpected("fake init failure");
@@ -115,6 +123,21 @@ class FakeDriver : public FieldbusDriver {
   std::expected<void, std::string> writeRegister(uint16_t, uint16_t,
                                                  std::span<const uint8_t>) override {
     return {};
+  }
+
+  std::expected<mm::comm::ProcessDataWatchdogConfig, std::string> processDataWatchdog(
+      uint16_t) override {
+    return watchdogConfig;
+  }
+
+  std::expected<mm::comm::ProcessDataWatchdogConfig, std::string> setProcessDataWatchdog(
+      uint16_t slavePosition, std::chrono::nanoseconds timeout) override {
+    lastWatchdogPosition = slavePosition;
+    lastWatchdogTimeout = timeout;
+    // Echo the request as the "programmed" config, mimicking a driver that achieved it exactly.
+    watchdogConfig.timeout = timeout;
+    watchdogConfig.enabled = timeout != std::chrono::nanoseconds::zero();
+    return watchdogConfig;
   }
 
   void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
@@ -212,6 +235,54 @@ TEST(DeviceManagerDelegates, UnknownDeviceErrors) {
   EXPECT_FALSE(dm.readDeviceParameter(99, 0x6064, 0x00).has_value());
   EXPECT_FALSE(
       dm.writeDeviceParameter(99, 0x6064, 0x00, DeviceParameterValue{uint32_t{1}}).has_value());
+}
+
+TEST(DeviceManagerWatchdog, GetReturnsDriverConfig) {
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->watchdogConfig = {
+      .enabled = true, .timeout = std::chrono::milliseconds(200), .divider = 2498, .ticks = 2000};
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  auto wd = dm.getProcessDataWatchdog(1);
+  ASSERT_TRUE(wd.has_value());
+  EXPECT_TRUE(wd->enabled);
+  EXPECT_EQ(wd->timeout, std::chrono::milliseconds(200));
+  EXPECT_EQ(wd->ticks, 2000);
+}
+
+TEST(DeviceManagerWatchdog, SetForwardsPositionAndTimeout) {
+  auto driver = std::make_unique<FakeDriver>(true, 2);
+  FakeDriver* raw = driver.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  auto result = dm.setProcessDataWatchdog(2, std::chrono::milliseconds(250));
+  ASSERT_TRUE(result.has_value());
+  EXPECT_EQ(raw->lastWatchdogPosition, 2);
+  EXPECT_EQ(raw->lastWatchdogTimeout, std::chrono::milliseconds(250));
+  EXPECT_TRUE(result->enabled);
+  EXPECT_EQ(result->timeout, std::chrono::milliseconds(250));
+
+  // A zero timeout disables the watchdog.
+  auto disabled = dm.setProcessDataWatchdog(2, std::chrono::nanoseconds::zero());
+  ASSERT_TRUE(disabled.has_value());
+  EXPECT_FALSE(disabled->enabled);
+}
+
+TEST(DeviceManagerWatchdog, UnknownDeviceAndNoDriverError) {
+  DeviceManager dm;
+  // Before init there is no driver — both accessors must report it, not crash.
+  EXPECT_FALSE(dm.getProcessDataWatchdog(1).has_value());
+  EXPECT_FALSE(dm.setProcessDataWatchdog(1, std::chrono::milliseconds(100)).has_value());
+
+  ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true, 1)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  // Position 99 does not exist.
+  EXPECT_FALSE(dm.getProcessDataWatchdog(99).has_value());
+  EXPECT_FALSE(dm.setProcessDataWatchdog(99, std::chrono::milliseconds(100)).has_value());
 }
 
 TEST(DeviceManagerOnline, InitStateKeepsDeviceOffline) {

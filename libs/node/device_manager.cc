@@ -644,6 +644,30 @@ std::expected<std::vector<DcSyncInfo>, std::string> DeviceManager::getDcSync(
   return result;
 }
 
+std::expected<mm::comm::ProcessDataWatchdogConfig, std::string>
+DeviceManager::getProcessDataWatchdog(uint16_t slavePosition) {
+  std::shared_lock lock(busMutex_);
+  if (!driver_) {
+    return std::unexpected("no driver — call init() first");
+  }
+  if (!findDevice(slavePosition)) {
+    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
+  }
+  return driver_->processDataWatchdog(slavePosition);
+}
+
+std::expected<mm::comm::ProcessDataWatchdogConfig, std::string>
+DeviceManager::setProcessDataWatchdog(uint16_t slavePosition, std::chrono::nanoseconds timeout) {
+  std::shared_lock lock(busMutex_);
+  if (!driver_) {
+    return std::unexpected("no driver — call init() first");
+  }
+  if (!findDevice(slavePosition)) {
+    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
+  }
+  return driver_->setProcessDataWatchdog(slavePosition, timeout);
+}
+
 std::expected<bool, std::string> DeviceManager::isDeviceOnline(uint16_t slavePosition) {
   if (!driver_) {
     return std::unexpected("no driver — call init() first");

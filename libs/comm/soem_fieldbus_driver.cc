@@ -672,6 +672,87 @@ std::expected<void, std::string> SoemFieldbusDriver::writeRegister(uint16_t slav
   return {};
 }
 
+namespace {
+// ESC watchdog registers (ETG.1000.4 §Table 32). The divider (0x0400) is the common time base
+// for both the process-data (0x0420) and PDI (0x0410) watchdogs; the time register counts ticks
+// of that base. One tick = 40 ns × (divider + 2). A zero time register disables the watchdog.
+constexpr uint16_t kWatchdogDividerReg = 0x0400;
+constexpr uint16_t kWatchdogTimePdReg = 0x0420;
+constexpr int64_t kEscClockNs = 40;  // ESC reference clock period feeding the watchdog divider.
+
+int64_t watchdogTickNs(uint16_t divider) {
+  return kEscClockNs * (static_cast<int64_t>(divider) + 2);
+}
+
+mm::comm::ProcessDataWatchdogConfig decodeWatchdog(uint16_t divider, uint16_t ticks) {
+  return {.enabled = ticks != 0,
+          .timeout = std::chrono::nanoseconds(watchdogTickNs(divider) * ticks),
+          .divider = divider,
+          .ticks = ticks};
+}
+}  // namespace
+
+std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::processDataWatchdog(
+    uint16_t slavePosition) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  uint16_t configAddr = ctx_->slavelist[slavePosition].configadr;
+  uint16_t divider = 0;
+  uint16_t ticks = 0;
+  // ESC registers are little-endian on the wire; reading straight into a uint16_t is correct on
+  // the x86 host (matches the readDiagnostics DL-status read above).
+  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogDividerReg, sizeof(divider), &divider,
+               EC_TIMEOUTRET) != 1) {
+    return std::unexpected(
+        std::format("FPRD slave {} watchdog divider (0x0400) failed", slavePosition));
+  }
+  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogTimePdReg, sizeof(ticks), &ticks, EC_TIMEOUTRET) !=
+      1) {
+    return std::unexpected(
+        std::format("FPRD slave {} PD watchdog time (0x0420) failed", slavePosition));
+  }
+  return decodeWatchdog(divider, ticks);
+}
+
+std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::setProcessDataWatchdog(
+    uint16_t slavePosition, std::chrono::nanoseconds timeout) {
+  if (timeout < std::chrono::nanoseconds::zero()) {
+    return std::unexpected("watchdog timeout must not be negative");
+  }
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  uint16_t configAddr = ctx_->slavelist[slavePosition].configadr;
+  // Read the existing divider and leave it untouched — it is shared with the PDI watchdog, so we
+  // only scale the process-data time register against whatever time base the device already uses.
+  uint16_t divider = 0;
+  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogDividerReg, sizeof(divider), &divider,
+               EC_TIMEOUTRET) != 1) {
+    return std::unexpected(
+        std::format("FPRD slave {} watchdog divider (0x0400) failed", slavePosition));
+  }
+  const int64_t tickNs = watchdogTickNs(divider);
+  // Round to the nearest tick. A zero timeout maps to zero ticks (watchdog disabled).
+  int64_t ticks64 = (timeout.count() + tickNs / 2) / tickNs;
+  if (ticks64 > 0xFFFF) {
+    return std::unexpected(std::format(
+        "watchdog timeout {} ns exceeds the maximum {} ns representable with this device's divider "
+        "({} ns per tick)",
+        timeout.count(), tickNs * 0xFFFF, tickNs));
+  }
+  // A non-zero request that rounds to zero would silently disable the watchdog — floor it to one
+  // tick so "set a tiny timeout" never reads as "disable".
+  if (timeout.count() > 0 && ticks64 == 0) {
+    ticks64 = 1;
+  }
+  auto ticks = static_cast<uint16_t>(ticks64);
+  if (ecx_FPWR(&ctx_->port, configAddr, kWatchdogTimePdReg, sizeof(ticks), &ticks, EC_TIMEOUTRET) !=
+      1) {
+    return std::unexpected(
+        std::format("FPWR slave {} PD watchdog time (0x0420) failed", slavePosition));
+  }
+  spdlog::info("Device {}: process-data watchdog set to {} ns ({} ticks @ {} ns/tick)",
+               slavePosition, tickNs * ticks, ticks, tickNs);
+  return decodeWatchdog(divider, ticks);
+}
+
 // BOOT and PRE-OP use different mailbox sizes (e.g. 1024 vs 128 bytes on Integro
 // devices). After a firmware download the slave context still holds BOOT SM parameters;
 // without reprogramming them here an INIT→PRE-OP transition would reuse stale BOOT

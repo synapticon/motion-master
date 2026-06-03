@@ -10,6 +10,80 @@
  * ---------------------------------------------------------------
  */
 
+/** A device's process-data (sync-manager) watchdog configuration, decoded from the watchdog divider (0x0400) and process-data watchdog time (0x0420) ESC registers. */
+export interface ProcessDataWatchdog {
+  /**
+   * 1-based position of the device on the fieldbus.
+   * @example 1
+   */
+  slavePosition: number;
+  /**
+   * False when the time register (ticks) is 0, i.e. the watchdog is disabled.
+   * @example true
+   */
+  enabled: boolean;
+  /**
+   * Configured timeout in nanoseconds: ticks × 40 ns × (divider + 2).
+   * @example 100000000
+   */
+  timeoutNs: number;
+  /**
+   * The same timeout in milliseconds (convenience for display/editing).
+   * @example 100
+   */
+  timeoutMs: number;
+  /**
+   * Raw watchdog divider register (0x0400); shared with the PDI watchdog.
+   * @example 2498
+   */
+  divider: number;
+  /**
+   * Raw process-data watchdog time register (0x0420), in watchdog ticks.
+   * @example 1000
+   */
+  ticks: number;
+}
+
+/** A monitoring's configuration plus its current runtime status. */
+export interface Monitoring {
+  /** @example "left-leg" */
+  topic: string;
+  /**
+   * Present only when a label was supplied at creation.
+   * @example "Left Leg"
+   */
+  name?: string;
+  /**
+   * Sampling period in milliseconds.
+   * @example 1000
+   */
+  interval: number;
+  /**
+   * Samples per published batch.
+   * @example 16
+   */
+  bufferSize: number;
+  /**
+   * Rows currently accumulated toward the next batch.
+   * @example 7
+   */
+  bufferFill: number;
+  /** The sampled objects, in the positional order of each WebSocket sample row. */
+  parameters: {
+    /** @example 1 */
+    devicePosition: number;
+    /** @example 24676 */
+    index: number;
+    /** @example 0 */
+    subindex: number;
+    /**
+     * How the value is sourced — `pdo` (decoded from the live process image) or `sdo` (polled in the background and read from cache).
+     * @example "pdo"
+     */
+    source: "pdo" | "sdo";
+  }[];
+}
+
 export interface ProcessImageObject {
   /**
    * 1-based bus position of the owning device
@@ -771,16 +845,25 @@ export class HttpClient<SecurityDataType = unknown> {
  *
  * ## Monitoring WebSocket
  *
- * A monitoring WebSocket is available at `/ws`. Real-time messages use a
- * positionally-ordered array of numbers rather than keyed objects, to keep the
- * high-frequency path small (~40 values at a 1 ms cycle). Clients fetch the
- * schema once via `GET /api/monitoring/pdos` and cache it; the array order is
- * stable for the lifetime of a monitoring session. Two message types are sent:
+ * A monitoring WebSocket is available at `/ws`. A client creates a monitoring
+ * with `POST /api/monitorings` (a topic, sampling interval, buffer size, and a
+ * list of parameters), then subscribes to its topic over the socket by sending
+ * `{"subscribe":"<topic>"}` (and `{"unsubscribe":"<topic>"}` to stop). The server
+ * samples the parameters off the real-time thread, accumulates `bufferSize` rows,
+ * and publishes each batch to that topic — delivered only to the clients
+ * subscribed to it. The messages:
  *
  * ```json
- * {"type": "monitoring", "topic": "pdos", "data": [1234567890, 39, 0, 12345]}
+ * {"type": "monitoring", "topic": "left-leg", "data": [[1735821000123, 39000, 41], ...]}
  * {"type": "notification", "data": {"event": "slaves_changed"}}
  * ```
+ *
+ * `data` is an array of sample rows; each row is `[timestampMs, v0, v1, ...]`
+ * whose values are positionally ordered by the monitoring's `parameters` (fetch
+ * the order, and how each value is sourced, via `GET /api/monitorings/{topic}`).
+ * A value is `null` while its owning device is not exchanging (SAFE-OP/OP).
+ * Numbers beyond 2^53 lose precision in a JS client; the targeted values are
+ * 32-bit integers and floats.
  *
  * ## Networking, TLS, and CORS
  *
@@ -1085,6 +1168,70 @@ export class Api<
       >({
         path: `/api/devices/${slavePosition}/registers/${address}`,
         method: "POST",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Reads the process-data watchdog timeout the slave at `slavePosition` is configured with, decoded from the watchdog divider (0x0400) and process-data watchdog time (0x0420) ESC registers. This is the configured timeout itself, not the expiration counter exposed by `GET /api/devices/diagnostics`. A device in OP that misses process data past this timeout faults itself to SAFE-OP+error; raising it lets a device tolerate the brief PDO pause of a whole-bus re-map.
+     *
+     * @name GetProcessDataWatchdog
+     * @summary Read the process-data (sync-manager) watchdog configuration
+     * @request GET:/api/devices/{slavePosition}/watchdog
+     */
+    getProcessDataWatchdog: (
+      slavePosition: number,
+      params: RequestParams = {},
+    ) =>
+      this.request<
+        ProcessDataWatchdog,
+        void | {
+          /**
+           * Human-readable error message from the driver
+           * @example "FPRD slave 1: wkc=0"
+           */
+          error: string;
+        }
+      >({
+        path: `/api/devices/${slavePosition}/watchdog`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Sets the process-data watchdog timeout of the slave at `slavePosition`, writing the process-data watchdog time register (0x0420). The device's watchdog divider (0x0400) is left untouched (it is shared with the PDI watchdog), so the achieved timeout is rounded to that divider's tick base — the response reports the value actually programmed. A `timeoutMs` of 0 disables the watchdog. The write persists across re-maps and re-scans until the ESC reloads EEPROM (power cycle).
+     *
+     * @name SetProcessDataWatchdog
+     * @summary Set the process-data (sync-manager) watchdog timeout
+     * @request PUT:/api/devices/{slavePosition}/watchdog
+     */
+    setProcessDataWatchdog: (
+      slavePosition: number,
+      data: {
+        /**
+         * Desired watchdog timeout in milliseconds; 0 disables the watchdog
+         * @min 0
+         * @example 200
+         */
+        timeoutMs: number;
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<
+        ProcessDataWatchdog,
+        void | {
+          /**
+           * Human-readable error message from the driver
+           * @example "FPRD slave 1: wkc=0"
+           */
+          error: string;
+        }
+      >({
+        path: `/api/devices/${slavePosition}/watchdog`,
+        method: "PUT",
         body: data,
         type: ContentType.Json,
         format: "json",
@@ -1745,6 +1892,106 @@ export class Api<
         path: `/api/bus-config`,
         method: "GET",
         format: "json",
+        ...params,
+      }),
+  };
+  monitorings = {
+    /**
+     * @description Returns every registered monitoring as a resource — its configuration plus, per parameter, how its value is sourced, and the current buffer fill.
+     *
+     * @name ListMonitorings
+     * @summary List all monitorings
+     * @request GET:/api/monitorings
+     */
+    listMonitorings: (params: RequestParams = {}) =>
+      this.request<Monitoring[], any>({
+        path: `/api/monitorings`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Registers a monitoring and starts sampling it off the real-time thread. Each parameter is classified once against the published process image: PDO-mapped objects are decoded from the live image; the rest are polled over SDO in the background. Create monitorings after the bus is operational so PDO objects are recognised as PDO. Monitoring is live-only — a parameter samples `null` while its owning device is not exchanging (SAFE-OP/OP).
+     *
+     * @name CreateMonitoring
+     * @summary Create a monitoring
+     * @request POST:/api/monitorings
+     */
+    createMonitoring: (
+      data: {
+        /**
+         * URL-safe unique id; also the WebSocket topic. The name `pdos` is reserved.
+         * @pattern ^[A-Za-z0-9._-]{1,64}$
+         * @example "left-leg"
+         */
+        topic: string;
+        /**
+         * Optional human-readable label.
+         * @example "Left Leg"
+         */
+        name?: string;
+        /**
+         * Sampling period in milliseconds.
+         * @min 1
+         * @example 1000
+         */
+        interval: number;
+        /**
+         * Samples accumulated before a batch is published over the WebSocket.
+         * @min 16
+         * @example 16
+         */
+        bufferSize: number;
+        /**
+         * Objects to sample, each as `[devicePosition, index, subindex]`.
+         * @minItems 1
+         * @example [[1,8240,1],[1,24676,0]]
+         */
+        parameters: number[][];
+      },
+      params: RequestParams = {},
+    ) =>
+      this.request<
+        Monitoring,
+        {
+          error: string;
+        }
+      >({
+        path: `/api/monitorings`,
+        method: "POST",
+        body: data,
+        type: ContentType.Json,
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * No description
+     *
+     * @name GetMonitoring
+     * @summary Get a monitoring
+     * @request GET:/api/monitorings/{topic}
+     */
+    getMonitoring: (topic: string, params: RequestParams = {}) =>
+      this.request<Monitoring, void>({
+        path: `/api/monitorings/${topic}`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Stops sampling and releases the monitoring's SDO parameters from the shared refresher — an object no remaining monitoring needs stops being polled.
+     *
+     * @name DeleteMonitoring
+     * @summary Delete a monitoring
+     * @request DELETE:/api/monitorings/{topic}
+     */
+    deleteMonitoring: (topic: string, params: RequestParams = {}) =>
+      this.request<void, void>({
+        path: `/api/monitorings/${topic}`,
+        method: "DELETE",
         ...params,
       }),
   };

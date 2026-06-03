@@ -269,6 +269,21 @@ struct DcSyncDiagnostics {
                                  ///< negative = behind; zero on the reference clock itself.
 };
 
+/// @brief Process-data (sync-manager) watchdog configuration of one slave.
+///
+/// Decoded from the watchdog divider (0x0400) and process-data watchdog time (0x0420) ESC
+/// registers. The divider is the common time base for both the process-data and PDI watchdogs;
+/// the time register scales it. A zero time register disables the watchdog. Unlike
+/// @c SlaveDiagnostics::processDataWatchdog (an expiration counter), this is the configured
+/// timeout itself. Produced/consumed by @c FieldbusDriver::processDataWatchdog and
+/// @c setProcessDataWatchdog.
+struct ProcessDataWatchdogConfig {
+  bool enabled;                      ///< False when the time register (0x0420) is zero.
+  std::chrono::nanoseconds timeout;  ///< Decoded timeout: ticks × 40 ns × (divider + 2).
+  uint16_t divider;                  ///< Raw 0x0400 divider (shared with the PDI watchdog).
+  uint16_t ticks;                    ///< Raw 0x0420 process-data watchdog time register.
+};
+
 /// @brief Abstract interface for an EtherCAT fieldbus driver.
 ///
 /// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeDriver (SPoE).
@@ -526,6 +541,51 @@ class FieldbusDriver {
   /// @return Void on success, or an error string if no slave responded.
   virtual std::expected<void, std::string> writeRegister(uint16_t slavePosition, uint16_t address,
                                                          std::span<const uint8_t> data) = 0;
+
+  /// @brief Reads the process-data (sync-manager) watchdog configuration of one slave.
+  ///
+  /// FPRD-reads the watchdog divider (0x0400) and process-data watchdog time (0x0420) ESC
+  /// registers and decodes the timeout as @c ticks × 40 ns × (divider + 2). A zero time register
+  /// means the watchdog is disabled. Unlike @c readDiagnostics (which returns the expiration
+  /// counter), this returns the configured timeout itself. Serialised via the socket mutex; must
+  /// not overlap with @c exchangeProcessData.
+  ///
+  /// Optional capability: the default returns an error for transports without an ESC (e.g. SPoE);
+  /// the SOEM driver overrides it.
+  ///
+  /// @param slavePosition  1-based slave position on the bus.
+  /// @return The decoded watchdog configuration, or an error string if the transport has no ESC
+  ///         or a register read fails.
+  virtual std::expected<ProcessDataWatchdogConfig, std::string> processDataWatchdog(
+      uint16_t /*slavePosition*/) {
+    return std::unexpected("process-data watchdog not supported by this transport");
+  }
+
+  /// @brief Sets the process-data (sync-manager) watchdog timeout of one slave.
+  ///
+  /// Reads the slave's current watchdog divider (0x0400) — left untouched, since it is shared with
+  /// the PDI watchdog — computes the nearest tick count for @p timeout, and FPWR-writes the
+  /// process-data watchdog time register (0x0420). A @p timeout of zero disables the watchdog.
+  /// Because the tick resolution is the divider's time base, the achieved timeout is rounded; the
+  /// returned config reports what was actually programmed. Fails if @p timeout exceeds what the
+  /// current divider can represent (more than 65535 ticks) — the error names the maximum.
+  ///
+  /// The write persists across re-maps and re-scans (SOEM never reprograms these registers) until
+  /// the ESC reloads EEPROM (power cycle / explicit reload). Serialised via the socket mutex; must
+  /// not overlap with @c exchangeProcessData.
+  ///
+  /// Optional capability: the default returns an error for transports without an ESC (e.g. SPoE);
+  /// the SOEM driver overrides it.
+  ///
+  /// @param slavePosition  1-based slave position on the bus.
+  /// @param timeout        Desired watchdog timeout; zero disables the watchdog.
+  /// @return The watchdog configuration actually programmed (timeout rounded to the tick base),
+  ///         or an error string if the transport has no ESC, @p timeout is unrepresentable, or a
+  ///         register access fails.
+  virtual std::expected<ProcessDataWatchdogConfig, std::string> setProcessDataWatchdog(
+      uint16_t /*slavePosition*/, std::chrono::nanoseconds /*timeout*/) {
+    return std::unexpected("process-data watchdog not supported by this transport");
+  }
 
   /// @brief Commands a set of devices to @p targetState and blocks until all arrive or
   ///        @p timeout elapses.

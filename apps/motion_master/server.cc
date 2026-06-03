@@ -82,6 +82,18 @@ void sendStatus(Res* res, std::string_view status, std::string_view corsOrigin) 
   res->writeStatus(status)->writeHeader("Access-Control-Allow-Origin", corsOrigin)->end();
 }
 
+// Serialises a process-data watchdog configuration. timeoutMs is the human unit the UI edits;
+// timeoutNs and the raw divider/ticks expose the exact programmed value (the timeout is rounded
+// to the device's watchdog tick base).
+nlohmann::json watchdogJson(uint16_t slavePosition, const mm::comm::ProcessDataWatchdogConfig& wd) {
+  return {{"slavePosition", slavePosition},
+          {"enabled", wd.enabled},
+          {"timeoutNs", wd.timeout.count()},
+          {"timeoutMs", static_cast<double>(wd.timeout.count()) / 1e6},
+          {"divider", wd.divider},
+          {"ticks", wd.ticks}};
+}
+
 }  // namespace
 
 Server::Server(Config config, mm::node::DeviceManager& deviceManager,
@@ -440,6 +452,71 @@ void Server::run() {
                 sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
               });
             })
+      .get("/api/devices/:slavePosition/watchdog",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p1, ec1] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             if (ec1 != std::errc() || p1 != posParam.data() + posParam.size()) {
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
+               return;
+             }
+             if (!deviceManager_.findDevice(pos)) {
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
+               return;
+             }
+             auto r = deviceManager_.getProcessDataWatchdog(pos);
+             if (!r) {
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
+               return;
+             }
+             sendJson(res, config_.corsOrigin, watchdogJson(pos, *r));
+           })
+      .put("/api/devices/:slavePosition/watchdog",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p1, ec1] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             bool posOk = (ec1 == std::errc() && p1 == posParam.data() + posParam.size());
+             auto aborted = std::make_shared<bool>(false);
+             auto body = std::make_shared<std::string>();
+             res->onAborted([aborted]() { *aborted = true; });
+             res->onData([this, res, body, aborted, pos, posOk](std::string_view chunk, bool last) {
+               body->append(chunk);
+               if (!last) return;
+               if (*aborted) return;
+               if (!posOk) {
+                 sendStatus(res, "400 Bad Request", config_.corsOrigin);
+                 return;
+               }
+               double timeoutMs = 0;
+               try {
+                 nlohmann::json j = nlohmann::json::parse(*body);
+                 timeoutMs = j.at("timeoutMs").get<double>();
+               } catch (const nlohmann::json::exception& e) {
+                 sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
+                 return;
+               }
+               if (timeoutMs < 0) {
+                 sendError(res, "400 Bad Request", config_.corsOrigin,
+                           "timeoutMs must not be negative");
+                 return;
+               }
+               if (!deviceManager_.findDevice(pos)) {
+                 sendStatus(res, "404 Not Found", config_.corsOrigin);
+                 return;
+               }
+               auto ns = std::chrono::nanoseconds(static_cast<int64_t>(timeoutMs * 1e6 + 0.5));
+               auto r = deviceManager_.setProcessDataWatchdog(pos, ns);
+               if (!r) {
+                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
+                 return;
+               }
+               sendJson(res, config_.corsOrigin, watchdogJson(pos, *r));
+             });
+           })
       .get("/api/devices/:slavePosition/sdo/:index/:subindex",
            [this](auto* res, auto* req) {
              uint16_t pos{};

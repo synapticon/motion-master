@@ -1,8 +1,23 @@
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { DeviceDiagnostics, PortDiagnostics } from '@mm/api-client'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
+
+// Unwraps the {error: {error: "..."}} shape the generated client rejects with.
+function apiError(err: unknown): string {
+  if (err && typeof err === 'object' && 'error' in err) {
+    const inner = (err as { error: unknown }).error
+    if (inner && typeof inner === 'object' && 'error' in inner) {
+      return String((inner as { error: unknown }).error)
+    }
+  }
+  return 'Unknown error'
+}
+
+// Trims the float milliseconds (ticks × base, e.g. 100.0) to a tidy string.
+const formatMs = (ms: number): string => Number(ms.toFixed(3)).toString()
 
 // A port is worth showing when it carries a link or has accumulated any error — unused ports on a
 // 4-port ESC stay linkless with zero counters and would only add noise.
@@ -116,6 +131,81 @@ function PortTable({ ports }: { ports: PortDiagnostics[] }) {
   )
 }
 
+// The PD watchdog timeout is the knob behind the "PD watchdog" expiration counter above it:
+// raising it lets a device tolerate the brief whole-bus PDO pause of a re-map without faulting.
+// Per-device (config lives in the slave's ESC), so it has its own query/mutation, not the page's
+// bulk diagnostics fetch. A 0 ms timeout disables the watchdog.
+function WatchdogControl({ slavePosition }: { slavePosition: number }) {
+  const { api } = useConnection()
+  const queryClient = useQueryClient()
+  // null = follow the fetched value; a string = the user is editing.
+  const [draft, setDraft] = useState<string | null>(null)
+
+  const query = useQuery({
+    queryKey: ['watchdog', slavePosition],
+    queryFn: () => api.getProcessDataWatchdog(slavePosition).then(r => r.data),
+  })
+
+  const mutation = useMutation({
+    mutationFn: (timeoutMs: number) =>
+      api.setProcessDataWatchdog(slavePosition, { timeoutMs }).then(r => r.data),
+    onSuccess: data => {
+      queryClient.setQueryData(['watchdog', slavePosition], data)
+      setDraft(null)
+    },
+  })
+
+  const wd = query.data
+  const shown = draft ?? (wd ? formatMs(wd.timeoutMs) : '')
+  const value = Number(shown)
+  const canSet = shown !== '' && Number.isFinite(value) && value >= 0 && !mutation.isPending
+
+  return (
+    <div className="space-y-2">
+      <p className="eyebrow">Process-data watchdog timeout</p>
+      {query.isError ? (
+        <p className="text-xs text-grey-500">Not available on this transport.</p>
+      ) : query.isPending ? (
+        <p className="text-xs text-grey-600">Loading…</p>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className="text-[10px] uppercase tracking-wide text-grey-500 font-display block mb-1">
+                Timeout (ms) · 0 disables
+              </label>
+              <input
+                type="number"
+                min={0}
+                step="any"
+                value={shown}
+                onChange={e => setDraft(e.target.value)}
+                className="border border-grey-300 px-3 py-1.5 text-sm w-32 bg-white font-mono"
+              />
+            </div>
+            <button onClick={() => mutation.mutate(value)} disabled={!canSet} className={btnOutline}>
+              {mutation.isPending ? 'Setting…' : 'Set'}
+            </button>
+            <p className="text-xs text-grey-500 font-mono">
+              {wd!.enabled ? `current ${formatMs(wd!.timeoutMs)} ms` : 'disabled'} · {wd!.ticks} ticks
+              @ divider {wd!.divider}
+            </p>
+          </div>
+          {mutation.isError && (
+            <p className="text-xs text-status-bad font-mono">{apiError(mutation.error)}</p>
+          )}
+          {mutation.isSuccess && draft === null && (
+            <p className="text-xs text-status-good font-mono">
+              Programmed {wd!.enabled ? `${formatMs(wd!.timeoutMs)} ms` : 'disabled'} (rounded to the
+              tick base).
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 function DeviceCard({ device }: { device: DeviceDiagnostics }) {
   const errors = deviceErrors(device)
   return (
@@ -157,6 +247,8 @@ function DeviceCard({ device }: { device: DeviceDiagnostics }) {
             hint="PDI watchdog expirations (0x0443)"
           />
         </div>
+
+        <WatchdogControl slavePosition={device.slavePosition} />
 
         <div className="space-y-2">
           <p className="eyebrow">Ports</p>

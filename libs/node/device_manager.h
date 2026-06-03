@@ -345,6 +345,34 @@ class DeviceManager {
   std::expected<std::vector<DcSyncInfo>, std::string> getDcSync(
       const std::vector<uint16_t>& positions);
 
+  /// @brief Reads the process-data (sync-manager) watchdog configuration of one device.
+  ///
+  /// Forwards to @c FieldbusDriver::processDataWatchdog after resolving the device. Returns the
+  /// configured timeout itself (the divider/time registers), not the expiration counter that
+  /// @c getDeviceDiagnostics surfaces.
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @return The decoded watchdog configuration, or an error string if no driver is initialised,
+  ///         the device is unknown, the transport has no ESC, or a register read fails.
+  std::expected<mm::comm::ProcessDataWatchdogConfig, std::string> getProcessDataWatchdog(
+      uint16_t slavePosition);
+
+  /// @brief Sets the process-data (sync-manager) watchdog timeout of one device.
+  ///
+  /// Forwards to @c FieldbusDriver::setProcessDataWatchdog after resolving the device. A larger
+  /// timeout lets a device tolerate the brief PDO pause of a whole-bus re-map without faulting;
+  /// a @p timeout of zero disables the watchdog. The achieved timeout is rounded to the device's
+  /// watchdog tick base — the returned config reports what was programmed. The write persists
+  /// until the ESC reloads EEPROM (power cycle).
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @param timeout        Desired watchdog timeout; zero disables the watchdog.
+  /// @return The watchdog configuration actually programmed, or an error string if no driver is
+  ///         initialised, the device is unknown, the transport has no ESC, @p timeout is
+  ///         unrepresentable, or a register access fails.
+  std::expected<mm::comm::ProcessDataWatchdogConfig, std::string> setProcessDataWatchdog(
+      uint16_t slavePosition, std::chrono::nanoseconds timeout);
+
   /// @brief Reports whether a single device is currently online.
   ///
   /// Performs a live AL-state read for @p slavePosition and returns whether the device

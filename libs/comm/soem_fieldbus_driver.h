@@ -124,6 +124,14 @@ class SoemFieldbusDriver : public FieldbusDriver {
   std::expected<void, std::string> writeRegister(uint16_t slavePosition, uint16_t address,
                                                  std::span<const uint8_t> data) override;
 
+  /// @copydoc FieldbusDriver::processDataWatchdog
+  std::expected<ProcessDataWatchdogConfig, std::string> processDataWatchdog(
+      uint16_t slavePosition) override;
+
+  /// @copydoc FieldbusDriver::setProcessDataWatchdog
+  std::expected<ProcessDataWatchdogConfig, std::string> setProcessDataWatchdog(
+      uint16_t slavePosition, std::chrono::nanoseconds timeout) override;
+
   /// @brief Returns the number of discovered slaves, or 0 before discovery.
   int slaveCount() const;
 

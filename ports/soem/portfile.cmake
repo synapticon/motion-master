@@ -30,6 +30,16 @@ vcpkg_copy_pdbs()
 
 vcpkg_cmake_config_fixup(CONFIG_PATH "cmake")
 
+# Windows: the win32 nicdrv.h (installed to include/soem) #includes <pcap.h>,
+# but SOEM only puts the bundled wpcap headers on its own build include path
+# (BUILD_INTERFACE), so they are not installed and downstream consumers of
+# <soem/soem.h> cannot find pcap.h.  Install the bundled wpcap headers into the
+# package include root so they resolve.  (Runtime still needs Npcap installed.)
+if(VCPKG_TARGET_IS_WINDOWS)
+    file(COPY "${SOURCE_PATH}/oshw/win32/wpcap/Include/"
+         DESTINATION "${CURRENT_PACKAGES_DIR}/include")
+endif()
+
 file(REMOVE_RECURSE
     "${CURRENT_PACKAGES_DIR}/bin"
     "${CURRENT_PACKAGES_DIR}/debug/bin"

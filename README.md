@@ -323,10 +323,13 @@ git push && git push --tags
 
 | Workflow | Trigger | Purpose |
 |---|---|---|
-| `build.yml` | push / PR to `main` | Build, test; vcpkg packages cached in `~/.cache/vcpkg/archives` |
+| `build-linux-x64.yml` | push / PR to `main` | Build & test (Linux x64); vcpkg packages cached |
+| `build-linux-arm64.yml` | push / PR to `main` | Build & test (Linux ARM64) |
+| `build-macos-arm64.yml` | push / PR to `main` | Build & test (macOS Apple Silicon) |
+| `build-windows-x64.yml` | push / PR to `main` | Build & test (Windows x64) |
 | `lint.yml` | push / PR to `main` | clang-format + cpplint checks |
 | `cert-renewal.yml` | 1st of every month | Renew Let's Encrypt cert via acme-dns; update `TLS_CERT` / `TLS_KEY` secrets |
-| `release.yml` | `v*` tag push | Build release binary, bundle cert + key from secrets, publish GitHub Release with `.tar.gz`, `.deb`, and `.rpm` packages |
+| `release.yml` | `v*` tag push | Build all platforms, bundle cert + key from secrets, publish GitHub Release with `.tar.gz`, `.deb`, `.rpm` (Linux), NSIS `.exe` (Windows), and `.tar.gz` (macOS arm64) |
 
 The vcpkg cache key is OS + `vcpkg.json` hash. The first run after a dependency change rebuilds from source; subsequent runs restore from cache.
 

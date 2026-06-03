@@ -1,4 +1,4 @@
-name: Build & Test (ARM64)
+name: Build & Test (Linux ARM64)
 
 on:
   push:

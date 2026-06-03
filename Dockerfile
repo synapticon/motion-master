@@ -119,7 +119,6 @@ RUN ldconfig
 
 WORKDIR /opt/motion-master
 COPY --from=build /src/build/x64-linux-release/apps/motion_master/motion-master .
-COPY --from=build /src/apps/motion_master/swagger.yml .
 
 EXPOSE 8443
 

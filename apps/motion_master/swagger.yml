@@ -86,8 +86,7 @@ info:
       the form `{ "error": "<message>" }`. The message is a human-readable string;
       `409` on `init` specifically signals "already initialised" so a client can
       tell a reconnect from a real failure.
-    - **Spec** — this document is served live at `GET /api/swagger.yml`, and the
-      running version at `GET /api/version`.
+    - **Version** — the running server version is reported at `GET /api/version`.
 servers:
   - url: https://local.motion-master.synapticon.com:8443
     description: Local Motion Master instance
@@ -115,17 +114,6 @@ paths:
                       type: string
                       description: OS interface name (e.g. eth0 on Linux, \\Device\\NPF_{GUID} on Windows)
                       example: "eth0"
-  /api/swagger.yml:
-    get:
-      summary: OpenAPI specification
-      operationId: getSwaggerYml
-      responses:
-        "200":
-          description: This OpenAPI specification in YAML format
-          content:
-            text/yaml:
-              schema:
-                type: string
   /api/version:
     get:
       summary: Get Motion Master version

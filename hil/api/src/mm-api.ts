@@ -798,7 +798,7 @@ export class HttpClient<SecurityDataType = unknown> {
 
 /**
  * @title Motion Master API
- * @version 6.0.0-alpha.15
+ * @version 6.0.0-alpha.16
  * @baseUrl https://local.motion-master.synapticon.com:8443
  *
  * Motion Master is the motion-control software for Synapticon SOMANET servo
@@ -884,8 +884,7 @@ export class HttpClient<SecurityDataType = unknown> {
  *   the form `{ "error": "<message>" }`. The message is a human-readable string;
  *   `409` on `init` specifically signals "already initialised" so a client can
  *   tell a reconnect from a real failure.
- * - **Spec** — this document is served live at `GET /api/swagger.yml`, and the
- *   running version at `GET /api/version`.
+ * - **Version** — the running server version is reported at `GET /api/version`.
  */
 export class Api<
   SecurityDataType extends unknown,
@@ -917,21 +916,6 @@ export class Api<
         path: `/api/adapters`,
         method: "GET",
         format: "json",
-        ...params,
-      }),
-  };
-  swaggerYml = {
-    /**
-     * No description
-     *
-     * @name GetSwaggerYml
-     * @summary OpenAPI specification
-     * @request GET:/api/swagger.yml
-     */
-    getSwaggerYml: (params: RequestParams = {}) =>
-      this.request<string, any>({
-        path: `/api/swagger.yml`,
-        method: "GET",
         ...params,
       }),
   };

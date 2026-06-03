@@ -151,8 +151,6 @@ int main(int argc, char** argv) {
     }
   }
 
-  auto swaggerFile = (exeDir() / "swagger.yml").string();
-
   // Owns the monitoring registry plus its background SDO-refresher and sampler threads. Wired to
   // the server below so the HTTP routes reach it and sampled batches publish over the WebSocket.
   mm::node::MonitoringManager monitoringManager{deviceManager};
@@ -163,7 +161,6 @@ int main(int argc, char** argv) {
           .certFile = opts.certFile,
           .keyFile = opts.keyFile,
           .version = std::string{mm::core::kVersion},
-          .swaggerFile = std::move(swaggerFile),
           .initDriver = [&deviceManager, makeDriver](
                             const std::string& type,
                             const std::string& adapter) -> std::expected<void, std::string> {

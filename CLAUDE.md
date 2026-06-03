@@ -83,12 +83,12 @@ Four per-platform build workflows run on every push/PR — `build-linux-x64.yml`
 Three further workflows exist alongside the build set:
 
 - **`cert-renewal.yml`** — runs on the 1st of every month. Uses `acme.sh` with the `dns_acmedns` plugin against `auth.acme-dns.io` to issue a fresh Let's Encrypt cert for `local.motion-master.synapticon.com` (DNS-01 via CNAME delegation — no manual DNS touch required after the one-time setup). Stores the renewed cert and key as GitHub Secrets `TLS_CERT` and `TLS_KEY`. Requires `ACMEDNS_CONFIG` (acme-dns credentials JSON) and `GH_PAT_SECRETS` (fine-grained PAT with Secrets read/write on this repo) to be set as repository secrets.
-- **`release.yml`** — triggered by `v*` tags. Three parallel build legs (`linux` on `ubuntu-24.04`, `windows` on `windows-latest`, `macos` on `macos-14`) each read `TLS_CERT`/`TLS_KEY` from secrets and write them as `cert.pem`/`key.pem` into the build output; a final `release` job downloads every leg's artifacts and publishes one GitHub Release. The linux leg runs `tools/package.sh` (needs `dpkg-dev` + `rpm`); the windows leg runs `cpack -G NSIS`. Five artefacts: `motion-master-<version>-linux-x64.tar.gz`, `-amd64.deb`, `-x86_64.rpm`, `-windows-x64-setup.exe`, and `-macos-arm64.tar.gz`. All packages install to `/opt/motion-master/`; `cert.pem` and `key.pem` are marked as conffiles (deb) / `%config(noreplace)` (rpm) so upgrades never silently overwrite them. On deb, `apt remove` leaves conffiles behind — `apt purge` is required for a full uninstall. On rpm, `dnf remove` removes unmodified config files automatically; modified ones are saved as `.rpmsave`.
+- **`release.yml`** — triggered by `v*` tags. Three parallel build legs (`linux` on `ubuntu-24.04`, `windows` on `windows-latest`, `macos` on `macos-14`) each read `TLS_CERT`/`TLS_KEY` from secrets and write them as `cert.pem`/`key.pem` into the build output; a final `release` job downloads every leg's artifacts and publishes one GitHub Release. The linux leg runs `tools/package.sh` (needs `dpkg-dev` + `rpm`); the windows leg zips the exe with its vcpkg runtime DLLs (the `x64-windows` triplet is dynamic). Five artefacts: `motion-master-<version>-linux-x64.tar.gz`, `-amd64.deb`, `-x86_64.rpm`, `-windows-x64.zip`, and `-macos-arm64.tar.gz`. All packages install to `/opt/motion-master/`; `cert.pem` and `key.pem` are marked as conffiles (deb) / `%config(noreplace)` (rpm) so upgrades never silently overwrite them. On deb, `apt remove` leaves conffiles behind — `apt purge` is required for a full uninstall. On rpm, `dnf remove` removes unmodified config files automatically; modified ones are saved as `.rpmsave`.
 - **`lint.yml`** — runs clang-format and cpplint checks on every push and PR.
 
 ## Docker
 
-The `Dockerfile` is a two-stage build (build on `ubuntu:24.04`, minimal runtime image). The binary and swagger.yml land in `/opt/motion-master/` — consistent with the deb/rpm install path. `docker-entrypoint.sh` mirrors the cert discovery order of `tools/run.sh`: CERT/KEY env vars → bundled cert baked into the image → acme.sh mount → self-signed fallback.
+The `Dockerfile` is a two-stage build (build on `ubuntu:24.04`, minimal runtime image). The binary lands in `/opt/motion-master/` — consistent with the deb/rpm install path. `docker-entrypoint.sh` mirrors the cert discovery order of `tools/run.sh`: CERT/KEY env vars → bundled cert baked into the image → acme.sh mount → self-signed fallback.
 
 **Capabilities** — Docker drops most Linux capabilities by default. On bare-metal `setcap` stamps the binary so file capabilities are granted automatically; inside a container file capabilities are ignored and `--cap-add` is used instead:
 
@@ -109,7 +109,7 @@ Missing RT caps produce a warning and the loop runs non-RT. Missing EtherCAT cap
 ```
 motion-master/
   apps/
-    motion_master/     ← main executable (flat file layout); swagger.yml ships here alongside binary
+    motion_master/     ← main executable (flat file layout); swagger.yml here is the OpenAPI spec — source for the PWA's bundled API Docs + generated API clients, not shipped with the binary
     playground/        ← scratch binary
   libs/
     core/              ← version, seqlock, platform timers, cross-cutting utils
@@ -299,7 +299,7 @@ ninja -C build/x64-linux-debug format
 |---|---|---|
 | Classes, structs, enums, type aliases | `PascalCase` | `NetworkAdapter`, `GameLoop`, `SoemDriver` |
 | Functions (free and member) | `camelCase` | `isMacAddress()`, `addTask()`, `resolveNetworkAdapter()` |
-| Variables, parameters, struct members | `camelCase` | `macLinux`, `adapterName`, `swaggerFile` |
+| Variables, parameters, struct members | `camelCase` | `macLinux`, `adapterName`, `certFile` |
 | Private class data members | `camelCase_` (trailing `_`) | `period_`, `running_`, `tasks_` |
 | Files | `snake_case` | `game_loop.cc`, `soem_driver.h` |
 | Namespaces | `snake_case` | `mm::comm`, `mm::core` |

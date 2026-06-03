@@ -5,7 +5,6 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
-#include <fstream>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -173,20 +172,6 @@ void Server::publish(std::string topic, std::string json) {
 }
 
 void Server::run() {
-  // Read once at startup: the spec is static for the lifetime of the server, and
-  // failing early here surfaces a missing file before any client connects.
-  std::string swaggerContent;
-  if (!config_.swaggerFile.empty()) {
-    std::ifstream f{config_.swaggerFile};
-    if (f) {
-      std::ostringstream ss;
-      ss << f.rdbuf();
-      swaggerContent = ss.str();
-    } else {
-      spdlog::warn("Could not read swagger file: {}", config_.swaggerFile);
-    }
-  }
-
   loop_.store(uWS::Loop::get());
 
   uWS::SSLApp::WebSocketBehavior<WsData> ws_behavior{};
@@ -228,23 +213,10 @@ void Server::run() {
                      "<a href=\"https://synapticon.github.io/motion-master/\">"
                      "https://synapticon.github.io/motion-master/</a>.</p>"
                      "<ul>"
-                     "<li><a href=\"/api/swagger.yml\">API specification (swagger.yml)</a></li>"
                      "<li><a href=\"/api/log\">Log</a></li>"
                      "<li><a href=\"/api/registers\">ESC registers</a></li>"
                      "</ul>"
                      "</body></html>");
-           })
-      .get("/api/swagger.yml",
-           [this, swaggerContent](auto* res, auto* /*req*/) {
-             if (swaggerContent.empty()) {
-               res->writeStatus("404 Not Found")->end();
-               return;
-             }
-             // text/* renders inline in the browser; non-text MIME types trigger a download.
-             res->writeHeader("Content-Type", "text/yaml; charset=utf-8")
-                 ->writeHeader("Content-Disposition", "inline")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(swaggerContent);
            })
       .get("/api/adapters",
            [this](auto* res, auto* /*req*/) {

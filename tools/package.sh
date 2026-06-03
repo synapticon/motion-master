@@ -13,7 +13,7 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$REPO_DIR/build/$PRESET/apps/motion_master"
 VERSION=$(cat "$REPO_DIR/VERSION")
 
-for f in motion-master swagger.yml cert.pem key.pem; do
+for f in motion-master cert.pem key.pem; do
     [[ -f "$BUILD_DIR/$f" ]] || { echo "Missing: $BUILD_DIR/$f" >&2; exit 1; }
 done
 
@@ -27,14 +27,12 @@ mkdir -p "$deb_root/DEBIAN" \
          "$deb_root/usr/local/bin"
 
 cp "$BUILD_DIR/motion-master" "$deb_root/opt/motion-master/motion-master"
-cp "$BUILD_DIR/swagger.yml"   "$deb_root/opt/motion-master/swagger.yml"
 cp "$BUILD_DIR/cert.pem"      "$deb_root/opt/motion-master/cert.pem"
 cp "$BUILD_DIR/key.pem"       "$deb_root/opt/motion-master/key.pem"
 cp "$REPO_DIR/setup.sh"       "$deb_root/opt/motion-master/setup.sh"
 chmod 755 "$deb_root/opt/motion-master/motion-master" \
           "$deb_root/opt/motion-master/setup.sh"
-chmod 644 "$deb_root/opt/motion-master/swagger.yml" \
-          "$deb_root/opt/motion-master/cert.pem" \
+chmod 644 "$deb_root/opt/motion-master/cert.pem" \
           "$deb_root/opt/motion-master/key.pem"
 ln -sf /opt/motion-master/motion-master "$deb_root/usr/local/bin/motion-master"
 
@@ -67,7 +65,6 @@ RPM_RELEASE="${VERSION#*-}"
 mkdir -p "$rpm_root"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
 cp "$BUILD_DIR/motion-master" "$rpm_root/SOURCES/"
-cp "$BUILD_DIR/swagger.yml"   "$rpm_root/SOURCES/"
 cp "$BUILD_DIR/cert.pem"      "$rpm_root/SOURCES/"
 cp "$BUILD_DIR/key.pem"       "$rpm_root/SOURCES/"
 cp "$REPO_DIR/setup.sh"       "$rpm_root/SOURCES/"
@@ -91,7 +88,6 @@ Motion control software for SOMANET servo drives by Synapticon GmbH.
 %install
 install -d %{buildroot}/opt/motion-master %{buildroot}/usr/local/bin
 install -m 755 %{_sourcedir}/motion-master %{buildroot}/opt/motion-master/
-install -m 644 %{_sourcedir}/swagger.yml   %{buildroot}/opt/motion-master/
 install -m 644 %{_sourcedir}/cert.pem      %{buildroot}/opt/motion-master/
 install -m 644 %{_sourcedir}/key.pem       %{buildroot}/opt/motion-master/
 install -m 755 %{_sourcedir}/setup.sh      %{buildroot}/opt/motion-master/
@@ -103,7 +99,6 @@ setcap cap_sys_nice,cap_net_admin,cap_net_raw=eip /opt/motion-master/motion-mast
 %files
 %defattr(-,root,root,-)
 /opt/motion-master/motion-master
-/opt/motion-master/swagger.yml
 %config(noreplace) /opt/motion-master/cert.pem
 %config(noreplace) /opt/motion-master/key.pem
 /opt/motion-master/setup.sh

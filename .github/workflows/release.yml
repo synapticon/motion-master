@@ -56,7 +56,7 @@ jobs:
           cp setup.sh "$dir/setup.sh"
           cp SETUP.md "$dir/SETUP.md"
           tar -czf "motion-master-${GITHUB_REF_NAME}-linux-x64.tar.gz" \
-            -C "$dir" motion-master swagger.yml cert.pem key.pem setup.sh SETUP.md
+            -C "$dir" motion-master cert.pem key.pem setup.sh SETUP.md
 
       - name: Create deb and rpm
         run: ./tools/package.sh x64-linux-release
@@ -96,9 +96,6 @@ jobs:
         with:
           arch: x64
 
-      - name: Install NSIS
-        run: choco install nsis -y --no-progress
-
       - name: Configure
         run: cmake --preset x64-windows-release
 
@@ -115,14 +112,23 @@ jobs:
           echo "$TLS_CERT" > "$dir/cert.pem"
           echo "$TLS_KEY"  > "$dir/key.pem"
 
-      - name: Build NSIS installer
-        run: cpack -G NSIS --config build/x64-windows-release/CPackConfig.cmake
+      - name: Package zip
+        shell: pwsh
+        run: |
+          $dir = "build/x64-windows-release/apps/motion_master"
+          # x64-windows is a dynamic triplet, so bundle the vcpkg runtime DLLs next
+          # to the exe (openssl, zlib, fmt, ...). wpcap.dll comes from Npcap at runtime.
+          Copy-Item "build/x64-windows-release/vcpkg_installed/x64-windows/bin/*.dll" $dir -ErrorAction SilentlyContinue
+          Copy-Item "SETUP.md" $dir
+          $zip = "motion-master-$env:GITHUB_REF_NAME-windows-x64.zip"
+          Compress-Archive -Force -DestinationPath $zip -Path `
+            "$dir/motion-master.exe","$dir/cert.pem","$dir/key.pem","$dir/SETUP.md",(Get-Item "$dir/*.dll")
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: motion-master-*-windows-x64-setup.exe
+          path: motion-master-*-windows-x64.zip
 
   # ── macOS Apple Silicon (arm64): .tar.gz ───────────────────────────────────
   macos:
@@ -170,7 +176,7 @@ jobs:
           dir=build/arm64-osx-release/apps/motion_master
           cp SETUP.md "$dir/SETUP.md"
           tar -czf "motion-master-${GITHUB_REF_NAME}-macos-arm64.tar.gz" \
-            -C "$dir" motion-master swagger.yml cert.pem key.pem SETUP.md
+            -C "$dir" motion-master cert.pem key.pem SETUP.md
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

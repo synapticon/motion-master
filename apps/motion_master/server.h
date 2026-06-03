@@ -17,8 +17,8 @@ class MonitoringManager;
 
 /// @brief Combined HTTPS + WebSocket server.
 ///
-/// Hosts the REST API (swagger spec, version endpoint, CORS preflight) and a
-/// single monitoring WebSocket at `/ws`.  Runs on a dedicated background thread
+/// Hosts the REST API (version endpoint, CORS preflight, device/bus routes) and
+/// a single monitoring WebSocket at `/ws`.  Runs on a dedicated background thread
 /// started by start() and torn down by stop().
 ///
 /// All public methods are thread-safe.  broadcast() may be called from any
@@ -48,7 +48,6 @@ class Server {
     std::string certFile;     ///< Path to the TLS certificate (PEM).
     std::string keyFile;      ///< Path to the TLS private key (PEM).
     std::string version;      ///< Application version string served at `GET /api/version`.
-    std::string swaggerFile;  ///< Path to `swagger.yml`; served at `GET /api/swagger.yml`.
     InitDriverFn initDriver;  ///< Handler for `POST /api/init`; required for API-driven init.
     GetLogFn getLog;          ///< Handler for `GET /api/log`; returns buffered log entries.
     /// Value sent in `Access-Control-Allow-Origin`. Defaults to the production PWA origin.

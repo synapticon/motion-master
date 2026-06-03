@@ -2,7 +2,7 @@
 
 ## Feature List
 
-- Start the process without initializing devices. This enables API endpoints that return the Motion Master version, scan the network for available devices, and serve the OpenAPI/Swagger specification.
+- Start the process without initializing devices. This enables API endpoints that return the Motion Master version and scan the network for available devices.
 - HTTP API handles simple requests such as version info and network scanning, but also device initialization, device listing, and SDO read/write operations including file transfer.
 - A single WebSocket connection for monitoring: streams values only, plus notifications (e.g. number of slaves changed, devices leaving OP state due to a watchdog timeout). Monitoring configuration is exposed through the HTTP API. Multi-axis monitoring is required.
 - No complex Protobuf message structures as in the current implementation — SDO values are plain buffers, numbers, or strings; monitoring payloads are arrays of numbers.
@@ -628,7 +628,7 @@ Runs on the 1st of every month via `schedule`. Installs `acme.sh`, writes `~/.ac
 
 **release.yml**
 
-Triggered by `v*` tag pushes. Builds with the `x64-linux-release` CMake preset, reads `TLS_CERT` and `TLS_KEY` from secrets, writes them as `cert.pem`/`key.pem` into the build output directory, then packages `motion-master`, `swagger.yml`, `cert.pem`, and `key.pem` into `motion-master-<version>-linux-x64.tar.gz` and publishes a GitHub Release.
+Triggered by `v*` tag pushes. Builds with the `x64-linux-release` CMake preset, reads `TLS_CERT` and `TLS_KEY` from secrets, writes them as `cert.pem`/`key.pem` into the build output directory, then packages `motion-master`, `cert.pem`, and `key.pem` into `motion-master-<version>-linux-x64.tar.gz` and publishes a GitHub Release.
 
 **tools/run.sh cert discovery order**
 

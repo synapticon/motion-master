@@ -16,8 +16,12 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Cache vcpkg packages
-        uses: actions/cache@v5
+      # Split restore/save so the vcpkg binary cache is written even when a later
+      # build step fails — actions/cache only saves on job success, which would
+      # otherwise rebuild every dependency (openssl alone is ~8 min) on each red run.
+      - name: Restore vcpkg cache
+        id: vcpkg-cache
+        uses: actions/cache/restore@v5
         with:
           path: ~/AppData/Local/vcpkg/archives
           key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
@@ -36,6 +40,14 @@ jobs:
 
       - name: Configure
         run: cmake --preset x64-windows-debug
+
+      - name: Save vcpkg cache
+        # Persist the freshly built dependencies even if the build/test below fails.
+        if: always() && steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v5
+        with:
+          path: ~/AppData/Local/vcpkg/archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
 
       - name: Build
         run: cmake --build --preset x64-windows-debug

@@ -2,6 +2,13 @@
 
 Next-generation motion control software for SOMANET servo drives. Browser-based control interface, real-time process data exchange, and a secure HTTP API and WebSocket interface — control from any language, any tool, any AI agent.
 
+## Architecture
+
+Design documents with Mermaid diagrams (rendered natively on GitHub):
+
+- [Threading model](docs/THREADS.md) — the four threads, RT cycle, and control-plane vs PDO-path locking.
+- [Class diagram](docs/CLASS_DIAGRAM.md) — class structure, ownership, and inheritance.
+
 ## Prerequisites
 
 - CMake 4.0+

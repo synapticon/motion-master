@@ -62,7 +62,7 @@ jobs:
         run: ./tools/package.sh x64-linux-release
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: linux
           path: |
@@ -128,7 +128,7 @@ jobs:
           Compress-Archive -Force -DestinationPath $zip -Path $files
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: windows
           path: motion-master-*-windows-x64.zip
@@ -182,7 +182,7 @@ jobs:
             -C "$dir" motion-master cert.pem key.pem SETUP.md
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: macos
           path: motion-master-*-macos-arm64.tar.gz
@@ -193,7 +193,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: dist
           merge-multiple: true

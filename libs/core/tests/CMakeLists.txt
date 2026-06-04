@@ -15,4 +15,4 @@ target_compile_options(mm_core_tests PRIVATE
     $<$<CXX_COMPILER_ID:GNU>:-Wno-array-bounds -Wno-stringop-overflow>)
 
 include(GoogleTest)
-gtest_discover_tests(mm_core_tests)
+gtest_discover_tests(mm_core_tests DISCOVERY_TIMEOUT 60)

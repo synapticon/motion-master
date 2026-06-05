@@ -1,0 +1,184 @@
+#include "node/cia402_drive.h"
+
+#include <chrono>
+#include <format>
+#include <string>
+#include <thread>
+
+namespace mm::node {
+
+namespace {
+
+using cia402::Command;
+using cia402::Object;
+using cia402::State;
+
+// Poll cadence for enable()'s state-machine walk. Short enough that a healthy 1 ms bus advances
+// within a couple of polls, long enough not to busy-spin the control-plane thread. Not on the RT
+// path — enable() runs on the HTTP thread.
+constexpr auto kPollStep = std::chrono::milliseconds(1);
+
+}  // namespace
+
+std::expected<uint16_t, std::string> Cia402Drive::statusword() const {
+  return device_.readValue<uint16_t>(Object::kStatusword, 0);
+}
+
+std::expected<uint16_t, std::string> Cia402Drive::controlword() const {
+  return device_.readValue<uint16_t>(Object::kControlword, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setControlword(uint16_t value) {
+  return device_.writeValue(Object::kControlword, 0, value);
+}
+
+std::expected<State, std::string> Cia402Drive::state() const {
+  return statusword().transform(cia402::decodeState);
+}
+
+std::expected<cia402::OperationMode, std::string> Cia402Drive::operationMode() const {
+  auto v = device_.readValue<int8_t>(Object::kModeOfOperationDisplay, 0);
+  if (!v) {
+    return std::unexpected(v.error());
+  }
+  return static_cast<cia402::OperationMode>(*v);
+}
+
+std::expected<void, std::string> Cia402Drive::setOperationMode(cia402::OperationMode mode) {
+  return device_.writeValue(Object::kModeOfOperation, 0, static_cast<int8_t>(mode));
+}
+
+std::expected<void, std::string> Cia402Drive::applyCommand(uint16_t command) {
+  auto current = controlword();
+  if (!current) {
+    return std::unexpected(current.error());
+  }
+  const uint16_t next =
+      static_cast<uint16_t>((*current & ~cia402::kCommandMask) | (command & cia402::kCommandMask));
+  return setControlword(next);
+}
+
+std::expected<void, std::string> Cia402Drive::shutdown() {
+  return applyCommand(Command::kCmdShutdown);
+}
+
+std::expected<void, std::string> Cia402Drive::switchOn() {
+  return applyCommand(Command::kCmdSwitchOn);
+}
+
+std::expected<void, std::string> Cia402Drive::enableOperation() {
+  return applyCommand(Command::kCmdEnableOperation);
+}
+
+std::expected<void, std::string> Cia402Drive::disableVoltage() {
+  return applyCommand(Command::kCmdDisableVoltage);
+}
+
+std::expected<void, std::string> Cia402Drive::quickStop() {
+  return applyCommand(Command::kCmdQuickStop);
+}
+
+std::expected<void, std::string> Cia402Drive::faultReset() {
+  // Fault reset is the rising edge of bit 7: set it, then clear it so a later fault can be reset
+  // again. The clearing write leaves the other command bits as they were.
+  auto current = controlword();
+  if (!current) {
+    return std::unexpected(current.error());
+  }
+  const uint16_t pulsed = static_cast<uint16_t>(*current | Command::kCmdFaultReset);
+  if (auto r = setControlword(pulsed); !r) {
+    return r;
+  }
+  const uint16_t cleared = static_cast<uint16_t>(*current & ~Command::kCmdFaultReset);
+  return setControlword(cleared);
+}
+
+std::expected<void, std::string> Cia402Drive::disable() { return disableVoltage(); }
+
+std::expected<void, std::string> Cia402Drive::enable(std::chrono::milliseconds timeout) {
+  // Walk the state machine toward OperationEnabled, issuing one transition per observed state.
+  // We re-read the state each iteration rather than assuming the previous command took effect,
+  // so a drive that needs an extra cycle (or rejects a step) is handled by simply re-issuing.
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  for (;;) {
+    auto st = state();
+    if (!st) {
+      return std::unexpected(st.error());
+    }
+    switch (*st) {
+      case State::kOperationEnabled:
+        return {};
+      case State::kFault:
+        if (auto r = faultReset(); !r) {
+          return r;
+        }
+        break;
+      case State::kFaultReactionActive:
+        // Wait for the drive to finish reacting and settle into Fault, then reset.
+        break;
+      case State::kSwitchOnDisabled:
+        if (auto r = shutdown(); !r) {
+          return r;
+        }
+        break;
+      case State::kReadyToSwitchOn:
+        if (auto r = switchOn(); !r) {
+          return r;
+        }
+        break;
+      case State::kSwitchedOn:
+        if (auto r = enableOperation(); !r) {
+          return r;
+        }
+        break;
+      case State::kQuickStopActive:
+        // Quick stop must be released by the user (it is a deliberate safety state); re-issuing
+        // enable should not silently override it. Treat it as a soft wait — the user clears it.
+        break;
+      case State::kNotReadyToSwitchOn:
+        // Still initialising; wait.
+        break;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      return std::unexpected(std::format("enable timed out after {} ms in state {}",
+                                         timeout.count(), cia402::toString(*st)));
+    }
+    std::this_thread::sleep_for(kPollStep);
+  }
+}
+
+std::expected<void, std::string> Cia402Drive::setTargetPosition(int32_t counts) {
+  return device_.writeValue(Object::kTargetPosition, 0, counts);
+}
+
+std::expected<void, std::string> Cia402Drive::setTargetVelocity(int32_t value) {
+  return device_.writeValue(Object::kTargetVelocity, 0, value);
+}
+
+std::expected<void, std::string> Cia402Drive::setTargetTorque(int16_t perMille) {
+  return device_.writeValue(Object::kTargetTorque, 0, perMille);
+}
+
+std::expected<int32_t, std::string> Cia402Drive::positionActualValue() const {
+  return device_.readValue<int32_t>(Object::kPositionActualValue, 0);
+}
+
+std::expected<int32_t, std::string> Cia402Drive::velocityActualValue() const {
+  return device_.readValue<int32_t>(Object::kVelocityActualValue, 0);
+}
+
+std::expected<Cia402Drive, std::string> createCia402Drive(Device& device) {
+  // Offline-safe discriminator: a CiA402 drive exposes both the controlword and statusword in
+  // its object dictionary. Presence in the (already-enumerated) parameter map is enough — no bus
+  // I/O, so this works whether the device is online or not.
+  if (device.parameter(Object::kControlword, 0) == nullptr ||
+      device.parameter(Object::kStatusword, 0) == nullptr) {
+    return std::unexpected(
+        std::format("device {} is not a CiA402 drive (missing controlword/statusword; "
+                    "initializeParameters first?)",
+                    device.slavePosition()));
+  }
+  return Cia402Drive(device);
+}
+
+}  // namespace mm::node

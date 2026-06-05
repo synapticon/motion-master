@@ -1,6 +1,8 @@
 find_package(GTest CONFIG REQUIRED)
 
 add_executable(mm_node_tests
+    cia402_drive_test.cc
+    cia402_test.cc
     device_parameter_test.cc
     device_test.cc
     device_manager_test.cc
@@ -8,6 +10,7 @@ add_executable(mm_node_tests
     monitoring_manager_test.cc
     parameter_refresher_test.cc
     process_image_test.cc
+    somanet_drive_test.cc
 )
 
 target_link_libraries(mm_node_tests PRIVATE mm::node GTest::gtest GTest::gtest_main)

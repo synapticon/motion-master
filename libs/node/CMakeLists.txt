@@ -1,4 +1,5 @@
 add_library(node STATIC
+    cia402_drive.cc
     device.cc
     device_manager.cc
     device_parameter.cc
@@ -6,6 +7,7 @@ add_library(node STATIC
     monitoring_manager.cc
     parameter_refresher.cc
     process_image.cc
+    somanet_drive.cc
 )
 add_library(mm::node ALIAS node)
 

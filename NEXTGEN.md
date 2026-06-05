@@ -128,6 +128,8 @@ App  (composition root, owns everything)
 
 **Device hierarchy — inheritance vs composition**
 
+> **Superseded by Session 2026-06-05 — Device profiles as borrowed views.** The conclusion below (CiA402 as a subtype-or-component *of* `Device`; Somanet relegated to free functions because subclassing would force downcasting) was reasoned about the wrong ownership direction. The resolved model inverts it: profiles *borrow* a `Device&` rather than being owned *by* `Device`, which makes a full `SomanetDrive → Cia402Drive → ProfileDevice` inheritance chain correct. Read the later session; the notes here are kept only for the reasoning trail.
+
 `Device → Cia402Drive` via inheritance: correct. The relationship is genuinely "is-a" — CiA402 is a standard and every such device has the same state machine, op modes, and control/status word bits. Shallow inheritance is appropriate.
 
 `Cia402Drive → SomanetDevice` via inheritance: no. Somanet-specific features are not what the device _is_, they are what you _do with it_ using knowledge of Somanet's OD layout. Subclassing here would force `DeviceManager` to know about `SomanetDevice` or require downcasting — both are signs the abstraction is wrong.
@@ -769,3 +771,92 @@ std::vector<std::atomic<uint64_t>> outputSlots;
 **Practical notes.** (1) `std::vector<std::atomic<uint64_t>>` can't be resized (atomics aren't movable), so it is *constructed* at the needed size on each remap — fine, since remap rebuilds and re-seeds everything anyway. (2) Slot lookup `(pos,index,subindex) → i`: either extend `ProcessImage::find` to return the output index, or `ProcessData` keeps a small `unordered_map<key,size_t>` built at remap. (3) The `uint64_t` slot caps an object at 64 bits — true for every SOMANET CiA402 output; a hypothetical wider PDO would need a per-object `SeqLock<array>` (and would reintroduce single-producer concerns for concurrent writers to *that* object), so document the constraint rather than build for a case that doesn't exist here.
 
 **Status.** Implemented (2026-06-05), ahead of step 2. `ProcessData` now holds one `std::atomic<uint64_t>` slot per output object (rebuilt and seeded at each re-map) in place of the `outputStaging` seqlock + `stagingMutex`; `writePdo` is a lock-free per-slot store, and `exchangeProcessData` composes the wire image from the slots each cycle and publishes both an `outputSnapshot` (RT-written, for monitoring read-back) and the `inputSnapshot`. `ProcessImage::Location`/`find` gained `entryIndex` so an output object addresses its slot directly. One deliberate behaviour change: an output read-back on an *unhealthy* bus now returns the staged setpoint (always our own valid value, lock-free) rather than falling back to a blocking SDO upload — inputs are still health-gated and fall back to SDO. Tests cover independent-slot composition, sub-byte packing without clobber, and the output read-back. The `uint64_t`-slot ≤64-bit constraint stands as documented.
+
+## Session 2026-06-05 — Device profiles as borrowed views (`ProfileDevice` ← `Cia402Drive` ← `SomanetDrive`)
+
+**Supersedes** the device-hierarchy notes in *Session 2026-05-16 — Class diagram, device hierarchy, naming*. That section argued `Device → Cia402Drive` by inheritance with Somanet pushed out to free functions; the diagram alongside it argued the opposite (a `DeviceType` discriminator + a conditionally-owned `Cia402StateMachine`, i.e. composition). The two never agreed, and the code had silently picked a side: `DeviceManager` owns `std::vector<Device> devices_` **by value** (the whole reason `Device::parametersMutex_` is a `unique_ptr<std::mutex>` — see `device.h` — is to keep `Device` move-constructible into that vector). Value storage is flatly incompatible with `Cia402Drive : Device` — you'd slice, or you'd be forced to `vector<unique_ptr<Device>>` and downcast everywhere. So the prose's inheritance was unbuildable and the diagram's composition was the fallback.
+
+**The reframe that resolves it: invert the ownership.** The profile object does not live *on* `Device` (neither as a base nor as an owned member). It *borrows* a `Device&` and is constructed on demand. Once profiles are **borrowed views, never stored**, the entire objection evaporates and a real is-a chain becomes correct:
+
+```cpp
+class ProfileDevice {                       // base: just the borrowed reference + generic OD helpers
+ public:
+  explicit ProfileDevice(Device& device) : device_(device) {}
+ protected:
+  Device& device_;                          // the ONLY data member in the whole chain
+};
+
+class Cia402Drive : public ProfileDevice {  // is-a: every CiA402 device shares this state machine
+ public:
+  std::expected<void, std::string> enable();                 // walks the CiA402 transitions
+  std::expected<void, std::string> setOperationMode(OperationMode);
+  Cia402State state() const;                                 // decodes statusword
+};
+
+class SomanetDrive : public Cia402Drive {   // is-a: a SOMANET drive genuinely implements CiA402 + extras
+  // SOMANET-specific OD access (encoder config, motor config, ...)
+};
+```
+
+This is *legitimate* inheritance because nothing is ever stored base-typed: views are stack-locals for a synchronous operation, or members of a task scoped to that task's lifetime. No `vector<ProfileDevice>`, so no slicing; no polymorphic storage, so no downcasting. `Device` stays value-stored and untouched. Profile is no longer "discovered at scan and baked into a type" — you construct the view you want at the moment you know what you want to do.
+
+**Load-bearing rule: the views are data-free except `Device&`.** No persistent per-drive profile state. CiA402 doesn't need any — the drive's `statusword` *is* the state machine's state; an `enable()` just loops `read statusword → write controlword` until OperationEnabled (bounded, sub-second, synchronous, no memory between calls). The day a profile needs state that outlives a call is the day this model breaks; until then, give the views no members beyond the borrowed reference. (Procedure state that *does* persist lives in a task — below — which *is* stored.)
+
+**Construction: checked factory free functions, not a `somanet::`/`cia402::` namespace, not a `DeviceManager` method.**
+
+```cpp
+// In mm::node, alongside reconcileDetectedModules. Validate the profile, then bind the view.
+std::expected<Cia402Drive,  std::string> createCia402Drive(Device& device);
+std::expected<SomanetDrive, std::string> createSomanetDrive(Device& device);
+```
+
+The `create…` prefix is honest — the view is returned **by value** (it's a `Device&` wrapper; trivially movable), nothing is allocated or owned heap-side. The factory validates at the boundary (`0x1000` device type / vendor id) so an HTTP handler can return a clean 400 when someone aims a drive-only operation at an I/O module. Rejected alternatives: `somanet::drive()` reads as a noun/accessor, not construction; `DeviceManager::somanetDevice()` would drag every profile/vendor onto the generic device-registry's surface, against the standing rule that `DeviceManager` references no concrete driver/profile types. The unchecked constructor `SomanetDrive{dev}` still exists for tests or already-validated paths; `createSomanetDrive` is the checked front door.
+
+```cpp
+auto* dev = dm.findDevice(pos);
+if (!dev) {
+  return badRequest("no device at position");
+}
+auto sd = createSomanetDrive(*dev);          // expected<SomanetDrive, string>
+if (!sd) {
+  return badRequest(sd.error());             // "device 3 is not a SOMANET drive"
+}
+// ... synchronous single-device OD work via sd-> ...
+```
+
+**Multi-cycle procedures: `ICyclicTask` takes `DeviceManager&` + its own task-specific targets, and re-resolves every cycle.** This corrects the old note's "ICyclicTask … take a `Cia402Drive&`". A task must **not** cache a `Device&`/view across cycles: `devices_` is a `vector<Device>` rebuilt on `scan()`/`reset()`, so a cached reference dangles the instant a rescan reallocates it — and a long-lived task is the most likely thing to still be alive across a rescan. So the universal task dependency is `DeviceManager&` (reference-stable access + the ability to re-resolve), and the task re-derives its view from a fresh `findDevice(pos)` each cycle:
+
+```cpp
+class CommutationOffsetTask : public ICyclicTask {
+ public:
+  CommutationOffsetTask(DeviceManager& dm, uint16_t axis) : dm_(dm), axis_(axis) {}
+  void cycle() override {
+    Device* dev = dm_.findDevice(axis_);     // re-resolve; nullptr ⇒ it left the bus → abort
+    if (!dev) { /* abort the procedure */ return; }
+    auto drive = createSomanetDrive(*dev);   // cheap view, reconstructed per cycle, never cached
+    // ... step the procedure via PDO (controlword/statusword/target) ...
+  }
+ private:
+  DeviceManager& dm_;
+  uint16_t axis_;
+};
+```
+
+**No generic targets parameter.** `DeviceManager&` is universal; *what* a task acts on is task-specific and must not be flattened into a one-size `vector<uint16_t> axes`. Offset detection is inherently single-axis → one `uint16_t`. A gantry/dual-axis sync task takes two positions *with roles* (leader/follower), not an anonymous list. An "enable all drives" task takes none and discovers its targets from `DeviceManager`. Each constructor takes exactly what its job defines.
+
+**RT-safety of what a task touches.** Tasks run on the GameLoop (RT) thread, so per-cycle work goes through the lock-free PDO path — `readParameter`/`writeParameter` already route to the process-image seqlock/slots while the device is exchanging (see the Design B session). A task must **not** do blocking SDO inside `cycle()`: that takes the socket mutex and stalls the RT loop. SDO setup/teardown (precondition checks, writing the detected offset back to the OD) happens at **schedule time and completion time** on the control-plane thread.
+
+**Where launching lives.** A multi-cycle procedure needs both `DeviceManager&` *and* the scheduler (`GameLoop&`), but a thin view holds only `Device&`. So the *launch* is not a method on the view — it lives at the layer App wires with both (the HTTP handler, or a small launcher). The view does synchronous single-device work; procedures are constructed-and-scheduled where the scheduler is:
+
+```cpp
+// Handler/launcher — has DeviceManager& and GameLoop&:
+auto* dev = dm.findDevice(pos);
+if (!dev || !createSomanetDrive(*dev)) {
+  return badRequest("position is not a SOMANET drive");
+}
+return gameLoop.schedule(std::make_unique<CommutationOffsetTask>(dm, pos));  // returns a handle; status via notification/poll
+```
+
+**`ProfileDevice` — keep or collapse.** If `Cia402Drive` is the only direct subclass for now, `ProfileDevice` is nearly empty (the `Device&` + a couple of OD-access shortcuts) and could be folded into `Cia402Drive`, reintroducing the base when a second profile (CiA401 I/O, a generic profile) actually appears — YAGNI. Kept as a named base only if the profile-agnostic glue is worth a stable seam today. Cheap either way; doesn't affect the rest of the model.
+
+**The model in one rule.** *Views borrow a `Device&` for synchronous, single-device, here-and-now operations and carry no other state; tasks borrow `DeviceManager&` plus whatever target identifiers their specific job needs, re-resolve every cycle, and touch only the lock-free PDO path; both view types are constructed through checked `create…` factories in `mm::node`; launching a procedure lives at the layer that owns the scheduler, never on the view.*

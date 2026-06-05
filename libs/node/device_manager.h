@@ -509,21 +509,6 @@ class DeviceManager {
   /// touching the driver's IOmap, so it is safe to re-map or tear down. Bounded wait.
   void stopExchange();
 
-  /// @brief Reads a PDO-mapped object's current bytes from the published process image.
-  ///
-  /// Inputs come from the input snapshot, outputs from the output staging buffer; bytes are
-  /// little-endian and LSB-aligned (SDO encoding). @c nullopt when the object is not mapped
-  /// or no image is published. Backs the read hook installed on each @c Device.
-  std::optional<std::vector<uint8_t>> readPdoValue(uint16_t slavePosition, uint16_t index,
-                                                   uint8_t subindex) const;
-
-  /// @brief Stages a PDO output object's bytes into the output image.
-  ///
-  /// @return @c true if the object is output-mapped and was staged; @c false otherwise.
-  /// Backs the write hook installed on each @c Device.
-  bool writePdoValue(uint16_t slavePosition, uint16_t index, uint8_t subindex,
-                     std::span<const uint8_t> bytes);
-
   // Guards the non-RT mutable state — driver_, devices_, and the retained image generations —
   // against the off-RT monitoring threads. Control-plane mutators (init/scan/reset/
   // configureProcessData/transitionToState) take it exclusively; the position-based value

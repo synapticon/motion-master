@@ -729,3 +729,43 @@ The figures are meaningful only while exchanging in SAFE-OP/OP: this stack runs 
 *Out of scope for SOMANET (absence is correct, not a gap):* cable redundancy, and the non-CoE mailbox protocols (EoE / SoE / AoE / VoE) — SOMANET is CoE-only.
 
 Top pick when revisited: the **topology map** (#1) — near-pure presentation of already-cached data; **frame-health timeline** (#2) a close second, as it closes the one operational blind spot (intermittent faults).
+
+## Session 2026-06-05 — Parameter access routing in `Device`, and a lock-free output path (Design B)
+
+**What landed.** The PDO↔SDO routing was moved out of `DeviceManager` and into `Device`, so a single accessor — `device->readParameter` / `writeParameter` (and the typed `readValue`/`writeValue` wrappers) — serves the live value transparently and identically from an HTTP handler or an RT task. The motivating goal: a fork author writes their own `ICyclicTask`, gets a `Device` from `DeviceManager`, and just calls `device->readValue<int32_t>(0x6064, 0)` — that value comes from the IOmap when the device is exchanging, and from SDO otherwise, with the caller never choosing the transport.
+
+The mechanism is composition, not an interface. `ProcessData` (the live process-data runtime — published image pointer + exchange seqlocks + working-counter health) was promoted from a `device_manager.cc`-local pimpl to a proper component in `node/process_data.h`, and given the two object-level accessors a `Device` needs:
+
+```cpp
+std::optional<std::vector<uint8_t>> ProcessData::readPdo(pos, index, subindex) const;  // health-gated
+bool ProcessData::writePdo(pos, index, subindex, std::span<const uint8_t> bytes);
+```
+
+`DeviceManager` *owns* one `ProcessData` and hands each `Device` a `ProcessData*` at `scan()` (`nullptr` ⇒ SDO-only, so direct-construction unit tests are unchanged). `Device::readParameter` prefers `readPdo` when `exchangesProcessData()` (it returns `nullopt` when the object isn't PDO-mapped *or* the bus is unhealthy — a short working counter means the snapshot is stale — and the read falls through to the authoritative SDO upload); `Device::writeParameter` stages via `writePdo` when exchanging and output-mapped, else SDO. `DeviceManager::read/writeDeviceParameter` shrank to "resolve position + shared-lock + delegate" — the routing lives in one place. **No interface, no inheritance**: a single-implementation `ProcessDataAccess` abstraction was prototyped and deliberately discarded as over-engineering — `ProcessData` already *has* the access, so the concrete type is passed directly.
+
+**The remaining wart: `writePdo` takes `stagingMutex`.** The output-staging seqlock has *many* writers (every non-RT HTTP thread, and — once step 2 lands RT tasks calling `setTargetPosition`) the RT thread too. `writePdo` is a read-modify-write (`load` the whole packed buffer → `insertBits` one object → `store`), and a `SeqLock` is single-producer / multi-consumer. The mutex serialises the producers, covering both the lost-update race and the seqlock's single-writer invariant. It is *not* yet on the RT path (today only non-RT threads write), but the moment an RT task writes a setpoint, that mutex becomes an unbounded block / priority-inversion risk on the RT cycle. The contrast is right there in the same struct: `inputSnapshot` has exactly **one** writer (the RT loop) and is already fully lock-free — that is the shape the output path must take.
+
+**Decision: Design B — per-object lock-free slots, RT is the sole composer.** The root cause of the mutex is multiple writers editing one shared bit-packed buffer. Bit-packing composition *must* happen on one thread anyway (sub-byte objects share a byte), so we make the RT thread the only assembler and give every output object its own lock-free slot for writers to drop a value into independently.
+
+`ProcessData` loses `outputStaging` + `stagingMutex` and gains one atomic slot per output object (the RT-owned `outScratch` is already the compose target):
+
+```cpp
+// Rebuilt at each remap, sized to image->outputs.size(); slot i pairs with image->outputs[i]
+// (which carries bitOffset/bitLength). Each slot holds the object's latest encoded wire bytes
+// packed into a u64 — type-agnostic, it's just bytes.
+std::vector<std::atomic<uint64_t>> outputSlots;
+```
+
+- **Write** (`writePdo`, any thread): resolve the object to its slot index, `packLE(bytes)` → `outputSlots[i].store(packed, relaxed)`. Lock-free; no load, no RMW. Writers to *different* objects never contend; the *same* object is a clean last-writer-wins (a newer setpoint supersedes an older one — correct semantics).
+- **Compose** (RT, once per cycle, replacing the `outputStaging.load` in `exchangeProcessData`): for each output object, `load` its slot, `unpackLE` to wire bytes, `insertBits` into `outScratch`, then exchange. Single thread writing `outScratch` → no lock, exactly like `inputSnapshot` in the other direction.
+- **Output read-back** (`readPdo` for an output): load the slot — that's the current setpoint. **Inputs** are unchanged (`inputSnapshot` seqlock).
+
+*Worked example (the CiA402 test image — controlword `0x6040` u16 @ bit 0, target position `0x607A` i32 @ bit 16):* an HTTP thread does `writeValue(0x6040, 0, 0x000F)` → `slot[0].store(0x000F)` while an RT task does `setTargetPosition(0x00405060)` → `slot[1].store(0x00405060)`. Different atomics, simultaneous, zero contention. Next cycle the RT composer emits `[0F 00 60 50 40 00]` — identical wire bytes to today's mutex version, no mutex anywhere.
+
+*Why a single composer is required, not just nice:* two boolean outputs packed into one byte (`flagA` bit 0, `flagB` bit 1) written from two threads land in separate slots (no write race); the RT composer `insertBits` both into byte 0 → `0b11`. Letting the writers RMW the shared byte directly would clobber a bit. Routing all packing through one thread makes that class of bug *structurally impossible* rather than lock-prevented.
+
+**Design A, considered and not chosen.** The alternative single-composer scheme: non-RT writers post `{bitOffset, bitLength, ≤8 bytes}` deltas into a lock-free MPSC ring the RT loop drains each cycle. It applies only deltas (less per-cycle work), but adds a genuinely new, easy-to-get-subtly-wrong concurrency primitive (a bounded MPSC ring) with an overflow policy to define. Design B needs no such primitive, matches the existing "the `DeviceParameter` cache is the source of truth" model (the slot is the RT-readable projection of the cached setpoint), and its per-cycle recompose is negligible — O(#output objects), ~tens of objects / a few hundred bytes, essentially the work `remapProcessImage` already does once when it seeds staging. Design A becomes the better choice only if that recompose ever turns measurable or PDO outputs routinely exceed 64 bits — neither true for SOMANET.
+
+**Practical notes.** (1) `std::vector<std::atomic<uint64_t>>` can't be resized (atomics aren't movable), so it is *constructed* at the needed size on each remap — fine, since remap rebuilds and re-seeds everything anyway. (2) Slot lookup `(pos,index,subindex) → i`: either extend `ProcessImage::find` to return the output index, or `ProcessData` keeps a small `unordered_map<key,size_t>` built at remap. (3) The `uint64_t` slot caps an object at 64 bits — true for every SOMANET CiA402 output; a hypothetical wider PDO would need a per-object `SeqLock<array>` (and would reintroduce single-producer concerns for concurrent writers to *that* object), so document the constraint rather than build for a case that doesn't exist here.
+
+**Status.** Decided; to be implemented alongside step 2 (the `Cia402StateMachine` / `Cia402Drive` work), since that is when RT-thread setpoint writes actually begin and the mutex would otherwise reach the RT path. Until then the `stagingMutex` is correct and harmless (non-RT writers only).

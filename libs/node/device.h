@@ -19,6 +19,11 @@
 
 namespace mm::node {
 
+/// @brief The live process-data runtime (image + exchange buffers). Forward-declared here and
+///        held by pointer so device.h stays free of its heavy SeqLock buffers; the definition
+///        (node/process_data.h) is pulled in only by device.cc, which calls readPdo / writePdo.
+struct ProcessData;
+
 /// @brief Represents a single node on the fieldbus.
 ///
 /// Holds the node's bus position, immutable identity read from EEPROM,
@@ -28,7 +33,12 @@ class Device {
   /// @brief Constructs a device, reading identity from the driver at @p slavePosition.
   /// @param slavePosition  1-based position on the fieldbus (0 is reserved for the master).
   /// @param driver         Fieldbus driver; lifetime must exceed that of this object.
-  Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver);
+  /// @param processData    Live process-data runtime, or @c nullptr for SDO-only operation. When
+  ///                       supplied (by @c DeviceManager), @c readParameter / @c writeParameter
+  ///                       prefer the live PDO image while the device is exchanging and fall back
+  ///                       to SDO otherwise. Lifetime must exceed that of this object.
+  Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver,
+         ProcessData* processData = nullptr);
 
   /// @brief Returns the 1-based position of this node on the fieldbus.
   uint16_t slavePosition() const;
@@ -239,10 +249,14 @@ class Device {
 
   /// @brief Reads a parameter value, keeping the cached store in sync.
   ///
-  /// When @c online(), uploads via SDO, decodes, stores the value (marking it
-  /// @c SyncState::Synced) and returns it. When offline, returns the cached value
-  /// without touching the bus. The parameter must already exist in the map (populated
-  /// by @c initializeParameters).
+  /// Routing, in order:
+  /// - When the device is exchanging (SAFE-OP/OP) and process-image access was injected, the
+  ///   live PDO value is taken from the process image (if the object is PDO-mapped and the bus is
+  ///   healthy), decoded, stored (marking it @c SyncState::Synced) and returned — no bus I/O.
+  /// - Otherwise, when @c online(), uploads via SDO, decodes, stores and returns it.
+  /// - Otherwise (offline) returns the cached value without touching the bus.
+  ///
+  /// The parameter must already exist in the map (populated by @c initializeParameters).
   ///
   /// @param index     CoE object index.
   /// @param subindex  CoE object subindex.
@@ -253,7 +267,10 @@ class Device {
   /// @brief Writes a parameter value, always updating the cache first.
   ///
   /// @p value is coerced into the parameter's declared data type and stored in the cache
-  /// (the cache is the source of truth). Then:
+  /// (the cache is the source of truth). Then, in order:
+  /// - exchanging (SAFE-OP/OP) with process-image access injected and the object output-mapped:
+  ///   the value is staged into the output image (sent next cycle), marked @c SyncState::Synced,
+  ///   and the call returns — no SDO download.
   /// - online: the value is encoded and downloaded via SDO. On success the parameter is
   ///   marked @c SyncState::Synced; on download failure it is marked @c SyncState::Pending
   ///   and the error is returned.
@@ -328,6 +345,11 @@ class Device {
 
   uint16_t slavePosition_;
   mm::comm::FieldbusDriver& driver_;
+  // Live process-data runtime, or nullptr for SDO-only operation. Injected by DeviceManager so
+  // read/writeParameter can prefer PDO over SDO while exchanging. Non-owning; the owner
+  // (DeviceManager) outlives every Device it created. A raw pointer keeps Device
+  // move-constructible.
+  ProcessData* processData_ = nullptr;
   std::string name_;
   uint32_t vendorId_;
   uint32_t productCode_;

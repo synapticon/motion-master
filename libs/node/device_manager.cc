@@ -18,36 +18,15 @@
 #include <vector>
 
 #include "core/seqlock.h"
+#include "node/process_data.h"
 
 namespace mm::node {
 
-/// RT process-data runtime state (see the forward declaration in the header). The image
-/// pointer is published with release / read with acquire; the seqlocks carry the flat output
-/// and input images across the RT/non-RT boundary; the scratch buffers are touched only on
-/// the RT thread. Published images are retained in @c generations so no reader ever sees a
-/// freed image. stopExchange() drains the RT reader before a re-map, but the non-RT readers
-/// (readPdoValue() and the SDO read/write paths) load @c image lock-free with no such
-/// handshake, so a freed-on-republish image would dangle under them. Retaining every
-/// generation until reset() — when the loop is stopped — sidesteps reclamation tracking for
-/// all readers, RT and non-RT alike.
-struct ProcessData {
-  std::atomic<const ProcessImage*> image{nullptr};
-  std::vector<std::shared_ptr<const ProcessImage>> generations;
-  mm::core::SeqLock<ProcessBuffer> outputStaging;
-  mm::core::SeqLock<ProcessBuffer> inputSnapshot;
-  ProcessBuffer outScratch;
-  ProcessBuffer inScratch;
-  // Serialises non-RT writers doing read-modify-write on outputStaging (the RT reader is
-  // wait-free via the seqlock and does not take this lock).
-  std::mutex stagingMutex;
-  // Set by the RT thread while it is inside a driver exchange; lets stopExchange() drain an
-  // in-flight cycle before a re-map or teardown mutates the IOmap.
-  std::atomic<bool> exchanging{false};
-  // Working-counter health. lastWkc is written by the RT thread each cycle; expectedWkc is
-  // recomputed by the control plane from current device states. healthy = last >= expected.
-  std::atomic<int> lastWkc{0};
-  std::atomic<int> expectedWkc{0};
-};
+// ProcessData (the live process-data runtime: published image pointer + exchange seqlocks +
+// working-counter health) is defined in node/process_data.h so device.cc can use it too — a Device
+// reaches its live IOmap objects through ProcessData::readPdo / writePdo. Those two accessors are
+// defined out-of-line below, after the bit/byte helpers they use. Published images are retained in
+// ProcessData::generations until reset() so a lock-free reader never dereferences a freed image.
 
 DeviceManager::DeviceManager() : pd_(std::make_unique<ProcessData>()) {}
 
@@ -122,7 +101,11 @@ std::expected<int, std::string> DeviceManager::scan() {
   }
   devices_.clear();
   for (uint16_t pos = 1; pos <= static_cast<uint16_t>(*result); ++pos) {
-    devices_.emplace_back(pos, *driver_);
+    // Hand each device the process-data runtime so its read/writeParameter can serve the live
+    // IOmap value while exchanging (and stage outputs), falling back to SDO otherwise. pd_ is
+    // created once in the constructor and never replaced, so the pointer is stable for our
+    // lifetime.
+    devices_.emplace_back(pos, *driver_, pd_.get());
   }
   // The device set was rebuilt: positions may now name different devices. Bump the generation
   // so off-thread consumers (monitoring) that pinned to a position re-validate it.
@@ -310,10 +293,7 @@ int DeviceManager::expectedWorkingCounter() const {
   return pd_->expectedWkc.load(std::memory_order_relaxed);
 }
 
-bool DeviceManager::processDataHealthy() const {
-  return processDataConfigured() && pd_->lastWkc.load(std::memory_order_relaxed) >=
-                                        pd_->expectedWkc.load(std::memory_order_relaxed);
-}
+bool DeviceManager::processDataHealthy() const { return pd_->healthy(); }
 
 ProcessImageInfo DeviceManager::processImageInfo() const {
   ProcessImageInfo info{};
@@ -695,49 +675,51 @@ std::expected<void, std::string> DeviceManager::initializeDeviceParameters(uint1
   return it->initializeParameters(readValues);
 }
 
-std::optional<std::vector<uint8_t>> DeviceManager::readPdoValue(uint16_t slavePosition,
-                                                                uint16_t index,
-                                                                uint8_t subindex) const {
-  const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
-  if (!image) {
+std::optional<std::vector<uint8_t>> ProcessData::readPdo(uint16_t slavePosition, uint16_t index,
+                                                         uint8_t subindex) const {
+  // Gate on health: on a lost or partial frame the driver leaves the prior cycle's bytes in the
+  // IOmap, so the snapshot is stale — signal the caller to read the authoritative SDO value instead
+  // (a healthy() check also covers "no image published").
+  if (!healthy()) {
     return std::nullopt;
   }
-  auto loc = image->find(slavePosition, index, subindex);
+  const ProcessImage* img = image.load(std::memory_order_acquire);
+  auto loc = img->find(slavePosition, index, subindex);
   if (!loc) {
     return std::nullopt;
   }
   // Inputs live in the latest snapshot; outputs in the staging buffer (what is being sent). Copy
   // only the live prefix (the published image size) rather than the full capacity.
-  const size_t live = liveBufferBytes(loc->isOutput ? image->outputBytes : image->inputBytes);
+  const size_t live = liveBufferBytes(loc->isOutput ? img->outputBytes : img->inputBytes);
   ProcessBuffer buffer;
   if (loc->isOutput) {
-    pd_->outputStaging.load(buffer, live);
+    outputStaging.load(buffer, live);
   } else {
-    pd_->inputSnapshot.load(buffer, live);
+    inputSnapshot.load(buffer, live);
   }
   return extractBits(std::span<const uint8_t>(buffer.bytes.data(), buffer.size), loc->bitOffset,
                      loc->bitLength);
 }
 
-bool DeviceManager::writePdoValue(uint16_t slavePosition, uint16_t index, uint8_t subindex,
-                                  std::span<const uint8_t> bytes) {
-  const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
-  if (!image) {
+bool ProcessData::writePdo(uint16_t slavePosition, uint16_t index, uint8_t subindex,
+                           std::span<const uint8_t> bytes) {
+  const ProcessImage* img = image.load(std::memory_order_acquire);
+  if (!img) {
     return false;
   }
-  auto loc = image->find(slavePosition, index, subindex);
+  auto loc = img->find(slavePosition, index, subindex);
   if (!loc || !loc->isOutput) {
     return false;  // only outputs are writable from the master
   }
   // Read-modify-write the staging buffer; serialise against other non-RT writers. Copy only the
   // live prefix (the published output image size) rather than the full capacity.
-  const size_t live = liveBufferBytes(image->outputBytes);
-  std::lock_guard<std::mutex> lock(pd_->stagingMutex);
+  const size_t live = liveBufferBytes(img->outputBytes);
+  std::lock_guard<std::mutex> lock(stagingMutex);
   ProcessBuffer buffer;
-  pd_->outputStaging.load(buffer, live);
+  outputStaging.load(buffer, live);
   insertBits(std::span<uint8_t>(buffer.bytes.data(), buffer.size), loc->bitOffset, loc->bitLength,
              bytes);
-  pd_->outputStaging.store(buffer, live);
+  outputStaging.store(buffer, live);
   return true;
 }
 
@@ -789,20 +771,9 @@ std::expected<DeviceParameterValue, std::string> DeviceManager::readDeviceParame
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
   }
-  // Use the process image only for a device actually exchanging (SAFE-OP/OP) AND only while the
-  // bus is healthy. A device left in PRE-OP on a partially-operational bus is in the image but
-  // not filling its region; and on a lost or partial frame the input snapshot still holds the
-  // previous cycle's bytes (the IOmap is not refreshed when the working counter falls short), so
-  // trusting it would serve stale data as a live value. In either case the value must come over
-  // SDO — the authoritative read, which for a genuinely faulted device fails and surfaces the
-  // problem rather than returning a confident-but-wrong last-good figure.
-  if (device->exchangesProcessData() && processDataHealthy()) {
-    // The live value lives in the process data — decode it and reflect it into the cached
-    // DeviceParameter (which stays the source of truth), thread-safely under the cache lock.
-    if (auto bytes = readPdoValue(slavePosition, index, subindex); bytes) {
-      return device->setValueFromBytes(index, subindex, *bytes);
-    }
-  }
+  // Routing (live PDO image when exchanging + healthy, SDO otherwise) lives in Device, which holds
+  // the process-data runtime we injected at scan(). This entry point only resolves the position and
+  // takes the shared lock so an off-thread caller is serialised against a device-set rebuild.
   return device->readParameter(index, subindex);
 }
 
@@ -817,23 +788,9 @@ std::expected<void, std::string> DeviceManager::writeDeviceParameter(uint16_t sl
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
   }
-  // When the object is a PDO output of a device that is exchanging (SAFE-OP/OP), coerce +
-  // cache it and stage it into the output buffer (sent every cycle) instead of an SDO download.
-  // A device not exchanging falls through to SDO, even if it appears in the published image.
-  const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
-  if (image && device->exchangesProcessData()) {
-    if (auto loc = image->find(slavePosition, index, subindex); loc && loc->isOutput) {
-      if (auto set = device->setValue(index, subindex, std::move(value)); !set) {
-        return std::unexpected(set.error());
-      }
-      auto bytes = device->valueAsBytes(index, subindex);
-      if (!bytes) {
-        return std::unexpected(bytes.error());
-      }
-      writePdoValue(slavePosition, index, subindex, *bytes);
-      return {};
-    }
-  }
+  // Routing (stage into the output image when exchanging + output-mapped, SDO otherwise) lives in
+  // Device. This entry point only resolves the position and takes the shared lock so an off-thread
+  // caller is serialised against a device-set rebuild.
   return device->writeParameter(index, subindex, std::move(value));
 }
 

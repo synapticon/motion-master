@@ -12,12 +12,14 @@
 #include <vector>
 
 #include "node/device_parameter.h"
+#include "node/process_data.h"
 
 namespace mm::node {
 
-Device::Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver)
+Device::Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver, ProcessData* processData)
     : slavePosition_(slavePosition),
       driver_(driver),
+      processData_(processData),
       parametersMutex_(std::make_unique<std::mutex>()) {
   auto info = driver_.slaveInfo(slavePosition);
   name_ = std::move(info.name);
@@ -353,6 +355,21 @@ std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t 
     return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
                                        slavePosition_, index, subindex));
   }
+  // Prefer the live PDO image while exchanging: readPdo returns the staged/snapshot bytes when the
+  // object is PDO-mapped and the bus is healthy, and nullopt otherwise (not mapped / unhealthy /
+  // no image) — in which case we fall through to the authoritative SDO upload below. Decode inline
+  // rather than via setValueFromBytes, which would re-take parametersMutex_ that we already hold.
+  if (processData_ && exchangesProcessData()) {
+    if (auto bytes = processData_->readPdo(slavePosition_, index, subindex)) {
+      auto decoded = decodeSdoBytes(p->dataType, *bytes);
+      if (!decoded) {
+        return std::unexpected(decoded.error());
+      }
+      p->value = std::move(*decoded);
+      p->syncState = SyncState::Synced;
+      return p->value;
+    }
+  }
   if (!online()) {
     return p->value;  // offline: serve the cached value, never touch the bus
   }
@@ -382,6 +399,19 @@ std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t 
   // cache always reflects the latest intended value regardless of online state.
   if (auto set = p->setValue(value); !set) {
     return std::unexpected(set.error());
+  }
+  // While exchanging, stage an output-mapped object into the process image (sent next cycle)
+  // instead of an SDO download. writePdo returns false when the object is not output-mapped (or no
+  // image is published), in which case we fall through to the SDO/offline paths below. Encode
+  // inline rather than via valueAsBytes, which would re-take parametersMutex_ that we already hold.
+  // No health gate here (unlike the read path): staging is always safe — the value is simply sent
+  // on the next cycle.
+  if (processData_ && exchangesProcessData()) {
+    auto bytes = encodeSdoBytes(p->dataType, p->value);
+    if (bytes && processData_->writePdo(slavePosition_, index, subindex, *bytes)) {
+      p->syncState = SyncState::Synced;
+      return {};
+    }
   }
   if (!online()) {
     // Offline edit: hold the change in the cache, to be flushed when the device returns.

@@ -846,7 +846,7 @@ class CommutationOffsetTask : public ICyclicTask {
 
 **RT-safety of what a task touches.** Tasks run on the GameLoop (RT) thread, so per-cycle work goes through the lock-free PDO path — `readParameter`/`writeParameter` already route to the process-image seqlock/slots while the device is exchanging (see the Design B session). A task must **not** do blocking SDO inside `cycle()`: that takes the socket mutex and stalls the RT loop. SDO setup/teardown (precondition checks, writing the detected offset back to the OD) happens at **schedule time and completion time** on the control-plane thread.
 
-**Where launching lives.** A multi-cycle procedure needs both `DeviceManager&` *and* the scheduler (`GameLoop&`), but a thin view holds only `Device&`. So the *launch* is not a method on the view — it lives at the layer App wires with both (the HTTP handler, or a small launcher). The view does synchronous single-device work; procedures are constructed-and-scheduled where the scheduler is:
+**Where launching lives.** *(Partly superseded — see Session 2026-06-05 "RT tasks are fixed-membership" below.)* This section assumed the dynamic-scheduling model where a launch *constructs and schedules* a task: that genuinely needs both `DeviceManager&` *and* the scheduler (`GameLoop&`), which a thin view (holding only `Device&`) does not have, so the launch could not be a method on the view.
 
 ```cpp
 // Handler/launcher — has DeviceManager& and GameLoop&:
@@ -857,6 +857,54 @@ if (!dev || !createSomanetDrive(*dev)) {
 return gameLoop.schedule(std::make_unique<CommutationOffsetTask>(dm, pos));  // returns a handle; status via notification/poll
 ```
 
+That reasoning holds **only for dynamically-scheduled tasks**, which the later session removes. Once RT tasks are *fixed-membership* (registered before `run()`), an RT generator's "launch" is no longer a scheduling op — it is a control-block write, a synchronous single-device state change, which is exactly the view's job. So for that class the rule inverts: the launch **does** live on the view (`Cia402Drive::startSineWave`). Off-RT command-and-wait procedures still launch as background jobs at the layer that owns them. See the next session for the resolved placement.
+
 **`ProfileDevice` — keep or collapse.** If `Cia402Drive` is the only direct subclass for now, `ProfileDevice` is nearly empty (the `Device&` + a couple of OD-access shortcuts) and could be folded into `Cia402Drive`, reintroducing the base when a second profile (CiA401 I/O, a generic profile) actually appears — YAGNI. Kept as a named base only if the profile-agnostic glue is worth a stable seam today. Cheap either way; doesn't affect the rest of the model.
 
 **The model in one rule.** *Views borrow a `Device&` for synchronous, single-device, here-and-now operations and carry no other state; tasks borrow `DeviceManager&` plus whatever target identifiers their specific job needs, re-resolve every cycle, and touch only the lock-free PDO path; both view types are constructed through checked `create…` factories in `mm::node`; launching a procedure lives at the layer that owns the scheduler, never on the view.*
+
+---
+
+## Session 2026-06-05 — RT tasks are fixed-membership; off-RT procedures are background jobs
+
+**Revises** the launch model from *Session 2026-06-05 — Device profiles as borrowed views*: that session showed `gameLoop.schedule(std::make_unique<CommutationOffsetTask>(dm, pos))` — dynamic, per-request scheduling that adds a `CyclicTask` to a running loop and returns a handle. That requires machinery the RT loop does not have and should not grow: `GameLoop::addTask` is documented as before-`run()`-only and mutates a plain `std::vector<CyclicTask*>` with no synchronisation (`game_loop.{h,cc}`). Adding/removing tasks at runtime would need a lock-free add queue, a completion signal out of `execute()`, a retire queue, and off-RT destruction (never `delete` on the RT thread). All of that is avoidable.
+
+**The deciding question is not "is the procedure ephemeral?" but "does it need to touch the process image on a per-cycle deadline?"** That splits every runtime procedure into two categories with two entirely different mechanisms.
+
+**Category 1 — RT cyclic procedures (SineWave / profile / ramp generators).** Must write a fresh target into the output region *every* cycle, phase-locked to the bus. These are `CyclicTask`s — but with **fixed membership**: registered once before `run()`, exactly like `ProcessDataTask`. They are **activated/deactivated at runtime via a control block** (an atomic active-flag + seqlock'd parameters: target position/axis, frequency, amplitude, waveform), written from the HTTP thread. This mirrors the pattern already in production — `ProcessDataTask` is registered unconditionally and is a *no-op until a process image is published*. An idle generator is the same: registered always, computes nothing until HTTP flips it active. So runtime variability is in task *behaviour*, never task *membership* — which deletes the add/retire/destruction problem wholesale.
+
+- **Concurrency = a fixed pool, not runtime spawning.** Several devices running waveforms at once is served by registering a small fixed pool of generator slots at startup, each idle until claimed by a device. Membership stays static.
+- **Output writes are direct, not via the staging seqlock.** A generator runs *on* the RT thread, so it writes the output PDO slots directly each cycle. The output-staging seqlock exists only to serialise *non-RT* (HTTP) setpoint writers; an on-RT generator does not use it. (Note this is the same producer the Design B output path must stay lock-free for — see that session's `writePdo`/`stagingMutex` wart.)
+- **Target ownership / arbitration.** While a generator owns a device's target word, a concurrent HTTP setpoint to that same word would fight it. Activating a generator must claim authority over that target; HTTP target writes for that device are rejected (or redirected) until it is deactivated.
+- **Ordering.** Generators run *after* `ProcessDataTask` in registration order: read this cycle's inputs, compute, stage the output for the next exchange.
+
+**Category 2 — off-RT procedures (commutation/offset detection, auto-tuning, firmware).** These drive the device through SDO writes / state transitions and then *wait* for the drive's firmware to do the work — they call a command and poll for completion, not cycle-time-sensitive. They have **no business on the RT thread at all** and are **not `CyclicTask`s**. The right shape is a background `std::jthread` calling reference-stable `DeviceManager`/`Device` methods (already serialised on the fieldbus socket mutex), polling and reporting progress, cancellable via `stop_token`. **Precedent: `FirmwareInstaller`** — already exactly this (long-running, `DeviceManager`-driven, off-RT); offset detection follows it rather than inventing scheduling.
+
+This reclassifies commutation/offset detection from the RT, PDO-stepped `CommutationOffsetTask` sketched in the earlier session to a Category-2 off-RT job — on SOMANET the drive firmware performs the detection internally in response to an OD command, so the master writes the command and polls, which is off-RT by nature.
+
+**The control block: a per-device params seqlock, written by the launcher, read lock-free by RT.** The transport is `mm::core::SeqLock<T>` — single-writer (serialise the non-RT producers with a mutex), any number of lock-free readers (the RT loop), `T` trivially copyable. A waveform param set is all scalars, so it fits:
+
+```cpp
+enum class WaveMode : uint8_t { CSP, CSV, CST };   // which target object the wave drives
+
+struct SineWaveParams {                            // trivially copyable — no std::string/vector
+  WaveMode mode;        // "controller" → CiA402 op mode (position/velocity/torque)
+  double   amplitude;
+  double   frequency;   // Hz
+  double   velocityLimit;
+  double   accelLimit;
+  bool     active;      // the activation handshake rides inside the snapshot
+};
+```
+
+A **seqlock, not per-field atomics**, precisely because the snapshot must be consistent — the RT loop must never read a new `amplitude` with an old `frequency`. One `load()` yields a coherent set. (Contrast the output PDO slots, where per-field atomics are right because each object is independent.)
+
+**The control block lives on `Device`; the start/stop method lives on `Cia402Drive`.** This is the placement correction to the previous session's "launch lives at the scheduler layer" rule — see *Where launching lives* above. With fixed membership the generator task already exists in the loop, so a "launch" is just a control-block write — a synchronous single-device state change, which is the view's role. Concretely:
+
+- `Device` holds the params seqlock as `unique_ptr<SeqLock<SineWaveParams>>` — `SeqLock` is non-movable and `Device` is moved into `vector<Device>`, so it takes the same `unique_ptr` indirection already used for `parametersMutex_`. One slot per device *is* the fixed pool — naturally sized and indexed by device, no abstract pool object.
+- `Cia402Drive::startSineWave(amplitude, frequency, mode, …) → expected<void, string>`: (1) validates CiA402 preconditions — holding a `Cia402Drive` already proves it is a CiA402 drive; (2) does the op-mode handshake (write `0x6060`, confirm `0x6061`) synchronously on the caller's off-RT thread — the view's "synchronous single-device work"; (3) `device_.sineParams_->store({…, .active = true})`. `stopSineWave()` stores `active = false`. The HTTP handler shrinks to: resolve the view, call `startSineWave`, translate the `expected<>`.
+- The single fixed-membership `SineWaveTask` (owned by App, holds `DeviceManager&`) iterates devices each cycle, `load()`s each control block, and for active ones computes `center + amplitude·sin(phase)` and writes the output slot directly (on-RT). It runs after `ProcessDataTask`. Bad params never reach it — all validation is on the launcher's `expected<>` path, so the RT side has no error branch.
+
+**RT-only scratch state stays off the seqlock.** `phase_`, `center_` (latched on the rising edge of `active` so the wave starts from the current position), and `wasActive_` (edge detection) are written *and* read only by the RT task — they must not go in the control block (HTTP→RT only; readers must not see RT scribbling phase back). Phase is *accumulated* (`phase_ += 2π·f·dt`), not `2π·f·t`, so a mid-run frequency change stays continuous. Open question for implementation: this scratch lives either in a per-axis map inside `SineWaveTask` or as RT-only members on `Device`, and either way the task's per-cycle `findDevice()` re-resolution must sit behind the same `scan()`/`reset()` drain (`stopExchange()` + published-image pointer) that `ProcessDataTask` relies on today — iterating `devices_` while a rescan reallocates it is a data race that only the process-image path is currently guarded against.
+
+**The model in one rule.** *If a procedure must hit the process image every cycle it is a fixed-membership `CyclicTask` registered before `run()`, gated active/idle by a per-device `SeqLock` control block that the corresponding view writes (`Cia402Drive::startSineWave`), with the fixed pool being one slot per `Device`; otherwise it is a cancellable background `std::jthread` calling `DeviceManager` (like `FirmwareInstaller`). `GameLoop` never gains runtime add/remove, and the RT side never sees an invalid param set.*

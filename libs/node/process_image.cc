@@ -101,10 +101,16 @@ std::optional<ProcessImage::Location> ProcessImage::find(uint16_t slavePosition,
     return e.slavePosition == slavePosition && e.index == index && e.subindex == subindex;
   };
   if (auto it = std::ranges::find_if(outputs, match); it != outputs.end()) {
-    return Location{.bitOffset = it->bitOffset, .bitLength = it->bitLength, .isOutput = true};
+    return Location{.bitOffset = it->bitOffset,
+                    .bitLength = it->bitLength,
+                    .isOutput = true,
+                    .entryIndex = static_cast<size_t>(it - outputs.begin())};
   }
   if (auto it = std::ranges::find_if(inputs, match); it != inputs.end()) {
-    return Location{.bitOffset = it->bitOffset, .bitLength = it->bitLength, .isOutput = false};
+    return Location{.bitOffset = it->bitOffset,
+                    .bitLength = it->bitLength,
+                    .isOutput = false,
+                    .entryIndex = static_cast<size_t>(it - inputs.begin())};
   }
   return std::nullopt;
 }

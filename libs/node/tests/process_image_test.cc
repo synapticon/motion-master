@@ -35,6 +35,7 @@ using mm::node::extractBits;
 using mm::node::insertBits;
 
 // ETG.1020 data type codes.
+constexpr uint16_t kU8 = 0x0005;
 constexpr uint16_t kU16 = 0x0006;
 constexpr uint16_t kI32 = 0x0004;
 
@@ -326,6 +327,29 @@ std::unique_ptr<FakeBus> makeCia402Bus() {
   return bus;
 }
 
+// Builds a bus with two 4-bit outputs packed into a single output byte: 0x2001 in the low nibble
+// (bits 0..3), 0x2002 in the high nibble (bits 4..7). No inputs. Used to prove that two sub-byte
+// objects sharing a byte, each written into its own lock-free slot, are composed by the single RT
+// thread without clobbering each other.
+std::unique_ptr<FakeBus> makeSubByteBus() {
+  auto bus = std::make_unique<FakeBus>();
+  bus->program(0x1C12, 0x00, u8le(1));
+  bus->program(0x1C12, 0x01, u16le(0x1600));
+  bus->program(0x1600, 0x00, u8le(2));
+  bus->program(0x1600, 0x01, pdoEntry(0x2001, 0x00, 4));  // low nibble @0
+  bus->program(0x1600, 0x02, pdoEntry(0x2002, 0x00, 4));  // high nibble @4
+  bus->programOd(0x2001, 0x00, kU8);
+  bus->programOd(0x2002, 0x00, kU8);
+  bus->slaves = 1;
+  bus->layout.outputBytes = 1;
+  bus->layout.inputBytes = 0;
+  bus->layout.expectedWkc = 2;
+  bus->layout.slaves = {SlaveIo{
+      .slavePosition = 1, .outputOffset = 0, .outputBytes = 1, .inputOffset = 0, .inputBytes = 0}};
+  bus->state = static_cast<uint16_t>(EtherCatState::Op);
+  return bus;
+}
+
 TEST(DeviceManagerProcessData, WriteStagesOutputAndReadPullsInput) {
   auto bus = makeCia402Bus();
   // Statusword 0x0237, actual position 0x11223344 — little-endian in the input image.
@@ -353,6 +377,81 @@ TEST(DeviceManagerProcessData, WriteStagesOutputAndReadPullsInput) {
   EXPECT_EQ(std::get<uint16_t>(*status), 0x0237);
   // The cached parameter now reflects the live value too.
   EXPECT_EQ(std::get<uint16_t>(dm.findDevice(1)->parameter(0x6041, 0x00)->value), 0x0237);
+}
+
+TEST(DeviceManagerProcessData, IndependentOutputSlotsComposeIntoOneImage) {
+  auto bus = makeCia402Bus();
+  bus->wkc = 3;
+  FakeBus* busPtr = bus.get();
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+
+  // Two distinct output objects, each staged into its own lock-free slot — no shared buffer, no
+  // lock. The RT loop is the sole composer that assembles them into the packed wire image.
+  ASSERT_TRUE(
+      dm.writeDeviceParameter(1, 0x6040, 0x00, DeviceParameterValue{uint16_t{0xABCD}}).has_value());
+  ASSERT_TRUE(dm.writeDeviceParameter(1, 0x607A, 0x00, DeviceParameterValue{int32_t{0x11223344}})
+                  .has_value());
+  dm.exchangeProcessData();
+
+  ASSERT_EQ(busPtr->lastOutputs.size(), 6u);
+  EXPECT_EQ(busPtr->lastOutputs[0], 0xCD);  // controlword (0x6040) little-endian @ byte 0
+  EXPECT_EQ(busPtr->lastOutputs[1], 0xAB);
+  EXPECT_EQ(busPtr->lastOutputs[2], 0x44);  // target position (0x607A) little-endian @ byte 2
+  EXPECT_EQ(busPtr->lastOutputs[3], 0x33);
+  EXPECT_EQ(busPtr->lastOutputs[4], 0x22);
+  EXPECT_EQ(busPtr->lastOutputs[5], 0x11);
+}
+
+TEST(DeviceManagerProcessData, SubByteOutputsSharingAByteComposeWithoutClobber) {
+  auto bus = makeSubByteBus();
+  FakeBus* busPtr = bus.get();
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+
+  // Two objects share byte 0; each is written independently into its own slot.
+  ASSERT_TRUE(
+      dm.writeDeviceParameter(1, 0x2001, 0x00, DeviceParameterValue{uint8_t{0x0A}}).has_value());
+  ASSERT_TRUE(
+      dm.writeDeviceParameter(1, 0x2002, 0x00, DeviceParameterValue{uint8_t{0x05}}).has_value());
+  dm.exchangeProcessData();
+
+  // The single RT composer packed both nibbles into byte 0: (0x05 << 4) | 0x0A = 0x5A. Neither
+  // write clobbered the other — exactly the race the old shared-buffer RMW needed the mutex for.
+  ASSERT_EQ(busPtr->lastOutputs.size(), 1u);
+  EXPECT_EQ(busPtr->lastOutputs[0], 0x5A);
+}
+
+TEST(DeviceManagerProcessData, OutputReadBackServesStagedSlotNotSdoAndIgnoresHealth) {
+  auto bus = makeCia402Bus();
+  bus->program(0x6040, 0x00, u16le(0x1111));  // distinct authoritative SDO value for the output
+  bus->wkc = 1;                               // below expected 3 → unhealthy bus
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  dm.exchangeProcessData();
+  ASSERT_FALSE(dm.processDataHealthy());
+
+  // Stage a controlword distinct from the SDO value.
+  ASSERT_TRUE(
+      dm.writeDeviceParameter(1, 0x6040, 0x00, DeviceParameterValue{uint16_t{0x000F}}).has_value());
+
+  // An output read returns the staged slot (0x000F) — our own setpoint, always valid and lock-free
+  // — never the SDO value (0x1111). Unlike an input, it is NOT gated on bus health: a momentarily
+  // short working counter must not push an RT caller onto a blocking SDO upload for its own output.
+  auto v = dm.readDeviceParameter(1, 0x6040, 0x00);
+  ASSERT_TRUE(v.has_value());
+  EXPECT_EQ(std::get<uint16_t>(*v), 0x000F);
 }
 
 TEST(DeviceManagerProcessData, OutputsInitialisedBeforeOpAreSentOnFirstCycle) {

@@ -54,6 +54,31 @@ DeviceStateInfo decodeState(uint16_t slavePosition,
 /// the seqlock clamps the count to sizeof(ProcessBuffer) regardless.
 size_t liveBufferBytes(uint32_t imageBytes) { return offsetof(ProcessBuffer, bytes) + imageBytes; }
 
+// Number of whole bytes a bit-width object occupies on the wire, capped at the 8 a staging slot
+// (uint64_t) holds. Objects wider than 64 bits are not represented by the slot scheme (documented
+// in process_data.h); no SOMANET CiA402 output approaches that.
+size_t slotByteWidth(uint16_t bitLength) {
+  return std::min<size_t>((static_cast<size_t>(bitLength) + 7) / 8, sizeof(uint64_t));
+}
+
+// Pack up to 8 little-endian wire bytes into a u64 staging slot, and unpack them back out. The
+// slot is type-agnostic — it carries whatever encodeSdoBytes produced for the object.
+uint64_t packSlot(std::span<const uint8_t> bytes) {
+  uint64_t v = 0;
+  for (size_t i = 0; i < bytes.size() && i < sizeof(uint64_t); ++i) {
+    v |= static_cast<uint64_t>(bytes[i]) << (8 * i);
+  }
+  return v;
+}
+
+std::vector<uint8_t> unpackSlot(uint64_t packed, size_t byteWidth) {
+  std::vector<uint8_t> bytes(byteWidth);
+  for (size_t i = 0; i < byteWidth && i < sizeof(uint64_t); ++i) {
+    bytes[i] = static_cast<uint8_t>(packed >> (8 * i));
+  }
+  return bytes;
+}
+
 }  // namespace
 
 std::expected<void, std::string> DeviceManager::init(
@@ -186,12 +211,18 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
     return std::unexpected(image.error());
   }
 
-  // Seed the output staging from the current cached parameter values, so the RxPDO setpoints
-  // callers initialised before OP (controlword, modes, targets) are sent on the very first
-  // cycle. Unset parameters encode their type-appropriate zero, which is the safe default.
-  ProcessBuffer staging;
-  staging.size = image->outputBytes;
-  for (const auto& entry : image->outputs) {
+  // Build a fresh staging slot per output object and seed each from the current cached parameter
+  // value, so the RxPDO setpoints callers initialised before OP (controlword, modes, targets) are
+  // sent on the very first cycle. Unset parameters encode their type-appropriate zero, the safe
+  // default. The whole-image seeded buffer is also published to outputSnapshot so a non-RT reader
+  // (monitoring) sees the seeded outputs even before the first exchange. Building the slots here,
+  // under busMutex with exchange drained by stopExchange() above, is the only place the slot
+  // vector is (re)sized — the RT composer only ever reads it, gated by the image pointer.
+  std::vector<std::atomic<uint64_t>> slots(image->outputs.size());
+  ProcessBuffer seeded;
+  seeded.size = image->outputBytes;
+  for (size_t i = 0; i < image->outputs.size(); ++i) {
+    const ProcessImageEntry& entry = image->outputs[i];
     const Device* device = findDevice(entry.slavePosition);
     if (!device) {
       continue;
@@ -204,10 +235,12 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
     if (!bytes) {
       continue;
     }
-    insertBits(std::span<uint8_t>(staging.bytes.data(), staging.size), entry.bitOffset,
+    slots[i].store(packSlot(*bytes), std::memory_order_relaxed);
+    insertBits(std::span<uint8_t>(seeded.bytes.data(), seeded.size), entry.bitOffset,
                entry.bitLength, *bytes);
   }
-  pd_->outputStaging.store(staging);
+  pd_->outputSlots = std::move(slots);
+  pd_->outputSnapshot.store(seeded);
 
   auto shared = std::make_shared<const ProcessImage>(std::move(*image));
   pd_->generations.push_back(shared);
@@ -238,19 +271,35 @@ void DeviceManager::exchangeProcessData() {
     pd_->exchanging.store(false, std::memory_order_release);
     return;  // not mapped yet, or torn down mid-flight — back out without touching the IOmap
   }
-  // Load staged outputs, exchange one cycle, publish the received inputs. The scratch buffers
-  // are touched only on this (RT) thread; the seqlocks hand data to/from non-RT readers. Both
-  // copies move only the live prefix (the published image size, which is stable) rather than the
-  // full kMaxProcessImageBytes capacity, keeping per-cycle memory traffic proportional to the
-  // real image.
-  pd_->outputStaging.load(pd_->outScratch, liveBufferBytes(image->outputBytes));
+  // Compose the output image from the per-object staging slots — this RT thread is the sole writer
+  // of outScratch, so no lock is needed and bit-packed objects sharing a byte are applied safely in
+  // sequence. Zero the live region first so alignment gaps (and any object whose slot is untouched)
+  // go out as zero. outputSlots is sized to image->outputs for this published generation.
+  const uint32_t outputBytes = image->outputBytes;
+  std::fill_n(pd_->outScratch.bytes.begin(), outputBytes, uint8_t{0});
+  pd_->outScratch.size = outputBytes;
+  for (size_t i = 0; i < image->outputs.size(); ++i) {
+    const ProcessImageEntry& entry = image->outputs[i];
+    const uint64_t packed = pd_->outputSlots[i].load(std::memory_order_relaxed);
+    const auto bytes = unpackSlot(packed, slotByteWidth(entry.bitLength));
+    insertBits(std::span<uint8_t>(pd_->outScratch.bytes.data(), outputBytes), entry.bitOffset,
+               entry.bitLength, bytes);
+  }
+  // Exchange one cycle, then publish both directions for non-RT readers. The scratch buffers are
+  // touched only on this (RT) thread; the seqlocks hand data to/from non-RT readers, copying only
+  // the live prefix (the published image size, which is stable) rather than the full
+  // kMaxProcessImageBytes capacity, keeping per-cycle memory traffic proportional to the real
+  // image.
   const int wkc = driver_->exchangeProcessData(
-      std::span<const uint8_t>(pd_->outScratch.bytes.data(), image->outputBytes),
+      std::span<const uint8_t>(pd_->outScratch.bytes.data(), outputBytes),
       std::span<uint8_t>(pd_->inScratch.bytes.data(), image->inputBytes));
   pd_->inScratch.size = image->inputBytes;
-  // Always publish the latest snapshot. On a lost or partial frame the driver leaves the prior
-  // bytes in the IOmap, so this may republish stale data — readers gate on the working counter
-  // below (processDataHealthy()) rather than here, since skipping the store would only leave an
+  // Publish what we sent so monitoring can decode the RxPDO setpoints from a coherent buffer
+  // (single-writer, lock-free — the read-back counterpart of the per-object write slots).
+  pd_->outputSnapshot.store(pd_->outScratch, liveBufferBytes(outputBytes));
+  // Always publish the latest input snapshot. On a lost or partial frame the driver leaves the
+  // prior bytes in the IOmap, so this may republish stale data — readers gate on the working
+  // counter (processDataHealthy()) rather than here, since skipping the store would only leave an
   // even older snapshot in the seqlock and still expose nothing about freshness.
   pd_->inputSnapshot.store(pd_->inScratch, liveBufferBytes(image->inputBytes));
   // Publish the working counter for health checks; expectedWkc is maintained off the RT path.
@@ -275,7 +324,7 @@ void DeviceManager::stopExchange() {
 
 ProcessBuffer DeviceManager::inputSnapshot() const { return pd_->inputSnapshot.load(); }
 
-ProcessBuffer DeviceManager::outputSnapshot() const { return pd_->outputStaging.load(); }
+ProcessBuffer DeviceManager::outputSnapshot() const { return pd_->outputSnapshot.load(); }
 
 bool DeviceManager::processDataConfigured() const {
   return pd_->image.load(std::memory_order_acquire) != nullptr;
@@ -677,26 +726,27 @@ std::expected<void, std::string> DeviceManager::initializeDeviceParameters(uint1
 
 std::optional<std::vector<uint8_t>> ProcessData::readPdo(uint16_t slavePosition, uint16_t index,
                                                          uint8_t subindex) const {
-  // Gate on health: on a lost or partial frame the driver leaves the prior cycle's bytes in the
-  // IOmap, so the snapshot is stale — signal the caller to read the authoritative SDO value instead
-  // (a healthy() check also covers "no image published").
+  const ProcessImage* img = image.load(std::memory_order_acquire);
+  if (!img) {
+    return std::nullopt;  // no image published — caller uses SDO
+  }
+  auto loc = img->find(slavePosition, index, subindex);
+  if (!loc) {
+    return std::nullopt;  // not PDO-mapped — caller uses SDO
+  }
+  if (loc->isOutput) {
+    // Our own staged setpoint: always valid, no health gate, lock-free. outputSlots is sized to
+    // img->outputs for this generation, so the entry index addresses our slot directly.
+    const uint64_t packed = outputSlots[loc->entryIndex].load(std::memory_order_relaxed);
+    return unpackSlot(packed, slotByteWidth(loc->bitLength));
+  }
+  // Input: gate on health. On a lost or partial frame the driver leaves the prior cycle's bytes in
+  // the IOmap, so the snapshot is stale — signal the caller to read the authoritative SDO value.
   if (!healthy()) {
     return std::nullopt;
   }
-  const ProcessImage* img = image.load(std::memory_order_acquire);
-  auto loc = img->find(slavePosition, index, subindex);
-  if (!loc) {
-    return std::nullopt;
-  }
-  // Inputs live in the latest snapshot; outputs in the staging buffer (what is being sent). Copy
-  // only the live prefix (the published image size) rather than the full capacity.
-  const size_t live = liveBufferBytes(loc->isOutput ? img->outputBytes : img->inputBytes);
   ProcessBuffer buffer;
-  if (loc->isOutput) {
-    outputStaging.load(buffer, live);
-  } else {
-    inputSnapshot.load(buffer, live);
-  }
+  inputSnapshot.load(buffer, liveBufferBytes(img->inputBytes));
   return extractBits(std::span<const uint8_t>(buffer.bytes.data(), buffer.size), loc->bitOffset,
                      loc->bitLength);
 }
@@ -711,15 +761,10 @@ bool ProcessData::writePdo(uint16_t slavePosition, uint16_t index, uint8_t subin
   if (!loc || !loc->isOutput) {
     return false;  // only outputs are writable from the master
   }
-  // Read-modify-write the staging buffer; serialise against other non-RT writers. Copy only the
-  // live prefix (the published output image size) rather than the full capacity.
-  const size_t live = liveBufferBytes(img->outputBytes);
-  std::lock_guard<std::mutex> lock(stagingMutex);
-  ProcessBuffer buffer;
-  outputStaging.load(buffer, live);
-  insertBits(std::span<uint8_t>(buffer.bytes.data(), buffer.size), loc->bitOffset, loc->bitLength,
-             bytes);
-  outputStaging.store(buffer, live);
+  // Lock-free store into this object's own slot. The RT loop composes the wire image from all
+  // slots each cycle, so two writers to different objects never contend and bit-packed objects
+  // sharing a byte stay safe (the single RT composer applies them). Same object = last-writer-wins.
+  outputSlots[loc->entryIndex].store(packSlot(bytes), std::memory_order_relaxed);
   return true;
 }
 

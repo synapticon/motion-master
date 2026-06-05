@@ -60,6 +60,8 @@ struct ProcessImage {
     uint32_t bitOffset;  ///< Absolute bit offset within the direction's image.
     uint16_t bitLength;  ///< Width of the value in bits.
     bool isOutput;       ///< True for an RxPDO output, false for a TxPDO input.
+    size_t entryIndex;   ///< Index within @c outputs (output) or @c inputs (input). For an output,
+                         ///< this addresses the matching lock-free staging slot in @c ProcessData.
   };
 
   /// @brief Locates a mapped object by bus position and CoE address.

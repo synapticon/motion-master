@@ -46,6 +46,8 @@ struct ProcessData {
   // wins. The RT loop reads every slot each cycle and composes the output image. Replaces the old
   // shared output-staging seqlock + mutex (a single packed buffer that every writer had to lock).
   std::vector<std::atomic<uint64_t>> outputSlots;
+  static_assert(std::atomic<uint64_t>::is_always_lock_free,
+                "output staging slots must be lock-free so the RT path never blocks");
   // The output image the RT loop last composed and sent, published for non-RT readers (monitoring).
   // Single-writer (RT) like inputSnapshot, hence lock-free; outputSlots is the write target, this
   // is the read-back of what actually went on the wire.

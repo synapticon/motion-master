@@ -3,6 +3,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstddef>
 #include <format>
@@ -71,12 +72,12 @@ uint64_t packSlot(std::span<const uint8_t> bytes) {
   return v;
 }
 
-std::vector<uint8_t> unpackSlot(uint64_t packed, size_t byteWidth) {
-  std::vector<uint8_t> bytes(byteWidth);
-  for (size_t i = 0; i < byteWidth && i < sizeof(uint64_t); ++i) {
-    bytes[i] = static_cast<uint8_t>(packed >> (8 * i));
+// Unpacks the low bytes of a slot into a caller-provided buffer (no allocation, so the RT compose
+// loop can use a stack array). Writes min(out.size(), 8) little-endian bytes.
+void unpackSlotInto(uint64_t packed, std::span<uint8_t> out) {
+  for (size_t i = 0; i < out.size() && i < sizeof(uint64_t); ++i) {
+    out[i] = static_cast<uint8_t>(packed >> (8 * i));
   }
-  return bytes;
 }
 
 }  // namespace
@@ -281,9 +282,12 @@ void DeviceManager::exchangeProcessData() {
   for (size_t i = 0; i < image->outputs.size(); ++i) {
     const ProcessImageEntry& entry = image->outputs[i];
     const uint64_t packed = pd_->outputSlots[i].load(std::memory_order_relaxed);
-    const auto bytes = unpackSlot(packed, slotByteWidth(entry.bitLength));
+    // Unpack into a stack buffer — no allocation on the RT path.
+    std::array<uint8_t, sizeof(uint64_t)> buf;
+    const size_t width = slotByteWidth(entry.bitLength);
+    unpackSlotInto(packed, std::span<uint8_t>(buf.data(), width));
     insertBits(std::span<uint8_t>(pd_->outScratch.bytes.data(), outputBytes), entry.bitOffset,
-               entry.bitLength, bytes);
+               entry.bitLength, std::span<const uint8_t>(buf.data(), width));
   }
   // Exchange one cycle, then publish both directions for non-RT readers. The scratch buffers are
   // touched only on this (RT) thread; the seqlocks hand data to/from non-RT readers, copying only
@@ -738,7 +742,9 @@ std::optional<std::vector<uint8_t>> ProcessData::readPdo(uint16_t slavePosition,
     // Our own staged setpoint: always valid, no health gate, lock-free. outputSlots is sized to
     // img->outputs for this generation, so the entry index addresses our slot directly.
     const uint64_t packed = outputSlots[loc->entryIndex].load(std::memory_order_relaxed);
-    return unpackSlot(packed, slotByteWidth(loc->bitLength));
+    std::vector<uint8_t> bytes(slotByteWidth(loc->bitLength));
+    unpackSlotInto(packed, bytes);
+    return bytes;
   }
   // Input: gate on health. On a lost or partial frame the driver leaves the prior cycle's bytes in
   // the IOmap, so the snapshot is stale — signal the caller to read the authoritative SDO value.

@@ -50,7 +50,7 @@ class HttpServer {
 
   /// @brief Server configuration.
   struct Config {
-    uint16_t port = 61447;       ///< TCP port to listen on (TLS).
+    uint16_t port = 61447;      ///< TCP port to listen on (TLS).
     std::string certFile;       ///< Path to the TLS certificate (PEM).
     std::string keyFile;        ///< Path to the TLS private key (PEM).
     std::string version;        ///< Application version string served at `GET /api/version`.

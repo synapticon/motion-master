@@ -8,7 +8,7 @@ namespace mm {
 
 /// @brief Number of days before @c notAfter at which a certificate is considered
 ///        "expiring soon" — drives the startup warning and the @c expiresSoon flag
-///        returned by @c GET /api/cert-info.
+///        returned by @c GET /api/cert.
 inline constexpr int kCertExpiryWarningDays = 7;
 
 /// @brief Validity window and identity of a TLS leaf certificate.

@@ -110,7 +110,7 @@ std::string toIso8601Utc(std::chrono::system_clock::time_point tp) {
   return buf;
 }
 
-// Builds the GET /api/cert-info body from a parsed certificate and the path it was read from.
+// Builds the GET /api/cert body from a parsed certificate and the path it was read from.
 // daysRemaining is whole days until notAfter (negative once expired); expiresSoon trips inside
 // the kCertExpiryWarningDays window so the PWA can prompt the user to download a fresh release.
 nlohmann::json certInfoJson(const mm::CertInfo& info, const std::string& path) {
@@ -265,7 +265,7 @@ void Server::run() {
            [this](auto* res, auto* /*req*/) {
              sendJson(res, config_.corsOrigin, nlohmann::json{{"version", config_.version}});
            })
-      .get("/api/cert-info",
+      .get("/api/cert",
            [this](auto* res, auto* /*req*/) {
              auto info = mm::readCertInfo(config_.certFile);
              if (!info) {

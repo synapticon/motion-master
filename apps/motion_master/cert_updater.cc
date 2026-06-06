@@ -1,0 +1,176 @@
+#include "cert_updater.h"
+
+#include <curl/curl.h>
+#include <openssl/bio.h>
+#include <openssl/evp.h>
+#include <openssl/pem.h>
+#include <openssl/x509.h>
+
+#include <cstddef>
+#include <filesystem>
+#include <fstream>
+#include <ios>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <system_error>
+
+namespace mm {
+
+namespace {
+
+// Common name the fetched certificate must carry to be accepted.
+constexpr char kCertCommonName[] = "local.motion-master.synapticon.com";
+
+// curl_global_init is not thread-safe and must run once before any curl_easy_* use. The startup
+// self-heal call is single-threaded, but POST /api/cert/refresh runs on an HTTP thread, so guard
+// it.
+void ensureCurlInit() {
+  static std::once_flag once;
+  std::call_once(once, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
+}
+
+size_t appendToString(char* ptr, size_t size, size_t nmemb, void* userdata) {
+  auto* out = static_cast<std::string*>(userdata);
+  const size_t bytes = size * nmemb;
+  out->append(ptr, bytes);
+  return bytes;
+}
+
+// Downloads @p url into @p out over HTTPS, following redirects (release asset URLs 302 to a
+// separate host) and failing on any HTTP status >= 400.
+std::expected<void, std::string> httpGet(const std::string& url, std::string* out) {
+  ensureCurlInit();
+  CURL* curl = curl_easy_init();
+  if (curl == nullptr) {
+    return std::unexpected("failed to initialise HTTP client");
+  }
+  const std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> guard{curl, curl_easy_cleanup};
+
+  char errbuf[CURL_ERROR_SIZE] = {0};
+  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+  curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
+  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, appendToString);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, out);
+  curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
+  curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
+  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
+  curl_easy_setopt(curl, CURLOPT_USERAGENT, "motion-master");
+
+  const CURLcode rc = curl_easy_perform(curl);
+  if (rc != CURLE_OK) {
+    const std::string detail = errbuf[0] != '\0' ? errbuf : curl_easy_strerror(rc);
+    return std::unexpected("download failed for " + url + ": " + detail);
+  }
+  return {};
+}
+
+std::string subjectCommonName(X509* cert) {
+  char buf[256];
+  const int len =
+      X509_NAME_get_text_by_NID(X509_get_subject_name(cert), NID_commonName, buf, sizeof(buf));
+  if (len < 0) {
+    return {};
+  }
+  return std::string(buf, static_cast<std::size_t>(len));
+}
+
+// Validates the downloaded pair before it is allowed anywhere near the live files: the cert parses
+// and carries the expected CN, it is not already expired, and the key parses and matches the cert.
+std::expected<void, std::string> validatePair(const std::string& certPem,
+                                              const std::string& keyPem) {
+  const std::unique_ptr<BIO, decltype(&BIO_free)> certBio{
+      BIO_new_mem_buf(certPem.data(), static_cast<int>(certPem.size())), BIO_free};
+  const std::unique_ptr<X509, decltype(&X509_free)> cert{
+      PEM_read_bio_X509(certBio.get(), nullptr, nullptr, nullptr), X509_free};
+  if (!cert) {
+    return std::unexpected("downloaded certificate is not valid PEM");
+  }
+
+  const std::string cn = subjectCommonName(cert.get());
+  if (cn != kCertCommonName) {
+    return std::unexpected("downloaded certificate CN '" + cn + "' != expected '" +
+                           std::string(kCertCommonName) + "'");
+  }
+
+  // X509_cmp_current_time returns > 0 when notAfter is in the future, i.e. not yet expired.
+  if (X509_cmp_current_time(X509_get0_notAfter(cert.get())) <= 0) {
+    return std::unexpected("downloaded certificate is already expired");
+  }
+
+  const std::unique_ptr<BIO, decltype(&BIO_free)> keyBio{
+      BIO_new_mem_buf(keyPem.data(), static_cast<int>(keyPem.size())), BIO_free};
+  const std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key{
+      PEM_read_bio_PrivateKey(keyBio.get(), nullptr, nullptr, nullptr), EVP_PKEY_free};
+  if (!key) {
+    return std::unexpected("downloaded key is not valid PEM");
+  }
+  if (X509_check_private_key(cert.get(), key.get()) != 1) {
+    return std::unexpected("downloaded key does not match certificate");
+  }
+  return {};
+}
+
+// Writes @p data to a sibling temp file, applies @p perms, then atomically renames it over @p path.
+std::expected<void, std::string> writeAtomic(const std::string& path, const std::string& data,
+                                             std::filesystem::perms perms) {
+  std::filesystem::path target{path};
+  std::filesystem::path tmp{path + ".new"};
+  {
+    std::ofstream f{tmp, std::ios::binary | std::ios::trunc};
+    if (!f) {
+      return std::unexpected("cannot open " + tmp.string() + " for writing");
+    }
+    f.write(data.data(), static_cast<std::streamsize>(data.size()));
+    if (!f) {
+      return std::unexpected("write failed for " + tmp.string());
+    }
+  }
+
+  std::error_code ec;
+  std::filesystem::permissions(tmp, perms, ec);  // best-effort; key perms matter most
+  std::filesystem::rename(tmp, target, ec);
+  if (ec) {
+    std::filesystem::remove(tmp, ec);
+    return std::unexpected("cannot replace " + target.string() + ": " + ec.message());
+  }
+  return {};
+}
+
+}  // namespace
+
+std::expected<void, std::string> fetchAndSwapCert(const std::string& certPath,
+                                                  const std::string& keyPath,
+                                                  const std::string& certUrl,
+                                                  const std::string& keyUrl) {
+  std::string certPem;
+  std::string keyPem;
+  if (auto r = httpGet(certUrl, &certPem); !r) {
+    return r;
+  }
+  if (auto r = httpGet(keyUrl, &keyPem); !r) {
+    return r;
+  }
+
+  if (auto r = validatePair(certPem, keyPem); !r) {
+    return r;
+  }
+
+  // Install the key first (0600) then the cert; both pass through a temp-then-rename so a failed
+  // write never leaves a half-written live file. The pair was validated above, so the brief window
+  // between the two renames still holds a matching cert/key.
+  using std::filesystem::perms;
+  if (auto r = writeAtomic(keyPath, keyPem, perms::owner_read | perms::owner_write); !r) {
+    return r;
+  }
+  if (auto r = writeAtomic(
+          certPath, certPem,
+          perms::owner_read | perms::owner_write | perms::group_read | perms::others_read);
+      !r) {
+    return r;
+  }
+  return {};
+}
+
+}  // namespace mm

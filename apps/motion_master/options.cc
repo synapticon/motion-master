@@ -9,6 +9,7 @@
 #include <string>
 #include <utility>
 
+#include "cert_updater.h"
 #include "comm/base.h"
 #include "core/version.h"
 
@@ -24,8 +25,10 @@ Options parseOptions(int argc, char** argv) {
 
   app.add_option("-c,--config", opts.config, "Path to JSON config file")->check(CLI::ExistingFile);
   app.add_option("-p,--port", opts.port, "HTTP/WebSocket port")->capture_default_str();
-  app.add_option("--cert", opts.certFile, "TLS certificate file")->check(CLI::ExistingFile);
-  app.add_option("--key", opts.keyFile, "TLS private key file")->check(CLI::ExistingFile);
+  // No ExistingFile check: a not-yet-existing path is valid — the startup self-heal and
+  // --update-cert paths fetch a fresh cert into it.
+  app.add_option("--cert", opts.certFile, "TLS certificate file");
+  app.add_option("--key", opts.keyFile, "TLS private key file");
   std::string driverInput;
   auto* driverOpt = app.add_option("-d,--driver", driverInput, "Fieldbus driver (soem|spoe|igh)")
                         ->check(CLI::IsMember({"soem", "spoe", "igh"}));
@@ -40,6 +43,16 @@ Options parseOptions(int argc, char** argv) {
   app.add_option("--cors-origin", opts.corsOrigin, "Allowed CORS origin")->capture_default_str();
   app.add_flag("--open", opts.openBrowser,
                "Open https://motion-master.synapticon.com/app/ in the default browser");
+  app.add_flag("--update-cert", opts.updateCert,
+               "Download a fresh TLS cert/key, install them next to the binary, and exit");
+  app.add_flag("--no-cert-update", opts.noCertUpdate,
+               "Do not auto-fetch a fresh cert on startup when the current one is missing/expired");
+  opts.certUrl = mm::defaultCertUrl();
+  opts.keyUrl = mm::defaultKeyUrl();
+  app.add_option("--cert-url", opts.certUrl, "Source URL for the TLS certificate")
+      ->capture_default_str();
+  app.add_option("--key-url", opts.keyUrl, "Source URL for the TLS private key")
+      ->capture_default_str();
 
   try {
     app.parse(argc, argv);

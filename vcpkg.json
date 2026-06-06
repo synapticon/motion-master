@@ -4,6 +4,7 @@
   "builtin-baseline": "56bb2411609227288b70117ead2c47585ba07713",
   "dependencies": [
     "cli11",
+    "curl",
     "gtest",
     "neargye-semver",
     "nlohmann-json",

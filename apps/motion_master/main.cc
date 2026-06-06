@@ -23,6 +23,7 @@
 #include <memory>
 
 #include "cert_info.h"
+#include "cert_updater.h"
 #include "comm/fieldbus_driver.h"
 #include "comm/soem_fieldbus_driver.h"
 #include "core/version.h"
@@ -132,15 +133,20 @@ int main(int argc, char** argv) {
     }
   }
 
+  // The install-dir cert/key — both the default served location and the target the self-heal and
+  // --update-cert paths fetch into (it is writable by the same privileges that installed the
+  // binary).
+  const auto defaultCert = exeDir() / "cert.pem";
+  const auto defaultKey = exeDir() / "key.pem";
+
   // Auto-discover TLS cert/key when not supplied via --cert/--key:
   //   1. cert.pem / key.pem next to the binary  (release install)
   //   2. ~/.acme.sh/local.motion-master.synapticon.com_ecc/  (local acme.sh)
+  // Unlike before, a miss is not fatal here — the self-heal below fetches a fresh cert.
   if (opts.certFile.empty() || opts.keyFile.empty()) {
-    const auto bundledCert = exeDir() / "cert.pem";
-    const auto bundledKey = exeDir() / "key.pem";
-    if (std::filesystem::exists(bundledCert) && std::filesystem::exists(bundledKey)) {
-      opts.certFile = bundledCert.string();
-      opts.keyFile = bundledKey.string();
+    if (std::filesystem::exists(defaultCert) && std::filesystem::exists(defaultKey)) {
+      opts.certFile = defaultCert.string();
+      opts.keyFile = defaultKey.string();
       spdlog::info("TLS: bundled cert ({})", opts.certFile);
     } else if (const char* home = std::getenv("HOME")) {
       const auto acmeDir =
@@ -151,38 +157,75 @@ int main(int argc, char** argv) {
         opts.certFile = acmeCert.string();
         opts.keyFile = acmeKey.string();
         spdlog::info("TLS: Let's Encrypt cert from acme.sh ({})", opts.certFile);
-      } else {
-        spdlog::error(
-            "No TLS certificate found — pass --cert/--key or place cert.pem/key.pem next to the "
-            "binary");
-        return 1;
       }
-    } else {
-      spdlog::error(
-          "No TLS certificate found — pass --cert/--key or place cert.pem/key.pem next to the "
-          "binary");
-      return 1;
     }
   }
 
-  // Inspect the resolved certificate's expiry so an operator sees it in the startup log. Failure to
-  // parse is non-fatal — the server still starts (the browser can bypass an invalid cert), and
-  // GET /api/cert-info surfaces the same data so the PWA can prompt for a refresh.
-  if (auto certInfo = mm::readCertInfo(opts.certFile)) {
+  // --update-cert: fetch a fresh cert/key into the resolved path (or the install-dir default when
+  // nothing is configured), then exit without serving. The explicit path for terminal/headless use.
+  if (opts.updateCert) {
+    const std::string certTarget = opts.certFile.empty() ? defaultCert.string() : opts.certFile;
+    const std::string keyTarget = opts.keyFile.empty() ? defaultKey.string() : opts.keyFile;
+    spdlog::info("Fetching TLS certificate from {}", opts.certUrl);
+    if (auto r = mm::fetchAndSwapCert(certTarget, keyTarget, opts.certUrl, opts.keyUrl); !r) {
+      spdlog::error("Certificate update failed: {}", r.error());
+      return 1;
+    }
+    spdlog::info("Installed fresh TLS certificate at {}", certTarget);
+    return 0;
+  }
+
+  // Nothing resolved — target the install-dir default so the self-heal below can populate it.
+  if (opts.certFile.empty() || opts.keyFile.empty()) {
+    opts.certFile = defaultCert.string();
+    opts.keyFile = defaultKey.string();
+  }
+
+  // Decide whether the served cert needs refreshing. A missing cert means we cannot serve TLS at
+  // all; an expired cert still binds (browsers can bypass) but should be refreshed. Both are healed
+  // by fetching from the rolling release unless --no-cert-update is set.
+  bool needFetch = false;
+  bool certMissing =
+      !std::filesystem::exists(opts.certFile) || !std::filesystem::exists(opts.keyFile);
+  if (certMissing) {
+    needFetch = true;
+    spdlog::warn("No TLS certificate at {}", opts.certFile);
+  } else if (auto info = mm::readCertInfo(opts.certFile)) {
     const auto now = std::chrono::system_clock::now();
     const auto daysRemaining =
-        std::chrono::duration_cast<std::chrono::hours>(certInfo->notAfter - now).count() / 24;
-    if (now >= certInfo->notAfter) {
-      spdlog::error("TLS certificate EXPIRED ({} days ago) — update cert.pem/key.pem",
-                    -daysRemaining);
+        std::chrono::duration_cast<std::chrono::hours>(info->notAfter - now).count() / 24;
+    if (now >= info->notAfter) {
+      needFetch = true;
+      spdlog::error("TLS certificate EXPIRED ({} days ago)", -daysRemaining);
     } else if (daysRemaining < mm::kCertExpiryWarningDays) {
-      spdlog::warn("TLS certificate expires in {} days — consider updating cert.pem/key.pem",
-                   daysRemaining);
+      spdlog::warn("TLS certificate expires in {} days", daysRemaining);
     } else {
       spdlog::info("TLS certificate valid for {} more days", daysRemaining);
     }
   } else {
-    spdlog::warn("Could not read TLS certificate expiry: {}", certInfo.error());
+    spdlog::warn("Could not read TLS certificate expiry: {}", info.error());
+  }
+
+  if (needFetch) {
+    if (opts.noCertUpdate) {
+      if (certMissing) {
+        spdlog::error("No certificate and --no-cert-update set — cannot serve TLS");
+        return 1;
+      }
+      spdlog::error(
+          "Certificate expired and --no-cert-update set — serving the expired certificate");
+    } else {
+      spdlog::warn("Fetching fresh TLS certificate from {}", opts.certUrl);
+      if (auto r = mm::fetchAndSwapCert(opts.certFile, opts.keyFile, opts.certUrl, opts.keyUrl);
+          r) {
+        spdlog::info("Installed fresh TLS certificate at {}", opts.certFile);
+      } else if (certMissing) {
+        spdlog::error("Certificate fetch failed and no local certificate exists: {}", r.error());
+        return 1;
+      } else {
+        spdlog::error("Certificate fetch failed: {} — serving the expired certificate", r.error());
+      }
+    }
   }
 
   // Owns the monitoring registry plus its background SDO-refresher and sampler threads. Wired to

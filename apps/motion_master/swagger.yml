@@ -130,15 +130,18 @@ paths:
                   version:
                     type: string
                     example: "6.0.0"
-  /api/cert-info:
+  /api/cert:
     get:
       summary: Get the TLS certificate validity window
       description: >
         Reports the validity window and identity of the certificate the server
         is currently serving. `expiresSoon` trips within 7 days of `notAfter`,
-        so the PWA can prompt the user to download a fresh release. Returns 500
-        if the certificate file cannot be read or parsed.
-      operationId: getCertInfo
+        so the PWA can prompt the user to refresh. Note that an already-expired
+        certificate blocks the browser from reaching this endpoint at all; the
+        binary self-heals an expired/missing certificate at startup (fetching
+        from the rolling release) and exposes `--update-cert` for manual refresh.
+        Returns 500 if the certificate file cannot be read or parsed.
+      operationId: getCert
       responses:
         "200":
           description: Certificate validity and identity

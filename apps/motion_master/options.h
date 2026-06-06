@@ -21,6 +21,10 @@ struct Options {
   /// Allowed CORS origin. Defaults to the production PWA origin.
   std::string corsOrigin{"https://motion-master.synapticon.com"};
   bool openBrowser{false};  ///< Open https://motion-master.synapticon.com/app/ in browser on start.
+  bool updateCert{false};   ///< Fetch a fresh cert/key, install them, and exit without serving.
+  bool noCertUpdate{false};  ///< Disable the startup auto-fetch when the cert is missing/expired.
+  std::string certUrl;       ///< Source URL for the certificate (defaults to the rolling release).
+  std::string keyUrl;        ///< Source URL for the private key (defaults to the rolling release).
 };
 
 /// @brief Parse argv and load the config file into an Options value.

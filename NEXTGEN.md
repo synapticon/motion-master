@@ -72,6 +72,8 @@ The PWA at `https://motion-master.synapticon.com` connects to:
 
 Port 8443 is fixed and well-known; no discovery mechanism is needed.
 
+> **Superseded by Session 2026-06-06 — HTTP and WebSocket on separate ports/loops.** The WebSocket now runs on its own port (`wss://…:8444`, `--ws-port`) and event loop so a blocking HTTP handler can't stall it; only the HTTP API stays on 8443.
+
 **Bearer token (optional — not implemented in v1)**
 
 CORS covers the primary threat (other websites controlling drives via the browser). A bearer token would additionally block non-browser local processes (malware, rogue scripts) from talking to the API — relevant because Motion Master controls physical hardware.
@@ -104,10 +106,10 @@ App  (composition root, owns everything)
  │     └── runs: ICyclicTask[]
  │           ├── Watchdog           → NotificationBus
  │           └── MonitorPublisher   → WebSocketServer
- ├── HttpServer
+ ├── HttpServer  (own port 8443 + loop/thread)
  │     ├── uses: DeviceManager    (SDO read/write, file transfer, state control)
  │     └── Config.InitDriverFn    (callback to main.cc; creates concrete driver for POST /api/init)
- ├── WebSocketServer  (monitoring output)
+ ├── WebSocketServer  (own port 8444 + loop/thread; realtime channel — monitoring/notifications/progress out, subscribe + output staging in)
  ├── NotificationBus  (observer; decouples Watchdog/DeviceManager from servers)
  └── FirmwareInstaller
        └── uses: DeviceManager
@@ -623,6 +625,8 @@ When Let's Encrypt validates, it follows the CNAME and reads the TXT record from
 
 **cert-renewal.yml**
 
+*(The `~/.acmedns.json` step described here was a no-op — acme.sh reads `ACMEDNS_*` env vars, not that file. See Session 2026-06-06 — TLS cert auto-update for the fix and the rolling-release/self-heal additions.)*
+
 Runs on the 1st of every month via `schedule`. Installs `acme.sh`, writes `~/.acmedns.json` from the `ACMEDNS_CONFIG` secret, issues a fresh cert with `--issue --force --dns dns_acmedns --server letsencrypt`, then updates two repository secrets via `gh secret set` using a PAT (`GH_PAT_SECRETS`) with Secrets read/write permission:
 
 - `TLS_CERT` — full-chain PEM (renewed cert + Let's Encrypt intermediate)
@@ -908,3 +912,32 @@ A **seqlock, not per-field atomics**, precisely because the snapshot must be con
 **RT-only scratch state stays off the seqlock.** `phase_`, `center_` (latched on the rising edge of `active` so the wave starts from the current position), and `wasActive_` (edge detection) are written *and* read only by the RT task — they must not go in the control block (HTTP→RT only; readers must not see RT scribbling phase back). Phase is *accumulated* (`phase_ += 2π·f·dt`), not `2π·f·t`, so a mid-run frequency change stays continuous. Open question for implementation: this scratch lives either in a per-axis map inside `SineWaveTask` or as RT-only members on `Device`, and either way the task's per-cycle `findDevice()` re-resolution must sit behind the same `scan()`/`reset()` drain (`stopExchange()` + published-image pointer) that `ProcessDataTask` relies on today — iterating `devices_` while a rescan reallocates it is a data race that only the process-image path is currently guarded against.
 
 **The model in one rule.** *If a procedure must hit the process image every cycle it is a fixed-membership `CyclicTask` registered before `run()`, gated active/idle by a per-device `SeqLock` control block that the corresponding view writes (`Cia402Drive::startSineWave`), with the fixed pool being one slot per `Device`; otherwise it is a cancellable background `std::jthread` calling `DeviceManager` (like `FirmwareInstaller`). `GameLoop` never gains runtime add/remove, and the RT side never sees an invalid param set.*
+
+---
+
+## Session 2026-06-06 — TLS cert auto-update (self-heal + rolling release)
+
+**Extends** *Session 2026-05-23 — TLS certificate automation*, and corrects one bug in it.
+
+**The acme-dns credential bug.** That session said `cert-renewal.yml` "writes `~/.acmedns.json` from the `ACMEDNS_CONFIG` secret." It does, but acme.sh's `dns_acmedns` plugin **does not read that file** — it reads `ACMEDNS_USERNAME`/`ACMEDNS_PASSWORD`/`ACMEDNS_SUBDOMAIN`/`ACMEDNS_BASE_URL` from the environment (the `~/.acmedns.json` format is certbot's). With no env vars set, acme.sh self-registered a throwaway acme-dns account each run and posted the challenge TXT to a subdomain the permanent CNAME doesn't point at, so validation spun ~20 min and failed (the 2026-06-01 cron and a manual re-run both did). Fixed: parse `ACMEDNS_CONFIG` with `jq` and export the `ACMEDNS_*` vars, with a guard that aborts before any validation attempt unless the parsed subdomain equals the public CNAME target (`4723b93a-…`) — so a bad config can't burn a Let's Encrypt failed-validation slot.
+
+**Rolling release as a stable fetch source.** Releases bundle the cert, but they're tied to `v*` tags — a 4-month release gap means the bundled cert is already expired, useless as a refresh source. So `cert-renewal.yml` also publishes the monthly cert/key as assets on a fixed-tag `tls-cert` release (marked **pre-release** so it never becomes the repo's "Latest" and shadows app releases — `--latest=false` was not enough once it was the only non-prerelease). Stable URL, decoupled from app cadence: `https://github.com/synapticon/motion-master/releases/download/tls-cert/{cert,key}.pem`. Publishing the keypair is safe: it only authenticates `local.motion-master.synapticon.com`, which resolves to `127.0.0.1`.
+
+**Self-heal in the binary, not (only) the API.** The load-bearing refresh path is in the binary, because an expired cert blocks the very API call that would fix it: the PWA reaches the local server via cross-origin `fetch()`, which a browser refuses (with no click-through) once the cert is invalid — and terminal-only users never open the UI. So:
+- `cert_updater.{h,cc}` (`fetchAndSwapCert`, libcurl + the already-linked OpenSSL) downloads cert+key, validates the pair (parses, CN matches, not expired, key matches cert), then atomically installs them (temp + rename; key `0600`).
+- `main.cc` self-heals at startup: a missing/expired cert triggers a fetch before binding TLS (missing + fail is fatal; expired + fail serves the expired cert). `--no-cert-update` opts out (air-gapped); `--update-cert` fetches and exits (headless/CLI); `--cert-url`/`--key-url` override the source.
+- `GET /api/cert` reports validity (`expiresSoon` within 7 days); `POST /api/cert/refresh` is the still-valid proactive path, surfaced as a button on the PWA Connection page. It returns `restartRequired: true` — the TLS listener loads the cert once at listen, so a restart applies it (chosen over hairy in-process listener reload). It runs synchronously on the HTTP loop; tolerable because it's rare and ~1 s, and after the split below it no longer touches the WebSocket.
+
+---
+
+## Session 2026-06-06 — HTTP and WebSocket on separate ports/loops
+
+**Supersedes** the single-port model in *Session 2026-05-16 — HTTPS, WebSocket security, and PWA connectivity* (the "binds exclusively to `127.0.0.1:8443`" / "`wss://…:8443`" / "Port 8443 is fixed" claims).
+
+**Problem.** HTTP and the monitoring WebSocket shared one uWS app, one event loop, one thread. uWS runs handlers inline on the loop thread, so a blocking handler (FoE transfer, an SDO, the cert fetch) froze the loop — and since `publish()` marshals monitoring frames onto that same loop via `defer()`, the live stream stalled and inbound WS messages went unread along with it.
+
+**Why not just give the WebSocket its own loop on the same port.** Can't. A WebSocket is not a separate socket — the `101 Switching Protocols` upgrade reuses the *same* TCP connection (same fd), and in uWS an fd belongs to the loop that accepted it (the loop isn't thread-safe to mutate from elsewhere; there's no socket-to-loop migration). One port ⇒ one accepting loop ⇒ the WS is stuck on it. The only one-port fix is to never block the loop (offload slow handler work to a worker, respond via `defer`) — the worker-offload option. A *physically* separate WS loop needs its own port.
+
+**Decision: second port.** Split the merged `Server` into `HttpServer` (8443) and `WebSocketServer` (8444, `--ws-port`), each its own uWS SSLApp + loop + thread — realising the `HttpServer`/`WebSocketServer` split already in the class diagram. The original "no dual-port setup" mandate was a reaction to the old `motion_master`'s ZeroMQ request + pub/sub channels; a second TLS port for the *same* WebSocket is far milder, and the hard isolation is worth it. Trade-off accepted: this isolates the WebSocket (the latency-critical 1 ms path) but does **not** stop HTTP handlers from head-of-line-blocking *each other* (e.g. a long FoE delaying `GET /api/version`, which the PWA health-poll reads as "offline"); that's the separate worker-offload fix, deferred until it bites.
+
+**The WebSocket is the bidirectional realtime channel**, not monitoring-only: server→client monitoring batches, notifications (slaves changed, watchdog), and procedure progress (firmware, calibration); client→server topic subscribe/unsubscribe and (planned) process-data **output** values staged for the RT loop's output seqlock. Today only subscribe/unsubscribe and monitoring publishes are wired; the rest plug into the same `WebSocketServer` as they land. The inbound output-staging path will need `WebSocketServer` to reach `DeviceManager` (write the staging seqlock) with its own validation design — not built yet.

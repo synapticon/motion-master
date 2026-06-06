@@ -38,9 +38,14 @@ motion-master [OPTIONS]
   -h, --help                    Print this help message and exit
       --version                 Display program version and exit
   -c, --config TEXT:FILE        Path to JSONC config file (JSON with // and /* */ comments)
-  -p, --port UINT [8443]        HTTP/WebSocket port
-      --cert TEXT:FILE          TLS certificate file
-      --key TEXT:FILE           TLS private key file
+  -p, --port UINT [8443]        HTTP API port
+      --ws-port UINT [8444]     Realtime WebSocket port (separate loop from the HTTP API)
+      --cert TEXT               TLS certificate file
+      --key TEXT                TLS private key file
+      --update-cert             Download a fresh TLS cert/key, install them, and exit
+      --no-cert-update          Do not auto-fetch a fresh cert on startup when it is missing/expired
+      --cert-url TEXT           Source URL for the TLS certificate (default: rolling release)
+      --key-url TEXT            Source URL for the TLS private key (default: rolling release)
       --cors-origin TEXT [https://motion-master.synapticon.com]
                                 Value sent in Access-Control-Allow-Origin (use '*' to allow any)
   -d, --driver TEXT             Fieldbus driver: soem (omit to defer initialisation to the HTTP API)
@@ -124,7 +129,7 @@ docker run --rm --network host motion-master
 
 **Updating an expired cert on an older image**
 
-The bundled cert is renewed monthly, but an older image keeps its original cert. Override it at runtime — the volume mount shadows the baked-in file:
+The bundled cert is renewed monthly, but an older image keeps its original cert. By default the container self-heals: if the baked-in cert is expired at startup it fetches a fresh one from the rolling release before serving (pass `--no-cert-update` to disable, e.g. for air-gapped hosts). To pin your own cert instead, override it at runtime — the volume mount shadows the baked-in file:
 
 ```bash
 docker run --rm --network host \
@@ -191,6 +196,12 @@ It looks for a certificate in this order:
 2. `~/.acme.sh/local.motion-master.synapticon.com_ecc/` — if you have `acme.sh` installed locally with the Let's Encrypt cert (no browser warning)
 3. Self-signed fallback — generated on the fly; requires accepting a browser security exception once per server restart
 
+If the cert is missing or already expired at startup, the binary fetches a fresh one from the rolling release and installs it before serving (disable with `--no-cert-update`). You can also refresh on demand — `motion-master --update-cert` (terminal) or the **Refresh certificate** button on the PWA's Connection page (`POST /api/cert/refresh`). The cert is rotated monthly and published at a stable URL, decoupled from app releases:
+
+```
+https://github.com/synapticon/motion-master/releases/download/tls-cert/{cert,key}.pem
+```
+
 Test the API (add `-k` only when using the self-signed fallback):
 
 ```bash
@@ -245,7 +256,7 @@ curl -k -X POST https://localhost:8443/api/devices/state \
 curl -k -X POST https://localhost:8443/api/reset
 ```
 
-Connect a WebSocket client to `wss://localhost:8443/ws`. The server sends two message types:
+Connect a WebSocket client to `wss://localhost:8444/ws` (the realtime channel runs on its own port and event loop, separate from the HTTP API on 8443, so a slow HTTP request never stalls the stream). The server sends two message types:
 
 ```json
 {"type": "monitoring", "topic": "pdos", "data": [1234567890, 39, 0, 12345]}

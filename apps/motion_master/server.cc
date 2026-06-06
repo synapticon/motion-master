@@ -5,6 +5,7 @@
 #include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <ctime>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -14,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "cert_info.h"
 #include "comm/al_status_codes.h"
 #include "comm/base.h"
 #include "comm/esc_registers.h"
@@ -92,6 +94,38 @@ nlohmann::json watchdogJson(uint16_t slavePosition, const mm::comm::ProcessDataW
           {"timeoutMs", static_cast<double>(wd.timeout.count()) / 1e6},
           {"divider", wd.divider},
           {"ticks", wd.ticks}};
+}
+
+// Formats a system_clock time_point as an ISO 8601 UTC timestamp (e.g. "2026-08-01T00:00:00Z").
+std::string toIso8601Utc(std::chrono::system_clock::time_point tp) {
+  const std::time_t t = std::chrono::system_clock::to_time_t(tp);
+  std::tm tm{};
+#ifdef _WIN32
+  gmtime_s(&tm, &t);
+#else
+  gmtime_r(&t, &tm);
+#endif
+  char buf[32];
+  std::strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M:%SZ", &tm);
+  return buf;
+}
+
+// Builds the GET /api/cert-info body from a parsed certificate and the path it was read from.
+// daysRemaining is whole days until notAfter (negative once expired); expiresSoon trips inside
+// the kCertExpiryWarningDays window so the PWA can prompt the user to download a fresh release.
+nlohmann::json certInfoJson(const mm::CertInfo& info, const std::string& path) {
+  const auto now = std::chrono::system_clock::now();
+  const auto daysRemaining =
+      std::chrono::duration_cast<std::chrono::hours>(info.notAfter - now).count() / 24;
+  const bool expired = now >= info.notAfter;
+  return {{"path", path},
+          {"subject", info.subject},
+          {"issuer", info.issuer},
+          {"notBefore", toIso8601Utc(info.notBefore)},
+          {"notAfter", toIso8601Utc(info.notAfter)},
+          {"daysRemaining", daysRemaining},
+          {"expired", expired},
+          {"expiresSoon", expired || daysRemaining < mm::kCertExpiryWarningDays}};
 }
 
 }  // namespace
@@ -230,6 +264,15 @@ void Server::run() {
       .get("/api/version",
            [this](auto* res, auto* /*req*/) {
              sendJson(res, config_.corsOrigin, nlohmann::json{{"version", config_.version}});
+           })
+      .get("/api/cert-info",
+           [this](auto* res, auto* /*req*/) {
+             auto info = mm::readCertInfo(config_.certFile);
+             if (!info) {
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, info.error());
+               return;
+             }
+             sendJson(res, config_.corsOrigin, certInfoJson(*info, config_.certFile));
            })
       .get("/api/log",
            [this](auto* res, auto* /*req*/) {

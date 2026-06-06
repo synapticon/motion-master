@@ -7,6 +7,7 @@
     "gtest",
     "neargye-semver",
     "nlohmann-json",
+    "openssl",
     "soem",
     "spdlog",
     {

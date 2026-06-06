@@ -9,6 +9,10 @@ jobs:
   renew:
     runs-on: ubuntu-latest
 
+    # contents: write lets the default GITHUB_TOKEN create/update the rolling `tls-cert` release.
+    permissions:
+      contents: write
+
     steps:
       - name: Install acme.sh
         run: curl -fsSL https://get.acme.sh | sh -s email=msankovic@synapticon.com
@@ -35,3 +39,29 @@ jobs:
           gh secret set TLS_KEY \
             --repo "$GITHUB_REPOSITORY" \
             --body "$(cat ~/.acme.sh/local.motion-master.synapticon.com_ecc/local.motion-master.synapticon.com.key)"
+
+      # Publish the fresh cert/key as assets on a rolling release with a fixed tag, so a running
+      # Motion Master can always fetch the current cert from a stable URL — independent of app
+      # releases (which may be months apart, by which point their bundled cert would have expired):
+      #   https://github.com/synapticon/motion-master/releases/download/tls-cert/cert.pem
+      #   https://github.com/synapticon/motion-master/releases/download/tls-cert/key.pem
+      # The keypair only authenticates local.motion-master.synapticon.com, which resolves to
+      # 127.0.0.1, so publishing it is no wider an exposure than the cert already bundled in every
+      # public release artifact.
+      - name: Publish cert to rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp ~/.acme.sh/local.motion-master.synapticon.com_ecc/fullchain.cer cert.pem
+          cp ~/.acme.sh/local.motion-master.synapticon.com_ecc/local.motion-master.synapticon.com.key key.pem
+          notes="Latest Let's Encrypt certificate for local.motion-master.synapticon.com (resolves to 127.0.0.1). Rotated monthly by cert-renewal.yml. Updated $(date -u +%Y-%m-%dT%H:%M:%SZ)."
+          if gh release view tls-cert --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit tls-cert --repo "$GITHUB_REPOSITORY" --notes "$notes"
+            gh release upload tls-cert cert.pem key.pem --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create tls-cert cert.pem key.pem \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "TLS certificate (rolling)" \
+              --notes "$notes" \
+              --latest=false
+          fi

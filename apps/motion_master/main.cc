@@ -1,6 +1,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
@@ -21,6 +22,7 @@
 
 #include <memory>
 
+#include "cert_info.h"
 #include "comm/fieldbus_driver.h"
 #include "comm/soem_fieldbus_driver.h"
 #include "core/version.h"
@@ -161,6 +163,26 @@ int main(int argc, char** argv) {
           "binary");
       return 1;
     }
+  }
+
+  // Inspect the resolved certificate's expiry so an operator sees it in the startup log. Failure to
+  // parse is non-fatal — the server still starts (the browser can bypass an invalid cert), and
+  // GET /api/cert-info surfaces the same data so the PWA can prompt for a refresh.
+  if (auto certInfo = mm::readCertInfo(opts.certFile)) {
+    const auto now = std::chrono::system_clock::now();
+    const auto daysRemaining =
+        std::chrono::duration_cast<std::chrono::hours>(certInfo->notAfter - now).count() / 24;
+    if (now >= certInfo->notAfter) {
+      spdlog::error("TLS certificate EXPIRED ({} days ago) — update cert.pem/key.pem",
+                    -daysRemaining);
+    } else if (daysRemaining < mm::kCertExpiryWarningDays) {
+      spdlog::warn("TLS certificate expires in {} days — consider updating cert.pem/key.pem",
+                   daysRemaining);
+    } else {
+      spdlog::info("TLS certificate valid for {} more days", daysRemaining);
+    }
+  } else {
+    spdlog::warn("Could not read TLS certificate expiry: {}", certInfo.error());
   }
 
   // Owns the monitoring registry plus its background SDO-refresher and sampler threads. Wired to

@@ -65,6 +65,7 @@ export default function ConnectionPage() {
       />
       <div className="p-4 sm:p-8 space-y-8">
         <section>
+          <h2 className="eyebrow mb-3">Endpoint</h2>
           <div className="border border-grey-200 p-5">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">

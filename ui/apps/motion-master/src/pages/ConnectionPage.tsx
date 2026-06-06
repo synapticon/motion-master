@@ -83,7 +83,7 @@ export default function ConnectionPage() {
                   type="text"
                   value={httpPort}
                   onChange={e => setHttpPort(e.target.value)}
-                  placeholder="8443"
+                  placeholder="61447"
                   className={inputCls}
                 />
               </div>
@@ -93,7 +93,7 @@ export default function ConnectionPage() {
                   type="text"
                   value={wsPort}
                   onChange={e => setWsPort(e.target.value)}
-                  placeholder="8444"
+                  placeholder="62281"
                   className={inputCls}
                 />
               </div>

@@ -74,7 +74,7 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/local\.motion-master\.synapticon\.com:8443\//,
+            urlPattern: /^https:\/\/local\.motion-master\.synapticon\.com:61447\//,
             handler: 'NetworkFirst',
             options: {
               cacheName: 'mm-api-cache',

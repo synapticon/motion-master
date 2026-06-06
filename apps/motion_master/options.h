@@ -10,8 +10,8 @@
 /// All command-line options and loaded configuration for Motion Master.
 struct Options {
   std::string config;     ///< Path to the JSONC config file; empty if not given.
-  uint16_t port{8443};    ///< HTTP API listen port.
-  uint16_t wsPort{8444};  ///< Realtime WebSocket listen port (separate loop/thread from the API).
+  uint16_t port{61447};    ///< HTTP API listen port.
+  uint16_t wsPort{62281};  ///< Realtime WebSocket listen port (separate loop/thread from the API).
   std::string certFile;   ///< Path to the TLS certificate file.
   std::string keyFile;    ///< Path to the TLS private key file.
   /// Fieldbus driver: "soem", "spoe", or "igh". Absent means defer init to the HTTP API.

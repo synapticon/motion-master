@@ -594,7 +594,7 @@ export enum ContentType {
 }
 
 export class HttpClient<SecurityDataType = unknown> {
-  public baseUrl: string = "https://local.motion-master.synapticon.com:8443";
+  public baseUrl: string = "https://local.motion-master.synapticon.com:61447";
   private securityData: SecurityDataType | null = null;
   private securityWorker?: ApiConfig<SecurityDataType>["securityWorker"];
   private abortControllers = new Map<CancelToken, AbortController>();
@@ -799,7 +799,7 @@ export class HttpClient<SecurityDataType = unknown> {
 /**
  * @title Motion Master API
  * @version 6.0.0-alpha.16
- * @baseUrl https://local.motion-master.synapticon.com:8443
+ * @baseUrl https://local.motion-master.synapticon.com:61447
  *
  * Motion Master is the motion-control software for Synapticon SOMANET servo
  * drives. This HTTP API drives the EtherCAT fieldbus end to end: bring up a
@@ -872,8 +872,8 @@ export class HttpClient<SecurityDataType = unknown> {
  *
  * ## Networking, TLS, and CORS
  *
- * The server binds to `127.0.0.1:8443` and is reached at
- * `https://local.motion-master.synapticon.com:8443` (a DNS record that resolves
+ * The server binds to `127.0.0.1:61447` and is reached at
+ * `https://local.motion-master.synapticon.com:61447` (a DNS record that resolves
  * to localhost), with a real, publicly-trusted TLS certificate bundled in every
  * release. CORS allows the single origin
  * `https://motion-master.synapticon.com`, the hosted progressive web app.

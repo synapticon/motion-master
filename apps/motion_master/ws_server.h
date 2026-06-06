@@ -31,7 +31,7 @@ class WebSocketServer {
  public:
   /// @brief Server configuration.
   struct Config {
-    uint16_t port = 8444;  ///< TCP port to listen on (TLS).
+    uint16_t port = 62281;  ///< TCP port to listen on (TLS).
     std::string certFile;  ///< Path to the TLS certificate (PEM).
     std::string keyFile;   ///< Path to the TLS private key (PEM).
   };

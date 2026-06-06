@@ -14,7 +14,7 @@ export default defineConfig({
       forks: { singleFork: true },
     },
     env: {
-      MM_URL: process.env.MM_URL ?? 'https://local.motion-master.synapticon.com:8443',
+      MM_URL: process.env.MM_URL ?? 'https://local.motion-master.synapticon.com:61447',
     },
   },
 });

@@ -38,8 +38,8 @@ motion-master [OPTIONS]
   -h, --help                    Print this help message and exit
       --version                 Display program version and exit
   -c, --config TEXT:FILE        Path to JSONC config file (JSON with // and /* */ comments)
-  -p, --port UINT [8443]        HTTP API port
-      --ws-port UINT [8444]     Realtime WebSocket port (separate loop from the HTTP API)
+  -p, --port UINT [61447]       HTTP API port
+      --ws-port UINT [62281]    Realtime WebSocket port (separate loop from the HTTP API)
       --cert TEXT               TLS certificate file
       --key TEXT                TLS private key file
       --update-cert             Download a fresh TLS cert/key, install them, and exit
@@ -205,7 +205,7 @@ https://github.com/synapticon/motion-master/releases/download/tls-cert/{cert,key
 Test the API (add `-k` only when using the self-signed fallback):
 
 ```bash
-curl -k https://localhost:8443/api/version
+curl -k https://localhost:61447/api/version
 ```
 
 ### CORS
@@ -229,34 +229,34 @@ CORS_ORIGIN='*' ./tools/run.sh
 
 ```bash
 # 1. Discover available adapters
-curl -k https://localhost:8443/api/adapters
+curl -k https://localhost:61447/api/adapters
 
 # 2. Initialise the fieldbus driver
-curl -k -X POST https://localhost:8443/api/init \
+curl -k -X POST https://localhost:61447/api/init \
      -H 'Content-Type: application/json' \
      -d '{"driver":"soem","adapter":"eth0"}'
 
 # 3. Scan for slaves and populate the device list
-curl -k -X POST https://localhost:8443/api/scan
+curl -k -X POST https://localhost:61447/api/scan
 
 # 4. List discovered devices
-curl -k https://localhost:8443/api/devices
+curl -k https://localhost:61447/api/devices
 
 # 5. Transition all devices to Op state (state values: 1=Init, 2=PreOp, 3=Boot, 4=SafeOp, 8=Op)
-curl -k -X POST https://localhost:8443/api/devices/state \
+curl -k -X POST https://localhost:61447/api/devices/state \
      -H 'Content-Type: application/json' \
      -d '{"state":8}'
 
 # 6. Transition specific devices, with a custom timeout
-curl -k -X POST https://localhost:8443/api/devices/state \
+curl -k -X POST https://localhost:61447/api/devices/state \
      -H 'Content-Type: application/json' \
      -d '{"state":2,"positions":[1,2],"timeout":3000}'
 
 # 7. Tear down (stops driver, clears device list; init + scan can be called again)
-curl -k -X POST https://localhost:8443/api/reset
+curl -k -X POST https://localhost:61447/api/reset
 ```
 
-Connect a WebSocket client to `wss://localhost:8444` (the realtime channel runs on its own port and event loop, separate from the HTTP API on 8443, so a slow HTTP request never stalls the stream; the whole port is the WebSocket, so the URL needs no path). The server sends two message types:
+Connect a WebSocket client to `wss://localhost:62281` (the realtime channel runs on its own port and event loop, separate from the HTTP API on 61447, so a slow HTTP request never stalls the stream; the whole port is the WebSocket, so the URL needs no path). The server sends two message types:
 
 ```json
 {"type": "monitoring", "topic": "pdos", "data": [1234567890, 39, 0, 12345]}
@@ -266,7 +266,7 @@ Connect a WebSocket client to `wss://localhost:8444` (the realtime channel runs 
 Fetch the monitoring schema to interpret the `data` array:
 
 ```bash
-curl -k https://localhost:8443/api/monitoring/pdos
+curl -k https://localhost:61447/api/monitoring/pdos
 ```
 
 ### Bus inspection
@@ -275,21 +275,21 @@ Read-only endpoints expose the configured bus state and live health — none of 
 
 ```bash
 # Per-slave ESC configuration captured at scan (Sync Managers, FMMUs, mailbox, distributed clock)
-curl -k https://localhost:8443/api/bus-config
+curl -k https://localhost:61447/api/bus-config
 
 # Process-image layout: every PDO-mapped object resolved to a bit offset, plus working-counter health
-curl -k https://localhost:8443/api/process-image
+curl -k https://localhost:61447/api/process-image
 
 # Current AL state of every device (1=Init, 2=PreOp, 3=Boot, 4=SafeOp, 8=Op)
-curl -k https://localhost:8443/api/devices/state
+curl -k https://localhost:61447/api/devices/state
 
 # Live link diagnostics from each slave's EtherCAT Slave Controller: per-port error counters
 # (invalid frame, RX / forwarded errors, lost link), link state, and watchdog expirations. The
 # counters are cumulative — watch for a rising delta to localise a degrading cable or connector.
-curl -k https://localhost:8443/api/devices/diagnostics
+curl -k https://localhost:61447/api/devices/diagnostics
 
 # The device queries accept a positions filter
-curl -k 'https://localhost:8443/api/devices/diagnostics?positions=1,2'
+curl -k 'https://localhost:61447/api/devices/diagnostics?positions=1,2'
 ```
 
 In the web UI these are the **Fieldbus** group's pages — Control (init / scan / state), Configuration, Process Image, and Diagnostics.

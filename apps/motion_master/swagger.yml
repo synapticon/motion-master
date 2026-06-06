@@ -52,9 +52,9 @@ info:
 
     ## Monitoring WebSocket
 
-    The realtime WebSocket runs on its own port (`8444` by default), separate from
-    this HTTP API (`8443`) and on its own event loop, so a slow HTTP request can
-    never stall the stream: `wss://local.motion-master.synapticon.com:8444` (the
+    The realtime WebSocket runs on its own port (`62281` by default), separate from
+    this HTTP API (`61447`) and on its own event loop, so a slow HTTP request can
+    never stall the stream: `wss://local.motion-master.synapticon.com:62281` (the
     whole port is the WebSocket, so the URL needs no path).
     A client creates a monitoring
     with `POST /api/monitorings` (a topic, sampling interval, buffer size, and a
@@ -78,9 +78,9 @@ info:
 
     ## Networking, TLS, and CORS
 
-    The server binds the HTTP API to `127.0.0.1:8443` and the realtime WebSocket
-    to `127.0.0.1:8444`, reached at `https://local.motion-master.synapticon.com:8443`
-    and `wss://local.motion-master.synapticon.com:8444` (a DNS record that resolves
+    The server binds the HTTP API to `127.0.0.1:61447` and the realtime WebSocket
+    to `127.0.0.1:62281`, reached at `https://local.motion-master.synapticon.com:61447`
+    and `wss://local.motion-master.synapticon.com:62281` (a DNS record that resolves
     to localhost), with a real, publicly-trusted TLS certificate bundled in every
     release. CORS allows the single origin
     `https://motion-master.synapticon.com`, the hosted progressive web app.
@@ -93,7 +93,7 @@ info:
       tell a reconnect from a real failure.
     - **Version** — the running server version is reported at `GET /api/version`.
 servers:
-  - url: https://local.motion-master.synapticon.com:8443
+  - url: https://local.motion-master.synapticon.com:61447
     description: Local Motion Master instance
 paths:
   /api/adapters:

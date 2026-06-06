@@ -23,13 +23,13 @@ The global setup (`src/global-setup.ts`) manages the full Docker lifecycle:
 4. Polls `/api/version` until the server is ready (up to 60 s).
 5. After all tests complete, stops the container (`docker stop`); `--rm` ensures it is removed automatically.
 
-`--network host` is required because Motion Master binds to `127.0.0.1:8443` — Docker's default bridge NAT would never reach a loopback listener.
+`--network host` is required because Motion Master binds to `127.0.0.1:61447` — Docker's default bridge NAT would never reach a loopback listener.
 
 ## Environment variables
 
 | Variable | Default | Description |
 |---|---|---|
-| `MM_URL` | `https://local.motion-master.synapticon.com:8443` | Base URL of the server under test |
+| `MM_URL` | `https://local.motion-master.synapticon.com:61447` | Base URL of the server under test |
 | `MM_SKIP_DOCKER` | _(unset)_ | Set to `1` to skip Docker management and connect to a running instance |
 
 Copy `.env.example` to `.env` and adjust as needed:

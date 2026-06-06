@@ -120,9 +120,9 @@ RUN ldconfig
 WORKDIR /opt/motion-master
 COPY --from=build /src/build/x64-linux-release/apps/motion_master/motion-master .
 
-# 8443 = HTTP API, 8444 = realtime WebSocket (separate loop/port so a slow HTTP request can't
+# 61447 = HTTP API, 62281 = realtime WebSocket (separate loop/port so a slow HTTP request can't
 # stall the monitoring/control stream).
-EXPOSE 8443 8444
+EXPOSE 61447 62281
 
 COPY docker-entrypoint.sh /usr/local/bin/entrypoint.sh
 RUN chmod +x /usr/local/bin/entrypoint.sh

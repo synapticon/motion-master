@@ -7,7 +7,7 @@ import { execFileSync } from 'child_process';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
 
-const mmUrl = process.env.MM_URL ?? 'https://local.motion-master.synapticon.com:8443';
+const mmUrl = process.env.MM_URL ?? 'https://local.motion-master.synapticon.com:61447';
 const CONTAINER_NAME = 'motion-master-api-test';
 const IMAGE_NAME = 'motion-master';
 

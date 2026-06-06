@@ -75,7 +75,7 @@ IOmap is rebuilt.
 Startup and shutdown order (`apps/motion_master/main.cc`):
 
 1. Construct subsystems.
-2. `server.start()` — spawns thread 2, listens on `127.0.0.1:8443` (`main.cc:193`).
+2. `server.start()` — spawns thread 2, listens on `127.0.0.1:61447` (`main.cc:193`).
 3. `monitoringManager.start()` — spawns threads 3 and 4 (`main.cc:200`).
 4. `game_loop.run()` — main thread becomes the RT thread, blocks until stop (`main.cc:227`).
 5. On signal: `game_loop.stop()` returns →

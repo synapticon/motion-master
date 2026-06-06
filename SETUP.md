@@ -21,6 +21,6 @@ File capabilities are the least-privilege alternative to running as root — the
 ./motion-master
 ```
 
-The server listens on `https://local.motion-master.synapticon.com:8443`. Open the Motion Master web app at `https://motion-master.synapticon.com` to connect.
+The server listens on `https://local.motion-master.synapticon.com:61447`. Open the Motion Master web app at `https://motion-master.synapticon.com` to connect.
 
 For full usage options run `./motion-master --help`.

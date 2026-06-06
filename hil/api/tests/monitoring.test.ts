@@ -6,9 +6,9 @@ import WebSocket from 'ws';
 // WebSocket subscribe plumbing — the socket-bound behaviour the C++ unit tests can't reach. The
 // full create → sample → receive path is exercised on hardware.
 
-const baseUrl = process.env.MM_URL ?? 'https://local.motion-master.synapticon.com:8443';
+const baseUrl = process.env.MM_URL ?? 'https://local.motion-master.synapticon.com:61447';
 // The realtime WebSocket runs on its own port (separate loop from the HTTP API).
-const wsBaseUrl = process.env.MM_WS_URL ?? 'wss://local.motion-master.synapticon.com:8444';
+const wsBaseUrl = process.env.MM_WS_URL ?? 'wss://local.motion-master.synapticon.com:62281';
 
 async function request(method: string, path: string, body?: unknown): Promise<Response> {
   return fetch(`${baseUrl}${path}`, {

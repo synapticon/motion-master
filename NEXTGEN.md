@@ -72,7 +72,7 @@ The PWA at `https://motion-master.synapticon.com` connects to:
 
 Port 8443 is fixed and well-known; no discovery mechanism is needed.
 
-> **Superseded by Session 2026-06-06 — HTTP and WebSocket on separate ports/loops.** The WebSocket now runs on its own port (`wss://…:8444`, `--ws-port`) and event loop so a blocking HTTP handler can't stall it; only the HTTP API stays on 8443.
+> **Superseded by Session 2026-06-06 — HTTP and WebSocket on separate ports/loops.** The WebSocket now runs on its own port (`wss://…:62281`, `--ws-port`) and event loop so a blocking HTTP handler can't stall it; the HTTP API is on `61447`. (Defaults moved off 8443/8444 — see that session.)
 
 **Bearer token (optional — not implemented in v1)**
 
@@ -106,10 +106,10 @@ App  (composition root, owns everything)
  │     └── runs: ICyclicTask[]
  │           ├── Watchdog           → NotificationBus
  │           └── MonitorPublisher   → WebSocketServer
- ├── HttpServer  (own port 8443 + loop/thread)
+ ├── HttpServer  (own port 61447 + loop/thread)
  │     ├── uses: DeviceManager    (SDO read/write, file transfer, state control)
  │     └── Config.InitDriverFn    (callback to main.cc; creates concrete driver for POST /api/init)
- ├── WebSocketServer  (own port 8444 + loop/thread; realtime channel — monitoring/notifications/progress out, subscribe + output staging in)
+ ├── WebSocketServer  (own port 62281 + loop/thread; realtime channel — monitoring/notifications/progress out, subscribe + output staging in)
  ├── NotificationBus  (observer; decouples Watchdog/DeviceManager from servers)
  └── FirmwareInstaller
        └── uses: DeviceManager
@@ -938,6 +938,6 @@ A **seqlock, not per-field atomics**, precisely because the snapshot must be con
 
 **Why not just give the WebSocket its own loop on the same port.** Can't. A WebSocket is not a separate socket — the `101 Switching Protocols` upgrade reuses the *same* TCP connection (same fd), and in uWS an fd belongs to the loop that accepted it (the loop isn't thread-safe to mutate from elsewhere; there's no socket-to-loop migration). One port ⇒ one accepting loop ⇒ the WS is stuck on it. The only one-port fix is to never block the loop (offload slow handler work to a worker, respond via `defer`) — the worker-offload option. A *physically* separate WS loop needs its own port.
 
-**Decision: second port.** Split the merged `Server` into `HttpServer` (8443) and `WebSocketServer` (8444, `--ws-port`), each its own uWS SSLApp + loop + thread — realising the `HttpServer`/`WebSocketServer` split already in the class diagram. The original "no dual-port setup" mandate was a reaction to the old `motion_master`'s ZeroMQ request + pub/sub channels; a second TLS port for the *same* WebSocket is far milder, and the hard isolation is worth it. Trade-off accepted: this isolates the WebSocket (the latency-critical 1 ms path) but does **not** stop HTTP handlers from head-of-line-blocking *each other* (e.g. a long FoE delaying `GET /api/version`, which the PWA health-poll reads as "offline"); that's the separate worker-offload fix, deferred until it bites.
+**Decision: second port.** Split the merged `Server` into `HttpServer` (61447) and `WebSocketServer` (62281, `--ws-port`), each its own uWS SSLApp + loop + thread — realising the `HttpServer`/`WebSocketServer` split already in the class diagram. (Defaults are 61447/62281, not 8443/8444: chosen high in the IANA dynamic range and deliberately **above** Linux's default ephemeral range 32768–60999, so a long-running listener never collides with an OS-assigned outbound port, and with no known association to common services.) The original "no dual-port setup" mandate was a reaction to the old `motion_master`'s ZeroMQ request + pub/sub channels; a second TLS port for the *same* WebSocket is far milder, and the hard isolation is worth it. Trade-off accepted: this isolates the WebSocket (the latency-critical 1 ms path) but does **not** stop HTTP handlers from head-of-line-blocking *each other* (e.g. a long FoE delaying `GET /api/version`, which the PWA health-poll reads as "offline"); that's the separate worker-offload fix, deferred until it bites.
 
 **The WebSocket is the bidirectional realtime channel**, not monitoring-only: server→client monitoring batches, notifications (slaves changed, watchdog), and procedure progress (firmware, calibration); client→server topic subscribe/unsubscribe and (planned) process-data **output** values staged for the RT loop's output seqlock. Today only subscribe/unsubscribe and monitoring publishes are wired; the rest plug into the same `WebSocketServer` as they land. The inbound output-staging path will need `WebSocketServer` to reach `DeviceManager` (write the staging seqlock) with its own validation design — not built yet.

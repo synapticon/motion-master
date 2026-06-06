@@ -27,7 +27,9 @@ flowchart TB
         PR[ParameterRefresher.run]
     end
 
-    EPD <-->|in/out PDO images<br/>lock-free| SEQ[(SeqLock&lt;ProcessBuffer&gt;)]
+    HTTP -.->|stage setpoints<br/>lock-free| SLOTS[(atomic outputSlots)]
+    EPD -->|read every slot,<br/>compose wire image| SLOTS
+    EPD -->|publish in/out<br/>snapshots| SEQ[(SeqLock in/outputSnapshot)]
     MS -->|read snapshots| SEQ
     HTTP -->|SDO / FoE / state / registers| SM{{FieldbusDriver::socketMutex_}}
     PR -->|SDO poll| SM
@@ -53,7 +55,10 @@ process-image IOmap and the seqlocks.
 
 - **PDO path (RT loop, thread 1):** `exchangeProcessData()` runs lock-free. SOEM's port
   layer is internally thread-safe, and PDO touches disjoint state (the IOmap) from the
-  control plane.
+  control plane. Setpoint writes are lock-free *from any thread* too: a writer stores its
+  object's bytes into a per-object atomic staging slot (`outputSlots`), and the RT loop is
+  the sole thread that composes all slots into the packed wire image each cycle — which is
+  what makes bit-packed objects sharing a byte safe without a lock (Design B).
 - **Control plane (threads 2 & 4):** every SDO read/write, FoE transfer, ESC register
   access, and AL-state transition serializes through `FieldbusDriver::socketMutex_`, held
   for a single socket transaction only — never across a sleep, a blocking wait, or a user
@@ -81,7 +86,8 @@ Startup and shutdown order (`apps/motion_master/main.cc`):
 
 | Primitive | Defined in | Protects | Writers → Readers |
 |---|---|---|---|
-| **SeqLock** | `libs/core/seqlock.h` | Input PDO snapshot + output staging buffer | RT loop (single writer) → sampler + HTTP readers (wait-free) |
+| **SeqLock** (×2) | `libs/core/seqlock.h` | `inputSnapshot` (last received image) + `outputSnapshot` (read-back of the composed wire image) | RT loop (single writer) → sampler + HTTP readers (wait-free) |
+| **`ProcessData::outputSlots`** (atomic `uint64_t[]`) | `libs/node/process_data.h` | Per-output-object setpoint staging — one lock-free slot per output object | Any thread stages its own object lock-free (last-writer-wins); RT loop composes all slots into the wire image (Design B) |
 | **`FieldbusDriver::socketMutex_`** | `libs/comm/fieldbus_driver.h` | Control-plane socket access (SDO, FoE, registers, state) | HTTP thread + refresher thread — one transaction at a time |
 | **`MonitoringManager::mutex_` + `cv_`** | `libs/node/monitoring_manager.h` | Monitoring registry + sampling schedule | Sampler thread, woken on add/remove/stop |
 | **`ParameterRefresher::mutex_` + `cv_`** | `libs/node/parameter_refresher.h` | Tracked-object set + poll schedule | Refresher thread (lock released during the actual poll) |

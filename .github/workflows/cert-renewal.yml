@@ -77,9 +77,12 @@ jobs:
             gh release edit tls-cert --repo "$GITHUB_REPOSITORY" --notes "$notes"
             gh release upload tls-cert cert.pem key.pem --repo "$GITHUB_REPOSITORY" --clobber
           else
+            # --prerelease keeps this off the repo's "Latest" badge (which --latest=false alone
+            # does not, once it is the only non-prerelease release); the stable per-tag download
+            # URL is unaffected.
             gh release create tls-cert cert.pem key.pem \
               --repo "$GITHUB_REPOSITORY" \
               --title "TLS certificate (rolling)" \
               --notes "$notes" \
-              --latest=false
+              --prerelease
           fi

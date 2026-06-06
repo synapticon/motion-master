@@ -252,6 +252,10 @@ int main(int argc, char** argv) {
             return deviceManager.init(std::move(*driver));
           },
           .getLog = [ringLogSink]() { return ringLogSink->entries(); },
+          .refreshCert = [certFile = opts.certFile, keyFile = opts.keyFile, certUrl = opts.certUrl,
+                          keyUrl = opts.keyUrl]() -> std::expected<void, std::string> {
+            return mm::fetchAndSwapCert(certFile, keyFile, certUrl, keyUrl);
+          },
           .corsOrigin = opts.corsOrigin,
       },
       deviceManager, monitoringManager};

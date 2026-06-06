@@ -42,14 +42,23 @@ class Server {
   /// chronological order.  Wired to @c RingLogSinkMt::entries() in main.cc.
   using GetLogFn = std::function<std::vector<std::string>()>;
 
+  /// @brief Callback type for `POST /api/cert/refresh`.
+  ///
+  /// Fetches a fresh TLS certificate/key from the configured source and installs them, returning
+  /// an error string on failure.  Lives in main.cc so the server never references the fetch URLs
+  /// or cert paths.  The newly installed cert only takes effect after a restart (uSockets loads
+  /// the cert once at listen time).
+  using RefreshCertFn = std::function<std::expected<void, std::string>()>;
+
   /// @brief Server configuration.
   struct Config {
-    uint16_t port = 8443;     ///< TCP port to listen on (TLS).
-    std::string certFile;     ///< Path to the TLS certificate (PEM).
-    std::string keyFile;      ///< Path to the TLS private key (PEM).
-    std::string version;      ///< Application version string served at `GET /api/version`.
-    InitDriverFn initDriver;  ///< Handler for `POST /api/init`; required for API-driven init.
-    GetLogFn getLog;          ///< Handler for `GET /api/log`; returns buffered log entries.
+    uint16_t port = 8443;       ///< TCP port to listen on (TLS).
+    std::string certFile;       ///< Path to the TLS certificate (PEM).
+    std::string keyFile;        ///< Path to the TLS private key (PEM).
+    std::string version;        ///< Application version string served at `GET /api/version`.
+    InitDriverFn initDriver;    ///< Handler for `POST /api/init`; required for API-driven init.
+    GetLogFn getLog;            ///< Handler for `GET /api/log`; returns buffered log entries.
+    RefreshCertFn refreshCert;  ///< Handler for `POST /api/cert/refresh`; fetches+installs a cert.
     /// Value sent in `Access-Control-Allow-Origin`. Defaults to the production PWA origin.
     std::string corsOrigin{"https://motion-master.synapticon.com"};
   };

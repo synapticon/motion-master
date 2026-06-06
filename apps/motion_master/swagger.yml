@@ -207,6 +207,76 @@ paths:
                     type: string
                     description: Human-readable reason the certificate could not be read.
                     example: "cannot parse PEM certificate: /opt/motion-master/cert.pem"
+  /api/cert/refresh:
+    post:
+      summary: Fetch and install a fresh TLS certificate
+      description: >
+        Downloads a fresh certificate and key from the rolling release, validates
+        the pair (parses, CN matches, not expired, key matches cert), and atomically
+        installs them next to the binary. The new certificate only takes effect after
+        a restart (the TLS listener loads the certificate once at startup), indicated
+        by `restartRequired` in the response. Use the still-valid proactive case; an
+        already-expired certificate is healed by the binary at startup instead.
+      operationId: refreshCert
+      responses:
+        "200":
+          description: The fresh certificate was installed (restart to apply)
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [notAfter, daysRemaining, restartRequired]
+                properties:
+                  path:
+                    type: string
+                    example: "/opt/motion-master/cert.pem"
+                  subject:
+                    type: string
+                    example: "local.motion-master.synapticon.com"
+                  issuer:
+                    type: string
+                    example: "R10"
+                  notBefore:
+                    type: string
+                    format: date-time
+                  notAfter:
+                    type: string
+                    format: date-time
+                  daysRemaining:
+                    type: integer
+                    example: 89
+                  expired:
+                    type: boolean
+                    example: false
+                  expiresSoon:
+                    type: boolean
+                    example: false
+                  restartRequired:
+                    type: boolean
+                    description: Always true — restart Motion Master to serve the new certificate.
+                    example: true
+        "500":
+          description: The certificate could not be fetched, validated, or installed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    example: "downloaded key does not match certificate"
+        "501":
+          description: Certificate refresh is not configured on this server
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    example: "certificate refresh is not configured"
   /api/devices/{slavePosition}:
     get:
       summary: Get a single fieldbus device by bus position

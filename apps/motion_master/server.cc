@@ -274,6 +274,27 @@ void Server::run() {
              }
              sendJson(res, config_.corsOrigin, certInfoJson(*info, config_.certFile));
            })
+      .post("/api/cert/refresh",
+            [this](auto* res, auto* /*req*/) {
+              if (!config_.refreshCert) {
+                sendError(res, "501 Not Implemented", config_.corsOrigin,
+                          "certificate refresh is not configured");
+                return;
+              }
+              // Synchronous network fetch on the loop thread — consistent with the FoE
+              // file-transfer handlers; cert refresh is a rare manual action.
+              if (auto r = config_.refreshCert(); !r) {
+                sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
+                return;
+              }
+              // The fresh cert is on disk, but uSockets bound the old one at listen — restart to
+              // apply. Report the newly installed cert's details plus the restart hint.
+              auto info = mm::readCertInfo(config_.certFile);
+              nlohmann::json body =
+                  info ? certInfoJson(*info, config_.certFile) : nlohmann::json::object();
+              body["restartRequired"] = true;
+              sendJson(res, config_.corsOrigin, body);
+            })
       .get("/api/log",
            [this](auto* res, auto* /*req*/) {
              auto lines = config_.getLog ? config_.getLog() : std::vector<std::string>{};

@@ -103,7 +103,7 @@ export default function ConnectionPage() {
         </section>
 
         <section>
-          <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center justify-between mb-2">
             <h2 className="eyebrow">TLS Certificate</h2>
             <button
               onClick={() => refreshMutation.mutate()}
@@ -113,6 +113,11 @@ export default function ConnectionPage() {
               {refreshMutation.isPending ? 'Refreshing…' : 'Refresh certificate'}
             </button>
           </div>
+          <p className="text-xs text-grey-600 mb-4 max-w-prose">
+            Downloads the latest certificate from Synapticon's rolling release, verifies it, and
+            installs it next to the binary. It does not interrupt the running server — the new
+            certificate takes effect the next time you restart Motion Master.
+          </p>
 
           <div className="border border-grey-200 p-5 space-y-4">
             {certQuery.isLoading && <p className="text-sm text-grey-600">Loading…</p>}

@@ -17,13 +17,31 @@ jobs:
       - name: Install acme.sh
         run: curl -fsSL https://get.acme.sh | sh -s email=msankovic@synapticon.com
 
-      - name: Write acme-dns credentials
+      - name: Issue certificate
         env:
           ACMEDNS_CONFIG: ${{ secrets.ACMEDNS_CONFIG }}
-        run: echo "$ACMEDNS_CONFIG" > ~/.acmedns.json
-
-      - name: Issue certificate
         run: |
+          printf '%s' "$ACMEDNS_CONFIG" > acmedns.json
+          # acme.sh's dns_acmedns plugin reads ACMEDNS_* from the environment, NOT a file — so the
+          # credentials must be exported here, or it self-registers a throwaway acme-dns account
+          # whose subdomain doesn't match our permanent CNAME and validation never succeeds.
+          # get() handles both the flat /register response and the certbot domain-keyed wrapper;
+          # the username/password/subdomain field names are fixed by the acme-dns API.
+          get() { jq -r --arg k "$1" \
+            'if has($k) then .[$k] else (to_entries[0].value[$k] // empty) end' acmedns.json; }
+          export ACMEDNS_BASE_URL="https://auth.acme-dns.io"
+          export ACMEDNS_USERNAME="$(get username)"
+          export ACMEDNS_PASSWORD="$(get password)"
+          export ACMEDNS_SUBDOMAIN="$(get subdomain)"
+          rm -f acmedns.json
+          # Abort before any validation attempt if the parse didn't yield the CNAME target, so a
+          # bad config can't burn a Let's Encrypt failed-validation slot. This subdomain is not
+          # secret — it is the public CNAME target documented in CLAUDE.md.
+          expected="4723b93a-99f5-43d7-93f1-195dbb4168ea"
+          if [ -z "$ACMEDNS_USERNAME" ] || [ "$ACMEDNS_SUBDOMAIN" != "$expected" ]; then
+            echo "::error::acme-dns parse failed (subdomain='$ACMEDNS_SUBDOMAIN', expected '$expected')"
+            exit 1
+          fi
           ~/.acme.sh/acme.sh --issue --force \
             -d local.motion-master.synapticon.com \
             --dns dns_acmedns \

@@ -281,8 +281,10 @@ void Server::run() {
                           "certificate refresh is not configured");
                 return;
               }
-              // Synchronous network fetch on the loop thread — consistent with the FoE
-              // file-transfer handlers; cert refresh is a rare manual action.
+              // Synchronous network fetch on the loop thread: it briefly blocks the event loop
+              // (and the monitoring publishes deferred onto it), accepted because refresh is a
+              // rare, manual action and the fetch is ~1s. To make it non-blocking, move it to a
+              // background thread and write the response via loop->defer, like FirmwareInstaller.
               if (auto r = config_.refreshCert(); !r) {
                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                 return;

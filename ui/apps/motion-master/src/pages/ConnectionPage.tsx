@@ -103,21 +103,7 @@ export default function ConnectionPage() {
         </section>
 
         <section>
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="eyebrow">TLS Certificate</h2>
-            <button
-              onClick={() => refreshMutation.mutate()}
-              disabled={refreshMutation.isPending}
-              className={btnOutline}
-            >
-              {refreshMutation.isPending ? 'Refreshing…' : 'Refresh certificate'}
-            </button>
-          </div>
-          <p className="text-xs text-grey-600 mb-4 max-w-prose">
-            Downloads the latest certificate from Synapticon's rolling release, verifies it, and
-            installs it next to the binary. It does not interrupt the running server — the new
-            certificate takes effect the next time you restart Motion Master.
-          </p>
+          <h2 className="eyebrow mb-3">TLS Certificate</h2>
 
           <div className="border border-grey-200 p-5 space-y-4">
             {certQuery.isLoading && <p className="text-sm text-grey-600">Loading…</p>}
@@ -140,9 +126,24 @@ export default function ConnectionPage() {
                 </div>
               </>
             )}
+          </div>
+
+          <div className="mt-4">
+            <button
+              onClick={() => refreshMutation.mutate()}
+              disabled={refreshMutation.isPending}
+              className={btnOutline}
+            >
+              {refreshMutation.isPending ? 'Refreshing…' : 'Refresh certificate'}
+            </button>
+            <p className="text-xs text-grey-600 mt-2 max-w-prose">
+              Downloads the latest certificate from Synapticon's rolling release, verifies it, and
+              installs it next to the binary. It does not interrupt the running server — the new
+              certificate takes effect the next time you restart Motion Master.
+            </p>
 
             {refreshMutation.isSuccess && (
-              <div className="border-l-2 border-status-info bg-status-info/10 px-3 py-2">
+              <div className="border-l-2 border-status-info bg-status-info/10 px-3 py-2 mt-3">
                 <p className="text-xs font-display font-medium uppercase tracking-wide text-status-info">
                   Certificate updated
                 </p>
@@ -152,7 +153,7 @@ export default function ConnectionPage() {
               </div>
             )}
             {refreshMutation.isError && (
-              <p className="text-status-bad text-xs">{apiError(refreshMutation.error)}</p>
+              <p className="text-status-bad text-xs mt-2">{apiError(refreshMutation.error)}</p>
             )}
           </div>
         </section>

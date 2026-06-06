@@ -256,7 +256,7 @@ curl -k -X POST https://localhost:8443/api/devices/state \
 curl -k -X POST https://localhost:8443/api/reset
 ```
 
-Connect a WebSocket client to `wss://localhost:8444/ws` (the realtime channel runs on its own port and event loop, separate from the HTTP API on 8443, so a slow HTTP request never stalls the stream). The server sends two message types:
+Connect a WebSocket client to `wss://localhost:8444` (the realtime channel runs on its own port and event loop, separate from the HTTP API on 8443, so a slow HTTP request never stalls the stream; the whole port is the WebSocket, so the URL needs no path). The server sends two message types:
 
 ```json
 {"type": "monitoring", "topic": "pdos", "data": [1234567890, 39, 0, 12345]}

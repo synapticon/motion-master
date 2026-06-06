@@ -58,7 +58,7 @@ test('GET/DELETE of an unknown monitoring is 404', async () => {
 });
 
 test('WebSocket accepts subscribe/unsubscribe without dropping the connection', async () => {
-  const wsUrl = `${wsBaseUrl}/ws`;
+  const wsUrl = wsBaseUrl;
   const ws = new WebSocket(wsUrl, { rejectUnauthorized: false });
   await new Promise<void>((resolve, reject) => {
     ws.on('open', () => resolve());

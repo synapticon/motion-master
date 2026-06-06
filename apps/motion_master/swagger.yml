@@ -54,7 +54,8 @@ info:
 
     The realtime WebSocket runs on its own port (`8444` by default), separate from
     this HTTP API (`8443`) and on its own event loop, so a slow HTTP request can
-    never stall the stream: `wss://local.motion-master.synapticon.com:8444/ws`.
+    never stall the stream: `wss://local.motion-master.synapticon.com:8444` (the
+    whole port is the WebSocket, so the URL needs no path).
     A client creates a monitoring
     with `POST /api/monitorings` (a topic, sampling interval, buffer size, and a
     list of parameters), then subscribes to its topic over the socket by sending

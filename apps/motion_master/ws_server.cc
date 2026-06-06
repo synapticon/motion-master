@@ -101,8 +101,10 @@ void WebSocketServer::run() {
   }};
   app_.store(&app);
 
+  // Path-agnostic: the whole port is the WebSocket, so the URL needs no path (clients connect to
+  // the bare `wss://host:<port>`). `/*` still accepts a legacy `/ws` path.
   std::move(app)
-      .ws<WsData>("/ws", std::move(wsBehavior))
+      .ws<WsData>("/*", std::move(wsBehavior))
       .listen("127.0.0.1", config_.port,
               [this](auto* token) {
                 if (token) {

@@ -1,6 +1,7 @@
 // cppcheck 2.20.0 misidentifies the argument inside std::move() as a post-move
 // access, flagging std::move(x) as both moving and reading x in the same expression.
-accessMoved:*/server.cc
+// (The WebSocketBehavior is moved into .ws() in ws_server.cc.)
+accessMoved:*/ws_server.cc
 
 // CyclicTimer has platform-split members (#ifdef _WIN32 / #else). cppcheck
 // analyses each .cc against both preprocessor branches, so it sees the Linux

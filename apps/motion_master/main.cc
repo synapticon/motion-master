@@ -28,12 +28,13 @@
 #include "comm/soem_fieldbus_driver.h"
 #include "core/version.h"
 #include "game_loop.h"
+#include "http_server.h"
 #include "node/device_manager.h"
 #include "node/monitoring_manager.h"
 #include "options.h"
 #include "process_data_task.h"
 #include "ring_log_sink.h"
-#include "server.h"
+#include "ws_server.h"
 
 namespace {
 
@@ -228,12 +229,13 @@ int main(int argc, char** argv) {
     }
   }
 
-  // Owns the monitoring registry plus its background SDO-refresher and sampler threads. Wired to
-  // the server below so the HTTP routes reach it and sampled batches publish over the WebSocket.
+  // Owns the monitoring registry plus its background SDO-refresher and sampler threads. The HTTP
+  // server reaches it for the /api/monitorings routes; sampled batches publish over the WebSocket
+  // server, which runs on its own port/loop so a slow HTTP handler can never stall the stream.
   mm::node::MonitoringManager monitoringManager{deviceManager};
 
-  Server server{
-      Server::Config{
+  HttpServer httpServer{
+      HttpServer::Config{
           .port = opts.port,
           .certFile = opts.certFile,
           .keyFile = opts.keyFile,
@@ -259,12 +261,19 @@ int main(int argc, char** argv) {
           .corsOrigin = opts.corsOrigin,
       },
       deviceManager, monitoringManager};
-  server.start();
+  httpServer.start();
+
+  WebSocketServer wsServer{WebSocketServer::Config{
+      .port = opts.wsPort,
+      .certFile = opts.certFile,
+      .keyFile = opts.keyFile,
+  }};
+  wsServer.start();
 
   // Publish each sampled batch to the WebSocket topic named after its monitoring, then start the
   // sampler + refresher threads. (Not added to the RT GameLoop — sampling runs off the RT thread.)
-  monitoringManager.setPublish([&server](std::string topic, std::string json) {
-    server.publish(std::move(topic), std::move(json));
+  monitoringManager.setPublish([&wsServer](std::string topic, std::string json) {
+    wsServer.publish(std::move(topic), std::move(json));
   });
   monitoringManager.start();
 
@@ -296,8 +305,9 @@ int main(int argc, char** argv) {
   game_loop.run();  // main thread IS the RT loop — blocks until stop()
 
   gGameLoop = nullptr;
-  monitoringManager.stop();  // stop sampling/publishing before the server loop goes away
-  server.stop();
+  monitoringManager.stop();  // stop sampling/publishing before the server loops go away
+  wsServer.stop();
+  httpServer.stop();
 
   spdlog::info("Shutting down");
   return 0;

@@ -129,7 +129,7 @@ function DeviceSection({
 }
 
 export default function RootLayout() {
-  const { api, host, port, hasScanned, isInitialized } = useConnection()
+  const { api, host, httpPort, hasScanned, isInitialized } = useConnection()
   const online = useApiHealth(api)
   const queryClient = useQueryClient()
   const [metaOpen, setMetaOpen] = useState(false)
@@ -184,8 +184,8 @@ export default function RootLayout() {
             <span
               title={
                 online
-                  ? `API online — the Motion Master HTTP server is reachable at https://${host}:${port}`
-                  : `API offline — no response from https://${host}:${port}. Make sure Motion Master is installed and running on your system, then accept its TLS certificate.`
+                  ? `API online — the Motion Master HTTP server is reachable at https://${host}:${httpPort}`
+                  : `API offline — no response from https://${host}:${httpPort}. Make sure Motion Master is installed and running on your system, then accept its TLS certificate.`
               }
               aria-label={online ? 'API online' : 'API offline'}
               className={`inline-block h-3 w-3 cursor-help rounded-full ring-2 ring-white ${online

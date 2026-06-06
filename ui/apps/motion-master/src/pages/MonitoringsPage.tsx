@@ -66,8 +66,8 @@ interface ParamRowState {
 const emptyRow: ParamRowState = { devicePosition: '', index: '', subindex: '' }
 
 export default function MonitoringsPage() {
-  const { api, hasScanned, host, port } = useConnection()
-  const wsUrl = `wss://${host}:${port}/ws`
+  const { api, hasScanned, host, wsPort } = useConnection()
+  const wsUrl = `wss://${host}:${wsPort}/ws`
   const queryClient = useQueryClient()
 
   const devicesQuery = useQuery({

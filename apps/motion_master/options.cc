@@ -24,7 +24,8 @@ Options parseOptions(int argc, char** argv) {
                "Print network adapters (MAC -> interface) and exit");
 
   app.add_option("-c,--config", opts.config, "Path to JSON config file")->check(CLI::ExistingFile);
-  app.add_option("-p,--port", opts.port, "HTTP/WebSocket port")->capture_default_str();
+  app.add_option("-p,--port", opts.port, "HTTP API port")->capture_default_str();
+  app.add_option("--ws-port", opts.wsPort, "Realtime WebSocket port")->capture_default_str();
   // No ExistingFile check: a not-yet-existing path is valid — the startup self-heal and
   // --update-cert paths fetch a fresh cert into it.
   app.add_option("--cert", opts.certFile, "TLS certificate file");

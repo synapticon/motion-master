@@ -1,4 +1,4 @@
-#include "server.h"
+#include "http_server.h"
 
 #include <spdlog/spdlog.h>
 
@@ -130,13 +130,13 @@ nlohmann::json certInfoJson(const mm::CertInfo& info, const std::string& path) {
 
 }  // namespace
 
-Server::Server(Config config, mm::node::DeviceManager& deviceManager,
-               mm::node::MonitoringManager& monitoringManager)
+HttpServer::HttpServer(Config config, mm::node::DeviceManager& deviceManager,
+                       mm::node::MonitoringManager& monitoringManager)
     : config_(std::move(config)),
       deviceManager_(deviceManager),
       monitoringManager_(monitoringManager) {}
 
-Server::~Server() {
+HttpServer::~HttpServer() {
   stop();
   // stop() returns early when running_ was already false (listen failed), leaving thread_ joinable.
   if (thread_.joinable()) {
@@ -144,7 +144,7 @@ Server::~Server() {
   }
 }
 
-void Server::start() {
+void HttpServer::start() {
   bool expected = false;
   if (!running_.compare_exchange_strong(expected, true)) {
     return;
@@ -152,24 +152,18 @@ void Server::start() {
   thread_ = std::thread([this]() { run(); });
 }
 
-void Server::stop() {
+void HttpServer::stop() {
   bool expected = true;
   if (!running_.compare_exchange_strong(expected, false)) {
     return;
   }
 
   if (auto* loop = loop_.load()) {
-    // App::close() iterates the HTTP context and every WebSocket context and calls
-    // us_socket_context_close on each, which closes the listen socket *and* every
-    // regular socket (incl. idle HTTP keep-alive connections) in those contexts.
-    // Each closed socket lands on the loop's closed_head queue and gets freed in
-    // the next loop_post, dropping num_polls and letting us_loop_run() exit.
-    //
-    // Manually closing only the listen socket leaves keep-alive HTTP connections
-    // alive in httpContext->head_sockets — they aren't tracked in connections_
-    // (which only holds WebSockets), so num_polls stays > 0 and the loop blocks
-    // until each connection hits its idle timeout, hanging shutdown for minutes
-    // after a client has talked to the API.
+    // App::close() closes the listen socket *and* every regular socket (incl. idle HTTP keep-alive
+    // connections); each lands on the loop's closed_head queue and is freed on the next loop_post,
+    // dropping num_polls so us_loop_run() exits. Manually closing only the listen socket would
+    // leave keep-alive connections alive, blocking the loop until each hits its idle timeout —
+    // hanging shutdown for minutes after a client has talked to the API.
     loop->defer([this]() {
       if (auto* app = app_.load()) {
         app->close();
@@ -182,52 +176,8 @@ void Server::stop() {
   }
 }
 
-void Server::broadcast(std::string json) {
-  if (auto* loop = loop_.load()) {
-    loop->defer([this, json = std::move(json)]() {
-      for (auto* ws : connections_) {
-        ws->send(json, uWS::OpCode::TEXT);
-      }
-    });
-  }
-}
-
-void Server::publish(std::string topic, std::string json) {
-  // Deliver only to clients subscribed to this topic, via uWebSockets' native pub/sub. Deferred
-  // onto the event loop (like broadcast) so any thread — the monitoring sampler here — can call it
-  // without touching the app off-loop.
-  if (auto* loop = loop_.load()) {
-    loop->defer([this, topic = std::move(topic), json = std::move(json)]() {
-      if (auto* app = app_.load()) {
-        app->publish(topic, json, uWS::OpCode::TEXT);
-      }
-    });
-  }
-}
-
-void Server::run() {
+void HttpServer::run() {
   loop_.store(uWS::Loop::get());
-
-  uWS::SSLApp::WebSocketBehavior<WsData> ws_behavior{};
-  ws_behavior.open = [this](auto* ws) {
-    connections_.insert(ws);
-    spdlog::debug("WebSocket connected, total: {}", connections_.size());
-  };
-  ws_behavior.close = [this](auto* ws, int /*code*/, std::string_view /*msg*/) {
-    connections_.erase(ws);
-    spdlog::debug("WebSocket disconnected, total: {}", connections_.size());
-  };
-  // Inbound control messages let a client opt into the monitoring topics it cares about. uWS
-  // removes the socket from all its topics automatically on close, so there is nothing to undo.
-  ws_behavior.message = [](auto* ws, std::string_view message, uWS::OpCode /*opCode*/) {
-    if (auto cmd = mm::parseWsCommand(message)) {
-      if (cmd->action == mm::WsCommand::Action::Subscribe) {
-        ws->subscribe(cmd->topic);
-      } else {
-        ws->unsubscribe(cmd->topic);
-      }
-    }
-  };
 
   uWS::SSLApp app{uWS::SocketContextOptions{
       .key_file_name = config_.keyFile.c_str(),
@@ -281,10 +231,10 @@ void Server::run() {
                           "certificate refresh is not configured");
                 return;
               }
-              // Synchronous network fetch on the loop thread: it briefly blocks the event loop
-              // (and the monitoring publishes deferred onto it), accepted because refresh is a
-              // rare, manual action and the fetch is ~1s. To make it non-blocking, move it to a
-              // background thread and write the response via loop->defer, like FirmwareInstaller.
+              // Synchronous network fetch on the HTTP loop thread: it briefly blocks other HTTP
+              // requests (the WebSocket runs on a separate loop, so it is unaffected), accepted
+              // because refresh is a rare, manual action and the fetch is ~1s. To make it fully
+              // non-blocking, move it to a background thread and respond via loop->defer.
               if (auto r = config_.refreshCert(); !r) {
                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                 return;
@@ -924,18 +874,17 @@ void Server::run() {
                      ->writeStatus("204 No Content")
                      ->end();
                })
-      .ws<WsData>("/ws", std::move(ws_behavior))
       .listen("127.0.0.1", config_.port,
               [this](auto* token) {
                 if (token) {
-                  spdlog::info("Server listening on port {}", config_.port);
+                  spdlog::info("HTTP server listening on port {}", config_.port);
                 } else {
-                  spdlog::error("Server failed to listen on port {}", config_.port);
+                  spdlog::error("HTTP server failed to listen on port {}", config_.port);
                   running_ = false;
                 }
               })
       .run();
 
   app_.store(nullptr);
-  spdlog::debug("Server event loop stopped");
+  spdlog::debug("HTTP server event loop stopped");
 }

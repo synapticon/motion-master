@@ -7,7 +7,6 @@
 #include <functional>
 #include <string>
 #include <thread>
-#include <unordered_set>
 #include <vector>
 
 namespace mm::node {
@@ -15,16 +14,15 @@ class DeviceManager;
 class MonitoringManager;
 }  // namespace mm::node
 
-/// @brief Combined HTTPS + WebSocket server.
+/// @brief HTTPS REST API server.
 ///
-/// Hosts the REST API (version endpoint, CORS preflight, device/bus routes) and
-/// a single monitoring WebSocket at `/ws`.  Runs on a dedicated background thread
-/// started by start() and torn down by stop().
+/// Hosts the REST API (version, cert, CORS preflight, device/bus/monitoring routes) on its own
+/// TLS port, event loop, and thread.  The realtime monitoring/control WebSocket lives in a
+/// separate @c WebSocketServer on its own port and loop, so a slow or blocking HTTP handler here
+/// (FoE transfer, SDO, cert fetch) can never stall the WebSocket.
 ///
-/// All public methods are thread-safe.  broadcast() may be called from any
-/// thread, including the RT GameLoop thread; the message is forwarded to the
-/// uWebSockets event loop via defer() so that the caller never blocks.
-class Server {
+/// All public methods are thread-safe.  start() spawns the background thread; stop() tears it down.
+class HttpServer {
  public:
   /// @brief Callback type for `POST /api/init`.
   ///
@@ -68,11 +66,11 @@ class Server {
   /// @param deviceManager      Device list source; lifetime must exceed that of this object.
   /// @param monitoringManager  Monitoring registry backing the `/api/monitorings` routes; lifetime
   ///                           must exceed that of this object.
-  Server(Config config, mm::node::DeviceManager& deviceManager,
-         mm::node::MonitoringManager& monitoringManager);
+  HttpServer(Config config, mm::node::DeviceManager& deviceManager,
+             mm::node::MonitoringManager& monitoringManager);
 
   /// @brief Destructor.  Calls stop() if the server is still running.
-  ~Server();
+  ~HttpServer();
 
   /// @brief Starts the server background thread and begins accepting connections.
   ///
@@ -84,28 +82,7 @@ class Server {
   /// Idempotent: a second call after the server has already stopped is a no-op.
   void stop();
 
-  /// @brief Sends a JSON message to all currently-connected WebSocket clients.
-  ///
-  /// The message is queued on the server's event loop via defer() and delivered
-  /// asynchronously.  Safe to call from the RT loop thread.
-  ///
-  /// @param json  Serialised JSON string.  Moved into the deferred closure.
-  void broadcast(std::string json);
-
-  /// @brief Publishes a JSON message to the WebSocket clients subscribed to @p topic.
-  ///
-  /// Uses uWebSockets' native topic pub/sub, so only clients that sent @c {"subscribe":"<topic>"}
-  /// receive it (publishing to a topic with no subscribers is a cheap no-op).  Like broadcast(),
-  /// the send is deferred onto the event loop, so this is safe to call from any thread — in
-  /// particular the monitoring sampler thread.
-  ///
-  /// @param topic  Topic to publish under (a monitoring id).  Moved into the deferred closure.
-  /// @param json   Serialised JSON string.  Moved into the deferred closure.
-  void publish(std::string topic, std::string json);
-
  private:
-  struct WsData {};
-
   void run();
 
   Config config_;
@@ -115,5 +92,4 @@ class Server {
   std::thread thread_;
   std::atomic<uWS::Loop*> loop_{nullptr};
   std::atomic<uWS::SSLApp*> app_{nullptr};
-  std::unordered_set<uWS::WebSocket<true, true, WsData>*> connections_;
 };

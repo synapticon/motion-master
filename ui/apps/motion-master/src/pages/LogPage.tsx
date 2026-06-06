@@ -5,13 +5,13 @@ import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
 export default function LogPage() {
-  const { host, port } = useConnection()
+  const { host, httpPort } = useConnection()
   const bottomRef = useRef<HTMLDivElement>(null)
 
   const logQuery = useQuery({
-    queryKey: ['log', host, port],
+    queryKey: ['log', host, httpPort],
     queryFn: async () => {
-      const res = await fetch(`https://${host}:${port}/api/log`)
+      const res = await fetch(`https://${host}:${httpPort}/api/log`)
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       return res.text()
     },

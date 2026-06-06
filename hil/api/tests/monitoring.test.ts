@@ -7,6 +7,8 @@ import WebSocket from 'ws';
 // full create → sample → receive path is exercised on hardware.
 
 const baseUrl = process.env.MM_URL ?? 'https://local.motion-master.synapticon.com:8443';
+// The realtime WebSocket runs on its own port (separate loop from the HTTP API).
+const wsBaseUrl = process.env.MM_WS_URL ?? 'wss://local.motion-master.synapticon.com:8444';
 
 async function request(method: string, path: string, body?: unknown): Promise<Response> {
   return fetch(`${baseUrl}${path}`, {
@@ -56,7 +58,7 @@ test('GET/DELETE of an unknown monitoring is 404', async () => {
 });
 
 test('WebSocket accepts subscribe/unsubscribe without dropping the connection', async () => {
-  const wsUrl = `${baseUrl.replace(/^http/, 'ws')}/ws`;
+  const wsUrl = `${wsBaseUrl}/ws`;
   const ws = new WebSocket(wsUrl, { rejectUnauthorized: false });
   await new Promise<void>((resolve, reject) => {
     ws.on('open', () => resolve());

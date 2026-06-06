@@ -19,9 +19,13 @@ export function readSession(): Session | null {
 
 interface ConnectionContextValue {
   host: string
-  port: string
+  httpPort: string
+  /// Realtime WebSocket port — separate from the HTTP API port, since the backend runs the
+  /// monitoring/control socket on its own port and loop.
+  wsPort: string
   setHost: (host: string) => void
-  setPort: (port: string) => void
+  setHttpPort: (httpPort: string) => void
+  setWsPort: (wsPort: string) => void
   api: Api
   driver: 'soem' | 'spoe' | 'igh'
   setDriver: (d: 'soem' | 'spoe' | 'igh') => void
@@ -45,7 +49,8 @@ const ConnectionContext = createContext<ConnectionContextValue | null>(null)
 export function ConnectionProvider({ children }: { children: React.ReactNode }) {
   const stored = readSession()
   const [host, setHost] = useState('local.motion-master.synapticon.com')
-  const [port, setPort] = useState('8443')
+  const [httpPort, setHttpPort] = useState('8443')
+  const [wsPort, setWsPort] = useState('8444')
   const [driver, setDriver] = useState<'soem' | 'spoe' | 'igh'>(stored?.driver ?? 'soem')
   const [adapter, setAdapter] = useState(stored?.adapter ?? '')
   const [hasScanned, setHasScannedState] = useState(false)
@@ -53,8 +58,8 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const [alreadyInitialized, setAlreadyInitialized] = useState(false)
 
   const api = useMemo(
-    () => new Api({ baseUrl: `https://${host}:${port}` }),
-    [host, port],
+    () => new Api({ baseUrl: `https://${host}:${httpPort}` }),
+    [host, httpPort],
   )
 
   const setHasScanned = useCallback(
@@ -71,7 +76,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
 
   return (
     <ConnectionContext.Provider
-      value={{ host, port, setHost, setPort, api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, isInitialized, setIsInitialized, alreadyInitialized, setAlreadyInitialized }}
+      value={{ host, httpPort, wsPort, setHost, setHttpPort, setWsPort, api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, isInitialized, setIsInitialized, alreadyInitialized, setAlreadyInitialized }}
     >
       {children}
     </ConnectionContext.Provider>

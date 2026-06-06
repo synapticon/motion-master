@@ -52,7 +52,10 @@ info:
 
     ## Monitoring WebSocket
 
-    A monitoring WebSocket is available at `/ws`. A client creates a monitoring
+    The realtime WebSocket runs on its own port (`8444` by default), separate from
+    this HTTP API (`8443`) and on its own event loop, so a slow HTTP request can
+    never stall the stream: `wss://local.motion-master.synapticon.com:8444/ws`.
+    A client creates a monitoring
     with `POST /api/monitorings` (a topic, sampling interval, buffer size, and a
     list of parameters), then subscribes to its topic over the socket by sending
     `{"subscribe":"<topic>"}` (and `{"unsubscribe":"<topic>"}` to stop). The server
@@ -74,8 +77,9 @@ info:
 
     ## Networking, TLS, and CORS
 
-    The server binds to `127.0.0.1:8443` and is reached at
-    `https://local.motion-master.synapticon.com:8443` (a DNS record that resolves
+    The server binds the HTTP API to `127.0.0.1:8443` and the realtime WebSocket
+    to `127.0.0.1:8444`, reached at `https://local.motion-master.synapticon.com:8443`
+    and `wss://local.motion-master.synapticon.com:8444` (a DNS record that resolves
     to localhost), with a real, publicly-trusted TLS certificate bundled in every
     release. CORS allows the single origin
     `https://motion-master.synapticon.com`, the hosted progressive web app.

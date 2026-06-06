@@ -33,7 +33,7 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 export default function ConnectionPage() {
-  const { host, port, setHost, setPort, api } = useConnection()
+  const { host, httpPort, wsPort, setHost, setHttpPort, setWsPort, api } = useConnection()
   const queryClient = useQueryClient()
 
   const certQuery = useQuery({
@@ -67,7 +67,7 @@ export default function ConnectionPage() {
         <section>
           <div className="border border-grey-200 p-5">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
+              <div className="sm:col-span-2">
                 <label className={labelCls}>Host</label>
                 <input
                   type="text"
@@ -78,12 +78,22 @@ export default function ConnectionPage() {
                 />
               </div>
               <div>
-                <label className={labelCls}>Port</label>
+                <label className={labelCls}>HTTP Port</label>
                 <input
                   type="text"
-                  value={port}
-                  onChange={e => setPort(e.target.value)}
+                  value={httpPort}
+                  onChange={e => setHttpPort(e.target.value)}
                   placeholder="8443"
+                  className={inputCls}
+                />
+              </div>
+              <div>
+                <label className={labelCls}>WebSocket Port</label>
+                <input
+                  type="text"
+                  value={wsPort}
+                  onChange={e => setWsPort(e.target.value)}
+                  placeholder="8444"
                   className={inputCls}
                 />
               </div>
@@ -108,7 +118,7 @@ export default function ConnectionPage() {
 
             {certQuery.isError && (
               <p className="text-status-bad text-sm">
-                Could not read certificate. Is the backend reachable at https://{host}:{port}?
+                Could not read certificate. Is the backend reachable at https://{host}:{httpPort}?
               </p>
             )}
 

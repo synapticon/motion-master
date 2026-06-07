@@ -20,31 +20,31 @@ const TRANSITION_TARGETS: TransitionTarget[] = [
     value: 3,
     label: 'Boot',
     cls: 'bg-status-warn text-grey-900 hover:brightness-95',
-    hint: 'Special state for file transfer. Only FoE is available; SyncManager sizes are programmed to support larger frame sizes for file operations.',
+    hint: 'Firmware-download state, reachable only from INIT (and only returns to INIT). Just the FoE mailbox is available — no CoE/SDO, no process data. Its mailbox uses larger SyncManagers sized for firmware payloads.',
   },
   {
     value: 1,
     label: 'Init',
     cls: 'bg-grey-700 text-white hover:bg-grey-800',
-    hint: 'No mailbox or process data (PDO) in INIT.',
+    hint: 'No mailbox and no process data. Reachable directly from any state.',
   },
   {
     value: 2,
     label: 'PreOp',
     cls: 'bg-ocean text-white hover:bg-ocean-dark',
-    hint: 'Mailbox communication starts in PRE-OP. No process data yet.',
+    hint: 'Mailbox communication (CoE/SDO) is available. No process data yet.',
   },
   {
     value: 4,
     label: 'SafeOp',
     cls: 'bg-status-info text-white hover:brightness-110',
-    hint: 'Outputs exchanged in SAFE-OP; mailbox stays active.',
+    hint: 'Inputs (TxPDO) are exchanged and the mailbox stays active; outputs are held in their safe state, not applied. Entered from PRE-OP.',
   },
   {
     value: 8,
     label: 'Op',
     cls: 'bg-green-600 text-white hover:brightness-110',
-    hint: 'Inputs, outputs, and mailbox — everything — exchanged in OP.',
+    hint: 'Everything active: inputs, outputs, and mailbox. Reachable only from SAFE-OP, and only once valid outputs are already being sent.',
   },
 ]
 
@@ -433,7 +433,11 @@ export default function FieldbusPage() {
             <div className="border border-grey-200 p-5 space-y-4 xl:col-span-1">
               <h3 className="text-sm font-display uppercase tracking-widest">Transition to State</h3>
               <p className="text-xs text-grey-600">
-                Command all slaves to transition to an EtherCAT AL state. Requires a successful scan first.
+                Command all slaves to transition to an EtherCAT AL state. Requires a successful scan
+                first. Going up must be step by step — INIT → PRE-OP → SAFE-OP → OP — but you can drop
+                down several states at once (e.g. OP → INIT). BOOT is reachable only from INIT.
+                Illegal jumps (skipping a step upward, or entering BOOT from elsewhere) are rejected
+                by the slave with AL status 0x0011, “Invalid requested state change”.
               </p>
               <div className="space-y-4">
                 {TRANSITION_TARGETS.map(({ value, label, cls, hint }) => {

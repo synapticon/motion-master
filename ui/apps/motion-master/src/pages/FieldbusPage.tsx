@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
+import { usePreferences } from '../contexts/PreferencesContext'
 import { btnOutline } from '../utils/styles'
 
 // AL state transition targets, in the order the buttons are rendered. BOOT leads
@@ -80,6 +81,7 @@ const btnCls =
 export default function FieldbusPage() {
   const queryClient = useQueryClient()
   const { api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, setIsInitialized, alreadyInitialized, setAlreadyInitialized } = useConnection()
+  const { hintsInline } = usePreferences()
   const AL_STATE_LABEL: Record<number, string> = { 1: 'Init', 2: 'PreOp', 3: 'Boot', 4: 'SafeOp', 8: 'Op' }
 
   const alStatusCodesQuery = useQuery({
@@ -437,11 +439,16 @@ export default function FieldbusPage() {
               <h3 className="text-sm font-display uppercase tracking-widest">Transition to State</h3>
               <p className="text-xs text-grey-600">
                 Command all slaves to transition to an EtherCAT AL state. Requires a successful scan
-                first. Going up must be step by step — INIT → PRE-OP → SAFE-OP → OP — but you can drop
-                down several states at once (e.g. OP → INIT). BOOT is reachable only from INIT.
-                Illegal jumps (skipping a step upward, or entering BOOT from elsewhere) are rejected
-                by the slave with AL status 0x0011, “Invalid requested state change”.
+                first.
               </p>
+              {hintsInline && (
+                <p className="text-xs text-grey-600">
+                  Going up must be step by step — INIT → PRE-OP → SAFE-OP → OP — but you can drop
+                  down several states at once (e.g. OP → INIT). BOOT is reachable only from INIT.
+                  Illegal jumps (skipping a step upward, or entering BOOT from elsewhere) are rejected
+                  by the slave with AL status 0x0011, “Invalid requested state change”.
+                </p>
+              )}
               <div className="space-y-4">
                 {TRANSITION_TARGETS.map(({ value, label, cls, hint }) => {
                   const isThisPending = transitionMutation.isPending && transitionMutation.variables === value
@@ -450,11 +457,12 @@ export default function FieldbusPage() {
                       <button
                         onClick={() => transitionMutation.mutate(value)}
                         disabled={transitionMutation.isPending}
+                        title={hintsInline ? undefined : hint}
                         className={`${cls} px-4 py-2 text-xs w-full font-display uppercase tracking-wide transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer`}
                       >
                         {isThisPending ? 'Transitioning…' : `${label} (${value})`}
                       </button>
-                      <p className="text-xs text-grey-600">{hint}</p>
+                      {hintsInline && <p className="text-xs text-grey-600">{hint}</p>}
                     </div>
                   )
                 })}

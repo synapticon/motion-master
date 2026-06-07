@@ -242,10 +242,12 @@ curl -k -X POST https://localhost:61447/api/scan
 # 4. List discovered devices
 curl -k https://localhost:61447/api/devices
 
-# 5. Transition all devices to Op state (state values: 1=Init, 2=PreOp, 3=Boot, 4=SafeOp, 8=Op)
-curl -k -X POST https://localhost:61447/api/devices/state \
-     -H 'Content-Type: application/json' \
-     -d '{"state":8}'
+# 5. Climb to Op state (state values: 1=Init, 2=PreOp, 3=Boot, 4=SafeOp, 8=Op).
+#    EtherCAT only allows single-step climbs, so go up one level at a time. After a
+#    scan devices sit in Init; jumping straight to a higher state is rejected.
+curl -k -X POST https://localhost:61447/api/devices/state -H 'Content-Type: application/json' -d '{"state":2}'  # PreOp
+curl -k -X POST https://localhost:61447/api/devices/state -H 'Content-Type: application/json' -d '{"state":4}'  # SafeOp
+curl -k -X POST https://localhost:61447/api/devices/state -H 'Content-Type: application/json' -d '{"state":8}'  # Op
 
 # 6. Transition specific devices, with a custom timeout
 curl -k -X POST https://localhost:61447/api/devices/state \

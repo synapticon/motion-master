@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import type { SlaveConfig, SyncManagerConfig, FmmuConfig } from '@mm/api-client'
 import PageHeader from '../components/PageHeader'
+import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { usePreferences } from '../contexts/PreferencesContext'
 import { formatHex } from '../utils/hex'
@@ -177,7 +178,7 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
   return (
     <section className="border border-grey-200">
       <header className="border-b border-grey-200 bg-grey-50 px-4 py-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="font-mono text-sm text-grey-800">#{slave.slavePosition}</span>
+        <SlavePositionBadge position={slave.slavePosition} />
         <span className="text-sm text-grey-800 font-medium">
           {slave.deviceName || <span className="text-grey-400">unknown device</span>}
         </span>

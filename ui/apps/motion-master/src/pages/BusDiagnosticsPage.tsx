@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { DeviceDiagnostics, PortDiagnostics } from '@mm/api-client'
 import PageHeader from '../components/PageHeader'
+import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { usePreferences } from '../contexts/PreferencesContext'
 import { btnOutline } from '../utils/styles'
@@ -266,7 +267,7 @@ function DeviceCard({ device }: { device: DeviceDiagnostics }) {
   return (
     <section className="border border-grey-200">
       <header className="border-b border-grey-200 bg-grey-50 px-4 py-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-        <span className="font-mono text-sm text-grey-800">#{device.slavePosition}</span>
+        <SlavePositionBadge position={device.slavePosition} />
         <span className="text-sm text-grey-800 font-medium">
           {device.deviceName || <span className="text-grey-400">unknown device</span>}
         </span>

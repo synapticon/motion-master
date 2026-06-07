@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import type { DcSyncStatus } from '@mm/api-client'
 import PageHeader from '../components/PageHeader'
+import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
@@ -130,7 +131,7 @@ export default function DcSyncPage() {
             <table className="w-full min-w-[560px] text-xs border-collapse">
               <thead>
                 <tr className="border-b border-grey-200 bg-grey-50 text-left text-grey-600">
-                  <th className={th}>#</th>
+                  <th className={th}>Slave</th>
                   <th className={th}>Device</th>
                   <th className={th}>Role</th>
                   <th
@@ -150,7 +151,9 @@ export default function DcSyncPage() {
               <tbody>
                 {devices.map(device => (
                   <tr key={device.slavePosition} className="border-b border-grey-100 last:border-0">
-                    <td className="px-4 py-2 font-mono text-grey-800">#{device.slavePosition}</td>
+                    <td className="px-4 py-2">
+                      <SlavePositionBadge position={device.slavePosition} />
+                    </td>
                     <td className="px-4 py-2 text-grey-800">
                       {device.deviceName || <span className="text-grey-400">unknown device</span>}
                     </td>

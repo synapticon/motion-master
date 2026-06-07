@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import type { ProcessImageObject } from '@mm/api-client'
 import PageHeader from '../components/PageHeader'
+import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { usePreferences } from '../contexts/PreferencesContext'
 import { formatHex } from '../utils/hex'
@@ -107,7 +108,9 @@ function MappingTable({
                   key={`${e.slavePosition}-${e.index}-${e.subindex}-${e.bitOffset}`}
                   className="border-b border-grey-100 last:border-0"
                 >
-                  <td className="px-4 py-2 font-mono">{e.slavePosition}</td>
+                  <td className="px-4 py-2">
+                    <SlavePositionBadge position={e.slavePosition} />
+                  </td>
                   <td className="px-4 py-2 text-grey-600 truncate" title={deviceName(e.slavePosition)}>
                     {deviceName(e.slavePosition)}
                   </td>

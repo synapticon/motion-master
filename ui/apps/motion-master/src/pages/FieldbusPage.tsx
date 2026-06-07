@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
+import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
@@ -373,7 +374,7 @@ export default function FieldbusPage() {
                       <table className="w-full text-xs border-collapse">
                         <thead>
                           <tr className="border-b border-grey-200 bg-grey-50">
-                            {['Pos', 'Name', 'Vendor ID', 'Product Code', 'Revision', 'Serial', 'AL State'].map(h => (
+                            {['Slave', 'Device', 'Vendor ID', 'Product Code', 'Revision', 'Serial', 'AL State'].map(h => (
                               <th key={h} className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium">
                                 {h}
                               </th>
@@ -383,7 +384,9 @@ export default function FieldbusPage() {
                         <tbody>
                           {devicesQuery.data.data.map(d => (
                             <tr key={d.slavePosition} className="border-b border-grey-100 last:border-0">
-                              <td className="px-4 py-2">{d.slavePosition}</td>
+                              <td className="px-4 py-2">
+                                <SlavePositionBadge position={d.slavePosition} />
+                              </td>
                               <td className="px-4 py-2">{d.name}</td>
                               <td className="px-4 py-2 font-mono">0x{d.vendorId.toString(16).toUpperCase()}</td>
                               <td className="px-4 py-2 font-mono">0x{d.productCode.toString(16).toUpperCase()}</td>

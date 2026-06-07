@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
+import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { usePreferences } from '../contexts/PreferencesContext'
 import { useApiHealth } from '../hooks/useApiHealth'
@@ -111,12 +112,7 @@ function DeviceSection({
         {/* Identity */}
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0 text-[13px]">
-            <span
-              className="shrink-0 cursor-help rounded-sm border border-white/25 bg-slate-400 px-1.5 py-0.5 font-mono font-semibold text-grey-900"
-              title={`Slave position — the device’s 1-based position on the EtherCAT bus. This is the {slavePosition} used in API endpoint paths, e.g. /api/devices/${deviceId}/parameters`}
-            >
-              {deviceId.padStart(2, '0')}
-            </span>
+            <SlavePositionBadge position={Number(deviceId)} />
             {name && (
               <span className="shrink-0 tracking-wide text-white/80" title={name}>
                 {name.length > 8 ? `${name.slice(0, 8).trimEnd()}…` : name}

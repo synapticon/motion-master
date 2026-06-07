@@ -72,7 +72,7 @@ export default function FieldbusPage() {
   }
 
   // Non-destructive refresh: re-read the device list and current AL states.
-  // Unlike Scan (ecx_config_init) this issues no bus reconfiguration, so slaves
+  // Unlike Scan this issues no bus reconfiguration, so slaves
   // keep their state (e.g. PRE-OP / OP). States are read off the freshly
   // re-fetched list so a refresh right after a scan reflects the new devices.
   async function refreshDevices() {

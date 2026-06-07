@@ -41,11 +41,15 @@ const COLUMNS = [
     width: 'w-28',
     hint: 'Object dictionary entry being mapped, as index:subindex (e.g. 6064:00).',
   },
-  { label: 'Name', width: 'w-auto', hint: 'Name of the mapped object dictionary entry, when known.' },
+  {
+    label: 'Name',
+    width: 'w-auto',
+    hint: 'Name of the mapped object dictionary entry, read from the device when its parameters are initialized.',
+  },
   {
     label: 'Byte',
     width: 'w-20',
-    hint: 'Byte offset of this object within the flat I/O image (bitOffset / 8).',
+    hint: "Byte offset within this direction's image (bitOffset / 8). Outputs and inputs are exchanged as separate images, so each direction is offset from 0 independently — inputs start at 0 of the input image, not after the outputs.",
   },
   {
     label: 'Bit',
@@ -149,7 +153,7 @@ export default function ProcessImagePage() {
         description={
           <>
             The whole-bus EtherCAT process image published for cyclic exchange — what each device
-            maps, where it sits in the flat I/O image, and the working-counter health. Rebuilt
+            maps, where it sits in its direction's image, and the working-counter health. Rebuilt
             automatically whenever a device enters or leaves SAFE-OP/OP; each rebuild is a new{' '}
             <span className="font-mono">generation</span>.
           </>
@@ -214,7 +218,7 @@ export default function ProcessImagePage() {
                       ? 'text-status-good'
                       : 'text-status-bad'
                 }
-                hint="EtherCAT working counter: last observed vs expected. Every slave that processes the datagram bumps the counter — by 2 for a successful write (outputs/RxPDO) and by 1 for a successful read (inputs/TxPDO). So a drive exchanging both directions contributes 3 (2 + 1); expected = writes×2 + reads×1 across the bus. A match means every device exchanged successfully; a shortfall means at least one slave dropped out. Shows Idle when no device is in SAFE-OP/OP."
+                hint="EtherCAT working counter: last observed vs expected. Each slave adds 2 for a successful write (outputs) and 1 for a successful read (inputs), so a drive doing both adds 3. A match means every device exchanged; a shortfall means one dropped out. Shows Idle when no device is in SAFE-OP/OP."
               />
             </div>
 

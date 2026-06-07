@@ -27,7 +27,7 @@ export function SessionRestore({ children }: { children: React.ReactNode }) {
       .catch((err: unknown) => {
         // 409 = the server is still initialized from before the refresh. The
         // fieldbus is live and already scanned, so just re-fetch the existing
-        // device list to restore the view. Do NOT re-scan: ecx_config_init
+        // device list to restore the view. Do NOT re-scan: a scan
         // re-discovers the bus and would reset every slave back to INIT, losing
         // the state the user already brought devices to (e.g. PRE-OP).
         if (err && typeof err === 'object' && (err as { status?: number }).status === 409) {

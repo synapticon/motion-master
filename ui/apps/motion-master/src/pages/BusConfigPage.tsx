@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
 import type { SlaveConfig, SyncManagerConfig, FmmuConfig } from '@mm/api-client'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
@@ -35,25 +36,36 @@ const fmmuType = (f: FmmuConfig): string => {
   return FMMU_TYPE[f.type] ?? `Type ${f.type}`
 }
 
-// Mailbox protocol bits (SOEM ECT_MBXPROT_*).
-const MBX_PROTOCOLS: [number, string][] = [
-  [0x01, 'AoE'],
-  [0x02, 'EoE'],
-  [0x04, 'CoE'],
-  [0x08, 'FoE'],
-  [0x10, 'SoE'],
-  [0x20, 'VoE'],
+// Mailbox protocol bits (SOEM ECT_MBXPROT_*): bit, abbreviation, full name.
+const MBX_PROTOCOLS: [number, string, string][] = [
+  [0x01, 'AoE', 'ADS over EtherCAT'],
+  [0x02, 'EoE', 'Ethernet over EtherCAT'],
+  [0x04, 'CoE', 'CANopen over EtherCAT'],
+  [0x08, 'FoE', 'File over EtherCAT'],
+  [0x10, 'SoE', 'Servo Drive Profile over EtherCAT'],
+  [0x20, 'VoE', 'Vendor-specific over EtherCAT'],
 ]
 
-const decodeProtocols = (bits: number) =>
-  MBX_PROTOCOLS.filter(([bit]) => bits & bit).map(([, name]) => name)
+const decodeProtocols = (bits: number) => MBX_PROTOCOLS.filter(([bit]) => bits & bit)
 
-function Field({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function Field({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
   return (
-    <div title={hint} className={hint ? 'cursor-help' : undefined}>
+    <div>
       <p className="text-[10px] uppercase tracking-wide text-grey-500 font-display">{label}</p>
       <p className="font-mono text-sm text-grey-800 mt-0.5">{value}</p>
+      {hint && <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>}
     </div>
+  )
+}
+
+function Th({ children, hint }: { children: ReactNode; hint: string }) {
+  return (
+    <th
+      title={hint}
+      className="px-4 py-2 font-display uppercase tracking-wide font-medium cursor-help"
+    >
+      {children}
+    </th>
   )
 }
 
@@ -66,21 +78,13 @@ function SyncManagerTable({ entries }: { entries: SyncManagerConfig[] }) {
       <table className="w-full min-w-[480px] text-xs border-collapse">
         <thead>
           <tr className="border-b border-grey-200 bg-grey-50 text-left text-grey-600">
-            <th className="px-4 py-2 font-display uppercase tracking-wide font-medium">SM</th>
-            <th className="px-4 py-2 font-display uppercase tracking-wide font-medium">Type</th>
-            <th
-              className="px-4 py-2 font-display uppercase tracking-wide font-medium cursor-help"
-              title="Physical ESC memory address the Sync Manager guards"
-            >
-              Phys addr
-            </th>
-            <th className="px-4 py-2 font-display uppercase tracking-wide font-medium">Length</th>
-            <th
-              className="px-4 py-2 font-display uppercase tracking-wide font-medium cursor-help"
-              title="Raw SM control/flags register (buffer mode, direction, watchdog, enable)"
-            >
+            <Th hint="Sync Manager index in the ESC">SM</Th>
+            <Th hint="Sync Manager role: mailbox in/out or cyclic process data (RxPDO/TxPDO)">Type</Th>
+            <Th hint="Physical ESC memory address the Sync Manager guards">Phys addr</Th>
+            <Th hint="Size in bytes of the memory buffer the Sync Manager guards">Length</Th>
+            <Th hint="Raw SM control/flags register (buffer mode, direction, watchdog, enable)">
               Flags
-            </th>
+            </Th>
           </tr>
         </thead>
         <tbody>
@@ -108,29 +112,40 @@ function FmmuTable({ entries }: { entries: FmmuConfig[] }) {
       <table className="w-full min-w-[560px] text-xs border-collapse">
         <thead>
           <tr className="border-b border-grey-200 bg-grey-50 text-left text-grey-600">
-            <th className="px-4 py-2 font-display uppercase tracking-wide font-medium">FMMU</th>
-            <th className="px-4 py-2 font-display uppercase tracking-wide font-medium">Type</th>
-            <th
-              className="px-4 py-2 font-display uppercase tracking-wide font-medium cursor-help"
-              title="Logical (bus-wide) start address and bit range"
-            >
-              Logical
-            </th>
-            <th className="px-4 py-2 font-display uppercase tracking-wide font-medium">Length</th>
-            <th
-              className="px-4 py-2 font-display uppercase tracking-wide font-medium cursor-help"
-              title="Physical ESC start address and bit (ties the FMMU to a Sync Manager)"
-            >
+            <Th hint="Fieldbus Memory Management Unit index in the ESC">FMMU</Th>
+            <Th hint="What the FMMU maps: inputs, outputs, or a mailbox Sync Manager's status">
+              Type
+            </Th>
+            <Th hint="Logical (bus-wide) start address and bit range">Logical</Th>
+            <Th hint="Size in bytes of the mapped region">Length</Th>
+            <Th hint="Physical ESC start address and bit (ties the FMMU to a Sync Manager)">
               Physical
-            </th>
-            <th className="px-4 py-2 font-display uppercase tracking-wide font-medium">Active</th>
+            </Th>
+            <Th hint="Whether this FMMU mapping is enabled">Active</Th>
           </tr>
         </thead>
         <tbody>
-          {entries.map(f => (
+          {entries.map(f => {
+            const type = fmmuType(f)
+            const typeHint =
+              type === 'Mailbox state'
+                ? "A 1-byte flag, not process data: it tells the master when this slave has a mailbox message waiting to be read, so the master only fetches it when there's something there instead of constantly asking."
+                : undefined
+            return (
             <tr key={f.index} className="border-b border-grey-100 last:border-0">
               <td className="px-4 py-2 font-mono">FMMU{f.index}</td>
-              <td className="px-4 py-2 text-grey-700">{fmmuType(f)}</td>
+              <td className="px-4 py-2 text-grey-700">
+                {typeHint ? (
+                  <span
+                    title={typeHint}
+                    className="cursor-help"
+                  >
+                    {type}
+                  </span>
+                ) : (
+                  type
+                )}
+              </td>
               <td className="px-4 py-2 font-mono">
                 {formatHex(f.logicalStart, 8)}.{f.logicalStartBit}–{f.logicalEndBit}
               </td>
@@ -146,7 +161,8 @@ function FmmuTable({ entries }: { entries: FmmuConfig[] }) {
                 )}
               </td>
             </tr>
-          ))}
+            )
+          })}
         </tbody>
       </table>
     </div>
@@ -193,7 +209,23 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
           />
           <Field
             label="Protocols"
-            value={protocols.length ? protocols.join(' · ') : '—'}
+            value={
+              protocols.length ? (
+                protocols.map(([bit, abbr, full], i) => (
+                  <span key={bit}>
+                    {i > 0 && <span className="text-grey-400"> · </span>}
+                    <span
+                      title={full}
+                      className="cursor-help"
+                    >
+                      {abbr}
+                    </span>
+                  </span>
+                ))
+              ) : (
+                '—'
+              )
+            }
             hint="Mailbox protocols the slave supports"
           />
           <Field
@@ -205,7 +237,7 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
                   ? `SYNC0, ${slave.dc.propagationDelay} ns`
                   : `free-run, ${slave.dc.propagationDelay} ns`
             }
-            hint="DC capability and SYNC0 state; propagation delay measured by ecx_configdc. SYNC0 is off for SM-synchronous bring-up."
+            hint="DC capability and SYNC0 state; propagation delay measured by the master during DC configuration. SYNC0 is off for SM-synchronous bring-up."
           />
         </div>
 

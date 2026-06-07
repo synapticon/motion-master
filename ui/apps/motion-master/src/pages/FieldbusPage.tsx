@@ -48,6 +48,12 @@ const TRANSITION_TARGETS: TransitionTarget[] = [
   },
 ]
 
+// Human-readable elapsed time for transition feedback: sub-second as whole ms,
+// otherwise seconds with one decimal (transitions can run up to the server timeout).
+function formatDuration(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`
+}
+
 function apiError(err: unknown): string {
   if (err && typeof err === 'object' && 'error' in err) {
     const inner = (err as { error: unknown }).error
@@ -169,7 +175,14 @@ export default function FieldbusPage() {
   })
 
   const transitionMutation = useMutation({
-    mutationFn: (state: 1 | 2 | 3 | 4 | 8) => api.transitionToState({ state }),
+    // Time just the transition request — the server blocks until devices settle (or time out),
+    // so this is the real wall-clock the state change took. Measured here, not around onSuccess,
+    // so the follow-up refresh below is excluded.
+    mutationFn: async (state: 1 | 2 | 3 | 4 | 8) => {
+      const start = performance.now()
+      const res = await api.transitionToState({ state })
+      return { res, elapsedMs: performance.now() - start }
+    },
     // The transition blocks server-side until devices arrive (or time out), so
     // re-read states afterwards to show where each device actually landed.
     onSuccess: () => refreshDevices(),
@@ -442,6 +455,7 @@ export default function FieldbusPage() {
               {transitionMutation.isSuccess && transitionMutation.variables !== undefined && (
                 <p className="text-status-good text-xs">
                   Transitioned to {AL_STATE_LABEL[transitionMutation.variables]} ({transitionMutation.variables})
+                  {transitionMutation.data && ` in ${formatDuration(transitionMutation.data.elapsedMs)}`}
                 </p>
               )}
               {transitionMutation.isError && (

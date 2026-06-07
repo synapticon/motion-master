@@ -4,12 +4,48 @@ import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
-const AL_STATES = [
-  { value: 1 as const, label: 'Init' },
-  { value: 2 as const, label: 'PreOp' },
-  { value: 3 as const, label: 'Boot' },
-  { value: 4 as const, label: 'SafeOp' },
-  { value: 8 as const, label: 'Op' },
+// AL state transition targets, in the order the buttons are rendered. BOOT leads
+// (it is the odd one out — file-transfer only) and is styled distinctly; the rest
+// are colored per state so each is recognizable at a glance. The hint spells out
+// what communication each state enables, since that is what users actually reason
+// about when choosing a target.
+type TransitionTarget = {
+  value: 1 | 2 | 3 | 4 | 8
+  label: string
+  cls: string
+  hint: string
+}
+const TRANSITION_TARGETS: TransitionTarget[] = [
+  {
+    value: 3,
+    label: 'Boot',
+    cls: 'bg-status-warn text-grey-900 hover:brightness-95',
+    hint: 'Special state for file transfer. Only FoE is available; SyncManager sizes are programmed to support larger frame sizes for file operations.',
+  },
+  {
+    value: 1,
+    label: 'Init',
+    cls: 'bg-grey-700 text-white hover:bg-grey-800',
+    hint: 'No mailbox or process data (PDO) in INIT.',
+  },
+  {
+    value: 2,
+    label: 'PreOp',
+    cls: 'bg-ocean text-white hover:bg-ocean-dark',
+    hint: 'Mailbox communication starts in PRE-OP. No process data yet.',
+  },
+  {
+    value: 4,
+    label: 'SafeOp',
+    cls: 'bg-status-info text-white hover:brightness-110',
+    hint: 'Outputs exchanged in SAFE-OP; mailbox stays active.',
+  },
+  {
+    value: 8,
+    label: 'Op',
+    cls: 'bg-green-600 text-white hover:brightness-110',
+    hint: 'Inputs, outputs, and mailbox — everything — exchanged in OP.',
+  },
 ]
 
 function apiError(err: unknown): string {
@@ -37,7 +73,6 @@ const btnCls =
 export default function FieldbusPage() {
   const queryClient = useQueryClient()
   const { api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, setIsInitialized, alreadyInitialized, setAlreadyInitialized } = useConnection()
-  const [alState, setAlState] = useState<1 | 2 | 3 | 4 | 8>(2)
   const AL_STATE_LABEL: Record<number, string> = { 1: 'Init', 2: 'PreOp', 3: 'Boot', 4: 'SafeOp', 8: 'Op' }
 
   const alStatusCodesQuery = useQuery({
@@ -134,7 +169,7 @@ export default function FieldbusPage() {
   })
 
   const transitionMutation = useMutation({
-    mutationFn: () => api.transitionToState({ state: alState }),
+    mutationFn: (state: 1 | 2 | 3 | 4 | 8) => api.transitionToState({ state }),
     // The transition blocks server-side until devices arrive (or time out), so
     // re-read states afterwards to show where each device actually landed.
     onSuccess: () => refreshDevices(),
@@ -385,29 +420,29 @@ export default function FieldbusPage() {
             <div className="border border-grey-200 p-5 space-y-4 xl:col-span-1">
               <h3 className="text-sm font-display uppercase tracking-widest">Transition to State</h3>
               <p className="text-xs text-grey-600">
-                Command all slaves to transition to the selected EtherCAT AL state. Requires a successful scan first.
+                Command all slaves to transition to an EtherCAT AL state. Requires a successful scan first.
               </p>
-              <div>
-                <label className={labelCls}>Target state</label>
-                <select
-                  value={alState}
-                  onChange={e => setAlState(Number(e.target.value) as 1 | 2 | 3 | 4 | 8)}
-                  className={inputCls}
-                >
-                  {AL_STATES.map(({ value, label }) => (
-                    <option key={value} value={value}>{label} ({value})</option>
-                  ))}
-                </select>
+              <div className="space-y-4">
+                {TRANSITION_TARGETS.map(({ value, label, cls, hint }) => {
+                  const isThisPending = transitionMutation.isPending && transitionMutation.variables === value
+                  return (
+                    <div key={value} className="space-y-1.5">
+                      <button
+                        onClick={() => transitionMutation.mutate(value)}
+                        disabled={transitionMutation.isPending}
+                        className={`${cls} px-4 py-2 text-xs w-full font-display uppercase tracking-wide transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer`}
+                      >
+                        {isThisPending ? 'Transitioning…' : `${label} (${value})`}
+                      </button>
+                      <p className="text-xs text-grey-600">{hint}</p>
+                    </div>
+                  )
+                })}
               </div>
-              <button
-                onClick={() => transitionMutation.mutate()}
-                disabled={transitionMutation.isPending}
-                className={btnCls}
-              >
-                {transitionMutation.isPending ? 'Transitioning…' : 'Transition'}
-              </button>
-              {transitionMutation.isSuccess && (
-                <p className="text-status-good text-xs">Transitioned</p>
+              {transitionMutation.isSuccess && transitionMutation.variables !== undefined && (
+                <p className="text-status-good text-xs">
+                  Transitioned to {AL_STATE_LABEL[transitionMutation.variables]} ({transitionMutation.variables})
+                </p>
               )}
               {transitionMutation.isError && (
                 <p className="text-status-bad text-xs">{apiError(transitionMutation.error)}</p>

@@ -23,6 +23,18 @@ const AL_STATE_LABEL: Record<number, string> = {
   8: 'Op',
 }
 
+// Per-state badge colors, matching the Transition-to-State buttons on the Control
+// page so a state reads the same here as where it's commanded. BOOT is the odd one
+// out (amber); the rest grade from neutral grey (no comms) up to teal (fully
+// operational). An error overrides these with red — see the badge below.
+const AL_STATE_BADGE: Record<number, string> = {
+  1: 'bg-grey-700 text-white',
+  2: 'bg-ocean text-white',
+  3: 'bg-status-warn text-grey-900',
+  4: 'bg-status-info text-white',
+  8: 'bg-green-600 text-white',
+}
+
 interface DeviceState {
   alState: number
   error: boolean
@@ -100,7 +112,7 @@ function DeviceSection({
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0 text-[13px]">
             <span
-              className="shrink-0 cursor-help rounded-sm bg-syn-red px-1.5 py-0.5 font-mono font-semibold text-white"
+              className="shrink-0 cursor-help rounded-sm border border-white/25 bg-slate-400 px-1.5 py-0.5 font-mono font-semibold text-grey-900"
               title={`Slave position — the device’s 1-based position on the EtherCAT bus. This is the {slavePosition} used in API endpoint paths, e.g. /api/devices/${deviceId}/parameters`}
             >
               {deviceId.padStart(2, '0')}
@@ -142,10 +154,13 @@ function DeviceSection({
                   ? 'AL state — the device’s EtherCAT Application Layer state, the low nibble of the AL Status register (0x0130). The error indicator (bit 4) is set; the reason is in the AL Status Code register (0x0134).'
                   : 'AL state — the device’s EtherCAT Application Layer state, the low nibble of the AL Status register (0x0130).'
               }
-              className={`shrink-0 px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider ${state?.error ? 'bg-status-warn/15 text-status-warn' : 'bg-white/10 text-white/60'
+              className={`shrink-0 px-1.5 py-0.5 rounded-sm border border-white/25 text-[10px] font-display tracking-wider ${state?.error
+                ? 'bg-status-bad text-white'
+                : AL_STATE_BADGE[state?.alState ?? -1] ?? 'bg-white/10 text-white/60'
                 }`}
             >
               {stateLabel}
+              {state && ` (${state.alState})`}
               {state?.error && ' · err'}
             </span>
           )}

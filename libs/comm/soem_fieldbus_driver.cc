@@ -108,6 +108,15 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
   for (int i = 1; i <= ctx_->slavecount; ++i) {
     ctx_->slavelist[i].outputs = nullptr;
     ctx_->slavelist[i].inputs = nullptr;
+    // ecx_config_map_group (via ecx_map_coe_soe) invokes the per-slave PO->SO config hook
+    // `if (slavelist[i].PO2SOconfig)` before reading the PDO mapping. We never register such a
+    // hook, and SOEM never assigns it — ecx_init_context's memset zeroes it once, but only on a
+    // fresh ecx_config_init, which a re-map does not run. A stray write that flips this field to a
+    // non-null value (observed after a BOOT/firmware excursion) therefore turns the map into a call
+    // through a garbage function pointer and segfaults the whole process. Force it null on every
+    // map so SOEM's guard always short-circuits — defence in depth for the same reason the
+    // outputs/inputs pointers above are reset rather than trusted across re-maps.
+    ctx_->slavelist[i].PO2SOconfig = nullptr;
   }
   const int usedSize = ecx_config_map_group(ctx_.get(), map_, 0);
   if (usedSize <= 0) {

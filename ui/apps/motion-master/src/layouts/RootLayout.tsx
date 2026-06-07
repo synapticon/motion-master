@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { NavLink, Outlet, useLocation } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
@@ -63,14 +63,12 @@ function DeviceSection({
 }) {
   const { api } = useConnection()
 
-  // Auto-expand the device whose page is currently open; collapse the rest so a long
-  // device list stays scannable. Manual toggling sticks until the active device changes.
+  // Initial fold state is route-driven: on load (or reload) the device whose page is open
+  // starts expanded, the rest collapsed. After that it's purely manual — the header toggles
+  // it and that choice sticks; navigation alone never re-expands it.
   const location = useLocation()
   const isActive = location.pathname.startsWith(`/devices/${deviceId}/`)
   const [open, setOpen] = useState(isActive)
-  useEffect(() => {
-    if (isActive) setOpen(true)
-  }, [isActive])
 
   // Live mailbox probe. Read per-device (not batched) so one missing device reports
   // inactive without disturbing the others. `null` while the first read is in flight.
@@ -100,21 +98,21 @@ function DeviceSection({
       >
         {/* Identity */}
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
+          <div className="flex items-center gap-2 min-w-0 text-[13px]">
             <span
-              className="shrink-0 cursor-help font-mono text-sm font-semibold text-white"
+              className="shrink-0 cursor-help rounded-sm bg-syn-red px-1.5 py-0.5 font-mono font-semibold text-white"
               title={`Slave position — the device’s 1-based position on the EtherCAT bus. This is the {slavePosition} used in API endpoint paths, e.g. /api/devices/${deviceId}/parameters`}
             >
-              |{deviceId.padStart(2, '0')}|
+              {deviceId.padStart(2, '0')}
             </span>
             {name && (
-              <span className="shrink-0 text-[13px] tracking-wide text-white/80" title={name}>
+              <span className="shrink-0 tracking-wide text-white/80" title={name}>
                 {name.length > 8 ? `${name.slice(0, 8).trimEnd()}…` : name}
               </span>
             )}
             {productCode !== undefined && (
               <span
-                className="truncate font-mono text-[11px] text-white/40"
+                className="truncate font-mono text-white/40"
                 title={`Product code (EEPROM): ${formatHex(productCode)}`}
               >
                 {formatHex(productCode)}
@@ -161,7 +159,7 @@ function DeviceSection({
                 ? 'bg-white/40 animate-pulse'
                 : mailboxActive
                   ? 'bg-status-good'
-                  : 'bg-syn-red'
+                  : 'bg-status-bad'
                 }`}
             />
             <span className="text-[10px] font-display tracking-wider text-white/70">
@@ -372,7 +370,7 @@ export default function RootLayout() {
                 )}
               </div>
               <div
-                className="flex items-center gap-2 cursor-help"
+                className="cursor-help"
                 title={
                   !isInitialized
                     ? 'Not initialized — no fieldbus driver is loaded. Initialize one on the Fieldbus page.'
@@ -382,14 +380,13 @@ export default function RootLayout() {
                 }
               >
                 <span
-                  className={`inline-block h-2 w-2 shrink-0 rounded-full ring-2 ring-white ${!isInitialized
-                    ? 'bg-white/30'
+                  className={`text-xs font-display tracking-wider ${!isInitialized
+                    ? 'text-white/40'
                     : hasScanned
-                      ? 'bg-status-good shadow-[0_0_6px_1px_var(--color-status-good)]'
-                      : 'bg-status-warn shadow-[0_0_6px_1px_var(--color-status-warn)]'
+                      ? 'text-status-good'
+                      : 'text-status-warn'
                     }`}
-                />
-                <span className="text-xs font-display tracking-wider text-white/70">
+                >
                   {!isInitialized
                     ? 'Not initialized'
                     : hasScanned

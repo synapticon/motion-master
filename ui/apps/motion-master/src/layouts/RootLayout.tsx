@@ -111,7 +111,7 @@ function DeviceSection({
       >
         {/* Identity */}
         <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 text-[13px]">
+          <div className="flex items-center gap-2 min-w-0 text-xs">
             <SlavePositionBadge position={Number(deviceId)} />
             {name && (
               <span className="shrink-0 tracking-wide text-white/80" title={name}>
@@ -166,7 +166,7 @@ function DeviceSection({
             className="shrink-0 flex items-center gap-1.5"
           >
             <span
-              className={`inline-block h-2 w-2 rounded-[1px] ${mailboxActive === null
+              className={`inline-block h-2 w-2 rounded-[1px] border border-white/25 ${mailboxActive === null
                 ? 'bg-white/40 animate-pulse'
                 : mailboxActive
                   ? 'bg-status-good'
@@ -288,7 +288,7 @@ export default function RootLayout() {
               </svg>
             </button>
             {prefsOpen && (
-              <label className="flex items-center gap-2 px-5 py-2 text-[11px] text-white/50 hover:text-white/80 cursor-pointer select-none">
+              <label className="flex items-center gap-2 px-5 py-2 text-xs text-white/60 hover:text-white cursor-pointer select-none">
                 <input
                   type="checkbox"
                   checked={hintsInline}

@@ -10,6 +10,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace mm::comm {
@@ -47,6 +48,23 @@ inline EtherCatState alState(uint16_t alStatus) {
 
 /// @brief Returns whether the AL Status error indicator (bit 4 of register 0x0130) is set.
 inline bool alHasError(uint16_t alStatus) { return (alStatus & 0x0010u) != 0; }
+
+/// @brief Human-readable name of an AL state, for log and error messages.
+inline std::string_view toString(EtherCatState state) {
+  switch (state) {
+    case EtherCatState::Init:
+      return "INIT";
+    case EtherCatState::PreOp:
+      return "PRE-OP";
+    case EtherCatState::Boot:
+      return "BOOT";
+    case EtherCatState::SafeOp:
+      return "SAFE-OP";
+    case EtherCatState::Op:
+      return "OP";
+  }
+  return "UNKNOWN";
+}
 
 /// @brief Working-counter contribution of one slave for a given AL state and PDO presence.
 ///

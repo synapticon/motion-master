@@ -7,10 +7,12 @@
 #include <atomic>
 #include <cstddef>
 #include <format>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <set>
 #include <shared_mutex>
 #include <span>
 #include <string>
@@ -78,6 +80,35 @@ void unpackSlotInto(uint64_t packed, std::span<uint8_t> out) {
   for (size_t i = 0; i < out.size() && i < sizeof(uint64_t); ++i) {
     out[i] = static_cast<uint8_t>(packed >> (8 * i));
   }
+}
+
+// The EtherCAT AL state machine, keyed by a device's current state: each entry lists every state
+// that state may transition to (including itself — re-commanding the current state is harmless).
+// Climbs are single-step only (INIT -> PRE-OP -> SAFE-OP -> OP); drops may skip levels (e.g.
+// OP -> INIT); BOOT is reachable only from INIT and only returns to INIT.
+//
+// Motion Master must reject illegal transitions itself rather than leaving them to the slave (which
+// answers an illegal request with AL status 0x0011): entering SAFE-OP/OP triggers a re-map that
+// reads each device's PDO mapping over the CoE mailbox, which is only live from PRE-OP up. A device
+// asked to jump straight from BOOT (firmware-sized mailbox, no CoE) into an exchange state would
+// reach that mailbox read while still in BOOT and segfault inside SOEM before the slave ever sees
+// the request. Validating here keeps the bad jump away from the mapper entirely.
+using mm::comm::EtherCatState;
+const std::map<EtherCatState, std::set<EtherCatState>> kValidStateTransitions = {
+    {EtherCatState::Init, {EtherCatState::Init, EtherCatState::PreOp, EtherCatState::Boot}},
+    {EtherCatState::PreOp, {EtherCatState::PreOp, EtherCatState::Init, EtherCatState::SafeOp}},
+    {EtherCatState::SafeOp,
+     {EtherCatState::SafeOp, EtherCatState::PreOp, EtherCatState::Init, EtherCatState::Op}},
+    {EtherCatState::Op,
+     {EtherCatState::Op, EtherCatState::SafeOp, EtherCatState::PreOp, EtherCatState::Init}},
+    {EtherCatState::Boot, {EtherCatState::Boot, EtherCatState::Init}},
+};
+
+// Whether the EtherCAT AL state machine permits a direct transition from currentState to
+// targetState. An unrecognised current state (e.g. a lost device reporting 0) permits nothing.
+bool isValidStateTransition(EtherCatState currentState, EtherCatState targetState) {
+  const auto allowed = kValidStateTransitions.find(currentState);
+  return allowed != kValidStateTransitions.end() && allowed->second.contains(targetState);
 }
 
 }  // namespace
@@ -470,6 +501,25 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
     return std::unexpected(resolved.error());
   }
   std::vector<uint16_t> targets = std::move(*resolved);
+
+  // Reject illegal AL transitions before doing anything else. Entering SAFE-OP/OP re-maps by
+  // reading PDO mappings over the CoE mailbox, which a device still in BOOT cannot serve — that
+  // read segfaults inside SOEM. Validate every target against the EtherCAT state machine here so a
+  // bad jump never reaches the mapper. Read the live state first (a plain AL-status register read,
+  // valid in any state) rather than trusting the cache, since this guards a crash.
+  auto currentStates = driver_->readStates(targets);
+  if (!currentStates) {
+    return std::unexpected(currentStates.error());
+  }
+  for (std::size_t i = 0; i < targets.size(); ++i) {
+    const auto currentState = mm::comm::alState((*currentStates)[i].alStatus);
+    if (!isValidStateTransition(currentState, targetState)) {
+      return std::unexpected(std::format(
+          "illegal AL transition for device {}: {} -> {} (allowed: single-step climb "
+          "INIT -> PRE-OP -> SAFE-OP -> OP, any drop, or BOOT only from/to INIT)",
+          targets[i], mm::comm::toString(currentState), mm::comm::toString(targetState)));
+    }
+  }
 
   // React to the requested state. Process data is exchanged only in SAFE-OP and OP, so Motion
   // Master maps/re-maps or tears down the whole-bus image around the user-driven AL transition.

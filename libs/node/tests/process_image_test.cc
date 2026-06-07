@@ -114,7 +114,14 @@ class FakeBus : public FieldbusDriver {
   void stop() override {}
   std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& p) override {
-    return std::vector<SlaveStateRaw>(p.size(), SlaveStateRaw{});
+    // Mirror slaveState() so the per-position state the test set up is what callers read back —
+    // the same source DeviceManager validates AL transitions against.
+    std::vector<SlaveStateRaw> out;
+    out.reserve(p.size());
+    for (uint16_t pos : p) {
+      out.push_back(SlaveStateRaw{.alStatus = slaveState(pos), .alStatusCode = 0});
+    }
+    return out;
   }
   std::expected<void, std::string> writeSdo(uint16_t, uint16_t, uint8_t,
                                             std::span<const uint8_t>) override {
@@ -555,12 +562,50 @@ TEST(DeviceManagerProcessData, SubsetDownKeepsOthersExchangingAndRejoinRemaps) {
   EXPECT_TRUE(dm.processDataConfigured());
   EXPECT_EQ(dm.processImageInfo().generations, 1u);
 
-  // Model device 2 now sitting in PRE-OP, then bring it back to OP: rejoining from a non-exchange
-  // state re-maps the whole bus (a new image generation), since its PDO layout may have changed.
+  // Model device 2 now sitting in PRE-OP, then climb it back to SAFE-OP (PRE-OP -> OP would be an
+  // illegal AL jump): rejoining from a non-exchange state re-maps the whole bus (a new image
+  // generation), since its PDO layout may have changed.
   busPtr->slaveStates[2] = static_cast<uint16_t>(EtherCatState::PreOp);
-  ASSERT_TRUE(dm.transitionToState({2}, EtherCatState::Op, kTimeout).has_value());
+  ASSERT_TRUE(dm.transitionToState({2}, EtherCatState::SafeOp, kTimeout).has_value());
   EXPECT_TRUE(dm.processDataConfigured());
   EXPECT_EQ(dm.processImageInfo().generations, 2u);
+}
+
+TEST(DeviceManagerProcessData, RejectsIllegalAlStateTransitions) {
+  // Motion Master enforces the EtherCAT AL state machine before touching the bus. The critical
+  // case is BOOT -> SAFE-OP/OP: entering an exchange state re-maps by reading PDO mappings over the
+  // CoE mailbox, which a device in BOOT cannot serve — that read segfaults inside SOEM. So an
+  // illegal jump must be rejected up front, never reaching the mapper.
+  const auto kNow = std::chrono::milliseconds(0);
+  auto bus = makeCia402Bus();
+  FakeBus* busPtr = bus.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  // BOOT reaches only INIT.
+  busPtr->state = static_cast<uint16_t>(EtherCatState::Boot);
+  EXPECT_FALSE(dm.transitionToState({}, EtherCatState::PreOp, kNow).has_value());
+  EXPECT_FALSE(dm.transitionToState({}, EtherCatState::SafeOp, kNow).has_value());
+  EXPECT_FALSE(dm.transitionToState({}, EtherCatState::Op, kNow).has_value());
+  EXPECT_TRUE(dm.transitionToState({}, EtherCatState::Init, kNow).has_value());
+
+  // INIT climbs only to PRE-OP (or enters BOOT); skipping to SAFE-OP/OP is rejected.
+  busPtr->state = static_cast<uint16_t>(EtherCatState::Init);
+  EXPECT_FALSE(dm.transitionToState({}, EtherCatState::SafeOp, kNow).has_value());
+  EXPECT_FALSE(dm.transitionToState({}, EtherCatState::Op, kNow).has_value());
+  EXPECT_TRUE(dm.transitionToState({}, EtherCatState::PreOp, kNow).has_value());
+  EXPECT_TRUE(dm.transitionToState({}, EtherCatState::Boot, kNow).has_value());
+
+  // PRE-OP climbs only one step (to SAFE-OP); OP is two steps and BOOT is reachable only from INIT.
+  busPtr->state = static_cast<uint16_t>(EtherCatState::PreOp);
+  EXPECT_FALSE(dm.transitionToState({}, EtherCatState::Op, kNow).has_value());
+  EXPECT_FALSE(dm.transitionToState({}, EtherCatState::Boot, kNow).has_value());
+  EXPECT_TRUE(dm.transitionToState({}, EtherCatState::Init, kNow).has_value());
+
+  // Drops may skip levels: OP -> INIT is allowed.
+  busPtr->state = static_cast<uint16_t>(EtherCatState::Op);
+  EXPECT_TRUE(dm.transitionToState({}, EtherCatState::Init, kNow).has_value());
 }
 
 TEST(DeviceManagerProcessData, MixedStatesRoutePerDeviceBetweenPdoAndSdo) {

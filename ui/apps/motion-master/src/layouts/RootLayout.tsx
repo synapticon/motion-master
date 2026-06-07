@@ -3,6 +3,7 @@ import { NavLink, Outlet } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
 import { useConnection } from '../contexts/ConnectionContext'
+import { usePreferences } from '../contexts/PreferencesContext'
 import { useApiHealth } from '../hooks/useApiHealth'
 
 const deviceLinks = [
@@ -133,6 +134,7 @@ export default function RootLayout() {
   const online = useApiHealth(api)
   const queryClient = useQueryClient()
   const [metaOpen, setMetaOpen] = useState(false)
+  const { hintsInline, setHintsInline } = usePreferences()
 
   const devicesQuery = useQuery({
     queryKey: ['devices'],
@@ -199,6 +201,15 @@ export default function RootLayout() {
 
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
           <NavItem to="/" label="Connection" end />
+          <label className="flex items-center gap-2 px-5 py-2 text-[11px] text-white/50 hover:text-white/80 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={hintsInline}
+              onChange={e => setHintsInline(e.target.checked)}
+              className="accent-syn-red"
+            />
+            Show hints inline
+          </label>
 
           <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Fieldbus</p>
           <NavItem to="/fieldbus" label="Control" />

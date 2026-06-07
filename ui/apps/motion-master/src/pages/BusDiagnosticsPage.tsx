@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { DeviceDiagnostics, PortDiagnostics } from '@mm/api-client'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
+import { usePreferences } from '../contexts/PreferencesContext'
 import { btnOutline } from '../utils/styles'
 
 // Unwraps the {error: {error: "..."}} shape the generated client rejects with.
@@ -56,12 +57,14 @@ function Bool({ value, good }: { value: boolean; good: boolean }) {
 }
 
 function Field({ label, value, hint }: { label: string; value: number; hint: string }) {
+  const { hintsInline } = usePreferences()
   return (
-    <div title={hint} className="cursor-help">
+    <div title={hintsInline ? undefined : hint} className={hintsInline ? undefined : 'cursor-help'}>
       <p className="text-[10px] uppercase tracking-wide text-grey-500 font-display">{label}</p>
       <p className={`font-mono text-sm mt-0.5 ${value > 0 ? 'text-status-bad font-bold' : 'text-grey-800'}`}>
         {value}
       </p>
+      {hintsInline && <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>}
     </div>
   )
 }
@@ -133,10 +136,13 @@ function PortTable({ ports }: { ports: PortDiagnostics[] }) {
 
 // A read-only labelled cell for the watchdog status/config breakdown.
 function Stat({ label, value, hint, cls }: { label: string; value: string; hint?: string; cls?: string }) {
+  const { hintsInline } = usePreferences()
+  const tooltip = hint && !hintsInline
   return (
-    <div title={hint} className={hint ? 'cursor-help' : undefined}>
+    <div title={tooltip ? hint : undefined} className={tooltip ? 'cursor-help' : undefined}>
       <p className="text-[10px] uppercase tracking-wide text-grey-500 font-display">{label}</p>
       <p className={`font-mono text-sm mt-0.5 ${cls ?? 'text-grey-800'}`}>{value}</p>
+      {hint && hintsInline && <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>}
     </div>
   )
 }
@@ -211,7 +217,7 @@ function WatchdogControl({ slavePosition, expirations }: { slavePosition: number
             <Stat
               label="Derivation"
               value={`${wd.ticks} × ${tickBaseUs} µs`}
-              hint={`${wd.ticks} ticks (0x0420) × ${tickBaseUs} µs tick base, where base = 40 ns × (divider ${wd.divider} + 2)`}
+              hint={`Timeout = ticks × tick base. Ticks = ${wd.ticks} (register 0x0420). Tick base = ${tickBaseUs} µs = (divider + 2) × 40 ns, where 40 ns is one period of the ESC's 25 MHz reference clock and the divider (${wd.divider}, register 0x0400) sets how many of those periods make one watchdog tick; the +2 is a fixed hardware offset in the ESC.`}
             />
             <Stat
               label="Expirations"

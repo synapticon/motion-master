@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import type { SlaveConfig, SyncManagerConfig, FmmuConfig } from '@mm/api-client'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
+import { usePreferences } from '../contexts/PreferencesContext'
 import { formatHex } from '../utils/hex'
 import { btnOutline } from '../utils/styles'
 
@@ -49,11 +50,13 @@ const MBX_PROTOCOLS: [number, string, string][] = [
 const decodeProtocols = (bits: number) => MBX_PROTOCOLS.filter(([bit]) => bits & bit)
 
 function Field({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
+  const { hintsInline } = usePreferences()
+  const tooltip = hint && !hintsInline
   return (
-    <div>
+    <div title={tooltip ? hint : undefined} className={tooltip ? 'cursor-help' : undefined}>
       <p className="text-[10px] uppercase tracking-wide text-grey-500 font-display">{label}</p>
       <p className="font-mono text-sm text-grey-800 mt-0.5">{value}</p>
-      {hint && <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>}
+      {hint && hintsInline && <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>}
     </div>
   )
 }

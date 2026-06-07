@@ -105,6 +105,7 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
   // values, so processDataLayout()'s `slave.outputs - group.outputs` would yield offsets for the
   // old layout if the new firmware's PDO mapping changed size or order. Null them first so SOEM
   // recomputes them against the freshly mapped IOmap — exactly what a clean scan would do.
+  uint8_t zeroFmmus[sizeof(ec_fmmut) * EC_MAXFMMU] = {};
   for (int i = 1; i <= ctx_->slavecount; ++i) {
     ctx_->slavelist[i].outputs = nullptr;
     ctx_->slavelist[i].inputs = nullptr;
@@ -117,6 +118,23 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
     // map so SOEM's guard always short-circuits — defence in depth for the same reason the
     // outputs/inputs pointers above are reset rather than trusted across re-maps.
     ctx_->slavelist[i].PO2SOconfig = nullptr;
+    // Reset each slave's FMMU bookkeeping before the map. ecx_config_create_{output,input}_mappings
+    // and the mailbox-status mapper all begin at `FMMUunused` and append, relying on
+    // ecx_config_init having memset the slavelist (FMMUunused=0, FMMU[] cleared) — which a re-map
+    // does NOT run. Left unreset, FMMUunused stays at its previous value (e.g. 3) so the output
+    // mapper writes a *new* Outputs FMMU at index 3 (a byte-identical duplicate of FMMU0), then the
+    // input/mailbox mappers run with FMMUc == EC_MAXFMMU (4) and write past the end of the
+    // EC_MAXFMMU-sized FMMU[] array — corrupting the adjacent FMMU*func/mbx_*/…/PO2SOconfig fields
+    // of ec_slavet. That OOB write is the likely root cause behind the duplicate-Outputs-FMMU
+    // symptom, the broken mailbox sizes that make a subsequent SAFE-OP fail, and the stray non-null
+    // PO2SOconfig guarded above. Zero the in-memory array + counter so SOEM re-derives FMMU0/1/2
+    // from scratch exactly as a clean scan would, and clear all EC_MAXFMMU FMMU registers on the
+    // ESC so a slave already carrying a stale duplicate from a pre-fix re-map self-heals once SOEM
+    // reprograms the live ones during the map.
+    std::memset(ctx_->slavelist[i].FMMU, 0, sizeof(ctx_->slavelist[i].FMMU));
+    ctx_->slavelist[i].FMMUunused = 0;
+    ecx_FPWR(&ctx_->port, ctx_->slavelist[i].configadr, ECT_REG_FMMU0, sizeof(zeroFmmus), zeroFmmus,
+             EC_TIMEOUTRET3);
   }
   const int usedSize = ecx_config_map_group(ctx_.get(), map_, 0);
   if (usedSize <= 0) {

@@ -2,6 +2,11 @@ import { createContext, useCallback, useContext, useMemo, useState } from 'react
 import { Api } from '@mm/api-client'
 
 const SESSION_KEY = 'mm:session'
+const ENDPOINT_KEY = 'mm:endpoint'
+
+const DEFAULT_HOST = 'local.motion-master.synapticon.com'
+const DEFAULT_HTTP_PORT = '61447'
+const DEFAULT_WS_PORT = '62281'
 
 export interface Session {
   driver: 'soem' | 'spoe' | 'igh'
@@ -17,6 +22,31 @@ export function readSession(): Session | null {
   }
 }
 
+interface Endpoint {
+  host: string
+  httpPort: string
+  wsPort: string
+}
+
+// The endpoint config persists to localStorage so a configured host/port survives reloads.
+function readEndpoint(): Endpoint {
+  const fallback: Endpoint = { host: DEFAULT_HOST, httpPort: DEFAULT_HTTP_PORT, wsPort: DEFAULT_WS_PORT }
+  try {
+    const raw = localStorage.getItem(ENDPOINT_KEY)
+    return raw ? { ...fallback, ...(JSON.parse(raw) as Partial<Endpoint>) } : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function writeEndpoint(endpoint: Endpoint): void {
+  try {
+    localStorage.setItem(ENDPOINT_KEY, JSON.stringify(endpoint))
+  } catch {
+    // Ignore storage failures (e.g. private mode) — the in-memory value still applies.
+  }
+}
+
 interface ConnectionContextValue {
   host: string
   httpPort: string
@@ -26,6 +56,8 @@ interface ConnectionContextValue {
   setHost: (host: string) => void
   setHttpPort: (httpPort: string) => void
   setWsPort: (wsPort: string) => void
+  /// Reset host/httpPort/wsPort back to the built-in defaults (and persist them).
+  resetEndpoint: () => void
   api: Api
   driver: 'soem' | 'spoe' | 'igh'
   setDriver: (d: 'soem' | 'spoe' | 'igh') => void
@@ -48,14 +80,36 @@ const ConnectionContext = createContext<ConnectionContextValue | null>(null)
 
 export function ConnectionProvider({ children }: { children: React.ReactNode }) {
   const stored = readSession()
-  const [host, setHost] = useState('local.motion-master.synapticon.com')
-  const [httpPort, setHttpPort] = useState('61447')
-  const [wsPort, setWsPort] = useState('62281')
+  const endpoint = readEndpoint()
+  const [host, setHostState] = useState(endpoint.host)
+  const [httpPort, setHttpPortState] = useState(endpoint.httpPort)
+  const [wsPort, setWsPortState] = useState(endpoint.wsPort)
   const [driver, setDriver] = useState<'soem' | 'spoe' | 'igh'>(stored?.driver ?? 'soem')
   const [adapter, setAdapter] = useState(stored?.adapter ?? '')
   const [hasScanned, setHasScannedState] = useState(false)
   const [isInitialized, setIsInitialized] = useState(false)
   const [alreadyInitialized, setAlreadyInitialized] = useState(false)
+
+  // Persist the endpoint config on every change so a configured host/port survives reloads.
+  const setHost = useCallback((value: string) => {
+    setHostState(value)
+    writeEndpoint({ host: value, httpPort, wsPort })
+  }, [httpPort, wsPort])
+  const setHttpPort = useCallback((value: string) => {
+    setHttpPortState(value)
+    writeEndpoint({ host, httpPort: value, wsPort })
+  }, [host, wsPort])
+  const setWsPort = useCallback((value: string) => {
+    setWsPortState(value)
+    writeEndpoint({ host, httpPort, wsPort: value })
+  }, [host, httpPort])
+
+  const resetEndpoint = useCallback(() => {
+    setHostState(DEFAULT_HOST)
+    setHttpPortState(DEFAULT_HTTP_PORT)
+    setWsPortState(DEFAULT_WS_PORT)
+    writeEndpoint({ host: DEFAULT_HOST, httpPort: DEFAULT_HTTP_PORT, wsPort: DEFAULT_WS_PORT })
+  }, [])
 
   const api = useMemo(
     () => new Api({ baseUrl: `https://${host}:${httpPort}` }),
@@ -76,7 +130,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
 
   return (
     <ConnectionContext.Provider
-      value={{ host, httpPort, wsPort, setHost, setHttpPort, setWsPort, api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, isInitialized, setIsInitialized, alreadyInitialized, setAlreadyInitialized }}
+      value={{ host, httpPort, wsPort, setHost, setHttpPort, setWsPort, resetEndpoint, api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, isInitialized, setIsInitialized, alreadyInitialized, setAlreadyInitialized }}
     >
       {children}
     </ConnectionContext.Provider>

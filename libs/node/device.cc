@@ -36,13 +36,16 @@ uint32_t Device::productCode() const { return productCode_; }
 uint32_t Device::revisionNumber() const { return revisionNumber_; }
 uint32_t Device::serialNumber() const { return serialNumber_; }
 
-bool Device::online() const {
+bool Device::mailboxActive() const {
   using mm::comm::EtherCatState;
   const uint16_t status = driver_.slaveState(slavePosition_);
   const EtherCatState state = mm::comm::alState(status);
-  return !mm::comm::alHasError(status) &&
-         (state == EtherCatState::PreOp || state == EtherCatState::SafeOp ||
-          state == EtherCatState::Op);
+  // Mailbox (CoE/SDO) communication is available in PRE-OP and above, per the EtherCAT state
+  // machine — independent of the AL error indicator: a device in SAFE-OP+error still answers
+  // mailbox requests; the error is surfaced separately via the AL status. INIT has no mailbox,
+  // and BOOT's mailbox is FoE-only, so neither counts here.
+  return state == EtherCatState::PreOp || state == EtherCatState::SafeOp ||
+         state == EtherCatState::Op;
 }
 
 bool Device::exchangesProcessData() const {
@@ -370,8 +373,8 @@ std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t 
       return p->value;
     }
   }
-  if (!online()) {
-    return p->value;  // offline: serve the cached value, never touch the bus
+  if (!mailboxActive()) {
+    return p->value;  // no mailbox: serve the cached value, never touch the bus
   }
   auto bytes = upload(index, subindex);
   if (!bytes) {
@@ -413,8 +416,8 @@ std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t 
       return {};
     }
   }
-  if (!online()) {
-    // Offline edit: hold the change in the cache, to be flushed when the device returns.
+  if (!mailboxActive()) {
+    // No mailbox: hold the change in the cache, to be flushed when the device returns.
     p->syncState = SyncState::Pending;
     return {};
   }

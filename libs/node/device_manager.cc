@@ -558,8 +558,9 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   if (!raw) {
     return std::unexpected(raw.error());
   }
-  // readStates() refreshed the driver's cached AL status for every slave, so Device::online()
-  // / exchangesProcessData() now read through to the fresh state — no per-device copy to sync.
+  // readStates() refreshed the driver's cached AL status for every slave, so
+  // Device::mailboxActive() / exchangesProcessData() now read through to the fresh state — no
+  // per-device copy to sync.
   std::vector<DeviceStateInfo> result;
   result.reserve(targets.size());
   for (std::size_t i = 0; i < targets.size(); ++i) {
@@ -701,7 +702,7 @@ DeviceManager::setProcessDataWatchdog(uint16_t slavePosition, std::chrono::nanos
   return driver_->setProcessDataWatchdog(slavePosition, timeout);
 }
 
-std::expected<bool, std::string> DeviceManager::isDeviceOnline(uint16_t slavePosition) {
+std::expected<bool, std::string> DeviceManager::isDeviceMailboxActive(uint16_t slavePosition) {
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -709,12 +710,13 @@ std::expected<bool, std::string> DeviceManager::isDeviceOnline(uint16_t slavePos
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
   }
-  // Reading the single position refreshes the driver's cached AL status, which Device::online()
-  // reads through — reusing the one place that defines "online" rather than duplicating it.
+  // Reading the single position refreshes the driver's cached AL status, which
+  // Device::mailboxActive() reads through — reusing the one place that defines it rather than
+  // duplicating the state check here.
   if (auto states = getDeviceStates({slavePosition}); !states) {
     return std::unexpected(states.error());
   }
-  return device->online();
+  return device->mailboxActive();
 }
 
 std::expected<void, std::string> DeviceManager::initializeDeviceParameters(uint16_t slavePosition,

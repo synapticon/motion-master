@@ -53,7 +53,7 @@ class SdoFakeDriver : public FieldbusDriver {
   std::set<uint32_t> failWrites;
   /// Object dictionary entries returned by readObjectDictionary().
   std::vector<OdEntry> ods;
-  /// Cached AL status returned by slaveState() (what online()/exchangesProcessData read).
+  /// Cached AL status returned by slaveState() (what mailboxActive()/exchangesProcessData read).
   uint16_t state = 0;
 
   static uint32_t key(uint16_t index, uint8_t subindex) {

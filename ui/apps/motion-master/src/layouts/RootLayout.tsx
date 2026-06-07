@@ -1,10 +1,11 @@
-import { useState } from 'react'
-import { NavLink, Outlet } from 'react-router'
+import { useEffect, useState } from 'react'
+import { NavLink, Outlet, useLocation } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
 import { useConnection } from '../contexts/ConnectionContext'
 import { usePreferences } from '../contexts/PreferencesContext'
 import { useApiHealth } from '../hooks/useApiHealth'
+import { formatHex } from '../utils/hex'
 
 const deviceLinks = [
   { to: 'foe', label: 'FoE' },
@@ -52,79 +53,130 @@ function NavItem({ to, label, end }: { to: string; label: string; end?: boolean 
 function DeviceSection({
   deviceId,
   name,
+  productCode,
   state,
 }: {
   deviceId: string
   name?: string
+  productCode?: number
   state?: DeviceState
 }) {
   const { api } = useConnection()
 
-  // Live presence probe. Read per-device (not batched) so one missing device reports
-  // offline without disturbing the others. `null` while the first read is in flight.
-  const onlineQuery = useQuery({
-    queryKey: ['deviceOnline', deviceId],
-    queryFn: () => api.getDeviceOnline(Number(deviceId)),
+  // Auto-expand the device whose page is currently open; collapse the rest so a long
+  // device list stays scannable. Manual toggling sticks until the active device changes.
+  const location = useLocation()
+  const isActive = location.pathname.startsWith(`/devices/${deviceId}/`)
+  const [open, setOpen] = useState(isActive)
+  useEffect(() => {
+    if (isActive) setOpen(true)
+  }, [isActive])
+
+  // Live mailbox probe. Read per-device (not batched) so one missing device reports
+  // inactive without disturbing the others. `null` while the first read is in flight.
+  const mailboxQuery = useQuery({
+    queryKey: ['deviceMailboxActive', deviceId],
+    queryFn: () => api.getDeviceMailboxActive(Number(deviceId)),
   })
-  const online: boolean | null = onlineQuery.data?.data?.online ?? null
-  const statusLabel = online === null ? 'Checking…' : online ? 'Online' : 'Offline'
+  const mailboxActive: boolean | null = mailboxQuery.data?.data?.mailboxActive ?? null
+  const statusLabel =
+    mailboxActive === null ? 'Checking…' : mailboxActive ? 'Mailbox active' : 'Mailbox inactive'
   const statusTitle =
-    online === null
-      ? 'Checking… — probing whether the device responds on the bus'
-      : online
-        ? 'Online — the device answers live presence probes (mailbox reachable in PRE-OP or above)'
-        : 'Offline — the device is not responding (in INIT, powered off, unplugged, or it left the bus)'
+    mailboxActive === null
+      ? 'Checking… — reading the device’s AL state on the bus'
+      : mailboxActive
+        ? 'Mailbox active — the device is in PRE-OP or higher, so its CoE/SDO mailbox answers (regardless of the AL error flag, which the state badge shows separately)'
+        : 'Mailbox inactive — no CoE/SDO mailbox: the device is in INIT or BOOT, or is not responding (powered off, unplugged, or left the bus)'
   const stateLabel = alStateLabel(state)
 
   return (
-    <div className="mt-6">
-      <div className="px-5 mb-2">
+    <div className="mt-2">
+      {/* Backgrounded identity header that doubles as the fold toggle for the links below. */}
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-expanded={open}
+        className="group w-full text-left px-5 py-2 bg-white/[0.06] hover:bg-white/[0.1] border-y border-white/10 transition-colors cursor-pointer"
+      >
         {/* Identity */}
-        <p className="eyebrow truncate">Device {deviceId}</p>
-        {name && (
-          <p className="text-white/30 text-[11px] tracking-wide truncate" title={name}>
-            {name}
-          </p>
-        )}
-
-        {/* Status — online presence on the left, AL state on the right */}
-        <div className="mt-1.5 flex items-center justify-between gap-2">
-          <span className="flex items-center gap-1.5 min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
             <span
-              title={statusTitle}
-              aria-label={statusLabel}
-              className={`inline-block h-2 w-2 shrink-0 cursor-help rounded-full ring-2 ring-white ${online === null
-                ? 'bg-white/30 animate-pulse'
-                : online
-                  ? 'bg-status-good shadow-[0_0_6px_1px_var(--color-status-good)]'
-                  : 'bg-status-bad shadow-[0_0_6px_1px_var(--color-status-bad)]'
-                }`}
-            />
-            <span
-              title={statusTitle}
-              className={`text-xs font-display tracking-wider cursor-help ${online ? 'text-white/70' : 'text-white/40'
-                }`}
+              className="shrink-0 cursor-help font-mono text-sm font-semibold text-white"
+              title={`Slave position — the device’s 1-based position on the EtherCAT bus. This is the {slavePosition} used in API endpoint paths, e.g. /api/devices/${deviceId}/parameters`}
             >
-              {statusLabel}
+              |{deviceId.padStart(2, '0')}|
             </span>
-          </span>
+            {name && (
+              <span className="shrink-0 text-[13px] tracking-wide text-white/80" title={name}>
+                {name.length > 8 ? `${name.slice(0, 8).trimEnd()}…` : name}
+              </span>
+            )}
+            {productCode !== undefined && (
+              <span
+                className="truncate font-mono text-[11px] text-white/40"
+                title={`Product code (EEPROM): ${formatHex(productCode)}`}
+              >
+                {formatHex(productCode)}
+              </span>
+            )}
+          </div>
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-white/40 group-hover:text-white/70 transition-transform ${open ? 'rotate-180' : ''
+              }`}
+          >
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </div>
+
+        {/* Status — AL state first (primary), online presence as a small derived icon */}
+        <div className="mt-1.5 flex items-center gap-2">
           {stateLabel && (
             <span
-              title={`AL state${state?.error ? ' — error indicator set' : ''}`}
-              className={`shrink-0 cursor-help px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider ${state?.error ? 'bg-status-warn/15 text-status-warn' : 'bg-white/10 text-white/60'
+              title={
+                state?.error
+                  ? 'AL state — the device’s EtherCAT Application Layer state, the low nibble of the AL Status register (0x0130). The error indicator (bit 4) is set; the reason is in the AL Status Code register (0x0134).'
+                  : 'AL state — the device’s EtherCAT Application Layer state, the low nibble of the AL Status register (0x0130).'
+              }
+              className={`shrink-0 px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider ${state?.error ? 'bg-status-warn/15 text-status-warn' : 'bg-white/10 text-white/60'
                 }`}
             >
               {stateLabel}
               {state?.error && ' · err'}
             </span>
           )}
+          <span
+            title={statusTitle}
+            aria-label={statusLabel}
+            className="shrink-0 flex items-center gap-1.5"
+          >
+            <span
+              className={`inline-block h-2 w-2 rounded-[1px] ${mailboxActive === null
+                ? 'bg-white/40 animate-pulse'
+                : mailboxActive
+                  ? 'bg-status-good'
+                  : 'bg-syn-red'
+                }`}
+            />
+            <span className="text-[10px] font-display tracking-wider text-white/70">
+              {statusLabel}
+            </span>
+          </span>
         </div>
-      </div>
-      <div className="pl-3">
-        {deviceLinks.map(({ to, label }) => (
-          <NavItem key={to} to={`/devices/${deviceId}/${to}`} label={label} />
-        ))}
-      </div>
+      </button>
+      {open && (
+        <div className="pl-3">
+          {deviceLinks.map(({ to, label }) => (
+            <NavItem key={to} to={`/devices/${deviceId}/${to}`} label={label} />
+          ))}
+        </div>
+      )}
     </div>
   )
 }
@@ -167,7 +219,7 @@ export default function RootLayout() {
       const res = await devicesQuery.refetch()
       if ((res.data?.data.length ?? 0) > 0) {
         await statesQuery.refetch()
-        await queryClient.invalidateQueries({ queryKey: ['deviceOnline'] })
+        await queryClient.invalidateQueries({ queryKey: ['deviceMailboxActive'] })
       }
     } finally {
       const remaining = Math.max(0, 900 - (performance.now() - start))
@@ -178,7 +230,7 @@ export default function RootLayout() {
   return (
     <div className="flex h-screen bg-grey-50 text-grey-900">
       {/* Sidebar — Ocean Dark */}
-      <aside className="w-64 shrink-0 bg-ocean-dark flex flex-col border-r border-white/10">
+      <aside className="w-72 shrink-0 bg-ocean-dark flex flex-col border-r border-white/10">
         <div className="px-5 py-4 border-b border-white/10">
           <div className="flex items-center justify-between">
             <span className="font-display text-sm font-medium uppercase tracking-widest text-white">
@@ -354,6 +406,7 @@ export default function RootLayout() {
                 key={d.slavePosition}
                 deviceId={String(d.slavePosition)}
                 name={d.name}
+                productCode={d.productCode}
                 state={stateByPosition.get(d.slavePosition)}
               />
             ))}

@@ -207,7 +207,7 @@ TEST(DeviceManagerInit, SecondInitWhileInitialisedIsRejected) {
   EXPECT_TRUE(dm.init(std::make_unique<FakeDriver>(true)).has_value());
 }
 
-TEST(DeviceManagerOnline, PreOpStateMarksDeviceOnline) {
+TEST(DeviceManagerMailbox, PreOpStateMarksMailboxActive) {
   auto driver = std::make_unique<FakeDriver>(true, 1);
   driver->reportState = static_cast<uint16_t>(EtherCatState::PreOp);
   FakeDriver* raw = driver.get();  // dm keeps ownership; raw stays valid
@@ -216,17 +216,33 @@ TEST(DeviceManagerOnline, PreOpStateMarksDeviceOnline) {
   ASSERT_TRUE(dm.init(std::move(driver)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
-  // Devices start offline until a state read establishes mailbox availability.
+  // Devices start with no mailbox until a state read establishes availability.
   ASSERT_NE(dm.findDevice(1), nullptr);
-  EXPECT_FALSE(dm.findDevice(1)->online());
+  EXPECT_FALSE(dm.findDevice(1)->mailboxActive());
 
   ASSERT_TRUE(dm.getDeviceStates({}).has_value());
-  EXPECT_TRUE(dm.findDevice(1)->online());
+  EXPECT_TRUE(dm.findDevice(1)->mailboxActive());
 
-  // Dropping back to INIT must flip the device offline again.
+  // Dropping back to INIT must flip the mailbox inactive again.
   raw->reportState = static_cast<uint16_t>(EtherCatState::Init);
   ASSERT_TRUE(dm.getDeviceStates({}).has_value());
-  EXPECT_FALSE(dm.findDevice(1)->online());
+  EXPECT_FALSE(dm.findDevice(1)->mailboxActive());
+}
+
+TEST(DeviceManagerMailbox, ErrorIndicatorDoesNotDisableMailbox) {
+  // A device in SAFE-OP with the AL error bit set still answers mailbox requests, so the
+  // mailbox must report active — the error is surfaced separately via the AL status.
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->reportState =
+      static_cast<uint16_t>(EtherCatState::SafeOp) | 0x0010u;  // bit 4 = AL error indicator
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.getDeviceStates({}).has_value());
+
+  ASSERT_NE(dm.findDevice(1), nullptr);
+  EXPECT_TRUE(dm.findDevice(1)->mailboxActive());
 }
 
 TEST(DeviceManagerDelegates, UnknownDeviceErrors) {
@@ -291,7 +307,7 @@ TEST(DeviceManagerWatchdog, UnknownDeviceAndNoDriverError) {
   EXPECT_FALSE(dm.setProcessDataWatchdog(99, std::chrono::milliseconds(100)).has_value());
 }
 
-TEST(DeviceManagerOnline, InitStateKeepsDeviceOffline) {
+TEST(DeviceManagerMailbox, InitStateKeepsMailboxInactive) {
   auto driver = std::make_unique<FakeDriver>(true, 1);
   driver->reportState = static_cast<uint16_t>(EtherCatState::Init);
 
@@ -301,10 +317,10 @@ TEST(DeviceManagerOnline, InitStateKeepsDeviceOffline) {
   ASSERT_TRUE(dm.getDeviceStates({}).has_value());
 
   ASSERT_NE(dm.findDevice(1), nullptr);
-  EXPECT_FALSE(dm.findDevice(1)->online());
+  EXPECT_FALSE(dm.findDevice(1)->mailboxActive());
 }
 
-TEST(DeviceManagerOnline, IsDeviceOnlineReflectsLiveState) {
+TEST(DeviceManagerMailbox, IsDeviceMailboxActiveReflectsLiveState) {
   auto driver = std::make_unique<FakeDriver>(true, 1);
   driver->reportState = static_cast<uint16_t>(EtherCatState::Op);
   FakeDriver* raw = driver.get();  // dm keeps ownership; raw stays valid
@@ -313,27 +329,27 @@ TEST(DeviceManagerOnline, IsDeviceOnlineReflectsLiveState) {
   ASSERT_TRUE(dm.init(std::move(driver)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
-  // A device in OP with no error is online; the probe also syncs the cached flag.
-  auto onlineResult = dm.isDeviceOnline(1);
-  ASSERT_TRUE(onlineResult.has_value());
-  EXPECT_TRUE(*onlineResult);
-  EXPECT_TRUE(dm.findDevice(1)->online());
+  // A device in OP has an active mailbox; the probe also syncs the cached state.
+  auto activeResult = dm.isDeviceMailboxActive(1);
+  ASSERT_TRUE(activeResult.has_value());
+  EXPECT_TRUE(*activeResult);
+  EXPECT_TRUE(dm.findDevice(1)->mailboxActive());
 
-  // Falling back to INIT (no mailbox) flips the probe to offline.
+  // Falling back to INIT (no mailbox) flips the probe to inactive.
   raw->reportState = static_cast<uint16_t>(EtherCatState::Init);
-  auto offlineResult = dm.isDeviceOnline(1);
-  ASSERT_TRUE(offlineResult.has_value());
-  EXPECT_FALSE(*offlineResult);
-  EXPECT_FALSE(dm.findDevice(1)->online());
+  auto inactiveResult = dm.isDeviceMailboxActive(1);
+  ASSERT_TRUE(inactiveResult.has_value());
+  EXPECT_FALSE(*inactiveResult);
+  EXPECT_FALSE(dm.findDevice(1)->mailboxActive());
 }
 
-TEST(DeviceManagerOnline, IsDeviceOnlineRejectsUnknownDevice) {
+TEST(DeviceManagerMailbox, IsDeviceMailboxActiveRejectsUnknownDevice) {
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true, 1)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
   // Position 99 does not exist — report it rather than touching the bus or crashing.
-  EXPECT_FALSE(dm.isDeviceOnline(99).has_value());
+  EXPECT_FALSE(dm.isDeviceMailboxActive(99).has_value());
 }
 
 TEST(DeviceManagerBusConfig, EnrichesDriverConfigWithDeviceName) {

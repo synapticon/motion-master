@@ -798,7 +798,7 @@ export class HttpClient<SecurityDataType = unknown> {
 
 /**
  * @title Motion Master API
- * @version 6.0.0-alpha.16
+ * @version 6.0.0-alpha.19
  * @baseUrl https://local.motion-master.synapticon.com:61447
  *
  * Motion Master is the motion-control software for Synapticon SOMANET servo
@@ -841,8 +841,8 @@ export class HttpClient<SecurityDataType = unknown> {
  *   EtherCAT Slave Controller register bytes.
  * - **Files (FoE)** — `GET`/`PUT …/files/{filename}` transfer files to and from
  *   the device over File-over-EtherCAT (firmware, configuration, logs).
- * - **Presence** — `GET …/online` probes whether a device still answers on the
- *   bus.
+ * - **Mailbox** — `GET …/mailbox` probes whether a device's CoE/SDO mailbox is
+ *   active (AL state PRE-OP or above).
  *
  * The `/api/meta/*` endpoints expose static reference tables — AL status codes,
  * ESC register definitions, FoE error codes, and CoE data types — so clients
@@ -850,7 +850,11 @@ export class HttpClient<SecurityDataType = unknown> {
  *
  * ## Monitoring WebSocket
  *
- * A monitoring WebSocket is available at `/ws`. A client creates a monitoring
+ * The realtime WebSocket runs on its own port (`62281` by default), separate from
+ * this HTTP API (`61447`) and on its own event loop, so a slow HTTP request can
+ * never stall the stream: `wss://local.motion-master.synapticon.com:62281` (the
+ * whole port is the WebSocket, so the URL needs no path).
+ * A client creates a monitoring
  * with `POST /api/monitorings` (a topic, sampling interval, buffer size, and a
  * list of parameters), then subscribes to its topic over the socket by sending
  * `{"subscribe":"<topic>"}` (and `{"unsubscribe":"<topic>"}` to stop). The server
@@ -872,8 +876,9 @@ export class HttpClient<SecurityDataType = unknown> {
  *
  * ## Networking, TLS, and CORS
  *
- * The server binds to `127.0.0.1:61447` and is reached at
- * `https://local.motion-master.synapticon.com:61447` (a DNS record that resolves
+ * The server binds the HTTP API to `127.0.0.1:61447` and the realtime WebSocket
+ * to `127.0.0.1:62281`, reached at `https://local.motion-master.synapticon.com:61447`
+ * and `wss://local.motion-master.synapticon.com:62281` (a DNS record that resolves
  * to localhost), with a real, publicly-trusted TLS certificate bundled in every
  * release. CORS allows the single origin
  * `https://motion-master.synapticon.com`, the hosted progressive web app.
@@ -941,6 +946,121 @@ export class Api<
         ...params,
       }),
   };
+  cert = {
+    /**
+     * @description Reports the validity window and identity of the certificate the server is currently serving. `expiresSoon` trips within 7 days of `notAfter`, so the PWA can prompt the user to refresh. Note that an already-expired certificate blocks the browser from reaching this endpoint at all; the binary self-heals an expired/missing certificate at startup (fetching from the rolling release) and exposes `--update-cert` for manual refresh. Returns 500 if the certificate file cannot be read or parsed.
+     *
+     * @name GetCert
+     * @summary Get the TLS certificate validity window
+     * @request GET:/api/cert
+     */
+    getCert: (params: RequestParams = {}) =>
+      this.request<
+        {
+          /**
+           * Filesystem path of the certificate being served.
+           * @example "/opt/motion-master/cert.pem"
+           */
+          path: string;
+          /**
+           * Subject common name (CN).
+           * @example "local.motion-master.synapticon.com"
+           */
+          subject: string;
+          /**
+           * Issuer common name (CN).
+           * @example "R10"
+           */
+          issuer: string;
+          /**
+           * Start of the validity window (ISO 8601 UTC).
+           * @format date-time
+           * @example "2026-05-01T00:00:00Z"
+           */
+          notBefore: string;
+          /**
+           * End of the validity window / expiry (ISO 8601 UTC).
+           * @format date-time
+           * @example "2026-08-01T00:00:00Z"
+           */
+          notAfter: string;
+          /**
+           * Whole days until expiry; negative once expired.
+           * @example 56
+           */
+          daysRemaining: number;
+          /**
+           * Whether the certificate is already past notAfter.
+           * @example false
+           */
+          expired: boolean;
+          /**
+           * True when expired or within 7 days of notAfter.
+           * @example false
+           */
+          expiresSoon: boolean;
+        },
+        {
+          /**
+           * Human-readable reason the certificate could not be read.
+           * @example "cannot parse PEM certificate: /opt/motion-master/cert.pem"
+           */
+          error: string;
+        }
+      >({
+        path: `/api/cert`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+
+    /**
+     * @description Downloads a fresh certificate and key from the rolling release, validates the pair (parses, CN matches, not expired, key matches cert), and atomically installs them next to the binary. The new certificate only takes effect after a restart (the TLS listener loads the certificate once at startup), indicated by `restartRequired` in the response. Use the still-valid proactive case; an already-expired certificate is healed by the binary at startup instead.
+     *
+     * @name RefreshCert
+     * @summary Fetch and install a fresh TLS certificate
+     * @request POST:/api/cert/refresh
+     */
+    refreshCert: (params: RequestParams = {}) =>
+      this.request<
+        {
+          /** @example "/opt/motion-master/cert.pem" */
+          path?: string;
+          /** @example "local.motion-master.synapticon.com" */
+          subject?: string;
+          /** @example "R10" */
+          issuer?: string;
+          /** @format date-time */
+          notBefore?: string;
+          /** @format date-time */
+          notAfter: string;
+          /** @example 89 */
+          daysRemaining: number;
+          /** @example false */
+          expired?: boolean;
+          /** @example false */
+          expiresSoon?: boolean;
+          /**
+           * Always true — restart Motion Master to serve the new certificate.
+           * @example true
+           */
+          restartRequired: boolean;
+        },
+        | {
+            /** @example "downloaded key does not match certificate" */
+            error: string;
+          }
+        | {
+            /** @example "certificate refresh is not configured" */
+            error: string;
+          }
+      >({
+        path: `/api/cert/refresh`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
+  };
   devices = {
     /**
      * No description
@@ -996,13 +1116,16 @@ export class Api<
       }),
 
     /**
-     * @description Performs a live AL-state read for the device and reports whether it currently has an active SDO mailbox — i.e. it is in PRE-OP, SAFE-OP, or OP with no error indicator set. INIT, BOOT, and any error state are reported as offline. The device must already be known from a prior scan. Reading one device at a time means a single missing device reports offline without failing the others.
+     * @description Performs a live AL-state read for the device and reports whether its CoE/SDO mailbox is active — i.e. it is in PRE-OP, SAFE-OP, or OP. This is independent of the AL error indicator: a device in SAFE-OP+error still answers mailbox requests. Only INIT (no mailbox) and BOOT (FoE-only mailbox) report inactive. The device must already be known from a prior scan. Reading one device at a time means a single missing device reports inactive without failing the others.
      *
-     * @name GetDeviceOnline
-     * @summary Check whether a device is online
-     * @request GET:/api/devices/{slavePosition}/online
+     * @name GetDeviceMailboxActive
+     * @summary Check whether a device's mailbox is active
+     * @request GET:/api/devices/{slavePosition}/mailbox
      */
-    getDeviceOnline: (slavePosition: number, params: RequestParams = {}) =>
+    getDeviceMailboxActive: (
+      slavePosition: number,
+      params: RequestParams = {},
+    ) =>
       this.request<
         {
           /**
@@ -1011,10 +1134,10 @@ export class Api<
            */
           slavePosition: number;
           /**
-           * True when the device has an active SDO mailbox (PRE-OP, SAFE-OP, or OP with no error indicator); false otherwise.
+           * True when the device's CoE/SDO mailbox is active (AL state PRE-OP, SAFE-OP, or OP, regardless of the error indicator); false otherwise.
            * @example true
            */
-          online: boolean;
+          mailboxActive: boolean;
         },
         void | {
           /**
@@ -1024,7 +1147,7 @@ export class Api<
           error: string;
         }
       >({
-        path: `/api/devices/${slavePosition}/online`,
+        path: `/api/devices/${slavePosition}/mailbox`,
         method: "GET",
         format: "json",
         ...params,

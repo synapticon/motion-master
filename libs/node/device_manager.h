@@ -373,20 +373,21 @@ class DeviceManager {
   std::expected<mm::comm::ProcessDataWatchdogConfig, std::string> setProcessDataWatchdog(
       uint16_t slavePosition, std::chrono::nanoseconds timeout);
 
-  /// @brief Reports whether a single device is currently online.
+  /// @brief Reports whether a single device's CoE/SDO mailbox is currently active.
   ///
-  /// Performs a live AL-state read for @p slavePosition and returns whether the device
-  /// has an active SDO mailbox — AL state PRE-OP, SAFE-OP, or OP with no error indicator.
-  /// INIT, BOOT, and any error state count as offline. Updates the device's cached online
-  /// flag as a side effect, exactly as @c getDeviceStates does. Reading one position at a
-  /// time lets a single missing device report offline without disturbing the others.
+  /// Performs a live AL-state read for @p slavePosition and returns whether the device's
+  /// mailbox is reachable — AL state PRE-OP, SAFE-OP, or OP. This is independent of the AL
+  /// error indicator (a device in SAFE-OP+error still answers mailbox requests); only INIT
+  /// and BOOT report inactive. Updates the driver's cached AL status as a side effect, exactly
+  /// as @c getDeviceStates does. Reading one position at a time lets a single missing device
+  /// report inactive without disturbing the others.
   ///
   /// Must be called after both @c init() and @c scan().
   ///
   /// @param slavePosition  1-based bus position of the target device.
-  /// @return @c true if online, @c false if offline, or an error string if no driver is
-  ///         initialised, the device is unknown, or the hardware read fails.
-  std::expected<bool, std::string> isDeviceOnline(uint16_t slavePosition);
+  /// @return @c true if the mailbox is active, @c false otherwise, or an error string if no
+  ///         driver is initialised, the device is unknown, or the hardware read fails.
+  std::expected<bool, std::string> isDeviceMailboxActive(uint16_t slavePosition);
 
   /// @brief Enumerates the CoE object dictionary of one device and populates its
   ///        parameter map. See @c Device::initializeParameters for details.

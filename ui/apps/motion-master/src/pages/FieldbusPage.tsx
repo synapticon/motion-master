@@ -79,10 +79,10 @@ export default function FieldbusPage() {
     const res = await devicesQuery.refetch()
     await readStatesFor(res.data?.data.map(d => d.slavePosition) ?? [])
     // Keep the sidebar's shared queries in sync with fieldbus actions
-    // (scan / transition / manual refresh): AL state and the per-device online probe,
+    // (scan / transition / manual refresh): AL state and the per-device mailbox probe,
     // since a transition to/from INIT changes whether the mailbox is available.
     void queryClient.invalidateQueries({ queryKey: ['deviceStates'] })
-    void queryClient.invalidateQueries({ queryKey: ['deviceOnline'] })
+    void queryClient.invalidateQueries({ queryKey: ['deviceMailboxActive'] })
   }
 
   const initMutation = useMutation({

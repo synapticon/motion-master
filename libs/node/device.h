@@ -58,15 +58,17 @@ class Device {
   /// @brief Serial number from EEPROM.
   uint32_t serialNumber() const;
 
-  /// @brief Whether the device currently has an active SDO mailbox (PRE-OP, SAFE-OP, or OP,
-  ///        error bit clear).
+  /// @brief Whether the device's CoE/SDO mailbox is currently active (AL state PRE-OP,
+  ///        SAFE-OP, or OP).
   ///
-  /// Derived live from the fieldbus driver's cached AL status (@c FieldbusDriver::slaveState)
-  /// — no copy is stored here. When @c false the device is treated as offline:
-  /// @c readParameter / @c writeParameter operate on the cached value only and never touch
-  /// the bus. Reflects the last state the driver read; call @c DeviceManager::getDeviceStates
-  /// to refresh from the hardware.
-  bool online() const;
+  /// Mailbox communication is available in PRE-OP and above per the EtherCAT state machine,
+  /// independent of the AL error indicator — a device in SAFE-OP+error still answers mailbox
+  /// requests. INIT has no mailbox and BOOT's is FoE-only, so both report @c false. Derived
+  /// live from the fieldbus driver's cached AL status (@c FieldbusDriver::slaveState) — no
+  /// copy is stored here. When @c false, @c readParameter / @c writeParameter operate on the
+  /// cached value only and never touch the bus. Reflects the last state the driver read; call
+  /// @c DeviceManager::getDeviceStates to refresh from the hardware.
+  bool mailboxActive() const;
 
   /// @brief Whether the device is in a process-data-exchanging state (SAFE-OP or OP, error
   ///        bit clear).
@@ -253,8 +255,8 @@ class Device {
   /// - When the device is exchanging (SAFE-OP/OP) and process-image access was injected, the
   ///   live PDO value is taken from the process image (if the object is PDO-mapped and the bus is
   ///   healthy), decoded, stored (marking it @c SyncState::Synced) and returned — no bus I/O.
-  /// - Otherwise, when @c online(), uploads via SDO, decodes, stores and returns it.
-  /// - Otherwise (offline) returns the cached value without touching the bus.
+  /// - Otherwise, when @c mailboxActive(), uploads via SDO, decodes, stores and returns it.
+  /// - Otherwise (no mailbox) returns the cached value without touching the bus.
   ///
   /// The parameter must already exist in the map (populated by @c initializeParameters).
   ///

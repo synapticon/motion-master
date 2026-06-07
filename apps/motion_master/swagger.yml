@@ -43,8 +43,8 @@ info:
       EtherCAT Slave Controller register bytes.
     - **Files (FoE)** — `GET`/`PUT …/files/{filename}` transfer files to and from
       the device over File-over-EtherCAT (firmware, configuration, logs).
-    - **Presence** — `GET …/online` probes whether a device still answers on the
-      bus.
+    - **Mailbox** — `GET …/mailbox` probes whether a device's CoE/SDO mailbox is
+      active (AL state PRE-OP or above).
 
     The `/api/meta/*` endpoints expose static reference tables — AL status codes,
     ESC register definitions, FoE error codes, and CoE data types — so clients
@@ -336,16 +336,17 @@ paths:
           description: slavePosition is not a valid integer
         "404":
           description: No device at the given bus position
-  /api/devices/{slavePosition}/online:
+  /api/devices/{slavePosition}/mailbox:
     get:
-      summary: Check whether a device is online
-      operationId: getDeviceOnline
+      summary: Check whether a device's mailbox is active
+      operationId: getDeviceMailboxActive
       description: >
-        Performs a live AL-state read for the device and reports whether it currently
-        has an active SDO mailbox — i.e. it is in PRE-OP, SAFE-OP, or OP with no error
-        indicator set. INIT, BOOT, and any error state are reported as offline. The
-        device must already be known from a prior scan. Reading one device at a time
-        means a single missing device reports offline without failing the others.
+        Performs a live AL-state read for the device and reports whether its CoE/SDO
+        mailbox is active — i.e. it is in PRE-OP, SAFE-OP, or OP. This is independent of
+        the AL error indicator: a device in SAFE-OP+error still answers mailbox requests.
+        Only INIT (no mailbox) and BOOT (FoE-only mailbox) report inactive. The device
+        must already be known from a prior scan. Reading one device at a time means a
+        single missing device reports inactive without failing the others.
       parameters:
         - name: slavePosition
           in: path
@@ -357,22 +358,22 @@ paths:
           example: 1
       responses:
         "200":
-          description: Online status of the device
+          description: Mailbox status of the device
           content:
             application/json:
               schema:
                 type: object
-                required: [slavePosition, online]
+                required: [slavePosition, mailboxActive]
                 properties:
                   slavePosition:
                     type: integer
                     description: 1-based position on the fieldbus
                     example: 1
-                  online:
+                  mailboxActive:
                     type: boolean
                     description: >
-                      True when the device has an active SDO mailbox (PRE-OP, SAFE-OP,
-                      or OP with no error indicator); false otherwise.
+                      True when the device's CoE/SDO mailbox is active (AL state PRE-OP,
+                      SAFE-OP, or OP, regardless of the error indicator); false otherwise.
                     example: true
         "400":
           description: slavePosition is not a valid integer

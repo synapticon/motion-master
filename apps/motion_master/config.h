@@ -35,18 +35,25 @@ struct TlsConfig {
   bool autoUpdate = true;  ///< Fetch a fresh cert when missing/expired (false ⇒ --no-cert-update).
 };
 
+/// @brief @c "gameLoop" block — the real-time cyclic loop.
+struct GameLoopConfig {
+  uint32_t periodUs = 1000;  ///< Cyclic timer period in microseconds (must be > 0). 1000 = 1 ms.
+};
+
 /// @brief The whole config file. Top-level keys map to these members.
 struct Config {
   ServerConfig server;
   FieldbusConfig fieldbus;
   std::string logLevel = "info";  ///< trace | debug | info | warn | error.
   TlsConfig tls;
+  GameLoopConfig gameLoop;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ServerConfig, httpPort, wsPort, corsOrigin)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FieldbusConfig, driver, adapter)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TlsConfig, certPath, keyPath, autoUpdate)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logLevel, tls)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(GameLoopConfig, periodUs)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logLevel, tls, gameLoop)
 
 /// @brief Deserialises a parsed JSONC document into a @c Config, applying defaults for absent keys.
 ///

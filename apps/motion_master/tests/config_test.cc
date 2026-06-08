@@ -18,6 +18,17 @@ TEST(ConfigTest, EmptyObjectYieldsDefaults) {
   EXPECT_TRUE(r->tls.keyPath.empty());
   EXPECT_TRUE(r->fieldbus.driver.empty());
   EXPECT_TRUE(r->fieldbus.adapter.empty());
+  EXPECT_EQ(r->gameLoop.periodUs, 1000u);
+}
+
+TEST(ConfigTest, GameLoopPeriodOverride) {
+  auto r = parseConfig(json::parse(R"({"gameLoop": {"periodUs": 250}})"));
+  ASSERT_TRUE(r.has_value()) << r.error();
+  EXPECT_EQ(r->gameLoop.periodUs, 250u);
+}
+
+TEST(ConfigTest, ZeroGameLoopPeriodRejected) {
+  EXPECT_FALSE(parseConfig(json::parse(R"({"gameLoop": {"periodUs": 0}})")).has_value());
 }
 
 TEST(ConfigTest, PartialOverrideKeepsOtherDefaults) {

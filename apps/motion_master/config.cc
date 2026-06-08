@@ -29,5 +29,9 @@ std::expected<Config, std::string> parseConfig(const nlohmann::json& doc) {
     }
   }
 
+  if (config.gameLoop.periodUs == 0) {
+    return std::unexpected("gameLoop.periodUs must be greater than 0");
+  }
+
   return config;
 }

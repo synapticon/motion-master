@@ -285,7 +285,7 @@ int main(int argc, char** argv) {
     openInBrowser("https://motion-master.synapticon.com/app/");
   }
 
-  GameLoop game_loop{std::chrono::microseconds{1000}};
+  GameLoop game_loop{std::chrono::microseconds{opts.config.gameLoop.periodUs}};
 
   // Exchange process data every cycle. No-op until devices are mapped and brought into
   // SAFE-OP/OP via the API, at which point DeviceManager publishes the image and the loop

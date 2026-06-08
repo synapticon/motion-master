@@ -26,6 +26,11 @@
   // Log verbosity: trace | debug | info | warn | error
   "logLevel": "info",
 
+  // Real-time cyclic loop.
+  "gameLoop": {
+    "periodUs": 1000  // cyclic timer period in microseconds (1000 = 1 ms); must be > 0
+  },
+
   // TLS certificate for the HTTPS API and secure WebSocket.
   "tls": {
     "certPath": "cert.pem",

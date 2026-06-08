@@ -4,7 +4,9 @@ find_package(spdlog CONFIG REQUIRED)
 add_executable(mm_app_tests
     ring_log_sink_test.cc
     monitoring_api_test.cc
+    config_test.cc
     ../monitoring_api.cc
+    ../config.cc
 )
 
 # App headers are included unprefixed (e.g. "ring_log_sink.h"), matching main.cc.

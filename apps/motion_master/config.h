@@ -1,0 +1,59 @@
+#pragma once
+
+#include <cstdint>
+#include <expected>
+#include <nlohmann/json.hpp>
+#include <string>
+
+/// @file
+/// The on-disk configuration, modelled as a struct tree that maps 1-1 to the JSONC file.
+///
+/// Each sub-struct mirrors one JSONC object; nlohmann's @c _WITH_DEFAULT (de)serialization fills
+/// any key the file omits from a default-constructed instance, so a partial config "overrides the
+/// defaults" with no per-field plumbing. @c parseConfig adds the enum/value checks nlohmann cannot
+/// express. This is deliberately separate from @c Options, which also carries CLI-only and runtime
+/// fields (actions, resolved network adapter, cert source URLs) that have no place in the file.
+
+/// @brief @c "server" block — the HTTP API and realtime WebSocket listeners.
+struct ServerConfig {
+  uint16_t httpPort = 61447;
+  uint16_t wsPort = 62281;
+  std::string corsOrigin = "https://motion-master.synapticon.com";
+};
+
+/// @brief @c "fieldbus" block — the driver to auto-init at startup.
+/// An empty @c driver means "do not auto-init"; the fieldbus then waits for @c POST @c /api/init.
+struct FieldbusConfig {
+  std::string driver;   ///< "" | "soem" | "spoe" | "igh".
+  std::string adapter;  ///< SOEM NIC: MAC or interface name. "" = none.
+};
+
+/// @brief @c "tls" block — certificate paths and startup self-heal policy.
+struct TlsConfig {
+  std::string certPath;    ///< "" = auto-discover (bundled cert, then acme.sh, then self-signed).
+  std::string keyPath;     ///< "" = auto-discover, paired with @c certPath.
+  bool autoUpdate = true;  ///< Fetch a fresh cert when missing/expired (false ⇒ --no-cert-update).
+};
+
+/// @brief The whole config file. Top-level keys map to these members.
+struct Config {
+  ServerConfig server;
+  FieldbusConfig fieldbus;
+  std::string logLevel = "info";  ///< trace | debug | info | warn | error.
+  TlsConfig tls;
+};
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ServerConfig, httpPort, wsPort, corsOrigin)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FieldbusConfig, driver, adapter)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TlsConfig, certPath, keyPath, autoUpdate)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logLevel, tls)
+
+/// @brief Deserialises a parsed JSONC document into a @c Config, applying defaults for absent keys.
+///
+/// Pure: no file I/O, no process exit. Unknown keys are ignored (forward-compatible). nlohmann
+/// validates value *types*; this adds the enum checks it cannot (@c logLevel, @c fieldbus.driver).
+///
+/// @param doc A parsed JSON value (must be an object).
+/// @return The populated @c Config, or an error string on a wrong top-level type, a field type
+///         mismatch (from nlohmann), or an invalid enum value.
+std::expected<Config, std::string> parseConfig(const nlohmann::json& doc);

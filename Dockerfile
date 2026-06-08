@@ -8,8 +8,12 @@
 #
 # The server binds to 127.0.0.1 (loopback) by design, so --network host is
 # required — Docker's port-forwarding routes through eth0, not loopback, and
-# would never reach the server.  Pass --port <n> to avoid collisions:
-#   docker run --rm --network host motion-master --port 9443
+# would never reach the server.
+#
+# Settings (ports, fieldbus, log level, TLS) have no CLI flags — they are set only via a JSONC
+# config file. Mount one and point MM_CONFIG at it:
+#   docker run --rm --network host \
+#     -v /path/to/motion-master.jsonc:/config.jsonc:ro -e MM_CONFIG=/config.jsonc motion-master
 #
 # TLS certificate discovery order (same as tools/run.sh):
 #   1. CERT / KEY env vars — explicit override, highest priority
@@ -47,9 +51,13 @@
 #     CAP_SYS_NICE   SCHED_FIFO scheduling — RT game loop
 #     CAP_IPC_LOCK   mlockall() — pin memory for RT (also needs --ulimit memlock=-1)
 #
-#   EtherCAT only:
-#     docker run --cap-add NET_ADMIN --cap-add NET_RAW --network host motion-master \
-#                --driver soem --adapter eth0
+#   The fieldbus driver/adapter are set in the mounted config's "fieldbus" block, e.g.
+#   { "fieldbus": { "driver": "soem", "adapter": "eth0" } }.
+#
+#   EtherCAT only (config sets fieldbus):
+#     docker run --cap-add NET_ADMIN --cap-add NET_RAW --network host \
+#                -v /path/to/motion-master.jsonc:/config.jsonc:ro -e MM_CONFIG=/config.jsonc \
+#                motion-master
 #
 #   RT only (host kernel must be PREEMPT_RT):
 #     docker run --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 \
@@ -57,8 +65,9 @@
 #
 #   Full EtherCAT + RT:
 #     docker run --cap-add NET_ADMIN --cap-add NET_RAW \
-#                --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 \
-#                --network host motion-master --driver soem --adapter eth0
+#                --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 --network host \
+#                -v /path/to/motion-master.jsonc:/config.jsonc:ro -e MM_CONFIG=/config.jsonc \
+#                motion-master
 #
 # Running with --privileged also works but grants far more than necessary.
 

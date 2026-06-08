@@ -1,6 +1,7 @@
 add_executable(motion_master
     main.cc
     options.cc
+    config.cc
     http_server.cc
     ws_server.cc
     game_loop.cc

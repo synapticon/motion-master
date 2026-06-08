@@ -104,7 +104,7 @@ int main(int argc, char** argv) {
       std::make_shared<spdlog::logger>("", spdlog::sinks_init_list{consoleSink, ringLogSink}));
 
   auto opts = parseOptions(argc, argv);
-  spdlog::set_level(spdlog::level::from_str(opts.logLevel));
+  spdlog::set_level(spdlog::level::from_str(opts.config.logLevel));
 
   spdlog::info("Motion Master v{}", mm::core::kVersion);
 
@@ -118,9 +118,9 @@ int main(int argc, char** argv) {
     return std::unexpected("unsupported driver: " + type);
   };
 
-  if (opts.driver.has_value()) {
+  if (!opts.config.fieldbus.driver.empty()) {
     std::string ifname = opts.adapter ? opts.adapter->adapterName : "";
-    auto driver = makeDriver(*opts.driver, ifname);
+    auto driver = makeDriver(opts.config.fieldbus.driver, ifname);
     if (!driver) {
       spdlog::error("{}", driver.error());
       return 1;
@@ -144,20 +144,20 @@ int main(int argc, char** argv) {
   //   1. cert.pem / key.pem next to the binary  (release install)
   //   2. ~/.acme.sh/local.motion-master.synapticon.com_ecc/  (local acme.sh)
   // Unlike before, a miss is not fatal here — the self-heal below fetches a fresh cert.
-  if (opts.certFile.empty() || opts.keyFile.empty()) {
+  if (opts.config.tls.certPath.empty() || opts.config.tls.keyPath.empty()) {
     if (std::filesystem::exists(defaultCert) && std::filesystem::exists(defaultKey)) {
-      opts.certFile = defaultCert.string();
-      opts.keyFile = defaultKey.string();
-      spdlog::info("TLS: bundled cert ({})", opts.certFile);
+      opts.config.tls.certPath = defaultCert.string();
+      opts.config.tls.keyPath = defaultKey.string();
+      spdlog::info("TLS: bundled cert ({})", opts.config.tls.certPath);
     } else if (const char* home = std::getenv("HOME")) {
       const auto acmeDir =
           std::filesystem::path(home) / ".acme.sh/local.motion-master.synapticon.com_ecc";
       const auto acmeCert = acmeDir / "fullchain.cer";
       const auto acmeKey = acmeDir / "local.motion-master.synapticon.com.key";
       if (std::filesystem::exists(acmeCert) && std::filesystem::exists(acmeKey)) {
-        opts.certFile = acmeCert.string();
-        opts.keyFile = acmeKey.string();
-        spdlog::info("TLS: Let's Encrypt cert from acme.sh ({})", opts.certFile);
+        opts.config.tls.certPath = acmeCert.string();
+        opts.config.tls.keyPath = acmeKey.string();
+        spdlog::info("TLS: Let's Encrypt cert from acme.sh ({})", opts.config.tls.certPath);
       }
     }
   }
@@ -165,8 +165,10 @@ int main(int argc, char** argv) {
   // --update-cert: fetch a fresh cert/key into the resolved path (or the install-dir default when
   // nothing is configured), then exit without serving. The explicit path for terminal/headless use.
   if (opts.updateCert) {
-    const std::string certTarget = opts.certFile.empty() ? defaultCert.string() : opts.certFile;
-    const std::string keyTarget = opts.keyFile.empty() ? defaultKey.string() : opts.keyFile;
+    const std::string certTarget =
+        opts.config.tls.certPath.empty() ? defaultCert.string() : opts.config.tls.certPath;
+    const std::string keyTarget =
+        opts.config.tls.keyPath.empty() ? defaultKey.string() : opts.config.tls.keyPath;
     spdlog::info("Fetching TLS certificate from {}", opts.certUrl);
     if (auto r = mm::fetchAndSwapCert(certTarget, keyTarget, opts.certUrl, opts.keyUrl); !r) {
       spdlog::error("Certificate update failed: {}", r.error());
@@ -177,21 +179,21 @@ int main(int argc, char** argv) {
   }
 
   // Nothing resolved — target the install-dir default so the self-heal below can populate it.
-  if (opts.certFile.empty() || opts.keyFile.empty()) {
-    opts.certFile = defaultCert.string();
-    opts.keyFile = defaultKey.string();
+  if (opts.config.tls.certPath.empty() || opts.config.tls.keyPath.empty()) {
+    opts.config.tls.certPath = defaultCert.string();
+    opts.config.tls.keyPath = defaultKey.string();
   }
 
   // Decide whether the served cert needs refreshing. A missing cert means we cannot serve TLS at
   // all; an expired cert still binds (browsers can bypass) but should be refreshed. Both are healed
   // by fetching from the rolling release unless --no-cert-update is set.
   bool needFetch = false;
-  bool certMissing =
-      !std::filesystem::exists(opts.certFile) || !std::filesystem::exists(opts.keyFile);
+  bool certMissing = !std::filesystem::exists(opts.config.tls.certPath) ||
+                     !std::filesystem::exists(opts.config.tls.keyPath);
   if (certMissing) {
     needFetch = true;
-    spdlog::warn("No TLS certificate at {}", opts.certFile);
-  } else if (auto info = mm::readCertInfo(opts.certFile)) {
+    spdlog::warn("No TLS certificate at {}", opts.config.tls.certPath);
+  } else if (auto info = mm::readCertInfo(opts.config.tls.certPath)) {
     const auto now = std::chrono::system_clock::now();
     const auto daysRemaining =
         std::chrono::duration_cast<std::chrono::hours>(info->notAfter - now).count() / 24;
@@ -208,7 +210,7 @@ int main(int argc, char** argv) {
   }
 
   if (needFetch) {
-    if (opts.noCertUpdate) {
+    if (!opts.config.tls.autoUpdate) {
       if (certMissing) {
         spdlog::error("No certificate and --no-cert-update set — cannot serve TLS");
         return 1;
@@ -217,9 +219,10 @@ int main(int argc, char** argv) {
           "Certificate expired and --no-cert-update set — serving the expired certificate");
     } else {
       spdlog::warn("Fetching fresh TLS certificate from {}", opts.certUrl);
-      if (auto r = mm::fetchAndSwapCert(opts.certFile, opts.keyFile, opts.certUrl, opts.keyUrl);
+      if (auto r = mm::fetchAndSwapCert(opts.config.tls.certPath, opts.config.tls.keyPath,
+                                        opts.certUrl, opts.keyUrl);
           r) {
-        spdlog::info("Installed fresh TLS certificate at {}", opts.certFile);
+        spdlog::info("Installed fresh TLS certificate at {}", opts.config.tls.certPath);
       } else if (certMissing) {
         spdlog::error("Certificate fetch failed and no local certificate exists: {}", r.error());
         return 1;
@@ -236,9 +239,9 @@ int main(int argc, char** argv) {
 
   HttpServer httpServer{
       HttpServer::Config{
-          .port = opts.port,
-          .certFile = opts.certFile,
-          .keyFile = opts.keyFile,
+          .port = opts.config.server.httpPort,
+          .certFile = opts.config.tls.certPath,
+          .keyFile = opts.config.tls.keyPath,
           .version = std::string{mm::core::kVersion},
           .initDriver = [&deviceManager, makeDriver](
                             const std::string& type,
@@ -254,19 +257,20 @@ int main(int argc, char** argv) {
             return deviceManager.init(std::move(*driver));
           },
           .getLog = [ringLogSink]() { return ringLogSink->entries(); },
-          .refreshCert = [certFile = opts.certFile, keyFile = opts.keyFile, certUrl = opts.certUrl,
+          .refreshCert = [certFile = opts.config.tls.certPath, keyFile = opts.config.tls.keyPath,
+                          certUrl = opts.certUrl,
                           keyUrl = opts.keyUrl]() -> std::expected<void, std::string> {
             return mm::fetchAndSwapCert(certFile, keyFile, certUrl, keyUrl);
           },
-          .corsOrigin = opts.corsOrigin,
+          .corsOrigin = opts.config.server.corsOrigin,
       },
       deviceManager, monitoringManager};
   httpServer.start();
 
   WebSocketServer wsServer{WebSocketServer::Config{
-      .port = opts.wsPort,
-      .certFile = opts.certFile,
-      .keyFile = opts.keyFile,
+      .port = opts.config.server.wsPort,
+      .certFile = opts.config.tls.certPath,
+      .keyFile = opts.config.tls.keyPath,
   }};
   wsServer.start();
 

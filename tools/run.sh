@@ -4,6 +4,7 @@ set -euo pipefail
 preset="${1:-x64-linux-debug}"
 binary="build/${preset}/apps/motion_master/motion-master"
 cors_origin="${CORS_ORIGIN:-https://motion-master.synapticon.com}"
+log_level="${LOG_LEVEL:-info}"
 
 if [[ ! -x "$binary" ]]; then
     echo "Binary not found: $binary — run ./tools/build.sh first" >&2
@@ -11,34 +12,41 @@ if [[ ! -x "$binary" ]]; then
 fi
 
 binary_dir="$(dirname "$binary")"
-bundled_cert="$binary_dir/cert.pem"
-bundled_key="$binary_dir/key.pem"
+bundled_cert_path="$binary_dir/cert.pem"
+bundled_key_path="$binary_dir/key.pem"
 
 acme_dir="$HOME/.acme.sh/local.motion-master.synapticon.com_ecc"
-acme_cert="$acme_dir/fullchain.cer"
-acme_key="$acme_dir/local.motion-master.synapticon.com.key"
+acme_cert_path="$acme_dir/fullchain.cer"
+acme_key_path="$acme_dir/local.motion-master.synapticon.com.key"
 
-if [[ -f "$bundled_cert" && -f "$bundled_key" ]]; then
-    echo "Starting Motion Master (preset: $preset, cert: bundled, cors: $cors_origin)"
-    "$binary" --cert "$bundled_cert" --key "$bundled_key" --cors-origin "$cors_origin" "${@:2}"
-elif [[ -f "$acme_cert" && -f "$acme_key" ]]; then
-    echo "Starting Motion Master (preset: $preset, cert: Let's Encrypt, cors: $cors_origin)"
-    "$binary" --cert "$acme_cert" --key "$acme_key" --cors-origin "$cors_origin" "${@:2}"
+tmpdir=$(mktemp -d)
+trap 'rm -rf "$tmpdir"' EXIT
+
+# Resolve a cert/key, mirroring the binary's own discovery order.
+if [[ -f "$bundled_cert_path" && -f "$bundled_key_path" ]]; then
+    cert_path="$bundled_cert_path"; key_path="$bundled_key_path"; cert_kind="bundled"
+elif [[ -f "$acme_cert_path" && -f "$acme_key_path" ]]; then
+    cert_path="$acme_cert_path"; key_path="$acme_key_path"; cert_kind="Let's Encrypt"
 else
-    # Fall back to a short-lived self-signed cert for environments without the
-    # acme.sh certificate (requires accepting the browser security exception).
-    tmpdir=$(mktemp -d)
-    trap 'rm -rf "$tmpdir"' EXIT
-
-    cert="$tmpdir/cert.pem"
-    key="$tmpdir/key.pem"
-
+    # Fall back to a short-lived self-signed cert (requires accepting the browser exception).
     # SAN is required — browsers ignore CN for hostname validation since ~2017.
-    openssl req -x509 -newkey rsa:2048 -keyout "$key" -out "$cert" -days 1 -nodes \
+    cert_path="$tmpdir/cert.pem"; key_path="$tmpdir/key.pem"
+    cert_kind="self-signed — browser exception required"
+    openssl req -x509 -newkey rsa:2048 -keyout "$key_path" -out "$cert_path" -days 1 -nodes \
         -subj "/CN=local.motion-master.synapticon.com" \
         -addext "subjectAltName=DNS:local.motion-master.synapticon.com,IP:127.0.0.1" \
         2>/dev/null
-
-    echo "Starting Motion Master (preset: $preset, cert: self-signed — browser exception required, cors: $cors_origin)"
-    "$binary" --cert "$cert" --key "$key" --cors-origin "$cors_origin" "${@:2}"
 fi
+
+# Settings now live only in a JSONC config file (no CLI flags), so synthesise one for this run.
+config_path="$tmpdir/config.jsonc"
+cat > "$config_path" <<EOF
+{
+  "server": { "corsOrigin": "$cors_origin" },
+  "logLevel": "$log_level",
+  "tls": { "certPath": "$cert_path", "keyPath": "$key_path" }
+}
+EOF
+
+echo "Starting Motion Master (preset: $preset, cert: $cert_kind, cors: $cors_origin)"
+"$binary" --config "$config_path" "${@:2}"

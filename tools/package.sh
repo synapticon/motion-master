@@ -30,10 +30,13 @@ cp "$BUILD_DIR/motion-master" "$deb_root/opt/motion-master/motion-master"
 cp "$BUILD_DIR/cert.pem"      "$deb_root/opt/motion-master/cert.pem"
 cp "$BUILD_DIR/key.pem"       "$deb_root/opt/motion-master/key.pem"
 cp "$REPO_DIR/setup.sh"       "$deb_root/opt/motion-master/setup.sh"
+cp "$REPO_DIR/apps/motion_master/motion-master.example.jsonc" \
+   "$deb_root/opt/motion-master/motion-master.example.jsonc"
 chmod 755 "$deb_root/opt/motion-master/motion-master" \
           "$deb_root/opt/motion-master/setup.sh"
 chmod 644 "$deb_root/opt/motion-master/cert.pem" \
-          "$deb_root/opt/motion-master/key.pem"
+          "$deb_root/opt/motion-master/key.pem" \
+          "$deb_root/opt/motion-master/motion-master.example.jsonc"
 ln -sf /opt/motion-master/motion-master "$deb_root/usr/local/bin/motion-master"
 
 cat > "$deb_root/DEBIAN/control" <<EOF
@@ -68,6 +71,7 @@ cp "$BUILD_DIR/motion-master" "$rpm_root/SOURCES/"
 cp "$BUILD_DIR/cert.pem"      "$rpm_root/SOURCES/"
 cp "$BUILD_DIR/key.pem"       "$rpm_root/SOURCES/"
 cp "$REPO_DIR/setup.sh"       "$rpm_root/SOURCES/"
+cp "$REPO_DIR/apps/motion_master/motion-master.example.jsonc" "$rpm_root/SOURCES/"
 
 cat > "$rpm_root/SPECS/motion-master.spec" <<SPEC
 Name:           motion-master
@@ -91,6 +95,7 @@ install -m 755 %{_sourcedir}/motion-master %{buildroot}/opt/motion-master/
 install -m 644 %{_sourcedir}/cert.pem      %{buildroot}/opt/motion-master/
 install -m 644 %{_sourcedir}/key.pem       %{buildroot}/opt/motion-master/
 install -m 755 %{_sourcedir}/setup.sh      %{buildroot}/opt/motion-master/
+install -m 644 %{_sourcedir}/motion-master.example.jsonc %{buildroot}/opt/motion-master/
 ln -sf /opt/motion-master/motion-master %{buildroot}/usr/local/bin/motion-master
 
 %post
@@ -102,6 +107,7 @@ setcap cap_sys_nice,cap_net_admin,cap_net_raw=eip /opt/motion-master/motion-mast
 %config(noreplace) /opt/motion-master/cert.pem
 %config(noreplace) /opt/motion-master/key.pem
 /opt/motion-master/setup.sh
+/opt/motion-master/motion-master.example.jsonc
 /usr/local/bin/motion-master
 
 %changelog

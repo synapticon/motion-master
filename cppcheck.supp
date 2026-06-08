@@ -3,6 +3,11 @@
 // (The WebSocketBehavior is moved into .ws() in ws_server.cc.)
 accessMoved:*/ws_server.cc
 
+// config.h uses nlohmann's NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT macro to generate the
+// JSON (de)serialisers. cppcheck cannot expand the macro without the nlohmann headers and reports
+// it as an unknown macro; the real toolchain compiles it cleanly.
+unknownMacro:*/config.h
+
 // CyclicTimer has platform-split members (#ifdef _WIN32 / #else). cppcheck
 // analyses each .cc against both preprocessor branches, so it sees the Linux
 // implementation without Linux members (and vice versa) and incorrectly

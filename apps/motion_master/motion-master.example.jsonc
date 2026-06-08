@@ -1,0 +1,37 @@
+// motion-master.example.jsonc — example configuration (NOT loaded automatically).
+//
+// Copy this file, edit it, and pass it explicitly:   motion-master --config <path>
+// This file is the ONLY way to set ports, fieldbus, log level, and TLS — there are no CLI flags
+// for these. Motion Master loads a config ONLY when --config is given; there is no default search
+// path. Every key below shows its built-in default — delete the ones you don't override.
+//
+// This file is JSONC: // line comments and /* block comments */ are allowed.
+{
+  // HTTP API and realtime WebSocket servers (each on its own port / loop / thread).
+  "server": {
+    "httpPort": 61447,
+    "wsPort": 62281,
+    "corsOrigin": "https://motion-master.synapticon.com"
+  },
+
+  // Fieldbus driver to initialise at startup.
+  // Omit this whole block (or leave "driver" empty) to NOT auto-init — the fieldbus then
+  // waits to be initialised from the client via POST /api/init.
+  "fieldbus": {
+    "driver": "soem",   // soem | spoe | igh
+    "adapter": "eth0"   // soem: NIC MAC (AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF) or interface name
+    // spoe will instead take a list of device addresses: "ipAddresses": ["192.168.0.10"]
+  },
+
+  // Log verbosity: trace | debug | info | warn | error
+  "logLevel": "info",
+
+  // TLS certificate for the HTTPS API and secure WebSocket.
+  "tls": {
+    "certPath": "cert.pem",
+    "keyPath": "key.pem",
+    // Auto-fetch a fresh certificate at startup when the current one is missing or expired.
+    // Set false for air-gapped installs (equivalent to the --no-cert-update flag).
+    "autoUpdate": true
+  }
+}

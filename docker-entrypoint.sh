@@ -1,6 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Settings (ports, fieldbus, log level, TLS paths) are configured only through a JSONC config file
+# passed with --config; there are no CLI flags for them.
+#
+# If MM_CONFIG is set, that config is used verbatim (the user owns every setting, including TLS
+# paths — leave tls.certPath/keyPath empty to fall back to the baked-in cert next to the binary).
+# Otherwise this entrypoint resolves a TLS cert/key and generates a minimal config pointing at it.
+
+if [[ -n "${MM_CONFIG:-}" ]]; then
+    exec /opt/motion-master/motion-master --config "$MM_CONFIG" "$@"
+fi
+
 # TLS certificate resolution — mirrors the same priority as tools/run.sh:
 #   1. CERT / KEY env vars (explicit override)
 #   2. cert.pem / key.pem next to the binary (baked in on release image builds)
@@ -36,4 +47,9 @@ else
         2>/dev/null
 fi
 
-exec /opt/motion-master/motion-master --cert "$CERT" --key "$KEY" "$@"
+CONFIG="$(mktemp --suffix=.jsonc)"
+cat > "$CONFIG" <<EOF
+{ "tls": { "certPath": "$CERT", "keyPath": "$KEY" } }
+EOF
+
+exec /opt/motion-master/motion-master --config "$CONFIG" "$@"

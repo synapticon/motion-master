@@ -6,7 +6,7 @@ Next-generation motion control software for SOMANET servo drives. Browser-based 
 
 Design documents with Mermaid diagrams (rendered natively on GitHub):
 
-- [Threading model](https://github.com/synapticon/motion-master/blob/main/docs/THREADS.md) — the four threads, RT cycle, and control-plane vs PDO-path locking.
+- [Threading model](https://github.com/synapticon/motion-master/blob/main/docs/THREADS.md) — the five threads, RT cycle, and control-plane vs PDO-path locking.
 - [Class diagram](https://github.com/synapticon/motion-master/blob/main/docs/CLASS_DIAGRAM.md) — class structure, ownership, and inheritance.
 
 ## Prerequisites

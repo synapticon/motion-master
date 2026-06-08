@@ -31,17 +31,23 @@ classDiagram
     class CyclicTimer {
         +waitForNextCycle()
     }
-    class Server {
-        +start()
-        +stop()
-        +broadcast(json)
-        +publish(topic, json)
+    class HttpServer {
+        +start() / stop()
         -DeviceManager& deviceManager_
         -MonitoringManager& monitoringManager_
-        -thread thread_
+        -thread thread_ «port 61447»
+        -atomic~uWS::Loop*~ loop_
+    }
+    class WebSocketServer {
+        +start() / stop()
+        +broadcast(json)
+        +publish(topic, json)
+        -thread thread_ «port 62281»
+        -atomic~uWS::Loop*~ loop_
     }
     class MonitoringManager {
         +create(Monitoring)
+        +setPublish(cb)
         +start() / stop()
         -DeviceManager& deviceManager_
         -ParameterRefresher refresher_
@@ -120,9 +126,10 @@ classDiagram
     GameLoop o-- "0..*" CyclicTask : non-owning
     GameLoop *-- CyclicTimer
     ProcessDataTask ..> DeviceManager : ref
-    Server ..> DeviceManager : ref
-    Server ..> MonitoringManager : ref
+    HttpServer ..> DeviceManager : ref
+    HttpServer ..> MonitoringManager : ref
     MonitoringManager ..> DeviceManager : ref
+    MonitoringManager ..> WebSocketServer : publish cb (setPublish)
     MonitoringManager *-- ParameterRefresher
     ParameterRefresher ..> DeviceManager : ref
     DeviceManager *-- "1" FieldbusDriver : owns
@@ -146,7 +153,8 @@ classDiagram
 | `GameLoop` | `tasks_` | `vector<CyclicTask*>` | No — caller owns | `apps/motion_master/game_loop.h` |
 | `GameLoop` | `timer_` | `CyclicTimer` | Yes | `apps/motion_master/game_loop.h` |
 | `ProcessDataTask` | `deviceManager_` | `DeviceManager&` | No | `apps/motion_master/process_data_task.h` |
-| `Server` | `deviceManager_`, `monitoringManager_` | `&` | No | `apps/motion_master/server.h` |
+| `HttpServer` | `deviceManager_`, `monitoringManager_` | `&` | No | `apps/motion_master/http_server.h` |
+| `WebSocketServer` | — (publish target for `MonitoringManager::setPublish`) | — | No | `apps/motion_master/ws_server.h` |
 | `MonitoringManager` | `refresher_` | `ParameterRefresher` | **Yes** | `libs/node/monitoring_manager.h` |
 | `MonitoringManager` | `deviceManager_` | `DeviceManager&` | No | `libs/node/monitoring_manager.h` |
 | `ParameterRefresher` | `deviceManager_` | `DeviceManager&` | No | `libs/node/parameter_refresher.h` |

@@ -32,14 +32,16 @@
 
 ## Class Diagram UML
 
-Monitoring
-Watchdog
-DeviceManager / Master
-Device / Slave
-DeviceParameter / Object Dictionary Entry
-GameLoop
-HttpServer
-WebSocketServer
+> This was the initial brainstorm list. The **as-built** class diagram and threading model now live in
+> `CLAUDE.md` ("Class Structure" + "Game Loop / RT Threading") and are reconciled against the code in the
+> *Session 2026-06-08 — Diagram & threading reconciled with code* note below. The detailed design diagram
+> in *Session 2026-05-16* is kept as a historical reasoning trail; read the reconciliation note for what
+> actually shipped vs. what is still planned.
+
+Monitoring · DeviceManager / Master · Device / Slave · DeviceParameter / Object Dictionary Entry ·
+GameLoop · HttpServer · WebSocketServer
+*(Original list also named a `Watchdog` class — that became the ESC hardware sync-manager watchdog
+diagnostics on `DeviceManager`/`FieldbusDriver`, not a standalone RT task.)*
 
 ---
 
@@ -949,3 +951,23 @@ Cycling a device INIT → BOOT → INIT → PRE-OP → SAFE-OP (and the delibera
 **Crash 1 — duplicate Outputs FMMU + out-of-bounds write.** SOEM's FMMU mappers (`ecx_config_create_{output,input}_mappings` + the mailbox-status mapper) start at `slavelist[i].FMMUunused` and *append*, trusting that `ecx_config_init`'s memset zeroed `FMMUunused` and the `FMMU[]` array. A re-map never memsets, so `FMMUunused` stayed at 3 from the prior map: the output mapper wrote a byte-identical duplicate Outputs FMMU at `FMMU[3]`, then the input/mailbox mappers ran at index 4. With `EC_MAXFMMU == 4` that wrote a 16-byte `ec_fmmut` past the end of the array, smashing the adjacent `ec_slavet` fields (`FMMU*func`, `mbx_*`, … and on repeated re-maps marching toward `PO2SOconfig`). This is the long-unconfirmed root corruptor behind the earlier `PO2SOconfig` segfault. **Fix:** in `configureProcessData()`'s pre-map reset loop, `memset` each slave's `FMMU[]` + `FMMUunused = 0` so SOEM re-derives FMMU0/1/2 from scratch like a clean scan, and FPWR-clear all `EC_MAXFMMU` ESC FMMU registers so a slave already carrying a stale duplicate self-heals on the next map. (Sits alongside the existing `outputs`/`inputs`/`PO2SOconfig` resets, all there for the same "a re-map doesn't memset the slavelist" reason.)
 
 **Crash 2 — illegal AL transition reads SDO over a dead CoE mailbox.** Entering SAFE-OP/OP re-maps, and the re-map reads each slave's PDO mapping over the **CoE mailbox** (`ecx_readPDOmap → ecx_SDOread → ecx_mbxreceive → memcpy`), which is only live from PRE-OP up. A device commanded straight from BOOT (firmware-sized mailbox SMs, no CoE) reached that mailbox read while still in BOOT and segfaulted in `ecx_mbxreceive` — *before* the slave could reject the illegal jump with AL status 0x0011. **Fix:** enforce the EtherCAT AL state machine in `DeviceManager::transitionToState` before any re-map, via a `kValidStateTransitions` map (current state → allowed targets: single-step climbs `INIT → PRE-OP → SAFE-OP → OP`, multi-step drops, BOOT only paired with INIT; self-transitions allowed). Validated against a fresh `readStates` (authoritative; an AL-status register read works in any state). Lives in the node layer on purpose — re-mapping is a Motion Master concern, not the fieldbus's, so direct `FieldbusDriver` use is the caller's own risk. Added `toString(EtherCatState)` next to `alState`/`alHasError` for the messages. The PWA's Control page already taught these rules in its inline AL-state hints; the backend now actually enforces them rather than trusting the slave (which it never reaches in the crashing case).
+
+---
+
+## Session 2026-06-08 — Diagram & threading reconciled with code
+
+The "Class Diagram UML" stub and the *Session 2026-05-16* detailed diagram had drifted from what was actually built. Walked the source and brought the canonical references in `CLAUDE.md` ("Class Structure" + "Game Loop / RT Threading") back in line; this note records the as-built shape and what is still only designed. The historical session entries are left intact as the reasoning trail.
+
+**Built and load-bearing today:**
+- **Composition root is `main.cc`**, not an `App` class — `main.cc` is the one place concrete types are instantiated and wired (the DI seam `Server::Config::InitDriverFn` is the exception that lets `POST /api/init` build a driver without the server knowing concrete types).
+- **`DeviceManager` owns `unique_ptr<FieldbusDriver>` + `std::vector<Device>` + `unique_ptr<ProcessData>`.** It hands each `Device` a `FieldbusDriver&` and a raw `ProcessData*` (non-owning; the manager outlives every device). The only concrete driver in the tree is `SoemFieldbusDriver`; `SpoeDriver`/IgH remain planned.
+- **Profiles are borrowed views, confirmed in code:** `ProfileDevice ← Cia402Drive ← SomanetDrive`, each holding only a `Device&`, built via `createCia402Drive` / `createSomanetDrive`. There is **no** `Cia402StateMachine` owned by `Device` — that 2026-05-16 ownership model was already inverted by the 2026-06-05 borrowed-views session; the older diagram just hadn't caught up.
+- **One RT task is registered:** `ProcessDataTask` → `DeviceManager::exchangeProcessData()`. `GameLoop` keeps fixed `CyclicTask` membership.
+- **Output path is lock-free per-object slots, not a shared seqlock.** `ProcessData` carries `inputSnapshot`/`outputSnapshot` (`SeqLock<ProcessBuffer>`, RT writes), plus `outputSlots` — one `std::atomic<uint64_t>` per output object that any non-RT writer stores into independently; the RT loop alone composes them into the wire image (Design B). This replaced the earlier single shared output-staging seqlock + mutex that the threading doc still described.
+- **Monitoring is off-RT.** `MonitoringManager` (constructed in `main.cc` over `DeviceManager`, reached by `HttpServer` for `/api/monitorings`) owns a sampler thread and a `ParameterRefresher` thread; it publishes batches via a `setPublish` callback wired to `WebSocketServer::publish`. It is deliberately **not** a `CyclicTask`.
+
+**Designed but not yet in code (kept in the diagram, flagged `planned`):**
+- `SineWaveTask` and the per-device `SeqLock<SineWaveParams>` control block (the RT cyclic-procedure pattern from 2026-06-05).
+- `NotificationBus` (the observer that would decouple producers from the servers) — notifications currently go straight through `WebSocketServer::broadcast`.
+- `FirmwareInstaller` — the off-RT `std::jthread` procedure shape now has a real precedent in `MonitoringManager`'s threads rather than `FirmwareInstaller` itself.
+- The original `Watchdog` *class* never materialised; "watchdog" in the code is the ESC sync-manager hardware watchdog (config + diagnostics on `DeviceManager`/`FieldbusDriver`), not an RT task.

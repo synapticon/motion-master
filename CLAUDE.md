@@ -132,29 +132,46 @@ Flat layout within each lib/app is intentional — navigate by filename and grep
 ### Class Structure (from NEXTGEN.md)
 
 ```
-App  (composition root, owns everything)
- ├── Config
- ├── mm::node::DeviceManager      (owns FieldbusDriver + Device[]; drives scanning)
- │     ├── unique_ptr<FieldbusDriver>   ← SoemFieldbusDriver | SpoeDriver; owns mutex
+main.cc  (composition root — the only place concrete types are instantiated; no `App` class yet)
+ ├── Config (CLI options)
+ ├── mm::node::DeviceManager      (owns FieldbusDriver + Device[] + ProcessData; drives scanning)
+ │     ├── unique_ptr<FieldbusDriver>   ← SoemFieldbusDriver | SpoeDriver (planned); owns socketMutex_
  │     │                                  null until init(); set via init(unique_ptr<FieldbusDriver>)
- │     ├── owns: mm::node::Device[] (each Device holds FieldbusDriver& + immutable SlaveInfo)
- │     │     ├── slavePosition, name, vendorId, productCode, revisionNumber, serialNumber
- │     │     ├── owns: DeviceParameter[] (index/subindex → DeviceParameterValue variant)
+ │     ├── unique_ptr<ProcessData>      (published image + generations; per-output atomic staging
+ │     │                                  slots; input/output SeqLock snapshots; WKC health.
+ │     │                                  Owned here, handed by raw pointer to each Device)
+ │     ├── owns: std::vector<Device>    (each Device borrows FieldbusDriver& + ProcessData*)
+ │     │     ├── slavePosition, name, vendorId, productCode, revisionNumber, serialNumber (immutable)
+ │     │     ├── owns: parameters_  (index/subindex → DeviceParameter{ DeviceParameterValue variant })
  │     │     ├── owns: PdoMappings
- │     │     └── owns: Cia402StateMachine  (only if Cia402Drive)
- │     └── init(unique_ptr<FieldbusDriver>), scan(), reset(), exchangeProcessData(), transitionToState()
- ├── GameLoop  (RT thread, SCHED_FIFO, 1ms)
- │     ├── uses: DeviceManager    (calls exchangeProcessData each cycle; no-op when driver is null)
- │     ├── writes: Device parameters via seqlock
- │     └── runs: ICyclicTask[]  (Watchdog, MonitorPublisher)
- ├── HttpServer
- │     ├── uses: DeviceManager    (SDO read/write, file transfer, state control)
- │     └── Config.InitDriverFn    (callback to main.cc; creates concrete driver for POST /api/init)
- ├── WebSocketServer  (own port 62281 + loop; realtime channel: monitoring/notifications/progress out, subscribe + output staging in)
- ├── NotificationBus  (observer; decouples Watchdog/DeviceManager from servers)
- └── FirmwareInstaller
-       └── uses: DeviceManager
+ │     │     └── parametersMutex_  (guards parameters_ vs the off-RT monitoring threads)
+ │     └── init(), scan(), reset(), configureProcessData(), exchangeProcessData(), transitionToState()
+ ├── GameLoop  (RT thread, SCHED_FIFO, 1 ms; the main thread blocks here)
+ │     └── runs: CyclicTask[]  (fixed membership — all registered before run())
+ │           └── ProcessDataTask → DeviceManager::exchangeProcessData()  (no-op until image published)
+ │           └── [planned: SineWaveTask + other RT target generators, idle until activated]
+ ├── HttpServer  (own port 61447 + loop/thread)
+ │     ├── uses: DeviceManager      (SDO read/write, FoE, state control, bus inspection)
+ │     ├── uses: MonitoringManager  (/api/monitorings routes)
+ │     └── Config.InitDriverFn      (callback to main.cc; creates concrete driver for POST /api/init)
+ ├── WebSocketServer  (own port 62281 + loop/thread; realtime channel — monitoring batches out,
+ │                     subscribe in; notifications / procedure progress / output-staging in as they land)
+ └── MonitoringManager  (off-RT; owns the monitoring registry, turns each into a stream of sampled rows)
+       ├── owns: ParameterRefresher  (background thread polling SDO-only params into a cache)
+       ├── owns: sampler thread        (samples due monitorings off-RT, batches rows)
+       └── setPublish(cb)              → WebSocketServer::publish(topic, json)
+
+ [planned, not yet in code: NotificationBus (observer decoupling producers from servers),
+  FirmwareInstaller (off-RT std::jthread procedure, modelled on MonitoringManager's threads)]
 ```
+
+**Device profile views are borrowed, not owned by `Device`.** The CiA402 / SOMANET behaviour lives in a
+shallow inheritance chain of *views* — `ProfileDevice ← Cia402Drive ← SomanetDrive` — each holding only a
+`Device&` (no `Cia402StateMachine` member on `Device`; that 2026-05-16 model was superseded). A view binds
+a device for the duration of one operation and is constructed via the validated factories
+`createCia402Drive(Device&)` / `createSomanetDrive(Device&)`. A view must never outlive its `Device&` or be
+cached across a rescan — long-running RT procedures re-resolve their `Device` via `DeviceManager::findDevice`
+each cycle.
 
 ### Key Types
 
@@ -174,11 +191,18 @@ Use `std::visit` for type dispatch on `DeviceParameterValue`. `DeviceParameter` 
 
 `GameLoop` calls `deviceManager_.exchangeProcessData()` each cycle via a `ProcessDataTask` (a `CyclicTask` adapter, so `GameLoop` has no knowledge of `DeviceManager` internals or `FieldbusDriver`). It is a no-op until a process image is published, so the loop runs unconditionally. HTTP handlers call SDO methods on `DeviceManager`/`Device` from their own threads; `FieldbusDriver` serializes all socket access via its internal mutex.
 
-PDO values are shared between the RT loop and HTTP/monitoring readers via a **seqlock** (`libs/core/seqlock.h`, odd seq = write in progress; even = stable). At ~100 PDO values / 400 bytes at 1 ms cycles, the retry path is effectively never triggered. The output staging buffer is a second seqlock written by non-RT callers (serialized among themselves by a mutex) and read by the RT loop.
+PDO data crosses the RT/non-RT boundary through `ProcessData` (`libs/node/process_data.h`, owned by `DeviceManager`, pointer handed to each `Device`):
 
-**`CyclicTask` membership is fixed.** All tasks are registered before `run()`; `GameLoop` never adds or removes tasks at runtime (the design rationale is in NEXTGEN.md, session 2026-06-05 — *RT tasks are fixed-membership*). This splits runtime procedures into two kinds:
-- **RT cyclic procedures** (SineWave / profile / ramp generators — anything that must write a target into the output region every cycle) are `CyclicTask`s registered up front and *idle until activated* via a control block, exactly like `ProcessDataTask` is a no-op until an image is published. The control block is a per-device `SeqLock<SineWaveParams>` (held on `Device` as a `unique_ptr`, like `parametersMutex_`); one slot per device *is* the fixed pool. **The launch lives on the view, not the HTTP handler or scheduler:** `Cia402Drive::startSineWave(...) → expected<>` validates, does the op-mode handshake synchronously off-RT, then stores the params with `active = true` — with fixed membership a "launch" is just a control-block write, a synchronous single-device state change. The single `SineWaveTask` (holds `DeviceManager&`) iterates devices each cycle, runs after `ProcessDataTask`, and writes the output slots directly (on-RT, no staging seqlock). RT-only scratch (phase, center, edge flag) stays off the seqlock; all validation is on the launcher's `expected<>` path so the RT side has no error branch.
-- **Off-RT procedures** (commutation/offset detection, auto-tuning, firmware — call a command and wait, not cycle-time-sensitive) are **not** `CyclicTask`s. They run on a cancellable background `std::jthread` calling `DeviceManager`/`Device` methods (serialized on the fieldbus mutex). Precedent: `FirmwareInstaller`.
+- **Inputs and the output read-back** are `SeqLock<ProcessBuffer>` snapshots (`inputSnapshot`, `outputSnapshot` — `libs/core/seqlock.h`, odd seq = write in progress, even = stable). The RT loop is the sole writer; HTTP/monitoring readers retry on a torn read, which at ~400 bytes / 1 ms is effectively never.
+- **Outputs are staged lock-free, not through a seqlock.** Each output object owns its own `std::atomic<uint64_t>` slot in `outputSlots` (≤8 wire bytes packed little-endian). Any number of non-RT writers store into *different* objects' slots without contending; same-object writes are last-writer-wins. The RT loop is the only thread that *composes* those slots into the packed wire image each cycle, which is what makes bit-packed objects sharing a byte safe without a lock (NEXTGEN.md "Design B"). This replaced the older single shared output-staging seqlock + mutex.
+
+An atomically-published `image` pointer (with retained `generations`) gates the whole thing: readers load it lock-free and `readPdo` falls back to SDO when no image is published or (inputs only) the bus is unhealthy (`lastWkc < expectedWkc`).
+
+**Monitoring runs off the RT loop.** It is *not* a `CyclicTask`. `MonitoringManager` owns a background sampler thread that samples each due monitoring, batches `bufferSize` rows, and hands the batch to an injected publish callback (wired in `main.cc` to `WebSocketServer::publish`). PDO-mapped parameters are read straight from the live image; SDO-only parameters are polled in the background by the owned `ParameterRefresher` and the sampler reads its cache. `Device::parametersMutex_` guards the parameter map against these off-RT threads racing the control plane.
+
+**`CyclicTask` membership is fixed.** All tasks are registered before `run()`; `GameLoop` never adds or removes tasks at runtime (the design rationale is in NEXTGEN.md, session 2026-06-05 — *RT tasks are fixed-membership*). Today only `ProcessDataTask` is registered (`main.cc`). This fixed-membership rule splits runtime procedures into two kinds:
+- **RT cyclic procedures** *(planned — not yet in code)*: SineWave / profile / ramp generators — anything that must write a target into the output region every cycle — will be `CyclicTask`s registered up front and *idle until activated* via a control block, exactly like `ProcessDataTask` is a no-op until an image is published. The intended control block is a per-device `SeqLock<SineWaveParams>` (held on `Device` as a `unique_ptr`, like `parametersMutex_`); one slot per device *is* the fixed pool. **The launch lives on the view, not the HTTP handler or scheduler:** `Cia402Drive::startSineWave(...) → expected<>` validates, does the op-mode handshake synchronously off-RT, then stores the params with `active = true` — with fixed membership a "launch" is just a control-block write, a synchronous single-device state change. The single `SineWaveTask` (holds `DeviceManager&`) iterates devices each cycle, runs after `ProcessDataTask`, and writes the output slots directly (on-RT). RT-only scratch (phase, center, edge flag) stays off the seqlock; all validation is on the launcher's `expected<>` path so the RT side has no error branch.
+- **Off-RT procedures** (commutation/offset detection, auto-tuning, firmware — call a command and wait, not cycle-time-sensitive) are **not** `CyclicTask`s. They run on a cancellable background `std::jthread` calling `DeviceManager`/`Device` methods (serialized on the fieldbus mutex). The built precedent for an off-RT background thread is `MonitoringManager`'s sampler/refresher; a dedicated `FirmwareInstaller` of this shape is planned.
 
 **Reactive mapping.** Changing AL states is the user's job (via `POST /api/state`); Motion Master *reacts* in `DeviceManager::transitionToState`. The process image is a single whole-bus layout (`ecx_config_map_group` maps the entire IOmap at once), but the reactive logic supports **partial-bus operations** so a subset can be serviced without disturbing the rest:
 
@@ -230,7 +254,7 @@ Deferred fieldbus work is catalogued in NEXTGEN.md (session 2026-06-01), ranked 
 
 ### CiA402 / Somanet
 
-`Device → Cia402Drive` via inheritance (is-a relationship, shallow). **No** `Cia402Drive → SomanetDevice` inheritance — Somanet-specific OD access is free functions in `namespace somanet`. Multi-step procedures split by whether they need the per-cycle process image (see the `CyclicTask`-membership note under *Game Loop / RT Threading*): cycle-locked target generators (SineWave) are fixed-membership RT `CyclicTask`s gated active/idle by a per-device control block, *launched from the view* — `Cia402Drive::startSineWave(...)`/`stopSineWave()` validate and write the control block; command-and-wait procedures (encoder calibration / offset detection, auto-tuning) run off-RT on a background `std::jthread` calling `DeviceManager`, like `FirmwareInstaller`.
+Profiles are **borrowed views**, not subtypes of `Device`: the inheritance chain `ProfileDevice ← Cia402Drive ← SomanetDrive` holds only a `Device&` (the only data member permitted in the whole chain). A view binds a device for one operation and is built via the validated factories `createCia402Drive(Device&)` / `createSomanetDrive(Device&)` (offline-safe — they check the CiA402 implementation / immutable vendor ID before binding). The borrowed `Device&` must outlive the view; never cache one across a bus rescan (which rebuilds `DeviceManager`'s device vector). SOMANET specifics are SOMANET-OD access on `SomanetDrive` plus free functions in `namespace somanet`. Multi-step procedures split by whether they need the per-cycle process image (see the `CyclicTask`-membership note under *Game Loop / RT Threading*): cycle-locked target generators (SineWave, *planned*) will be fixed-membership RT `CyclicTask`s gated active/idle by a per-device control block, *launched from the view* — `Cia402Drive::startSineWave(...)`/`stopSineWave()` validate and write the control block; command-and-wait procedures (encoder calibration / offset detection, auto-tuning) run off-RT on a background `std::jthread` calling `DeviceManager`.
 
 ## Dependencies
 

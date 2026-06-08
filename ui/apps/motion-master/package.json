@@ -1,6 +1,6 @@
 {
   "name": "motion-master",
-  "version": "6.0.0-alpha.19",
+  "version": "6.0.0-alpha.20",
   "private": true,
   "type": "module",
   "scripts": {

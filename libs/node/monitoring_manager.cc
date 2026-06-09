@@ -65,28 +65,53 @@ std::expected<Monitoring, std::string> MonitoringManager::create(Monitoring conf
     return std::unexpected("parameters must not be empty");
   }
 
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (entries_.contains(config.topic)) {
-    return std::unexpected("monitoring '" + config.topic + "' already exists");
-  }
+  // Classify every parameter, and if one cannot be sourced yet, auto-enumerate its device's object
+  // dictionary once and retry: a PDO-mapped object needs its CoE data type to decode the image
+  // bytes, and an SDO object needs its dictionary entry — neither is known until the OD is read.
+  // This does the "read parameters" step implicitly, so monitoring a freshly-OP device just works.
+  // Done before taking the monitoring lock because enumeration issues SDO and can take seconds; it
+  // touches only the device's own (separately locked) parameter cache and never half-registers a
+  // monitoring on failure.
+  auto classify = [&](const MonitoredParameter& p) -> std::optional<ParamPlan> {
+    if (auto spec = deviceManager_.pdoSampleSpec(p.devicePosition, p.index, p.subindex)) {
+      return ParamPlan{p.devicePosition, p.index, p.subindex, Source::Pdo, spec};
+    }
+    if (deviceManager_.value(p.devicePosition, p.index, p.subindex).has_value()) {
+      return ParamPlan{p.devicePosition, p.index, p.subindex, Source::Sdo, std::nullopt};
+    }
+    return std::nullopt;
+  };
 
-  // Classify every parameter first and reject the whole request on the first that cannot be
-  // sourced, so a failed create never half-registers a monitoring or leaks a refresher reference.
   std::vector<ParamPlan> plans;
   plans.reserve(config.parameters.size());
   for (const auto& p : config.parameters) {
-    ParamPlan plan{p.devicePosition, p.index, p.subindex, Source::Sdo, std::nullopt};
-    if (auto spec = deviceManager_.pdoSampleSpec(p.devicePosition, p.index, p.subindex)) {
-      plan.source = Source::Pdo;
-      plan.pdoSpec = spec;
-    } else if (deviceManager_.value(p.devicePosition, p.index, p.subindex).has_value()) {
-      plan.source = Source::Sdo;
-    } else {
+    auto plan = classify(p);
+    if (!plan) {
+      // Not sourceable yet. If this device's object dictionary has not been enumerated, read it
+      // once (the "read parameters" step, done implicitly) and retry — a PDO object then resolves
+      // its data type and an SDO object its entry. A device that is already enumerated has a
+      // non-empty map and is skipped, so a genuinely-absent object errors immediately instead of
+      // triggering a wasteful re-read.
+      const Device* device = deviceManager_.findDevice(p.devicePosition);
+      if (device && device->parameters().empty()) {
+        if (auto r = deviceManager_.initializeDeviceParameters(p.devicePosition, false); !r) {
+          spdlog::debug("monitoring '{}': object-dictionary read of device {} failed: {}",
+                        config.topic, p.devicePosition, r.error());
+        }
+        plan = classify(p);
+      }
+    }
+    if (!plan) {
       return std::unexpected(std::format(
           "device {} object 0x{:04X}:{:02X} is neither PDO-mapped nor in the object dictionary",
           p.devicePosition, p.index, p.subindex));
     }
-    plans.push_back(plan);
+    plans.push_back(std::move(*plan));
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  if (entries_.contains(config.topic)) {
+    return std::unexpected("monitoring '" + config.topic + "' already exists");
   }
 
   // Register SDO parameters with the refresher (refcounted; poll period = the monitoring interval).

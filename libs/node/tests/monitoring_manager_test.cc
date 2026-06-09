@@ -213,6 +213,26 @@ TEST(MonitoringManagerTest, CreateClassifiesPdoAndSdoAndExposesSource) {
   EXPECT_EQ((*resource)["parameters"][1]["source"], "sdo");  // temperature
 }
 
+TEST(MonitoringManagerTest, CreateAutoEnumeratesObjectDictionaryWhenNeeded) {
+  // A freshly-OP device whose object dictionary has NOT been read: configure + exchange, but skip
+  // initializeDeviceParameters. Classification would otherwise fail (no data type to decode the
+  // PDO object, no cached SDO entry); create() must read the OD on demand and succeed.
+  DeviceManager dm;
+  auto bus = makeBus();
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  dm.exchangeProcessData();
+
+  MonitoringManager manager(dm);
+  ASSERT_TRUE(manager.create(axisConfig()).has_value());
+
+  auto resource = manager.get("axis");
+  ASSERT_TRUE(resource.has_value());
+  EXPECT_EQ((*resource)["parameters"][0]["source"], "pdo");  // actual position — type resolved
+  EXPECT_EQ((*resource)["parameters"][1]["source"], "sdo");  // temperature — entry resolved
+}
+
 TEST(MonitoringManagerTest, CreateRejectsInvalidConfigs) {
   DeviceManager dm;
   setUp(dm);

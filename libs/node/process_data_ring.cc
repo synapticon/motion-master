@@ -64,8 +64,11 @@ void ProcessDataRing::clear() {
   locked_ = false;
   buffer_.clear();
   buffer_.shrink_to_fit();
-  seqWords_.clear();
-  seqWords_.shrink_to_fit();
+  // Release the storage by swapping in an empty vector rather than clear()+shrink_to_fit():
+  // shrink_to_fit may reallocate, which requires moving the elements, and std::atomic is neither
+  // movable nor copyable (libc++/MSVC reject the instantiation; libstdc++ happens to tolerate it).
+  // swap only exchanges the vectors' internal pointers, so it never touches the atomics.
+  std::vector<std::atomic<uint64_t>>().swap(seqWords_);
   stride_ = 0;
   capacity_ = 0;
   inputCap_ = 0;

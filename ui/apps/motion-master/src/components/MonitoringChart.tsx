@@ -16,16 +16,16 @@ const COLORS = [
 
 const HEIGHT = 240
 
-// x values are microseconds elapsed since the first sample. Render one value with an adaptive unit.
-function formatElapsed(us: number): string {
-  const a = Math.abs(us)
-  if (a >= 1_000_000) return `${(us / 1_000_000).toFixed(3)} s`
-  if (a >= 1_000) return `${(us / 1_000).toFixed(3)} ms`
-  return `${Math.round(us)} µs`
+// x values are microseconds elapsed since the first sample. The cursor/hover readout always shows
+// exact microseconds — the point the user is reading off the trace — since the default cycle is
+// 1 ms and can be shorter, so µs is the resolution that matters. Grouped for readability.
+function formatMicros(us: number): string {
+  return `${us.toLocaleString(undefined, { maximumFractionDigits: 3 })} µs`
 }
 
-// Format a whole set of axis ticks with one shared unit (chosen from the largest tick) so labels
-// read consistently — e.g. all in "ms" rather than mixing µs/ms across neighbouring ticks.
+// Axis tick labels, by contrast, use one shared larger unit (chosen from the biggest tick) so a
+// wide window's labels stay short and don't overlap — e.g. "250 ms", "1 s" — while the trace
+// itself and the hover readout keep full µs resolution.
 function formatTicks(splits: number[]): string[] {
   const max = splits.reduce((m, v) => Math.max(m, Math.abs(v)), 0)
   const [div, unit] = max >= 1_000_000 ? [1_000_000, 's'] : max >= 1_000 ? [1_000, 'ms'] : [1, 'µs']
@@ -56,8 +56,8 @@ export default function MonitoringChart({
     if (!el) return
 
     const series: uPlot.Series[] = [
-      // x is elapsed microseconds, not a timestamp — format the cursor/legend readout adaptively.
-      { label: 'Elapsed', value: (_u, v) => (v == null ? '—' : formatElapsed(v)) },
+      // x is elapsed microseconds, not a timestamp — format the cursor/legend readout in µs.
+      { label: 'Elapsed', value: (_u, v) => (v == null ? '—' : formatMicros(v)) },
       ...labels.map((label, i) => ({
         label,
         stroke: COLORS[i % COLORS.length],
@@ -70,7 +70,8 @@ export default function MonitoringChart({
       height: HEIGHT,
       series,
       // time:false — x is relative elapsed microseconds, so uPlot ticks in linear µs (down to the
-      // cycle resolution) instead of clamping to whole-second wall-clock; the axis formats the unit.
+      // cycle resolution) instead of clamping to whole-second wall-clock. Tick labels adapt their
+      // unit so they don't overlap; the hover readout (series value above) stays in exact µs.
       scales: { x: { time: false } },
       axes: [{ values: (_u, splits) => formatTicks(splits) }, {}],
       legend: { live: true },

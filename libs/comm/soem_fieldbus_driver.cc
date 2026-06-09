@@ -470,14 +470,15 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
   }
   data.resize(size);
   // Show the returned bytes (wire order, little-endian) so the value is visible. The driver has no
-  // data type to decode it — that happens in the node layer — so a hex dump is the faithful view.
-  // Cap the dump so a large object (string/array) can't produce a runaway log line.
+  // data type to decode it — that happens in the node layer — so the raw bytes are the faithful
+  // view. `{:n}` keeps to_hex on one line (no offset column / newlines); the range is capped first
+  // so a large object (string/array) can't run away.
   constexpr size_t kMaxHexBytes = 16;
   const auto hexEnd =
       data.begin() + static_cast<std::ptrdiff_t>(std::min(data.size(), kMaxHexBytes));
-  spdlog::log(sdoLevel, "SDOread slave {} 0x{:04X}:{:02X} ok ({} bytes): {}{}", slavePosition,
+  spdlog::log(sdoLevel, "SDOread slave {} 0x{:04X}:{:02X} ok ({} bytes): {:n}{}", slavePosition,
               index, subindex, data.size(), spdlog::to_hex(data.begin(), hexEnd),
-              data.size() > kMaxHexBytes ? " …" : "");
+              data.size() > kMaxHexBytes ? " ..." : "");
   return data;
 }
 

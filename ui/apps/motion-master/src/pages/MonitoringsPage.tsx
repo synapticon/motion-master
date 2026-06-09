@@ -207,6 +207,9 @@ function MonitoringCard({
 
   // Live buffer kept in refs (mutated in place for speed); a fresh outer tuple is pushed to
   // `data` state each batch so the chart's setData runs without copying the whole buffer.
+  // x values are microseconds elapsed since the first sample (t0Ref), so the axis shows relative
+  // time at the data's true resolution rather than coarse whole-second wall-clock ticks.
+  const t0Ref = useRef<number | null>(null)
   const xsRef = useRef<number[]>([])
   const ysRef = useRef<(number | null)[][]>(params.map(() => []))
   const [data, setData] = useState<uPlot.AlignedData>(
@@ -229,9 +232,11 @@ function MonitoringCard({
     const onBatch = (rows: SampleRows) => {
       if (!playingRef.current) return
       for (const row of rows) {
-        // row[0] is the cycle timestamp in epoch microseconds; uPlot's time axis is in seconds.
+        // row[0] is the cycle timestamp in epoch microseconds. Plot microseconds elapsed since the
+        // first sample so the x-axis keeps the data's resolution (the chart formats it as µs/ms/s).
         const ts = typeof row[0] === 'number' ? row[0] : 0
-        xsRef.current.push(ts / 1_000_000)
+        if (t0Ref.current === null) t0Ref.current = ts
+        xsRef.current.push(ts - t0Ref.current)
         for (let i = 0; i < seriesCount; i++) {
           const v = row[i + 1]
           ysRef.current[i].push(typeof v === 'number' ? v : null)
@@ -249,6 +254,7 @@ function MonitoringCard({
   }, [subscribe, monitoring.topic, seriesCount])
 
   function clear() {
+    t0Ref.current = null
     xsRef.current = []
     ysRef.current = params.map(() => [])
     setData([[], ...params.map(() => [])] as uPlot.AlignedData)

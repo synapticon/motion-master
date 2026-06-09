@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <format>
 #include <map>
@@ -20,12 +21,11 @@
 #include <utility>
 #include <vector>
 
-#include "core/seqlock.h"
 #include "node/process_data.h"
 
 namespace mm::node {
 
-// ProcessData (the live process-data runtime: published image pointer + exchange seqlocks +
+// ProcessData (the live process-data runtime: published image pointer + recorder ring +
 // working-counter health) is defined in node/process_data.h so device.cc can use it too — a Device
 // reaches its live IOmap objects through ProcessData::readPdo / writePdo. Those two accessors are
 // defined out-of-line below, after the bit/byte helpers they use. Published images are retained in
@@ -49,13 +49,6 @@ DeviceStateInfo decodeState(uint16_t slavePosition,
       .alStatusCode = raw.alStatusCode,
   };
 }
-
-/// Number of leading bytes of a ProcessBuffer that are live for an image of @p imageBytes: the
-/// size field plus the active byte prefix. The process-data seqlocks copy only these, so the
-/// per-cycle traffic is proportional to the real image (a few hundred bytes) rather than the full
-/// kMaxProcessImageBytes capacity (~32 KB). @p imageBytes is bounded by configureProcessData, and
-/// the seqlock clamps the count to sizeof(ProcessBuffer) regardless.
-size_t liveBufferBytes(uint32_t imageBytes) { return offsetof(ProcessBuffer, bytes) + imageBytes; }
 
 // Number of whole bytes a bit-width object occupies on the wire, capped at the 8 a staging slot
 // (uint64_t) holds. Objects wider than 64 bits are not represented by the slot scheme (documented
@@ -114,7 +107,8 @@ bool isValidStateTransition(EtherCatState currentState, EtherCatState targetStat
 }  // namespace
 
 std::expected<void, std::string> DeviceManager::init(
-    std::unique_ptr<mm::comm::FieldbusDriver> driver) {
+    std::unique_ptr<mm::comm::FieldbusDriver> driver, uint32_t recorderHistorySeconds,
+    uint32_t cyclePeriodUs) {
   std::unique_lock lock(busMutex_);
   // init() is a one-shot: replacing a live driver would destroy it while the
   // Devices in devices_ still hold a FieldbusDriver& to it, leaving every Device
@@ -122,6 +116,11 @@ std::expected<void, std::string> DeviceManager::init(
   if (driver_) {
     return std::unexpected("already initialised — call reset() before init()");
   }
+  // Retain the recorder sizing for configureProcessData, which allocates the ring once the image
+  // (and hence the per-record byte size) is known. cyclePeriodUs is the GameLoop period, so the
+  // ring holds recorderHistorySeconds of cycles: capacity = seconds * 1e6 / periodUs.
+  recorderHistorySeconds_ = recorderHistorySeconds;
+  cyclePeriodUs_ = cyclePeriodUs == 0 ? 1000 : cyclePeriodUs;
   driver_ = std::move(driver);
   auto result = driver_->init();
   if (!result) {
@@ -151,6 +150,7 @@ std::expected<int, std::string> DeviceManager::scan() {
   // gated off); a fresh image is published when the bus is next brought into SAFE-OP/OP.
   stopExchange();
   pd_->generations.clear();
+  pd_->ring.clear();  // device set is being rebuilt — discard the recording (a new image follows)
   auto result = driver_->scan();
   if (!result) {
     spdlog::error("FieldbusDriver scan failed: {}", result.error());
@@ -183,7 +183,8 @@ void DeviceManager::reset() {
   // gated off).
   stopExchange();
   pd_->generations.clear();
-  devices_.clear();  // drop device references to driver before stopping
+  pd_->ring.clear();  // teardown — free the recorder storage
+  devices_.clear();   // drop device references to driver before stopping
   // The device set is gone: bump the generation so off-thread consumers re-validate (and find
   // their positions no longer resolve).
   topologyGeneration_.fetch_add(1, std::memory_order_relaxed);
@@ -246,13 +247,11 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
   // Build a fresh staging slot per output object and seed each from the current cached parameter
   // value, so the RxPDO setpoints callers initialised before OP (controlword, modes, targets) are
   // sent on the very first cycle. Unset parameters encode their type-appropriate zero, the safe
-  // default. The whole-image seeded buffer is also published to outputSnapshot so a non-RT reader
-  // (monitoring) sees the seeded outputs even before the first exchange. Building the slots here,
-  // under busMutex with exchange drained by stopExchange() above, is the only place the slot
-  // vector is (re)sized — the RT composer only ever reads it, gated by the image pointer.
+  // default. Building the slots here, under busMutex with exchange drained by stopExchange() above,
+  // is the only place the slot vector is (re)sized — the RT composer only ever reads it, gated by
+  // the image pointer. (Output point reads come straight from these slots, so no pre-exchange
+  // snapshot is needed; monitoring begins streaming once the first cycle is recorded.)
   std::vector<std::atomic<uint64_t>> slots(image->outputs.size());
-  ProcessBuffer seeded;
-  seeded.size = image->outputBytes;
   for (size_t i = 0; i < image->outputs.size(); ++i) {
     const ProcessImageEntry& entry = image->outputs[i];
     const Device* device = findDevice(entry.slavePosition);
@@ -268,11 +267,16 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
       continue;
     }
     slots[i].store(packSlot(*bytes), std::memory_order_relaxed);
-    insertBits(std::span<uint8_t>(seeded.bytes.data(), seeded.size), entry.bitOffset,
-               entry.bitLength, *bytes);
   }
   pd_->outputSlots = std::move(slots);
-  pd_->outputSnapshot.store(seeded);
+
+  // (Re)allocate the recorder for this image's per-cycle byte size and the configured depth. A
+  // layout-changing re-map restarts the recording — records under the old layout are undecodable
+  // under the new one. Exchange is drained (stopExchange above) and the image is not yet published,
+  // so the RT writer cannot touch the ring while it is being rebuilt.
+  const size_t ringCapacity =
+      static_cast<size_t>(recorderHistorySeconds_) * (1'000'000u / cyclePeriodUs_);
+  pd_->ring.allocate(image->inputBytes, image->outputBytes, ringCapacity);
 
   auto shared = std::make_shared<const ProcessImage>(std::move(*image));
   pd_->generations.push_back(shared);
@@ -320,25 +324,29 @@ void DeviceManager::exchangeProcessData() {
     insertBits(std::span<uint8_t>(pd_->outScratch.bytes.data(), outputBytes), entry.bitOffset,
                entry.bitLength, std::span<const uint8_t>(buf.data(), width));
   }
-  // Exchange one cycle, then publish both directions for non-RT readers. The scratch buffers are
-  // touched only on this (RT) thread; the seqlocks hand data to/from non-RT readers, copying only
-  // the live prefix (the published image size, which is stable) rather than the full
-  // kMaxProcessImageBytes capacity, keeping per-cycle memory traffic proportional to the real
-  // image.
+  // Exchange one cycle, then append it to the recorder for non-RT readers. The scratch buffers are
+  // touched only on this (RT) thread; ring.write() copies just the live image bytes (the published
+  // sizes, which are stable for this generation) into the next ring slot, keeping per-cycle memory
+  // traffic proportional to the real image.
   const int wkc = driver_->exchangeProcessData(
       std::span<const uint8_t>(pd_->outScratch.bytes.data(), outputBytes),
       std::span<uint8_t>(pd_->inScratch.bytes.data(), image->inputBytes));
   pd_->inScratch.size = image->inputBytes;
-  // Publish what we sent so monitoring can decode the RxPDO setpoints from a coherent buffer
-  // (single-writer, lock-free — the read-back counterpart of the per-object write slots).
-  pd_->outputSnapshot.store(pd_->outScratch, liveBufferBytes(outputBytes));
-  // Always publish the latest input snapshot. On a lost or partial frame the driver leaves the
-  // prior bytes in the IOmap, so this may republish stale data — readers gate on the working
-  // counter (processDataHealthy()) rather than here, since skipping the store would only leave an
-  // even older snapshot in the seqlock and still expose nothing about freshness.
-  pd_->inputSnapshot.store(pd_->inScratch, liveBufferBytes(image->inputBytes));
   // Publish the working counter for health checks; expectedWkc is maintained off the RT path.
   pd_->lastWkc.store(wkc, std::memory_order_relaxed);
+  // Record this cycle: one lock-free append carrying both directions from the same exchange, the
+  // single source for the live monitoring stream and freshest-value point reads. On a lost or
+  // partial frame the driver leaves the prior bytes in the IOmap so the recorded inputs may be
+  // stale — readers gate on the working counter (processDataHealthy()), not here. The timestamp is
+  // wall-clock epoch nanoseconds (reduced to microseconds at the JSON boundary; see
+  // ProcessDataRing).
+  const uint64_t timestampNs =
+      static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                std::chrono::system_clock::now().time_since_epoch())
+                                .count());
+  pd_->ring.write(timestampNs, wkc,
+                  std::span<const uint8_t>(pd_->inScratch.bytes.data(), image->inputBytes),
+                  std::span<const uint8_t>(pd_->outScratch.bytes.data(), outputBytes));
   pd_->exchanging.store(false, std::memory_order_release);
 }
 
@@ -357,9 +365,13 @@ void DeviceManager::stopExchange() {
   }
 }
 
-ProcessBuffer DeviceManager::inputSnapshot() const { return pd_->inputSnapshot.load(); }
+uint64_t DeviceManager::recorderHead() const { return pd_->ring.head(); }
 
-ProcessBuffer DeviceManager::outputSnapshot() const { return pd_->outputSnapshot.load(); }
+uint64_t DeviceManager::recorderOldestSeq() const { return pd_->ring.oldestValidSeq(); }
+
+bool DeviceManager::readRecord(uint64_t seq, ProcessDataRing::Record& out) const {
+  return pd_->ring.readRecord(seq, out);
+}
 
 bool DeviceManager::processDataConfigured() const {
   return pd_->image.load(std::memory_order_acquire) != nullptr;
@@ -798,15 +810,26 @@ std::optional<std::vector<uint8_t>> ProcessData::readPdo(uint16_t slavePosition,
     unpackSlotInto(packed, bytes);
     return bytes;
   }
-  // Input: gate on health. On a lost or partial frame the driver leaves the prior cycle's bytes in
-  // the IOmap, so the snapshot is stale — signal the caller to read the authoritative SDO value.
+  // Input: gate on health, then read the newest recorded cycle (ring head()-1). On a lost or
+  // partial frame the driver leaves the prior cycle's bytes in the IOmap, so an unhealthy bus
+  // reads stale — signal the caller to read the authoritative SDO value. readRecord can only fail
+  // if the producer lapped us by a whole ring (capacity cycles) between this head() load and the
+  // copy — impossible at the configured depth (minutes of cycles), and head()-1 is the newest,
+  // longest-lived slot anyway. If it ever does (a degenerate tiny ring), the SDO fallback below is
+  // authoritative, so a single read needs no retry.
   if (!healthy()) {
     return std::nullopt;
   }
-  ProcessBuffer buffer;
-  inputSnapshot.load(buffer, liveBufferBytes(img->inputBytes));
-  return extractBits(std::span<const uint8_t>(buffer.bytes.data(), buffer.size), loc->bitOffset,
-                     loc->bitLength);
+  const uint64_t head = ring.head();
+  if (head == 0) {
+    return std::nullopt;  // nothing recorded yet — caller uses SDO
+  }
+  ProcessDataRing::Record record;
+  if (!ring.readRecord(head - 1, record)) {
+    return std::nullopt;  // raced a full ring wrap (≈never) — caller uses SDO
+  }
+  return extractBits(std::span<const uint8_t>(record.inputs.data(), record.inputs.size()),
+                     loc->bitOffset, loc->bitLength);
 }
 
 bool ProcessData::writePdo(uint16_t slavePosition, uint16_t index, uint8_t subindex,

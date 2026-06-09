@@ -70,12 +70,8 @@ std::expected<mm::node::Monitoring, std::string> parseMonitoringRequest(
     return std::unexpected("interval is required and must be an integer (milliseconds)");
   }
   m.interval = std::chrono::milliseconds{interval->get<int64_t>()};
-
-  auto bufferSize = body.find("bufferSize");
-  if (bufferSize == body.end() || !bufferSize->is_number_unsigned()) {
-    return std::unexpected("bufferSize is required and must be a non-negative integer");
-  }
-  m.bufferSize = bufferSize->get<uint32_t>();
+  // bufferSize was removed: the stream is lossless and interval is the flush cadence, so there is
+  // no batch-size knob. Any bufferSize an older client sends is ignored (validated server-side).
 
   auto parameters = body.find("parameters");
   if (parameters == body.end() || !parameters->is_array()) {

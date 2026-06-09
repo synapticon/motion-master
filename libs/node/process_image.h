@@ -17,16 +17,14 @@ class Device;
 
 /// @brief Fixed-capacity byte buffer for one direction of the process image.
 ///
-/// Trivially copyable so it can be published through a @c mm::core::SeqLock: the RT loop
-/// writes the input image, non-RT readers (API, monitoring) snapshot it, and vice-versa for
-/// outputs.  Sized to @c mm::comm::kMaxProcessImageBytes; @c size is the number of valid
-/// leading bytes for the current mapping.
+/// The RT-thread scratch the exchange composes into (outputs) and receives into (inputs) each
+/// cycle before the cycle is appended to the recorder ring. Sized to
+/// @c mm::comm::kMaxProcessImageBytes; @c size is the number of valid leading bytes for the
+/// current mapping.
 struct ProcessBuffer {
   uint32_t size = 0;
   std::array<uint8_t, mm::comm::kMaxProcessImageBytes> bytes{};
 };
-static_assert(std::is_trivially_copyable_v<ProcessBuffer>,
-              "ProcessBuffer must be trivially copyable to publish via SeqLock");
 
 /// @brief Locates one mapped object within the flat process image.
 ///

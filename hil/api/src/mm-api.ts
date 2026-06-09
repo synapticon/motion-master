@@ -49,7 +49,7 @@ export interface ProcessDataWatchdog {
   ticks: number;
 }
 
-/** A monitoring's configuration plus its current runtime status. */
+/** A monitoring's configuration plus its per-parameter source classification. */
 export interface Monitoring {
   /** @example "left-leg" */
   topic: string;
@@ -59,20 +59,10 @@ export interface Monitoring {
    */
   name?: string;
   /**
-   * Sampling period in milliseconds.
-   * @example 1000
+   * Flush cadence in milliseconds (10–1000).
+   * @example 20
    */
   interval: number;
-  /**
-   * Samples per published batch.
-   * @example 16
-   */
-  bufferSize: number;
-  /**
-   * Rows currently accumulated toward the next batch.
-   * @example 7
-   */
-  bufferFill: number;
   /** The sampled objects, in the positional order of each WebSocket sample row. */
   parameters: {
     /** @example 1 */
@@ -798,7 +788,7 @@ export class HttpClient<SecurityDataType = unknown> {
 
 /**
  * @title Motion Master API
- * @version 6.0.0-alpha.19
+ * @version 6.0.0-alpha.20
  * @baseUrl https://local.motion-master.synapticon.com:61447
  *
  * Motion Master is the motion-control software for Synapticon SOMANET servo
@@ -855,15 +845,19 @@ export class HttpClient<SecurityDataType = unknown> {
  * never stall the stream: `wss://local.motion-master.synapticon.com:62281` (the
  * whole port is the WebSocket, so the URL needs no path).
  * A client creates a monitoring
- * with `POST /api/monitorings` (a topic, sampling interval, buffer size, and a
- * list of parameters), then subscribes to its topic over the socket by sending
- * `{"subscribe":"<topic>"}` (and `{"unsubscribe":"<topic>"}` to stop). The server
- * samples the parameters off the real-time thread, accumulates `bufferSize` rows,
- * and publishes each batch to that topic — delivered only to the clients
- * subscribed to it. The messages:
+ * with `POST /api/monitorings` (a topic, flush interval, and a list of
+ * parameters), then subscribes to its topic over the socket by sending
+ * `{"subscribe":"<topic>"}` (and `{"unsubscribe":"<topic>"}` to stop). The stream
+ * is **lossless**: every process-data cycle recorded since the last flush is
+ * delivered — `interval` is the flush cadence, not a sample rate, so a longer
+ * interval means a bigger batch, never dropped cycles. Each batch is published to
+ * that topic, delivered only to the clients subscribed to it. Each row is
+ * `[timestamp, value, ...]` where `timestamp` is **epoch microseconds** (exact in
+ * a JavaScript number, and distinct per cycle even at sub-millisecond periods).
+ * The messages:
  *
  * ```json
- * {"type": "monitoring", "topic": "left-leg", "data": [[1735821000123, 39000, 41], ...]}
+ * {"type": "monitoring", "topic": "left-leg", "data": [[1735821000123456, 39000, 41], ...]}
  * {"type": "notification", "data": {"event": "slaves_changed"}}
  * ```
  *
@@ -2044,17 +2038,12 @@ export class Api<
          */
         name?: string;
         /**
-         * Sampling period in milliseconds.
-         * @min 1
-         * @example 1000
+         * Flush cadence in milliseconds (10–1000). Not a sample rate: every recorded cycle since the last flush is delivered, so a longer interval yields a larger batch rather than fewer samples.
+         * @min 10
+         * @max 1000
+         * @example 20
          */
         interval: number;
-        /**
-         * Samples accumulated before a batch is published over the WebSocket.
-         * @min 16
-         * @example 16
-         */
-        bufferSize: number;
         /**
          * Objects to sample, each as `[devicePosition, index, subindex]`.
          * @minItems 1

@@ -19,8 +19,8 @@
 
 namespace mm::node {
 
-/// @brief The live process-data runtime (image + exchange buffers). Forward-declared here and
-///        held by pointer so device.h stays free of its heavy SeqLock buffers; the definition
+/// @brief The live process-data runtime (image + recorder ring + staging). Forward-declared here
+///        and held by pointer so device.h stays free of its heavy buffers; the definition
 ///        (node/process_data.h) is pulled in only by device.cc, which calls readPdo / writePdo.
 struct ProcessData;
 

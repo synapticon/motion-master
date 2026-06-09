@@ -20,16 +20,21 @@
 
 namespace mm::node {
 
-/// @brief Owns the active monitorings and turns each into a stream of sampled rows.
+/// @brief Owns the active monitorings and turns each into a lossless stream of recorded rows.
 ///
-/// A client creates a @c Monitoring (topic, interval, bufferSize, parameters); the manager
-/// validates it, classifies every parameter by how its value is sourced, samples them off the RT
-/// thread, batches @c bufferSize rows, and hands each batch to an injected publish callback.
+/// A client creates a @c Monitoring (topic, interval, parameters); the manager validates it,
+/// classifies every parameter by how its value is sourced, and on each flush ships **every**
+/// process-data cycle recorded since the last flush. The stream is lossless: each monitoring holds
+/// a read cursor into the recorder ring and, each time it is due, decodes and publishes every
+/// cycle-row in @c [cursor, recorderHead()) as one batch, then advances the cursor. @c interval is
+/// the flush cadence, not a sample rate — a longer interval means a bigger batch, never dropped
+/// cycles. A cursor that falls more than a whole ring behind (a stalled client) is logged and
+/// resynced to the oldest available cycle; the gap is never silent.
 ///
 /// Sourcing (decided once at @c create, against the published process image):
-/// - **PDO** — the object is mapped in the live image; its value is decoded each tick straight
-///   from one coherent @c inputSnapshot / @c outputSnapshot (no bus access, all values in a row
-///   from the same cycle). The decode spec is captured up front and re-captured on a re-map.
+/// - **PDO** — the object is mapped in the live image; its value is decoded for each recorded
+///   cycle from that cycle's ring record (no bus access, all values in a row from the same cycle).
+///   The decode spec is captured up front and re-captured on a re-map.
 /// - **SDO** — the object is not PDO-mapped; it is registered with the owned @c ParameterRefresher
 ///   which polls it in the background, and the sampler reads the cached value.
 ///
@@ -60,9 +65,9 @@ class MonitoringManager {
   ///        and registers the monitoring.
   ///
   /// Validation: @c topic URL-safe and not the reserved @c "pdos"; not already registered;
-  /// @c interval >= 1 ms; @c bufferSize >= 16; @c parameters non-empty; and every parameter is
-  /// either PDO-mapped or present in its device's object dictionary (otherwise it cannot be
-  /// sourced).
+  /// @c interval between 10 ms and 1000 ms (the flush cadence); @c parameters non-empty; and every
+  /// parameter is either PDO-mapped or present in its device's object dictionary (otherwise it
+  /// cannot be sourced).
   ///
   /// @return The created configuration on success, or an error string describing the first
   ///         validation failure.
@@ -85,8 +90,8 @@ class MonitoringManager {
   /// @brief Stops the owned refresher (and, once added, the sampler thread). Idempotent.
   void stop();
 
-  /// @brief Samples every monitoring once, appending a row and flushing a batch when full.
-  ///        The deterministic core the (later) scheduler thread drives; exposed for tests.
+  /// @brief Flushes every monitoring once: delivers each one's recorded cycles since its last
+  ///        flush. The deterministic core the scheduler thread drives; exposed for tests.
   void sampleAll();
 
   /// @brief Number of registered monitorings. For tests / status.
@@ -109,9 +114,11 @@ class MonitoringManager {
     std::optional<DeviceManager::PdoSampleSpec> pdoSpec;  // PDO only
   };
 
-  /// @brief One sampled row: a timestamp and one optional value per parameter (@c nullopt = null).
+  /// @brief One row: a cycle timestamp (epoch microseconds) and one optional value per parameter
+  ///        (@c nullopt = null). Microseconds keep every cycle distinct even at sub-ms periods and
+  ///        stay exact in a JavaScript double (see @c ProcessDataRing for the unit rationale).
   struct Sample {
-    int64_t timestampMs;
+    int64_t timestampUs;
     std::vector<std::optional<DeviceParameterValue>> values;
   };
 
@@ -119,14 +126,14 @@ class MonitoringManager {
   struct Entry {
     Monitoring config;
     std::vector<ParamPlan> plans;
-    std::vector<Sample> batch;
+    uint64_t cursor = 0;           // next recorder sequence number to deliver ([cursor, head))
+    bool cursorPrimed = false;     // false until the first flush seeds cursor from recorderHead()
     uint64_t imageGeneration = 0;  // processImageGeneration the PDO specs were captured under
     std::chrono::steady_clock::time_point nextDue{};  // default (epoch) => due on the next wake
   };
 
-  void sampleEntry(Entry& entry);          // assumes mutex_ held
+  void flushEntry(Entry& entry);           // decode + publish [cursor, head); assumes mutex_ held
   void recaptureIfRemapped(Entry& entry);  // re-capture PDO specs; assumes mutex_ held
-  void flush(Entry& entry);                // publish batch + clear; assumes mutex_ held
   static nlohmann::json resourceJson(const Entry& entry);  // assumes mutex_ held
 
   /// @brief Sampler thread body: waits until the nearest monitoring is due (or an

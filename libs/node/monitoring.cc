@@ -16,7 +16,6 @@ void to_json(nlohmann::json& j, const Monitoring& m) {
   j = nlohmann::json{
       {"topic", m.topic},
       {"interval", m.interval.count()},
-      {"bufferSize", m.bufferSize},
       {"parameters", m.parameters},
   };
   if (m.name) {

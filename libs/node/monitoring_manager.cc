@@ -1,5 +1,7 @@
 #include "node/monitoring_manager.h"
 
+#include <spdlog/spdlog.h>
+
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
@@ -23,13 +25,6 @@ namespace mm::node {
 namespace {
 
 constexpr char kReservedTopic[] = "pdos";  // the built-in high-frequency PDO stream's topic
-
-/// Wall-clock timestamp in epoch milliseconds (fits a JS number; used as each row's time key).
-int64_t nowMillis() {
-  return std::chrono::duration_cast<std::chrono::milliseconds>(
-             std::chrono::system_clock::now().time_since_epoch())
-      .count();
-}
 
 /// Serialises one sampled value to JSON: @c null when absent, otherwise the variant alternative
 /// (integers/floats → number, string → string, raw bytes → array of numbers).
@@ -59,11 +54,12 @@ std::expected<Monitoring, std::string> MonitoringManager::create(Monitoring conf
   if (config.topic == kReservedTopic) {
     return std::unexpected("topic 'pdos' is reserved");
   }
-  if (config.interval < std::chrono::milliseconds{1}) {
-    return std::unexpected("interval must be >= 1 ms");
-  }
-  if (config.bufferSize < 16) {
-    return std::unexpected("bufferSize must be >= 16");
+  // interval is the flush cadence, not a sample rate. Bounded so each batch stays a sane size: a
+  // longer interval ships more recorded cycles per message (~one row per cycle), so 1000 ms caps
+  // the burst while 10 ms avoids a message storm without dropping any cycle.
+  if (config.interval < std::chrono::milliseconds(10) ||
+      config.interval > std::chrono::milliseconds(1000)) {
+    return std::unexpected("interval must be between 10 ms and 1000 ms");
   }
   if (config.parameters.empty()) {
     return std::unexpected("parameters must not be empty");
@@ -181,7 +177,7 @@ void MonitoringManager::run() {
     if (nearest <= now) {
       for (auto& [topic, entry] : entries_) {
         if (entry.nextDue <= now) {
-          sampleEntry(entry);
+          flushEntry(entry);
           entry.nextDue = now + entry.config.interval;  // reschedule from now (no catch-up burst)
         }
       }
@@ -194,7 +190,7 @@ void MonitoringManager::run() {
 void MonitoringManager::sampleAll() {
   std::lock_guard<std::mutex> lock(mutex_);
   for (auto& [topic, entry] : entries_) {
-    sampleEntry(entry);
+    flushEntry(entry);
   }
 }
 
@@ -220,14 +216,32 @@ void MonitoringManager::recaptureIfRemapped(Entry& entry) {
   entry.imageGeneration = generation;
 }
 
-void MonitoringManager::sampleEntry(Entry& entry) {
+void MonitoringManager::flushEntry(Entry& entry) {
   recaptureIfRemapped(entry);
 
-  // Read each direction's image once, so every value in the row comes from the same bus cycle.
-  const ProcessBuffer inputs = deviceManager_.inputSnapshot();
-  const ProcessBuffer outputs = deviceManager_.outputSnapshot();
+  const uint64_t head = deviceManager_.recorderHead();
+  // Seed the cursor on the first flush so the monitoring streams from "now" rather than dumping the
+  // whole ring history that predates it.
+  if (!entry.cursorPrimed) {
+    entry.cursor = head;
+    entry.cursorPrimed = true;
+    return;
+  }
+  if (head == entry.cursor) {
+    return;  // no new cycles recorded since the last flush (bus idle / not exchanging)
+  }
+  // Resync a lapped cursor: if it fell more than a whole ring behind, those cycles were overwritten
+  // before we read them. Log the gap (never silent) and skip forward to the oldest still present.
+  const uint64_t oldest = deviceManager_.recorderOldestSeq();
+  if (entry.cursor < oldest) {
+    spdlog::warn("monitoring '{}' fell behind — dropped recorded cycles [{}, {})",
+                 entry.config.topic, entry.cursor, oldest);
+    entry.cursor = oldest;
+  }
 
-  // Cache the per-device live gate for this row (a row may span several devices).
+  // Per-flush constants, evaluated once and applied to every row: the device live gate (current AL
+  // state) and SDO values (the refresher cache is a single current value, so every row in this
+  // flush shares it — SDO objects are slow telemetry, not per-cycle signals).
   std::unordered_map<uint16_t, bool> exchanging;
   auto isExchanging = [&](uint16_t pos) {
     auto [it, inserted] = exchanging.try_emplace(pos, false);
@@ -236,54 +250,67 @@ void MonitoringManager::sampleEntry(Entry& entry) {
     }
     return it->second;
   };
+  std::vector<std::optional<DeviceParameterValue>> sdoValues(entry.plans.size());
+  for (size_t i = 0; i < entry.plans.size(); ++i) {
+    const auto& plan = entry.plans[i];
+    if (plan.source == Source::Sdo && isExchanging(plan.devicePosition)) {
+      sdoValues[i] = deviceManager_.value(plan.devicePosition, plan.index, plan.subindex);
+    }
+  }
 
-  Sample sample;
-  sample.timestampMs = nowMillis();
-  sample.values.reserve(entry.plans.size());
-  for (const auto& plan : entry.plans) {
-    std::optional<DeviceParameterValue> value;  // null unless resolved live below
-    if (isExchanging(plan.devicePosition)) {
-      if (plan.source == Source::Pdo) {
-        if (plan.pdoSpec) {
-          const ProcessBuffer& buffer = plan.pdoSpec->isOutput ? outputs : inputs;
-          auto bytes = extractBits(std::span<const uint8_t>(buffer.bytes.data(), buffer.size),
-                                   plan.pdoSpec->bitOffset, plan.pdoSpec->bitLength);
-          if (auto decoded = decodeSdoBytes(plan.pdoSpec->dataType, bytes)) {
-            value = std::move(*decoded);
+  // Decode every recorded cycle in [cursor, head) into one row each — the lossless span.
+  std::vector<Sample> rows;
+  rows.reserve(static_cast<size_t>(head - entry.cursor));
+  ProcessDataRing::Record record;
+  for (uint64_t seq = entry.cursor; seq != head; ++seq) {
+    if (!deviceManager_.readRecord(seq, record)) {
+      continue;  // raced an overwrite at the oldest edge — skip this one cycle
+    }
+    Sample sample;
+    sample.timestampUs = static_cast<int64_t>(record.timestampNs / 1000);
+    sample.values.reserve(entry.plans.size());
+    for (size_t i = 0; i < entry.plans.size(); ++i) {
+      const auto& plan = entry.plans[i];
+      std::optional<DeviceParameterValue> value;  // null unless resolved below
+      if (isExchanging(plan.devicePosition)) {
+        if (plan.source == Source::Pdo) {
+          if (plan.pdoSpec) {
+            const std::vector<uint8_t>& region =
+                plan.pdoSpec->isOutput ? record.outputs : record.inputs;
+            auto bytes = extractBits(std::span<const uint8_t>(region.data(), region.size()),
+                                     plan.pdoSpec->bitOffset, plan.pdoSpec->bitLength);
+            if (auto decoded = decodeSdoBytes(plan.pdoSpec->dataType, bytes)) {
+              value = std::move(*decoded);
+            }
           }
+        } else {
+          value = sdoValues[i];
         }
-      } else {
-        value = deviceManager_.value(plan.devicePosition, plan.index, plan.subindex);
       }
+      sample.values.push_back(std::move(value));
     }
-    sample.values.push_back(std::move(value));
+    rows.push_back(std::move(sample));
   }
+  entry.cursor = head;
 
-  entry.batch.push_back(std::move(sample));
-  if (entry.batch.size() >= entry.config.bufferSize) {
-    flush(entry);
+  if (!publish_ || rows.empty()) {
+    return;
   }
-}
-
-void MonitoringManager::flush(Entry& entry) {
-  if (publish_) {
-    auto data = nlohmann::json::array();
-    for (const auto& sample : entry.batch) {
-      auto row = nlohmann::json::array();
-      row.push_back(sample.timestampMs);
-      std::transform(sample.values.begin(), sample.values.end(), std::back_inserter(row),
-                     valueToJson);
-      data.push_back(std::move(row));
-    }
-    const nlohmann::json envelope = {
-        {"type", "monitoring"}, {"topic", entry.config.topic}, {"data", std::move(data)}};
-    publish_(entry.config.topic, envelope.dump());
+  auto data = nlohmann::json::array();
+  for (const auto& sample : rows) {
+    auto row = nlohmann::json::array();
+    row.push_back(sample.timestampUs);
+    std::transform(sample.values.begin(), sample.values.end(), std::back_inserter(row),
+                   valueToJson);
+    data.push_back(std::move(row));
   }
-  entry.batch.clear();
+  const nlohmann::json envelope = {
+      {"type", "monitoring"}, {"topic", entry.config.topic}, {"data", std::move(data)}};
+  publish_(entry.config.topic, envelope.dump());
 }
 
 nlohmann::json MonitoringManager::resourceJson(const Entry& entry) {
-  nlohmann::json j = entry.config;  // {topic, name?, interval, bufferSize, parameters:[...]}
+  nlohmann::json j = entry.config;  // {topic, name?, interval, parameters:[...]}
   // Replace the bare parameter list with one annotated by how each value is sourced (for the UI).
   auto parameters = nlohmann::json::array();
   std::transform(entry.plans.begin(), entry.plans.end(), std::back_inserter(parameters),
@@ -294,7 +321,6 @@ nlohmann::json MonitoringManager::resourceJson(const Entry& entry) {
                                          {"source", plan.source == Source::Pdo ? "pdo" : "sdo"}};
                  });
   j["parameters"] = std::move(parameters);
-  j["bufferFill"] = entry.batch.size();
   return j;
 }
 

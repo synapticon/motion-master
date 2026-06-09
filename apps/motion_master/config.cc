@@ -33,5 +33,9 @@ std::expected<Config, std::string> parseConfig(const nlohmann::json& doc) {
     return std::unexpected("gameLoop.periodUs must be greater than 0");
   }
 
+  if (config.recorder.historySeconds == 0) {
+    return std::unexpected("recorder.historySeconds must be greater than 0");
+  }
+
   return config;
 }

@@ -28,12 +28,12 @@ test('GET /api/monitorings is initially empty', async () => {
 
 test('POST /api/monitorings rejects malformed configs with 400', async () => {
   const cases: Array<Record<string, unknown>> = [
-    { interval: 1000, bufferSize: 16, parameters: [validParam] }, // missing topic
-    { topic: 'bad/topic', interval: 1000, bufferSize: 16, parameters: [validParam] }, // not URL-safe
-    { topic: 'pdos', interval: 1000, bufferSize: 16, parameters: [validParam] }, // reserved
-    { topic: 'x', interval: 0, bufferSize: 16, parameters: [validParam] }, // interval < 1
-    { topic: 'x', interval: 1000, bufferSize: 8, parameters: [validParam] }, // bufferSize < 16
-    { topic: 'x', interval: 1000, bufferSize: 16, parameters: [] }, // no parameters
+    { interval: 100, parameters: [validParam] }, // missing topic
+    { topic: 'bad/topic', interval: 100, parameters: [validParam] }, // not URL-safe
+    { topic: 'pdos', interval: 100, parameters: [validParam] }, // reserved
+    { topic: 'x', interval: 5, parameters: [validParam] }, // interval < 10 ms
+    { topic: 'x', interval: 2000, parameters: [validParam] }, // interval > 1000 ms
+    { topic: 'x', interval: 100, parameters: [] }, // no parameters
   ];
   for (const body of cases) {
     const res = await request('POST', '/api/monitorings', body);
@@ -45,8 +45,7 @@ test('POST /api/monitorings rejects an unsourceable parameter with 400', async (
   // No bus → device/object cannot be classified as PDO or SDO.
   const res = await request('POST', '/api/monitorings', {
     topic: 'left-leg',
-    interval: 1000,
-    bufferSize: 16,
+    interval: 100,
     parameters: [validParam],
   });
   expect(res.status).toBe(400);

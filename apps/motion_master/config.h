@@ -40,6 +40,14 @@ struct GameLoopConfig {
   uint32_t periodUs = 1000;  ///< Cyclic timer period in microseconds (must be > 0). 1000 = 1 ms.
 };
 
+/// @brief @c "recorder" block — the lossless process-data recorder ring.
+struct RecorderConfig {
+  /// Depth of the recorder ring in seconds (must be > 0). The ring is allocated at process-image
+  /// configuration to hold this many seconds of cycles at the GameLoop period, so RAM ≈
+  /// historySeconds × (1e6 / periodUs) × per-cycle image bytes (~400). 300 s ≈ 120 MB.
+  uint32_t historySeconds = 300;
+};
+
 /// @brief The whole config file. Top-level keys map to these members.
 struct Config {
   ServerConfig server;
@@ -47,13 +55,16 @@ struct Config {
   std::string logLevel = "info";  ///< trace | debug | info | warn | error.
   TlsConfig tls;
   GameLoopConfig gameLoop;
+  RecorderConfig recorder;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ServerConfig, httpPort, wsPort, corsOrigin)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FieldbusConfig, driver, adapter)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TlsConfig, certPath, keyPath, autoUpdate)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(GameLoopConfig, periodUs)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logLevel, tls, gameLoop)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RecorderConfig, historySeconds)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logLevel, tls, gameLoop,
+                                                recorder)
 
 /// @brief Deserialises a parsed JSONC document into a @c Config, applying defaults for absent keys.
 ///

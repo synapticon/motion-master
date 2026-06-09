@@ -34,12 +34,13 @@ std::optional<WsCommand> parseWsCommand(std::string_view message);
 /// Expected shape:
 /// @code
 /// { "topic": "left-leg", "name": "Left Leg" (optional),
-///   "interval": 1000, "bufferSize": 16,
+///   "interval": 1000,
 ///   "parameters": [[devicePosition, index, subindex], ...] }
 /// @endcode
-/// Each parameter is a three-element array of integers. This checks only the request *shape*
-/// (presence, JSON types, ranges) and converts it; semantic validation (URL-safe/reserved topic,
-/// interval/bufferSize bounds, parameter sourcing) is @c MonitoringManager::create's job.
+/// @c interval is the flush cadence in milliseconds. Each parameter is a three-element array of
+/// integers. This checks only the request *shape* (presence, JSON types, ranges) and converts it;
+/// semantic validation (URL-safe/reserved topic, interval bounds, parameter sourcing) is
+/// @c MonitoringManager::create's job. (A legacy @c bufferSize key, if present, is ignored.)
 ///
 /// @param body  The parsed request body.
 /// @return The configuration, or an error string naming the first shape problem.

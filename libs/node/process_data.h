@@ -7,7 +7,7 @@
 #include <span>
 #include <vector>
 
-#include "core/seqlock.h"
+#include "node/process_data_ring.h"
 #include "node/process_image.h"
 
 namespace mm::node {
@@ -31,8 +31,8 @@ namespace mm::node {
 /// objects that share a byte safe without a lock — see NEXTGEN.md (Design B).
 ///
 /// Defined in a header (rather than pimpl'd) so both @c device.cc and @c device_manager.cc can use
-/// it; the @c SeqLock members and fixed buffers are heavy, but only those two translation units
-/// pull them in (the public @c device.h / @c device_manager.h only forward-declare it).
+/// it; the recorder ring and fixed buffers are heavy, but only those two translation units pull
+/// them in (the public @c device.h / @c device_manager.h only forward-declare it).
 struct ProcessData {
   // The currently published image layout, or nullptr when no image is published (exchange is then
   // a no-op). Loaded lock-free by readers; published with release ordering by the control plane.
@@ -43,17 +43,17 @@ struct ProcessData {
   // Per-output-object staging slots, one per entry in image->outputs (rebuilt and seeded at each
   // re-map). A writer stores its object's latest wire bytes (≤8, packed little-endian into the u64)
   // here lock-free — writers to different objects never contend; the same object is last-writer-
-  // wins. The RT loop reads every slot each cycle and composes the output image. Replaces the old
-  // shared output-staging seqlock + mutex (a single packed buffer that every writer had to lock).
+  // wins. The RT loop reads every slot each cycle and composes the output image (one thread
+  // composing is what keeps bit-packed objects sharing a byte safe without a lock; NEXTGEN Design
+  // B).
   std::vector<std::atomic<uint64_t>> outputSlots;
   static_assert(std::atomic<uint64_t>::is_always_lock_free,
                 "output staging slots must be lock-free so the RT path never blocks");
-  // The output image the RT loop last composed and sent, published for non-RT readers (monitoring).
-  // Single-writer (RT) like inputSnapshot, hence lock-free; outputSlots is the write target, this
-  // is the read-back of what actually went on the wire.
-  mm::core::SeqLock<ProcessBuffer> outputSnapshot;
-  // The latest received input image: the RT loop publishes it, non-RT readers load it.
-  mm::core::SeqLock<ProcessBuffer> inputSnapshot;
+  // The lossless flight-data recorder: the RT loop appends one record per cycle (raw input + output
+  // IOmap, timestamp, working counter), the source for both the live monitoring stream and point
+  // reads of the freshest value (head()-1). Allocated at configureProcessData (sizes known then),
+  // re-allocated on a layout-changing re-map, retained across teardown, freed by reset()/scan().
+  ProcessDataRing ring;
   // RT-thread scratch for the exchange (touched only on the RT thread).
   ProcessBuffer outScratch;
   ProcessBuffer inScratch;
@@ -79,9 +79,10 @@ struct ProcessData {
   /// @brief Reads a PDO-mapped object's current bytes from the live image. Lock-free.
   ///
   /// Outputs come from their staging slot (our current setpoint — always valid); inputs from the
-  /// latest received snapshot, gated on @c healthy(). Returns @c nullopt when no image is
-  /// published, the object is not PDO-mapped, or (inputs only) the bus is unhealthy — in each case
-  /// the caller reads it over SDO instead. Bytes are little-endian and LSB-aligned.
+  /// newest recorded cycle (@c ring head()-1), gated on @c healthy(). Returns @c nullopt when no
+  /// image is published, nothing has been recorded yet, the object is not PDO-mapped, or (inputs
+  /// only) the bus is unhealthy — in each case the caller reads it over SDO instead. Bytes are
+  /// little-endian and LSB-aligned.
   std::optional<std::vector<uint8_t>> readPdo(uint16_t slavePosition, uint16_t index,
                                               uint8_t subindex) const;
 

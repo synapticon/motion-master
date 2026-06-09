@@ -105,7 +105,7 @@ export default function MonitoringsPage() {
     queryKey: ['monitorings'],
     queryFn: () => api.listMonitorings(),
     enabled: hasScanned,
-    refetchInterval: 5000, // keep buffer fills / list fresh
+    refetchInterval: 5000, // keep the list (and per-parameter source classification) fresh
   })
   const monitorings: Monitoring[] = monitoringsQuery.data?.data ?? []
 
@@ -215,8 +215,9 @@ function MonitoringCard({
     const onBatch = (rows: SampleRows) => {
       if (!playingRef.current) return
       for (const row of rows) {
+        // row[0] is the cycle timestamp in epoch microseconds; uPlot's time axis is in seconds.
         const ts = typeof row[0] === 'number' ? row[0] : 0
-        xsRef.current.push(ts / 1000)
+        xsRef.current.push(ts / 1_000_000)
         for (let i = 0; i < seriesCount; i++) {
           const v = row[i + 1]
           ysRef.current[i].push(typeof v === 'number' ? v : null)
@@ -251,8 +252,8 @@ function MonitoringCard({
             )}
           </h3>
           <p className="text-xs text-grey-500 mt-0.5">
-            interval {monitoring.interval} ms · batch {monitoring.bufferSize} · buffered{' '}
-            {monitoring.bufferFill}
+            flush every {monitoring.interval} ms · lossless ({seriesCount}{' '}
+            {seriesCount === 1 ? 'parameter' : 'parameters'})
           </p>
         </div>
         <button type="button" className={btnGhostCls} onClick={onDelete} disabled={deleting}>
@@ -352,8 +353,7 @@ function CreateMonitoringForm({
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [topic, setTopic] = useState('')
-  const [interval, setInterval] = useState('1000')
-  const [bufferSize, setBufferSize] = useState('16')
+  const [interval, setInterval] = useState('20')
   const [rows, setRows] = useState<ParamRowState[]>([{ ...emptyRow }])
   const [error, setError] = useState<string | null>(null)
 
@@ -362,14 +362,12 @@ function CreateMonitoringForm({
       topic: string
       name?: string
       interval: number
-      bufferSize: number
       parameters: number[][]
     }) => api.createMonitoring(body),
     onSuccess: () => {
       setName('')
       setTopic('')
-      setInterval('1000')
-      setBufferSize('16')
+      setInterval('20')
       setRows([{ ...emptyRow }])
       setError(null)
       setOpen(false)
@@ -389,13 +387,8 @@ function CreateMonitoringForm({
       return
     }
     const intervalMs = Number(interval)
-    const buffer = Number(bufferSize)
-    if (!Number.isInteger(intervalMs) || intervalMs < 1) {
-      setError('Interval must be an integer ≥ 1 ms')
-      return
-    }
-    if (!Number.isInteger(buffer) || buffer < 16) {
-      setError('Buffer size must be an integer ≥ 16')
+    if (!Number.isInteger(intervalMs) || intervalMs < 10 || intervalMs > 1000) {
+      setError('Interval must be an integer between 10 and 1000 ms')
       return
     }
     const parameters: number[][] = []
@@ -417,7 +410,6 @@ function CreateMonitoringForm({
       topic,
       name: name.trim() === '' ? undefined : name.trim(),
       interval: intervalMs,
-      bufferSize: buffer,
       parameters,
     })
   }
@@ -432,7 +424,7 @@ function CreateMonitoringForm({
 
   return (
     <div className="border border-grey-200 bg-white p-5 space-y-4">
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
         <div>
           <label className={labelCls}>Topic</label>
           <input className={inputCls} value={topic} onChange={(e) => setTopic(e.target.value)} placeholder="left-leg" />
@@ -442,12 +434,12 @@ function CreateMonitoringForm({
           <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} placeholder="Left Leg" />
         </div>
         <div>
-          <label className={labelCls}>Interval (ms)</label>
+          <label className={labelCls}>Flush interval (ms)</label>
           <input className={inputCls} value={interval} onChange={(e) => setInterval(e.target.value)} inputMode="numeric" />
-        </div>
-        <div>
-          <label className={labelCls}>Buffer size</label>
-          <input className={inputCls} value={bufferSize} onChange={(e) => setBufferSize(e.target.value)} inputMode="numeric" />
+          <p className="mt-1 text-[10px] text-grey-400">
+            10–1000 ms. How often a batch is sent; the stream is lossless (every cycle), so this
+            trades message size against frequency, not resolution.
+          </p>
         </div>
       </div>
 

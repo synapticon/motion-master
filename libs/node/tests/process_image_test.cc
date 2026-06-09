@@ -33,6 +33,7 @@ using mm::node::DeviceManager;
 using mm::node::DeviceParameterValue;
 using mm::node::extractBits;
 using mm::node::insertBits;
+using mm::node::ProcessDataRing;
 
 // ETG.1020 data type codes.
 constexpr uint16_t kU8 = 0x0005;
@@ -276,17 +277,20 @@ TEST(DeviceManagerProcessData, ConfigurePublishesAndExchangePublishesInputs) {
   ASSERT_TRUE(dm.configureProcessData().has_value());
   EXPECT_TRUE(dm.processDataConfigured());
 
-  // Before any exchange the input snapshot is empty.
-  EXPECT_EQ(dm.inputSnapshot().size, 0u);
+  // Before any exchange nothing is recorded.
+  EXPECT_EQ(dm.recorderHead(), 0u);
 
   dm.exchangeProcessData();
 
-  auto snap = dm.inputSnapshot();
-  ASSERT_EQ(snap.size, 6u);
-  EXPECT_EQ(snap.bytes[0], 0x37);
-  EXPECT_EQ(snap.bytes[1], 0x02);
-  EXPECT_EQ(snap.bytes[2], 0x44);
-  EXPECT_EQ(snap.bytes[5], 0x11);
+  // One cycle recorded; its raw input image is the newest record.
+  ASSERT_EQ(dm.recorderHead(), 1u);
+  ProcessDataRing::Record rec;
+  ASSERT_TRUE(dm.readRecord(0, rec));
+  ASSERT_EQ(rec.inputs.size(), 6u);
+  EXPECT_EQ(rec.inputs[0], 0x37);
+  EXPECT_EQ(rec.inputs[1], 0x02);
+  EXPECT_EQ(rec.inputs[2], 0x44);
+  EXPECT_EQ(rec.inputs[5], 0x11);
 
   // After reset, exchange is gated off again.
   dm.reset();
@@ -504,7 +508,9 @@ TEST(DeviceManagerProcessData, MappingConfiguredAndTornDownReactingToState) {
   ASSERT_TRUE(dm.transitionToState({}, EtherCatState::SafeOp, kTimeout).has_value());
   EXPECT_TRUE(dm.processDataConfigured());
   dm.exchangeProcessData();
-  EXPECT_EQ(dm.inputSnapshot().size, 6u);
+  ProcessDataRing::Record rec;
+  ASSERT_TRUE(dm.readRecord(dm.recorderHead() - 1, rec));
+  EXPECT_EQ(rec.inputs.size(), 6u);
 
   // SAFE-OP -> OP keeps the existing mapping (no re-map).
   ASSERT_TRUE(dm.transitionToState({}, EtherCatState::Op, kTimeout).has_value());

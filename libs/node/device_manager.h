@@ -14,13 +14,14 @@
 
 #include "comm/fieldbus_driver.h"
 #include "node/device.h"
+#include "node/process_data_ring.h"
 #include "node/process_image.h"
 
 namespace mm::node {
 
-/// @brief Holds the RT process-data runtime state (seqlock buffers, the published image
-///        pointer, and scratch). Defined in the .cc — pimpl'd so its non-movable SeqLock
-///        members and large fixed buffers stay out of the header.
+/// @brief Holds the RT process-data runtime state (the recorder ring, the published image
+///        pointer, output staging slots, and scratch). Defined in the .cc — pimpl'd so its
+///        non-movable members and large fixed buffers stay out of the header.
 struct ProcessData;
 
 /// @brief Current AL state snapshot for a single device.
@@ -135,9 +136,15 @@ class DeviceManager {
   /// would dangle the @c FieldbusDriver& that every @c Device holds.
   ///
   /// @param driver  Concrete fieldbus driver to own and operate.
+  /// @param recorderHistorySeconds  Depth of the process-data recorder ring in seconds; the ring
+  ///        is allocated at @c configureProcessData to hold this many seconds of cycles.
+  /// @param cyclePeriodUs  The GameLoop cycle period in microseconds, used with the history depth
+  ///        to size the ring (capacity = seconds * 1e6 / periodUs).
   /// @return Void on success, or an error string if a driver is already held or
   ///         driver initialisation fails.
-  std::expected<void, std::string> init(std::unique_ptr<mm::comm::FieldbusDriver> driver);
+  std::expected<void, std::string> init(std::unique_ptr<mm::comm::FieldbusDriver> driver,
+                                        uint32_t recorderHistorySeconds = 300,
+                                        uint32_t cyclePeriodUs = 1000);
 
   /// @brief Scans the bus for nodes and populates the device list.
   ///
@@ -207,11 +214,11 @@ class DeviceManager {
 
   /// @brief Exchanges one cycle of process data: sends staged outputs, captures inputs.
   ///
-  /// Loads the output image from the output-staging seqlock, calls
-  /// @c FieldbusDriver::exchangeProcessData, and publishes the received input image to the
-  /// input-snapshot seqlock.  No-op until @c configureProcessData has published an image, so
-  /// the GameLoop can call it unconditionally every cycle.  Runs on the RT thread and takes
-  /// no lock.
+  /// Composes the output image from the per-object staging slots, calls
+  /// @c FieldbusDriver::exchangeProcessData, and appends the cycle (both directions) to the
+  /// recorder ring for non-RT readers.  No-op until @c configureProcessData has published an
+  /// image, so the GameLoop can call it unconditionally every cycle.  Runs on the RT thread and
+  /// takes no lock.
   ///
   /// @warning @c exchangeProcessData() runs on the RT GameLoop thread while @c init(),
   ///          @c scan(), @c reset(), and @c configureProcessData() may be called from the
@@ -220,20 +227,6 @@ class DeviceManager {
   ///          that boundary.  Stop the loop (or drain one cycle) before calling @c init() /
   ///          @c reset() / @c configureProcessData() via the API.
   void exchangeProcessData();
-
-  /// @brief Returns a snapshot of the latest input image (slave→master).
-  ///
-  /// Reads the input-snapshot seqlock without blocking the RT writer.  Empty (@c size 0)
-  /// until the first @c exchangeProcessData after @c configureProcessData.  Intended for the
-  /// monitoring/WebSocket path and value read-back.
-  ProcessBuffer inputSnapshot() const;
-
-  /// @brief Returns a snapshot of the staged output image (master→slave).
-  ///
-  /// The output counterpart of @c inputSnapshot: reads the output-staging seqlock without
-  /// blocking the RT reader. Lets the monitoring sampler decode output (RxPDO) objects — the
-  /// setpoints being sent — from the same coherent buffer mechanism as inputs.
-  ProcessBuffer outputSnapshot() const;
 
   /// @brief Whether @c configureProcessData has published a process image for exchange.
   bool processDataConfigured() const;
@@ -435,8 +428,8 @@ class DeviceManager {
   //
   // These let the monitoring sampler read live values from its own thread without ever blocking
   // on the bus: SDO objects from the (refresher-fed) cache via value(); PDO objects decoded by
-  // the caller from inputSnapshot()/outputSnapshot() using the layout pdoSampleSpec() captures.
-  // Thread-safe; they hand back copies, never device pointers.
+  // the caller from recorder-ring records (recorderHead()/recorderOldestSeq()/readRecord()) using
+  // the layout pdoSampleSpec() captures. Thread-safe; they hand back copies, never device pointers.
 
   /// @brief Returns a copy of a parameter's cached value, no bus access. Thread-safe.
   ///
@@ -458,14 +451,32 @@ class DeviceManager {
   /// @brief Resolves a PDO-mapped object's decode spec from the published image. Thread-safe.
   ///
   /// The sampler captures this once per PDO parameter (and re-captures when
-  /// @c processImageGeneration changes), then per tick reads the matching snapshot
-  /// (@c inputSnapshot / @c outputSnapshot) and runs @c extractBits + @c decodeSdoBytes itself —
-  /// so the bus is never touched on the sampling path and a whole sample comes from one snapshot.
+  /// @c processImageGeneration changes), then for each recorded cycle reads the matching region
+  /// of the ring record (@c inputs for an input object, @c outputs for an output) and runs
+  /// @c extractBits + @c decodeSdoBytes itself — so the bus is never touched on the sampling path
+  /// and every value in a row comes from the same cycle's record.
   ///
   /// @return The spec, or @c nullopt if no image is published, the object is not PDO-mapped, or
   ///         its data type is unknown (object dictionary not enumerated).
   std::optional<PdoSampleSpec> pdoSampleSpec(uint16_t slavePosition, uint16_t index,
                                              uint8_t subindex) const;
+
+  /// @brief The recorder ring's next sequence number; @c recorderHead()-1 is the newest recorded
+  ///        cycle and @c recorderHead()==0 means nothing has been recorded yet. Thread-safe.
+  ///
+  /// A monitoring holds a read cursor and ships every record in @c [cursor, recorderHead()) per
+  /// flush, advancing the cursor — a non-destructive reader that never gates the RT producer.
+  uint64_t recorderHead() const;
+
+  /// @brief The oldest sequence number still present in the ring (@c max(0, head - capacity)).
+  ///        A cursor below this has been lapped (overwritten) and must resync to it. Thread-safe.
+  uint64_t recorderOldestSeq() const;
+
+  /// @brief Copies the recorded cycle for @p seq into @p out. Thread-safe, lock-free.
+  ///
+  /// @return @c true if @p seq is present and copied without a concurrent overwrite; @c false if
+  ///         it is no longer in the ring or the copy raced the producer (the caller skips it).
+  bool readRecord(uint64_t seq, ProcessDataRing::Record& out) const;
 
   /// @brief Whether the device at @p slavePosition is currently exchanging (SAFE-OP/OP).
   ///        Thread-safe; reads the driver's cached AL state, no bus I/O.
@@ -525,6 +536,10 @@ class DeviceManager {
   std::unique_ptr<mm::comm::FieldbusDriver> driver_;
   std::vector<Device> devices_;
   std::unique_ptr<ProcessData> pd_;
+  // Recorder ring sizing, captured at init(): the ring (allocated at configureProcessData) holds
+  // recorderHistorySeconds_ of cycles at the GameLoop period cyclePeriodUs_.
+  uint32_t recorderHistorySeconds_ = 300;
+  uint32_t cyclePeriodUs_ = 1000;
 };
 
 /// @brief Serialises all devices in a DeviceManager to a JSON array.

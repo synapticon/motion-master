@@ -57,24 +57,29 @@ info:
     never stall the stream: `wss://local.motion-master.synapticon.com:62281` (the
     whole port is the WebSocket, so the URL needs no path).
     A client creates a monitoring
-    with `POST /api/monitorings` (a topic, sampling interval, buffer size, and a
-    list of parameters), then subscribes to its topic over the socket by sending
-    `{"subscribe":"<topic>"}` (and `{"unsubscribe":"<topic>"}` to stop). The server
-    samples the parameters off the real-time thread, accumulates `bufferSize` rows,
-    and publishes each batch to that topic — delivered only to the clients
-    subscribed to it. The messages:
+    with `POST /api/monitorings` (a topic, flush interval, and a list of
+    parameters), then subscribes to its topic over the socket by sending
+    `{"subscribe":"<topic>"}` (and `{"unsubscribe":"<topic>"}` to stop). The stream
+    is **lossless**: every process-data cycle recorded since the last flush is
+    delivered — `interval` is the flush cadence, not a sample rate, so a longer
+    interval means a bigger batch, never dropped cycles. Each batch is published to
+    that topic, delivered only to the clients subscribed to it. Each row is
+    `[timestamp, value, ...]` where `timestamp` is **epoch microseconds** (exact in
+    a JavaScript number, and distinct per cycle even at sub-millisecond periods).
+    The messages:
 
     ```json
-    {"type": "monitoring", "topic": "left-leg", "data": [[1735821000123, 39000, 41], ...]}
+    {"type": "monitoring", "topic": "left-leg", "data": [[1735821000123456, 39000, 41], ...]}
     {"type": "notification", "data": {"event": "slaves_changed"}}
     ```
 
-    `data` is an array of sample rows; each row is `[timestampMs, v0, v1, ...]`
-    whose values are positionally ordered by the monitoring's `parameters` (fetch
-    the order, and how each value is sourced, via `GET /api/monitorings/{topic}`).
-    A value is `null` while its owning device is not exchanging (SAFE-OP/OP).
-    Numbers beyond 2^53 lose precision in a JS client; the targeted values are
-    32-bit integers and floats.
+    `data` is an array of cycle rows; each row is `[timestampUs, v0, v1, ...]` where
+    `timestampUs` is epoch microseconds and the values are positionally ordered by
+    the monitoring's `parameters` (fetch the order, and how each value is sourced,
+    via `GET /api/monitorings/{topic}`). A value is `null` while its owning device
+    is not exchanging (SAFE-OP/OP). Numbers beyond 2^53 lose precision in a JS
+    client; epoch microseconds stay exact until ~year 2255 and the targeted values
+    are 32-bit integers and floats.
 
     ## Networking, TLS, and CORS
 
@@ -1455,7 +1460,7 @@ paths:
           application/json:
             schema:
               type: object
-              required: [topic, interval, bufferSize, parameters]
+              required: [topic, interval, parameters]
               properties:
                 topic:
                   type: string
@@ -1468,14 +1473,13 @@ paths:
                   example: "Left Leg"
                 interval:
                   type: integer
-                  minimum: 1
-                  description: Sampling period in milliseconds.
-                  example: 1000
-                bufferSize:
-                  type: integer
-                  minimum: 16
-                  description: Samples accumulated before a batch is published over the WebSocket.
-                  example: 16
+                  minimum: 10
+                  maximum: 1000
+                  description: >
+                    Flush cadence in milliseconds (10–1000). Not a sample rate: every recorded
+                    cycle since the last flush is delivered, so a longer interval yields a larger
+                    batch rather than fewer samples.
+                  example: 20
                 parameters:
                   type: array
                   minItems: 1
@@ -1496,9 +1500,9 @@ paths:
                 $ref: "#/components/schemas/Monitoring"
         "400":
           description: >
-            Invalid request — malformed body, non-URL-safe or reserved topic, interval < 1,
-            bufferSize < 16, empty parameters, or a parameter that is neither PDO-mapped nor in
-            the device's object dictionary.
+            Invalid request — malformed body, non-URL-safe or reserved topic, interval outside
+            10–1000 ms, empty parameters, or a parameter that is neither PDO-mapped nor in the
+            device's object dictionary.
           content:
             application/json:
               schema:
@@ -1589,8 +1593,8 @@ components:
           example: 1000
     Monitoring:
       type: object
-      description: A monitoring's configuration plus its current runtime status.
-      required: [topic, interval, bufferSize, parameters, bufferFill]
+      description: A monitoring's configuration plus its per-parameter source classification.
+      required: [topic, interval, parameters]
       properties:
         topic:
           type: string
@@ -1601,16 +1605,8 @@ components:
           example: "Left Leg"
         interval:
           type: integer
-          description: Sampling period in milliseconds.
-          example: 1000
-        bufferSize:
-          type: integer
-          description: Samples per published batch.
-          example: 16
-        bufferFill:
-          type: integer
-          description: Rows currently accumulated toward the next batch.
-          example: 7
+          description: Flush cadence in milliseconds (10–1000).
+          example: 20
         parameters:
           type: array
           description: The sampled objects, in the positional order of each WebSocket sample row.

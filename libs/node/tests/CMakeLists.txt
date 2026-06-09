@@ -9,6 +9,7 @@ add_executable(mm_node_tests
     monitoring_test.cc
     monitoring_manager_test.cc
     parameter_refresher_test.cc
+    process_data_ring_test.cc
     process_image_test.cc
     somanet_drive_test.cc
 )

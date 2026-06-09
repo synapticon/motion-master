@@ -16,26 +16,26 @@ struct MonitoredParameter {
   uint8_t subindex;         ///< CoE object subindex.
 };
 
-/// @brief A client-defined recording of a set of parameters sampled over time.
+/// @brief A client-defined recording of a set of parameters streamed over time.
 ///
 /// Created via @c POST @c /api/monitorings and streamed over the monitoring WebSocket under its
-/// @c topic. The server samples @c parameters every @c interval off the RT thread, accumulates
-/// @c bufferSize samples, and publishes each batch as a positional array (one inner array per
-/// sample, in @c parameters order). This struct is the immutable client configuration; the
-/// runtime state (batch buffer, per-parameter PDO/SDO classification, subscriber count) lives on
-/// the manager that owns the monitoring, not here.
+/// @c topic. The stream is **lossless**: every process-data cycle recorded since the last flush is
+/// delivered. @c interval is the flush cadence (how often a batch is published), not a sample rate
+/// — the manager ships every cycle-row in one positional-array batch per flush (one inner array
+/// per cycle, in @c parameters order, prefixed by the cycle timestamp). This struct is the
+/// immutable client configuration; the runtime state (read cursor, per-parameter PDO/SDO
+/// classification) lives on the manager that owns the monitoring, not here.
 struct Monitoring {
   std::string topic;                   ///< URL-safe unique id; also the WebSocket pub/sub topic.
   std::optional<std::string> name;     ///< Optional human-readable label (display only).
-  std::chrono::milliseconds interval;  ///< Sampling period.
-  uint32_t bufferSize;                 ///< Samples accumulated before a batch is published.
+  std::chrono::milliseconds interval;  ///< Flush cadence (bounded [10 ms, 1000 ms]).
   std::vector<MonitoredParameter> parameters;  ///< Objects to sample, in positional order.
 };
 
 /// @brief Serialises a MonitoredParameter to JSON: @c {devicePosition, index, subindex}.
 void to_json(nlohmann::json& j, const MonitoredParameter& p);
 
-/// @brief Serialises a Monitoring to JSON: @c {topic, name?, interval, bufferSize, parameters}.
+/// @brief Serialises a Monitoring to JSON: @c {topic, name?, interval, parameters}.
 ///
 /// @c name is omitted when unset; @c interval is emitted as an integer count of milliseconds.
 void to_json(nlohmann::json& j, const Monitoring& m);

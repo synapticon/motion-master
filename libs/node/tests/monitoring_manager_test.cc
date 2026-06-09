@@ -181,14 +181,20 @@ FakeBus* setUp(DeviceManager& dm) {
   return raw;
 }
 
-// A monitoring of actual position (PDO input) + temperature (SDO), bufferSize 16.
+// A monitoring of actual position (PDO input) + temperature (SDO).
 Monitoring axisConfig() {
   Monitoring m;
   m.topic = "axis";
   m.interval = std::chrono::milliseconds{10};
-  m.bufferSize = 16;
   m.parameters = {MonitoredParameter{1, 0x6064, 0x00}, MonitoredParameter{1, 0x2030, 0x01}};
   return m;
+}
+
+// Records @p n process-data cycles into the recorder ring (each advances recorderHead by one).
+void drive(DeviceManager& dm, int n) {
+  for (int i = 0; i < n; ++i) {
+    dm.exchangeProcessData();
+  }
 }
 
 TEST(MonitoringManagerTest, CreateClassifiesPdoAndSdoAndExposesSource) {
@@ -205,7 +211,6 @@ TEST(MonitoringManagerTest, CreateClassifiesPdoAndSdoAndExposesSource) {
   ASSERT_EQ((*resource)["parameters"].size(), 2u);
   EXPECT_EQ((*resource)["parameters"][0]["source"], "pdo");  // actual position
   EXPECT_EQ((*resource)["parameters"][1]["source"], "sdo");  // temperature
-  EXPECT_EQ((*resource)["bufferSize"], 16);
 }
 
 TEST(MonitoringManagerTest, CreateRejectsInvalidConfigs) {
@@ -220,9 +225,9 @@ TEST(MonitoringManagerTest, CreateRejectsInvalidConfigs) {
   };
   EXPECT_FALSE(bad([](Monitoring& m) { m.topic = "bad/topic"; }));  // not URL-safe
   EXPECT_FALSE(bad([](Monitoring& m) { m.topic = "pdos"; }));       // reserved
-  EXPECT_FALSE(bad([](Monitoring& m) { m.interval = std::chrono::milliseconds{0}; }));
-  EXPECT_FALSE(bad([](Monitoring& m) { m.bufferSize = 8; }));      // < 16
-  EXPECT_FALSE(bad([](Monitoring& m) { m.parameters.clear(); }));  // empty
+  EXPECT_FALSE(bad([](Monitoring& m) { m.interval = std::chrono::milliseconds{5}; }));  // < 10 ms
+  EXPECT_FALSE(bad([](Monitoring& m) { m.interval = std::chrono::milliseconds{2000}; }));  // > 1 s
+  EXPECT_FALSE(bad([](Monitoring& m) { m.parameters.clear(); }));                          // empty
   EXPECT_FALSE(bad([](Monitoring& m) {
     m.parameters = {MonitoredParameter{1, 0x9999, 0x00}};  // neither PDO-mapped nor in OD
   }));
@@ -232,7 +237,7 @@ TEST(MonitoringManagerTest, CreateRejectsInvalidConfigs) {
   EXPECT_FALSE(manager.create(axisConfig()).has_value());  // duplicate topic
 }
 
-TEST(MonitoringManagerTest, SampleBatchesAndPublishesPositionalRows) {
+TEST(MonitoringManagerTest, FlushPublishesEveryRecordedCycleAsPositionalRows) {
   DeviceManager dm;
   setUp(dm);
   // Seed the temperature cache (OP → online → cached + downloaded) to a known value.
@@ -246,19 +251,29 @@ TEST(MonitoringManagerTest, SampleBatchesAndPublishesPositionalRows) {
   });
   ASSERT_TRUE(manager.create(axisConfig()).has_value());
 
-  for (int i = 0; i < 16; ++i) {
-    manager.sampleAll();
-  }
+  manager.sampleAll();  // first flush primes the cursor at the current head — no rows yet
+  EXPECT_TRUE(published.empty());
 
-  ASSERT_EQ(published.size(), 1u);  // one batch flushed at bufferSize == 16
+  drive(dm, 16);        // record 16 cycles
+  manager.sampleAll();  // flush delivers every recorded cycle since the cursor: 16 rows
+
+  ASSERT_EQ(published.size(), 1u);  // one lossless batch of every cycle since the last flush
   const auto& env = published[0];
   EXPECT_EQ(env["type"], "monitoring");
   EXPECT_EQ(env["topic"], "axis");
   ASSERT_EQ(env["data"].size(), 16u);
   const auto& row = env["data"][0];
-  ASSERT_EQ(row.size(), 3u);      // [ts, actualPosition, temperature]
-  EXPECT_EQ(row[1], 0x11223344);  // actual position decoded from the input snapshot
+  ASSERT_EQ(row.size(), 3u);      // [ts(µs), actualPosition, temperature]
+  EXPECT_EQ(row[1], 0x11223344);  // actual position decoded from the cycle's recorded input image
   EXPECT_EQ(row[2], 42);          // temperature from the cache
+
+  drive(dm, 4);         // record 4 more cycles
+  manager.sampleAll();  // next flush delivers only those 4 (cursor advanced)
+  ASSERT_EQ(published.size(), 2u);
+  EXPECT_EQ(published[1]["data"].size(), 4u);
+
+  manager.sampleAll();  // nothing recorded since — no message
+  EXPECT_EQ(published.size(), 2u);
 }
 
 TEST(MonitoringManagerTest, NonExchangingDeviceSamplesNull) {
@@ -272,9 +287,9 @@ TEST(MonitoringManagerTest, NonExchangingDeviceSamplesNull) {
       [&](std::string, std::string json) { published.push_back(nlohmann::json::parse(json)); });
   ASSERT_TRUE(manager.create(axisConfig()).has_value());
 
-  for (int i = 0; i < 16; ++i) {
-    manager.sampleAll();
-  }
+  manager.sampleAll();  // prime the cursor
+  drive(dm, 16);        // cycles still record (image is published); only the live gate is closed
+  manager.sampleAll();  // flush
 
   ASSERT_EQ(published.size(), 1u);
   const auto& row = published[0]["data"][0];
@@ -305,14 +320,16 @@ TEST(MonitoringManagerTest, SchedulerThreadSamplesAndPublishes) {
       [&](std::string, std::string) { publishCount.fetch_add(1, std::memory_order_relaxed); });
 
   Monitoring m = axisConfig();
-  m.interval = std::chrono::milliseconds{1};  // ~16 ms between batches (bufferSize 16)
+  m.interval = std::chrono::milliseconds{10};  // minimum flush cadence
   ASSERT_TRUE(manager.create(m).has_value());
   manager.start();
 
-  // Wait (bounded) for the sampler thread to flush at least one batch.
+  // Drive cycles into the ring (as the RT loop would) and wait, bounded, for the sampler thread to
+  // flush at least one batch of recorded cycles.
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
   while (publishCount.load(std::memory_order_relaxed) == 0 &&
          std::chrono::steady_clock::now() < deadline) {
+    drive(dm, 5);
     std::this_thread::sleep_for(std::chrono::milliseconds{5});
   }
   manager.stop();

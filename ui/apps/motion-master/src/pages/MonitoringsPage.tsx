@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
+import { adjectives, animals, colors, uniqueNamesGenerator } from 'unique-names-generator'
 import type uPlot from 'uplot'
 import type { DeviceParameter, Monitoring } from '@mm/api-client'
 import MonitoringChart from '../components/MonitoringChart'
@@ -48,6 +49,18 @@ function toHex(n: number, pad: number): string {
 
 function paramKey(pos: number, index: number, subindex: number): string {
   return `${pos}:${index}:${subindex}`
+}
+
+// A memorable, URL-safe identifier + Title-cased label for a new monitoring, e.g. topic
+// "swift-amber-otter", name "Swift Amber Otter". adjectives × colors × animals is tens of
+// thousands of combos, so a re-roll comfortably resolves the rare clash with an existing topic.
+function generateMonitoringName(): { topic: string; name: string } {
+  const words = uniqueNamesGenerator({
+    dictionaries: [adjectives, colors, animals],
+    separator: ' ',
+    style: 'capital',
+  }).split(' ')
+  return { topic: words.join('-').toLowerCase(), name: words.join(' ') }
 }
 
 // A device known to the bus (subset of the getDevices payload we use here).
@@ -357,6 +370,14 @@ function CreateMonitoringForm({
   const [rows, setRows] = useState<ParamRowState[]>([{ ...emptyRow }])
   const [error, setError] = useState<string | null>(null)
 
+  // Fill the topic + name with a fresh funny pair (both stay editable). Used to seed the form on
+  // open and from the 🎲 button.
+  function reroll() {
+    const g = generateMonitoringName()
+    setTopic(g.topic)
+    setName(g.name)
+  }
+
   const createMutation = useMutation({
     mutationFn: (body: {
       topic: string
@@ -416,7 +437,14 @@ function CreateMonitoringForm({
 
   if (!open) {
     return (
-      <button type="button" className={btnCls} onClick={() => setOpen(true)}>
+      <button
+        type="button"
+        className={btnCls}
+        onClick={() => {
+          reroll() // seed a funny topic + name so creating one is a single click
+          setOpen(true)
+        }}
+      >
         New monitoring
       </button>
     )
@@ -424,6 +452,17 @@ function CreateMonitoringForm({
 
   return (
     <div className="border border-grey-200 bg-white p-5 space-y-4">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-grey-500 uppercase tracking-wide">New monitoring</span>
+        <button
+          type="button"
+          className={`${btnGhostCls} px-3`}
+          onClick={reroll}
+          title="Generate a random topic and name"
+        >
+          🎲 Random name
+        </button>
+      </div>
       <div className="grid grid-cols-2 gap-4 md:grid-cols-3">
         <div>
           <label className={labelCls}>Topic</label>

@@ -1,6 +1,7 @@
 #include "comm/soem_fieldbus_driver.h"
 
 #include <soem/soem.h>
+#include <spdlog/fmt/bin_to_hex.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -468,8 +469,15 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
     return std::unexpected(msg);
   }
   data.resize(size);
-  spdlog::log(sdoLevel, "SDOread slave {} 0x{:04X}:{:02X} ok ({} bytes)", slavePosition, index,
-              subindex, data.size());
+  // Show the returned bytes (wire order, little-endian) so the value is visible. The driver has no
+  // data type to decode it — that happens in the node layer — so a hex dump is the faithful view.
+  // Cap the dump so a large object (string/array) can't produce a runaway log line.
+  constexpr size_t kMaxHexBytes = 16;
+  const auto hexEnd =
+      data.begin() + static_cast<std::ptrdiff_t>(std::min(data.size(), kMaxHexBytes));
+  spdlog::log(sdoLevel, "SDOread slave {} 0x{:04X}:{:02X} ok ({} bytes): {}{}", slavePosition,
+              index, subindex, data.size(), spdlog::to_hex(data.begin(), hexEnd),
+              data.size() > kMaxHexBytes ? " …" : "");
   return data;
 }
 

@@ -5,6 +5,7 @@ import type uPlot from 'uplot'
 import type { DeviceParameter, Monitoring } from '@mm/api-client'
 import MonitoringChart from '../components/MonitoringChart'
 import PageHeader from '../components/PageHeader'
+import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import {
   MonitoringSocketProvider,
@@ -277,8 +278,8 @@ function MonitoringCard({
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-xs text-grey-500 uppercase tracking-wide">
-            <th className="px-5 py-2 font-medium">Device</th>
-            <th className="px-3 py-2 font-medium">Object</th>
+            <th className="px-5 py-2 font-medium">Slave</th>
+            <th className="px-3 py-2 font-medium">Address</th>
             <th className="px-3 py-2 font-medium">Name</th>
             <th className="px-3 py-2 font-medium">Source</th>
           </tr>
@@ -288,7 +289,9 @@ function MonitoringCard({
             const name = nameByKey.get(paramKey(p.devicePosition, p.index, p.subindex))
             return (
               <tr key={paramKey(p.devicePosition, p.index, p.subindex)} className="border-t border-grey-100">
-                <td className="px-5 py-2">{p.devicePosition}</td>
+                <td className="px-5 py-2">
+                  <SlavePositionBadge position={p.devicePosition} />
+                </td>
                 <td className="px-3 py-2 font-mono text-xs">
                   {toHex(p.index, 4)}:{toHex(p.subindex, 2).slice(2)}
                 </td>
@@ -343,7 +346,7 @@ function SourceBadge({ source }: { source: string }) {
           ? 'PDO — decoded live from the process image each tick'
           : 'SDO — polled in the background and read from cache'
       }
-      className={`px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider uppercase ${pdo ? 'bg-ocean/10 text-ocean' : 'bg-grey-100 text-grey-600'
+      className={`px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider uppercase cursor-help ${pdo ? 'bg-ocean/10 text-ocean' : 'bg-grey-100 text-grey-600'
         }`}
     >
       {source}

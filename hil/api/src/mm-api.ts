@@ -788,7 +788,7 @@ export class HttpClient<SecurityDataType = unknown> {
 
 /**
  * @title Motion Master API
- * @version 6.0.0-alpha.20
+ * @version 6.0.0-alpha.21
  * @baseUrl https://local.motion-master.synapticon.com:61447
  *
  * Motion Master is the motion-control software for Synapticon SOMANET servo

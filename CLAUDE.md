@@ -112,7 +112,7 @@ motion-master/
     motion_master/     ← main executable (flat file layout); swagger.yml here is the OpenAPI spec — source for the PWA's bundled API Docs + generated API clients, not shipped with the binary
     playground/        ← scratch binary
   libs/
-    core/              ← version, seqlock, platform timers, cross-cutting utils
+    core/              ← version, platform timers, cross-cutting utils
     comm/              ← fieldbus interfaces; soem.cc, spoe.cc, igh.cc alongside base
     node/              ← Device, DeviceManager, CiA402, profiles (depends on mm::comm)
   hil/
@@ -138,7 +138,7 @@ main.cc  (composition root — the only place concrete types are instantiated; n
  │     ├── unique_ptr<FieldbusDriver>   ← SoemFieldbusDriver | SpoeDriver (planned); owns socketMutex_
  │     │                                  null until init(); set via init(unique_ptr<FieldbusDriver>)
  │     ├── unique_ptr<ProcessData>      (published image + generations; per-output atomic staging
- │     │                                  slots; input/output SeqLock snapshots; WKC health.
+ │     │                                  slots; lossless recorder ring (every cycle); WKC health.
  │     │                                  Owned here, handed by raw pointer to each Device)
  │     ├── owns: std::vector<Device>    (each Device borrows FieldbusDriver& + ProcessData*)
  │     │     ├── slavePosition, name, vendorId, productCode, revisionNumber, serialNumber (immutable)
@@ -156,9 +156,10 @@ main.cc  (composition root — the only place concrete types are instantiated; n
  │     └── Config.InitDriverFn      (callback to main.cc; creates concrete driver for POST /api/init)
  ├── WebSocketServer  (own port 62281 + loop/thread; realtime channel — monitoring batches out,
  │                     subscribe in; notifications / procedure progress / output-staging in as they land)
- └── MonitoringManager  (off-RT; owns the monitoring registry, turns each into a stream of sampled rows)
+ └── MonitoringManager  (off-RT; owns the monitoring registry, turns each into a lossless row stream)
        ├── owns: ParameterRefresher  (background thread polling SDO-only params into a cache)
-       ├── owns: sampler thread        (samples due monitorings off-RT, batches rows)
+       ├── owns: sampler thread        (per flush, ships every recorded cycle since each monitoring's
+       │                                read cursor — reads the recorder ring, never the bus)
        └── setPublish(cb)              → WebSocketServer::publish(topic, json)
 
  [planned, not yet in code: NotificationBus (observer decoupling producers from servers),
@@ -193,15 +194,15 @@ Use `std::visit` for type dispatch on `DeviceParameterValue`. `DeviceParameter` 
 
 PDO data crosses the RT/non-RT boundary through `ProcessData` (`libs/node/process_data.h`, owned by `DeviceManager`, pointer handed to each `Device`):
 
-- **Inputs and the output read-back** are `SeqLock<ProcessBuffer>` snapshots (`inputSnapshot`, `outputSnapshot` — `libs/core/seqlock.h`, odd seq = write in progress, even = stable). The RT loop is the sole writer; HTTP/monitoring readers retry on a torn read, which at ~400 bytes / 1 ms is effectively never.
-- **Outputs are staged lock-free, not through a seqlock.** Each output object owns its own `std::atomic<uint64_t>` slot in `outputSlots` (≤8 wire bytes packed little-endian). Any number of non-RT writers store into *different* objects' slots without contending; same-object writes are last-writer-wins. The RT loop is the only thread that *composes* those slots into the packed wire image each cycle, which is what makes bit-packed objects sharing a byte safe without a lock (NEXTGEN.md "Design B"). This replaced the older single shared output-staging seqlock + mutex.
+- **Inputs and the output read-back come from the recorder ring** (`ProcessDataRing`, `libs/node/process_data_ring.{h,cc}`) — a lock-free circular recorder the RT loop appends one record to **every cycle** (raw input + output IOmap, epoch-ns timestamp, working counter). It is the single RT-written structure and the source for both the live monitoring stream and point reads of the freshest value (`head()-1`); there are no separate whole-image snapshots. The RT `write()` is wait-free (a few `memcpy` + a per-slot release-stored absolute sequence number); readers re-check that sequence after copying to detect a write that raced the copy, which at a seconds-deep ring is effectively never. Allocated + `mlock`'d at `configureProcessData` for `recorder.historySeconds × (1e6/periodUs)` cycles (default 300 s ≈ 120 MB), re-allocated on a layout-changing re-map (records under the old layout are undecodable), retained across image teardown, freed only by `reset()`/`scan()`.
+- **Outputs are staged lock-free.** Each output object owns its own `std::atomic<uint64_t>` slot in `outputSlots` (≤8 wire bytes packed little-endian). Any number of non-RT writers store into *different* objects' slots without contending; same-object writes are last-writer-wins. The RT loop is the only thread that *composes* those slots into the packed wire image each cycle, which is what makes bit-packed objects sharing a byte safe without a lock (NEXTGEN.md "Design B").
 
-An atomically-published `image` pointer (with retained `generations`) gates the whole thing: readers load it lock-free and `readPdo` falls back to SDO when no image is published or (inputs only) the bus is unhealthy (`lastWkc < expectedWkc`).
+An atomically-published `image` pointer (with retained `generations`) gates the whole thing: readers load it lock-free and `readPdo` falls back to SDO when no image is published, nothing has been recorded yet (`head()==0`), or (inputs only) the bus is unhealthy (`lastWkc < expectedWkc`).
 
-**Monitoring runs off the RT loop.** It is *not* a `CyclicTask`. `MonitoringManager` owns a background sampler thread that samples each due monitoring, batches `bufferSize` rows, and hands the batch to an injected publish callback (wired in `main.cc` to `WebSocketServer::publish`). PDO-mapped parameters are read straight from the live image; SDO-only parameters are polled in the background by the owned `ParameterRefresher` and the sampler reads its cache. `Device::parametersMutex_` guards the parameter map against these off-RT threads racing the control plane.
+**Monitoring runs off the RT loop and is lossless.** It is *not* a `CyclicTask`. `MonitoringManager` owns a background sampler thread; each monitoring holds a **read cursor** into the recorder ring, and on each flush ships **every** cycle recorded in `[cursor, head)` as one batch, then advances the cursor — so no cycle is dropped (`interval` is the flush *cadence*, not a sample rate; bounded 5–2000 ms). A cursor lapped by more than a whole ring is logged (not notified) and resynced to the oldest record. PDO-mapped parameters are decoded from each cycle's ring record; SDO-only parameters are polled in the background by the owned `ParameterRefresher` and read from its cache (one cached value per flush). Row timestamps on the wire are **epoch microseconds** (JS-exact, distinct per sub-ms cycle). `Device::parametersMutex_` guards the parameter map against these off-RT threads racing the control plane.
 
 **`CyclicTask` membership is fixed.** All tasks are registered before `run()`; `GameLoop` never adds or removes tasks at runtime (the design rationale is in NEXTGEN.md, session 2026-06-05 — *RT tasks are fixed-membership*). Today only `ProcessDataTask` is registered (`main.cc`). This fixed-membership rule splits runtime procedures into two kinds:
-- **RT cyclic procedures** *(planned — not yet in code)*: SineWave / profile / ramp generators — anything that must write a target into the output region every cycle — will be `CyclicTask`s registered up front and *idle until activated* via a control block, exactly like `ProcessDataTask` is a no-op until an image is published. The intended control block is a per-device `SeqLock<SineWaveParams>` (held on `Device` as a `unique_ptr`, like `parametersMutex_`); one slot per device *is* the fixed pool. **The launch lives on the view, not the HTTP handler or scheduler:** `Cia402Drive::startSineWave(...) → expected<>` validates, does the op-mode handshake synchronously off-RT, then stores the params with `active = true` — with fixed membership a "launch" is just a control-block write, a synchronous single-device state change. The single `SineWaveTask` (holds `DeviceManager&`) iterates devices each cycle, runs after `ProcessDataTask`, and writes the output slots directly (on-RT). RT-only scratch (phase, center, edge flag) stays off the seqlock; all validation is on the launcher's `expected<>` path so the RT side has no error branch.
+- **RT cyclic procedures** *(planned — not yet in code)*: SineWave / profile / ramp generators — anything that must write a target into the output region every cycle — will be `CyclicTask`s registered up front and *idle until activated* via a control block, exactly like `ProcessDataTask` is a no-op until an image is published. The intended control block is a per-device lock-free published `SineWaveParams` (held on `Device` as a `unique_ptr`, like `parametersMutex_`); one slot per device *is* the fixed pool. **The launch lives on the view, not the HTTP handler or scheduler:** `Cia402Drive::startSineWave(...) → expected<>` validates, does the op-mode handshake synchronously off-RT, then stores the params with `active = true` — with fixed membership a "launch" is just a control-block write, a synchronous single-device state change. The single `SineWaveTask` (holds `DeviceManager&`) iterates devices each cycle, runs after `ProcessDataTask`, and writes the output slots directly (on-RT). RT-only scratch (phase, center, edge flag) stays off the published block; all validation is on the launcher's `expected<>` path so the RT side has no error branch.
 - **Off-RT procedures** (commutation/offset detection, auto-tuning, firmware — call a command and wait, not cycle-time-sensitive) are **not** `CyclicTask`s. They run on a cancellable background `std::jthread` calling `DeviceManager`/`Device` methods (serialized on the fieldbus mutex). The built precedent for an off-RT background thread is `MonitoringManager`'s sampler/refresher; a dedicated `FirmwareInstaller` of this shape is planned.
 
 **Reactive mapping.** Changing AL states is the user's job (via `POST /api/state`); Motion Master *reacts* in `DeviceManager::transitionToState`. The process image is a single whole-bus layout (`ecx_config_map_group` maps the entire IOmap at once), but the reactive logic supports **partial-bus operations** so a subset can be serviced without disturbing the rest:
@@ -234,17 +235,17 @@ On developer machines, `tools/run.sh` discovers the cert in this priority order:
 Two message types are sent over the WebSocket:
 
 ```json
-{"type": "monitoring", "topic": "pdos", "data": [1234567890, 39, 0, 12345]}
+{"type": "monitoring", "topic": "left-leg", "data": [[1735821000123456, 39, 0, 12345], ...]}
 {"type": "notification", "data": {"event": "slaves_changed"}}
 ```
 
-`data` is a positionally-ordered array of numbers — no keys in the high-frequency path. Clients fetch the schema once via HTTP and cache it:
+`data` is an array of **cycle rows** (the stream is lossless — one row per recorded cycle since the monitoring's last flush). Each row is `[timestampUs, v0, v1, ...]`: epoch **microseconds** (JS-exact, distinct per sub-ms cycle) followed by one value per parameter, positionally ordered — no keys in the high-frequency path. A value is `null` while its device is not exchanging. Clients fetch the order (and how each value is sourced) once and cache it:
 
 ```
-GET /api/monitoring/pdos → [{"index": "6064:00", "name": "actual_position"}, ...]
+GET /api/monitorings/{topic} → { ..., "parameters": [{"devicePosition":1,"index":24676,"subindex":0,"source":"pdo"}, ...] }
 ```
 
-The array order is stable for the lifetime of a monitoring session. Up to 5 simultaneous clients; ~40 × 32-bit values per message ≈ 450 bytes at 1 ms cycles.
+The order is stable for the lifetime of a monitoring. `interval` is the flush **cadence** (bounded 5–2000 ms, not a sample rate): a longer interval ships more rows per message, never fewer cycles. Throughput is constant (~one row per cycle, ~450 bytes for ~40 × 32-bit values); interval only trades message size against frequency. Up to 5 simultaneous clients.
 
 ### Fieldbus Capability Surface
 

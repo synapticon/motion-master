@@ -261,14 +261,14 @@ curl -k -X POST https://localhost:61447/api/reset
 Connect a WebSocket client to `wss://localhost:62281` (the realtime channel runs on its own port and event loop, separate from the HTTP API on 61447, so a slow HTTP request never stalls the stream; the whole port is the WebSocket, so the URL needs no path). The server sends two message types:
 
 ```json
-{"type": "monitoring", "topic": "pdos", "data": [1234567890, 39, 0, 12345]}
+{"type": "monitoring", "topic": "left-leg", "data": [[1735821000123456, 39, 0, 12345], ...]}
 {"type": "notification", "data": {"event": "slaves_changed"}}
 ```
 
-Fetch the monitoring schema to interpret the `data` array:
+`data` is an array of cycle rows — the stream is **lossless**, one row per recorded process-data cycle since the last flush. Each row is `[timestampUs, v0, v1, ...]`: epoch microseconds followed by one value per parameter in the monitoring's order (a value is `null` while its device is not exchanging). `interval` is the flush cadence (5–2000 ms), not a sample rate. Fetch the parameter order (and how each value is sourced) to interpret the array:
 
 ```bash
-curl -k https://localhost:61447/api/monitoring/pdos
+curl -k https://localhost:61447/api/monitorings/left-leg
 ```
 
 ### Bus inspection

@@ -140,6 +140,30 @@ paths:
                   version:
                     type: string
                     example: "6.0.0"
+  /api/config:
+    get:
+      summary: Get the configuration Motion Master was started with
+      description: >
+        The effective configuration after merging the JSONC config file (if any) over the built-in
+        defaults — the same `Config` the server booted with. Read-only; changing it requires editing
+        the config file and restarting. The shape mirrors the config file (server, fieldbus,
+        logLevel, tls, gameLoop, recorder).
+      operationId: getStartedConfig
+      responses:
+        "200":
+          description: The started configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+                example:
+                  server: { httpPort: 61447, wsPort: 62281, corsOrigin: "https://motion-master.synapticon.com" }
+                  fieldbus: { driver: "", adapter: "" }
+                  logLevel: "info"
+                  tls: { certPath: "", keyPath: "", autoUpdate: true }
+                  gameLoop: { periodUs: 1000 }
+                  recorder: { historySeconds: 300 }
   /api/cert:
     get:
       summary: Get the TLS certificate validity window

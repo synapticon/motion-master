@@ -215,6 +215,13 @@ void HttpServer::run() {
            [this](auto* res, auto* /*req*/) {
              sendJson(res, config_.corsOrigin, nlohmann::json{{"version", config_.version}});
            })
+      .get("/api/config",
+           [this](auto* res, auto* /*req*/) {
+             // Pre-serialized at startup; parse back so sendJson sets the JSON content type + CORS.
+             sendJson(res, config_.corsOrigin,
+                      config_.startedConfig.empty() ? nlohmann::json::object()
+                                                    : nlohmann::json::parse(config_.startedConfig));
+           })
       .get("/api/cert",
            [this](auto* res, auto* /*req*/) {
              auto info = mm::readCertInfo(config_.certFile);

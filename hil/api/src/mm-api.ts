@@ -941,6 +941,22 @@ export class Api<
         ...params,
       }),
   };
+  config = {
+    /**
+     * @description The effective configuration after merging the JSONC config file (if any) over the built-in defaults — the same `Config` the server booted with. Read-only; changing it requires editing the config file and restarting. The shape mirrors the config file (server, fieldbus, logLevel, tls, gameLoop, recorder).
+     *
+     * @name GetStartedConfig
+     * @summary Get the configuration Motion Master was started with
+     * @request GET:/api/config
+     */
+    getStartedConfig: (params: RequestParams = {}) =>
+      this.request<Record<string, any>, any>({
+        path: `/api/config`,
+        method: "GET",
+        format: "json",
+        ...params,
+      }),
+  };
   cert = {
     /**
      * @description Reports the validity window and identity of the certificate the server is currently serving. `expiresSoon` trips within 7 days of `notAfter`, so the PWA can prompt the user to refresh. Note that an already-expired certificate blocks the browser from reaching this endpoint at all; the binary self-heals an expired/missing certificate at startup (fetching from the rolling release) and exposes `--update-cert` for manual refresh. Returns 500 if the certificate file cannot be read or parsed.

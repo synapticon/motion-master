@@ -42,6 +42,12 @@ export default function ConnectionPage() {
   })
   const cert = certQuery.data?.data
 
+  const configQuery = useQuery({
+    queryKey: ['startedConfig'],
+    queryFn: () => api.getStartedConfig(),
+  })
+  const startedConfig = configQuery.data?.data
+
   const refreshMutation = useMutation({
     mutationFn: () => api.refreshCert(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cert'] }),
@@ -159,6 +165,30 @@ export default function ConnectionPage() {
             )}
             {refreshMutation.isError && (
               <p className="text-status-bad text-xs mt-2">{apiError(refreshMutation.error)}</p>
+            )}
+          </div>
+        </section>
+
+        <section>
+          <h2 className="eyebrow mb-3">Started Configuration</h2>
+          <div className="border border-grey-200 p-5 space-y-3">
+            <p className="text-xs text-grey-600 max-w-prose">
+              The effective configuration Motion Master booted with — the JSONC config file merged
+              over the built-in defaults. Read-only: edit the config file and restart to change it.
+            </p>
+
+            {configQuery.isLoading && <p className="text-sm text-grey-600">Loading…</p>}
+
+            {configQuery.isError && (
+              <p className="text-status-bad text-sm">
+                Could not read configuration. Is the backend reachable at https://{host}:{httpPort}?
+              </p>
+            )}
+
+            {startedConfig && (
+              <pre className="text-xs font-mono bg-grey-50 border border-grey-200 p-3 overflow-x-auto whitespace-pre">
+                {JSON.stringify(startedConfig, null, 2)}
+              </pre>
             )}
           </div>
         </section>

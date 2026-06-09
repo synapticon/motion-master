@@ -126,9 +126,8 @@ int main(int argc, char** argv) {
       return 1;
     }
     if (auto result = deviceManager.init(
-            std::move(*driver),
-            {.recorderHistorySeconds = opts.config.recorder.historySeconds,
-             .cyclePeriodUs = opts.config.gameLoop.periodUs});
+            std::move(*driver), {.recorderHistorySeconds = opts.config.recorder.historySeconds,
+                                 .cyclePeriodUs = opts.config.gameLoop.periodUs});
         !result) {
       spdlog::error("DeviceManager init failed: {}", result.error());
       return 1;
@@ -247,6 +246,7 @@ int main(int argc, char** argv) {
           .certFile = opts.config.tls.certPath,
           .keyFile = opts.config.tls.keyPath,
           .version = std::string{mm::core::kVersion},
+          .startedConfig = nlohmann::json(opts.config).dump(),
           .initDriver = [&deviceManager, makeDriver,
                          historySeconds = opts.config.recorder.historySeconds,
                          periodUs = opts.config.gameLoop.periodUs](
@@ -260,9 +260,8 @@ int main(int argc, char** argv) {
             }
             auto driver = makeDriver(type, ifname);
             if (!driver) return std::unexpected(driver.error());
-            return deviceManager.init(
-                std::move(*driver),
-                {.recorderHistorySeconds = historySeconds, .cyclePeriodUs = periodUs});
+            return deviceManager.init(std::move(*driver), {.recorderHistorySeconds = historySeconds,
+                                                           .cyclePeriodUs = periodUs});
           },
           .getLog = [ringLogSink]() { return ringLogSink->entries(); },
           .refreshCert = [certFile = opts.config.tls.certPath, keyFile = opts.config.tls.keyPath,

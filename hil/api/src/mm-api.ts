@@ -59,7 +59,7 @@ export interface Monitoring {
    */
   name?: string;
   /**
-   * Flush cadence in milliseconds (10–1000).
+   * Flush cadence in milliseconds (5–2000).
    * @example 20
    */
   interval: number;
@@ -861,12 +861,13 @@ export class HttpClient<SecurityDataType = unknown> {
  * {"type": "notification", "data": {"event": "slaves_changed"}}
  * ```
  *
- * `data` is an array of sample rows; each row is `[timestampMs, v0, v1, ...]`
- * whose values are positionally ordered by the monitoring's `parameters` (fetch
- * the order, and how each value is sourced, via `GET /api/monitorings/{topic}`).
- * A value is `null` while its owning device is not exchanging (SAFE-OP/OP).
- * Numbers beyond 2^53 lose precision in a JS client; the targeted values are
- * 32-bit integers and floats.
+ * `data` is an array of cycle rows; each row is `[timestampUs, v0, v1, ...]` where
+ * `timestampUs` is epoch microseconds and the values are positionally ordered by
+ * the monitoring's `parameters` (fetch the order, and how each value is sourced,
+ * via `GET /api/monitorings/{topic}`). A value is `null` while its owning device
+ * is not exchanging (SAFE-OP/OP). Numbers beyond 2^53 lose precision in a JS
+ * client; epoch microseconds stay exact until ~year 2255 and the targeted values
+ * are 32-bit integers and floats.
  *
  * ## Networking, TLS, and CORS
  *
@@ -2038,10 +2039,10 @@ export class Api<
          */
         name?: string;
         /**
-         * Flush cadence in milliseconds (10–1000). Not a sample rate: every recorded cycle since the last flush is delivered, so a longer interval yields a larger batch rather than fewer samples.
-         * @min 10
-         * @max 1000
-         * @example 20
+         * Flush cadence in milliseconds (5–2000). Not a sample rate: every recorded cycle since the last flush is delivered, so a longer interval yields a larger batch rather than fewer samples. 16 ms (~one batch per 60 Hz display frame) is a good default for live plotting.
+         * @min 5
+         * @max 2000
+         * @example 16
          */
         interval: number;
         /**

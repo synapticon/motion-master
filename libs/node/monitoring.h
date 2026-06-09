@@ -28,7 +28,7 @@ struct MonitoredParameter {
 struct Monitoring {
   std::string topic;                   ///< URL-safe unique id; also the WebSocket pub/sub topic.
   std::optional<std::string> name;     ///< Optional human-readable label (display only).
-  std::chrono::milliseconds interval;  ///< Flush cadence (bounded [10 ms, 1000 ms]).
+  std::chrono::milliseconds interval;  ///< Flush cadence (bounded [5 ms, 2000 ms]).
   std::vector<MonitoredParameter> parameters;  ///< Objects to sample, in positional order.
 };
 

@@ -353,7 +353,7 @@ function CreateMonitoringForm({
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [topic, setTopic] = useState('')
-  const [interval, setInterval] = useState('20')
+  const [interval, setInterval] = useState('16')
   const [rows, setRows] = useState<ParamRowState[]>([{ ...emptyRow }])
   const [error, setError] = useState<string | null>(null)
 
@@ -367,7 +367,7 @@ function CreateMonitoringForm({
     onSuccess: () => {
       setName('')
       setTopic('')
-      setInterval('20')
+      setInterval('16')
       setRows([{ ...emptyRow }])
       setError(null)
       setOpen(false)
@@ -387,8 +387,8 @@ function CreateMonitoringForm({
       return
     }
     const intervalMs = Number(interval)
-    if (!Number.isInteger(intervalMs) || intervalMs < 10 || intervalMs > 1000) {
-      setError('Interval must be an integer between 10 and 1000 ms')
+    if (!Number.isInteger(intervalMs) || intervalMs < 5 || intervalMs > 2000) {
+      setError('Interval must be an integer between 5 and 2000 ms')
       return
     }
     const parameters: number[][] = []
@@ -437,8 +437,8 @@ function CreateMonitoringForm({
           <label className={labelCls}>Flush interval (ms)</label>
           <input className={inputCls} value={interval} onChange={(e) => setInterval(e.target.value)} inputMode="numeric" />
           <p className="mt-1 text-[10px] text-grey-400">
-            10–1000 ms. How often a batch is sent; the stream is lossless (every cycle), so this
-            trades message size against frequency, not resolution.
+            5–2000 ms (16 ms ≈ one batch per 60 Hz frame). How often a batch is sent; the stream is
+            lossless (every cycle), so this trades message size against frequency, not resolution.
           </p>
         </div>
       </div>

@@ -55,11 +55,11 @@ std::expected<Monitoring, std::string> MonitoringManager::create(Monitoring conf
     return std::unexpected("topic 'pdos' is reserved");
   }
   // interval is the flush cadence, not a sample rate. Bounded so each batch stays a sane size: a
-  // longer interval ships more recorded cycles per message (~one row per cycle), so 1000 ms caps
-  // the burst while 10 ms avoids a message storm without dropping any cycle.
-  if (config.interval < std::chrono::milliseconds(10) ||
-      config.interval > std::chrono::milliseconds(1000)) {
-    return std::unexpected("interval must be between 10 ms and 1000 ms");
+  // longer interval ships more recorded cycles per message (~one row per cycle), so 2000 ms caps
+  // the burst while 5 ms avoids a message storm without dropping any cycle.
+  if (config.interval < std::chrono::milliseconds(5) ||
+      config.interval > std::chrono::milliseconds(2000)) {
+    return std::unexpected("interval must be between 5 ms and 2000 ms");
   }
   if (config.parameters.empty()) {
     return std::unexpected("parameters must not be empty");

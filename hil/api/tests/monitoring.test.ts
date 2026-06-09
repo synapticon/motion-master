@@ -31,8 +31,8 @@ test('POST /api/monitorings rejects malformed configs with 400', async () => {
     { interval: 100, parameters: [validParam] }, // missing topic
     { topic: 'bad/topic', interval: 100, parameters: [validParam] }, // not URL-safe
     { topic: 'pdos', interval: 100, parameters: [validParam] }, // reserved
-    { topic: 'x', interval: 5, parameters: [validParam] }, // interval < 10 ms
-    { topic: 'x', interval: 2000, parameters: [validParam] }, // interval > 1000 ms
+    { topic: 'x', interval: 4, parameters: [validParam] }, // interval < 5 ms
+    { topic: 'x', interval: 3000, parameters: [validParam] }, // interval > 2000 ms
     { topic: 'x', interval: 100, parameters: [] }, // no parameters
   ];
   for (const body of cases) {

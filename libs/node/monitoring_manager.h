@@ -65,7 +65,7 @@ class MonitoringManager {
   ///        and registers the monitoring.
   ///
   /// Validation: @c topic URL-safe and not the reserved @c "pdos"; not already registered;
-  /// @c interval between 10 ms and 1000 ms (the flush cadence); @c parameters non-empty; and every
+  /// @c interval between 5 ms and 2000 ms (the flush cadence); @c parameters non-empty; and every
   /// parameter is either PDO-mapped or present in its device's object dictionary (otherwise it
   /// cannot be sourced).
   ///

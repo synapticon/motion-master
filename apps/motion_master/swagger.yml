@@ -1473,13 +1473,14 @@ paths:
                   example: "Left Leg"
                 interval:
                   type: integer
-                  minimum: 10
-                  maximum: 1000
+                  minimum: 5
+                  maximum: 2000
                   description: >
-                    Flush cadence in milliseconds (10–1000). Not a sample rate: every recorded
+                    Flush cadence in milliseconds (5–2000). Not a sample rate: every recorded
                     cycle since the last flush is delivered, so a longer interval yields a larger
-                    batch rather than fewer samples.
-                  example: 20
+                    batch rather than fewer samples. 16 ms (~one batch per 60 Hz display frame) is
+                    a good default for live plotting.
+                  example: 16
                 parameters:
                   type: array
                   minItems: 1
@@ -1501,7 +1502,7 @@ paths:
         "400":
           description: >
             Invalid request — malformed body, non-URL-safe or reserved topic, interval outside
-            10–1000 ms, empty parameters, or a parameter that is neither PDO-mapped nor in the
+            5–2000 ms, empty parameters, or a parameter that is neither PDO-mapped nor in the
             device's object dictionary.
           content:
             application/json:
@@ -1605,7 +1606,7 @@ components:
           example: "Left Leg"
         interval:
           type: integer
-          description: Flush cadence in milliseconds (10–1000).
+          description: Flush cadence in milliseconds (5–2000).
           example: 20
         parameters:
           type: array

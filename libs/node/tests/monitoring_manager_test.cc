@@ -225,8 +225,8 @@ TEST(MonitoringManagerTest, CreateRejectsInvalidConfigs) {
   };
   EXPECT_FALSE(bad([](Monitoring& m) { m.topic = "bad/topic"; }));  // not URL-safe
   EXPECT_FALSE(bad([](Monitoring& m) { m.topic = "pdos"; }));       // reserved
-  EXPECT_FALSE(bad([](Monitoring& m) { m.interval = std::chrono::milliseconds{5}; }));  // < 10 ms
-  EXPECT_FALSE(bad([](Monitoring& m) { m.interval = std::chrono::milliseconds{2000}; }));  // > 1 s
+  EXPECT_FALSE(bad([](Monitoring& m) { m.interval = std::chrono::milliseconds{4}; }));     // < 5 ms
+  EXPECT_FALSE(bad([](Monitoring& m) { m.interval = std::chrono::milliseconds{2001}; }));  // > 2 s
   EXPECT_FALSE(bad([](Monitoring& m) { m.parameters.clear(); }));                          // empty
   EXPECT_FALSE(bad([](Monitoring& m) {
     m.parameters = {MonitoredParameter{1, 0x9999, 0x00}};  // neither PDO-mapped nor in OD
@@ -320,7 +320,7 @@ TEST(MonitoringManagerTest, SchedulerThreadSamplesAndPublishes) {
       [&](std::string, std::string) { publishCount.fetch_add(1, std::memory_order_relaxed); });
 
   Monitoring m = axisConfig();
-  m.interval = std::chrono::milliseconds{10};  // minimum flush cadence
+  m.interval = std::chrono::milliseconds{16};  // ~one batch per 60 Hz display frame
   ASSERT_TRUE(manager.create(m).has_value());
   manager.start();
 

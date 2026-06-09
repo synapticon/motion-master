@@ -365,7 +365,19 @@ function MonitoringCard({
 
       <div className="px-5 py-3 border-t border-grey-100">
         <div className="flex flex-wrap items-center gap-3 mb-3">
-          <button type="button" className={btnGhostCls} onClick={() => setPlaying((p) => !p)}>
+          <button
+            type="button"
+            className={btnGhostCls}
+            onClick={() => {
+              // Resuming: start fresh. No samples arrive while paused, so the first post-resume
+              // sample is a full pause-duration ahead of the last one — that bridging Δt would
+              // otherwise corrupt the trace and the cycle-time stats.
+              if (!playing) {
+                clear()
+              }
+              setPlaying((p) => !p)
+            }}
+          >
             {playing ? 'Pause' : 'Resume'}
           </button>
           <button type="button" className={btnGhostCls} onClick={clear}>

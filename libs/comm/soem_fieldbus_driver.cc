@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "comm/al_status_codes.h"
+#include "comm/sdo_log.h"
 
 namespace mm::comm::soem {
 
@@ -435,7 +436,10 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
                                                                              uint16_t index,
                                                                              uint8_t subindex) {
   std::lock_guard<std::mutex> lock(socketMutex_);
-  spdlog::debug("SDOread slave {} 0x{:04X}:{:02X}", slavePosition, index, subindex);
+  // The background ParameterRefresher polls SDOs continuously; demote its per-read traces to trace
+  // so they don't flood the log, while a direct (user-initiated) read keeps its debug trace.
+  const auto sdoLevel = sdoLogQuiet ? spdlog::level::trace : spdlog::level::debug;
+  spdlog::log(sdoLevel, "SDOread slave {} 0x{:04X}:{:02X}", slavePosition, index, subindex);
   std::vector<uint8_t> data(4096, 0);
   int size = static_cast<int>(data.size());
   int wkc = ecx_SDOread(ctx_.get(), slavePosition, index, subindex, FALSE, &size, data.data(),
@@ -460,12 +464,12 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
           break;
       }
     }
-    spdlog::debug("{}", msg);
+    spdlog::log(sdoLevel, "{}", msg);
     return std::unexpected(msg);
   }
   data.resize(size);
-  spdlog::debug("SDOread slave {} 0x{:04X}:{:02X} ok ({} bytes)", slavePosition, index, subindex,
-                data.size());
+  spdlog::log(sdoLevel, "SDOread slave {} 0x{:04X}:{:02X} ok ({} bytes)", slavePosition, index,
+              subindex, data.size());
   return data;
 }
 

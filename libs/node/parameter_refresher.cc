@@ -4,6 +4,7 @@
 #include <utility>
 #include <vector>
 
+#include "comm/sdo_log.h"
 #include "node/device_manager.h"
 
 namespace mm::node {
@@ -106,6 +107,9 @@ std::size_t ParameterRefresher::trackedCount() const {
 }
 
 void ParameterRefresher::pollDue() {
+  // Background polling: keep the driver's per-read SDO debug traces out of the log (demoted to
+  // trace). A direct, user-initiated read runs without this guard and keeps its debug trace.
+  const mm::comm::ScopedQuietSdoLog quietSdoLogging;
   const auto now = std::chrono::steady_clock::now();
 
   // Snapshot the keys due now, then poll each with the lock released — readDeviceParameter does a

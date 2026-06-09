@@ -107,8 +107,7 @@ bool isValidStateTransition(EtherCatState currentState, EtherCatState targetStat
 }  // namespace
 
 std::expected<void, std::string> DeviceManager::init(
-    std::unique_ptr<mm::comm::FieldbusDriver> driver, uint32_t recorderHistorySeconds,
-    uint32_t cyclePeriodUs) {
+    std::unique_ptr<mm::comm::FieldbusDriver> driver, DeviceManagerConfig config) {
   std::unique_lock lock(busMutex_);
   // init() is a one-shot: replacing a live driver would destroy it while the
   // Devices in devices_ still hold a FieldbusDriver& to it, leaving every Device
@@ -116,11 +115,13 @@ std::expected<void, std::string> DeviceManager::init(
   if (driver_) {
     return std::unexpected("already initialised — call reset() before init()");
   }
-  // Retain the recorder sizing for configureProcessData, which allocates the ring once the image
-  // (and hence the per-record byte size) is known. cyclePeriodUs is the GameLoop period, so the
-  // ring holds recorderHistorySeconds of cycles: capacity = seconds * 1e6 / periodUs.
-  recorderHistorySeconds_ = recorderHistorySeconds;
-  cyclePeriodUs_ = cyclePeriodUs == 0 ? 1000 : cyclePeriodUs;
+  // Retain the config for configureProcessData, which allocates the recorder ring once the image
+  // (and hence the per-record byte size) is known. Guard cyclePeriodUs against 0 so the ring-size
+  // division is always safe (capacity = recorderHistorySeconds * 1e6 / cyclePeriodUs).
+  config_ = config;
+  if (config_.cyclePeriodUs == 0) {
+    config_.cyclePeriodUs = 1000;
+  }
   driver_ = std::move(driver);
   auto result = driver_->init();
   if (!result) {
@@ -275,7 +276,7 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
   // under the new one. Exchange is drained (stopExchange above) and the image is not yet published,
   // so the RT writer cannot touch the ring while it is being rebuilt.
   const size_t ringCapacity =
-      static_cast<size_t>(recorderHistorySeconds_) * (1'000'000u / cyclePeriodUs_);
+      static_cast<size_t>(config_.recorderHistorySeconds) * (1'000'000u / config_.cyclePeriodUs);
   pd_->ring.allocate(image->inputBytes, image->outputBytes, ringCapacity);
 
   auto shared = std::make_shared<const ProcessImage>(std::move(*image));

@@ -116,6 +116,18 @@ struct DcSyncInfo {
 /// @brief Serialises a DcSyncInfo to JSON.
 void to_json(nlohmann::json& j, const DcSyncInfo& info);
 
+/// @brief Runtime tuning passed to @c DeviceManager::init. Every field has a sensible default, so a
+///        caller can pass @c {} (or omit it) and override only what it cares about; new knobs can
+///        be added here without changing the @c init signature.
+struct DeviceManagerConfig {
+  /// Depth of the process-data recorder ring in seconds; the ring is allocated at
+  /// @c configureProcessData to hold this many seconds of cycles.
+  uint32_t recorderHistorySeconds = 300;
+  /// The GameLoop cycle period in microseconds, used with the history depth to size the ring
+  /// (capacity = recorderHistorySeconds * 1e6 / cyclePeriodUs).
+  uint32_t cyclePeriodUs = 1000;
+};
+
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.
 ///
 /// The driver is not required at construction — call @c init() to supply one.
@@ -136,15 +148,12 @@ class DeviceManager {
   /// would dangle the @c FieldbusDriver& that every @c Device holds.
   ///
   /// @param driver  Concrete fieldbus driver to own and operate.
-  /// @param recorderHistorySeconds  Depth of the process-data recorder ring in seconds; the ring
-  ///        is allocated at @c configureProcessData to hold this many seconds of cycles.
-  /// @param cyclePeriodUs  The GameLoop cycle period in microseconds, used with the history depth
-  ///        to size the ring (capacity = seconds * 1e6 / periodUs).
+  /// @param config  Runtime tuning (recorder depth, cycle period). Defaults are used for any field
+  ///        left at its default; omit the argument entirely to use all defaults.
   /// @return Void on success, or an error string if a driver is already held or
   ///         driver initialisation fails.
   std::expected<void, std::string> init(std::unique_ptr<mm::comm::FieldbusDriver> driver,
-                                        uint32_t recorderHistorySeconds = 300,
-                                        uint32_t cyclePeriodUs = 1000);
+                                        DeviceManagerConfig config = {});
 
   /// @brief Scans the bus for nodes and populates the device list.
   ///
@@ -536,10 +545,8 @@ class DeviceManager {
   std::unique_ptr<mm::comm::FieldbusDriver> driver_;
   std::vector<Device> devices_;
   std::unique_ptr<ProcessData> pd_;
-  // Recorder ring sizing, captured at init(): the ring (allocated at configureProcessData) holds
-  // recorderHistorySeconds_ of cycles at the GameLoop period cyclePeriodUs_.
-  uint32_t recorderHistorySeconds_ = 300;
-  uint32_t cyclePeriodUs_ = 1000;
+  // Runtime tuning captured at init(); drives recorder-ring sizing at configureProcessData.
+  DeviceManagerConfig config_;
 };
 
 /// @brief Serialises all devices in a DeviceManager to a JSON array.

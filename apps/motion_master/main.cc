@@ -125,8 +125,10 @@ int main(int argc, char** argv) {
       spdlog::error("{}", driver.error());
       return 1;
     }
-    if (auto result = deviceManager.init(std::move(*driver), opts.config.recorder.historySeconds,
-                                         opts.config.gameLoop.periodUs);
+    if (auto result = deviceManager.init(
+            std::move(*driver),
+            {.recorderHistorySeconds = opts.config.recorder.historySeconds,
+             .cyclePeriodUs = opts.config.gameLoop.periodUs});
         !result) {
       spdlog::error("DeviceManager init failed: {}", result.error());
       return 1;
@@ -258,7 +260,9 @@ int main(int argc, char** argv) {
             }
             auto driver = makeDriver(type, ifname);
             if (!driver) return std::unexpected(driver.error());
-            return deviceManager.init(std::move(*driver), historySeconds, periodUs);
+            return deviceManager.init(
+                std::move(*driver),
+                {.recorderHistorySeconds = historySeconds, .cyclePeriodUs = periodUs});
           },
           .getLog = [ringLogSink]() { return ringLogSink->entries(); },
           .refreshCert = [certFile = opts.config.tls.certPath, keyFile = opts.config.tls.keyPath,

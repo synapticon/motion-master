@@ -7,7 +7,9 @@
 #include <atomic>
 #include <chrono>
 #include <cstddef>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -22,6 +24,7 @@
 #include <vector>
 
 #include "node/process_data.h"
+#include "node/process_data_dump.h"
 
 namespace mm::node {
 
@@ -107,7 +110,7 @@ bool isValidStateTransition(EtherCatState currentState, EtherCatState targetStat
 }  // namespace
 
 std::expected<void, std::string> DeviceManager::init(
-    std::unique_ptr<mm::comm::FieldbusDriver> driver, DeviceManagerConfig config) {
+    std::unique_ptr<mm::comm::FieldbusDriver> driver, const DeviceManagerConfig& config) {
   std::unique_lock lock(busMutex_);
   // init() is a one-shot: replacing a live driver would destroy it while the
   // Devices in devices_ still hold a FieldbusDriver& to it, leaving every Device
@@ -438,6 +441,115 @@ ProcessImageInfo DeviceManager::processImageInfo() const {
   info.outputs = flatten(describe->outputs);
   info.inputs = flatten(describe->inputs);
   return info;
+}
+
+std::expected<std::string, std::string> DeviceManager::dumpProcessData() {
+  // Shared lock: serialise against the exclusive mutators (init/scan/reset/configure) that rebuild
+  // devices_ and the retained image generations, exactly as the other off-thread read surfaces do.
+  // The RT producer is never blocked — it appends to the ring lock-free; we only read the ring.
+  std::shared_lock lock(busMutex_);
+
+  // Header image: the live published image, or — once the bus has left the exchange states and the
+  // image was torn down — the most recent retained generation (kept until reset()/scan()). Records
+  // currently in the ring were all written under this layout (a layout-changing re-map resets the
+  // ring), so it is the correct decode header for the whole span.
+  const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
+  if (image == nullptr && !pd_->generations.empty()) {
+    image = pd_->generations.back().get();
+  }
+  if (image == nullptr) {
+    return std::unexpected("no process image has been mapped — nothing to dump");
+  }
+  if (!pd_->ring.allocated() || pd_->ring.head() == 0) {
+    return std::unexpected("the recorder is empty — no cycles have been recorded yet");
+  }
+
+  // Freeze the span at this instant. While exchanging, the producer keeps advancing head() during
+  // the write; we only serialise this [start, end) snapshot and ignore later cycles. A record the
+  // producer laps mid-read is skipped by readRecord and self-describes via its sequence.
+  const uint64_t startSeq = pd_->ring.oldestValidSeq();
+  const uint64_t endSeq = pd_->ring.head();
+
+  // Build the embedded header: every discovered device's identity, then its PDO objects (both
+  // directions) resolved to name + data type from its parameter map (empty/0 if the OD was not
+  // enumerated), in image order.
+  DumpHeader header;
+  header.cyclePeriodUs = config_.cyclePeriodUs;
+  header.inputBytes = image->inputBytes;
+  header.outputBytes = image->outputBytes;
+
+  std::map<uint16_t, size_t> deviceIndex;
+  for (const Device& d : devices_) {
+    deviceIndex.emplace(d.slavePosition(), header.devices.size());
+    header.devices.push_back(DumpDevice{.slavePosition = d.slavePosition(),
+                                        .vendorId = d.vendorId(),
+                                        .productCode = d.productCode(),
+                                        .revisionNumber = d.revisionNumber(),
+                                        .serialNumber = d.serialNumber(),
+                                        .name = d.name(),
+                                        .entries = {}});
+  }
+  auto appendEntries = [&](const std::vector<ProcessImageEntry>& entries, bool isOutput) {
+    for (const ProcessImageEntry& e : entries) {
+      auto it = deviceIndex.find(e.slavePosition);
+      if (it == deviceIndex.end()) {
+        continue;  // entry for a device no longer present — skip (cannot happen under busMutex_)
+      }
+      DumpPdoEntry pe{.index = e.index,
+                      .subindex = e.subindex,
+                      .isOutput = isOutput,
+                      .dataType = 0,
+                      .bitLength = e.bitLength,
+                      .bitOffset = e.bitOffset,
+                      .name = {}};
+      if (const Device* dev = findDevice(e.slavePosition)) {
+        if (const DeviceParameter* p = dev->parameter(e.index, e.subindex)) {
+          pe.name = p->name;
+          pe.dataType = p->dataType;
+        }
+      }
+      header.devices[it->second].entries.push_back(std::move(pe));
+    }
+  };
+  appendEntries(image->outputs, /*isOutput=*/true);
+  appendEntries(image->inputs, /*isOutput=*/false);
+
+  // Resolve the output directory (empty => <temp>/motion-master, cross-platform) and create it.
+  namespace fs = std::filesystem;
+  std::error_code ec;
+  fs::path dir = config_.dumpDir.empty() ? fs::temp_directory_path(ec) / "motion-master"
+                                         : fs::path(config_.dumpDir);
+  if (ec) {
+    return std::unexpected("could not resolve a temporary directory: " + ec.message());
+  }
+  fs::create_directories(dir, ec);
+  if (ec) {
+    return std::unexpected("could not create dump directory '" + dir.string() +
+                           "': " + ec.message());
+  }
+
+  // dump-<UTC>-<endSeq>.mmpd — the trailing sequence keeps two dumps in the same second distinct.
+  const auto nowSec = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+  const std::string filename = std::format("dump-{:%Y%m%dT%H%M%SZ}-{}.mmpd", nowSec, endSeq);
+  const fs::path path = dir / filename;
+
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  if (!out) {
+    return std::unexpected("could not open dump file '" + path.string() + "' for writing");
+  }
+  auto written = writeProcessDataDump(out, header, startSeq, endSeq,
+                                      [this](uint64_t seq, ProcessDataRing::Record& rec) {
+                                        return pd_->ring.readRecord(seq, rec);
+                                      });
+  out.close();
+  if (!written) {
+    std::error_code rmEc;
+    fs::remove(path, rmEc);  // do not leave a truncated file behind
+    return std::unexpected(written.error());
+  }
+  spdlog::info("Dumped {} process-data cycles ([{}, {})) to {}", *written, startSeq, endSeq,
+               path.string());
+  return path.string();
 }
 
 std::vector<SlaveConfigInfo> DeviceManager::busConfig() const {

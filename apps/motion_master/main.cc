@@ -127,7 +127,8 @@ int main(int argc, char** argv) {
     }
     if (auto result = deviceManager.init(
             std::move(*driver), {.recorderHistorySeconds = opts.config.recorder.historySeconds,
-                                 .cyclePeriodUs = opts.config.gameLoop.periodUs});
+                                 .cyclePeriodUs = opts.config.gameLoop.periodUs,
+                                 .dumpDir = opts.config.recorder.dumpDir});
         !result) {
       spdlog::error("DeviceManager init failed: {}", result.error());
       return 1;
@@ -247,11 +248,11 @@ int main(int argc, char** argv) {
           .keyFile = opts.config.tls.keyPath,
           .version = std::string{mm::core::kVersion},
           .startedConfig = nlohmann::json(opts.config).dump(),
-          .initDriver = [&deviceManager, makeDriver,
-                         historySeconds = opts.config.recorder.historySeconds,
-                         periodUs = opts.config.gameLoop.periodUs](
-                            const std::string& type,
-                            const std::string& adapter) -> std::expected<void, std::string> {
+          .initDriver =
+              [&deviceManager, makeDriver, historySeconds = opts.config.recorder.historySeconds,
+               periodUs = opts.config.gameLoop.periodUs, dumpDir = opts.config.recorder.dumpDir](
+                  const std::string& type,
+                  const std::string& adapter) -> std::expected<void, std::string> {
             std::string ifname = adapter;
             if (!adapter.empty()) {
               auto resolved = mm::comm::resolveNetworkAdapter(adapter);
@@ -261,7 +262,8 @@ int main(int argc, char** argv) {
             auto driver = makeDriver(type, ifname);
             if (!driver) return std::unexpected(driver.error());
             return deviceManager.init(std::move(*driver), {.recorderHistorySeconds = historySeconds,
-                                                           .cyclePeriodUs = periodUs});
+                                                           .cyclePeriodUs = periodUs,
+                                                           .dumpDir = dumpDir});
           },
           .getLog = [ringLogSink]() { return ringLogSink->entries(); },
           .refreshCert = [certFile = opts.config.tls.certPath, keyFile = opts.config.tls.keyPath,

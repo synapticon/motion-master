@@ -2002,6 +2002,37 @@ export class Api<
         ...params,
       }),
   };
+  processData = {
+    /**
+     * @description Serialises the process-data recorder's current span — every cycle from the oldest still in the ring up to the newest at the instant of the call — to a `.mmpd` file and returns its path. Each cycle's full raw input and output images, sequence, and epoch-nanosecond timestamp are written, with the process image (per-device identity and PDO object layout, including object names and data types where the object dictionary has been enumerated) embedded as a header, so the file decodes fully offline with no running Motion Master and no live bus. Works in any state: while devices are exchanging (SAFE-OP/OP) it captures tail→head at that moment and ignores cycles recorded afterwards; after the bus has left the exchange states it uses the most recent retained image layout. The file is written under the configured `recorder.dumpDir` (default: a `motion-master` subdirectory of the OS temporary directory), created if absent. Motion Master binds 127.0.0.1, so the file is on the caller's own machine — only the path is returned (there is no download, list, or delete endpoint).
+     *
+     * @name DumpProcessData
+     * @summary Dump the recorder ring to a binary .mmpd file
+     * @request POST:/api/process-data/dump
+     */
+    dumpProcessData: (params: RequestParams = {}) =>
+      this.request<
+        {
+          /**
+           * Absolute path of the written .mmpd file
+           * @example "/tmp/motion-master/dump-20260610T141530Z-300123.mmpd"
+           */
+          path: string;
+        },
+        {
+          /**
+           * Human-readable reason the dump could not be produced
+           * @example "the recorder is empty — no cycles have been recorded yet"
+           */
+          error: string;
+        }
+      >({
+        path: `/api/process-data/dump`,
+        method: "POST",
+        format: "json",
+        ...params,
+      }),
+  };
   busConfig = {
     /**
      * @description Returns the static ESC configuration the master programmed into every slave during the last scan: station/alias addresses, mapped process-data sizes, the mailbox transport windows, the distributed-clock setup, and the configured Sync Managers and FMMUs. Read from cached state with no bus I/O and valid once the bus has been scanned. The list is empty before any scan, or when the active transport has no ESC (e.g. SPoE). Numeric fields (SM/FMMU type, mailbox protocol bits, SM flags) are raw register values; the client decodes them. `deviceName` is empty when no known device occupies the slave.

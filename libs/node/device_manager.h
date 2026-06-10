@@ -126,6 +126,9 @@ struct DeviceManagerConfig {
   /// The GameLoop cycle period in microseconds, used with the history depth to size the ring
   /// (capacity = recorderHistorySeconds * 1e6 / cyclePeriodUs).
   uint32_t cyclePeriodUs = 1000;
+  /// Directory for `.mmpd` recorder dumps. Empty resolves to a @c "motion-master" subdirectory of
+  /// the OS temporary directory at dump time. Passed through to @c dumpProcessData.
+  std::string dumpDir;
 };
 
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.
@@ -153,7 +156,7 @@ class DeviceManager {
   /// @return Void on success, or an error string if a driver is already held or
   ///         driver initialisation fails.
   std::expected<void, std::string> init(std::unique_ptr<mm::comm::FieldbusDriver> driver,
-                                        DeviceManagerConfig config = {});
+                                        const DeviceManagerConfig& config = {});
 
   /// @brief Scans the bus for nodes and populates the device list.
   ///
@@ -274,6 +277,26 @@ class DeviceManager {
   /// generations. Returns @c configured false with empty object lists when no image is
   /// published. Runs on the (non-RT) caller's thread; reads the published image lock-free.
   ProcessImageInfo processImageInfo() const;
+
+  /// @brief Serialises the recorder's current span to a `.mmpd` dump file and returns its path.
+  ///
+  /// Freezes the recorder span at the instant of the call — @c [recorderOldestSeq(),
+  /// recorderHead()) — and writes every cycle in it (full raw inputs + outputs, sequence,
+  /// epoch-ns timestamp) plus the process image embedded as a header, so the file decodes fully
+  /// offline. Works in any state: while exchanging (OP/SAFE-OP) it dumps tail→head at that moment
+  /// and ignores cycles the producer records afterwards; after teardown it uses the most recent
+  /// retained image generation. The header objects' names/data types come from each device's
+  /// parameter map (empty/0 when the object dictionary has not been enumerated).
+  ///
+  /// The file is written to the configured @c dumpDir (created if absent); an empty @c dumpDir
+  /// (the default) resolves to a @c "motion-master" subdirectory of the OS temporary directory. The
+  /// filename is @c dump-<UTC-timestamp>-<endSequence>.mmpd. Motion Master binds @c 127.0.0.1, so
+  /// the file is on the caller's own machine — the path is all that is returned (no
+  /// download/list/delete).
+  ///
+  /// @return The absolute path of the written file, or an error string if no image has ever been
+  ///         mapped, the recorder is empty, or the directory/file could not be written.
+  std::expected<std::string, std::string> dumpProcessData();
 
   /// @brief Snapshots each slave's static ESC configuration (SM, FMMU, mailbox, DC) for the API.
   ///

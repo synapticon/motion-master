@@ -17,3 +17,9 @@ test('started configuration', async () => {
     recorder: expect.any(Object),
   });
 });
+
+test('POST /api/process-data/dump is 409 with no process image', async () => {
+  // The server under test in CI has no fieldbus, so no image has ever been mapped — the dump has
+  // nothing to serialise and must reject. The full dump path is exercised on hardware.
+  await expect(api.processData.dumpProcessData()).rejects.toMatchObject({ status: 409 });
+});

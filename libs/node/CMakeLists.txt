@@ -6,6 +6,7 @@ add_library(node STATIC
     monitoring.cc
     monitoring_manager.cc
     parameter_refresher.cc
+    process_data_dump.cc
     process_data_ring.cc
     process_image.cc
     somanet_drive.cc

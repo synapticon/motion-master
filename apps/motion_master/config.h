@@ -46,6 +46,10 @@ struct RecorderConfig {
   /// configuration to hold this many seconds of cycles at the GameLoop period, so RAM ≈
   /// historySeconds × (1e6 / periodUs) × per-cycle image bytes (~400). 300 s ≈ 120 MB.
   uint32_t historySeconds = 300;
+  /// Directory for `.mmpd` recorder dumps written by @c POST @c /api/process-data/dump. Empty
+  /// means a @c "motion-master" subdirectory of the OS temporary directory (resolved at dump time,
+  /// cross-platform — never a hardcoded @c /tmp). The directory is created on first dump.
+  std::string dumpDir;
 };
 
 /// @brief The whole config file. Top-level keys map to these members.
@@ -62,7 +66,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ServerConfig, httpPort, wsPort, 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FieldbusConfig, driver, adapter)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TlsConfig, certPath, keyPath, autoUpdate)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(GameLoopConfig, periodUs)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RecorderConfig, historySeconds)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RecorderConfig, historySeconds, dumpDir)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logLevel, tls, gameLoop,
                                                 recorder)
 

@@ -749,6 +749,20 @@ void HttpServer::run() {
                 sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
               });
             })
+      .post("/api/process-data/dump",
+            [this](auto* res, auto* /*req*/) {
+              auto aborted = std::make_shared<bool>(false);
+              res->onAborted([aborted]() { *aborted = true; });
+              res->onData([this, res, aborted](std::string_view /*data*/, bool last) {
+                if (!last) return;
+                if (*aborted) return;
+                if (auto r = deviceManager_.dumpProcessData(); !r) {
+                  sendError(res, "409 Conflict", config_.corsOrigin, r.error());
+                } else {
+                  sendJson(res, config_.corsOrigin, nlohmann::json{{"path", *r}});
+                }
+              });
+            })
       .post("/api/devices/state",
             [this](auto* res, auto* /*req*/) {
               auto aborted = std::make_shared<bool>(false);

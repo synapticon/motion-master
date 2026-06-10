@@ -282,6 +282,12 @@ curl -k https://localhost:61447/api/bus-config
 # Process-image layout: every PDO-mapped object resolved to a bit offset, plus working-counter health
 curl -k https://localhost:61447/api/process-image
 
+# Dump the lossless recorder to a binary .mmpd file (full raw inputs+outputs for every cycle in the
+# ring, with the process image embedded as a header so it decodes offline). Captures the ring from
+# oldest to newest at the moment of the call — works while exchanging too. The file is written on the
+# server's machine under recorder.dumpDir (default: <temp>/motion-master); the response is its path.
+curl -k -X POST https://localhost:61447/api/process-data/dump
+
 # Current AL state of every device (1=Init, 2=PreOp, 3=Boot, 4=SafeOp, 8=Op)
 curl -k https://localhost:61447/api/devices/state
 

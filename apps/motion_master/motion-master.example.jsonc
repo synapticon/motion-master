@@ -31,6 +31,16 @@
     "periodUs": 1000  // cyclic timer period in microseconds (1000 = 1 ms); must be > 0
   },
 
+  // Lossless process-data recorder (the flight-data ring every RT cycle is appended to).
+  "recorder": {
+    // Depth of the ring in seconds; sized at process-image configuration to hold this many
+    // seconds of cycles at the gameLoop period. RAM ≈ historySeconds × (1e6/periodUs) × ~400 B.
+    "historySeconds": 300,
+    // Directory for .mmpd dumps written by POST /api/process-data/dump.
+    // Empty = a "motion-master" subdirectory of the OS temp directory (created on first dump).
+    "dumpDir": ""
+  },
+
   // TLS certificate for the HTTPS API and secure WebSocket.
   "tls": {
     "certPath": "cert.pem",

@@ -1431,6 +1431,53 @@ paths:
                     description: Input-mapped objects (TxPDO), in image order
                     items:
                       $ref: "#/components/schemas/ProcessImageObject"
+  /api/process-data/dump:
+    post:
+      summary: Dump the recorder ring to a binary .mmpd file
+      description: >-
+        Serialises the process-data recorder's current span — every cycle from the
+        oldest still in the ring up to the newest at the instant of the call — to a
+        `.mmpd` file and returns its path. Each cycle's full raw input and output
+        images, sequence, and epoch-nanosecond timestamp are written, with the
+        process image (per-device identity and PDO object layout, including object
+        names and data types where the object dictionary has been enumerated)
+        embedded as a header, so the file decodes fully offline with no running
+        Motion Master and no live bus. Works in any state: while devices are
+        exchanging (SAFE-OP/OP) it captures tail→head at that moment and ignores
+        cycles recorded afterwards; after the bus has left the exchange states it
+        uses the most recent retained image layout. The file is written under the
+        configured `recorder.dumpDir` (default: a `motion-master` subdirectory of
+        the OS temporary directory), created if absent. Motion Master binds
+        127.0.0.1, so the file is on the caller's own machine — only the path is
+        returned (there is no download, list, or delete endpoint).
+      operationId: dumpProcessData
+      responses:
+        "200":
+          description: The dump was written
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path]
+                properties:
+                  path:
+                    type: string
+                    description: Absolute path of the written .mmpd file
+                    example: /tmp/motion-master/dump-20260610T141530Z-300123.mmpd
+        "409":
+          description: >-
+            Nothing to dump — no process image has ever been mapped, or the recorder
+            is empty (no cycles recorded yet) — or the file could not be written.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: Human-readable reason the dump could not be produced
+                    example: "the recorder is empty — no cycles have been recorded yet"
   /api/bus-config:
     get:
       summary: Inspect each slave's static EtherCAT Slave Controller configuration

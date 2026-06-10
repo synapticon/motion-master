@@ -99,10 +99,21 @@ classDiagram
     class PdoMappings
     class ProcessData {
         +readPdo() / writePdo() «lock-free»
+        +healthy()
         -atomic~ProcessImage*~ image
         -vector~atomic_u64~ outputSlots
-        -SeqLock~ProcessBuffer~ outputSnapshot
-        -SeqLock~ProcessBuffer~ inputSnapshot
+        -ProcessDataRing ring
+        -atomic~int~ lastWkc, expectedWkc
+        -atomic~bool~ exchanging
+    }
+    class ProcessDataRing {
+        +write() «RT, wait-free»
+        +head() / oldestValidSeq()
+        +readRecord(seq, Record&) «lock-free»
+        +allocate() / clear()
+        -vector~uint8~ buffer_
+        -vector~atomic_u64~ seqWords_
+        -atomic~u64~ head_
     }
     class ProcessImage
     class ProfileDevice {
@@ -135,6 +146,7 @@ classDiagram
     DeviceManager *-- "1" FieldbusDriver : owns
     DeviceManager *-- "0..*" Device : owns
     DeviceManager *-- "1" ProcessData : owns (pd_)
+    ProcessData *-- "1" ProcessDataRing : owns (recorder)
     ProcessData o-- "0..*" ProcessImage : generations
     Device ..> FieldbusDriver : ref (shared)
     Device ..> ProcessData : ref (live IO image)
@@ -161,6 +173,8 @@ classDiagram
 | `DeviceManager` | `driver_` | `unique_ptr<FieldbusDriver>` | **Yes (exclusive)** | `libs/node/device_manager.h` |
 | `DeviceManager` | `devices_` | `vector<Device>` | **Yes** | `libs/node/device_manager.h` |
 | `DeviceManager` | `pd_` | `unique_ptr<ProcessData>` | **Yes** | `libs/node/device_manager.h` |
+| `ProcessData` | `ring` | `ProcessDataRing` | **Yes** | `libs/node/process_data.h` |
+| `ProcessData` | `outputSlots` | `vector<atomic<uint64_t>>` | **Yes** | `libs/node/process_data.h` |
 | `ProcessData` | `generations` | `vector<shared_ptr<const ProcessImage>>` | **Yes (retained)** | `libs/node/process_data.h` |
 | `Device` | `driver_` | `FieldbusDriver&` | No — same instance `DeviceManager` owns | `libs/node/device.h` |
 | `Device` | `processData_` | `ProcessData*` | No — points at `DeviceManager::pd_` | `libs/node/device.h` |

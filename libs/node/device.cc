@@ -90,6 +90,10 @@ std::expected<std::vector<uint8_t>, std::string> Device::readSii() const {
   return driver_.readSii(slavePosition_);
 }
 
+std::expected<void, std::string> Device::writeSii(std::span<const uint8_t> data) const {
+  return driver_.writeSii(slavePosition_, data);
+}
+
 std::expected<void, std::string> Device::initializeParameters(bool readValues) {
   auto entries = driver_.readObjectDictionary(slavePosition_);
   if (!entries) {

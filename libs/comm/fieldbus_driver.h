@@ -529,6 +529,27 @@ class FieldbusDriver {
     return std::unexpected("SII (EEPROM) read not supported by this transport");
   }
 
+  /// @brief Writes a raw SII (EEPROM) image to a slave.
+  ///
+  /// Writes @p data to the slave's EEPROM through the ESC's EEPROM-control registers, one 16-bit
+  /// word at a time from word address 0. @p data must be a whole number of 16-bit words (even
+  /// length). This is a destructive control-plane operation: a malformed image can leave the slave
+  /// unidentifiable until re-flashed. EEPROM access takes the socket mutex, must not overlap with
+  /// @c exchangeProcessData, and is only safe while the slave is in INIT or PRE-OP. The slave does
+  /// not adopt the new contents until its ESC reloads the EEPROM — i.e. after a power cycle.
+  ///
+  /// Optional capability: the default returns an error for transports without an ESC EEPROM
+  /// (e.g. SPoE); the SOEM driver overrides it.
+  ///
+  /// @param slavePosition  1-based slave position on the bus.
+  /// @param data           Raw SII image to write (even length).
+  /// @return Void on success, or an error string if the transport has no EEPROM, the position is
+  ///         out of range, @p data has an odd length, or a word write fails.
+  virtual std::expected<void, std::string> writeSii(uint16_t /*slavePosition*/,
+                                                    std::span<const uint8_t> /*data*/) {
+    return std::unexpected("SII (EEPROM) write not supported by this transport");
+  }
+
   /// @brief Reads a file from the slave via File over EtherCAT (FoE).
   ///
   /// Sends an FoE read request for @p filename and collects all data packets from the slave.

@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useParams } from 'react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import { useQuery } from '@tanstack/react-query'
 import DevicePageHeader from '../components/DevicePageHeader'
 import SiiExplainer from '../components/SiiExplainer'
@@ -17,9 +18,13 @@ export default function SiiPage() {
   const { deviceId } = useParams()
   const slavePosition = Number(deviceId)
   const { api } = useConnection()
+  const queryClient = useQueryClient()
+  const writeInputRef = useRef<HTMLInputElement>(null)
   const [showRaw, setShowRaw] = useState(false)
   const [fetchMs, setFetchMs] = useState<number | null>(null)
   const [downloading, setDownloading] = useState(false)
+  const [writing, setWriting] = useState(false)
+  const [writeStatus, setWriteStatus] = useState<{ ok: boolean; msg: string } | null>(null)
 
   const query = useQuery({
     queryKey: ['sii', slavePosition],
@@ -57,6 +62,48 @@ export default function SiiPage() {
     }
   }
 
+  async function onWriteFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    e.target.value = '' // allow re-selecting the same file
+    if (!file) {
+      return
+    }
+    const bytes = new Uint8Array(await file.arrayBuffer())
+    const confirmed = window.confirm(
+      `Write ${bytes.length} bytes from "${file.name}" to the EEPROM of slave ${slavePosition}?\n\n` +
+        `This overwrites the device's Slave Information Interface. A wrong image can leave the ` +
+        `device unidentifiable until it is re-flashed. The device must be power-cycled afterwards ` +
+        `to apply the change, and writing is safest while it is in INIT or PRE-OP.`,
+    )
+    if (!confirmed) {
+      return
+    }
+    setWriting(true)
+    setWriteStatus(null)
+    try {
+      const res = await fetch(`${api.baseUrl}/api/devices/${slavePosition}/sii`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: bytes,
+      })
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => null)
+        throw new Error(errBody?.error ?? `HTTP ${res.status}`)
+      }
+      setWriteStatus({
+        ok: true,
+        msg: `Wrote ${bytes.length} bytes from "${file.name}". Power-cycle the device to apply.`,
+      })
+      // The on-device identity won't change until a power cycle, but refresh the read-back so the
+      // raw view reflects what is now stored.
+      await queryClient.invalidateQueries({ queryKey: ['sii-raw', slavePosition] })
+    } catch (err) {
+      setWriteStatus({ ok: false, msg: err instanceof Error ? err.message : 'Write failed.' })
+    } finally {
+      setWriting(false)
+    }
+  }
+
   const sii = query.data?.data
 
   return (
@@ -85,8 +132,29 @@ export default function SiiPage() {
             <button onClick={handleDownload} disabled={downloading} className={btnOutline}>
               {downloading ? 'Downloading…' : 'Download SII'}
             </button>
+            <input
+              ref={writeInputRef}
+              type="file"
+              accept=".bin,application/octet-stream"
+              onChange={onWriteFileChange}
+              className="hidden"
+            />
+            <button
+              onClick={() => writeInputRef.current?.click()}
+              disabled={writing}
+              title="Overwrite the device EEPROM with an SII image from a file. Destructive — requires a power cycle to apply. Best done in INIT or PRE-OP."
+              className="border border-status-bad text-status-bad px-3 py-1.5 text-xs hover:bg-status-bad hover:text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+            >
+              {writing ? 'Writing…' : 'Write SII…'}
+            </button>
           </div>
         </div>
+
+        {writeStatus && (
+          <p className={`text-xs font-mono ${writeStatus.ok ? 'text-status-good' : 'text-status-bad'}`}>
+            {writeStatus.msg}
+          </p>
+        )}
 
         {query.isError && (
           <p className="text-xs text-status-bad font-mono">

@@ -139,6 +139,17 @@ class Device {
   /// @return The raw SII image on success, or an error string on failure.
   std::expected<std::vector<uint8_t>, std::string> readSii() const;
 
+  /// @brief Writes a raw SII (EEPROM) image to this device.
+  ///
+  /// Delegates to the fieldbus driver's @c writeSii using this device's slave position.
+  /// Destructive: a malformed image can leave the device unidentifiable until re-flashed. The
+  /// device adopts the new contents only after a power cycle. Most reliable while the device is in
+  /// INIT or PRE-OP.
+  ///
+  /// @param data  Raw SII image to write (even length).
+  /// @return Void on success, or an error string on failure.
+  std::expected<void, std::string> writeSii(std::span<const uint8_t> data) const;
+
   /// @brief Enumerates the device's CoE object dictionary and populates @c parameters().
   ///
   /// Requires the device to be in PRE-OP, SAFE-OP, or OP (mailbox communication

@@ -454,6 +454,49 @@ void HttpServer::run() {
              }
              sendJson(res, config_.corsOrigin, nlohmann::json(*parsed));
            })
+      .put("/api/devices/:slavePosition/sii",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p, ec] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             bool posOk = (ec == std::errc() && p == posParam.data() + posParam.size());
+             auto aborted = std::make_shared<bool>(false);
+             auto body = std::make_shared<std::string>();
+             res->onAborted([aborted]() { *aborted = true; });
+             res->onData([this, res, body, aborted, pos, posOk](std::string_view chunk, bool last) {
+               body->append(chunk);
+               if (!last) {
+                 return;
+               }
+               if (*aborted) {
+                 return;
+               }
+               if (!posOk) {
+                 sendStatus(res, "400 Bad Request", config_.corsOrigin);
+                 return;
+               }
+               std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(body->data()),
+                                             body->size()};
+               // Reject an image that does not parse before touching the EEPROM — a guard against
+               // bricking the device by writing garbage.
+               if (auto parsed = mm::comm::parseSii(data); !parsed) {
+                 sendError(res, "400 Bad Request", config_.corsOrigin,
+                           std::string("not a valid SII image: ") + parsed.error());
+                 return;
+               }
+               const auto* device = deviceManager_.findDevice(pos);
+               if (!device) {
+                 sendStatus(res, "404 Not Found", config_.corsOrigin);
+                 return;
+               }
+               if (auto r = device->writeSii(data); !r) {
+                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
+                 return;
+               }
+               sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
+             });
+           })
       .post("/api/sii/parse",
             [this](auto* res, auto* /*req*/) {
               // Bus-independent utility: parse a raw SII image uploaded in the request body (e.g. a

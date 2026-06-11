@@ -103,6 +103,10 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// @copydoc FieldbusDriver::readSii
   std::expected<std::vector<uint8_t>, std::string> readSii(uint16_t slavePosition) override;
 
+  /// @copydoc FieldbusDriver::writeSii
+  std::expected<void, std::string> writeSii(uint16_t slavePosition,
+                                            std::span<const uint8_t> data) override;
+
   /// @copydoc FieldbusDriver::readFile
   std::expected<std::vector<uint8_t>, std::string> readFile(uint16_t slavePosition,
                                                             const std::string& filename) override;

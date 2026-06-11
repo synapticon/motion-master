@@ -625,6 +625,43 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSii(
   return sii;
 }
 
+std::expected<void, std::string> SoemFieldbusDriver::writeSii(uint16_t slavePosition,
+                                                              std::span<const uint8_t> data) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("driver not initialised");
+  }
+  if (slavePosition < 1 || slavePosition > ctx_->slavecount) {
+    return std::unexpected(
+        std::format("slave {} out of range (1..{})", slavePosition, ctx_->slavecount));
+  }
+  if (data.size() % 2 != 0) {
+    return std::unexpected(
+        std::format("SII image length {} is odd; EEPROM is written in 16-bit words", data.size()));
+  }
+  // Take EEPROM control from the slave's PDI, then write word-by-word from address 0. Each
+  // ecx_writeeeprom is a full EEPROM transaction (mailbox-paced); a few thousand words takes a
+  // moment, which is fine off the RT loop. Control is handed back to the PDI afterwards. The slave
+  // adopts the new image only when its ESC reloads the EEPROM (power cycle).
+  ecx_eeprom2master(ctx_.get(), slavePosition);
+  const size_t words = data.size() / 2;
+  for (size_t i = 0; i < words; ++i) {
+    const uint16_t word = static_cast<uint16_t>(data[2 * i] | (data[2 * i + 1] << 8));
+    const int wkc =
+        ecx_writeeeprom(ctx_.get(), slavePosition, static_cast<uint16_t>(i), word, EC_TIMEOUTEEP);
+    if (wkc <= 0) {
+      ecx_eeprom2pdi(ctx_.get(), slavePosition);
+      return std::unexpected(
+          std::format("EEPROM write to slave {} failed at word 0x{:04X} ({} of {} words written)",
+                      slavePosition, i, i, words));
+    }
+  }
+  ecx_eeprom2pdi(ctx_.get(), slavePosition);
+  spdlog::info("writeSii slave {} ({} bytes) ok — power-cycle the device to apply", slavePosition,
+               data.size());
+  return {};
+}
+
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
     uint16_t slavePosition, const std::string& filename) {
   std::lock_guard<std::mutex> lock(socketMutex_);

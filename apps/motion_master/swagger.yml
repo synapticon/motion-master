@@ -1175,6 +1175,50 @@ paths:
           description: No device at the given bus position
         "500":
           $ref: "#/components/responses/DriverError"
+    put:
+      summary: Write a raw SII (EEPROM) image to a device
+      operationId: writeSii
+      description: >
+        Writes the raw SII image in the request body to the device's EEPROM, one 16-bit
+        word at a time. The image is parse-validated first and rejected if it is not a
+        well-formed SII (a guard against bricking the device). **Destructive:** a wrong
+        image can leave the device unidentifiable until re-flashed. The device adopts the
+        new contents only after a **power cycle**, and the write is most reliable while
+        the device is in INIT or PRE-OP. Intended for restoring a previously downloaded
+        image.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: SII image written successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        "400":
+          description: slavePosition is invalid, or the body is not a valid SII image
+        "404":
+          description: No device at the given bus position
+        "500":
+          $ref: "#/components/responses/DriverError"
   /api/sii/parse:
     post:
       summary: Parse a raw SII (EEPROM) image

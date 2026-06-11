@@ -906,6 +906,38 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
   // is never held across the poll sleep or the tick()/shouldAbort() callbacks, so
   // a multi-second transition does not block other control-plane callers (and the
   // PDO tick, being lock-free, never contends here).
+
+  // A slave sitting in INIT can silently ignore the next state request — staying in INIT with the
+  // error bit clear and AL status code 0x0000 — when its PDI has latched a stale internal state
+  // (e.g. it lost its previous master to a cable unplugged mid-cycle and never cleanly recovered).
+  // An explicit INIT+ACK cycle re-engages the PDI before the target state is requested; it is
+  // harmless to a healthy slave, which just re-affirms INIT. Only meaningful when leaving INIT, so
+  // skip it when INIT itself is the target. The resend loop below only ACKs slaves that have raised
+  // the error bit, so a cleanly-latched INIT (no error bit) would otherwise never get this kick.
+  // Issued under the lock, then released so the slave can settle without the lock held across the
+  // sleep.
+  if (targetState != EtherCatState::Init) {
+    std::vector<uint16_t> kicked;
+    {
+      std::lock_guard<std::mutex> lock(socketMutex_);
+      ecx_readstate(ctx_.get());
+      for (uint16_t pos : positions) {
+        const uint16_t stateClean = ctx_->slavelist[pos].state & 0x000Fu;
+        if ((!requiredState || stateClean == static_cast<uint16_t>(*requiredState)) &&
+            stateClean == static_cast<uint16_t>(EtherCatState::Init)) {
+          ctx_->slavelist[pos].state = static_cast<uint16_t>(EtherCatState::Init) | EC_STATE_ACK;
+          ecx_writestate(ctx_.get(), pos);
+          kicked.push_back(pos);
+        }
+      }
+    }
+    if (!kicked.empty()) {
+      spdlog::debug("Issued INIT+ACK to {} slave(s) in INIT before requesting state 0x{:02X}",
+                    kicked.size(), targetRaw);
+      std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    }
+  }
+
   std::set<uint16_t> pending;
   {
     std::lock_guard<std::mutex> lock(socketMutex_);

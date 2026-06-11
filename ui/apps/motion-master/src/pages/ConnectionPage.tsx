@@ -32,6 +32,44 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
+type ChainLink = { subject: string; issuer: string; organization: string; issuerOrganization: string }
+
+// Renders the served certificate chain leaf-first. The PEM stops at the intermediate (the root
+// lives in the OS trust store and is not transmitted), so we append a synthetic root node named by
+// the last link's issuer — unless that link is self-signed (issuer == subject, e.g. a dev cert),
+// in which case there is no separate root to show. Each entry shows the common name with the
+// organization (O) beside it, since the friendly CA name ("Let's Encrypt") lives in O, not the CN.
+function CertChain({ chain }: { chain: ChainLink[] }) {
+  const last = chain[chain.length - 1]
+  const rootName = last && last.issuer !== last.subject ? last.issuer : null
+  const selfSigned = chain.length === 1 && chain[0].issuer === chain[0].subject
+  const role = (i: number) => (selfSigned ? 'Self-signed' : i === 0 ? 'Leaf' : 'Intermediate CA')
+  return (
+    <div>
+      <p className={labelCls}>Certificate chain</p>
+      <ol className="text-sm space-y-1.5">
+        {chain.map((link, i) => (
+          <li key={i} className="break-all" style={{ paddingLeft: `${i * 1.25}rem` }}>
+            <span className="text-xs uppercase tracking-wide text-grey-400 mr-2">{role(i)}</span>
+            {link.subject}
+            {link.organization && <span className="text-grey-500"> · {link.organization}</span>}
+          </li>
+        ))}
+        {rootName && (
+          <li className="break-all" style={{ paddingLeft: `${chain.length * 1.25}rem` }}>
+            <span className="text-xs uppercase tracking-wide text-grey-400 mr-2">Root CA</span>
+            {rootName}
+            {last.issuerOrganization && (
+              <span className="text-grey-500"> · {last.issuerOrganization}</span>
+            )}
+            <span className="text-xs text-grey-500 ml-1">(in your OS trust store)</span>
+          </li>
+        )}
+      </ol>
+    </div>
+  )
+}
+
 export default function ConnectionPage() {
   const { host, httpPort, wsPort, setHost, setHttpPort, setWsPort, resetEndpoint, api } = useConnection()
   const queryClient = useQueryClient()
@@ -67,13 +105,17 @@ export default function ConnectionPage() {
       <PageHeader
         eyebrow="App"
         title="Connection"
-        description="Configure the host and port used to reach the Motion Master backend."
+        description="Configure the host and ports used to reach the Motion Master backend, check the TLS certificate status and refresh it, and review the configuration the backend started with."
       />
       <div className="p-4 sm:p-8 space-y-8">
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="eyebrow">Endpoint</h2>
-            <button onClick={resetEndpoint} className={btnOutline}>
+            <button
+              onClick={resetEndpoint}
+              className={btnOutline}
+              title="Reset the host and ports to their built-in defaults (local.motion-master.synapticon.com, 61447, 62281) and save them to this browser's local storage, so they persist across reloads."
+            >
               Load defaults
             </button>
           </div>
@@ -88,6 +130,22 @@ export default function ConnectionPage() {
                   placeholder="local.motion-master.synapticon.com"
                   className={inputCls}
                 />
+                <p className="text-xs text-grey-600 mt-1 max-w-prose">
+                  <code>local.motion-master.synapticon.com</code> is a public DNS A record that
+                  resolves to <code>127.0.0.1</code> — your own machine, where Motion Master runs.
+                  Traffic never leaves the loopback interface, yet the address is a real, globally
+                  registered hostname, so Synapticon can obtain a genuine CA-issued TLS certificate
+                  for it that Motion Master serves locally.
+                </p>
+                <p className="text-xs text-grey-600 mt-1 max-w-prose">
+                  This is what makes the connection work. This PWA is served from{' '}
+                  <code>https://motion-master.synapticon.com</code>, a secure origin, so the browser
+                  reaches the backend only over HTTPS and WSS (mixed-content blocking) and every
+                  cross-origin request must pass certificate validation. A self-signed or{' '}
+                  <code>localhost</code> certificate would be rejected outright, with no click-through
+                  — only a publicly trusted certificate for a real hostname is accepted, which is
+                  exactly what this DNS trick provides.
+                </p>
               </div>
               <div>
                 <label className={labelCls}>HTTP Port</label>
@@ -128,12 +186,17 @@ export default function ConnectionPage() {
             {cert && status && (
               <>
                 <p className={`text-sm font-display font-medium ${status.cls}`}>{status.label}</p>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field label="Subject" value={cert.subject} />
-                  <Field label="Issuer" value={cert.issuer} />
-                  <Field label="Valid from" value={formatDate(cert.notBefore)} />
-                  <Field label="Valid until" value={formatDate(cert.notAfter)} />
-                  <Field label="File" value={cert.path} />
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                  <div className="space-y-4 self-start">
+                    <Field label="Subject" value={cert.subject} />
+                    <Field label="Issuer" value={cert.issuer} />
+                    <Field label="File" value={cert.path} />
+                  </div>
+                  <div className="space-y-4 self-start">
+                    <Field label="Valid from" value={formatDate(cert.notBefore)} />
+                    <Field label="Valid until" value={formatDate(cert.notAfter)} />
+                  </div>
+                  {cert.chain && cert.chain.length > 0 && <CertChain chain={cert.chain} />}
                 </div>
               </>
             )}
@@ -151,6 +214,18 @@ export default function ConnectionPage() {
               Downloads the latest certificate from Synapticon's rolling release, verifies it, and
               installs it next to the binary. It does not interrupt the running server — the new
               certificate takes effect the next time you restart Motion Master.
+            </p>
+            <p className="text-xs text-grey-600 mt-2 max-w-prose">
+              Motion Master also self-heals on startup: if the certificate is missing or expired it
+              fetches a fresh one automatically (unless started with <code>--no-cert-update</code>),
+              so a restart normally suffices.
+            </p>
+            <p className="text-xs text-grey-600 mt-2 max-w-prose">
+              Once the certificate has already expired this button can no longer help — the PWA
+              itself can no longer reach the backend over a trusted connection. A plain restart
+              heals it via the startup fetch above; if Motion Master runs with{' '}
+              <code>--no-cert-update</code>, refresh explicitly first with{' '}
+              <code>motion-master --update-cert</code>, then restart.
             </p>
 
             {refreshMutation.isSuccess && (
@@ -173,8 +248,17 @@ export default function ConnectionPage() {
           <h2 className="eyebrow mb-3">Started Configuration</h2>
           <div className="border border-grey-200 p-5 space-y-3">
             <p className="text-xs text-grey-600 max-w-prose">
-              The effective configuration Motion Master booted with — the JSONC config file merged
-              over the built-in defaults. Read-only: edit the config file and restart to change it.
+              The fully-resolved configuration Motion Master booted with. A JSONC config file
+              (passed with <code>-c</code>/<code>--config</code>) is the single source for ports, the
+              fieldbus driver and adapter, log level, the recorder, and TLS paths — there are no
+              command-line flags for these. Any key the file omits keeps its built-in default, so
+              what you see here is the file overlaid on those defaults; with no config file at all it
+              is the pure defaults.
+            </p>
+            <p className="text-xs text-grey-600 max-w-prose">
+              Read-only and captured at startup: it is not re-read while running. To change a value,
+              edit the JSONC file (see <code>motion-master.example.jsonc</code>) and restart Motion
+              Master.
             </p>
 
             {configQuery.isLoading && <p className="text-sm text-grey-600">Loading…</p>}

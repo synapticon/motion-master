@@ -30,18 +30,25 @@ std::chrono::system_clock::time_point asn1TimeToTimePoint(const ASN1_TIME* t) {
   return tmUtcToTimePoint(tm);
 }
 
-// Extracts the common name (CN) from an X509_NAME, or "" if absent.
-std::string commonName(X509_NAME* name) {
+// Extracts a single text entry (by NID) from an X509_NAME, or "" if absent.
+std::string nameEntry(X509_NAME* name, int nid) {
   if (name == nullptr) {
     return {};
   }
   char buf[256];
-  const int len = X509_NAME_get_text_by_NID(name, NID_commonName, buf, sizeof(buf));
+  const int len = X509_NAME_get_text_by_NID(name, nid, buf, sizeof(buf));
   if (len < 0) {
     return {};
   }
   return std::string(buf, static_cast<std::size_t>(len));
 }
+
+// Extracts the common name (CN) from an X509_NAME, or "" if absent.
+std::string commonName(X509_NAME* name) { return nameEntry(name, NID_commonName); }
+
+// Extracts the organization (O) from an X509_NAME, or "" if absent — the friendly CA name
+// (e.g. "Let's Encrypt") that the short CN ("R10", "YE2") does not carry.
+std::string organizationName(X509_NAME* name) { return nameEntry(name, NID_organizationName); }
 
 }  // namespace
 
@@ -52,18 +59,35 @@ std::expected<CertInfo, std::string> readCertInfo(const std::string& certPath) {
     return std::unexpected("cannot open certificate file: " + certPath);
   }
 
-  const std::unique_ptr<X509, decltype(&X509_free)> cert{
+  const std::unique_ptr<X509, decltype(&X509_free)> leaf{
       PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr), X509_free};
-  if (!cert) {
+  if (!leaf) {
     return std::unexpected("cannot parse PEM certificate: " + certPath);
   }
 
-  return CertInfo{
-      .subject = commonName(X509_get_subject_name(cert.get())),
-      .issuer = commonName(X509_get_issuer_name(cert.get())),
-      .notBefore = asn1TimeToTimePoint(X509_get0_notBefore(cert.get())),
-      .notAfter = asn1TimeToTimePoint(X509_get0_notAfter(cert.get())),
+  CertInfo result{
+      .subject = commonName(X509_get_subject_name(leaf.get())),
+      .issuer = commonName(X509_get_issuer_name(leaf.get())),
+      .notBefore = asn1TimeToTimePoint(X509_get0_notBefore(leaf.get())),
+      .notAfter = asn1TimeToTimePoint(X509_get0_notAfter(leaf.get())),
+      .chain = {},
   };
+
+  // Walk every certificate in the PEM, leaf first, recording each link's subject/issuer CNs. The
+  // leaf is already parsed; subsequent PEM_read_bio_X509 calls return the next cert until the BIO
+  // is exhausted (it then returns null, which ends the loop).
+  for (X509* cur = leaf.get(); cur != nullptr;) {
+    result.chain.push_back({.subject = commonName(X509_get_subject_name(cur)),
+                            .issuer = commonName(X509_get_issuer_name(cur)),
+                            .organization = organizationName(X509_get_subject_name(cur)),
+                            .issuerOrganization = organizationName(X509_get_issuer_name(cur))});
+    if (cur != leaf.get()) {
+      X509_free(cur);
+    }
+    cur = PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr);
+  }
+
+  return result;
 }
 
 }  // namespace mm

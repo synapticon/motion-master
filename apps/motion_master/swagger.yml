@@ -229,6 +229,38 @@ paths:
                     type: boolean
                     description: True when expired or within 7 days of notAfter.
                     example: false
+                  chain:
+                    type: array
+                    description: >
+                      Every certificate present in the served PEM file, leaf first, in chain order
+                      (leaf → intermediate(s)). A fullchain PEM usually stops at the intermediate —
+                      the root lives in the OS trust store and is not transmitted — but the last
+                      entry's `issuer` still names that root.
+                    items:
+                      type: object
+                      required: [subject, issuer, organization, issuerOrganization]
+                      properties:
+                        subject:
+                          type: string
+                          description: Subject common name (CN) of this certificate.
+                          example: "local.motion-master.synapticon.com"
+                        issuer:
+                          type: string
+                          description: Issuer common name (CN) — the subject of the next link up.
+                          example: "R10"
+                        organization:
+                          type: string
+                          description: >
+                            Subject organization (O) — the friendly CA name (e.g. "Let's Encrypt")
+                            that the short CN does not carry; empty if absent (leaf certs often have
+                            no O).
+                          example: "Let's Encrypt"
+                        issuerOrganization:
+                          type: string
+                          description: >
+                            Issuer organization (O) — names the next link's (or, for the last link,
+                            the root's) organization; empty if absent.
+                          example: "Internet Security Research Group"
         "500":
           description: The certificate file could not be read or parsed
           content:

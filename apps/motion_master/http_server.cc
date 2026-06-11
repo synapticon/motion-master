@@ -118,6 +118,13 @@ nlohmann::json certInfoJson(const mm::CertInfo& info, const std::string& path) {
   const auto daysRemaining =
       std::chrono::duration_cast<std::chrono::hours>(info.notAfter - now).count() / 24;
   const bool expired = now >= info.notAfter;
+  auto chain = nlohmann::json::array();
+  for (const auto& link : info.chain) {
+    chain.push_back({{"subject", link.subject},
+                     {"issuer", link.issuer},
+                     {"organization", link.organization},
+                     {"issuerOrganization", link.issuerOrganization}});
+  }
   return {{"path", path},
           {"subject", info.subject},
           {"issuer", info.issuer},
@@ -125,7 +132,8 @@ nlohmann::json certInfoJson(const mm::CertInfo& info, const std::string& path) {
           {"notAfter", toIso8601Utc(info.notAfter)},
           {"daysRemaining", daysRemaining},
           {"expired", expired},
-          {"expiresSoon", expired || daysRemaining < mm::kCertExpiryWarningDays}};
+          {"expiresSoon", expired || daysRemaining < mm::kCertExpiryWarningDays},
+          {"chain", chain}};
 }
 
 }  // namespace

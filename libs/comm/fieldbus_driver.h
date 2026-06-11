@@ -509,6 +509,26 @@ class FieldbusDriver {
   virtual std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(
       uint16_t slavePosition) = 0;
 
+  /// @brief Reads the raw Slave Information Interface (SII / EEPROM) image of a slave.
+  ///
+  /// Reads the slave's EEPROM through the ESC's EEPROM-control registers and returns the raw
+  /// byte image — a fixed 128-byte header followed by the self-describing category section
+  /// (strings, general info, FMMU/Sync-Manager and PDO defaults, distributed-clock settings).
+  /// Decode it with @c mm::comm::parseSii. EEPROM access is a control-plane operation: it takes
+  /// the socket mutex per transaction, must not overlap with @c exchangeProcessData, and is most
+  /// reliable while the slave is in INIT or PRE-OP. The driver hands EEPROM control back to the
+  /// slave's PDI before returning.
+  ///
+  /// Optional capability: the default returns an error for transports without an ESC EEPROM
+  /// (e.g. SPoE); the SOEM driver overrides it.
+  ///
+  /// @param slavePosition  1-based slave position on the bus.
+  /// @return The raw SII image on success, or an error string if the transport has no EEPROM,
+  ///         the position is out of range, or the driver is not initialised.
+  virtual std::expected<std::vector<uint8_t>, std::string> readSii(uint16_t /*slavePosition*/) {
+    return std::unexpected("SII (EEPROM) read not supported by this transport");
+  }
+
   /// @brief Reads a file from the slave via File over EtherCAT (FoE).
   ///
   /// Sends an FoE read request for @p filename and collects all data packets from the slave.

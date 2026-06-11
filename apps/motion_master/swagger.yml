@@ -43,6 +43,8 @@ info:
       EtherCAT Slave Controller register bytes.
     - **Files (FoE)** — `GET`/`PUT …/files/{filename}` transfer files to and from
       the device over File-over-EtherCAT (firmware, configuration, logs).
+    - **SII (EEPROM)** — `GET …/sii` reads the Slave Information Interface, returning
+      the parsed structure or the raw EEPROM bytes per the `Accept` header.
     - **Mailbox** — `GET …/mailbox` probes whether a device's CoE/SDO mailbox is
       active (AL state PRE-OP or above).
 
@@ -1111,6 +1113,62 @@ paths:
                   ok:
                     type: boolean
                     example: true
+        "400":
+          description: slavePosition is not a valid integer
+        "404":
+          description: No device at the given bus position
+        "500":
+          $ref: "#/components/responses/DriverError"
+  /api/devices/{slavePosition}/sii:
+    get:
+      summary: Read a device's SII (Slave Information Interface / EEPROM)
+      operationId: readSii
+      description: >
+        Reads the raw SII EEPROM image of the device at `slavePosition` through the
+        ESC's EEPROM-control registers and returns either the parsed structure or the
+        raw bytes, selected by the `Accept` request header.
+
+
+        With `Accept: application/json` (or `*/*`, or no `Accept` header) the parsed
+        `SlaveInformationInterface` is returned — the 128-byte fixed header plus the
+        decoded category section (strings, general info, FMMU/Sync-Manager and PDO
+        defaults, distributed-clock settings).  With `Accept: application/octet-stream`
+        the raw EEPROM image is returned unparsed, suitable for a hex dump or archival.
+
+
+        EEPROM access is a control-plane operation and is most reliable while the
+        device is in INIT or PRE-OP.  String-index fields in the parsed structure
+        (e.g. `general.nameIdx`) are 1-based references into `category.strings`.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: Accept
+          in: header
+          required: false
+          schema:
+            type: string
+            enum: [application/json, application/octet-stream]
+            default: application/json
+          description: >
+            `application/octet-stream` returns the raw EEPROM bytes; anything else
+            returns the parsed JSON structure.
+      responses:
+        "200":
+          description: Parsed SII structure, or the raw EEPROM image
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlaveInformationInterface"
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
         "400":
           description: slavePosition is not a valid integer
         "404":
@@ -2209,6 +2267,134 @@ components:
             offline or after a failed write, not yet confirmed on the device;
             `unknown` — never read, `value` is the type-appropriate default.
           example: "synced"
+    SlaveInformationInterface:
+      type: object
+      description: >
+        Parsed SII (EEPROM) image of a slave — the fixed header plus the decoded
+        category section.  String-index fields are 1-based references into
+        `category.strings`.
+      required: [info, category]
+      properties:
+        info:
+          type: object
+          description: Fixed 128-byte header (identity and mailbox configuration)
+          properties:
+            pdiControl: { type: integer }
+            pdiConfiguration: { type: integer }
+            syncImpulseLen: { type: integer }
+            pdiConfiguration2: { type: integer }
+            configuredStationAlias: { type: integer }
+            checksum: { type: integer }
+            vendorId: { type: integer, example: 8914 }
+            productCode: { type: integer, example: 769 }
+            revisionNumber: { type: integer }
+            serialNumber: { type: integer }
+            bootstrapReceiveMailboxOffset: { type: integer }
+            bootstrapReceiveMailboxSize: { type: integer }
+            bootstrapSendMailboxOffset: { type: integer }
+            bootstrapSendMailboxSize: { type: integer }
+            standardReceiveMailboxOffset: { type: integer }
+            standardReceiveMailboxSize: { type: integer }
+            standardSendMailboxOffset: { type: integer }
+            standardSendMailboxSize: { type: integer }
+            mailboxProtocol:
+              type: integer
+              description: "Bitfield: 0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE, 0x10 SoE, 0x20 VoE"
+              example: 12
+            size:
+              type: integer
+              description: "Raw EEPROM-size word (ETG: size in KiBit − 1)"
+            version: { type: integer }
+        category:
+          type: object
+          description: Decoded SII category section
+          properties:
+            strings:
+              type: array
+              description: STRINGS table (category 10), referenced by 1-based index
+              items: { type: string }
+              example: ["SOMANET", "SOMANET Circulo CiA402 Drive"]
+            general:
+              type: object
+              description: GENERAL device information (category 30)
+              properties:
+                groupIdx: { type: integer }
+                imgIdx: { type: integer }
+                orderIdx: { type: integer }
+                nameIdx: { type: integer }
+                coeDetails: { type: integer }
+                foeDetails: { type: integer }
+                eoeDetails: { type: integer }
+                soeChannels: { type: integer }
+                ds402Channels: { type: integer }
+                sysmanClass: { type: integer }
+                flags: { type: integer }
+                currentOnEBus: { type: integer }
+                physicalPort: { type: integer }
+                physicalMemoryAddress: { type: integer }
+            fmmus:
+              type: array
+              description: FMMU defaults (category 40), one raw 16-bit word per entry
+              items: { type: integer }
+            syncManagers:
+              type: array
+              description: Sync-Manager defaults (category 41)
+              items:
+                type: object
+                properties:
+                  physicalStartAddress: { type: integer }
+                  length: { type: integer }
+                  controlRegister: { type: integer }
+                  statusRegister: { type: integer }
+                  enableSyncManager: { type: integer }
+                  syncManagerType:
+                    type: integer
+                    description: "1 MbxOut, 2 MbxIn, 3 Outputs, 4 Inputs"
+            rxPdos:
+              type: array
+              description: Default RxPDOs (category 51)
+              items: { $ref: "#/components/schemas/SiiPdo" }
+            txPdos:
+              type: array
+              description: Default TxPDOs (category 50)
+              items: { $ref: "#/components/schemas/SiiPdo" }
+            distributedClocks:
+              type: array
+              description: Distributed-clock settings (category 60)
+              items:
+                type: object
+                properties:
+                  cycleTime0: { type: integer }
+                  shiftTime0: { type: integer }
+                  shiftTime1: { type: integer }
+                  sync1CycleFactor: { type: integer }
+                  assignActivate: { type: integer }
+                  sync0CycleFactor: { type: integer }
+                  nameIdx: { type: integer }
+                  descIdx: { type: integer }
+    SiiPdo:
+      type: object
+      description: One default PDO from the SII (RxPDO category 51 or TxPDO category 50)
+      properties:
+        pdoIndex: { type: integer }
+        nEntry:
+          type: integer
+          description: Declared entry count (may exceed `entries.length` if the payload was truncated)
+        syncM: { type: integer }
+        synchronization: { type: integer }
+        nameIdx: { type: integer }
+        flags: { type: integer }
+        entries:
+          type: array
+          items:
+            type: object
+            properties:
+              entryIndex: { type: integer }
+              subindex: { type: integer }
+              entryNameIdx: { type: integer }
+              dataType: { type: integer }
+              bitLen: { type: integer }
+              flags: { type: integer }
   responses:
     DriverError:
       description: Fieldbus driver returned an error

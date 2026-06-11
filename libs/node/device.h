@@ -130,6 +130,15 @@ class Device {
   std::expected<void, std::string> writeRegister(uint16_t address,
                                                  std::span<const uint8_t> data) const;
 
+  /// @brief Reads this device's raw Slave Information Interface (SII / EEPROM) image.
+  ///
+  /// Delegates to the fieldbus driver's @c readSii using this device's slave position. Decode the
+  /// returned bytes with @c mm::comm::parseSii. EEPROM access is most reliable while the device is
+  /// in INIT or PRE-OP.
+  ///
+  /// @return The raw SII image on success, or an error string on failure.
+  std::expected<std::vector<uint8_t>, std::string> readSii() const;
+
   /// @brief Enumerates the device's CoE object dictionary and populates @c parameters().
   ///
   /// Requires the device to be in PRE-OP, SAFE-OP, or OP (mailbox communication

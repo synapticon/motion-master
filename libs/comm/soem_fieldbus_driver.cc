@@ -600,6 +600,31 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
   return entries;
 }
 
+std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSii(
+    uint16_t slavePosition) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("driver not initialised");
+  }
+  if (slavePosition < 1 || slavePosition > ctx_->slavecount) {
+    return std::unexpected(
+        std::format("slave {} out of range (1..{})", slavePosition, ctx_->slavecount));
+  }
+  // SOMANET EEPROMs report a large declared size (the 'size' word, ETG.1000.6 §5.4) but populate
+  // only the first few hundred bytes, terminated by the END (0xFFFF) category. Reading a fixed
+  // conservative window keeps the read bounded and always covers the real content; the parser
+  // stops at END. ecx_siigetbyte caches a 128-byte EEPROM page internally, so this is ~64 EEPROM
+  // transactions rather than one per byte. EEPROM control is handed back to the PDI afterwards.
+  constexpr uint16_t kSiiBytes = 0x2000;  // 8 KiB — conservative upper bound for SII content.
+  std::vector<uint8_t> sii(kSiiBytes);
+  for (uint16_t i = 0; i < kSiiBytes; ++i) {
+    sii[i] = ecx_siigetbyte(ctx_.get(), slavePosition, i);
+  }
+  ecx_eeprom2pdi(ctx_.get(), slavePosition);
+  spdlog::debug("readSii slave {} ({} bytes)", slavePosition, sii.size());
+  return sii;
+}
+
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
     uint16_t slavePosition, const std::string& filename) {
   std::lock_guard<std::mutex> lock(socketMutex_);

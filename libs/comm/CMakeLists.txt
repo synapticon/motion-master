@@ -5,6 +5,7 @@ add_library(comm STATIC
     fieldbus_driver.cc
     foe_error_codes.cc
     object_data_types.cc
+    sii.cc
     soem_fieldbus_driver.cc
 )
 add_library(mm::comm ALIAS comm)
@@ -30,3 +31,5 @@ target_link_libraries(comm PUBLIC
 if(WIN32)
   target_link_libraries(comm PUBLIC mm::npcap)
 endif()
+
+add_subdirectory(tests)

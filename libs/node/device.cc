@@ -86,6 +86,10 @@ std::expected<void, std::string> Device::writeRegister(uint16_t address,
   return driver_.writeRegister(slavePosition_, address, data);
 }
 
+std::expected<std::vector<uint8_t>, std::string> Device::readSii() const {
+  return driver_.readSii(slavePosition_);
+}
+
 std::expected<void, std::string> Device::initializeParameters(bool readValues) {
   auto entries = driver_.readObjectDictionary(slavePosition_);
   if (!entries) {

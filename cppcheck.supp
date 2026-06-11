@@ -35,3 +35,4 @@ syntaxError:*/process_image_test.cc
 syntaxError:*/cia402_test.cc
 syntaxError:*/cia402_drive_test.cc
 syntaxError:*/somanet_drive_test.cc
+syntaxError:*/sii_test.cc

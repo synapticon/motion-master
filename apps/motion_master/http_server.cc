@@ -22,6 +22,7 @@
 #include "comm/fieldbus_driver.h"
 #include "comm/foe_error_codes.h"
 #include "comm/object_data_types.h"
+#include "comm/sii.h"
 #include "core/util.h"
 #include "monitoring_api.h"
 #include "node/device_manager.h"
@@ -411,6 +412,44 @@ void HttpServer::run() {
                return;
              }
              sendJson(res, config_.corsOrigin, nlohmann::json{{"data", buf}});
+           })
+      .get("/api/devices/:slavePosition/sii",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p, ec] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
+               return;
+             }
+             // Content negotiation: the raw EEPROM image is returned only when the client asks for
+             // it via Accept: application/octet-stream. Otherwise (Accept: application/json, */*,
+             // or absent) the parsed SII structure is returned — the default.
+             const bool wantRaw = req->getHeader("accept").find("application/octet-stream") !=
+                                  std::string_view::npos;
+             const auto* device = deviceManager_.findDevice(pos);
+             if (!device) {
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
+               return;
+             }
+             auto raw = device->readSii();
+             if (!raw) {
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, raw.error());
+               return;
+             }
+             if (wantRaw) {
+               res->writeHeader("Content-Type", "application/octet-stream")
+                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                   ->end(std::string_view{reinterpret_cast<const char*>(raw->data()), raw->size()});
+               return;
+             }
+             auto parsed = mm::comm::parseSii(*raw);
+             if (!parsed) {
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, parsed.error());
+               return;
+             }
+             sendJson(res, config_.corsOrigin, nlohmann::json(*parsed));
            })
       .post("/api/devices/:slavePosition/registers/:address",
             [this](auto* res, auto* req) {

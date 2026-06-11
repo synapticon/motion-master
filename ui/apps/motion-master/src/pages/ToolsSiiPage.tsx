@@ -1,15 +1,14 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import type { SlaveInformationInterface } from '@mm/api-client'
+import FilePickerButton from '../components/FilePickerButton'
 import PageHeader from '../components/PageHeader'
 import SiiExplainer from '../components/SiiExplainer'
 import SiiView from '../components/SiiView'
 import SiiRawView from '../components/SiiRawView'
 import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline } from '../utils/styles'
 
 export default function ToolsSiiPage() {
   const { api } = useConnection()
-  const fileInputRef = useRef<HTMLInputElement>(null)
   const [filename, setFilename] = useState<string | null>(null)
   const [bytes, setBytes] = useState<Uint8Array | null>(null)
   const [sii, setSii] = useState<SlaveInformationInterface | null>(null)
@@ -44,13 +43,6 @@ export default function ToolsSiiPage() {
     }
   }
 
-  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (file) {
-      void loadFile(file)
-    }
-  }
-
   return (
     <div>
       <PageHeader
@@ -62,16 +54,9 @@ export default function ToolsSiiPage() {
         <SiiExplainer />
 
         <div className="flex items-center gap-3">
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".bin,application/octet-stream"
-            onChange={onFileChange}
-            className="hidden"
-          />
-          <button onClick={() => fileInputRef.current?.click()} className={btnOutline}>
+          <FilePickerButton onFile={loadFile} disabled={parsing}>
             {bytes ? 'Load another file' : 'Load SII file'}
-          </button>
+          </FilePickerButton>
           {filename && (
             <span className="text-xs text-grey-500 font-mono">
               {filename}

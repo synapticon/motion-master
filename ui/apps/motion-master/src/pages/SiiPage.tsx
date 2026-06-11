@@ -1,8 +1,8 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import { useParams } from 'react-router'
-import { useQueryClient } from '@tanstack/react-query'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import DevicePageHeader from '../components/DevicePageHeader'
+import FilePickerButton from '../components/FilePickerButton'
 import SiiExplainer from '../components/SiiExplainer'
 import SiiView from '../components/SiiView'
 import SiiRawView from '../components/SiiRawView'
@@ -19,7 +19,6 @@ export default function SiiPage() {
   const slavePosition = Number(deviceId)
   const { api } = useConnection()
   const queryClient = useQueryClient()
-  const writeInputRef = useRef<HTMLInputElement>(null)
   const [showRaw, setShowRaw] = useState(false)
   const [fetchMs, setFetchMs] = useState<number | null>(null)
   const [downloading, setDownloading] = useState(false)
@@ -62,12 +61,7 @@ export default function SiiPage() {
     }
   }
 
-  async function onWriteFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    e.target.value = '' // allow re-selecting the same file
-    if (!file) {
-      return
-    }
+  async function handleWriteFile(file: File) {
     const bytes = new Uint8Array(await file.arrayBuffer())
     const confirmed = window.confirm(
       `Write ${bytes.length} bytes from "${file.name}" to the EEPROM of slave ${slavePosition}?\n\n` +
@@ -121,21 +115,13 @@ export default function SiiPage() {
               <button onClick={handleDownload} disabled={downloading} className={btnOutline}>
                 {downloading ? 'Downloading…' : 'Download SII'}
               </button>
-              <input
-                ref={writeInputRef}
-                type="file"
-                accept=".bin,application/octet-stream"
-                onChange={onWriteFileChange}
-                className="hidden"
-              />
-              <button
-                onClick={() => writeInputRef.current?.click()}
+              <FilePickerButton
+                onFile={handleWriteFile}
                 disabled={writing}
                 title="Overwrite the device EEPROM with an SII image from a file. Destructive — requires a power cycle to apply. Best done in INIT or PRE-OP."
-                className="border border-status-bad text-status-bad px-3 py-1.5 text-xs hover:bg-status-bad hover:text-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
               >
                 {writing ? 'Writing…' : 'Write SII…'}
-              </button>
+              </FilePickerButton>
             </div>
           </div>
           <div className="flex items-center gap-3">

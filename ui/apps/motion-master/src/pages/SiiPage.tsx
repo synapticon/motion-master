@@ -275,7 +275,7 @@ export default function SiiPage() {
 
         <div className="flex items-center justify-end gap-3">
           {!query.isFetching && fetchMs !== null && (
-            <span className="text-xs text-grey-500 mr-auto" title="Time to read and parse the EEPROM">
+            <span className="text-xs text-grey-500" title="Time to read and parse the EEPROM">
               Loaded in {formatDuration(fetchMs)}
             </span>
           )}

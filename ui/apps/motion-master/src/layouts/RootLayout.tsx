@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { ChevronDown, RefreshCw } from 'lucide-react'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
@@ -124,18 +125,10 @@ function DeviceSection({
               </span>
             )}
           </div>
-          <svg
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
+          <ChevronDown
             className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-white/40 group-hover:text-white/70 transition-transform ${open ? 'rotate-180' : ''
               }`}
-          >
-            <path d="m6 9 6 6 6-6" />
-          </svg>
+          />
         </div>
 
         {/* Status — AL state first (primary), online presence as a small derived icon */}
@@ -271,18 +264,10 @@ export default function RootLayout() {
               <span className="eyebrow text-white/40 group-hover:text-white/70 transition-colors">
                 Preferences
               </span>
-              <svg
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
+              <ChevronDown
                 className={`h-3.5 w-3.5 text-white/40 group-hover:text-white/70 transition-transform ${prefsOpen ? 'rotate-180' : ''
                   }`}
-              >
-                <path d="m6 9 6 6 6-6" />
-              </svg>
+              />
             </button>
             {prefsOpen && (
               <label className="flex items-center gap-2 px-5 py-2 text-xs text-white/60 hover:text-white cursor-pointer select-none">
@@ -329,18 +314,10 @@ export default function RootLayout() {
                 <span className="eyebrow text-white/40 group-hover:text-white/70 transition-colors">
                   Meta
                 </span>
-                <svg
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
+                <ChevronDown
                   className={`h-3.5 w-3.5 text-white/40 group-hover:text-white/70 transition-transform ${metaOpen ? 'rotate-180' : ''
                     }`}
-                >
-                  <path d="m6 9 6 6 6-6" />
-                </svg>
+                />
               </button>
               {metaOpen && (
                 <div className="pl-3">
@@ -375,18 +352,7 @@ export default function RootLayout() {
                     aria-label="Refresh all devices — re-read the device list and AL states without re-scanning the bus"
                     className="text-white/40 hover:text-white disabled:opacity-40 disabled:cursor-default cursor-pointer transition-colors"
                   >
-                    <svg
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`}
-                    >
-                      <path d="M21 12a9 9 0 1 1-2.64-6.36" />
-                      <path d="M21 3v6h-6" />
-                    </svg>
+                    <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
                   </button>
                 )}
               </div>

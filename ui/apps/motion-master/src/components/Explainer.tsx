@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { ReactNode } from 'react'
+import { ChevronDown } from 'lucide-react'
 
 interface ExplainerProps {
   /** Header label, e.g. "What is SII?". */
@@ -25,16 +26,10 @@ export default function Explainer({ title, children, defaultOpen = false }: Expl
         className="w-full flex items-center justify-between gap-3 px-4 py-3 text-left hover:bg-grey-50 transition-colors cursor-pointer"
       >
         <span className="eyebrow">{title}</span>
-        <svg
-          className={`w-4 h-4 text-grey-500 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
-          viewBox="0 0 20 20"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.5"
+        <ChevronDown
           aria-hidden="true"
-        >
-          <path d="M5 7.5 10 12.5 15 7.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+          className={`w-4 h-4 text-grey-500 shrink-0 transition-transform ${open ? 'rotate-180' : ''}`}
+        />
       </button>
       {open && (
         <div className="border-t border-grey-200 px-4 py-4 text-sm text-grey-700 leading-relaxed space-y-3">

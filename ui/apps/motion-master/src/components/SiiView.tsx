@@ -66,13 +66,24 @@ const theadCls = 'border-b border-grey-200 bg-grey-50 text-left text-grey-600'
 
 // SII string indices are 1-based references into the STRINGS table (index 0 means "no string").
 function StringRef({ idx, strings }: { idx: number; strings: string[] }) {
+  const idxTitle =
+    idx === 0
+      ? 'No string — this field references index 0 of the EEPROM STRINGS table, which means “unset”.'
+      : `1-based index into the EEPROM STRINGS table — this field stores the index ${idx}, not the text itself; entry ${idx} of that table holds the string shown.`
   const name = idx >= 1 && idx <= strings.length ? strings[idx - 1] : null
   if (!name) {
-    return <span className="text-grey-400">— ({idx})</span>
+    return (
+      <span className="text-grey-400 cursor-help" title={idxTitle}>
+        — ({idx})
+      </span>
+    )
   }
   return (
     <span>
-      {name} <span className="text-grey-400">({idx})</span>
+      {name}{' '}
+      <span className="text-grey-400 cursor-help" title={idxTitle}>
+        ({idx})
+      </span>
     </span>
   )
 }

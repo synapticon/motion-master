@@ -223,27 +223,6 @@ export default function SiiPage() {
     <div>
       <DevicePageHeader slavePosition={slavePosition} title="SII" />
       <div className="p-4 sm:p-8 space-y-8">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <p className="text-xs text-grey-600 max-w-2xl leading-relaxed">
-            The Slave Information Interface (SII) is the device's EEPROM: the identity and mailbox
-            configuration the ESC loads at power-on, followed by the self-describing categories
-            (strings, general info, default Sync Managers / FMMUs / PDOs, distributed-clock
-            settings). Read directly from the EEPROM — most reliable in INIT or PRE-OP.
-          </p>
-          <div className="flex gap-2">
-            <button onClick={() => setShowRaw(v => !v)} className={btnOutline}>
-              {showRaw ? 'Hide raw image' : 'Show raw image'}
-            </button>
-            <button
-              onClick={() => query.refetch()}
-              disabled={query.isFetching}
-              className={btnOutline}
-            >
-              {query.isFetching ? 'Loading…' : 'Refresh'}
-            </button>
-          </div>
-        </div>
-
         <Explainer title="What is SII?">
           <p>
             <strong>SII</strong> stands for <strong>Slave Information Interface</strong>. It is the
@@ -283,6 +262,15 @@ export default function SiiPage() {
             displays below.
           </p>
         </Explainer>
+
+        <div className="flex justify-end gap-2">
+          <button onClick={() => setShowRaw(v => !v)} className={btnOutline}>
+            {showRaw ? 'Hide raw image' : 'Show raw image'}
+          </button>
+          <button onClick={() => query.refetch()} disabled={query.isFetching} className={btnOutline}>
+            {query.isFetching ? 'Loading…' : 'Refresh'}
+          </button>
+        </div>
 
         {query.isError && (
           <p className="text-xs text-status-bad font-mono">

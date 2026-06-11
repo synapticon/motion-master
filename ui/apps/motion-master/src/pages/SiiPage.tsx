@@ -65,21 +65,27 @@ export default function SiiPage() {
       <div className="p-4 sm:p-8 space-y-8">
         <SiiExplainer />
 
-        <div className="flex items-center justify-end gap-3">
-          {!query.isFetching && fetchMs !== null && (
-            <span className="text-xs text-grey-500" title="Time to read and parse the EEPROM">
-              Loaded in {formatDuration(fetchMs)}
-            </span>
-          )}
-          <button onClick={() => query.refetch()} disabled={query.isFetching} className={btnOutline}>
-            {query.isFetching ? 'Loading…' : 'Refresh'}
-          </button>
-          <button onClick={handleDownload} disabled={downloading} className={btnOutline}>
-            {downloading ? 'Downloading…' : 'Download SII'}
-          </button>
+        <div className="flex items-center justify-between gap-3">
           <button onClick={() => setShowRaw(v => !v)} className={btnOutline}>
             {showRaw ? 'Hide raw image' : 'Show raw image'}
           </button>
+          <div className="flex items-center gap-3">
+            {!query.isFetching && fetchMs !== null && (
+              <span className="text-xs text-grey-500" title="Time to read and parse the EEPROM">
+                Loaded in {formatDuration(fetchMs)}
+              </span>
+            )}
+            <button
+              onClick={() => query.refetch()}
+              disabled={query.isFetching}
+              className={btnOutline}
+            >
+              {query.isFetching ? 'Loading…' : 'Refresh'}
+            </button>
+            <button onClick={handleDownload} disabled={downloading} className={btnOutline}>
+              {downloading ? 'Downloading…' : 'Download SII'}
+            </button>
+          </div>
         </div>
 
         {query.isError && (

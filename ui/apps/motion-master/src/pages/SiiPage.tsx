@@ -273,18 +273,24 @@ export default function SiiPage() {
           </p>
         </Explainer>
 
-        <div className="flex items-center justify-end gap-3">
-          {!query.isFetching && fetchMs !== null && (
-            <span className="text-xs text-grey-500" title="Time to read and parse the EEPROM">
-              Loaded in {formatDuration(fetchMs)}
-            </span>
-          )}
+        <div className="flex items-center justify-between gap-3">
           <button onClick={() => setShowRaw(v => !v)} className={btnOutline}>
             {showRaw ? 'Hide raw image' : 'Show raw image'}
           </button>
-          <button onClick={() => query.refetch()} disabled={query.isFetching} className={btnOutline}>
-            {query.isFetching ? 'Loading…' : 'Refresh'}
-          </button>
+          <div className="flex items-center gap-3">
+            {!query.isFetching && fetchMs !== null && (
+              <span className="text-xs text-grey-500" title="Time to read and parse the EEPROM">
+                Loaded in {formatDuration(fetchMs)}
+              </span>
+            )}
+            <button
+              onClick={() => query.refetch()}
+              disabled={query.isFetching}
+              className={btnOutline}
+            >
+              {query.isFetching ? 'Loading…' : 'Refresh'}
+            </button>
+          </div>
         </div>
 
         {query.isError && (

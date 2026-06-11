@@ -2,10 +2,12 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <charconv>
 #include <chrono>
 #include <cstdint>
 #include <ctime>
+#include <iterator>
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
@@ -120,12 +122,13 @@ nlohmann::json certInfoJson(const mm::CertInfo& info, const std::string& path) {
       std::chrono::duration_cast<std::chrono::hours>(info.notAfter - now).count() / 24;
   const bool expired = now >= info.notAfter;
   auto chain = nlohmann::json::array();
-  for (const auto& link : info.chain) {
-    chain.push_back({{"subject", link.subject},
-                     {"issuer", link.issuer},
-                     {"organization", link.organization},
-                     {"issuerOrganization", link.issuerOrganization}});
-  }
+  std::transform(info.chain.begin(), info.chain.end(), std::back_inserter(chain),
+                 [](const auto& link) {
+                   return nlohmann::json{{"subject", link.subject},
+                                         {"issuer", link.issuer},
+                                         {"organization", link.organization},
+                                         {"issuerOrganization", link.issuerOrganization}};
+                 });
   return {{"path", path},
           {"subject", info.subject},
           {"issuer", info.issuer},

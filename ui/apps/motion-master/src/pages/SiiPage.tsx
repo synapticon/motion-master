@@ -35,6 +35,10 @@ const MBX_PROTOCOLS: [number, string, string][] = [
 
 const decodeProtocols = (bits: number) => MBX_PROTOCOLS.filter(([bit]) => bits & bit)
 
+// Human-readable fetch duration: sub-second as whole milliseconds, otherwise seconds with one
+// decimal (a full EEPROM read is many small transactions and can take a noticeable moment).
+const formatDuration = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`)
+
 function Field({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
   const { hintsInline } = usePreferences()
   const tooltip = hint && !hintsInline
@@ -202,10 +206,16 @@ export default function SiiPage() {
   const slavePosition = Number(deviceId)
   const { api } = useConnection()
   const [showRaw, setShowRaw] = useState(false)
+  const [fetchMs, setFetchMs] = useState<number | null>(null)
 
   const query = useQuery({
     queryKey: ['sii', slavePosition],
-    queryFn: () => api.readSii(slavePosition),
+    queryFn: async () => {
+      const start = performance.now()
+      const res = await api.readSii(slavePosition)
+      setFetchMs(performance.now() - start)
+      return res
+    },
   })
 
   const sii = query.data?.data
@@ -263,7 +273,12 @@ export default function SiiPage() {
           </p>
         </Explainer>
 
-        <div className="flex justify-end gap-2">
+        <div className="flex items-center justify-end gap-3">
+          {!query.isFetching && fetchMs !== null && (
+            <span className="text-xs text-grey-500 mr-auto" title="Time to read and parse the EEPROM">
+              Loaded in {formatDuration(fetchMs)}
+            </span>
+          )}
           <button onClick={() => setShowRaw(v => !v)} className={btnOutline}>
             {showRaw ? 'Hide raw image' : 'Show raw image'}
           </button>

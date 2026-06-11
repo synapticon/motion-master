@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, RefreshCw } from 'lucide-react'
+import { ChevronDown, Cpu, RefreshCw } from 'lucide-react'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
@@ -25,16 +25,26 @@ const AL_STATE_LABEL: Record<number, string> = {
   8: 'Op',
 }
 
-// Per-state badge colors, matching the Transition-to-State buttons on the Control
-// page so a state reads the same here as where it's commanded. BOOT is the odd one
-// out (amber); the rest grade from neutral grey (no comms) up to teal (fully
-// operational). An error overrides these with red — see the badge below.
+// Per-state badge colors (bg + text), matching the Transition-to-State buttons on
+// the Control page so a state reads the same here as where it's commanded. BOOT is
+// the odd one out (amber); the rest grade from neutral grey (no comms) up to green
+// (fully operational). An error overrides these with red — see the badge below.
 const AL_STATE_BADGE: Record<number, string> = {
   1: 'bg-grey-700 text-white',
   2: 'bg-ocean text-white',
   3: 'bg-status-warn text-grey-900',
   4: 'bg-status-info text-white',
   8: 'bg-green-600 text-white',
+}
+
+// Solid fills for the device card's left accent bar — same color story as the
+// badge above, but just the background since the bar carries no text.
+const AL_STATE_ACCENT: Record<number, string> = {
+  1: 'bg-grey-700',
+  2: 'bg-ocean',
+  3: 'bg-status-warn',
+  4: 'bg-status-info',
+  8: 'bg-green-600',
 }
 
 interface DeviceState {
@@ -67,12 +77,18 @@ function NavItem({ to, label, end }: { to: string; label: string; end?: boolean 
 function DeviceSection({
   deviceId,
   name,
+  vendorId,
   productCode,
+  revisionNumber,
+  serialNumber,
   state,
 }: {
   deviceId: string
   name?: string
+  vendorId?: number
   productCode?: number
+  revisionNumber?: number
+  serialNumber?: number
   state?: DeviceState
 }) {
   const { api } = useConnection()
@@ -97,53 +113,71 @@ function DeviceSection({
         ? 'Mailbox active — the device is in PRE-OP or higher, so its CoE/SDO mailbox answers (regardless of the AL error flag, which the state badge shows separately)'
         : 'Mailbox inactive — no CoE/SDO mailbox: the device is in INIT or BOOT, or is not responding (powered off, unplugged, or left the bus)'
   const stateLabel = alStateLabel(state)
+  const accentClass = state?.error
+    ? 'bg-status-bad'
+    : AL_STATE_ACCENT[state?.alState ?? -1] ?? 'bg-white/20'
+
+  // Full device identity, shown as a multi-line tooltip on the name — the immutable
+  // EEPROM identity that the status line deliberately keeps off the chrome.
+  const identityTitle = [
+    'Name',
+    name ?? `Device ${deviceId}`,
+    ...(vendorId !== undefined ? ['Vendor ID', formatHex(vendorId, 8)] : []),
+    ...(productCode !== undefined ? ['Product Code', formatHex(productCode, 8)] : []),
+    ...(revisionNumber !== undefined ? ['Revision', formatHex(revisionNumber, 8)] : []),
+    ...(serialNumber !== undefined ? ['Serial', String(serialNumber)] : []),
+  ].join('\n')
 
   return (
     <div className="mt-2">
-      {/* Backgrounded identity header that doubles as the fold toggle for the links below. */}
+      {/* Device card — a state-colored accent bar frames it as one device and doubles
+          the AL-state signal; the header toggles the links below. */}
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
-        className="group w-full text-left px-5 py-2 bg-white/[0.06] hover:bg-white/[0.1] border-y border-white/10 transition-colors cursor-pointer"
+        className="group relative w-full text-left px-5 py-2.5 bg-white/[0.06] hover:bg-white/[0.1] border-y border-white/10 transition-colors cursor-pointer"
       >
-        {/* Identity */}
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0 text-xs">
-            <SlavePositionBadge position={Number(deviceId)} />
-            {name && (
-              <span className="shrink-0 tracking-wide text-white/80" title={name}>
-                {name.length > 8 ? `${name.slice(0, 8).trimEnd()}…` : name}
-              </span>
-            )}
-            {productCode !== undefined && (
-              <span
-                className="truncate font-mono text-white/40"
-                title={`Product code (EEPROM): ${formatHex(productCode)}`}
-              >
-                {formatHex(productCode)}
-              </span>
-            )}
+        {/* AL-state accent bar */}
+        <span
+          aria-hidden
+          className={`absolute inset-y-0 left-0 w-0.5 ${accentClass}`}
+        />
+
+        {/* Identity — device glyph + name lead; position is a demoted detail on the right. */}
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0">
+            <Cpu className="h-4 w-4 shrink-0 text-white/45" />
+            <span
+              className="truncate font-display text-sm tracking-wide text-white/90 cursor-help"
+              title={identityTitle}
+            >
+              {name ?? `Device ${deviceId}`}
+            </span>
           </div>
-          <ChevronDown
-            className={`mt-0.5 h-3.5 w-3.5 shrink-0 text-white/40 group-hover:text-white/70 transition-transform ${open ? 'rotate-180' : ''
-              }`}
-          />
+          <div className="flex items-center gap-2 shrink-0">
+            <SlavePositionBadge position={Number(deviceId)} tone="muted" />
+            <ChevronDown
+              className={`h-3.5 w-3.5 text-white/40 group-hover:text-white/70 transition-transform ${open ? 'rotate-180' : ''
+                }`}
+            />
+          </div>
         </div>
 
-        {/* Status — AL state first (primary), online presence as a small derived icon */}
-        <div className="mt-1.5 flex items-center gap-2">
+        {/* Status — one quiet line under the device glyph: AL state badge, then mailbox
+            presence. Immutable identity (vendor/code/revision/serial) lives in the name tooltip. */}
+        <div className="mt-1.5 flex items-center gap-2 text-[10px] font-display tracking-wider">
           {stateLabel && (
             <span
+              className={`shrink-0 px-1.5 py-0.5 rounded-sm ${state?.error
+                ? 'bg-status-bad text-white'
+                : AL_STATE_BADGE[state?.alState ?? -1] ?? 'bg-white/10 text-white/60'
+                }`}
               title={
                 state?.error
                   ? 'AL state — the device’s EtherCAT Application Layer state, the low nibble of the AL Status register (0x0130). The error indicator (bit 4) is set; the reason is in the AL Status Code register (0x0134).'
                   : 'AL state — the device’s EtherCAT Application Layer state, the low nibble of the AL Status register (0x0130).'
               }
-              className={`shrink-0 px-1.5 py-0.5 rounded-sm border border-white/25 text-[10px] font-display tracking-wider ${state?.error
-                ? 'bg-status-bad text-white'
-                : AL_STATE_BADGE[state?.alState ?? -1] ?? 'bg-white/10 text-white/60'
-                }`}
             >
               {stateLabel}
               {state && ` (${state.alState})`}
@@ -153,19 +187,17 @@ function DeviceSection({
           <span
             title={statusTitle}
             aria-label={statusLabel}
-            className="shrink-0 flex items-center gap-1.5"
+            className="shrink-0 flex items-center gap-1.5 text-white/55"
           >
             <span
-              className={`inline-block h-2 w-2 rounded-[1px] border border-white/25 ${mailboxActive === null
+              className={`inline-block h-1.5 w-1.5 rounded-full ${mailboxActive === null
                 ? 'bg-white/40 animate-pulse'
                 : mailboxActive
                   ? 'bg-status-good'
                   : 'bg-status-bad'
                 }`}
             />
-            <span className="text-[10px] font-display tracking-wider text-white/70">
-              {statusLabel}
-            </span>
+            {mailboxActive === null ? 'checking…' : mailboxActive ? 'mailbox' : 'no mailbox'}
           </span>
         </div>
       </button>
@@ -382,7 +414,10 @@ export default function RootLayout() {
                 key={d.slavePosition}
                 deviceId={String(d.slavePosition)}
                 name={d.name}
+                vendorId={d.vendorId}
                 productCode={d.productCode}
+                revisionNumber={d.revisionNumber}
+                serialNumber={d.serialNumber}
                 state={stateByPosition.get(d.slavePosition)}
               />
             ))}

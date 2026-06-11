@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { NavLink, Outlet, useLocation } from 'react-router'
+import { NavLink, Outlet } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
 import SlavePositionBadge from '../components/SlavePositionBadge'
@@ -76,12 +76,9 @@ function DeviceSection({
 }) {
   const { api } = useConnection()
 
-  // Initial fold state is route-driven: on load (or reload) the device whose page is open
-  // starts expanded, the rest collapsed. After that it's purely manual — the header toggles
-  // it and that choice sticks; navigation alone never re-expands it.
-  const location = useLocation()
-  const isActive = location.pathname.startsWith(`/devices/${deviceId}/`)
-  const [open, setOpen] = useState(isActive)
+  // Links start expanded for every device. After that it's purely manual — the header
+  // toggles it and that choice sticks; navigation alone never re-folds it.
+  const [open, setOpen] = useState(true)
 
   // Live mailbox probe. Read per-device (not batched) so one missing device reports
   // inactive without disturbing the others. `null` while the first read is in flight.
@@ -356,7 +353,16 @@ export default function RootLayout() {
           {online && (
             <div className="px-5 mt-6 mb-2">
               <div className="flex items-center justify-between mb-1.5">
-                <p className="eyebrow text-white/40">Fieldbus</p>
+                <p
+                  className={`eyebrow text-white/40 ${hasScanned ? 'cursor-help' : ''}`}
+                  title={
+                    hasScanned
+                      ? `Scanned — the bus was enumerated and ${devices.length} ${devices.length === 1 ? 'device is' : 'devices are'} present.`
+                      : undefined
+                  }
+                >
+                  Devices{hasScanned && ` (${devices.length})`}
+                </p>
                 {hasScanned && (
                   <button
                     type="button"
@@ -381,31 +387,23 @@ export default function RootLayout() {
                   </button>
                 )}
               </div>
-              <div
-                className="cursor-help"
-                title={
-                  !isInitialized
-                    ? 'Not initialized — no fieldbus driver is loaded. Initialize one on the Fieldbus page.'
-                    : hasScanned
-                      ? `Scanned — the bus was enumerated and ${devices.length} ${devices.length === 1 ? 'device is' : 'devices are'} present.`
+              {!hasScanned && (
+                <div
+                  className="cursor-help"
+                  title={
+                    !isInitialized
+                      ? 'Not initialized — no fieldbus driver is loaded. Initialize one on the Fieldbus page.'
                       : 'Initialized, not scanned — a driver is loaded but the bus has not been scanned yet, so no devices are known. Scan to discover them.'
-                }
-              >
-                <span
-                  className={`text-xs font-display tracking-wider ${!isInitialized
-                    ? 'text-white/40'
-                    : hasScanned
-                      ? 'text-status-good'
-                      : 'text-status-warn'
-                    }`}
+                  }
                 >
-                  {!isInitialized
-                    ? 'Not initialized'
-                    : hasScanned
-                      ? `${devices.length} ${devices.length === 1 ? 'device' : 'devices'}`
-                      : 'Initialized · not scanned'}
-                </span>
-              </div>
+                  <span
+                    className={`text-xs font-display tracking-wider ${!isInitialized ? 'text-white/40' : 'text-status-warn'
+                      }`}
+                  >
+                    {!isInitialized ? 'Not initialized' : 'Initialized · not scanned'}
+                  </span>
+                </div>
+              )}
             </div>
           )}
 

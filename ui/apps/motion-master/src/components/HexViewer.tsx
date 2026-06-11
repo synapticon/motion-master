@@ -45,7 +45,7 @@ export default function HexViewer({ bytes, offsetDigits = 4 }: HexViewerProps) {
               <span
                 key={`h${c}`}
                 onMouseEnter={() => setHovered(idx)}
-                className={hovered === idx ? HL : undefined}
+                className={`cursor-pointer ${hovered === idx ? HL : ''}`}
               >
                 {hex2(bytes[idx])}
               </span>,
@@ -64,7 +64,7 @@ export default function HexViewer({ bytes, offsetDigits = 4 }: HexViewerProps) {
               <span
                 key={`a${c}`}
                 onMouseEnter={() => setHovered(idx)}
-                className={hovered === idx ? HL : undefined}
+                className={`cursor-pointer ${hovered === idx ? HL : ''}`}
               >
                 {asciiChar(bytes[idx])}
               </span>,

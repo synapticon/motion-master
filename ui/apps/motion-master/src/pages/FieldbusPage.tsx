@@ -467,12 +467,36 @@ export default function FieldbusPage() {
                   )
                 })}
               </div>
-              {transitionMutation.isSuccess && transitionMutation.variables !== undefined && (
-                <p className="text-status-good text-xs">
-                  Transitioned to {AL_STATE_LABEL[transitionMutation.variables]} ({transitionMutation.variables})
-                  {transitionMutation.data && ` in ${formatDuration(transitionMutation.data.elapsedMs)}`}
-                </p>
-              )}
+              {transitionMutation.isSuccess && transitionMutation.variables !== undefined && transitionMutation.data && (() => {
+                // The request returns HTTP 200 whenever the bus was commanded — it does NOT mean
+                // the devices arrived. The server reports per-device truth in `ok` / `devices[].reached`
+                // (a device commanded to PreOp can stay in Init with AL status code "No error"), so
+                // branch on that here rather than treating any 200 as a successful transition.
+                const target = transitionMutation.variables
+                const body = transitionMutation.data.res.data
+                const elapsed = ` in ${formatDuration(transitionMutation.data.elapsedMs)}`
+                if (body.ok) {
+                  return (
+                    <p className="text-status-good text-xs">
+                      Transitioned to {AL_STATE_LABEL[target]} ({target}){elapsed}
+                    </p>
+                  )
+                }
+                const failed = body.devices.filter(d => !d.reached)
+                const detail = failed.map(d => {
+                  const stateLabel = AL_STATE_LABEL[d.alState] ?? `0x${d.alState.toString(16).toUpperCase()}`
+                  const codeEntry = d.error ? (alStatusCodeMap[d.alStatusCode] ?? null) : null
+                  const code = codeEntry
+                    ? ` — 0x${d.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} ${codeEntry.name}`
+                    : ''
+                  return `Device ${d.slavePosition} stuck in ${stateLabel} (${d.alState})${code}`
+                }).join('; ')
+                return (
+                  <p className="text-status-bad text-xs">
+                    Failed to reach {AL_STATE_LABEL[target]} ({target}){elapsed}. {detail}
+                  </p>
+                )
+              })()}
               {transitionMutation.isError && (
                 <p className="text-status-bad text-xs">{apiError(transitionMutation.error)}</p>
               )}

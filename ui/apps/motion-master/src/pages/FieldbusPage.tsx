@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
+import ControlExplainer from '../components/ControlExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { usePreferences } from '../contexts/PreferencesContext'
@@ -212,6 +213,8 @@ export default function FieldbusPage() {
         description="Initialize the EtherCAT fieldbus, scan for slave devices, and command AL state transitions across the bus."
       />
       <div className="p-4 sm:p-8 space-y-8">
+        <ControlExplainer />
+
         {/* Row 1 — Init + Reset */}
         <section>
           <div className="grid grid-cols-1 2xl:grid-cols-4 gap-6">

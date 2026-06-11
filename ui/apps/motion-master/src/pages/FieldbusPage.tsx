@@ -491,10 +491,27 @@ export default function FieldbusPage() {
                     : ''
                   return `Device ${d.slavePosition} stuck in ${stateLabel} (${d.alState})${code}`
                 }).join('; ')
+                // A device that stays in Init (1) after being asked to leave it, with the error bit
+                // clear and AL status code 0x0000 ("No error"), is not reporting a fault — its
+                // firmware silently isn't servicing the transition. The usual cause is a drive that
+                // was last run by a different EtherCAT master and moved over without a power-cycle;
+                // the firmware latches state that only cutting power clears. Surface that, since the
+                // silent no-error failure is otherwise baffling.
+                const silentlyStuckInInit = target !== 1 && failed.some(
+                  d => d.alState === 1 && !d.error && d.alStatusCode === 0)
                 return (
-                  <p className="text-status-bad text-xs">
-                    Failed to reach {AL_STATE_LABEL[target]} ({target}){elapsed}. {detail}
-                  </p>
+                  <>
+                    <p className="text-status-bad text-xs">
+                      Failed to reach {AL_STATE_LABEL[target]} ({target}){elapsed}. {detail}
+                    </p>
+                    {silentlyStuckInInit && (
+                      <p className="text-grey-600 text-xs">
+                        The drive reports no error — it is silently ignoring the request. If you just
+                        moved this drive from another EtherCAT master, power-cycle it once after
+                        connecting, then scan again.
+                      </p>
+                    )}
+                  </>
                 )
               })()}
               {transitionMutation.isError && (

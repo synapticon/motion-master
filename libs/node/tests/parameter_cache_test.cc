@@ -2,9 +2,11 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <system_error>
@@ -159,6 +161,65 @@ TEST(ParameterCacheTest, CorruptFileIsAMiss) {
   std::ofstream(dir / "parameters-000022d2-00000001-00000001.json") << "{ not valid json ]";
 
   EXPECT_FALSE(cache.load(kSynapticonVendorId, 1, 1).has_value());
+}
+
+// list() reports each stored file's identity and a parameter count, for the management UI.
+TEST(ParameterCacheTest, ListReportsStoredCaches) {
+  ParameterCache cache(
+      {.enabled = true, .cacheAllVendors = false, .directory = makeTempDir("list").string()});
+  EXPECT_TRUE(cache.list().empty());
+
+  cache.store(kSynapticonVendorId, 0x0201, 0x0A,
+              {makeParam(0x6040, 0, kUnsigned32), makeParam(0x6041, 0, kUnsigned32)});
+  cache.store(kSynapticonVendorId, 0x0301, 0x0C, {makeParam(0x6060, 0, kUnsigned32)});
+
+  auto entries = cache.list();
+  ASSERT_EQ(entries.size(), 2u);
+  const auto byKey = [&](uint32_t product) {
+    return std::find_if(entries.begin(), entries.end(),
+                        [&](const auto& e) { return e.productCode == product; });
+  };
+  auto a = byKey(0x0201);
+  ASSERT_NE(a, entries.end());
+  EXPECT_EQ(a->vendorId, kSynapticonVendorId);
+  EXPECT_EQ(a->revisionNumber, 0x0Au);
+  EXPECT_EQ(a->parameterCount, 2u);
+  EXPECT_GT(a->sizeBytes, 0u);
+  EXPECT_EQ(byKey(0x0301)->parameterCount, 1u);
+}
+
+// Listing is policy-independent: a disabled cache still reports files already on disk so they can
+// be cleaned up.
+TEST(ParameterCacheTest, ListIgnoresPolicy) {
+  const fs::path dir = makeTempDir("list-policy");
+  ParameterCache writer({.enabled = true, .cacheAllVendors = false, .directory = dir.string()});
+  writer.store(kSynapticonVendorId, 1, 1, {makeParam(0x6040, 0, kUnsigned32)});
+
+  ParameterCache disabled({.enabled = false, .cacheAllVendors = false, .directory = dir.string()});
+  EXPECT_EQ(disabled.list().size(), 1u);
+}
+
+// readRaw returns the JSON file verbatim; remove deletes it. Both are addressed by the opaque id
+// (the same one list() reports), and reject a malformed id.
+TEST(ParameterCacheTest, ReadRawAndRemove) {
+  ParameterCache cache(
+      {.enabled = true, .cacheAllVendors = false, .directory = makeTempDir("rawremove").string()});
+  cache.store(kSynapticonVendorId, 0x0201, 0x0A, {makeParam(0x6040, 0, kUnsigned32)});
+  const std::string id = ParameterCache::makeId(kSynapticonVendorId, 0x0201, 0x0A);
+
+  auto raw = cache.readRaw(id);
+  ASSERT_TRUE(raw.has_value());
+  const auto doc = nlohmann::json::parse(*raw);
+  EXPECT_EQ(doc.at("vendorId").get<uint32_t>(), kSynapticonVendorId);
+  EXPECT_EQ(doc.at("parameters").size(), 1u);
+
+  EXPECT_FALSE(cache.readRaw("not-a-valid-id").has_value());  // malformed → error
+  EXPECT_FALSE(
+      cache.readRaw(ParameterCache::makeId(kSynapticonVendorId, 0x0201, 0x0B)).has_value());
+
+  EXPECT_TRUE(cache.remove(id).has_value());
+  EXPECT_TRUE(cache.list().empty());
+  EXPECT_FALSE(cache.remove(id).has_value());  // already gone → error
 }
 
 }  // namespace

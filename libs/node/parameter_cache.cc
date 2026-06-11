@@ -3,6 +3,8 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <array>
+#include <charconv>
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
@@ -99,6 +101,33 @@ std::optional<std::string> envVar(const char* name) {
   return std::string(v);
 }
 
+/// Parses an id of the form "<vendor>-<product>-<revision>" (three hex fields, the inverse of
+/// @c makeId) into its identity triple. Returns nullopt on any malformed or extra/missing field.
+std::optional<std::array<uint32_t, 3>> parseId(std::string_view id) {
+  std::array<uint32_t, 3> parts{0, 0, 0};
+  size_t field = 0;
+  size_t start = 0;
+  for (size_t end = 0; end <= id.size(); ++end) {
+    if (end != id.size() && id[end] != '-') {
+      continue;
+    }
+    if (field >= parts.size()) {
+      return std::nullopt;  // too many fields
+    }
+    const std::string_view token = id.substr(start, end - start);
+    auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), parts[field], 16);
+    if (ec != std::errc() || ptr != token.data() + token.size()) {
+      return std::nullopt;
+    }
+    ++field;
+    start = end + 1;
+  }
+  if (field != parts.size()) {
+    return std::nullopt;  // too few fields
+  }
+  return parts;
+}
+
 }  // namespace
 
 ParameterCache::ParameterCache(ParameterCacheConfig config) : config_(std::move(config)) {}
@@ -139,10 +168,15 @@ fs::path ParameterCache::resolveDir() const {
   return fs::temp_directory_path(ec) / "motion-master" / "parameters";
 }
 
+std::string ParameterCache::makeId(uint32_t vendorId, uint32_t productCode,
+                                   uint32_t revisionNumber) {
+  return std::format("{:08x}-{:08x}-{:08x}", vendorId, productCode, revisionNumber);
+}
+
 fs::path ParameterCache::pathFor(uint32_t vendorId, uint32_t productCode,
                                  uint32_t revisionNumber) const {
   return resolveDir() /
-         std::format("parameters-{:08x}-{:08x}-{:08x}.json", vendorId, productCode, revisionNumber);
+         std::format("parameters-{}.json", makeId(vendorId, productCode, revisionNumber));
 }
 
 std::optional<std::vector<DeviceParameter>> ParameterCache::load(uint32_t vendorId,
@@ -212,6 +246,85 @@ void ParameterCache::store(uint32_t vendorId, uint32_t productCode, uint32_t rev
   } catch (const std::exception& e) {
     spdlog::warn("Parameter cache: failed to write {}: {}", path.string(), e.what());
   }
+}
+
+std::vector<ParameterCache::CacheEntry> ParameterCache::list() const {
+  std::vector<CacheEntry> entries;
+  std::error_code ec;
+  const fs::path dir = resolveDir();
+  if (!fs::is_directory(dir, ec)) {
+    return entries;  // No cache directory yet — nothing cached.
+  }
+  for (const auto& dirEntry : fs::directory_iterator(dir, ec)) {
+    if (!dirEntry.is_regular_file() || dirEntry.path().extension() != ".json") {
+      continue;
+    }
+    try {
+      std::ifstream in(dirEntry.path(), std::ios::binary);
+      if (!in) {
+        continue;
+      }
+      const nlohmann::json doc = nlohmann::json::parse(in);
+      if (doc.value("formatVersion", -1) != kFormatVersion) {
+        continue;  // A different (incompatible) format — not ours to report.
+      }
+      const uint32_t vendorId = doc.value("vendorId", uint32_t{0});
+      const uint32_t productCode = doc.value("productCode", uint32_t{0});
+      const uint32_t revisionNumber = doc.value("revisionNumber", uint32_t{0});
+      entries.push_back(CacheEntry{
+          .id = makeId(vendorId, productCode, revisionNumber),
+          .vendorId = vendorId,
+          .productCode = productCode,
+          .revisionNumber = revisionNumber,
+          .parameterCount =
+              static_cast<uint32_t>(doc.value("parameters", nlohmann::json::array()).size()),
+          .sizeBytes = dirEntry.file_size(ec),
+      });
+    } catch (const std::exception& e) {
+      spdlog::warn("Parameter cache: skipping unreadable file {}: {}", dirEntry.path().string(),
+                   e.what());
+    }
+  }
+  return entries;
+}
+
+std::expected<std::vector<uint8_t>, std::string> ParameterCache::readRaw(
+    std::string_view id) const {
+  const auto parts = parseId(id);
+  if (!parts) {
+    return std::unexpected(std::format("invalid cache id '{}'", id));
+  }
+  const fs::path path = pathFor((*parts)[0], (*parts)[1], (*parts)[2]);
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    return std::unexpected(std::format("no cache file '{}'", id));
+  }
+  return std::vector<uint8_t>(std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>());
+}
+
+std::expected<void, std::string> ParameterCache::remove(std::string_view id) const {
+  const auto parts = parseId(id);
+  if (!parts) {
+    return std::unexpected(std::format("invalid cache id '{}'", id));
+  }
+  const fs::path path = pathFor((*parts)[0], (*parts)[1], (*parts)[2]);
+  std::error_code ec;
+  if (!fs::remove(path, ec)) {
+    return std::unexpected(ec ? ec.message() : std::format("no cache file '{}'", id));
+  }
+  spdlog::info("Parameter cache: removed {}", path.string());
+  return {};
+}
+
+void to_json(nlohmann::json& j, const ParameterCache::CacheEntry& e) {
+  j = nlohmann::json{
+      {"id", e.id},
+      {"vendorId", e.vendorId},
+      {"productCode", e.productCode},
+      {"revisionNumber", e.revisionNumber},
+      {"parameterCount", e.parameterCount},
+      {"sizeBytes", e.sizeBytes},
+  };
 }
 
 }  // namespace mm::node

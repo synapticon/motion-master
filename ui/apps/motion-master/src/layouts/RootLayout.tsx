@@ -324,6 +324,7 @@ export default function RootLayout() {
           <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Data</p>
           <NavItem to="/monitorings" label="Monitorings" />
           <NavItem to="/recorder" label="Recorder" />
+          <NavItem to="/parameter-caches" label="Parameter Caches" />
 
           <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Server</p>
           <NavItem to="/log" label="Log" />

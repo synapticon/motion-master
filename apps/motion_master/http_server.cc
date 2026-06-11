@@ -1006,6 +1006,30 @@ void HttpServer::run() {
                sendStatus(res, "404 Not Found", config_.corsOrigin);
              }
            })
+      .get("/api/parameter-caches",
+           [this](auto* res, auto* /*req*/) {
+             sendJson(res, config_.corsOrigin, deviceManager_.parameterCache().list());
+           })
+      .get("/api/parameter-caches/:id",
+           [this](auto* res, auto* req) {
+             auto raw = deviceManager_.parameterCache().readRaw(req->getParameter("id"));
+             if (!raw) {
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
+               return;
+             }
+             // The file is JSON; serve it verbatim so the client can save it as-is.
+             res->writeHeader("Content-Type", "application/json")
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                 ->end(std::string_view{reinterpret_cast<const char*>(raw->data()), raw->size()});
+           })
+      .del("/api/parameter-caches/:id",
+           [this](auto* res, auto* req) {
+             if (deviceManager_.parameterCache().remove(req->getParameter("id"))) {
+               sendStatus(res, "204 No Content", config_.corsOrigin);
+             } else {
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
+             }
+           })
       .options("/api/*",
                [this](auto* res, auto* /*req*/) {
                  res->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)

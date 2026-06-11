@@ -1783,8 +1783,91 @@ paths:
           description: Monitoring deleted
         "404":
           description: No monitoring with this topic
+  /api/parameter-caches:
+    get:
+      summary: List on-disk parameter caches
+      operationId: listParameterCaches
+      description: >
+        Returns one entry per cached parameter-definition file on disk, keyed by device identity
+        (vendor, product, revision). The cache stores only the object-dictionary *definitions* (not
+        live values), so a scan of previously-seen hardware can skip the slow SDO enumeration.
+        Independent of the bus — works whether or not a driver is initialised.
+      responses:
+        "200":
+          description: The cache files currently on disk.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ParameterCacheEntry"
+  /api/parameter-caches/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+        description: Opaque cache id from listParameterCaches ("<vendor>-<product>-<revision>").
+    get:
+      summary: Download a parameter-cache file
+      operationId: getParameterCache
+      description: >
+        Returns the raw JSON cache file for the given id, verbatim, so it can be saved or inspected
+        offline.
+      responses:
+        "200":
+          description: The cache file (JSON).
+          content:
+            application/json:
+              schema:
+                type: object
+        "404":
+          description: No cache file with this id (or the id is malformed).
+    delete:
+      summary: Delete a parameter-cache file
+      operationId: deleteParameterCache
+      description: >
+        Removes one cached file from disk. The next scan of that hardware re-enumerates it. Useful
+        when a vendor reused a revision across an object-dictionary change.
+      responses:
+        "204":
+          description: Cache file deleted.
+        "404":
+          description: No cache file with this id (or the id is malformed).
 components:
   schemas:
+    ParameterCacheEntry:
+      type: object
+      description: Summary of one on-disk parameter-cache file (its identity, size, and count).
+      required: [id, vendorId, productCode, revisionNumber, parameterCount, sizeBytes]
+      properties:
+        id:
+          type: string
+          description: >
+            Opaque key addressing this cache file in the download/delete endpoints
+            ("<vendor>-<product>-<revision>"). Use it verbatim — do not construct it client-side.
+          example: "000022d2-00000201-0000000a"
+        vendorId:
+          type: integer
+          description: EtherCAT vendor ID (0x22D2 = Synapticon).
+          example: 8914
+        productCode:
+          type: integer
+          description: Product code.
+          example: 513
+        revisionNumber:
+          type: integer
+          description: Revision number.
+          example: 10
+        parameterCount:
+          type: integer
+          description: Number of cached parameter definitions in the file.
+          example: 312
+        sizeBytes:
+          type: integer
+          description: File size on disk, in bytes.
+          example: 48213
     ProcessDataWatchdog:
       type: object
       description: >

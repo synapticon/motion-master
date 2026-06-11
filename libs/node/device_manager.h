@@ -130,9 +130,6 @@ struct DeviceManagerConfig {
   /// Directory for `.mmpd` recorder dumps. Empty resolves to a @c "motion-master" subdirectory of
   /// the OS temporary directory at dump time. Passed through to @c dumpProcessData.
   std::string dumpDir;
-  /// Policy and location for the on-disk parameter-definition cache. Applied to the manager's
-  /// @c ParameterCache at @c init; consulted by each device's @c initializeParameters.
-  ParameterCacheConfig parameterCache{};
 };
 
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.
@@ -161,6 +158,19 @@ class DeviceManager {
   ///         driver initialisation fails.
   std::expected<void, std::string> init(std::unique_ptr<mm::comm::FieldbusDriver> driver,
                                         const DeviceManagerConfig& config = {});
+
+  /// @brief Sets the on-disk parameter-cache policy and location.
+  ///
+  /// The cache is a process-level concern (its directory comes from the config file, like the
+  /// ports), independent of whether a driver is initialised — so this is called once at startup,
+  /// not from @c init. The configured location is then correct for the management API and for every
+  /// device's @c initializeParameters regardless of init order. Safe to call again to re-apply.
+  void configureParameterCache(const ParameterCacheConfig& config);
+
+  /// @brief The on-disk parameter cache, for the management API (list / download / remove).
+  ///
+  /// A disk store independent of the bus; usable with or without a driver initialised.
+  const ParameterCache& parameterCache() const;
 
   /// @brief Scans the bus for nodes and populates the device list.
   ///

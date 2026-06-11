@@ -125,7 +125,6 @@ std::expected<void, std::string> DeviceManager::init(
   if (config_.cyclePeriodUs == 0) {
     config_.cyclePeriodUs = 1000;
   }
-  parameterCache_.configure(config_.parameterCache);
   driver_ = std::move(driver);
   auto result = driver_->init();
   if (!result) {
@@ -140,6 +139,12 @@ std::expected<void, std::string> DeviceManager::init(
   }
   return result;
 }
+
+void DeviceManager::configureParameterCache(const ParameterCacheConfig& config) {
+  parameterCache_.configure(config);
+}
+
+const ParameterCache& DeviceManager::parameterCache() const { return parameterCache_; }
 
 std::expected<int, std::string> DeviceManager::scan() {
   std::unique_lock lock(busMutex_);

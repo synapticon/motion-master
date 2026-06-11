@@ -1,9 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <expected>
 #include <filesystem>
+#include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "node/device_parameter.h"
@@ -87,6 +90,41 @@ class ParameterCache {
   void store(uint32_t vendorId, uint32_t productCode, uint32_t revisionNumber,
              const std::vector<DeviceParameter>& parameters) const;
 
+  /// @brief Summary of one cache file on disk, for the management UI.
+  struct CacheEntry {
+    std::string id;            ///< Opaque "<vendor>-<product>-<revision>" key (see @c makeId).
+    uint32_t vendorId;         ///< Vendor ID from the file header.
+    uint32_t productCode;      ///< Product code from the file header.
+    uint32_t revisionNumber;   ///< Revision number from the file header.
+    uint32_t parameterCount;   ///< Number of cached parameter definitions in the file.
+    std::uintmax_t sizeBytes;  ///< File size on disk, in bytes.
+  };
+
+  /// @brief Builds the opaque id a client uses to address one cache file, from an identity triple.
+  ///        The single place the id encoding lives; @c list reports it and @c readRaw / @c remove
+  ///        parse it back, so neither the HTTP layer nor the UI ever formats the key itself.
+  static std::string makeId(uint32_t vendorId, uint32_t productCode, uint32_t revisionNumber);
+
+  /// @brief Lists every valid cache file in the cache directory.
+  ///
+  /// Unlike @c load / @c store, listing/management ignores the enabled/vendor *policy* — you must
+  /// be able to inspect and clean up files even with caching disabled or after turning it off.
+  /// Files that do not parse or carry a different @c formatVersion are skipped. Returns an empty
+  /// list when the directory does not exist.
+  std::vector<CacheEntry> list() const;
+
+  /// @brief Reads the raw JSON bytes of one cache file, addressed by its @c id (for download).
+  ///
+  /// Parses @p id and reads the file; policy-independent. The HTTP layer passes the path parameter
+  /// straight through — the id encoding and its validation live here, not in the server.
+  ///
+  /// @return The file bytes, or an error string if @p id is malformed or the file does not exist.
+  std::expected<std::vector<uint8_t>, std::string> readRaw(std::string_view id) const;
+
+  /// @brief Deletes one cache file addressed by its @c id. Policy-independent.
+  /// @return Void on success, or an error string if @p id is malformed or the file does not exist.
+  std::expected<void, std::string> remove(std::string_view id) const;
+
  private:
   /// @brief The directory cache files live in: @c config_.directory if set, else a per-user cache
   ///        directory (@c $XDG_CACHE_HOME / @c ~/.cache on Linux, @c %LOCALAPPDATA% on Windows,
@@ -100,5 +138,9 @@ class ParameterCache {
 
   ParameterCacheConfig config_;
 };
+
+/// @brief Serialises a CacheEntry to JSON (keys: vendorId, productCode, revisionNumber,
+///        parameterCount, sizeBytes). Participates in nlohmann ADL.
+void to_json(nlohmann::json& j, const ParameterCache::CacheEntry& e);
 
 }  // namespace mm::node

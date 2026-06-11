@@ -26,6 +26,7 @@ syntaxError:*/device_test.cc
 syntaxError:*/device_parameter_test.cc
 syntaxError:*/monitoring_test.cc
 syntaxError:*/monitoring_manager_test.cc
+syntaxError:*/parameter_cache_test.cc
 syntaxError:*/parameter_refresher_test.cc
 syntaxError:*/process_data_ring_test.cc
 syntaxError:*/process_data_dump_test.cc

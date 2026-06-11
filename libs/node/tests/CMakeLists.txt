@@ -8,6 +8,7 @@ add_executable(mm_node_tests
     device_manager_test.cc
     monitoring_test.cc
     monitoring_manager_test.cc
+    parameter_cache_test.cc
     parameter_refresher_test.cc
     process_data_dump_test.cc
     process_data_ring_test.cc

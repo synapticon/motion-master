@@ -5,6 +5,7 @@ add_library(node STATIC
     device_parameter.cc
     monitoring.cc
     monitoring_manager.cc
+    parameter_cache.cc
     parameter_refresher.cc
     process_data_dump.cc
     process_data_ring.cc

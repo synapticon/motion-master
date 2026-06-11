@@ -52,6 +52,21 @@ struct RecorderConfig {
   std::string dumpDir;
 };
 
+/// @brief @c "parameterCache" block — the on-disk cache of CoE parameter definitions.
+///
+/// Enumerating a drive's object dictionary over SDO is hundreds of round-trips; the result (the
+/// parameter *definitions* — not live values) is identical for every device of the same vendor,
+/// product, and revision, so it is cached to disk and reused on a later scan of the same hardware.
+/// Only definitions are cached — live values are always read from the device.
+struct ParameterCacheConfig {
+  bool enabled = true;  ///< Master switch for the whole cache.
+  /// false: cache only Synapticon devices (vendor 0x22D2), whose object dictionary is uniquely
+  /// determined by product + revision. true: cache every vendor — only safe when a vendor bumps
+  /// its revision whenever the dictionary changes (Motion Master cannot verify that for you).
+  bool cacheAllVendors = false;
+  std::string directory;  ///< "" = a standard per-user cache directory; set to override.
+};
+
 /// @brief The whole config file. Top-level keys map to these members.
 struct Config {
   ServerConfig server;
@@ -60,6 +75,7 @@ struct Config {
   TlsConfig tls;
   GameLoopConfig gameLoop;
   RecorderConfig recorder;
+  ParameterCacheConfig parameterCache;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ServerConfig, httpPort, wsPort, corsOrigin)
@@ -67,8 +83,10 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FieldbusConfig, driver, adapter)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TlsConfig, certPath, keyPath, autoUpdate)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(GameLoopConfig, periodUs)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RecorderConfig, historySeconds, dumpDir)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParameterCacheConfig, enabled, cacheAllVendors,
+                                                directory)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logLevel, tls, gameLoop,
-                                                recorder)
+                                                recorder, parameterCache)
 
 /// @brief Deserialises a parsed JSONC document into a @c Config, applying defaults for absent keys.
 ///

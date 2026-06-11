@@ -14,6 +14,7 @@
 
 #include "comm/fieldbus_driver.h"
 #include "node/device.h"
+#include "node/parameter_cache.h"
 #include "node/process_data_ring.h"
 #include "node/process_image.h"
 
@@ -129,6 +130,9 @@ struct DeviceManagerConfig {
   /// Directory for `.mmpd` recorder dumps. Empty resolves to a @c "motion-master" subdirectory of
   /// the OS temporary directory at dump time. Passed through to @c dumpProcessData.
   std::string dumpDir;
+  /// Policy and location for the on-disk parameter-definition cache. Applied to the manager's
+  /// @c ParameterCache at @c init; consulted by each device's @c initializeParameters.
+  ParameterCacheConfig parameterCache{};
 };
 
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.
@@ -568,6 +572,9 @@ class DeviceManager {
   std::unique_ptr<mm::comm::FieldbusDriver> driver_;
   std::vector<Device> devices_;
   std::unique_ptr<ProcessData> pd_;
+  // On-disk parameter-definition cache, shared by every Device (handed to each by pointer at
+  // scan()). Outlives the device set, which is rebuilt on every scan/reset. Configured at init().
+  ParameterCache parameterCache_;
   // Runtime tuning captured at init(); drives recorder-ring sizing at configureProcessData.
   DeviceManagerConfig config_;
 };

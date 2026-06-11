@@ -12,14 +12,17 @@
 #include <vector>
 
 #include "node/device_parameter.h"
+#include "node/parameter_cache.h"
 #include "node/process_data.h"
 
 namespace mm::node {
 
-Device::Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver, ProcessData* processData)
+Device::Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver, ProcessData* processData,
+               const ParameterCache* parameterCache)
     : slavePosition_(slavePosition),
       driver_(driver),
       processData_(processData),
+      parameterCache_(parameterCache),
       parametersMutex_(std::make_unique<std::mutex>()) {
   auto info = driver_.slaveInfo(slavePosition);
   name_ = std::move(info.name);
@@ -95,67 +98,88 @@ std::expected<void, std::string> Device::writeSii(std::span<const uint8_t> data)
 }
 
 std::expected<void, std::string> Device::initializeParameters(bool readValues) {
-  auto entries = driver_.readObjectDictionary(slavePosition_);
-  if (!entries) {
-    return std::unexpected(entries.error());
+  // 1. Obtain the parameter *definitions*: a cache hit (no bus I/O), or a live SDO-Info
+  //    enumeration. The cache holds the static schema only — never live values — so on a hit each
+  //    definition's value is the type default and is filled in by the value-read pass below.
+  std::optional<std::vector<DeviceParameter>> definitions;
+  if (parameterCache_) {
+    definitions = parameterCache_->load(vendorId_, productCode_, revisionNumber_);
+  }
+  if (!definitions) {
+    auto entries = driver_.readObjectDictionary(slavePosition_);
+    if (!entries) {
+      return std::unexpected(entries.error());
+    }
+    std::vector<DeviceParameter> built;
+    built.reserve(entries->size());
+    for (const auto& e : *entries) {
+      DeviceParameter p{
+          .index = e.index,
+          .subindex = e.subindex,
+          .name = e.name,
+          .objectCode = e.objectCode,
+          .dataType = e.dataType,
+          .bitLength = e.bitLength,
+          .access = e.access,
+          .value = defaultValueForDataType(e.dataType),
+          .unit = e.unit,
+          .defaultValue = std::nullopt,
+          .minValue = std::nullopt,
+          .maxValue = std::nullopt,
+      };
+
+      auto decodeRawBytes = [&](const std::optional<std::vector<uint8_t>>& raw)
+          -> std::optional<DeviceParameterValue> {
+        if (!raw) {
+          return std::nullopt;
+        }
+        auto decoded = decodeSdoBytes(e.dataType, *raw);
+        if (!decoded) {
+          spdlog::warn("Device {}: decode 0x{:04X}:{:02X} bound failed: {}", slavePosition_,
+                       e.index, e.subindex, decoded.error());
+          return std::nullopt;
+        }
+        return std::move(*decoded);
+      };
+      p.defaultValue = decodeRawBytes(e.defaultValue);
+      p.minValue = decodeRawBytes(e.minValue);
+      p.maxValue = decodeRawBytes(e.maxValue);
+
+      built.push_back(std::move(p));
+    }
+    // Persist the freshly enumerated definitions before reading values, so the (possibly slow)
+    // value pass below is never on the cache-population critical path.
+    if (parameterCache_) {
+      parameterCache_->store(vendorId_, productCode_, revisionNumber_, built);
+    }
+    definitions = std::move(built);
   }
 
-  // Build into a local map (the per-entry SDO uploads below are slow and must not hold the
-  // cache lock — that would stall a concurrent sampler cached-read for the whole enumeration),
-  // then swap it in under the lock in one move at the end.
+  // 2. Build the live map from the definitions, optionally reading each value via SDO. The
+  //    per-entry uploads are slow and must not hold the cache lock (that would stall a concurrent
+  //    sampler cached-read for the whole enumeration), so build a local map and swap it in under
+  //    the lock in one move at the end.
   std::unordered_map<uint32_t, DeviceParameter> built;
-  built.reserve(entries->size());
-
-  for (const auto& e : *entries) {
-    DeviceParameter p{
-        .index = e.index,
-        .subindex = e.subindex,
-        .name = e.name,
-        .objectCode = e.objectCode,
-        .dataType = e.dataType,
-        .bitLength = e.bitLength,
-        .access = e.access,
-        .value = defaultValueForDataType(e.dataType),
-        .unit = e.unit,
-        .defaultValue = std::nullopt,
-        .minValue = std::nullopt,
-        .maxValue = std::nullopt,
-    };
-
-    auto decodeRawBytes =
-        [&](const std::optional<std::vector<uint8_t>>& raw) -> std::optional<DeviceParameterValue> {
-      if (!raw) {
-        return std::nullopt;
-      }
-      auto decoded = decodeSdoBytes(e.dataType, *raw);
-      if (!decoded) {
-        spdlog::warn("Device {}: decode 0x{:04X}:{:02X} bound failed: {}", slavePosition_, e.index,
-                     e.subindex, decoded.error());
-        return std::nullopt;
-      }
-      return std::move(*decoded);
-    };
-    p.defaultValue = decodeRawBytes(e.defaultValue);
-    p.minValue = decodeRawBytes(e.minValue);
-    p.maxValue = decodeRawBytes(e.maxValue);
-
+  built.reserve(definitions->size());
+  for (auto& p : *definitions) {
+    p.value = defaultValueForDataType(p.dataType);
+    p.syncState = SyncState::Unknown;
     if (readValues) {
-      auto bytes = upload(e.index, e.subindex);
+      auto bytes = upload(p.index, p.subindex);
       if (bytes) {
-        auto decoded = decodeSdoBytes(e.dataType, *bytes);
+        auto decoded = decodeSdoBytes(p.dataType, *bytes);
         if (decoded) {
           p.value = std::move(*decoded);
           p.syncState = SyncState::Synced;
         } else {
-          spdlog::warn("Device {}: decode 0x{:04X}:{:02X} failed: {}", slavePosition_, e.index,
-                       e.subindex, decoded.error());
+          spdlog::warn("Device {}: decode 0x{:04X}:{:02X} failed: {}", slavePosition_, p.index,
+                       p.subindex, decoded.error());
         }
       } else {
-        spdlog::warn("Device {}: SDO upload 0x{:04X}:{:02X} failed: {}", slavePosition_, e.index,
-                     e.subindex, bytes.error());
+        spdlog::warn("Device {}: SDO upload 0x{:04X}:{:02X} failed: {}", slavePosition_, p.index,
+                     p.subindex, bytes.error());
       }
     }
-
     built.emplace(p.key(), std::move(p));
   }
 

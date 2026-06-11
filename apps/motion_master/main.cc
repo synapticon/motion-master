@@ -126,9 +126,13 @@ int main(int argc, char** argv) {
       return 1;
     }
     if (auto result = deviceManager.init(
-            std::move(*driver), {.recorderHistorySeconds = opts.config.recorder.historySeconds,
-                                 .cyclePeriodUs = opts.config.gameLoop.periodUs,
-                                 .dumpDir = opts.config.recorder.dumpDir});
+            std::move(*driver),
+            {.recorderHistorySeconds = opts.config.recorder.historySeconds,
+             .cyclePeriodUs = opts.config.gameLoop.periodUs,
+             .dumpDir = opts.config.recorder.dumpDir,
+             .parameterCache = {.enabled = opts.config.parameterCache.enabled,
+                                .cacheAllVendors = opts.config.parameterCache.cacheAllVendors,
+                                .directory = opts.config.parameterCache.directory}});
         !result) {
       spdlog::error("DeviceManager init failed: {}", result.error());
       return 1;
@@ -250,7 +254,8 @@ int main(int argc, char** argv) {
           .startedConfig = nlohmann::json(opts.config).dump(),
           .initDriver =
               [&deviceManager, makeDriver, historySeconds = opts.config.recorder.historySeconds,
-               periodUs = opts.config.gameLoop.periodUs, dumpDir = opts.config.recorder.dumpDir](
+               periodUs = opts.config.gameLoop.periodUs, dumpDir = opts.config.recorder.dumpDir,
+               parameterCache = opts.config.parameterCache](
                   const std::string& type,
                   const std::string& adapter) -> std::expected<void, std::string> {
             std::string ifname = adapter;
@@ -261,9 +266,14 @@ int main(int argc, char** argv) {
             }
             auto driver = makeDriver(type, ifname);
             if (!driver) return std::unexpected(driver.error());
-            return deviceManager.init(std::move(*driver), {.recorderHistorySeconds = historySeconds,
-                                                           .cyclePeriodUs = periodUs,
-                                                           .dumpDir = dumpDir});
+            return deviceManager.init(
+                std::move(*driver),
+                {.recorderHistorySeconds = historySeconds,
+                 .cyclePeriodUs = periodUs,
+                 .dumpDir = dumpDir,
+                 .parameterCache = {.enabled = parameterCache.enabled,
+                                    .cacheAllVendors = parameterCache.cacheAllVendors,
+                                    .directory = parameterCache.directory}});
           },
           .getLog = [ringLogSink]() { return ringLogSink->entries(); },
           .refreshCert = [certFile = opts.config.tls.certPath, keyFile = opts.config.tls.keyPath,

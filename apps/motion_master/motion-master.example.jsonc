@@ -41,6 +41,34 @@
     "dumpDir": ""
   },
 
+  // On-disk cache of CoE parameter definitions.
+  //
+  // Enumerating a drive's object dictionary over SDO is hundreds of mailbox round-trips and takes
+  // seconds. The result — the parameter DEFINITIONS (index, name, data type, access, units, and the
+  // default/min/max bounds), NOT the live values — is identical for every device of the same vendor,
+  // product, and revision. Motion Master caches it to a human-readable JSON file per identity (under
+  // a per-user cache directory) and reuses it on a later scan of the same hardware, so re-reading the
+  // device list after a scan no longer re-enumerates devices it has seen before.
+  //
+  // Live values are NEVER cached: on a cache hit each value is still read from the device, so a stale
+  // cache can at most cost a re-enumeration, never show a stale value as if current.
+  "parameterCache": {
+    "enabled": true,         // master switch; false disables the cache entirely
+
+    // Which vendors to cache. The cache is keyed only on (vendor, product, revision), so it is only
+    // correct for a vendor that bumps its revision whenever the object dictionary changes.
+    //   false (default): cache ONLY Synapticon devices (vendor 0x22D2), for which this holds.
+    //   true:            cache EVERY vendor — enable only if you trust your other vendors' revision
+    //                    discipline; otherwise a firmware change that reuses a revision could serve
+    //                    mismatched definitions.
+    "cacheAllVendors": false,
+
+    // Directory for the cache files. Empty = a standard per-user cache directory
+    // ($XDG_CACHE_HOME or ~/.cache on Linux, %LOCALAPPDATA% on Windows, ~/Library/Caches on macOS),
+    // under "motion-master/parameters". Set an absolute path to override.
+    "directory": ""
+  },
+
   // TLS certificate for the HTTPS API and secure WebSocket.
   "tls": {
     "certPath": "cert.pem",

@@ -24,6 +24,11 @@ namespace mm::node {
 ///        (node/process_data.h) is pulled in only by device.cc, which calls readPdo / writePdo.
 struct ProcessData;
 
+/// @brief On-disk cache of CoE parameter definitions, keyed by device identity. Forward-declared
+///        and held by pointer; the definition (node/parameter_cache.h) is pulled in only by
+///        device.cc, which consults it from @c initializeParameters. Owned by @c DeviceManager.
+class ParameterCache;
+
 /// @brief Represents a single node on the fieldbus.
 ///
 /// Holds the node's bus position, immutable identity read from EEPROM,
@@ -37,8 +42,12 @@ class Device {
   ///                       supplied (by @c DeviceManager), @c readParameter / @c writeParameter
   ///                       prefer the live PDO image while the device is exchanging and fall back
   ///                       to SDO otherwise. Lifetime must exceed that of this object.
+  /// @param parameterCache On-disk cache of object-dictionary definitions, or @c nullptr to always
+  ///                       enumerate live. When supplied (by @c DeviceManager),
+  ///                       @c initializeParameters loads definitions from it on a hit and populates
+  ///                       it on a miss. Lifetime must exceed that of this object.
   Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver,
-         ProcessData* processData = nullptr);
+         ProcessData* processData = nullptr, const ParameterCache* parameterCache = nullptr);
 
   /// @brief Returns the 1-based position of this node on the fieldbus.
   uint16_t slavePosition() const;
@@ -372,6 +381,9 @@ class Device {
   // (DeviceManager) outlives every Device it created. A raw pointer keeps Device
   // move-constructible.
   ProcessData* processData_ = nullptr;
+  // On-disk parameter-definition cache, or nullptr to always enumerate live. Non-owning; owned by
+  // DeviceManager, which outlives every Device. Consulted only by initializeParameters.
+  const ParameterCache* parameterCache_ = nullptr;
   std::string name_;
   uint32_t vendorId_;
   uint32_t productCode_;

@@ -125,6 +125,7 @@ std::expected<void, std::string> DeviceManager::init(
   if (config_.cyclePeriodUs == 0) {
     config_.cyclePeriodUs = 1000;
   }
+  parameterCache_.configure(config_.parameterCache);
   driver_ = std::move(driver);
   auto result = driver_->init();
   if (!result) {
@@ -163,10 +164,11 @@ std::expected<int, std::string> DeviceManager::scan() {
   devices_.clear();
   for (uint16_t pos = 1; pos <= static_cast<uint16_t>(*result); ++pos) {
     // Hand each device the process-data runtime so its read/writeParameter can serve the live
-    // IOmap value while exchanging (and stage outputs), falling back to SDO otherwise. pd_ is
-    // created once in the constructor and never replaced, so the pointer is stable for our
-    // lifetime.
-    devices_.emplace_back(pos, *driver_, pd_.get());
+    // IOmap value while exchanging (and stage outputs), falling back to SDO otherwise, plus the
+    // shared parameter cache so initializeParameters can skip enumeration on a hit. Both pd_ and
+    // parameterCache_ are members created once and never replaced, so the pointers are stable for
+    // our lifetime.
+    devices_.emplace_back(pos, *driver_, pd_.get(), &parameterCache_);
   }
   // The device set was rebuilt: positions may now name different devices. Bump the generation
   // so off-thread consumers (monitoring) that pinned to a position re-validate it.

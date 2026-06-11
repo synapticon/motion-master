@@ -5,6 +5,7 @@ import FieldbusPage from './pages/FieldbusPage'
 import EthercatStatePage from './pages/EthercatStatePage'
 import ObjectDictionaryPage from './pages/ObjectDictionaryPage'
 import SiiPage from './pages/SiiPage'
+import ToolsSiiPage from './pages/ToolsSiiPage'
 import RegistersPage from './pages/RegistersPage'
 import FoePage from './pages/FoePage'
 import ParametersPage from './pages/ParametersPage'
@@ -42,6 +43,7 @@ export default function App() {
         <Route path="meta/al-status-codes" element={<AlStatusCodesPage />} />
         <Route path="meta/foe-error-codes" element={<FoeErrorCodesPage />} />
         <Route path="meta/data-types" element={<DataTypesPage />} />
+        <Route path="tools/sii" element={<ToolsSiiPage />} />
         <Route path="devices/:deviceId">
           <Route path="ethercat-state" element={<EthercatStatePage />} />
           <Route path="object-dictionary" element={<ObjectDictionaryPage />} />

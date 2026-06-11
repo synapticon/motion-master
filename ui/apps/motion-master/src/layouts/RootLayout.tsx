@@ -312,6 +312,9 @@ export default function RootLayout() {
           <NavItem to="/log" label="Log" />
           <NavItem to="/requests" label="Requests" />
 
+          <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Tools</p>
+          <NavItem to="/tools/sii" label="SII" />
+
           <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Reference</p>
           <NavItem to="/api-docs" label="API Docs" />
 

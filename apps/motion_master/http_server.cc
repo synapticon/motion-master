@@ -454,6 +454,33 @@ void HttpServer::run() {
              }
              sendJson(res, config_.corsOrigin, nlohmann::json(*parsed));
            })
+      .post("/api/sii/parse",
+            [this](auto* res, auto* /*req*/) {
+              // Bus-independent utility: parse a raw SII image uploaded in the request body (e.g. a
+              // previously downloaded .bin) and return the decoded structure. No device involved —
+              // the Tools SII page uses this to view EEPROM files offline through the same parser
+              // the device read path uses.
+              auto aborted = std::make_shared<bool>(false);
+              auto body = std::make_shared<std::string>();
+              res->onAborted([aborted]() { *aborted = true; });
+              res->onData([this, res, body, aborted](std::string_view chunk, bool last) {
+                body->append(chunk);
+                if (!last) {
+                  return;
+                }
+                if (*aborted) {
+                  return;
+                }
+                std::span<const uint8_t> bytes{reinterpret_cast<const uint8_t*>(body->data()),
+                                               body->size()};
+                auto parsed = mm::comm::parseSii(bytes);
+                if (!parsed) {
+                  sendError(res, "400 Bad Request", config_.corsOrigin, parsed.error());
+                  return;
+                }
+                sendJson(res, config_.corsOrigin, nlohmann::json(*parsed));
+              });
+            })
       .post("/api/devices/:slavePosition/registers/:address",
             [this](auto* res, auto* req) {
               uint16_t pos{};

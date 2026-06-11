@@ -1175,6 +1175,31 @@ paths:
           description: No device at the given bus position
         "500":
           $ref: "#/components/responses/DriverError"
+  /api/sii/parse:
+    post:
+      summary: Parse a raw SII (EEPROM) image
+      operationId: parseSii
+      description: >
+        Decodes a raw SII EEPROM image supplied in the request body and returns the
+        parsed structure — the same decoder the device read path uses, exposed as a
+        bus-independent utility. No device is involved; the Tools SII page uses this to
+        view previously downloaded `.bin` files offline.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: Parsed SII structure
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SlaveInformationInterface"
+        "400":
+          description: The body is not a valid SII image (e.g. shorter than the 128-byte header)
   /api/devices/diagnostics:
     get:
       summary: Read live ESC health diagnostics for devices

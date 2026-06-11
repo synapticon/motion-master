@@ -239,7 +239,7 @@ export default function RootLayout() {
   return (
     <div className="flex h-screen bg-grey-50 text-grey-900">
       {/* Sidebar — Ocean Dark */}
-      <aside className="w-72 shrink-0 bg-ocean-dark flex flex-col border-r border-white/10">
+      <aside className="w-60 shrink-0 bg-ocean-dark flex flex-col border-r border-white/10">
         <div className="px-5 py-4 border-b border-white/10">
           <div className="flex items-center justify-between">
             <span className="font-display text-sm font-medium uppercase tracking-widest text-white">

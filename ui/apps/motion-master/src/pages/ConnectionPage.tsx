@@ -186,7 +186,7 @@ export default function ConnectionPage() {
             {cert && status && (
               <>
                 <p className={`text-sm font-display font-medium ${status.cls}`}>{status.label}</p>
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 2xl:grid-cols-3 gap-4">
                   <div className="space-y-4 self-start">
                     <Field label="Subject" value={cert.subject} />
                     <Field label="Issuer" value={cert.issuer} />

@@ -214,10 +214,10 @@ export default function FieldbusPage() {
       <div className="p-4 sm:p-8 space-y-8">
         {/* Row 1 — Init + Reset */}
         <section>
-          <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 2xl:grid-cols-4 gap-6">
 
             {/* Init */}
-            <div className="border border-grey-200 p-5 space-y-4 xl:col-span-3">
+            <div className="border border-grey-200 p-5 space-y-4 2xl:col-span-3">
               <h3 className="text-sm font-display uppercase tracking-widest">Init</h3>
               <p className="text-xs text-grey-600">
                 Initialize the fieldbus driver with the selected protocol and network adapter. Must be called before scanning.
@@ -300,7 +300,7 @@ export default function FieldbusPage() {
             </div>
 
             {/* Reset */}
-            <div className="border border-grey-200 p-5 space-y-4 xl:col-span-1">
+            <div className="border border-grey-200 p-5 space-y-4 2xl:col-span-1">
               <h3 className="text-sm font-display uppercase tracking-widest">Reset</h3>
               <p className="text-xs text-grey-600">
                 Reset the fieldbus driver and clear the device list. Init must be performed again afterwards.
@@ -325,10 +325,10 @@ export default function FieldbusPage() {
 
         {/* Row 2 — Scan + Transition to State */}
         <section>
-          <div className="grid grid-cols-1 xl:grid-cols-4 gap-6">
+          <div className="grid grid-cols-1 2xl:grid-cols-4 gap-6">
 
             {/* Scan + Devices */}
-            <div className="border border-grey-200 p-5 space-y-4 xl:col-span-3">
+            <div className="border border-grey-200 p-5 space-y-4 2xl:col-span-3">
               <h3 className="text-sm font-display uppercase tracking-widest">Scan</h3>
               <p className="text-xs text-grey-600">
                 Discover EtherCAT slaves on the bus. Requires a successful init first.
@@ -435,7 +435,7 @@ export default function FieldbusPage() {
             </div>
 
             {/* Transition to State */}
-            <div className="border border-grey-200 p-5 space-y-4 xl:col-span-1">
+            <div className="border border-grey-200 p-5 space-y-4 2xl:col-span-1">
               <h3 className="text-sm font-display uppercase tracking-widest">Transition to State</h3>
               <p className="text-xs text-grey-600">
                 Command all slaves to transition to an EtherCAT AL state. Requires a successful scan

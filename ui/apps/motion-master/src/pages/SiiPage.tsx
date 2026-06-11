@@ -5,6 +5,7 @@ import type { ReactNode } from 'react'
 import type { SlaveInformationInterface, SiiPdo } from '@mm/api-client'
 import DevicePageHeader from '../components/DevicePageHeader'
 import Explainer from '../components/Explainer'
+import HexViewer from '../components/HexViewer'
 import { useConnection } from '../contexts/ConnectionContext'
 import { usePreferences } from '../contexts/PreferencesContext'
 import { formatHex } from '../utils/hex'
@@ -142,30 +143,25 @@ function PdoTable({ pdos, strings }: { pdos: SiiPdo[]; strings: string[] }) {
   )
 }
 
-// Render raw EEPROM bytes as an offset / hex / ASCII dump.
-function hexDump(bytes: Uint8Array): string {
-  const rows: string[] = []
-  for (let i = 0; i < bytes.length; i += 16) {
-    const chunk = Array.from(bytes.slice(i, i + 16))
-    const offset = i.toString(16).padStart(4, '0').toUpperCase()
-    const hex = chunk.map(b => b.toString(16).padStart(2, '0').toUpperCase())
-    const firstHalf = hex.slice(0, 8).join(' ')
-    const secondHalf = hex.slice(8).join(' ')
-    const hexPart = `${firstHalf.padEnd(23, ' ')}  ${secondHalf}`.padEnd(48, ' ')
-    const ascii = chunk.map(b => (b >= 32 && b < 127 ? String.fromCharCode(b) : '.')).join('')
-    rows.push(`${offset}  ${hexPart}  |${ascii}|`)
+// Length of the meaningful SII content: everything up to and including the END category marker
+// (0xFFFF). Walks the category list from the 128-byte header exactly as the parser does, so the
+// dump stops where the data does — everything after is unprogrammed flash (0xFF). Falls back to the
+// full buffer if no END marker is found (a malformed or unterminated image).
+const SII_HEADER_BYTES = 128
+function siiContentLength(bytes: Uint8Array): number {
+  if (bytes.length < SII_HEADER_BYTES) {
+    return bytes.length
   }
-  return rows.join('\n')
-}
-
-// Drop the trailing run of 0xFF the EEPROM read pads with, so the dump shows only real content.
-function trimTrailingPadding(bytes: Uint8Array): Uint8Array {
-  let end = bytes.length
-  while (end > 0 && bytes[end - 1] === 0xff) {
-    end--
+  let off = SII_HEADER_BYTES
+  while (off + 4 <= bytes.length) {
+    const type = bytes[off] | (bytes[off + 1] << 8)
+    if (type === 0xffff) {
+      return off + 2 // include the 2-byte END marker itself
+    }
+    const wordSize = bytes[off + 2] | (bytes[off + 3] << 8)
+    off += 4 + wordSize * 2
   }
-  // Keep to a 16-byte boundary so the final dump row stays aligned.
-  return bytes.subarray(0, Math.min(bytes.length, Math.ceil(end / 16) * 16))
+  return bytes.length
 }
 
 function RawDump({ slavePosition }: { slavePosition: number }) {
@@ -188,15 +184,15 @@ function RawDump({ slavePosition }: { slavePosition: number }) {
   if (query.isError) {
     return <p className="text-xs text-status-bad font-mono">Failed to read raw EEPROM image.</p>
   }
-  const trimmed = trimTrailingPadding(query.data)
+  const contentLen = siiContentLength(query.data)
+  const hidden = query.data.length - contentLen
   return (
     <div className="space-y-2">
       <p className="text-xs text-grey-500">
-        {query.data.length} bytes read; {trimmed.length} shown (trailing 0xFF padding trimmed).
+        {query.data.length} bytes read; {contentLen} bytes of SII content
+        {hidden > 0 && ` (${hidden} unprogrammed 0xFF bytes hidden)`}.
       </p>
-      <pre className="border border-grey-200 bg-grey-50 p-4 text-[11px] leading-relaxed font-mono overflow-x-auto">
-        {hexDump(trimmed)}
-      </pre>
+      <HexViewer bytes={query.data.subarray(0, contentLen)} />
     </div>
   )
 }

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import DevicePageHeader from '../components/DevicePageHeader'
+import HexViewer from '../components/HexViewer'
 import { useConnection } from '../contexts/ConnectionContext'
 import { downloadBytes } from '../utils/download'
 import { parseSomanetFileList, type SomanetFile } from '../utils/somanet'
@@ -48,20 +49,6 @@ function encodeFilename(name: string): string {
   return encodeURIComponent(name).replace(/%3D/g, '=')
 }
 
-function hexDump(bytes: Uint8Array): string {
-  const rows: string[] = []
-  const limit = Math.min(bytes.length, 256)
-  for (let i = 0; i < limit; i += 16) {
-    const chunk = Array.from(bytes.slice(i, Math.min(i + 16, limit)))
-    const offset = i.toString(16).padStart(8, '0')
-    const firstHalf = chunk.slice(0, 8).map(b => b.toString(16).padStart(2, '0').toUpperCase())
-    const secondHalf = chunk.slice(8).map(b => b.toString(16).padStart(2, '0').toUpperCase())
-    const hexPart = (firstHalf.join(' ').padEnd(23, ' ') + '  ' + secondHalf.join(' ')).padEnd(48, ' ')
-    const ascii = chunk.map(b => b >= 32 && b < 127 ? String.fromCharCode(b) : '.').join('')
-    rows.push(`${offset}  ${hexPart}  |${ascii}|`)
-  }
-  return rows.join('\n')
-}
 
 function decodeUtf8(bytes: Uint8Array): string | null {
   try {
@@ -479,9 +466,7 @@ export default function FoePage() {
 
             {view === 'bytes' && (
               <div>
-                <pre className="text-xs font-mono bg-grey-50 border border-grey-200 p-4 overflow-x-auto leading-5">
-                  {hexDump(result)}
-                </pre>
+                <HexViewer bytes={result.subarray(0, 256)} offsetDigits={8} />
                 {result.length > 256 && (
                   <p className="text-xs text-grey-500 mt-2">
                     Showing first 256 of {result.length.toLocaleString()} bytes.

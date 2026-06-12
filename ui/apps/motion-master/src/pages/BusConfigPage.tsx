@@ -188,9 +188,19 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
         >
           @ {formatHex(slave.configuredAddress)}
         </span>
-        {slave.aliasAddress > 0 && (
-          <span className="font-mono text-[11px] text-grey-500" title="Configured station alias">
+        {slave.aliasAddress > 0 ? (
+          <span
+            className="font-mono text-[11px] text-grey-500 cursor-help"
+            title="Station alias stored in the slave's EEPROM — stable across rescans and recabling, unlike the configured address"
+          >
             alias {formatHex(slave.aliasAddress)}
+          </span>
+        ) : (
+          <span
+            className="font-mono text-[11px] text-grey-400 cursor-help"
+            title="No station alias set in EEPROM. The alias is the only stable per-device identifier across rescans/recabling; the configured (@) address is reassigned every scan."
+          >
+            alias —
           </span>
         )}
       </header>
@@ -205,11 +215,16 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
           <Field
             label="Mailbox"
             value={
-              slave.mailbox.writeLength === 0 && slave.mailbox.readLength === 0
-                ? 'none'
-                : `${slave.mailbox.writeLength} / ${slave.mailbox.readLength} B`
+              slave.mailbox.writeLength === 0 && slave.mailbox.readLength === 0 ? (
+                'none'
+              ) : (
+                <>
+                  {slave.mailbox.writeLength} B @ {formatHex(slave.mailbox.writeOffset)} /{' '}
+                  {slave.mailbox.readLength} B @ {formatHex(slave.mailbox.readOffset)}
+                </>
+              )
             }
-            hint="Write (master→slave) / read (slave→master) mailbox lengths"
+            hint="Write (master→slave) / read (slave→master) mailbox windows: length and physical ESC offset of each"
           />
           <Field
             label="Protocols"
@@ -235,13 +250,16 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
           <Field
             label="Distributed clock"
             value={
-              !slave.dc.capable
-                ? 'not capable'
-                : slave.dc.active
-                  ? `SYNC0, ${slave.dc.propagationDelay} ns`
-                  : `free-run, ${slave.dc.propagationDelay} ns`
+              !slave.dc.capable ? (
+                'not capable'
+              ) : (
+                <>
+                  {slave.dc.active ? 'SYNC0' : 'free-run'} · delay {slave.dc.propagationDelay} ns ·
+                  cycle {slave.dc.cycleTime} ns · shift {slave.dc.shift} ns
+                </>
+              )
             }
-            hint="DC capability and SYNC0 state; propagation delay measured by the master during DC configuration. SYNC0 is off for SM-synchronous bring-up."
+            hint="DC capability and SYNC0 state, with the master-measured propagation delay and the SYNC0 cycle time / shift. SYNC0 is off for the SM-synchronous bring-up this driver uses, so cycle and shift read 0 until SYNC0 activation is enabled."
           />
         </div>
 

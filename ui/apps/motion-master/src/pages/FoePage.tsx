@@ -268,7 +268,18 @@ export default function FoePage() {
 
   return (
     <div>
-      <DevicePageHeader slavePosition={slavePosition} title="FoE" />
+      <DevicePageHeader
+        slavePosition={slavePosition}
+        title="FoE"
+        description={
+          <>
+            Read and write files on the device over File-over-EtherCAT (FoE) — the mailbox protocol
+            used for firmware images and, on SOMANET drives, the on-drive filesystem (configuration,
+            hardware description, logs). Writing a file overwrites any existing file of the same
+            name; some SOMANET files require a one-shot stack unlock immediately before each write.
+          </>
+        }
+      />
       <div className="p-4 sm:p-8 space-y-8">
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">

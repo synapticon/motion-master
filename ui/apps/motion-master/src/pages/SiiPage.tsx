@@ -102,7 +102,19 @@ export default function SiiPage() {
 
   return (
     <div>
-      <DevicePageHeader slavePosition={slavePosition} title="SII" />
+      <DevicePageHeader
+        slavePosition={slavePosition}
+        title="SII"
+        description={
+          <>
+            Read the device's SII (Slave Information Interface) — the EEPROM the EtherCAT Slave
+            Controller reads at power-up for its identity and Sync Manager / FMMU / mailbox
+            configuration. Browse the parsed categories or the raw image, download it, or overwrite
+            the EEPROM from a file. Writing is destructive and requires a power cycle to apply — best
+            done in INIT or PRE-OP.
+          </>
+        }
+      />
       <div className="p-4 sm:p-8 space-y-8">
         <SiiExplainer />
 

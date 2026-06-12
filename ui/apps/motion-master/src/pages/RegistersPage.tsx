@@ -137,7 +137,19 @@ export default function RegistersPage() {
 
   return (
     <div>
-      <DevicePageHeader slavePosition={slavePosition} title="Registers" />
+      <DevicePageHeader
+        slavePosition={slavePosition}
+        title="Registers"
+        description={
+          <>
+            Read and write the device's EtherCAT Slave Controller (ESC) registers directly by
+            address — the low-level hardware registers in the slave (AL control/status, Sync Manager
+            and FMMU configuration, distributed clocks, error counters), distinct from the CoE
+            object dictionary. Pick a known register from the catalogue or enter a raw address.
+            Writing arbitrary registers can disrupt communication — use with care.
+          </>
+        }
+      />
       <div className="p-4 sm:p-8 space-y-8">
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">

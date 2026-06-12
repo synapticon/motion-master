@@ -281,7 +281,18 @@ export default function ParametersPage() {
 
   return (
     <div>
-      <DevicePageHeader slavePosition={slavePosition} title="Parameters" />
+      <DevicePageHeader
+        slavePosition={slavePosition}
+        title="Parameters"
+        description={
+          <>
+            Read and write the device's CoE object dictionary over SDO (Service Data Object) — the
+            parameters addressed by index and subindex (e.g. 0x6064 position actual value). Upload a
+            single value to inspect it, download a value to set it, or browse the full dictionary.
+            SDO access runs over the EtherCAT mailbox and works from PRE-OP up.
+          </>
+        }
+      />
       <div className="p-4 sm:p-8 space-y-8">
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">

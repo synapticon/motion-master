@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
 import type { SlaveConfig, SyncManagerConfig, FmmuConfig } from '@mm/api-client'
 import PageHeader from '../components/PageHeader'
+import ConfigExplainer from '../components/ConfigExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { usePreferences } from '../contexts/PreferencesContext'
@@ -301,6 +302,8 @@ export default function BusConfigPage() {
         }
       />
       <div className="p-4 sm:p-8 space-y-6">
+        <ConfigExplainer />
+
         <div className="flex justify-end">
           <button
             onClick={() => query.refetch()}

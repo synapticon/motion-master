@@ -908,6 +908,13 @@ void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState 
           slave, wkc0, wkc1);
     }
 
+    // Reprogramming the mailbox sync managers re-initializes the slave's mailbox, which resets
+    // the slave's expected mailbox sequence counter. The master's counter (mbx_cnt) must be
+    // reset to match, otherwise the first FoE exchange on the fresh BOOT mailbox is rejected and
+    // every subsequent read desyncs (seen as wkc 0x5 then 0x0/0x3 "unexpected mailbox"). On a
+    // first flash after a bus scan the counter happens to line up, but on a re-entry into BOOT it
+    // carries a stale PRE-OP value and wedges the mailbox, breaking repeated enter/exit BOOT.
+    ctx->slavelist[slave].mbx_cnt = 0;
   } else if (targetState == EtherCatState::PreOp) {
     // PRE-OP SMs come from the standard SII mailbox entries, not the BOOT entries.
     ecx_readeeprom1(ctx, slave, ECT_SII_RXMBXADR);
@@ -944,6 +951,13 @@ void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState 
           "slave may refuse the transition",
           slave, wkc0, wkc1);
     }
+
+    // Same reset as the BOOT branch: this PRE-OP reprogramming only runs for a slave we earlier
+    // drove into BOOT (firmware download), so mbx_cnt still holds the counter advanced by the
+    // BOOT-mode FoE transfers. Reprogramming the SMs re-initializes the slave's mailbox and
+    // resets its expected sequence counter, so the master must reset to match — otherwise the
+    // first CoE SDO on the fresh PRE-OP mailbox desyncs.
+    ctx->slavelist[slave].mbx_cnt = 0;
   }
 
   // Both EEPROM read paths above (the combined ecx_readeeprom in the BOOT branch and the

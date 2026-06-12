@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import type { ProcessImageObject } from '@mm/api-client'
 import PageHeader from '../components/PageHeader'
+import ProcessImageExplainer from '../components/ProcessImageExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { usePreferences } from '../contexts/PreferencesContext'
@@ -168,6 +169,8 @@ export default function ProcessImagePage() {
         }
       />
       <div className="p-4 sm:p-8 space-y-8">
+        <ProcessImageExplainer />
+
         <div className="flex justify-end">
           <button
             onClick={() => query.refetch()}

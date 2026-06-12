@@ -99,20 +99,43 @@ export default function ConfigExplainer() {
       </p>
       <ul className="list-disc pl-5 space-y-1">
         <li>
-          <strong>Mailbox mode</strong> — a single buffer with a full/empty handshake, for the
-          acyclic mailbox. Typically <strong>SM0</strong> = Mailbox Out (master→slave) and{' '}
-          <strong>SM1</strong> = Mailbox In (slave→master).
+          <strong>Mailbox mode (1 buffer, handshake)</strong> — for the acyclic mailbox, where every
+          message must arrive intact and none may be lost. The SM holds a single buffer with a
+          full/empty flag and enforces strict flow control: the writer may only write when the buffer
+          is <em>empty</em>, and writing completes the moment the <em>last</em> byte of the window is
+          touched — at which point the SM flips the buffer to <em>full</em> and locks out further
+          writes. The reader empties it by reading to that same last byte, which flips it back to
+          empty and re-enables the writer. Because the flag turns only on access to the end address, a
+          message is always transferred whole — never half-read or overwritten mid-message. If a
+          writer tries while the buffer is still full, the access is refused (the working counter stays
+          0) and it retries; a toggle/repeat bit lets the two sides recover a lost or duplicated
+          message. Reliable, but only one message is in flight at a time. Typically{' '}
+          <strong>SM0</strong> = Mailbox Out (master→slave) and <strong>SM1</strong> = Mailbox In
+          (slave→master).
         </li>
         <li>
-          <strong>Buffered (3-buffer) mode</strong> — three rotating buffers so the master and the
-          slave can each access the latest complete copy without ever blocking, for cyclic process
-          data. Typically <strong>SM2</strong> = Outputs (RxPDO) and <strong>SM3</strong> = Inputs
-          (TxPDO).
+          <strong>Buffered / 3-buffer mode (&ldquo;free-run&rdquo;)</strong> — for cyclic process data,
+          where only the <em>freshest</em> value matters and <em>neither side may ever block</em>.
+          Behind one logical address the SM keeps three physical buffers and rotates them: at any
+          instant one is being written, one holds the last completed copy ready to read, and one is
+          spare. When the writer finishes a buffer (again, on touching the last byte) the SM atomically
+          hands it over as the new &ldquo;latest complete&rdquo; copy and gives the writer a fresh free
+          buffer for the next cycle — so the writer never waits for the reader, and the reader always
+          gets a whole, most-recent frame, never a torn one. The trade-off is the opposite of the
+          mailbox&apos;s: nothing blocks and nothing tears, but if the writer produces two frames
+          before the reader takes one, the intermediate frame is simply skipped — exactly what you want
+          for a setpoint or a feedback sample, where last-value-wins is correct. This is what lets the
+          master read/write the whole bus every cycle without ever stalling on a slave. Typically{' '}
+          <strong>SM2</strong> = Outputs (RxPDO) and <strong>SM3</strong> = Inputs (TxPDO).
         </li>
       </ul>
       <p>
-        Each row shows the SM&apos;s role, the physical address and length of the window it guards, and
-        its raw control/flags register (buffer mode, direction, watchdog, enable).
+        The two modes are the same hardware tuned for opposite goals:{' '}
+        <strong>mailbox = lossless and ordered but one-at-a-time</strong> (reliability), whereas{' '}
+        <strong>3-buffer = always-fresh and never-blocking but lossy of intermediate values</strong>{' '}
+        (timeliness). Each SM row on the card shows the SM&apos;s role, the physical address and length
+        of the window it guards, and its raw control/flags register (buffer mode, direction, watchdog,
+        enable).
       </p>
 
       <p>

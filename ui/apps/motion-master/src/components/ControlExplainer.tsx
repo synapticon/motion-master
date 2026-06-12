@@ -29,11 +29,16 @@ export default function ControlExplainer() {
         <strong>Scan</strong> enumerates the bus. The master sends a broadcast datagram down the
         line; because EtherCAT slaves are wired in a daisy-chain and each one processes the frame
         on the fly and increments a working counter as it passes, the master learns how many slaves
-        are present and in what physical order. Each slave is then assigned a fixed station address,
-        its <strong>SII (EEPROM) identity</strong> is read — vendor ID, product code, revision,
+        are present and in what physical order. Each slave is then assigned a fixed{' '}
+        <strong>station address</strong> — a 16-bit number the master writes into the slave&apos;s ESC
+        so it can address that slave directly on the wire, rather than by counting hops during the
+        initial scan (the Configuration page shows it as the <code>@ 0x…</code> value next to each
+        slave).
+        Its <strong>SII (EEPROM) identity</strong> is read — vendor ID, product code, revision,
         serial number, name — and its mailbox and default Sync-Manager / FMMU configuration are set
-        up from that SII. Scanning is destructive to slave state: it re-discovers the bus and resets
-        every slave to <strong>INIT</strong>. It is the only action that rebuilds the device list.
+        up from that SII. Scanning is destructive on both sides: it resets every slave to{' '}
+        <strong>INIT</strong>, and it rebuilds Motion Master&apos;s device list from scratch — it is
+        the only action that <em>repopulates</em> the list (Reset also clears it, but leaves it empty).
       </p>
 
       <p>
@@ -53,7 +58,9 @@ export default function ControlExplainer() {
       <ul className="list-disc pl-5 space-y-1">
         <li>
           <strong>INIT</strong> — no mailbox, no process data. The starting point; reachable directly
-          from any state.
+          from any state. ESC <strong>register</strong> read/write and <strong>SII (EEPROM)</strong>{' '}
+          read/write still work here — they ride the data-link layer, not the mailbox — and EEPROM
+          access is in fact most reliable in INIT.
         </li>
         <li>
           <strong>PRE-OP</strong> — mailbox communication (CoE / SDO) is live; no process data yet.

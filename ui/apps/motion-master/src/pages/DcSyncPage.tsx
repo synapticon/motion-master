@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import type { DcSyncStatus } from '@mm/api-client'
 import PageHeader from '../components/PageHeader'
+import DcSyncExplainer from '../components/DcSyncExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
@@ -86,6 +87,8 @@ export default function DcSyncPage() {
         }
       />
       <div className="p-4 sm:p-8 space-y-6">
+        <DcSyncExplainer />
+
         <div className="flex items-center justify-between gap-4">
           {dcDevices.length > 0 ? (
             <p className="text-xs text-grey-600">

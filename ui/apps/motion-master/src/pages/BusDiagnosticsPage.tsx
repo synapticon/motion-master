@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import type { DeviceDiagnostics, PortDiagnostics } from '@mm/api-client'
 import PageHeader from '../components/PageHeader'
+import DiagnosticsExplainer from '../components/DiagnosticsExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { usePreferences } from '../contexts/PreferencesContext'
@@ -342,6 +343,8 @@ export default function BusDiagnosticsPage() {
         }
       />
       <div className="p-4 sm:p-8 space-y-6">
+        <DiagnosticsExplainer />
+
         <div className="flex justify-end">
           <button
             onClick={() => query.refetch()}

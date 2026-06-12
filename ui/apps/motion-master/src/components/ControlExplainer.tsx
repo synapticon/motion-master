@@ -33,9 +33,21 @@ export default function ControlExplainer() {
         <strong>station address</strong> — a 16-bit number the master writes into the slave&apos;s ESC
         so it can address that slave directly on the wire, rather than by counting hops during the
         initial scan (the Configuration page shows it as the <code>@ 0x…</code> value next to each
-        slave).
-        Its <strong>SII (EEPROM) identity</strong> is read — vendor ID, product code, revision,
-        serial number, name — and its mailbox and default Sync-Manager / FMMU configuration are set
+        slave). Note that this address is <em>not</em> stable: the master derives it from scan order
+        (position 1 → <code>0x1001</code>, position 2 → <code>0x1002</code>, …) and reassigns it on
+        every scan, so re-cabling or inserting a slave shifts it — exactly like the position. The one
+        identifier that survives recabling is the <strong>station alias</strong>, a value stored in
+        the slave&apos;s own EEPROM (shown as <code>alias 0x…</code> on the Configuration page when
+        set). The API still addresses every device by slave position, so if you need stable
+        addressing it is on you to keep the mapping: note each device&apos;s alias (or serial number),
+        and after a rescan re-resolve which slave position now carries that alias before issuing
+        commands.
+      </p>
+
+      <p>
+        Each slave&apos;s <strong>SII (EEPROM) identity</strong> is read — vendor ID, product code,
+        revision, serial number, name — and its mailbox and default Sync-Manager / FMMU configuration
+        are set
         up from that SII. Scanning is destructive on both sides: it resets every slave to{' '}
         <strong>INIT</strong>, and it rebuilds Motion Master&apos;s device list from scratch — it is
         the only action that <em>repopulates</em> the list (Reset also clears it, but leaves it empty).

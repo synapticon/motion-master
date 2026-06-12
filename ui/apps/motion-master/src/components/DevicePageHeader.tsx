@@ -35,7 +35,7 @@ export default function DevicePageHeader({
           <h1 className="font-display text-4xl font-light">{title}</h1>
         </div>
         {device && (
-          <dl className="flex flex-wrap gap-x-6 gap-y-1 border border-grey-200 px-4 py-3">
+          <dl className="flex flex-wrap gap-x-5 gap-y-2 border border-grey-200 bg-grey-50 px-4 py-3">
             {[
               { label: 'Name', value: device.name, mono: false },
               { label: 'Vendor ID', value: hex32(device.vendorId), mono: true },
@@ -44,8 +44,10 @@ export default function DevicePageHeader({
               { label: 'Serial', value: String(device.serialNumber), mono: false },
             ].map(({ label, value, mono }) => (
               <div key={label}>
-                <dt className="text-xs text-grey-500 uppercase tracking-wide">{label}</dt>
-                <dd className={`text-xs text-grey-900 ${mono ? 'font-mono' : ''}`}>{value}</dd>
+                <dt className="text-[10px] text-grey-500 uppercase tracking-wide font-display">
+                  {label}
+                </dt>
+                <dd className={`text-[11px] text-grey-900 ${mono ? 'font-mono' : ''}`}>{value}</dd>
               </div>
             ))}
           </dl>

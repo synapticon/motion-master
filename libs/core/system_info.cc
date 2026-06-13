@@ -3,11 +3,10 @@
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <system_error>
 #include <thread>
-
-#include <nlohmann/json.hpp>
 
 #if defined(_WIN32)
 // clang-format off

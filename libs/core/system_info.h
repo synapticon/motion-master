@@ -2,9 +2,8 @@
 #define LIBS_CORE_SYSTEM_INFO_H_
 
 #include <cstdint>
-#include <string>
-
 #include <nlohmann/json_fwd.hpp>
+#include <string>
 
 namespace mm::core {
 

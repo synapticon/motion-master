@@ -68,6 +68,7 @@ classDiagram
         -unique_ptr~FieldbusDriver~ driver_
         -vector~Device~ devices_
         -unique_ptr~ProcessData~ pd_
+        -ParameterCache parameterCache_
         -shared_mutex busMutex_
     }
     class Device {
@@ -79,6 +80,13 @@ classDiagram
         -uint16 slavePosition_
         -map~uint32,DeviceParameter~ parameters_
         -PdoMappings pdoMappings_
+        -const ParameterCache* parameterCache_
+    }
+    class ParameterCache {
+        +load() / store() «control-plane»
+        +list() / readRaw() / remove()
+        +enabledForVendor()
+        -ParameterCacheConfig config_
     }
     class FieldbusDriver {
         <<interface>>
@@ -146,10 +154,12 @@ classDiagram
     DeviceManager *-- "1" FieldbusDriver : owns
     DeviceManager *-- "0..*" Device : owns
     DeviceManager *-- "1" ProcessData : owns (pd_)
+    DeviceManager *-- "1" ParameterCache : owns
     ProcessData *-- "1" ProcessDataRing : owns (recorder)
     ProcessData o-- "0..*" ProcessImage : generations
     Device ..> FieldbusDriver : ref (shared)
     Device ..> ProcessData : ref (live IO image)
+    Device ..> ParameterCache : ref (OD-definition cache)
     Device *-- "0..*" DeviceParameter
     Device *-- PdoMappings
     ProfileDevice ..> Device : borrows (non-owning)
@@ -173,6 +183,7 @@ classDiagram
 | `DeviceManager` | `driver_` | `unique_ptr<FieldbusDriver>` | **Yes (exclusive)** | `libs/node/device_manager.h` |
 | `DeviceManager` | `devices_` | `vector<Device>` | **Yes** | `libs/node/device_manager.h` |
 | `DeviceManager` | `pd_` | `unique_ptr<ProcessData>` | **Yes** | `libs/node/device_manager.h` |
+| `DeviceManager` | `parameterCache_` | `ParameterCache` | **Yes** | `libs/node/device_manager.h` |
 | `ProcessData` | `ring` | `ProcessDataRing` | **Yes** | `libs/node/process_data.h` |
 | `ProcessData` | `outputSlots` | `vector<atomic<uint64_t>>` | **Yes** | `libs/node/process_data.h` |
 | `ProcessData` | `generations` | `vector<shared_ptr<const ProcessImage>>` | **Yes (retained)** | `libs/node/process_data.h` |
@@ -180,6 +191,7 @@ classDiagram
 | `Device` | `processData_` | `ProcessData*` | No — points at `DeviceManager::pd_` | `libs/node/device.h` |
 | `Device` | `parameters_` | `unordered_map<uint32_t, DeviceParameter>` | **Yes** | `libs/node/device.h` |
 | `Device` | `pdoMappings_` | `PdoMappings` | **Yes** | `libs/node/device.h` |
+| `Device` | `parameterCache_` | `const ParameterCache*` | No — points at `DeviceManager::parameterCache_` | `libs/node/device.h` |
 
 ## Inheritance
 

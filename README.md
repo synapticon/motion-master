@@ -236,7 +236,11 @@ curl -k -X POST https://localhost:61447/api/init \
      -H 'Content-Type: application/json' \
      -d '{"driver":"soem","adapter":"eth0"}'
 
-# 3. Scan for slaves and populate the device list
+# 3. Scan for slaves and populate the device list. The first scan of a given drive enumerates its
+#    full CoE object dictionary (hundreds of mailbox round-trips, a few seconds); the definitions
+#    are cached on disk per device identity, so later scans of the same hardware skip it. Enabled
+#    for Synapticon drives by default — see the parameterCache config block. Inspect or clear the
+#    cache via GET/DELETE /api/parameter-caches (or the Parameter Caches page in the UI).
 curl -k -X POST https://localhost:61447/api/scan
 
 # 4. List discovered devices

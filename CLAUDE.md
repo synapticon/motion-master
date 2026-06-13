@@ -134,13 +134,18 @@ Flat layout within each lib/app is intentional — navigate by filename and grep
 ```
 main.cc  (composition root — the only place concrete types are instantiated; no `App` class yet)
  ├── Config (CLI options)
- ├── mm::node::DeviceManager      (owns FieldbusDriver + Device[] + ProcessData; drives scanning)
+ ├── mm::node::DeviceManager      (owns FieldbusDriver + Device[] + ProcessData + ParameterCache; drives scanning)
  │     ├── unique_ptr<FieldbusDriver>   ← SoemFieldbusDriver | SpoeDriver (planned); owns socketMutex_
  │     │                                  null until init(); set via init(unique_ptr<FieldbusDriver>)
  │     ├── unique_ptr<ProcessData>      (published image + generations; per-output atomic staging
  │     │                                  slots; lossless recorder ring (every cycle); WKC health.
  │     │                                  Owned here, handed by raw pointer to each Device)
- │     ├── owns: std::vector<Device>    (each Device borrows FieldbusDriver& + ProcessData*)
+ │     ├── ParameterCache               (control-plane only; on-disk OD-definition cache keyed by
+ │     │                                  identity. Direct member, created once + never replaced, so
+ │     │                                  the pointer is stable across scans; handed by raw pointer
+ │     │                                  to each Device. Best-effort file I/O; touched only on the
+ │     │                                  HTTP/scan threads — outside the RT path entirely)
+ │     ├── owns: std::vector<Device>    (each Device borrows FieldbusDriver& + ProcessData* + ParameterCache*)
  │     │     ├── slavePosition, name, vendorId, productCode, revisionNumber, serialNumber (immutable)
  │     │     ├── owns: parameters_  (index/subindex → DeviceParameter{ DeviceParameterValue variant })
  │     │     ├── owns: PdoMappings

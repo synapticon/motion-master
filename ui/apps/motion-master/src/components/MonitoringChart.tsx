@@ -41,9 +41,12 @@ function formatTicks(splits: number[]): string[] {
 export default function MonitoringChart({
   data,
   labels,
+  titles = [],
 }: {
   data: uPlot.AlignedData
   labels: string[]
+  /** Optional hover tooltip per series (e.g. the parameter name), aligned with `labels`. */
+  titles?: string[]
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const plotRef = useRef<uPlot | null>(null)
@@ -96,6 +99,18 @@ export default function MonitoringChart({
   useEffect(() => {
     plotRef.current?.setData(data)
   }, [data])
+
+  // Set each legend row's hover title to the parameter name. uPlot renders the legend as an HTML
+  // table; the first `.u-series` row is the x-axis ("Elapsed"), so series rows start at index 1.
+  // Re-applied when the plot is rebuilt (labels) or the names resolve later (titles).
+  useEffect(() => {
+    const rows = containerRef.current?.querySelectorAll<HTMLElement>('.u-legend tr.u-series')
+    if (!rows) return
+    titles.forEach((title, i) => {
+      const row = rows[i + 1]
+      if (row) row.title = title
+    })
+  }, [titles, labels])
 
   return <div ref={containerRef} className="w-full" />
 }

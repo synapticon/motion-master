@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { adjectives, animals, colors, uniqueNamesGenerator } from 'unique-names-generator'
+import { Eraser, Pause, Play, Plus, Trash2, X } from 'lucide-react'
 import type uPlot from 'uplot'
 import type { DeviceParameter, Monitoring } from '@mm/api-client'
 import MonitoringChart from '../components/MonitoringChart'
 import PageHeader from '../components/PageHeader'
+import ParameterPicker from '../components/ParameterPicker'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import {
@@ -50,6 +52,14 @@ function toHex(n: number, pad: number): string {
 
 function paramKey(pos: number, index: number, subindex: number): string {
   return `${pos}:${index}:${subindex}`
+}
+
+// CiA301 PDO mapping objects: RxPDO 0x1600–0x17FF, TxPDO 0x1A00–0x1BFF. Their sub-entries encode
+// the process-image layout (which object is mapped where), not a measurable value — monitoring
+// them is meaningless, and in a long list they're easily mistaken for real parameters. The picker
+// shows them greyed-out and unselectable rather than offering them as a pick.
+function isPdoMappingObject(p: DeviceParameter): boolean {
+  return (p.index >= 0x1600 && p.index <= 0x17ff) || (p.index >= 0x1a00 && p.index <= 0x1bff)
 }
 
 interface CycleStats {
@@ -270,6 +280,12 @@ function MonitoringCard({
     () => params.map((p) => `${p.devicePosition}·${toHex(p.index, 4)}:${toHex(p.subindex, 2).slice(2)}`),
     [sig],
   )
+  // Parameter names, positionally aligned with `labels`, surfaced as the legend row's hover title
+  // (the legend itself shows the compact device·index:subindex key). Empty when the name is unknown.
+  const titles = useMemo(
+    () => params.map((p) => nameByKey.get(paramKey(p.devicePosition, p.index, p.subindex)) ?? ''),
+    [sig, nameByKey],
+  )
 
   useEffect(() => {
     const onBatch = (rows: SampleRows) => {
@@ -328,7 +344,13 @@ function MonitoringCard({
             {seriesCount === 1 ? 'parameter' : 'parameters'})
           </p>
         </div>
-        <button type="button" className={btnGhostCls} onClick={onDelete} disabled={deleting}>
+        <button
+          type="button"
+          className={`${btnGhostCls} inline-flex items-center gap-1.5`}
+          onClick={onDelete}
+          disabled={deleting}
+        >
+          <Trash2 className="h-4 w-4" />
           {deleting ? 'Deleting…' : 'Delete'}
         </button>
       </div>
@@ -367,7 +389,7 @@ function MonitoringCard({
         <div className="flex flex-wrap items-center gap-3 mb-3">
           <button
             type="button"
-            className={btnGhostCls}
+            className={`${btnGhostCls} inline-flex items-center gap-1.5`}
             onClick={() => {
               // Resuming: start fresh. No samples arrive while paused, so the first post-resume
               // sample is a full pause-duration ahead of the last one — that bridging Δt would
@@ -378,9 +400,15 @@ function MonitoringCard({
               setPlaying((p) => !p)
             }}
           >
+            {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             {playing ? 'Pause' : 'Resume'}
           </button>
-          <button type="button" className={btnGhostCls} onClick={clear}>
+          <button
+            type="button"
+            className={`${btnGhostCls} inline-flex items-center gap-1.5`}
+            onClick={clear}
+          >
+            <Eraser className="h-4 w-4" />
             Clear
           </button>
           <label className="text-xs text-grey-500 flex items-center gap-1.5">
@@ -411,7 +439,7 @@ function MonitoringCard({
             <span className="font-mono text-grey-700">{micros(stats.max)}</span>
           </div>
         )}
-        <MonitoringChart data={data} labels={labels} />
+        <MonitoringChart data={data} labels={labels} titles={titles} />
       </div>
     </div>
   )
@@ -581,10 +609,18 @@ function CreateMonitoringForm({
         </div>
         <button
           type="button"
-          className={`${btnGhostCls} mt-2`}
-          onClick={() => setRows((rs) => [...rs, { ...emptyRow }])}
+          className={`${btnGhostCls} mt-2 inline-flex items-center gap-1.5`}
+          onClick={() =>
+            setRows((rs) => [
+              // Carry the previous row's device forward — appended parameters are usually for the
+              // same device, so this saves re-picking it every time.
+              ...rs,
+              { ...emptyRow, devicePosition: rs[rs.length - 1]?.devicePosition ?? '' },
+            ])
+          }
         >
-          + Append parameter
+          <Plus className="h-4 w-4" />
+          Append parameter
         </button>
       </div>
 
@@ -627,7 +663,7 @@ function ParamRow({
           value={row.devicePosition}
           onChange={(e) => onChange({ devicePosition: e.target.value })}
         >
-          <option value="">Select…</option>
+          <option value="">Select device…</option>
           {devices.map((d) => (
             <option key={d.slavePosition} value={String(d.slavePosition)}>
               {d.slavePosition} — {d.name || 'device'}
@@ -636,29 +672,18 @@ function ParamRow({
         </select>
       </div>
 
-      {deviceParams.length > 0 && (
-        <div className="w-64">
+      {pos !== null && (
+        <div className="w-[32rem]">
           <span className="block text-[10px] text-grey-400 mb-0.5">Pick parameter</span>
-          <select
-            className={inputCls}
-            value={
-              parseHexOrDec(row.index) !== null && parseHexOrDec(row.subindex) !== null
-                ? `${parseHexOrDec(row.index)}:${parseHexOrDec(row.subindex)}`
-                : ''
-            }
-            onChange={(e) => {
-              if (!e.target.value) return
-              const [idx, sub] = e.target.value.split(':')
-              onChange({ index: idx, subindex: sub })
-            }}
-          >
-            <option value="">Or type manually →</option>
-            {deviceParams.map((p) => (
-              <option key={paramKey(pos as number, p.index, p.subindex)} value={`${p.index}:${p.subindex}`}>
-                {toHex(p.index, 4)}:{toHex(p.subindex, 2).slice(2)} — {p.name}
-              </option>
-            ))}
-          </select>
+          <ParameterPicker
+            className="w-[32rem]"
+            params={deviceParams}
+            selectedIndex={parseHexOrDec(row.index)}
+            selectedSubindex={parseHexOrDec(row.subindex)}
+            onSelect={(p) => onChange({ index: String(p.index), subindex: String(p.subindex) })}
+            isDisabled={isPdoMappingObject}
+            disabledHint="PDO mapping"
+          />
         </div>
       )}
 
@@ -682,8 +707,13 @@ function ParamRow({
       </div>
 
       {onRemove && (
-        <button type="button" className={`${btnGhostCls} px-3`} onClick={onRemove} title="Remove parameter">
-          ✕
+        <button
+          type="button"
+          className="flex items-center justify-center border border-grey-300 px-3 py-2.5 text-syn-red hover:bg-syn-red hover:text-white cursor-pointer transition-colors"
+          onClick={onRemove}
+          title="Remove parameter"
+        >
+          <X className="h-4 w-4" />
         </button>
       )}
     </div>

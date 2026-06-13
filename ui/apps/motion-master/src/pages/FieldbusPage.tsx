@@ -51,15 +51,6 @@ const TRANSITION_TARGETS: TransitionTarget[] = [
   },
 ]
 
-// Same targets ordered for the per-device dropdown: ascending up the AL ladder
-// (Init → PreOp → SafeOp → Op), with Boot last since it is the off-to-the-side
-// firmware state reachable only from INIT. Derived from TRANSITION_TARGETS so the
-// labels/values stay in one place.
-const PER_DEVICE_STATE_ORDER: TransitionTarget[] = [1, 2, 4, 8, 3].flatMap(v => {
-  const t = TRANSITION_TARGETS.find(target => target.value === v)
-  return t ? [t] : []
-})
-
 // Human-readable elapsed time for transition feedback: sub-second as whole ms,
 // otherwise seconds with one decimal (transitions can run up to the server timeout).
 function formatDuration(ms: number): string {
@@ -514,7 +505,7 @@ export default function FieldbusPage() {
                                       className="border border-grey-300 px-2 py-1 text-xs bg-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
                                     >
                                       <option value="">{rowPending ? 'Transitioning…' : 'Change AL state…'}</option>
-                                      {PER_DEVICE_STATE_ORDER.map(t => (
+                                      {TRANSITION_TARGETS.map(t => (
                                         <option key={t.value} value={t.value}>{t.label} ({t.value})</option>
                                       ))}
                                     </select>

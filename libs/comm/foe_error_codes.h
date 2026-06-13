@@ -9,7 +9,7 @@ namespace mm::comm {
 
 /// @brief Metadata for a single FoE error code entry.
 struct FoeErrorCode {
-  uint32_t code;                 ///< 32-bit FoE error code as sent in the FoE ERROR packet.
+  uint32_t code = 0;             ///< 32-bit FoE error code as sent in the FoE ERROR packet.
   std::string_view name;         ///< Short human-readable name.
   std::string_view description;  ///< Full description of the error condition.
 };

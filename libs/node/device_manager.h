@@ -43,12 +43,12 @@ void to_json(nlohmann::json& j, const DeviceStateInfo& info);
 /// name looked up from the owning device's parameter map (empty when the object dictionary
 /// has not been enumerated for that device).
 struct ProcessImageObjectInfo {
-  uint16_t slavePosition;  ///< 1-based bus position of the owning device.
-  uint16_t index;          ///< CoE object index.
-  uint8_t subindex;        ///< CoE object subindex.
-  std::string name;        ///< Object name, or empty if the OD has not been enumerated.
-  uint32_t bitOffset;      ///< Absolute bit offset within the direction's image.
-  uint16_t bitLength;      ///< Width of the value in bits.
+  uint16_t slavePosition = 0;  ///< 1-based bus position of the owning device.
+  uint16_t index = 0;          ///< CoE object index.
+  uint8_t subindex = 0;        ///< CoE object subindex.
+  std::string name;            ///< Object name, or empty if the OD has not been enumerated.
+  uint32_t bitOffset = 0;      ///< Absolute bit offset within the direction's image.
+  uint16_t bitLength = 0;      ///< Width of the value in bits.
 };
 
 /// @brief API-facing snapshot of the currently published process image and its runtime health.
@@ -61,13 +61,13 @@ struct ProcessImageObjectInfo {
 /// while @c expectedWkc reflects the now-idle bus. The lists are empty only before any image has
 /// ever been mapped.
 struct ProcessImageInfo {
-  bool configured;          ///< Whether an image is currently published for exchange.
-  uint32_t outputBytes;     ///< Size of the output image (master→slave).
-  uint32_t inputBytes;      ///< Size of the input image (slave→master).
-  int expectedWkc;          ///< Working counter expected from the devices currently exchanging.
-  int lastWkc;              ///< Working counter from the most recent exchange (0 before any).
-  bool healthy;             ///< Whether the last working counter meets the expected value.
-  std::size_t generations;  ///< Number of process images retained since the last reset().
+  bool configured = false;      ///< Whether an image is currently published for exchange.
+  uint32_t outputBytes = 0;     ///< Size of the output image (master→slave).
+  uint32_t inputBytes = 0;      ///< Size of the input image (slave→master).
+  int expectedWkc = 0;          ///< Working counter expected from the devices currently exchanging.
+  int lastWkc = 0;              ///< Working counter from the most recent exchange (0 before any).
+  bool healthy = false;         ///< Whether the last working counter meets the expected value.
+  std::size_t generations = 0;  ///< Number of process images retained since the last reset().
   std::vector<ProcessImageObjectInfo> outputs;  ///< Output-mapped objects in image order.
   std::vector<ProcessImageObjectInfo> inputs;   ///< Input-mapped objects in image order.
 };
@@ -468,7 +468,7 @@ class DeviceManager {
   ///         the value cannot be coerced, or an online download fails.
   std::expected<void, std::string> writeDeviceParameter(uint16_t slavePosition, uint16_t index,
                                                         uint8_t subindex,
-                                                        DeviceParameterValue value);
+                                                        DeviceParameterValue newValue);
 
   // --- Off-thread sampling read surface (for monitoring) ---
   //

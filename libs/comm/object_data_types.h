@@ -99,9 +99,9 @@ enum class ObjectDataType : uint16_t {
 
 /// @brief Metadata for a single object dictionary data type.
 struct ObjectDataTypeInfo {
-  uint16_t code;          ///< ETG.1020 data type code.
+  uint16_t code = 0;      ///< ETG.1020 data type code.
   std::string_view name;  ///< Symbolic name (e.g. @c "UNSIGNED32").
-  uint16_t bitSize;       ///< Bit width of one element; @c 0 for variable-length types.
+  uint16_t bitSize = 0;   ///< Bit width of one element; @c 0 for variable-length types.
 };
 
 /// @brief Serialises an ObjectDataTypeInfo to JSON.

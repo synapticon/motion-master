@@ -63,7 +63,7 @@ class ProcessDataRing {
   /// under a new one. The storage is best-effort @c mlock'd on POSIX so the RT @c write() never
   /// page-faults (process-wide @c mlockall already covers it when RT scheduling is in effect;
   /// this is belt-and-suspenders and silently does nothing if locking is not permitted).
-  void allocate(uint32_t inputCap, uint32_t outputCap, size_t capacity);
+  void allocate(uint32_t inputCap, uint32_t outputCap, size_t capacityCycles);
 
   /// @brief Releases the storage and resets to the unallocated state. Idempotent.
   void clear();

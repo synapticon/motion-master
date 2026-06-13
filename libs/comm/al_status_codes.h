@@ -10,7 +10,7 @@ namespace mm::comm {
 
 /// @brief Metadata for a single AL Status Code entry.
 struct AlStatusCode {
-  uint16_t code;                 ///< AL Status Code value (ETG.1000.6 Table 11).
+  uint16_t code = 0;             ///< AL Status Code value (ETG.1000.6 Table 11).
   std::string_view name;         ///< Short human-readable name.
   std::string_view description;  ///< Full description of the error condition.
   bool terminal = false;         ///< True if a slave reporting this code cannot reach the

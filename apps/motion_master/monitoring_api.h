@@ -13,7 +13,7 @@ namespace mm {
 /// @brief A client request received over the monitoring WebSocket to (un)subscribe to a topic.
 struct WsCommand {
   enum class Action { Subscribe, Unsubscribe };
-  Action action;
+  Action action = Action::Subscribe;
   std::string topic;  ///< Validated URL-safe topic (a monitoring id).
 };
 

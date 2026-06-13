@@ -1023,10 +1023,8 @@ std::expected<DeviceParameterValue, std::string> DeviceManager::readDeviceParame
   return device->readParameter(index, subindex);
 }
 
-std::expected<void, std::string> DeviceManager::writeDeviceParameter(uint16_t slavePosition,
-                                                                     uint16_t index,
-                                                                     uint8_t subindex,
-                                                                     DeviceParameterValue value) {
+std::expected<void, std::string> DeviceManager::writeDeviceParameter(
+    uint16_t slavePosition, uint16_t index, uint8_t subindex, DeviceParameterValue newValue) {
   // Shared lock: serialise against the exclusive mutators that rebuild devices_/driver_, so a
   // write that lands here off the control-plane thread can never see a half-torn device set.
   std::shared_lock lock(busMutex_);
@@ -1037,7 +1035,7 @@ std::expected<void, std::string> DeviceManager::writeDeviceParameter(uint16_t sl
   // Routing (stage into the output image when exchanging + output-mapped, SDO otherwise) lives in
   // Device. This entry point only resolves the position and takes the shared lock so an off-thread
   // caller is serialised against a device-set rebuild.
-  return device->writeParameter(index, subindex, std::move(value));
+  return device->writeParameter(index, subindex, std::move(newValue));
 }
 
 void to_json(nlohmann::json& j, const ProcessImageObjectInfo& obj) {

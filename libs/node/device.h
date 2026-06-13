@@ -208,7 +208,7 @@ class Device {
   /// @return Void on success, or an error string if the parameter is unknown or @p value
   ///         cannot be coerced to its type.
   std::expected<void, std::string> setValue(uint16_t index, uint8_t subindex,
-                                            DeviceParameterValue value);
+                                            DeviceParameterValue newValue);
 
   /// @brief Sets the parameter's value from its raw on-the-wire bytes (the bytes-domain setter).
   ///
@@ -315,12 +315,12 @@ class Device {
   ///         if the parameter is unknown, @p value cannot be coerced, or an online
   ///         download fails.
   std::expected<void, std::string> writeParameter(uint16_t index, uint8_t subindex,
-                                                  DeviceParameterValue value);
+                                                  DeviceParameterValue newValue);
 
   /// @brief Typed convenience wrapper for @c writeParameter.
   ///
   /// Lets callers pass a bare value without constructing a @c DeviceParameterValue —
-  /// e.g. @c device.writeValue(0x2030, 1, 123). @p value is coerced into the
+  /// e.g. @c device.writeValue(0x2030, 1, 123). @p newValue is coerced into the
   /// parameter's declared type, so the literal's own type need not match the object's
   /// width. Online / offline behaviour is exactly that of @c writeParameter.
   ///
@@ -328,11 +328,11 @@ class Device {
   ///                  @c std::string, @c std::vector<uint8_t>).
   /// @param index     CoE object index.
   /// @param subindex  CoE object subindex.
-  /// @param value     Value to write; coerced to the parameter's type.
+  /// @param newValue  Value to write; coerced to the parameter's type.
   /// @return Void on success (including the offline cache-only case), or an error string.
   template <typename T>
-  std::expected<void, std::string> writeValue(uint16_t index, uint8_t subindex, T value) {
-    return writeParameter(index, subindex, DeviceParameterValue{value});
+  std::expected<void, std::string> writeValue(uint16_t index, uint8_t subindex, T newValue) {
+    return writeParameter(index, subindex, DeviceParameterValue{newValue});
   }
 
   /// @brief Typed convenience wrapper for @c readParameter.

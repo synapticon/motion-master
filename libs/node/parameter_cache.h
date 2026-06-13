@@ -92,12 +92,12 @@ class ParameterCache {
 
   /// @brief Summary of one cache file on disk, for the management UI.
   struct CacheEntry {
-    std::string id;            ///< Opaque "<vendor>-<product>-<revision>" key (see @c makeId).
-    uint32_t vendorId;         ///< Vendor ID from the file header.
-    uint32_t productCode;      ///< Product code from the file header.
-    uint32_t revisionNumber;   ///< Revision number from the file header.
-    uint32_t parameterCount;   ///< Number of cached parameter definitions in the file.
-    std::uintmax_t sizeBytes;  ///< File size on disk, in bytes.
+    std::string id;                ///< Opaque "<vendor>-<product>-<revision>" key (see @c makeId).
+    uint32_t vendorId = 0;         ///< Vendor ID from the file header.
+    uint32_t productCode = 0;      ///< Product code from the file header.
+    uint32_t revisionNumber = 0;   ///< Revision number from the file header.
+    uint32_t parameterCount = 0;   ///< Number of cached parameter definitions in the file.
+    std::uintmax_t sizeBytes = 0;  ///< File size on disk, in bytes.
   };
 
   /// @brief Builds the opaque id a client uses to address one cache file, from an identity triple.

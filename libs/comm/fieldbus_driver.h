@@ -92,11 +92,11 @@ inline int workingCounterContribution(EtherCatState state, bool hasOutputs, bool
 
 /// @brief Immutable identity fields read from a slave's EEPROM during configuration.
 struct SlaveInfo {
-  std::string name;         ///< Human-readable name from SII.
-  uint32_t vendorId;        ///< Vendor ID (EEprom manufacturer field).
-  uint32_t productCode;     ///< Product code (EEprom ID field).
-  uint32_t revisionNumber;  ///< Revision number.
-  uint32_t serialNumber;    ///< Serial number.
+  std::string name;             ///< Human-readable name from SII.
+  uint32_t vendorId = 0;        ///< Vendor ID (EEprom manufacturer field).
+  uint32_t productCode = 0;     ///< Product code (EEprom ID field).
+  uint32_t revisionNumber = 0;  ///< Revision number.
+  uint32_t serialNumber = 0;    ///< Serial number.
 };
 
 /// @brief Schema of a single object dictionary entry uploaded from a slave.
@@ -113,12 +113,12 @@ struct SlaveInfo {
 /// payload, which corrupts the trailing name. If these are ever needed, source
 /// them from the object-dictionary description metadata rather than this service.
 struct OdEntry {
-  uint16_t index;                ///< CoE object index.
-  uint8_t subindex;              ///< CoE object subindex.
-  uint16_t objectCode;           ///< OTYPE_VAR / OTYPE_ARRAY / OTYPE_RECORD (ETG.1000.6 §5).
-  uint16_t dataType;             ///< ETG.1020 data type code (e.g. 0x0007 = UNSIGNED32).
-  uint16_t bitLength;            ///< Bit length of the entry.
-  uint16_t access;               ///< ObjAccess bitfield (read/write per AL state).
+  uint16_t index = 0;            ///< CoE object index.
+  uint8_t subindex = 0;          ///< CoE object subindex.
+  uint16_t objectCode = 0;       ///< OTYPE_VAR / OTYPE_ARRAY / OTYPE_RECORD (ETG.1000.6 §5).
+  uint16_t dataType = 0;         ///< ETG.1020 data type code (e.g. 0x0007 = UNSIGNED32).
+  uint16_t bitLength = 0;        ///< Bit length of the entry.
+  uint16_t access = 0;           ///< ObjAccess bitfield (read/write per AL state).
   std::string name;              ///< Textual description.
   std::optional<uint32_t> unit;  ///< ETG.1004 unit code, if available.
   std::optional<std::vector<uint8_t>> defaultValue;  ///< Raw default-value bytes, if available.
@@ -133,11 +133,11 @@ struct OdEntry {
 /// @c exchangeProcessData).  A direction with fewer than 8 mapped bits reports a byte count
 /// of 0 and an offset of 0.
 struct SlaveIo {
-  uint16_t slavePosition;  ///< 1-based bus position.
-  uint32_t outputOffset;   ///< Byte offset of this slave's outputs within the output image.
-  uint32_t outputBytes;    ///< Output byte count for this slave.
-  uint32_t inputOffset;    ///< Byte offset of this slave's inputs within the input image.
-  uint32_t inputBytes;     ///< Input byte count for this slave.
+  uint16_t slavePosition = 0;  ///< 1-based bus position.
+  uint32_t outputOffset = 0;   ///< Byte offset of this slave's outputs within the output image.
+  uint32_t outputBytes = 0;    ///< Output byte count for this slave.
+  uint32_t inputOffset = 0;    ///< Byte offset of this slave's inputs within the input image.
+  uint32_t inputBytes = 0;     ///< Input byte count for this slave.
 };
 
 /// @brief Layout of the process-data images, produced by @c configureProcessData.
@@ -162,11 +162,11 @@ struct PdoLayout {
 /// A Sync Manager guards a window of the slave's physical memory and governs how the master
 /// and the slave's application exchange it (mailbox handshake or buffered process data).
 struct SyncManagerConfig {
-  uint8_t index;           ///< SM number (0..7).
-  uint16_t physicalStart;  ///< Physical ESC memory start address the SM guards.
-  uint16_t length;         ///< Length of the guarded window in bytes.
-  uint32_t flags;          ///< Raw SM control/flags register (buffer mode, direction, watchdog).
-  uint8_t type;            ///< 0=unused, 1=MbxOut, 2=MbxIn, 3=Outputs, 4=Inputs.
+  uint8_t index = 0;           ///< SM number (0..7).
+  uint16_t physicalStart = 0;  ///< Physical ESC memory start address the SM guards.
+  uint16_t length = 0;         ///< Length of the guarded window in bytes.
+  uint32_t flags = 0;  ///< Raw SM control/flags register (buffer mode, direction, watchdog).
+  uint8_t type = 0;    ///< 0=unused, 1=MbxOut, 2=MbxIn, 3=Outputs, 4=Inputs.
 };
 
 /// @brief One FMMU's configuration as programmed on a slave's ESC.
@@ -175,25 +175,25 @@ struct SyncManagerConfig {
 /// window of the slave's physical memory (typically the process-data Sync Manager), translating
 /// the master's logical reads/writes into local accesses.
 struct FmmuConfig {
-  uint8_t index;             ///< FMMU number (0..3).
-  uint32_t logicalStart;     ///< Logical (bus-wide) start address.
-  uint16_t length;           ///< Mapped length in bytes.
-  uint8_t logicalStartBit;   ///< Start bit within the first logical byte.
-  uint8_t logicalEndBit;     ///< End bit within the last logical byte.
-  uint16_t physicalStart;    ///< Physical ESC start address (ties the FMMU to a Sync Manager).
-  uint8_t physicalStartBit;  ///< Start bit within the first physical byte.
-  uint8_t type;              ///< ESC FMMU type: 1=read (inputs/TxPDO), 2=write (outputs/RxPDO).
-  uint8_t active;            ///< Non-zero when the FMMU is active.
+  uint8_t index = 0;             ///< FMMU number (0..3).
+  uint32_t logicalStart = 0;     ///< Logical (bus-wide) start address.
+  uint16_t length = 0;           ///< Mapped length in bytes.
+  uint8_t logicalStartBit = 0;   ///< Start bit within the first logical byte.
+  uint8_t logicalEndBit = 0;     ///< End bit within the last logical byte.
+  uint16_t physicalStart = 0;    ///< Physical ESC start address (ties the FMMU to a Sync Manager).
+  uint8_t physicalStartBit = 0;  ///< Start bit within the first physical byte.
+  uint8_t type = 0;              ///< ESC FMMU type: 1=read (inputs/TxPDO), 2=write (outputs/RxPDO).
+  uint8_t active = 0;            ///< Non-zero when the FMMU is active.
 };
 
 /// @brief Mailbox configuration for a slave (the CoE/FoE/EoE/SoE transport windows).
 struct MailboxConfig {
-  uint16_t writeLength;  ///< Write (master→slave) mailbox length in bytes; 0 if no mailbox.
-  uint16_t writeOffset;  ///< Write mailbox physical ESC offset.
-  uint16_t readLength;   ///< Read (slave→master) mailbox length in bytes.
-  uint16_t readOffset;   ///< Read mailbox physical ESC offset.
-  uint16_t protocols;    ///< Supported-protocol bits: 0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE, 0x10
-                         ///< SoE, 0x20 VoE.
+  uint16_t writeLength = 0;  ///< Write (master→slave) mailbox length in bytes; 0 if no mailbox.
+  uint16_t writeOffset = 0;  ///< Write mailbox physical ESC offset.
+  uint16_t readLength = 0;   ///< Read (slave→master) mailbox length in bytes.
+  uint16_t readOffset = 0;   ///< Read mailbox physical ESC offset.
+  uint16_t protocols = 0;    ///< Supported-protocol bits: 0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE,
+                             ///< 0x10 SoE, 0x20 VoE.
 };
 
 /// @brief Distributed-clock configuration for a slave.
@@ -202,11 +202,11 @@ struct MailboxConfig {
 /// the SM-synchronous / free-run bring-up this driver uses — DC is measured but no SYNC0 pulse
 /// is generated.
 struct DcConfig {
-  bool capable;              ///< Slave has distributed-clock hardware.
-  bool active;               ///< SYNC0 generation enabled.
-  int32_t propagationDelay;  ///< Measured propagation delay (ns).
-  int32_t cycleTime;         ///< DC cycle time (ns).
-  int32_t shift;             ///< Shift from the cycle-modulus boundary (ns).
+  bool capable = false;          ///< Slave has distributed-clock hardware.
+  bool active = false;           ///< SYNC0 generation enabled.
+  int32_t propagationDelay = 0;  ///< Measured propagation delay (ns).
+  int32_t cycleTime = 0;         ///< DC cycle time (ns).
+  int32_t shift = 0;             ///< Shift from the cycle-modulus boundary (ns).
 };
 
 /// @brief Static ESC configuration snapshot for one slave, captured by @c configureProcessData.
@@ -216,13 +216,13 @@ struct DcConfig {
 /// EtherCAT-ESC concept; transports without an ESC (e.g. SPoE) report no slaves (see
 /// @c FieldbusDriver::busConfig).
 struct SlaveConfig {
-  uint16_t slavePosition;      ///< 1-based bus position.
-  uint16_t configuredAddress;  ///< Station (configured) address assigned during scan.
-  uint16_t aliasAddress;       ///< Configured station alias from EEPROM.
-  uint16_t outputBits;         ///< Mapped output (master→slave) bits.
-  uint16_t inputBits;          ///< Mapped input (slave→master) bits.
-  MailboxConfig mailbox;       ///< Mailbox transport windows.
-  DcConfig dc;                 ///< Distributed-clock configuration.
+  uint16_t slavePosition = 0;      ///< 1-based bus position.
+  uint16_t configuredAddress = 0;  ///< Station (configured) address assigned during scan.
+  uint16_t aliasAddress = 0;       ///< Configured station alias from EEPROM.
+  uint16_t outputBits = 0;         ///< Mapped output (master→slave) bits.
+  uint16_t inputBits = 0;          ///< Mapped input (slave→master) bits.
+  MailboxConfig mailbox;           ///< Mailbox transport windows.
+  DcConfig dc;                     ///< Distributed-clock configuration.
   std::vector<SyncManagerConfig> syncManagers;  ///< Configured Sync Managers, by index.
   std::vector<FmmuConfig> fmmus;                ///< Configured FMMUs, by index.
 };
@@ -235,14 +235,14 @@ struct SlaveConfig {
 /// a rising delta rather than an absolute value. Link state is decoded from DL Status (0x0110);
 /// the counters come from the error-counter block (0x0300–0x0313).
 struct PortDiagnostics {
-  bool linkUp;             ///< Physical link detected on this port (DL Status link bit).
-  bool loopClosed;         ///< Loop closed on this port (no downstream slave, or port disabled).
-  bool communication;      ///< Stable communication established on this port (DL Status).
-  uint8_t invalidFrame;    ///< Invalid-frame counter: frames with a bad FCS/structure (0x0300+).
-  uint8_t rxError;         ///< Physical-layer RX error counter: RX_ER from the PHY (0x0301+).
-  uint8_t forwardedError;  ///< Forwarded RX error counter: errors flagged by an upstream ESC
-                           ///< (0x0308+). Pinpoints the segment where corruption began.
-  uint8_t lostLink;        ///< Lost-link counter: link-down events on this port (0x0310+).
+  bool linkUp = false;      ///< Physical link detected on this port (DL Status link bit).
+  bool loopClosed = false;  ///< Loop closed on this port (no downstream slave, or port disabled).
+  bool communication = false;  ///< Stable communication established on this port (DL Status).
+  uint8_t invalidFrame = 0;  ///< Invalid-frame counter: frames with a bad FCS/structure (0x0300+).
+  uint8_t rxError = 0;       ///< Physical-layer RX error counter: RX_ER from the PHY (0x0301+).
+  uint8_t forwardedError = 0;  ///< Forwarded RX error counter: errors flagged by an upstream ESC
+                               ///< (0x0308+). Pinpoints the segment where corruption began.
+  uint8_t lostLink = 0;        ///< Lost-link counter: link-down events on this port (0x0310+).
 };
 
 /// @brief Decoded health diagnostics for one slave, read live from its ESC registers.
@@ -253,15 +253,15 @@ struct PortDiagnostics {
 /// localise a fault to a specific cable/connector; the watchdog counters distinguish a slave
 /// that stopped receiving process data from a master-side problem.
 struct SlaveDiagnostics {
-  uint16_t slavePosition;                ///< 1-based bus position.
+  uint16_t slavePosition = 0;            ///< 1-based bus position.
   std::array<PortDiagnostics, 4> ports;  ///< Per-port link state and error counters (ports 0–3).
-  uint8_t processingUnitError;           ///< ECAT processing-unit error counter (0x030C): datagrams
+  uint8_t processingUnitError = 0;       ///< ECAT processing-unit error counter (0x030C): datagrams
                                          ///< that reached the processing unit malformed.
-  uint8_t pdiError;             ///< PDI error counter (0x030D): problems on the slave-local
-                                ///< process-data interface.
-  uint8_t processDataWatchdog;  ///< Process-data (SM) watchdog expirations (0x0442): the
-                                ///< slave stopped seeing fresh outputs.
-  uint8_t pdiWatchdog;          ///< PDI watchdog expirations (0x0443).
+  uint8_t pdiError = 0;             ///< PDI error counter (0x030D): problems on the slave-local
+                                    ///< process-data interface.
+  uint8_t processDataWatchdog = 0;  ///< Process-data (SM) watchdog expirations (0x0442): the
+                                    ///< slave stopped seeing fresh outputs.
+  uint8_t pdiWatchdog = 0;          ///< PDI watchdog expirations (0x0443).
 };
 
 /// @brief Live distributed-clock synchronisation status for one slave, read from its ESC.
@@ -278,13 +278,14 @@ struct SlaveDiagnostics {
 /// bus is exchanging in SAFE-OP/OP, since the master distributes the reference time in the
 /// cyclic frame. Non-DC slaves report @c dcCapable false and zeroed values.
 struct DcSyncDiagnostics {
-  uint16_t slavePosition;        ///< 1-based bus position.
-  bool dcCapable;                ///< Slave has distributed-clock hardware (cached @c hasdc).
-  bool referenceClock;           ///< This slave is the DC reference clock (first DC-capable slave).
-  int32_t propagationDelay;      ///< System-time delay / propagation delay (0x0928), ns.
-  int32_t systemTimeDifference;  ///< Signed deviation of the local system time from the reference
-                                 ///< (0x092C), ns. Positive = local clock ahead of the reference,
-                                 ///< negative = behind; zero on the reference clock itself.
+  uint16_t slavePosition = 0;    ///< 1-based bus position.
+  bool dcCapable = false;        ///< Slave has distributed-clock hardware (cached @c hasdc).
+  bool referenceClock = false;   ///< This slave is the DC reference clock (first DC-capable).
+  int32_t propagationDelay = 0;  ///< System-time delay / propagation delay (0x0928), ns.
+  int32_t systemTimeDifference =
+      0;  ///< Signed deviation of the local system time from the reference
+          ///< (0x092C), ns. Positive = local clock ahead of the reference,
+          ///< negative = behind; zero on the reference clock itself.
 };
 
 /// @brief Process-data (sync-manager) watchdog configuration of one slave.
@@ -296,12 +297,12 @@ struct DcSyncDiagnostics {
 /// timeout itself. Produced/consumed by @c FieldbusDriver::processDataWatchdog and
 /// @c setProcessDataWatchdog.
 struct ProcessDataWatchdogConfig {
-  bool enabled;                      ///< False when the time register (0x0420) is zero.
-  bool running;                      ///< Live status (0x0440 bit 0): true = counting, false =
-                                     ///< expired or disabled. Meaningful only while @c enabled.
-  std::chrono::nanoseconds timeout;  ///< Decoded timeout: ticks × 40 ns × (divider + 2).
-  uint16_t divider;                  ///< Raw 0x0400 divider (shared with the PDI watchdog).
-  uint16_t ticks;                    ///< Raw 0x0420 process-data watchdog time register.
+  bool enabled = false;                 ///< False when the time register (0x0420) is zero.
+  bool running = false;                 ///< Live status (0x0440 bit 0): true = counting, false =
+                                        ///< expired or disabled. Meaningful only while @c enabled.
+  std::chrono::nanoseconds timeout{0};  ///< Decoded timeout: ticks × 40 ns × (divider + 2).
+  uint16_t divider = 0;                 ///< Raw 0x0400 divider (shared with the PDI watchdog).
+  uint16_t ticks = 0;                   ///< Raw 0x0420 process-data watchdog time register.
 };
 
 /// @brief Abstract interface for an EtherCAT fieldbus driver.

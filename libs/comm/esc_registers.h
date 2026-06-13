@@ -9,8 +9,8 @@ namespace mm::comm {
 
 /// @brief Metadata for a single ESC register entry.
 struct EscRegister {
-  uint16_t address;       ///< Register address in the ESC address space.
-  uint8_t length;         ///< Width in bytes (1, 2, 4, or 8).
+  uint16_t address = 0;   ///< Register address in the ESC address space.
+  uint8_t length = 0;     ///< Width in bytes (1, 2, 4, or 8).
   std::string_view name;  ///< Short snake_case identifier.
   std::string_view
       description;  ///< Human-readable description from ETG.1000.4 / Beckhoff ESC datasheet.

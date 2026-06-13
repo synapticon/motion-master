@@ -21,14 +21,14 @@ constexpr uint64_t kInvalidSeq = std::numeric_limits<uint64_t>::max();
 
 ProcessDataRing::~ProcessDataRing() { clear(); }
 
-void ProcessDataRing::allocate(uint32_t inputCap, uint32_t outputCap, size_t capacity) {
+void ProcessDataRing::allocate(uint32_t inputCap, uint32_t outputCap, size_t capacityCycles) {
   clear();
-  if (capacity == 0) {
+  if (capacityCycles == 0) {
     return;
   }
   inputCap_ = inputCap;
   outputCap_ = outputCap;
-  capacity_ = capacity;
+  capacity_ = capacityCycles;
   stride_ = kHeaderBytes + inputCap_ + outputCap_;
 
   buffer_.assign(capacity_ * stride_, uint8_t{0});

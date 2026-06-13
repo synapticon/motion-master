@@ -107,10 +107,10 @@ class MonitoringManager {
   /// @brief A parameter resolved to its source: PDO carries the captured decode spec (refreshed
   ///        on a re-map), SDO is served from the refresher-fed cache.
   struct ParamPlan {
-    uint16_t devicePosition;
-    uint16_t index;
-    uint8_t subindex;
-    Source source;
+    uint16_t devicePosition = 0;
+    uint16_t index = 0;
+    uint8_t subindex = 0;
+    Source source = Source::Pdo;
     std::optional<DeviceManager::PdoSampleSpec> pdoSpec;  // PDO only
   };
 
@@ -118,7 +118,7 @@ class MonitoringManager {
   ///        (@c nullopt = null). Microseconds keep every cycle distinct even at sub-ms periods and
   ///        stay exact in a JavaScript double (see @c ProcessDataRing for the unit rationale).
   struct Sample {
-    int64_t timestampUs;
+    int64_t timestampUs = 0;
     std::vector<std::optional<DeviceParameterValue>> values;
   };
 

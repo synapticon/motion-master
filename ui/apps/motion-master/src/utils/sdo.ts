@@ -82,6 +82,43 @@ export function encodeSdoValue(type: SdoType, raw: string): { bytes: number[] } 
   return { bytes }
 }
 
+// Maps a CoE object's data-type name (as reported by SDO Info) to the SdoType the
+// encoder understands, so a value typed inline against an object can be encoded
+// without the user picking a type. Falls back to `raw` for unknown/complex types.
+export function sdoTypeForDataTypeName(dataTypeName: string): SdoType {
+  switch (dataTypeName) {
+    case 'BOOLEAN':
+    case 'UNSIGNED8':
+    case 'BYTE':
+      return 'uint8'
+    case 'INTEGER8':
+      return 'int8'
+    case 'UNSIGNED16':
+    case 'WORD':
+      return 'uint16'
+    case 'INTEGER16':
+      return 'int16'
+    case 'UNSIGNED32':
+    case 'DWORD':
+      return 'uint32'
+    case 'INTEGER32':
+      return 'int32'
+    case 'UNSIGNED64':
+      return 'uint64'
+    case 'INTEGER64':
+      return 'int64'
+    case 'REAL32':
+      return 'float32'
+    case 'REAL64':
+      return 'float64'
+    case 'VISIBLE_STRING':
+    case 'UNICODE_STRING':
+      return 'string'
+    default:
+      return 'raw'
+  }
+}
+
 export interface SdoInterpretation { label: string; value: string }
 
 // Best-effort interpretation of raw SDO bytes as every fixed-width type that fits,

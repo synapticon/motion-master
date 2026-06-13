@@ -11,6 +11,7 @@ import {
   encodeSdoValue,
   decodeSdoBytes,
   interpretSdoBytes,
+  sdoTypeForDataTypeName,
 } from '../utils/sdo'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
@@ -63,10 +64,42 @@ function formatValue(v: number | string | number[] | undefined): string {
   return v.length > 16 ? `${head} …(${v.length}B)` : head
 }
 
+// The current cached value rendered for an editable text input: plain (unquoted)
+// for numbers/strings, space-separated hex for byte arrays (matching `raw` input).
+function valueToInputString(v: number | string | number[] | undefined): string {
+  if (v === undefined) return ''
+  if (typeof v === 'number') return String(v)
+  if (typeof v === 'string') return v
+  return v.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')
+}
+
+// ETG.1000.6 ObjAccess: write bits 3-5 (Wr PreOp/SafeOp/Op). Writable iff any is set.
+function isWritable(access: number): boolean {
+  return (access & 0x38) !== 0
+}
+
+// ETG.1000.6 ObjAccess: read bits 0-2 (Rd PreOp/SafeOp/Op). Readable iff any is set.
+function isReadable(access: number): boolean {
+  return (access & 0x07) !== 0
+}
+
+// Compares two decoded parameter values. Both come through decodeSdoBytes, so a
+// written/read-back pair with identical wire bytes compares equal even for floats
+// (same bytes → same decoded number); strings ignore NUL padding (already stripped).
+function valuesEqual(
+  a: number | string | number[] | undefined,
+  b: number | string | number[] | undefined,
+): boolean {
+  if (Array.isArray(a) && Array.isArray(b)) {
+    return a.length === b.length && a.every((x, i) => x === b[i])
+  }
+  return a === b
+}
+
 function formatAccess(a: number): string {
   // ETG.1000.6: bit 0=Rd PreOp, 1=Rd SafeOp, 2=Rd Op, 3=Wr PreOp, 4=Wr SafeOp, 5=Wr Op
   const r = (a & 0x07) !== 0
-  const w = (a & 0x38) !== 0
+  const w = isWritable(a)
   if (r && w) return 'RW'
   if (r) return 'RO'
   if (w) return 'WO'
@@ -140,7 +173,15 @@ export default function ParametersPage() {
   const [initElapsedMs, setInitElapsedMs] = useState<number | null>(null)
   const [reloadElapsedMs, setReloadElapsedMs] = useState<number | null>(null)
   const [refreshingKeys, setRefreshingKeys] = useState<Set<string>>(new Set())
-  const [rowError, setRowError] = useState<{key: string; message: string} | null>(null)
+  const [settingKeys, setSettingKeys] = useState<Set<string>>(new Set())
+  // Per-row in-progress edits, keyed by index-subindex. Absent means the input
+  // mirrors the cached value; present means the user has typed an override.
+  const [editValues, setEditValues] = useState<Record<string, string>>({})
+  // A single transient message attached to one row: an 'error' (red, the op
+  // failed) or a 'note' (amber, the op succeeded but the result is unexpected,
+  // e.g. the device clamped a write).
+  const [rowMsg, setRowMsg] =
+    useState<{ key: string; message: string; kind: 'error' | 'note' } | null>(null)
 
   const paramsQueryKey = ['deviceParameters', slavePosition] as const
 
@@ -178,7 +219,7 @@ export default function ParametersPage() {
   async function handleRefreshValue(p: DeviceParameter) {
     const key = paramKey(p.index, p.subindex)
     setRefreshingKeys(prev => new Set(prev).add(key))
-    setRowError(null)
+    setRowMsg(null)
     try {
       const res = await api.sdoUpload(slavePosition, p.index, p.subindex)
       const decoded = decodeSdoBytes(p.dataTypeName, res.data.data)
@@ -191,10 +232,75 @@ export default function ParametersPage() {
         )
         return { ...prev, data: next }
       })
+      clearEdit(key)
     } catch (err) {
-      setRowError({ key, message: apiError(err) })
+      setRowMsg({ key, message: apiError(err), kind: 'error' })
     } finally {
       setRefreshingKeys(prev => {
+        const next = new Set(prev)
+        next.delete(key)
+        return next
+      })
+    }
+  }
+
+  function clearEdit(key: string) {
+    setEditValues(prev => {
+      if (!(key in prev)) return prev
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
+  }
+
+  async function handleSetValue(p: DeviceParameter) {
+    const key = paramKey(p.index, p.subindex)
+    const raw = editValues[key] ?? valueToInputString(p.value)
+    const encoded = encodeSdoValue(sdoTypeForDataTypeName(p.dataTypeName), raw)
+    if ('error' in encoded) {
+      setRowMsg({ key, message: encoded.error, kind: 'error' })
+      return
+    }
+    setSettingKeys(prev => new Set(prev).add(key))
+    setRowMsg(null)
+    try {
+      await api.sdoDownload(slavePosition, p.index, p.subindex, { data: encoded.bytes })
+      // The write was accepted by the mailbox, but the device may clamp, coerce, or
+      // ignore the value — so read it back rather than trusting what we sent, and
+      // show the device's actual value. (Write-only objects can't be read back, so
+      // for those we fall back to the bytes we wrote.)
+      const sent = decodeSdoBytes(p.dataTypeName, encoded.bytes)
+      const readBack = isReadable(p.access)
+      const value = readBack
+        ? decodeSdoBytes(
+            p.dataTypeName,
+            (await api.sdoUpload(slavePosition, p.index, p.subindex)).data.data,
+          )
+        : sent
+      queryClient.setQueryData(paramsQueryKey, (prev: typeof paramsQuery.data) => {
+        if (!prev) return prev
+        const next = prev.data.map(x =>
+          x.index === p.index && x.subindex === p.subindex
+            ? { ...x, value, syncState: 'synced' as const }
+            : x,
+        )
+        return { ...prev, data: next }
+      })
+      clearEdit(key)
+      // If the read-back differs from what we sent, the device silently rejected or
+      // adjusted the write (out-of-range clamp, rounding, ignored). Flag it — the
+      // displayed value is now the device's actual value, not what was typed.
+      if (readBack && !valuesEqual(value, sent)) {
+        setRowMsg({
+          key,
+          message: 'Write was sent but the device kept a different value (shown) — out of range or not accepted.',
+          kind: 'note',
+        })
+      }
+    } catch (err) {
+      setRowMsg({ key, message: apiError(err), kind: 'error' })
+    } finally {
+      setSettingKeys(prev => {
         const next = new Set(prev)
         next.delete(key)
         return next
@@ -469,13 +575,26 @@ export default function ParametersPage() {
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               {params.length > 0 && (
                 <div className="flex items-center gap-3 flex-1 min-w-[12rem]">
-                  <input
-                    type="text"
-                    value={filter}
-                    onChange={e => setFilter(e.target.value)}
-                    placeholder="Filter by name, index, or type…"
-                    className={`${inputCls} max-w-sm`}
-                  />
+                  <div className="relative max-w-sm w-full">
+                    <input
+                      type="text"
+                      value={filter}
+                      onChange={e => setFilter(e.target.value)}
+                      placeholder="Filter by name, index, or type…"
+                      className={`${inputCls} pr-8`}
+                    />
+                    {filter && (
+                      <button
+                        type="button"
+                        onClick={() => setFilter('')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-grey-400 hover:text-syn-red cursor-pointer leading-none text-lg"
+                        title="Clear filter"
+                        aria-label="Clear filter"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
                   <span className="text-xs text-grey-500 whitespace-nowrap">
                     {filteredParams.length === params.length
                       ? `${params.length} entries`
@@ -524,7 +643,9 @@ export default function ParametersPage() {
               <p className="text-xs text-grey-500">
                 Values are cached from the last read, not live. <strong>Reload</strong> re-fetches
                 the cache (no bus traffic); a row's <span className="font-mono">↻</span> reads that
-                one value live from the device via SDO upload.
+                one value live from the device via SDO upload. Edit a writable row's value and press
+                <strong> Set</strong> to write it back via SDO download — read-only objects are
+                locked.
               </p>
             )}
 
@@ -545,7 +666,11 @@ export default function ParametersPage() {
                       {filteredParams.map(p => {
                         const key = paramKey(p.index, p.subindex)
                         const refreshing = refreshingKeys.has(key)
-                        const cellError = rowError?.key === key ? rowError.message : null
+                        const setting = settingKeys.has(key)
+                        const busy = refreshing || setting
+                        const writable = isWritable(p.access)
+                        const editValue = editValues[key] ?? valueToInputString(p.value)
+                        const cellMsg = rowMsg?.key === key ? rowMsg : null
                         return (
                           <tr key={key} className="border-b border-grey-100 last:border-0">
                             <td className="px-3 py-1.5 font-mono whitespace-nowrap">
@@ -556,21 +681,44 @@ export default function ParametersPage() {
                             <td className="px-3 py-1.5 font-mono text-grey-700">{p.bitLength}</td>
                             <td className="px-3 py-1.5 font-mono text-grey-700">{formatAccess(p.access)}</td>
                             <td className="px-3 py-1.5 font-mono">
-                              <div className="flex items-center gap-2">
-                                <span className={cellError ? 'text-status-bad' : ''}>
-                                  {cellError ?? formatValue(p.value)}
-                                </span>
+                              <div className="flex items-stretch gap-2">
+                                <input
+                                  type="text"
+                                  value={editValue}
+                                  onChange={e => setEditValues(prev => ({ ...prev, [key]: e.target.value }))}
+                                  disabled={!writable || busy}
+                                  className="border border-grey-300 px-2 py-1 text-xs font-mono w-36 bg-white disabled:bg-grey-50 disabled:text-grey-500 disabled:cursor-not-allowed"
+                                  title={writable ? 'Edit, then Set to write via SDO download' : 'Read-only object'}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => handleSetValue(p)}
+                                  disabled={!writable || busy}
+                                  className="inline-flex items-center justify-center border border-grey-300 px-3 text-xs text-syn-red hover:text-ocean hover:border-grey-400 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer font-display uppercase tracking-wide"
+                                  title={writable ? 'Write this value via SDO download' : 'Read-only object'}
+                                >
+                                  {setting ? '…' : 'Set'}
+                                </button>
                                 <button
                                   type="button"
                                   onClick={() => handleRefreshValue(p)}
-                                  disabled={refreshing}
-                                  className="text-grey-400 hover:text-syn-red disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer leading-none"
+                                  disabled={busy}
+                                  className="inline-flex items-center justify-center border border-grey-300 px-2 text-grey-400 hover:text-syn-red hover:border-grey-400 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer leading-none"
                                   title="Refresh by SDO upload"
                                   aria-label="Refresh value"
                                 >
                                   {refreshing ? '…' : '↻'}
                                 </button>
                               </div>
+                              {cellMsg && (
+                                <p
+                                  className={`mt-1 whitespace-normal ${
+                                    cellMsg.kind === 'error' ? 'text-status-bad' : 'text-status-warn'
+                                  }`}
+                                >
+                                  {cellMsg.message}
+                                </p>
+                              )}
                             </td>
                             <td className="px-3 py-1.5 whitespace-nowrap"><SyncBadge state={p.syncState} /></td>
                             <td className="px-3 py-1.5 font-mono text-grey-600">{formatValue(p.defaultValue)}</td>

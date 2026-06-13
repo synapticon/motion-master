@@ -51,6 +51,15 @@ const TRANSITION_TARGETS: TransitionTarget[] = [
   },
 ]
 
+// Same targets ordered for the per-device dropdown: ascending up the AL ladder
+// (Init → PreOp → SafeOp → Op), with Boot last since it is the off-to-the-side
+// firmware state reachable only from INIT. Derived from TRANSITION_TARGETS so the
+// labels/values stay in one place.
+const PER_DEVICE_STATE_ORDER: TransitionTarget[] = [1, 2, 4, 8, 3].flatMap(v => {
+  const t = TRANSITION_TARGETS.find(target => target.value === v)
+  return t ? [t] : []
+})
+
 // Human-readable elapsed time for transition feedback: sub-second as whole ms,
 // otherwise seconds with one decimal (transitions can run up to the server timeout).
 function formatDuration(ms: number): string {
@@ -190,6 +199,53 @@ export default function FieldbusPage() {
     // The transition blocks server-side until devices arrive (or time out), so
     // re-read states afterwards to show where each device actually landed.
     onSuccess: () => refreshDevices(),
+  })
+
+  // Per-device transition: same endpoint, but scoped to a single slave via `positions`.
+  // The server validates the AL transition itself (illegal jumps are rejected with
+  // 0x0011), so the dropdown stays permissive and we surface whatever the slave reports.
+  // Last result is kept per slave position for the inline row feedback.
+  type DeviceTransitionResult = {
+    target: 1 | 2 | 3 | 4 | 8
+    alState: number
+    error: boolean
+    alStatusCode: number
+    elapsedMs: number
+    requestError?: string
+  }
+  const [deviceTransitionResult, setDeviceTransitionResult] = useState<Record<number, DeviceTransitionResult>>({})
+
+  const deviceTransitionMutation = useMutation({
+    mutationFn: async ({ position, state }: { position: number; state: 1 | 2 | 3 | 4 | 8 }) => {
+      const start = performance.now()
+      const res = await api.transitionToState({ state, positions: [position] })
+      return { position, target: state, res, elapsedMs: performance.now() - start }
+    },
+    // Clear the previous result for this row as soon as a new transition starts.
+    onMutate: ({ position }) => {
+      setDeviceTransitionResult(prev => {
+        const next = { ...prev }
+        delete next[position]
+        return next
+      })
+    },
+    onSuccess: ({ position, target, res, elapsedMs }) => {
+      // Scoped to one slave, so the response carries exactly that device.
+      const entry = res.data.devices.find(d => d.slavePosition === position) ?? res.data.devices[0]
+      if (entry) {
+        setDeviceTransitionResult(prev => ({
+          ...prev,
+          [position]: { target, alState: entry.alState, error: entry.error, alStatusCode: entry.alStatusCode, elapsedMs },
+        }))
+      }
+      return refreshDevices()
+    },
+    onError: (err, { position, state }) => {
+      setDeviceTransitionResult(prev => ({
+        ...prev,
+        [position]: { target: state, alState: 0, error: true, alStatusCode: 0, elapsedMs: 0, requestError: apiError(err) },
+      }))
+    },
   })
 
   // When the device list first appears without us having read states yet — a page
@@ -368,6 +424,10 @@ export default function FieldbusPage() {
                       {devicesQuery.isFetching || readingStates ? 'Refreshing…' : 'Refresh'}
                     </button>
                   </div>
+                  <p className="text-xs text-grey-600">
+                    Use the <span className="font-medium">Action</span> dropdown to command an individual
+                    slave to an AL state. The bus-wide buttons under “Transition to State” move every slave at once.
+                  </p>
                   <div className="border border-grey-200 overflow-x-auto">
                     {devicesQuery.isFetching && !devicesQuery.data && (
                       <p className="p-4 text-xs text-grey-600">Loading devices…</p>
@@ -379,7 +439,7 @@ export default function FieldbusPage() {
                       <table className="w-full text-xs border-collapse">
                         <thead>
                           <tr className="border-b border-grey-200 bg-grey-50">
-                            {['Slave', 'Device', 'Vendor ID', 'Product Code', 'Revision', 'Serial', 'AL State'].map(h => (
+                            {['Slave', 'Device', 'Vendor ID', 'Product Code', 'Revision', 'Serial', 'AL State', 'Action'].map(h => (
                               <th key={h} className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium">
                                 {h}
                               </th>
@@ -427,6 +487,72 @@ export default function FieldbusPage() {
                                   })()
                                   : '—'}
                               </td>
+                              <td className="px-4 py-2">
+                                {(() => {
+                                  const pos = d.slavePosition
+                                  const rowPending = deviceTransitionMutation.isPending
+                                    && deviceTransitionMutation.variables?.position === pos
+                                  // Block all per-device dropdowns while any transition (bus-wide or
+                                  // per-device) is in flight — they all command the same bus.
+                                  const busy = transitionMutation.isPending || deviceTransitionMutation.isPending
+                                  const result = deviceTransitionResult[pos]
+                                  return (
+                                    <div className="space-y-1">
+                                      <select
+                                        value=""
+                                        disabled={busy}
+                                        onChange={e => {
+                                          const state = Number(e.currentTarget.value) as 1 | 2 | 3 | 4 | 8
+                                          // Reset to the placeholder so re-selecting the same target re-fires.
+                                          e.currentTarget.value = ''
+                                          if (state) {
+                                            deviceTransitionMutation.mutate({ position: pos, state })
+                                          }
+                                        }}
+                                        title="Command just this slave to an AL state. Illegal jumps are rejected by the slave."
+                                        className="border border-grey-300 px-2 py-1 text-xs bg-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                                      >
+                                        <option value="">{rowPending ? 'Transitioning…' : 'Change…'}</option>
+                                        {PER_DEVICE_STATE_ORDER.map(t => (
+                                          <option key={t.value} value={t.value}>{t.label} ({t.value})</option>
+                                        ))}
+                                      </select>
+                                      {result && (() => {
+                                        if (result.requestError) {
+                                          return <p className="text-status-bad">{result.requestError}</p>
+                                        }
+                                        const reached = !result.error && result.alState === result.target
+                                        if (reached) {
+                                          return (
+                                            <p className="text-status-good">
+                                              → {AL_STATE_LABEL[result.target]} ({result.target}) in {formatDuration(result.elapsedMs)}
+                                            </p>
+                                          )
+                                        }
+                                        const stateLabel = AL_STATE_LABEL[result.alState] ?? `0x${result.alState.toString(16).toUpperCase()}`
+                                        const codeEntry = result.error ? (alStatusCodeMap[result.alStatusCode] ?? null) : null
+                                        const code = result.error
+                                          ? ` — 0x${result.alStatusCode.toString(16).toUpperCase().padStart(4, '0')}${codeEntry ? ` ${codeEntry.name}` : ''}`
+                                          : ''
+                                        // Stuck in INIT with no error reported: usually a drive carried over from
+                                        // another master that needs a power-cycle (same case the bus-wide panel explains).
+                                        const silentInit = result.target !== 1 && result.alState === 1
+                                          && !result.error && result.alStatusCode === 0
+                                        return (
+                                          <p className="text-status-bad">
+                                            stuck in {stateLabel} ({result.alState}){code}
+                                            {silentInit && (
+                                              <span className="block text-grey-600">
+                                                No error reported — if moved from another master, power-cycle and rescan.
+                                              </span>
+                                            )}
+                                          </p>
+                                        )
+                                      })()}
+                                    </div>
+                                  )
+                                })()}
+                              </td>
                             </tr>
                           ))}
                         </tbody>
@@ -459,7 +585,7 @@ export default function FieldbusPage() {
                     <div key={value} className="space-y-1.5">
                       <button
                         onClick={() => transitionMutation.mutate(value)}
-                        disabled={transitionMutation.isPending}
+                        disabled={transitionMutation.isPending || deviceTransitionMutation.isPending}
                         title={hintsInline ? undefined : hint}
                         className={`${cls} px-4 py-2 text-xs w-full font-display uppercase tracking-wide transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer`}
                       >

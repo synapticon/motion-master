@@ -289,8 +289,17 @@ export default function ConnectionPage() {
             </p>
             <p className="text-xs text-grey-600 max-w-prose">
               Read-only and captured at startup: it is not re-read while running. To change a value,
-              edit the JSONC file (see <code>motion-master.example.jsonc</code>) and restart Motion
-              Master.
+              edit the JSONC file and restart Motion Master. The annotated{' '}
+              <a
+                href="https://github.com/synapticon/motion-master/blob/main/apps/motion_master/motion-master.example.jsonc"
+                target="_blank"
+                rel="noreferrer"
+                className="text-ocean hover:underline"
+              >
+                motion-master.example.jsonc
+              </a>{' '}
+              documents every property with inline comments — unlike the resolved values shown below,
+              which carry no descriptions.
             </p>
 
             {configQuery.isLoading && <p className="text-sm text-grey-600">Loading…</p>}

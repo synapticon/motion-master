@@ -1,0 +1,10 @@
+# Single pnpm workspace for all JavaScript/TypeScript in the repo. The bulk lives under web/ (the
+# PWA app and the published client library); hil/api is the outlier — it stays beside its C++ HIL
+# sibling (jitter_bench) but joins the workspace so it can consume the client via `workspace:*`.
+packages:
+  - 'web/apps/*'
+  - 'web/packages/*'
+  - 'hil/api'
+allowBuilds:
+  esbuild: true
+  sharp: true

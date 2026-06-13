@@ -1,0 +1,12 @@
+// Public entry point for @synapticon/motion-master-client.
+//
+// `src/generated/` is the swagger-typescript-api output — regenerate with `pnpm generate`, never
+// hand-edit. Everything else here is the hand-written SDK layer (facade + realtime channel).
+
+export * from './generated/http-client'
+export * from './generated/data-contracts'
+export * from './generated/Api'
+
+export * from './constants'
+export * from './web-socket-client'
+export * from './client'

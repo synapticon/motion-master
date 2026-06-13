@@ -26,11 +26,11 @@ printf '%s\n' "$NEW_VERSION" > "$ROOT/VERSION"
 sed -i "s/\"version\": \"${OLD_ESC}\"/\"version\": \"${NEW_VERSION}\"/" \
   "$ROOT/vcpkg.json"
 
-# 3. JS/TS package manifests
+# 3. JS/TS package manifests (root workspace manifest + every workspace member)
 for f in \
-  "$ROOT/ui/package.json" \
-  "$ROOT/ui/apps/motion-master/package.json" \
-  "$ROOT/ui/packages/api-client/package.json" \
+  "$ROOT/package.json" \
+  "$ROOT/web/apps/motion-master/package.json" \
+  "$ROOT/web/packages/motion-master-client/package.json" \
   "$ROOT/hil/api/package.json"; do
   sed -i "s/\"version\": \"${OLD_ESC}\"/\"version\": \"${NEW_VERSION}\"/" "$f"
 done
@@ -45,7 +45,7 @@ sed -i "s/kVersion, \"${OLD_ESC}\"/kVersion, \"${NEW_VERSION}\"/" \
 
 # 6. UI sidebar version badge
 sed -i "s/>v${OLD_ESC}</>v${NEW_VERSION}</" \
-  "$ROOT/ui/apps/motion-master/src/layouts/RootLayout.tsx"
+  "$ROOT/web/apps/motion-master/src/layouts/RootLayout.tsx"
 
 echo "Done — review with: git diff"
-echo "Note: hil/api/src/mm-api.ts is auto-generated from swagger.yml; regenerate if needed."
+echo "Note: tagging v${NEW_VERSION} publishes @synapticon/motion-master-client@${NEW_VERSION} to npm (release.yml)."

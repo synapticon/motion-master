@@ -49,20 +49,18 @@ jobs:
 
       - uses: pnpm/action-setup@v4
         with:
-          version: 9
+          version: 10
 
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
           cache: pnpm
-          cache-dependency-path: ui/pnpm-lock.yaml
+          cache-dependency-path: pnpm-lock.yaml
 
-      - name: Install UI dependencies
-        working-directory: ui
+      - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
       - name: Build UI
-        working-directory: ui
         env:
           VITE_BASE: /app
         run: pnpm build
@@ -70,8 +68,8 @@ jobs:
       - name: Assemble Pages artifact
         run: |
           mkdir -p build/pages/app build/pages/docs
-          cp ui/landing/index.html build/pages/index.html
-          cp -r ui/apps/motion-master/dist/. build/pages/app/
+          cp web/landing/index.html build/pages/index.html
+          cp -r web/apps/motion-master/dist/. build/pages/app/
           cp -r build/docs/html/. build/pages/docs/
           cp apps/motion_master/swagger.yml build/pages/swagger.yml
           # 404.html is the SPA shell so GitHub Pages deep-links into /app/* work

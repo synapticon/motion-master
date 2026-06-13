@@ -1,5 +1,7 @@
+import type { ReadyState } from '@synapticon/motion-master-client';
 import { expect, test } from 'vitest';
 import WebSocket from 'ws';
+import { client } from '../src/setup.js';
 
 // The server under test in CI has no fieldbus, so a monitoring can never be created (its
 // parameters can't be sourced). These tests therefore cover the routes, validation, and the
@@ -10,6 +12,8 @@ const baseUrl = process.env.MM_URL ?? 'https://local.motion-master.synapticon.co
 // The realtime WebSocket runs on its own port (separate loop from the HTTP API).
 const wsBaseUrl = process.env.MM_WS_URL ?? 'wss://local.motion-master.synapticon.com:62281';
 
+// Raw fetch for the negative cases below: they post bodies the typed client deliberately can't
+// express (missing/invalid fields), so they bypass the client to hit the server's validation.
 async function request(method: string, path: string, body?: unknown): Promise<Response> {
   return fetch(`${baseUrl}${path}`, {
     method,
@@ -18,12 +22,31 @@ async function request(method: string, path: string, body?: unknown): Promise<Re
   });
 }
 
+function waitForState(target: ReadyState, timeoutMs = 5_000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (client.ws.readyState === target) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(() => {
+      off();
+      reject(new Error(`WebSocket did not reach "${target}" within ${timeoutMs}ms`));
+    }, timeoutMs);
+    const off = client.ws.onStateChange((state) => {
+      if (state === target) {
+        clearTimeout(timer);
+        off();
+        resolve();
+      }
+    });
+  });
+}
+
 const validParam = [1, 8240, 1];
 
 test('GET /api/monitorings is initially empty', async () => {
-  const res = await request('GET', '/api/monitorings');
-  expect(res.status).toBe(200);
-  expect(await res.json()).toEqual([]);
+  const { data } = await client.api.listMonitorings();
+  expect(data).toEqual([]);
 });
 
 test('POST /api/monitorings rejects malformed configs with 400', async () => {
@@ -56,17 +79,26 @@ test('GET/DELETE of an unknown monitoring is 404', async () => {
   expect((await request('DELETE', '/api/monitorings/nope')).status).toBe(404);
 });
 
-test('WebSocket accepts subscribe/unsubscribe without dropping the connection', async () => {
-  const wsUrl = wsBaseUrl;
-  const ws = new WebSocket(wsUrl, { rejectUnauthorized: false });
+test('client.ws subscribe/unsubscribe keeps the connection open', async () => {
+  // The client lazily connects on first subscribe and sends the subscribe frame; unsubscribing the
+  // last listener sends unsubscribe. The connection must survive both.
+  const unsubscribe = client.ws.subscribe('left-leg', () => {});
+  await waitForState('open');
+  unsubscribe();
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  expect(client.ws.readyState).toBe('open');
+  client.ws.close();
+});
+
+test('server ignores a malformed WebSocket frame without dropping the connection', async () => {
+  // The client never sends non-JSON, so this drives a raw socket to prove the server tolerates it.
+  const ws = new WebSocket(wsBaseUrl, { rejectUnauthorized: false });
   await new Promise<void>((resolve, reject) => {
     ws.on('open', () => resolve());
     ws.on('error', reject);
   });
 
-  ws.send(JSON.stringify({ subscribe: 'left-leg' }));
   ws.send('not json'); // malformed — must be ignored, not crash the server
-  ws.send(JSON.stringify({ unsubscribe: 'left-leg' }));
 
   await new Promise((resolve) => setTimeout(resolve, 200));
   expect(ws.readyState).toBe(WebSocket.OPEN);

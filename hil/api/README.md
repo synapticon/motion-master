@@ -1,18 +1,26 @@
 # hil/api — HTTP API & WebSocket integration tests
 
-TypeScript integration tests for the Motion Master HTTP API and monitoring WebSocket, using [Vitest](https://vitest.dev/).
+TypeScript integration tests for the Motion Master HTTP API and realtime WebSocket, using [Vitest](https://vitest.dev/). They drive the published client library, [`@synapticon/motion-master-client`](../../web/packages/motion-master-client), against a real server — so a run exercises Motion Master, the HTTP/WS contract, and the client library together.
 
 ## Prerequisites
 
-- Node.js 20+
+- Node.js 20+ and [pnpm](https://pnpm.io/) 10+
 - Docker (used to build and run the server under test)
 
 ## Running
 
+This package is part of the repo-root pnpm workspace, so dependencies install once from the root:
+
+```bash
+pnpm install                              # from the repo root — first time only
+pnpm --filter motion-master-api-tests test   # build image, start container, run tests, stop container
+```
+
+Or from inside this directory (pnpm still resolves the workspace):
+
 ```bash
 cd hil/api
-npm install          # first time only
-npm test             # build image, start container, run tests, stop container
+pnpm test
 ```
 
 The global setup (`src/global-setup.ts`) manages the full Docker lifecycle:
@@ -29,19 +37,14 @@ The global setup (`src/global-setup.ts`) manages the full Docker lifecycle:
 
 | Variable | Default | Description |
 |---|---|---|
-| `MM_URL` | `https://local.motion-master.synapticon.com:61447` | Base URL of the server under test |
+| `MM_URL` | `https://local.motion-master.synapticon.com:61447` | Base URL of the HTTP API under test |
+| `MM_WS_URL` | `wss://local.motion-master.synapticon.com:62281` | URL of the realtime WebSocket |
 | `MM_SKIP_DOCKER` | _(unset)_ | Set to `1` to skip Docker management and connect to a running instance |
-
-Copy `.env.example` to `.env` and adjust as needed:
-
-```bash
-cp .env.example .env
-```
 
 ## Running against an existing instance
 
 ```bash
-MM_SKIP_DOCKER=1 npm test
+MM_SKIP_DOCKER=1 pnpm --filter motion-master-api-tests test
 ```
 
 Useful when iterating locally with `./tools/run.sh` already running in another terminal.
@@ -52,20 +55,14 @@ Useful when iterating locally with `./tools/run.sh` already running in another t
 hil/api/
   src/
     global-setup.ts   ← Docker lifecycle + waitForApi (Vitest globalSetup)
-    setup.ts          ← typed API client shared by tests
+    setup.ts          ← shared MotionMasterClient instance (HTTP + WebSocket)
     log-fetch.ts      ← fetch wrapper that logs requests
-    mm-api.ts         ← generated typed client (from swagger.yml)
   tests/
-    system.test.ts    ← integration tests
+    system.test.ts      ← version / config / dump
+    monitoring.test.ts  ← monitoring routes + WebSocket plumbing
   vitest.config.ts
   package.json
   biome.json          ← formatter / linter config
 ```
 
-## Regenerating the API client
-
-```bash
-npm run generate:api
-```
-
-Reads `apps/motion_master/swagger.yml` and overwrites `src/mm-api.ts`.
+The typed HTTP client and the WebSocket channel both come from `@synapticon/motion-master-client` (`workspace:*`); there is no generated client checked in here. The client is generated and built in that package — see its README to regenerate from `apps/motion_master/swagger.yml`.

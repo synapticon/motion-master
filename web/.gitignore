@@ -1,0 +1,4 @@
+node_modules/
+dist/
+.pnpm-store/
+packages/motion-master-client/src/generated/

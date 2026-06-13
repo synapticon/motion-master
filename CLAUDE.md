@@ -70,11 +70,11 @@ Build output goes to `build/<preset>/`. Compiler requirements: C++23, warnings a
 ./tools/bump-version.sh 6.0.0-alpha.1
 ```
 
-Files updated by the script: `VERSION`, `vcpkg.json`, `ui/package.json`, `ui/apps/motion-master/package.json`, `ui/packages/api-client/package.json`, `hil/api/package.json`, `apps/motion_master/swagger.yml`, the `StringConstant` assertion in `libs/core/tests/version_test.cc`, and the sidebar badge in `ui/apps/motion-master/src/layouts/RootLayout.tsx`.
+Files updated by the script: `VERSION`, `vcpkg.json`, the root workspace `package.json`, `web/apps/motion-master/package.json`, `web/packages/motion-master-client/package.json`, `hil/api/package.json`, `apps/motion_master/swagger.yml`, the `StringConstant` assertion in `libs/core/tests/version_test.cc`, and the sidebar badge in `web/apps/motion-master/src/layouts/RootLayout.tsx`.
 
-`hil/api/src/mm-api.ts` is auto-generated from `swagger.yml` via `swagger-typescript-api` — regenerate it separately if the API shape changed.
+The generated HTTP API client (`web/packages/motion-master-client/src/generated/`) is produced from `swagger.yml` via `swagger-typescript-api` (`pnpm --filter @synapticon/motion-master-client generate`) and is gitignored — regenerate it if the API shape changed.
 
-After bumping, commit all changed files, then push a `v<version>` tag to trigger `release.yml`.
+After bumping, commit all changed files, then push a `v<version>` tag to trigger `release.yml` — which builds the binaries **and** publishes `@synapticon/motion-master-client@<version>` to npm (prereleases under the `next` dist-tag; needs the `NPM_TOKEN` repo secret).
 
 ## CI
 
@@ -317,12 +317,11 @@ python3 hil/jitter_bench/plot_jitter.py jitter.csv -o report.png
 
 ### api
 
-TypeScript integration tests for the HTTP API and monitoring WebSocket, using Vitest. The global setup manages the full Docker lifecycle automatically — no manual server startup required.
+TypeScript integration tests for the HTTP API and monitoring WebSocket, using Vitest. They drive the published client library (`@synapticon/motion-master-client`, a `workspace:*` member) against a real server, so a run exercises Motion Master, the HTTP/WS contract, and the client together. The global setup manages the full Docker lifecycle automatically — no manual server startup required.
 
 ```bash
-cd hil/api
-npm install          # first time only
-npm test             # build image → start container → run tests → stop & remove container
+pnpm install                                 # from the repo root — first time only
+pnpm --filter motion-master-api-tests test   # build image → start container → run tests → stop & remove container
 ```
 
 The `motion-master` Docker image is built from the repo root and run with `--network host` (required because the server binds to `127.0.0.1`). Set `MM_SKIP_DOCKER=1` to bypass Docker and test against an already-running instance (e.g. from `./tools/run.sh`).

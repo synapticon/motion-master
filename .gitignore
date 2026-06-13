@@ -74,3 +74,7 @@ Testing/
 
 # TypeScript build cache
 *.tsbuildinfo
+
+# Node / pnpm (root workspace lives here; see pnpm-workspace.yaml)
+node_modules/
+.pnpm-store/

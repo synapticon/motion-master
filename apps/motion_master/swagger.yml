@@ -166,6 +166,86 @@ paths:
                   tls: { certPath: "", keyPath: "", autoUpdate: true }
                   gameLoop: { periodUs: 1000 }
                   recorder: { historySeconds: 300 }
+  /api/system-info:
+    get:
+      summary: Get host OS and hardware information
+      description: >
+        A best-effort snapshot of the operating system and hardware Motion Master is running on,
+        for the Connection page's System panel. Every field is best-effort: one that cannot be
+        determined on the current platform is returned empty (strings) or zero (numbers) rather
+        than failing the request. Collected on demand — not cached.
+      operationId: getSystemInfo
+      responses:
+        "200":
+          description: Host system snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - osName
+                  - kernel
+                  - architecture
+                  - hostname
+                  - cpuModel
+                  - cpuCores
+                  - totalMemoryBytes
+                  - diskTotalBytes
+                  - diskFreeBytes
+                  - container
+                  - dockerVersion
+                properties:
+                  osName:
+                    type: string
+                    description: Friendly OS name.
+                    example: "Ubuntu 24.04 LTS"
+                  kernel:
+                    type: string
+                    description: Kernel or OS build identifier.
+                    example: "6.8.0-31-generic"
+                  architecture:
+                    type: string
+                    description: Machine architecture.
+                    example: "x86_64"
+                  hostname:
+                    type: string
+                    description: Network host name.
+                    example: "motion-master-pi"
+                  cpuModel:
+                    type: string
+                    description: CPU brand string.
+                    example: "Intel(R) Core(TM) i7-1185G7 @ 3.00GHz"
+                  cpuCores:
+                    type: integer
+                    description: Logical processor count.
+                    example: 8
+                  totalMemoryBytes:
+                    type: integer
+                    format: int64
+                    description: Total physical RAM in bytes (0 if unknown).
+                    example: 16777216000
+                  diskTotalBytes:
+                    type: integer
+                    format: int64
+                    description: Capacity of the filesystem holding the working directory, in bytes.
+                    example: 250790436864
+                  diskFreeBytes:
+                    type: integer
+                    format: int64
+                    description: Space available to an unprivileged process on that filesystem, in bytes.
+                    example: 98765432100
+                  container:
+                    type: string
+                    description: >
+                      Container runtime when running inside one ("docker", "podman", "containerd",
+                      "kubernetes", "lxc"); empty on bare metal.
+                    example: "docker"
+                  dockerVersion:
+                    type: string
+                    description: >
+                      Docker version reported by `docker --version` on the host; empty if the docker
+                      CLI is not installed/on PATH (including inside Motion Master's own image).
+                    example: "27.1.1"
   /api/cert:
     get:
       summary: Get the TLS certificate validity window

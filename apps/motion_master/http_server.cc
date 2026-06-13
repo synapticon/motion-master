@@ -25,6 +25,7 @@
 #include "comm/foe_error_codes.h"
 #include "comm/object_data_types.h"
 #include "comm/sii.h"
+#include "core/system_info.h"
 #include "core/util.h"
 #include "monitoring_api.h"
 #include "node/device_manager.h"
@@ -233,6 +234,10 @@ void HttpServer::run() {
              sendJson(res, config_.corsOrigin,
                       config_.startedConfig.empty() ? nlohmann::json::object()
                                                     : nlohmann::json::parse(config_.startedConfig));
+           })
+      .get("/api/system-info",
+           [this](auto* res, auto* /*req*/) {
+             sendJson(res, config_.corsOrigin, nlohmann::json(mm::core::collectSystemInfo()));
            })
       .get("/api/cert",
            [this](auto* res, auto* /*req*/) {

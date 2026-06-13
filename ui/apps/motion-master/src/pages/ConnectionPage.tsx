@@ -22,6 +22,32 @@ function formatDate(iso?: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
+// Formats a byte count as a binary-prefix size (KiB/MiB/GiB/TiB). 0 renders as "—" since the
+// backend reports 0 for a value it could not determine on the current platform.
+function formatBytes(bytes?: number): string {
+  if (!bytes) return '—'
+  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
+  let value = bytes
+  let unit = 0
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024
+    unit++
+  }
+  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`
+}
+
+// Combines the two related deployment facts into one cell: the container runtime MM runs inside (if
+// any) and the host's Docker version. Folds the version into the runtime when that runtime is
+// Docker to avoid a redundant "Docker · Docker 29.5.3".
+function containerSummary(container?: string, dockerVersion?: string): string {
+  const runtime = container
+    ? container.charAt(0).toUpperCase() + container.slice(1)
+    : 'None (bare metal)'
+  if (!dockerVersion) return runtime
+  if (container === 'docker') return `Docker ${dockerVersion}`
+  return `Docker ${dockerVersion} · ${runtime}`
+}
+
 // A labelled read-only field used in the certificate detail grid.
 function Field({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -86,6 +112,12 @@ export default function ConnectionPage() {
   })
   const startedConfig = configQuery.data?.data
 
+  const systemQuery = useQuery({
+    queryKey: ['systemInfo'],
+    queryFn: () => api.getSystemInfo(),
+  })
+  const system = systemQuery.data?.data
+
   const refreshMutation = useMutation({
     mutationFn: () => api.refreshCert(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cert'] }),
@@ -105,7 +137,7 @@ export default function ConnectionPage() {
       <PageHeader
         eyebrow="App"
         title="Connection"
-        description="Configure the host and ports used to reach the Motion Master backend, check the TLS certificate status and refresh it, and review the configuration the backend started with."
+        description="Configure the host and ports used to reach the Motion Master backend, check the TLS certificate status and refresh it, review the configuration the backend started with, and inspect the OS and hardware it is running on."
       />
       <div className="p-4 sm:p-8 space-y-8">
         <section>
@@ -273,6 +305,47 @@ export default function ConnectionPage() {
               <pre className="text-xs font-mono bg-grey-50 border border-grey-200 p-3 overflow-x-auto whitespace-pre">
                 {JSON.stringify(startedConfig, null, 2)}
               </pre>
+            )}
+          </div>
+        </section>
+
+        <section>
+          <h2 className="eyebrow mb-3">System</h2>
+          <div className="border border-grey-200 p-5 space-y-3">
+            <p className="text-xs text-grey-600 max-w-prose">
+              The operating system and hardware the Motion Master backend is running on — useful
+              when the server is on a separate machine (e.g. a Raspberry Pi appliance). A snapshot
+              read live from the host each time this page loads; fields that cannot be determined on
+              the host's platform are shown as <code>—</code>.
+            </p>
+
+            {systemQuery.isLoading && <p className="text-sm text-grey-600">Loading…</p>}
+
+            {systemQuery.isError && (
+              <p className="text-status-bad text-sm">
+                Could not read system information. Is the backend reachable at https://{host}:
+                {httpPort}?
+              </p>
+            )}
+
+            {system && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-4">
+                <Field label="Operating system" value={system.osName || '—'} />
+                <Field label="Kernel / build" value={system.kernel || '—'} />
+                <Field label="Architecture" value={system.architecture || '—'} />
+                <Field label="Hostname" value={system.hostname || '—'} />
+                <Field label="CPU" value={system.cpuModel || '—'} />
+                <Field label="Logical cores" value={system.cpuCores || '—'} />
+                <Field label="Total memory" value={formatBytes(system.totalMemoryBytes)} />
+                <Field
+                  label="Disk (free / total)"
+                  value={`${formatBytes(system.diskFreeBytes)} / ${formatBytes(system.diskTotalBytes)}`}
+                />
+                <Field
+                  label="Docker / Container"
+                  value={containerSummary(system.container, system.dockerVersion)}
+                />
+              </div>
             )}
           </div>
         </section>

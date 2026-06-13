@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
 import ControlExplainer from '../components/ControlExplainer'
@@ -440,93 +440,103 @@ export default function FieldbusPage() {
                         <thead>
                           <tr className="border-b border-grey-200 bg-grey-50">
                             {['Slave', 'Device', 'Vendor ID', 'Product Code', 'Revision', 'Serial', 'AL State', 'Action'].map(h => (
-                              <th key={h} className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium">
+                              <th key={h} className={`${h === 'Action' ? 'text-right' : 'text-left'} px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium`}>
                                 {h}
                               </th>
                             ))}
                           </tr>
                         </thead>
                         <tbody>
-                          {devicesQuery.data.data.map(d => (
-                            <tr key={d.slavePosition} className="border-b border-grey-100 last:border-0">
-                              <td className="px-4 py-2">
-                                <SlavePositionBadge position={d.slavePosition} />
-                              </td>
-                              <td className="px-4 py-2">{d.name}</td>
-                              <td className="px-4 py-2 font-mono">0x{d.vendorId.toString(16).toUpperCase()}</td>
-                              <td className="px-4 py-2 font-mono">0x{d.productCode.toString(16).toUpperCase()}</td>
-                              <td className="px-4 py-2 font-mono">0x{d.revisionNumber.toString(16).toUpperCase()}</td>
-                              <td className="px-4 py-2 font-mono">{d.serialNumber}</td>
-                              <td className="px-4 py-2">
-                                {deviceStates[d.slavePosition] !== undefined && deviceStates[d.slavePosition].alState !== 0
-                                  ? (() => {
-                                    const ds = deviceStates[d.slavePosition]
-                                    const stateLabel = AL_STATE_LABEL[ds.alState] ?? `0x${ds.alState.toString(16).toUpperCase()}`
-                                    const errorEntry = ds.error ? (alStatusCodeMap[ds.alStatusCode] ?? null) : null
-                                    return (
-                                      <span className={ds.error ? 'text-status-bad' : ''}>
-                                        {stateLabel} ({ds.alState})
-                                        {errorEntry && (
-                                          <span className="cursor-help" title={errorEntry.description}>
-                                            {' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} {errorEntry.name}
-                                            {errorEntry.terminal && (
-                                              <span
-                                                className="ml-1 cursor-help text-grey-600"
-                                                title="Terminal: the slave cannot reach the requested state by retrying. Re-init, reflash, or power cycle is required."
-                                              >
-                                                (terminal)
+                          {devicesQuery.data.data.map(d => {
+                            const pos = d.slavePosition
+                            const rowPending = deviceTransitionMutation.isPending
+                              && deviceTransitionMutation.variables?.position === pos
+                            // Block all per-device dropdowns while any transition (bus-wide or
+                            // per-device) is in flight — they all command the same bus.
+                            const busy = transitionMutation.isPending || deviceTransitionMutation.isPending
+                            const result = deviceTransitionResult[pos]
+                            return (
+                              <Fragment key={pos}>
+                                {/* When a transition result is shown, the row separator moves to the
+                                    detail row below so the device row + its result read as one unit. */}
+                                <tr className={result ? '' : 'border-b border-grey-100 last:border-0'}>
+                                  <td className="px-4 py-2">
+                                    <SlavePositionBadge position={d.slavePosition} />
+                                  </td>
+                                  <td className="px-4 py-2">{d.name}</td>
+                                  <td className="px-4 py-2 font-mono">0x{d.vendorId.toString(16).toUpperCase()}</td>
+                                  <td className="px-4 py-2 font-mono">0x{d.productCode.toString(16).toUpperCase()}</td>
+                                  <td className="px-4 py-2 font-mono">0x{d.revisionNumber.toString(16).toUpperCase()}</td>
+                                  <td className="px-4 py-2 font-mono">{d.serialNumber}</td>
+                                  <td className="px-4 py-2">
+                                    {deviceStates[d.slavePosition] !== undefined && deviceStates[d.slavePosition].alState !== 0
+                                      ? (() => {
+                                        const ds = deviceStates[d.slavePosition]
+                                        const stateLabel = AL_STATE_LABEL[ds.alState] ?? `0x${ds.alState.toString(16).toUpperCase()}`
+                                        const errorEntry = ds.error ? (alStatusCodeMap[ds.alStatusCode] ?? null) : null
+                                        return (
+                                          <span className={ds.error ? 'text-status-bad' : ''}>
+                                            {stateLabel} ({ds.alState})
+                                            {errorEntry && (
+                                              <span className="cursor-help" title={errorEntry.description}>
+                                                {' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')} {errorEntry.name}
+                                                {errorEntry.terminal && (
+                                                  <span
+                                                    className="ml-1 cursor-help text-grey-600"
+                                                    title="Terminal: the slave cannot reach the requested state by retrying. Re-init, reflash, or power cycle is required."
+                                                  >
+                                                    (terminal)
+                                                  </span>
+                                                )}
                                               </span>
                                             )}
+                                            {ds.error && !errorEntry && (
+                                              <span>{' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')}</span>
+                                            )}
                                           </span>
-                                        )}
-                                        {ds.error && !errorEntry && (
-                                          <span>{' — '}0x{ds.alStatusCode.toString(16).toUpperCase().padStart(4, '0')}</span>
-                                        )}
-                                      </span>
-                                    )
-                                  })()
-                                  : '—'}
-                              </td>
-                              <td className="px-4 py-2">
-                                {(() => {
-                                  const pos = d.slavePosition
-                                  const rowPending = deviceTransitionMutation.isPending
-                                    && deviceTransitionMutation.variables?.position === pos
-                                  // Block all per-device dropdowns while any transition (bus-wide or
-                                  // per-device) is in flight — they all command the same bus.
-                                  const busy = transitionMutation.isPending || deviceTransitionMutation.isPending
-                                  const result = deviceTransitionResult[pos]
-                                  return (
-                                    <div className="space-y-1">
-                                      <select
-                                        value=""
-                                        disabled={busy}
-                                        onChange={e => {
-                                          const state = Number(e.currentTarget.value) as 1 | 2 | 3 | 4 | 8
-                                          // Reset to the placeholder so re-selecting the same target re-fires.
-                                          e.currentTarget.value = ''
-                                          if (state) {
-                                            deviceTransitionMutation.mutate({ position: pos, state })
-                                          }
-                                        }}
-                                        title="Command just this slave to an AL state. Illegal jumps are rejected by the slave."
-                                        className="border border-grey-300 px-2 py-1 text-xs bg-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-                                      >
-                                        <option value="">{rowPending ? 'Transitioning…' : 'Change…'}</option>
-                                        {PER_DEVICE_STATE_ORDER.map(t => (
-                                          <option key={t.value} value={t.value}>{t.label} ({t.value})</option>
-                                        ))}
-                                      </select>
-                                      {result && (() => {
+                                        )
+                                      })()
+                                      : '—'}
+                                  </td>
+                                  <td className="px-4 py-2 text-right">
+                                    <select
+                                      value=""
+                                      disabled={busy}
+                                      onChange={e => {
+                                        const state = Number(e.currentTarget.value) as 1 | 2 | 3 | 4 | 8
+                                        // Reset to the placeholder so re-selecting the same target re-fires.
+                                        e.currentTarget.value = ''
+                                        if (state) {
+                                          deviceTransitionMutation.mutate({ position: pos, state })
+                                        }
+                                      }}
+                                      title="Command just this slave to an AL state. Illegal jumps are rejected by the slave."
+                                      className="border border-grey-300 px-2 py-1 text-xs bg-white disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+                                    >
+                                      <option value="">{rowPending ? 'Transitioning…' : 'Change AL state…'}</option>
+                                      {PER_DEVICE_STATE_ORDER.map(t => (
+                                        <option key={t.value} value={t.value}>{t.label} ({t.value})</option>
+                                      ))}
+                                    </select>
+                                  </td>
+                                </tr>
+                                {/* Transition result on its own full-width row, right-aligned so it
+                                    sits under the Action dropdown that produced it. Long AL-status
+                                    messages wrap here without widening the column or shifting the table. */}
+                                {result && (
+                                  <tr className="border-b border-grey-100 last:border-0">
+                                    <td colSpan={8} className="px-4 pb-2 pt-0 text-xs text-right">
+                                      <span className="text-grey-500">Slave {pos}: </span>
+                                      {(() => {
                                         if (result.requestError) {
-                                          return <p className="text-status-bad">{result.requestError}</p>
+                                          return <span className="text-status-bad">{result.requestError}</span>
                                         }
                                         const reached = !result.error && result.alState === result.target
                                         if (reached) {
                                           return (
-                                            <p className="text-status-good">
+                                            <span className="text-status-good">
                                               → {AL_STATE_LABEL[result.target]} ({result.target}) in {formatDuration(result.elapsedMs)}
-                                            </p>
+                                            </span>
                                           )
                                         }
                                         const stateLabel = AL_STATE_LABEL[result.alState] ?? `0x${result.alState.toString(16).toUpperCase()}`
@@ -539,22 +549,22 @@ export default function FieldbusPage() {
                                         const silentInit = result.target !== 1 && result.alState === 1
                                           && !result.error && result.alStatusCode === 0
                                         return (
-                                          <p className="text-status-bad">
+                                          <span className="text-status-bad">
                                             stuck in {stateLabel} ({result.alState}){code}
                                             {silentInit && (
                                               <span className="block text-grey-600">
                                                 No error reported — if moved from another master, power-cycle and rescan.
                                               </span>
                                             )}
-                                          </p>
+                                          </span>
                                         )
                                       })()}
-                                    </div>
-                                  )
-                                })()}
-                              </td>
-                            </tr>
-                          ))}
+                                    </td>
+                                  </tr>
+                                )}
+                              </Fragment>
+                            )
+                          })}
                         </tbody>
                       </table>
                     )}

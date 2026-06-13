@@ -296,6 +296,39 @@ TEST(MonitoringManagerTest, FlushPublishesEveryRecordedCycleAsPositionalRows) {
   EXPECT_EQ(published.size(), 2u);
 }
 
+TEST(MonitoringManagerTest, RemapResyncsCursorPastHeadInsteadOfUnderflowing) {
+  // A layout-changing re-map re-allocates the recorder ring, restarting the sequence at 0. A
+  // monitoring whose cursor had advanced past that fresh head must resync to the oldest record
+  // rather than evaluating the unsigned head - cursor (which underflows into an ~18-quintillion
+  // rows.reserve() that aborts the whole process). Regression for the crash hit while transitioning
+  // a device into OP with a live monitoring: the re-map reset head below the monitoring's cursor.
+  DeviceManager dm;
+  setUp(dm);
+
+  MonitoringManager manager(dm);
+  std::vector<nlohmann::json> published;
+  manager.setPublish(
+      [&](std::string, std::string json) { published.push_back(nlohmann::json::parse(json)); });
+  ASSERT_TRUE(manager.create(axisConfig()).has_value());
+
+  manager.sampleAll();  // prime the cursor at the current head
+  drive(dm, 16);        // record 16 cycles
+  manager.sampleAll();  // flush: the cursor now sits at head, far above 0
+  ASSERT_EQ(published.size(), 1u);
+
+  // Re-map: re-allocates the ring and restarts the sequence at 0, leaving the cursor far ahead of
+  // the new head. Then record a few cycles under the fresh ring (head stays well below the cursor).
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  drive(dm, 3);
+
+  // Must not abort; must resync to the oldest record and resume streaming the post-remap cycles,
+  // decoding them correctly against the re-captured PDO spec.
+  manager.sampleAll();
+  ASSERT_EQ(published.size(), 2u);
+  ASSERT_EQ(published[1]["data"].size(), 3u);
+  EXPECT_EQ(published[1]["data"][0][1], 0x11223344);  // actual position, decoded after re-capture
+}
+
 TEST(MonitoringManagerTest, NonExchangingDeviceSamplesNull) {
   DeviceManager dm;
   FakeBus* bus = setUp(dm);

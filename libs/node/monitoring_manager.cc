@@ -255,12 +255,17 @@ void MonitoringManager::flushEntry(Entry& entry) {
   if (head == entry.cursor) {
     return;  // no new cycles recorded since the last flush (bus idle / not exchanging)
   }
-  // Resync a lapped cursor: if it fell more than a whole ring behind, those cycles were overwritten
-  // before we read them. Log the gap (never silent) and skip forward to the oldest still present.
+  // Resync a cursor that has fallen outside the live recorded span [oldest, head). Two causes:
+  //   - it fell more than a whole ring behind (cursor < oldest): those cycles were overwritten
+  //     before we read them.
+  //   - a layout-changing re-map re-allocated the recorder ring, resetting head to a fresh, smaller
+  //     sequence (cursor > head): the cursor now indexes a ring that no longer exists, and the
+  //     unsigned head - cursor below would underflow into a gigantic rows.reserve() (length_error).
+  // Either way, log the gap (never silent) and skip forward to the oldest record still present.
   const uint64_t oldest = deviceManager_.recorderOldestSeq();
-  if (entry.cursor < oldest) {
-    spdlog::warn("monitoring '{}' fell behind — dropped recorded cycles [{}, {})",
-                 entry.config.topic, entry.cursor, oldest);
+  if (entry.cursor < oldest || entry.cursor > head) {
+    spdlog::warn("monitoring '{}' resynced — cursor {} outside recorded span [{}, {})",
+                 entry.config.topic, entry.cursor, oldest, head);
     entry.cursor = oldest;
   }
 

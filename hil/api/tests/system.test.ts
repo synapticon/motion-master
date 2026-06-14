@@ -23,3 +23,9 @@ test('POST /api/process-data/dump is 409 with no process image', async () => {
   // nothing to serialise and must reject. The full dump path is exercised on hardware.
   await expect(client.api.dumpProcessData()).rejects.toMatchObject({ status: 409 });
 });
+
+test('GET /api/process-data/dump (stream) rejects with no process image', async () => {
+  // The streaming variant the SDK/browser uses must reject the same way; fetchProcessDataDump
+  // throws with the server's error message on a non-OK response.
+  await expect(client.fetchProcessDataDump()).rejects.toThrow();
+});

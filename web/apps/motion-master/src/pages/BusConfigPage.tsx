@@ -1,12 +1,11 @@
 import { useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
-import type { SlaveConfig, SyncManagerConfig, FmmuConfig } from '@synapticon/motion-master-client'
+import { type SlaveConfig, type SyncManagerConfig, type FmmuConfig, formatHex } from '@synapticon/motion-master-client'
 import PageHeader from '../components/PageHeader'
 import ConfigExplainer from '../components/ConfigExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { usePreferences } from '../contexts/PreferencesContext'
-import { formatHex } from '../utils/hex'
 import { btnOutline } from '../utils/styles'
 
 // SOEM SMtype: 0 unused, 1 MbxOut, 2 MbxIn, 3 Outputs, 4 Inputs.

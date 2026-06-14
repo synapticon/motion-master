@@ -1,7 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Check, ChevronDown, Search, X } from 'lucide-react'
-import type { DeviceParameter } from '@synapticon/motion-master-client'
-import { formatHex } from '../utils/hex'
+import { type DeviceParameter, formatHex } from '@synapticon/motion-master-client'
 
 interface ParameterPickerProps {
   /** The device's enumerated object dictionary. May be empty while a scan is in flight. */

@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react'
-import type { SlaveInformationInterface, SiiPdo } from '@synapticon/motion-master-client'
+import { type SlaveInformationInterface, type SiiPdo, formatHex } from '@synapticon/motion-master-client'
 import { usePreferences } from '../contexts/PreferencesContext'
-import { formatHex } from '../utils/hex'
 
 type Sii = SlaveInformationInterface
 type SyncManager = NonNullable<Sii['category']['syncManagers']>[number]

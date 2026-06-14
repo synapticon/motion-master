@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import { useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type { DeviceParameter } from '@synapticon/motion-master-client'
 import DevicePageHeader from '../components/DevicePageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
 import {
+  type DeviceParameter,
   SDO_TYPES,
   SDO_TYPE_HINT,
   type SdoType,
@@ -12,7 +12,7 @@ import {
   decodeSdoBytes,
   interpretSdoBytes,
   sdoTypeForDataTypeName,
-} from '../utils/sdo'
+} from '@synapticon/motion-master-client'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'

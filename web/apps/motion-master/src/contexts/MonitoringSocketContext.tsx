@@ -1,7 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { WebSocketConnection } from '@synapticon/motion-master-client'
-import type { MonitoringBatch, ReadyState } from '@synapticon/motion-master-client'
+import { WebSocketConnection, type MonitoringBatch, type ReadyState } from '@synapticon/motion-master-client'
 
 // One published batch for a topic: an array of sample rows, each [timestampUs, v0, v1, ...].
 // A value is null when its device was not exchanging at sample time.

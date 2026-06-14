@@ -7,7 +7,7 @@ import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { usePreferences } from '../contexts/PreferencesContext'
 import { useApiHealth } from '../hooks/useApiHealth'
-import { formatHex } from '../utils/hex'
+import { formatHex } from '@synapticon/motion-master-client'
 
 const deviceLinks = [
   { to: 'foe', label: 'FoE' },

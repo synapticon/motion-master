@@ -3,7 +3,7 @@ import { useParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import DevicePageHeader from '../components/DevicePageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
-import { parseHexBytes } from '../utils/hex'
+import { parseHexBytes } from '@synapticon/motion-master-client'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'

@@ -10,3 +10,9 @@ export * from './generated/Api'
 export * from './constants'
 export * from './web-socket-connection'
 export * from './client'
+
+// Pure, framework-agnostic helpers (no DOM/React): hex formatting, CoE SDO value
+// encode/decode, and SOMANET file-list parsing.
+export * from './hex'
+export * from './sdo'
+export * from './somanet'

@@ -1,11 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
-import type { ProcessImageObject } from '@synapticon/motion-master-client'
+import { type ProcessImageObject, formatHex } from '@synapticon/motion-master-client'
 import PageHeader from '../components/PageHeader'
 import ProcessImageExplainer from '../components/ProcessImageExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { usePreferences } from '../contexts/PreferencesContext'
-import { formatHex } from '../utils/hex'
 import { btnOutline } from '../utils/styles'
 
 function Stat({

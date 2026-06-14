@@ -4,7 +4,7 @@ import type uPlot from 'uplot'
 import {
   fetchProcessDataDump,
   parseMmpd,
-  isPlottableDataType,
+  isPlottableEntry,
   formatHex,
   type MmpdFile,
   type MmpdPdoEntry,
@@ -43,7 +43,7 @@ function flatten(file: MmpdFile): FlatEntry[] {
         devicePosition: device.slavePosition,
         deviceName: device.name,
         entry,
-        plottable: isPlottableDataType(entry.dataType),
+        plottable: isPlottableEntry(entry),
       })
     }
   }
@@ -218,6 +218,15 @@ export default function RecorderPage() {
               {file.header.devices.length} device{file.header.devices.length === 1 ? '' : 's'}
               {' · '}cycle {file.header.cyclePeriodUs} µs
             </div>
+
+            {flat.some((e) => e.entry.dataType === 0) && (
+              <p className="text-[11px] text-grey-500 max-w-2xl">
+                Some objects carry no type info — the object dictionary wasn't enumerated when this
+                was recorded — so they plot as raw little-endian <em>unsigned</em> integers (signed
+                or float values will look wrong). Read a device's Parameters before dumping for
+                correctly typed values.
+              </p>
+            )}
 
             {chart.labels.length > 0 ? (
               <MonitoringChart data={chart.data} labels={chart.labels} titles={chart.titles} />

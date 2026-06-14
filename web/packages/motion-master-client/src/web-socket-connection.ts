@@ -1,4 +1,4 @@
-// Framework-agnostic client for Motion Master's single realtime WebSocket — the bidirectional
+// Framework-agnostic connection to Motion Master's single realtime WebSocket — the bidirectional
 // channel that carries server->client monitoring batches, notifications, and (planned) procedure
 // progress, and client->server topic subscribe/unsubscribe. It owns reconnection, multiplexes
 // per-topic subscriptions over the one socket (ref-counted: subscribe on the first listener,
@@ -64,7 +64,7 @@ export type WebSocketConstructor = new (
   protocolsOrOptions?: unknown,
 ) => WebSocketLike
 
-export interface WebSocketClientOptions {
+export interface WebSocketConnectionOptions {
   /// Full WebSocket URL (e.g. `wss://host:62281`).
   url: string
   /// WebSocket implementation. Defaults to the global `WebSocket` (browsers, Node >= 22). In older
@@ -81,7 +81,7 @@ export interface WebSocketClientOptions {
   maxReconnectDelayMs?: number
 }
 
-export class WebSocketClient {
+export class WebSocketConnection {
   private readonly url: string
   private readonly WebSocketImpl?: WebSocketConstructor
   private readonly protocolsOrOptions?: unknown
@@ -99,7 +99,7 @@ export class WebSocketClient {
   private readonly progressListeners = new Set<ProgressListener>()
   private readonly stateListeners = new Set<StateListener>()
 
-  constructor(options: WebSocketClientOptions) {
+  constructor(options: WebSocketConnectionOptions) {
     this.url = options.url
     this.WebSocketImpl = options.WebSocket
     this.protocolsOrOptions = options.protocolsOrOptions

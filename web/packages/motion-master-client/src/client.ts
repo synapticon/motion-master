@@ -7,7 +7,7 @@
 import { Api } from './generated/Api'
 import type { ApiConfig } from './generated/http-client'
 import { API_BASE_URL, WS_URL } from './constants'
-import { WebSocketClient, type WebSocketConstructor } from './web-socket-client'
+import { WebSocketConnection, type WebSocketConstructor } from './web-socket-connection'
 
 export interface MotionMasterClientOptions {
   /// Origin (or `host:port`) of the HTTP API. Default: the bundled localhost dev origin.
@@ -31,14 +31,14 @@ export class MotionMasterClient {
 
   /// The realtime WebSocket channel: `client.ws.subscribe(topic, cb)`,
   /// `client.ws.onNotification(cb)`, `client.ws.onProgress(cb)`. Connects lazily.
-  readonly ws: WebSocketClient
+  readonly ws: WebSocketConnection
 
   constructor(options: MotionMasterClientOptions = {}) {
     this.api = new Api({
       baseUrl: options.baseUrl ?? API_BASE_URL,
       customFetch: options.customFetch,
     })
-    this.ws = new WebSocketClient({
+    this.ws = new WebSocketConnection({
       url: options.wsUrl ?? WS_URL,
       WebSocket: options.WebSocket,
       protocolsOrOptions: options.webSocketOptions,

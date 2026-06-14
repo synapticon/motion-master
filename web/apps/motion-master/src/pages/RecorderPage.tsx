@@ -11,6 +11,7 @@ import {
 } from '@synapticon/motion-master-client'
 import PageHeader from '../components/PageHeader'
 import MonitoringChart from '../components/MonitoringChart'
+import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
@@ -254,9 +255,12 @@ export default function RecorderPage() {
             <div className="border border-grey-200 divide-y divide-grey-100 max-w-2xl">
               {byDevice.map((group) => (
                 <div key={group.position} className="px-3 py-2">
-                  <p className="eyebrow mb-1">
-                    {group.position} · {group.name}
-                  </p>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <SlavePositionBadge position={group.position} />
+                    <span className="text-[11px] font-medium text-grey-800 truncate">
+                      {group.name}
+                    </span>
+                  </div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
                     <div>
                       <p className="text-[10px] uppercase tracking-wide text-grey-400 mb-0.5">

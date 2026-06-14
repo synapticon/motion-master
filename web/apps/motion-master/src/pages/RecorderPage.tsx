@@ -252,9 +252,9 @@ export default function RecorderPage() {
               <p className="text-sm text-grey-500">Select one or more objects below to plot.</p>
             )}
 
-            <div className="border border-grey-200 divide-y divide-grey-100 max-w-2xl">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {byDevice.map((group) => (
-                <div key={group.position} className="px-3 py-2">
+                <div key={group.position} className="border border-grey-200 px-3 py-3">
                   <div className="flex items-center gap-2 mb-1.5">
                     <SlavePositionBadge position={group.position} />
                     <span className="text-[11px] font-medium text-grey-800 truncate">

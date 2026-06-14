@@ -29,30 +29,31 @@ export default function DevicePageHeader({
 
   return (
     <div className="px-8 py-7 border-b border-grey-200">
-      <div className="flex flex-wrap items-start justify-between gap-x-8 gap-y-4">
-        <div>
-          <p className="eyebrow mb-2">Device {slavePosition}</p>
-          <h1 className="font-display text-4xl font-light">{title}</h1>
-        </div>
+      <div className="mb-2 flex flex-wrap items-center gap-x-8 gap-y-1">
+        <p className="eyebrow">Device {slavePosition}</p>
         {device && (
-          <dl className="flex flex-wrap gap-x-5 gap-y-2 border border-grey-200 bg-grey-50 px-4 py-3">
+          <dl className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
             {[
               { label: 'Name', value: device.name, mono: false },
               { label: 'Vendor ID', value: hex32(device.vendorId), mono: true },
               { label: 'Product Code', value: hex32(device.productCode), mono: true },
               { label: 'Revision', value: hex32(device.revisionNumber), mono: true },
               { label: 'Serial', value: String(device.serialNumber), mono: false },
-            ].map(({ label, value, mono }) => (
-              <div key={label}>
-                <dt className="text-[10px] text-grey-500 uppercase tracking-wide font-display">
+            ].map(({ label, value, mono }, i) => (
+              <div
+                key={label}
+                className={`flex items-baseline gap-1.5 ${i > 0 ? 'border-l border-grey-200 pl-4' : ''}`}
+              >
+                <dt className="text-[9px] text-grey-500 uppercase tracking-wide font-display">
                   {label}
                 </dt>
-                <dd className={`text-[11px] text-grey-900 ${mono ? 'font-mono' : ''}`}>{value}</dd>
+                <dd className={`text-[10px] text-grey-900 ${mono ? 'font-mono' : ''}`}>{value}</dd>
               </div>
             ))}
           </dl>
         )}
       </div>
+      <h1 className="font-display text-4xl font-light">{title}</h1>
       {description && <p className="text-sm text-grey-600 mt-2">{description}</p>}
     </div>
   )

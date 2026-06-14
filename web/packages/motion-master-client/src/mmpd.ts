@@ -409,3 +409,10 @@ export function decodeMmpdValue(dataType: number, bytes: Uint8Array): number | b
     }
   }
 }
+
+/// Whether `decodeSeries` yields plottable numbers for this ETG.1020 data-type code — a
+/// fixed-width integer/real or a bit field, but not a string, struct, or unenumerated type
+/// (dataType 0). Useful for offering only chartable objects in a UI.
+export function isPlottableDataType(dataType: number): boolean {
+  return numericReader(dataType) !== null || (dataType >= 0x0030 && dataType <= 0x003f)
+}

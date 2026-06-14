@@ -146,20 +146,12 @@ export class MmpdFile {
   }
 
   /// Decodes one entry's value for every row. Numeric types yield numbers (64-bit ints are coerced
-  /// to Number, lossy beyond 2^53). An unenumerated object (dataType 0) is decoded as a raw
-  /// little-endian unsigned integer of its bit width — the best that can be done without a declared
-  /// type, so unknown-type dumps still plot (signed/float values just read as raw unsigned). String
-  /// types yield null.
+  /// to Number, lossy beyond 2^53); strings, undecodable (dataType 0), and unsupported types yield
+  /// null — so the result is always plottable.
   decodeSeries(entry: MmpdPdoEntry): (number | null)[] {
     const out: (number | null)[] = new Array(this.header.rowCount)
-    if (STRING_TYPES.has(entry.dataType)) {
-      return out.fill(null)
-    }
+    const reader = numericReader(entry.dataType)
     const byteAligned = entry.bitOffset % 8 === 0 && entry.bitLength % 8 === 0
-    // Known numeric types use their typed reader; an unenumerated object (dataType 0) with a sane
-    // byte width falls back to a raw little-endian unsigned read.
-    const reader =
-      numericReader(entry.dataType) ?? (byteAligned ? unsignedReader(entry.bitLength >> 3) : null)
     const regionStart = entry.isOutput ? 16 + this.header.inputBytes : 16
 
     if (reader && byteAligned) {
@@ -308,31 +300,6 @@ function numericReader(dataType: number): ScalarReader | null {
   }
 }
 
-// String/octet types — never plottable as a number.
-const STRING_TYPES = new Set<number>([
-  DataType.VISIBLE_STRING,
-  0x000a, // OCTET_STRING
-  DataType.UNICODE_STRING,
-])
-
-// A raw little-endian unsigned reader for a fixed byte width (1/2/4/8) — used for unenumerated
-// objects (dataType 0) where only the width is known. Other widths fall back to the bit-extract
-// path. Returns a bigint for 8 bytes.
-function unsignedReader(byteLen: number): ScalarReader | null {
-  switch (byteLen) {
-    case 1:
-      return (dv, o) => dv.getUint8(o)
-    case 2:
-      return (dv, o) => dv.getUint16(o, true)
-    case 4:
-      return (dv, o) => dv.getUint32(o, true)
-    case 8:
-      return (dv, o) => dv.getBigUint64(o, true)
-    default:
-      return null
-  }
-}
-
 /// Fetches the live recorder dump (`GET /api/process-data/dump`) and parses it. `baseUrl` is the
 /// HTTP API origin (e.g. `https://host:61447`). Throws on a non-OK response (the response body's
 /// `error` message when present). Pass `fetch` to inject an implementation (Node, request logging).
@@ -427,25 +394,18 @@ export function decodeMmpdValue(dataType: number, bytes: Uint8Array): number | b
       }
       return utf8.decode(bytes.subarray(0, end))
     }
+    case 0x0000:
+      return null // OD not enumerated — undecodable
     default: {
-      // Unenumerated (dataType 0), sub-byte (BIT1..BIT16), or any other code: read the available
-      // bytes as a little-endian unsigned integer — the best that can be done without a declared
-      // type. Up to 4 bytes return a Number; 5..8 bytes a bigint.
-      if (n === 0 || n > 8) {
+      // Unknown/sub-byte (e.g. BIT1..BIT16): read the available bytes as a little-endian unsigned.
+      if (n === 0 || n > 4) {
         return null
       }
-      if (n <= 4) {
-        let v = 0
-        for (let i = 0; i < n; i++) {
-          v |= bytes[i] << (8 * i)
-        }
-        return v >>> 0
-      }
-      let v = 0n
+      let v = 0
       for (let i = 0; i < n; i++) {
-        v |= BigInt(bytes[i]) << BigInt(8 * i)
+        v |= bytes[i] << (8 * i)
       }
-      return v
+      return v >>> 0
     }
   }
 }
@@ -455,14 +415,4 @@ export function decodeMmpdValue(dataType: number, bytes: Uint8Array): number | b
 /// (dataType 0). Useful for offering only chartable objects in a UI.
 export function isPlottableDataType(dataType: number): boolean {
   return numericReader(dataType) !== null || (dataType >= 0x0030 && dataType <= 0x003f)
-}
-
-/// Whether an entry can be plotted. Known numeric/bit types qualify; string/octet types never do;
-/// an unenumerated object (dataType 0, OD not read at dump time) still qualifies when its width is
-/// a sane scalar size (1..64 bits), decoded as a raw little-endian unsigned integer.
-export function isPlottableEntry(entry: { dataType: number; bitLength: number }): boolean {
-  if (STRING_TYPES.has(entry.dataType)) {
-    return false
-  }
-  return isPlottableDataType(entry.dataType) || (entry.bitLength >= 1 && entry.bitLength <= 64)
 }

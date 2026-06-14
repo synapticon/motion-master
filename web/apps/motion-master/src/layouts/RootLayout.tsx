@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { ChevronDown, Cpu, RefreshCw } from 'lucide-react'
+import { BookOpenText, ChevronDown, Mail, RefreshCw } from 'lucide-react'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
@@ -35,16 +35,6 @@ const AL_STATE_BADGE: Record<number, string> = {
   3: 'bg-status-warn text-grey-900',
   4: 'bg-status-info text-white',
   8: 'bg-green-600 text-white',
-}
-
-// Solid fills for the device card's left accent bar — same color story as the
-// badge above, but just the background since the bar carries no text.
-const AL_STATE_ACCENT: Record<number, string> = {
-  1: 'bg-grey-700',
-  2: 'bg-ocean',
-  3: 'bg-status-warn',
-  4: 'bg-status-info',
-  8: 'bg-green-600',
 }
 
 interface DeviceState {
@@ -112,10 +102,34 @@ function DeviceSection({
       : mailboxActive
         ? 'Mailbox active — the device is in PRE-OP or higher, so its CoE/SDO mailbox answers (regardless of the AL error flag, which the state badge shows separately)'
         : 'Mailbox inactive — no CoE/SDO mailbox: the device is in INIT or BOOT, or is not responding (powered off, unplugged, or left the bus)'
+
+  // Object-dictionary read state. The backend enumerates a device's OD when it reaches
+  // PRE-OP; we share the Parameters page's query cache (identical key) so this neither
+  // double-fetches nor drifts out of sync with that page. `null` while the first read is
+  // in flight; an empty list means the OD has not been read yet.
+  const parametersQuery = useQuery({
+    queryKey: ['deviceParameters', Number(deviceId)],
+    queryFn: () => api.getDeviceParameters(Number(deviceId)),
+    staleTime: Infinity,
+    retry: false,
+  })
+  const parameterCount: number | null = parametersQuery.isPending
+    ? null
+    : parametersQuery.data?.data?.length ?? 0
+  const dictionaryLabel =
+    parameterCount === null
+      ? 'Reading object dictionary'
+      : parameterCount > 0
+        ? 'Object dictionary read'
+        : 'Object dictionary not read'
+  const dictionaryTitle =
+    parameterCount === null
+      ? 'Object dictionary — reading the device’s parameters…'
+      : parameterCount > 0
+        ? `Object dictionary — ${parameterCount} parameters read (the device’s CoE object dictionary has been enumerated; it is read automatically once the device reaches PRE-OP)`
+        : 'Object dictionary — not read yet: no parameters enumerated. The device reads its OD on reaching PRE-OP; open the Parameters page to read it on demand.'
+
   const stateLabel = alStateLabel(state)
-  const accentClass = state?.error
-    ? 'bg-status-bad'
-    : AL_STATE_ACCENT[state?.alState ?? -1] ?? 'bg-white/20'
 
   // Full device identity, shown as a multi-line tooltip on the name — the immutable
   // EEPROM identity that the status line deliberately keeps off the chrome.
@@ -130,24 +144,18 @@ function DeviceSection({
 
   return (
     <div className="mt-2">
-      {/* Device card — a state-colored accent bar frames it as one device and doubles
-          the AL-state signal; the header toggles the links below. */}
+      {/* Device card — the header toggles the links below; the AL-state badge in the
+          status line carries the state color, so the card needs no left accent bar. */}
       <button
         type="button"
         onClick={() => setOpen(o => !o)}
         aria-expanded={open}
-        className="group relative w-full text-left px-5 py-2.5 bg-white/[0.06] hover:bg-white/[0.1] border-y border-white/10 transition-colors cursor-pointer"
+        className="group w-full text-left px-5 py-2.5 bg-white/[0.06] hover:bg-white/[0.1] border-y border-white/10 transition-colors cursor-pointer"
       >
-        {/* AL-state accent bar */}
-        <span
-          aria-hidden
-          className={`absolute inset-y-0 left-0 w-0.5 ${accentClass}`}
-        />
-
-        {/* Identity — device glyph + name lead; position is a demoted detail on the right. */}
+        {/* Identity — slave position leads on the left, then the device name. */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <Cpu className="h-4 w-4 shrink-0 text-white/45" />
+            <SlavePositionBadge position={Number(deviceId)} tone="muted" />
             <span
               className="truncate font-display text-sm tracking-wide text-white/90 cursor-help"
               title={identityTitle}
@@ -155,21 +163,20 @@ function DeviceSection({
               {name ?? `Device ${deviceId}`}
             </span>
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <SlavePositionBadge position={Number(deviceId)} tone="muted" />
-            <ChevronDown
-              className={`h-3.5 w-3.5 text-white/40 group-hover:text-white/70 transition-transform ${open ? 'rotate-180' : ''
-                }`}
-            />
-          </div>
+          <ChevronDown
+            className={`h-3.5 w-3.5 shrink-0 text-white/40 group-hover:text-white/70 transition-transform ${open ? 'rotate-180' : ''
+              }`}
+          />
         </div>
 
-        {/* Status — one quiet line under the device glyph: AL state badge, then mailbox
-            presence. Immutable identity (vendor/code/revision/serial) lives in the name tooltip. */}
-        <div className="mt-1.5 flex items-center gap-2 text-[10px] font-display tracking-wider">
+        {/* Status — one quiet line under the identity row: AL state badge, then two glyphs
+            (mailbox presence, object-dictionary read state), each green when healthy and
+            grey otherwise. Immutable identity (vendor/code/revision/serial) lives in the
+            name tooltip. */}
+        <div className="mt-1.5 flex items-center gap-1 text-[10px] font-display tracking-wider">
           {stateLabel && (
             <span
-              className={`shrink-0 px-1.5 py-0.5 rounded-sm ${state?.error
+              className={`shrink-0 inline-flex items-center h-[18px] px-1.5 rounded-sm ${state?.error
                 ? 'bg-status-bad text-white'
                 : AL_STATE_BADGE[state?.alState ?? -1] ?? 'bg-white/10 text-white/60'
                 }`}
@@ -187,22 +194,31 @@ function DeviceSection({
           <span
             title={statusTitle}
             aria-label={statusLabel}
-            className="shrink-0 flex items-center gap-1.5 text-white/55"
+            className={`shrink-0 flex items-center justify-center h-[18px] px-1.5 rounded-sm ${mailboxActive === null
+              ? 'bg-white/15 animate-pulse'
+              : mailboxActive
+                ? 'bg-green-600'
+                : 'bg-white/15'
+              }`}
           >
-            <span
-              className={`inline-block h-1.5 w-1.5 rounded-full ${mailboxActive === null
-                ? 'bg-white/40 animate-pulse'
-                : mailboxActive
-                  ? 'bg-status-good'
-                  : 'bg-status-bad'
-                }`}
-            />
-            {mailboxActive === null ? 'checking…' : mailboxActive ? 'mailbox' : 'no mailbox'}
+            <Mail className="h-3 w-3 text-white" />
+          </span>
+          <span
+            title={dictionaryTitle}
+            aria-label={dictionaryLabel}
+            className={`shrink-0 flex items-center justify-center h-[18px] px-1.5 rounded-sm ${parameterCount === null
+              ? 'bg-white/15 animate-pulse'
+              : parameterCount > 0
+                ? 'bg-green-600'
+                : 'bg-white/15'
+              }`}
+          >
+            <BookOpenText className="h-3 w-3 text-white" />
           </span>
         </div>
       </button>
       {open && (
-        <div className="pl-3">
+        <div>
           {deviceLinks.map(({ to, label }) => (
             <NavItem key={to} to={`/devices/${deviceId}/${to}`} label={label} />
           ))}
@@ -353,7 +369,7 @@ export default function RootLayout() {
                 />
               </button>
               {metaOpen && (
-                <div className="pl-3">
+                <div>
                   <NavItem to="/meta/al-status-codes" label="AL Status Codes" />
                   <NavItem to="/meta/data-types" label="Data Types" />
                   <NavItem to="/meta/esc-registers" label="ESC Registers" />

@@ -7,7 +7,7 @@
 //
 // This file is JSONC: // line comments and /* block comments */ are allowed.
 {
-  // HTTP API and realtime WebSocket servers (each on its own port / loop / thread).
+  // HTTP API and WebSocket servers (each on its own port / loop / thread).
   "server": {
     "httpPort": 61447,
     "wsPort": 62281,

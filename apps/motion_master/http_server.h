@@ -17,7 +17,7 @@ class MonitoringManager;
 /// @brief HTTPS REST API server.
 ///
 /// Hosts the REST API (version, cert, CORS preflight, device/bus/monitoring routes) on its own
-/// TLS port, event loop, and thread.  The realtime monitoring/control WebSocket lives in a
+/// TLS port, event loop, and thread.  The monitoring/control WebSocket lives in a
 /// separate @c WebSocketServer on its own port and loop, so a slow or blocking HTTP handler here
 /// (FoE transfer, SDO, cert fetch) can never stall the WebSocket.
 ///

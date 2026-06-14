@@ -1,5 +1,5 @@
 // The MotionMasterClient facade: a single connection object that composes the generated HTTP API
-// (`client.api.*`, flat — e.g. `client.api.getVersion()`) with the realtime WebSocket
+// (`client.api.*`, flat — e.g. `client.api.getVersion()`) with the WebSocket connection
 // (`client.ws`). It is a *connection, not a model*: it holds no mutable device/parameter/AL state
 // — the HTTP API and the monitoring stream are the source of truth. Isomorphic: pass `WebSocket`
 // (and `customFetch`) to run under Node; both default to the platform globals in the browser.
@@ -12,7 +12,7 @@ import { WebSocketConnection, type WebSocketConstructor } from './web-socket-con
 export interface MotionMasterClientOptions {
   /// Origin (or `host:port`) of the HTTP API. Default: the bundled localhost dev origin.
   baseUrl?: string
-  /// Full URL of the realtime WebSocket. Default: the bundled localhost dev origin.
+  /// Full URL of the WebSocket connection. Default: the bundled localhost dev origin.
   wsUrl?: string
   /// WebSocket implementation for `client.ws`. Defaults to the global `WebSocket` (browsers,
   /// Node >= 22); inject the `ws` package's constructor on older Node.
@@ -29,7 +29,7 @@ export class MotionMasterClient {
   /// `client.api.scan()`, `client.api.sdoUpload(...)`, ...
   readonly api: Api
 
-  /// The realtime WebSocket channel: `client.ws.subscribe(topic, cb)`,
+  /// The WebSocket connection: `client.ws.subscribe(topic, cb)`,
   /// `client.ws.onNotification(cb)`, `client.ws.onProgress(cb)`. Connects lazily.
   readonly ws: WebSocketConnection
 
@@ -45,7 +45,7 @@ export class MotionMasterClient {
     })
   }
 
-  /// Closes the realtime WebSocket (and cancels reconnection). The HTTP API needs no teardown.
+  /// Closes the WebSocket connection (and cancels reconnection). The HTTP API needs no teardown.
   close(): void {
     this.ws.close()
   }

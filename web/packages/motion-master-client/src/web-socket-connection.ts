@@ -1,5 +1,5 @@
-// Framework-agnostic connection to Motion Master's single realtime WebSocket — the bidirectional
-// channel that carries server->client monitoring batches, notifications, and (planned) procedure
+// Framework-agnostic connection to Motion Master's single WebSocket — the one bidirectional
+// socket that carries server->client monitoring batches, notifications, and (planned) procedure
 // progress, and client->server topic subscribe/unsubscribe. It owns reconnection, multiplexes
 // per-topic subscriptions over the one socket (ref-counted: subscribe on the first listener,
 // unsubscribe on the last, re-subscribe everything on reconnect), and routes inbound frames by

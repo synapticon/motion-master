@@ -39,7 +39,7 @@ motion-master [OPTIONS]
       --version                 Display program version and exit
   -c, --config TEXT:FILE        Path to JSONC config file (JSON with // and /* */ comments)
   -p, --port UINT [61447]       HTTP API port
-      --ws-port UINT [62281]    Realtime WebSocket port (separate loop from the HTTP API)
+      --ws-port UINT [62281]    WebSocket port (separate loop from the HTTP API)
       --cert TEXT               TLS certificate file
       --key TEXT                TLS private key file
       --update-cert             Download a fresh TLS cert/key, install them, and exit
@@ -262,7 +262,7 @@ curl -k -X POST https://localhost:61447/api/devices/state \
 curl -k -X POST https://localhost:61447/api/reset
 ```
 
-Connect a WebSocket client to `wss://localhost:62281` (the realtime channel runs on its own port and event loop, separate from the HTTP API on 61447, so a slow HTTP request never stalls the stream; the whole port is the WebSocket, so the URL needs no path). The server sends two message types:
+Connect a WebSocket client to `wss://localhost:62281` (the WebSocket runs on its own port and event loop, separate from the HTTP API on 61447, so a slow HTTP request never stalls the stream; the whole port is the WebSocket, so the URL needs no path). The server sends two message types:
 
 ```json
 {"type": "monitoring", "topic": "left-leg", "data": [[1735821000123456, 39, 0, 12345], ...]}

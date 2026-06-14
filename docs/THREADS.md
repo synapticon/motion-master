@@ -7,7 +7,7 @@
 
 Motion Master runs **five threads**. The main thread *is* the real-time (RT) thread;
 every other subsystem starts its own thread *before* `game_loop.run()` blocks the main
-thread. The HTTP API and the realtime WebSocket run on **separate ports and separate
+thread. The HTTP API and the WebSocket run on **separate ports and separate
 event loops/threads** (61447 / 62281), so a slow or blocking HTTP handler can never stall
 the WebSocket.
 
@@ -51,7 +51,7 @@ flowchart TB
 |---|--------|-----------|---------|-----------|-----------------|
 | 1 | **RT game loop** | main thread becomes it — `apps/motion_master/main.cc:305` (`game_loop.run()`) | Runs `ProcessDataTask::execute()` → `DeviceManager::exchangeProcessData()` once per cycle; the EtherCAT PDO send/receive | `SCHED_FIFO` prio 80 + `mlockall`, `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME)` at **1 ms** (`game_loop.cc:20,28`, `cyclic_timer_linux.cc:26`) | **Lock-free.** Wait-free append of one record/cycle to the `ProcessDataRing` recorder; `std::atomic` `running_` / `tick_` |
 | 2 | **HTTP server** | `std::thread` — `apps/motion_master/http_server.cc:152` | uWebSockets HTTPS event loop on **port 61447**; all REST routes. **One loop, not a thread pool** | Normal | `uWS::Loop::defer()` (atomic job queue) for cross-thread work; `std::atomic` `loop_` / `app_` pointers |
-| 3 | **WebSocket server** | `std::thread` — `apps/motion_master/ws_server.cc:26` | Separate uWebSockets WSS event loop on **port 62281**; realtime channel — monitoring batches, notifications, procedure progress out; subscribe in. Isolated from HTTP so a blocking handler can't stall the 1 ms-critical stream | Normal | `uWS::Loop::defer()` for cross-thread `broadcast()` / `publish()`; `std::atomic` `loop_` / `app_` pointers |
+| 3 | **WebSocket server** | `std::thread` — `apps/motion_master/ws_server.cc:26` | Separate uWebSockets WSS event loop on **port 62281**; the WebSocket connection — monitoring batches, notifications, procedure progress out; subscribe in. Isolated from HTTP so a blocking handler can't stall the 1 ms-critical stream | Normal | `uWS::Loop::defer()` for cross-thread `broadcast()` / `publish()`; `std::atomic` `loop_` / `app_` pointers |
 | 4 | **Monitoring sampler** | `std::thread` — `libs/node/monitoring_manager.cc:154` | **Lossless.** Each flush ships *every* recorded cycle since each monitoring's read cursor (`[cursor, head)` of the recorder ring) as one batch, then advances the cursor; hands each batch to the `setPublish` callback (wired to `WebSocketServer::publish`). `interval` is the flush **cadence** (5–2000 ms, default 16), not a sample rate | Normal; `cv_.wait_until(nearest deadline)` | `mutex_` + `cv_`; decodes PDO values from the lock-free recorder ring (never touches the bus); SDO-only params from the refresher cache |
 | 5 | **Parameter refresher** | `std::thread` — `libs/node/parameter_refresher.cc:86` | Background SDO polling for objects **not** in the PDO image, into a cache the sampler reads — decouples slow mailbox access from high-frequency sampling | Normal; ≥10 ms floor + exponential backoff | `mutex_` + `cv_`; takes `FieldbusDriver::socketMutex_` per SDO (releases its own lock during the poll) |
 

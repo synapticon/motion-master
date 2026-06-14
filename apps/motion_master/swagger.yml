@@ -54,7 +54,7 @@ info:
 
     ## Monitoring WebSocket
 
-    The realtime WebSocket runs on its own port (`62281` by default), separate from
+    The WebSocket runs on its own port (`62281` by default), separate from
     this HTTP API (`61447`) and on its own event loop, so a slow HTTP request can
     never stall the stream: `wss://local.motion-master.synapticon.com:62281` (the
     whole port is the WebSocket, so the URL needs no path).
@@ -85,7 +85,7 @@ info:
 
     ## Networking, TLS, and CORS
 
-    The server binds the HTTP API to `127.0.0.1:61447` and the realtime WebSocket
+    The server binds the HTTP API to `127.0.0.1:61447` and the WebSocket
     to `127.0.0.1:62281`, reached at `https://local.motion-master.synapticon.com:61447`
     and `wss://local.motion-master.synapticon.com:62281` (a DNS record that resolves
     to localhost), with a real, publicly-trusted TLS certificate bundled in every

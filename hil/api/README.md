@@ -1,6 +1,6 @@
 # hil/api — HTTP API & WebSocket integration tests
 
-TypeScript integration tests for the Motion Master HTTP API and realtime WebSocket, using [Vitest](https://vitest.dev/). They drive the published client library, [`@synapticon/motion-master-client`](../../web/packages/motion-master-client), against a real server — so a run exercises Motion Master, the HTTP/WS contract, and the client library together.
+TypeScript integration tests for the Motion Master HTTP API and WebSocket, using [Vitest](https://vitest.dev/). They drive the published client library, [`@synapticon/motion-master-client`](../../web/packages/motion-master-client), against a real server — so a run exercises Motion Master, the HTTP/WS contract, and the client library together.
 
 ## Prerequisites
 
@@ -38,7 +38,7 @@ The global setup (`src/global-setup.ts`) manages the full Docker lifecycle:
 | Variable | Default | Description |
 |---|---|---|
 | `MM_URL` | `https://local.motion-master.synapticon.com:61447` | Base URL of the HTTP API under test |
-| `MM_WS_URL` | `wss://local.motion-master.synapticon.com:62281` | URL of the realtime WebSocket |
+| `MM_WS_URL` | `wss://local.motion-master.synapticon.com:62281` | URL of the WebSocket |
 | `MM_SKIP_DOCKER` | _(unset)_ | Set to `1` to skip Docker management and connect to a running instance |
 
 ## Running against an existing instance
@@ -65,4 +65,4 @@ hil/api/
   biome.json          ← formatter / linter config
 ```
 
-The typed HTTP client and the WebSocket channel both come from `@synapticon/motion-master-client` (`workspace:*`); there is no generated client checked in here. The client is generated and built in that package — see its README to regenerate from `apps/motion_master/swagger.yml`.
+The typed HTTP client and the WebSocket connection both come from `@synapticon/motion-master-client` (`workspace:*`); there is no generated client checked in here. The client is generated and built in that package — see its README to regenerate from `apps/motion_master/swagger.yml`.

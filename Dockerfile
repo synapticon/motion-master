@@ -129,7 +129,7 @@ RUN ldconfig
 WORKDIR /opt/motion-master
 COPY --from=build /src/build/x64-linux-release/apps/motion_master/motion-master .
 
-# 61447 = HTTP API, 62281 = realtime WebSocket (separate loop/port so a slow HTTP request can't
+# 61447 = HTTP API, 62281 = WebSocket (separate loop/port so a slow HTTP request can't
 # stall the monitoring/control stream).
 EXPOSE 61447 62281
 

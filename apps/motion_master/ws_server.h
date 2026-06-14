@@ -8,11 +8,11 @@
 #include <thread>
 #include <unordered_set>
 
-/// @brief Realtime WebSocket server — the bidirectional channel between the PWA and the backend.
+/// @brief WebSocket server — the single bidirectional connection between the PWA and the backend.
 ///
 /// Runs on its own TLS port, event loop, and thread, fully isolated from the HTTP API server
 /// (@c HttpServer).  Because the two run on separate loops, a slow or blocking HTTP handler can
-/// never stall this channel: the loop only ever does non-blocking I/O.  The whole port is the
+/// never stall this connection: the loop only ever does non-blocking I/O.  The whole port is the
 /// WebSocket, so it accepts the upgrade on any path — clients connect to the bare
 /// `wss://host:port`.
 ///

@@ -50,7 +50,7 @@ function writeEndpoint(endpoint: Endpoint): void {
 interface ConnectionContextValue {
   host: string
   httpPort: string
-  /// Realtime WebSocket port — separate from the HTTP API port, since the backend runs the
+  /// WebSocket port — separate from the HTTP API port, since the backend runs the
   /// monitoring/control socket on its own port and loop.
   wsPort: string
   setHost: (host: string) => void

@@ -9,7 +9,7 @@ import { client } from '../src/setup.js';
 // full create → sample → receive path is exercised on hardware.
 
 const baseUrl = process.env.MM_URL ?? 'https://local.motion-master.synapticon.com:61447';
-// The realtime WebSocket runs on its own port (separate loop from the HTTP API).
+// The WebSocket runs on its own port (separate loop from the HTTP API).
 const wsBaseUrl = process.env.MM_WS_URL ?? 'wss://local.motion-master.synapticon.com:62281';
 
 // Raw fetch for the negative cases below: they post bodies the typed client deliberately can't

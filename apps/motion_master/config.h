@@ -14,7 +14,7 @@
 /// express. This is deliberately separate from @c Options, which also carries CLI-only and runtime
 /// fields (actions, resolved network adapter, cert source URLs) that have no place in the file.
 
-/// @brief @c "server" block — the HTTP API and realtime WebSocket listeners.
+/// @brief @c "server" block — the HTTP API and WebSocket listeners.
 struct ServerConfig {
   uint16_t httpPort = 61447;
   uint16_t wsPort = 62281;

@@ -7,6 +7,7 @@
 import { Api } from './generated/Api'
 import type { ApiConfig } from './generated/http-client'
 import { API_BASE_URL, WS_URL } from './constants'
+import { fetchProcessDataDump, type MmpdFile } from './mmpd'
 import { WebSocketConnection, type WebSocketConstructor } from './web-socket-connection'
 
 export interface MotionMasterClientOptions {
@@ -33,16 +34,23 @@ export class MotionMasterClient {
   /// `client.ws.onNotification(cb)`, `client.ws.onProgress(cb)`. Connects lazily.
   readonly ws: WebSocketConnection
 
+  private readonly httpBaseUrl: string
+  private readonly customFetch?: ApiConfig['customFetch']
+
   constructor(options: MotionMasterClientOptions = {}) {
-    this.api = new Api({
-      baseUrl: options.baseUrl ?? API_BASE_URL,
-      customFetch: options.customFetch,
-    })
+    this.httpBaseUrl = options.baseUrl ?? API_BASE_URL
+    this.customFetch = options.customFetch
+    this.api = new Api({ baseUrl: this.httpBaseUrl, customFetch: options.customFetch })
     this.ws = new WebSocketConnection({
       url: options.wsUrl ?? WS_URL,
       WebSocket: options.WebSocket,
       protocolsOrOptions: options.webSocketOptions,
     })
+  }
+
+  /// Fetches and parses the live recorder dump (`GET /api/process-data/dump`) as an `MmpdFile`.
+  fetchProcessDataDump(signal?: AbortSignal): Promise<MmpdFile> {
+    return fetchProcessDataDump(this.httpBaseUrl, { fetch: this.customFetch, signal })
   }
 
   /// Closes the WebSocket connection (and cancels reconnection). The HTTP API needs no teardown.

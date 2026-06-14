@@ -4,6 +4,7 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <iosfwd>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
 #include <optional>
@@ -312,6 +313,17 @@ class DeviceManager {
   ///         mapped, the recorder is empty, or the directory/file could not be written.
   std::expected<std::string, std::string> dumpProcessData();
 
+  /// @brief Serialises the recorder dump into an in-memory buffer — the same `.mmpd` bytes
+  /// @c dumpProcessData writes to disk — for streaming over HTTP.
+  ///
+  /// Buffers the whole span in memory (a deep recorder ring can be large; true row-by-row
+  /// streaming is a future optimisation). Same image/span semantics as @c dumpProcessData; the RT
+  /// producer is never blocked. Runs on the (non-RT) caller's thread.
+  ///
+  /// @return The dump bytes, or an error string if no image has ever been mapped or the recorder
+  ///         is empty.
+  std::expected<std::string, std::string> dumpProcessDataBuffer();
+
   /// @brief Snapshots each slave's static ESC configuration (SM, FMMU, mailbox, DC) for the API.
   ///
   /// Passes through the driver's cached configuration (no bus I/O) and resolves each slave's
@@ -533,6 +545,21 @@ class DeviceManager {
   bool deviceExchangesProcessData(uint16_t slavePosition) const;
 
  private:
+  /// @brief Rows written and the @c [startSeq, endSeq) sequence span of a serialised dump.
+  struct DumpSpan {
+    uint64_t rows = 0;
+    uint64_t startSeq = 0;
+    uint64_t endSeq = 0;
+  };
+
+  /// @brief Serialises the current recorder span as a `.mmpd` byte stream to @p out.
+  ///
+  /// Shared by @c dumpProcessData (file) and @c dumpProcessDataBuffer (in-memory). Holds @c
+  /// busMutex_ in shared mode for the whole serialisation (the ring is read while held; the RT
+  /// producer appends lock-free and is never blocked). @p out must be seekable — @c
+  /// writeProcessDataDump patches the row count after streaming the rows.
+  std::expected<DumpSpan, std::string> serializeDump(std::ostream& out);
+
   /// @brief (Re)maps the whole-bus process image and publishes it for exchange.
   ///
   /// The core mapping primitive: drains exchange, has the driver map the IOmap, re-reads each

@@ -888,6 +888,39 @@ void HttpServer::run() {
                 }
               });
             })
+      .get("/api/process-data/dump",
+           [this](auto* res, auto* /*req*/) {
+             // Streams the recorder span as a raw `.mmpd` — the binary the client SDK parses. (The
+             // POST variant writes the same bytes to a file and returns the path, for terminal
+             // users.) Serialisation blocks this HTTP loop, but the WebSocket runs on its own loop,
+             // so the monitoring stream is never stalled.
+             auto aborted = std::make_shared<bool>(false);
+             res->onAborted([aborted]() { *aborted = true; });
+             auto r = deviceManager_.dumpProcessDataBuffer();
+             if (*aborted) {
+               return;
+             }
+             if (!r) {
+               sendError(res, "409 Conflict", config_.corsOrigin, r.error());
+               return;
+             }
+             auto body = std::make_shared<std::string>(std::move(*r));
+             res->writeHeader("Content-Type", "application/octet-stream")
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                 ->writeHeader("Content-Disposition",
+                               "attachment; filename=\"motion-master-recorder.mmpd\"");
+             // Backpressure-aware send: tryEnd what the socket accepts now, resume from the acked
+             // write offset in onWritable until the whole buffer is flushed.
+             std::string_view full{*body};
+             auto [ok, done] = res->tryEnd(full, full.size());
+             if (!done) {
+               res->onWritable([res, body](uintptr_t offset) {
+                 std::string_view chunk{body->data() + offset, body->size() - offset};
+                 auto [chunkOk, chunkDone] = res->tryEnd(chunk, body->size());
+                 return chunkOk;
+               });
+             }
+           })
       .post("/api/devices/state",
             [this](auto* res, auto* /*req*/) {
               auto aborted = std::make_shared<bool>(false);

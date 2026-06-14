@@ -18,6 +18,7 @@
 #include <set>
 #include <shared_mutex>
 #include <span>
+#include <sstream>
 #include <string>
 #include <thread>
 #include <utility>
@@ -450,7 +451,7 @@ ProcessImageInfo DeviceManager::processImageInfo() const {
   return info;
 }
 
-std::expected<std::string, std::string> DeviceManager::dumpProcessData() {
+std::expected<DeviceManager::DumpSpan, std::string> DeviceManager::serializeDump(std::ostream& out) {
   // Shared lock: serialise against the exclusive mutators (init/scan/reset/configure) that rebuild
   // devices_ and the retained image generations, exactly as the other off-thread read surfaces do.
   // The RT producer is never blocked — it appends to the ring lock-free; we only read the ring.
@@ -521,6 +522,17 @@ std::expected<std::string, std::string> DeviceManager::dumpProcessData() {
   appendEntries(image->outputs, /*isOutput=*/true);
   appendEntries(image->inputs, /*isOutput=*/false);
 
+  auto written = writeProcessDataDump(out, header, startSeq, endSeq,
+                                      [this](uint64_t seq, ProcessDataRing::Record& rec) {
+                                        return pd_->ring.readRecord(seq, rec);
+                                      });
+  if (!written) {
+    return std::unexpected(written.error());
+  }
+  return DumpSpan{.rows = *written, .startSeq = startSeq, .endSeq = endSeq};
+}
+
+std::expected<std::string, std::string> DeviceManager::dumpProcessData() {
   // Resolve the output directory (empty => <temp>/motion-master, cross-platform) and create it.
   namespace fs = std::filesystem;
   std::error_code ec;
@@ -535,28 +547,45 @@ std::expected<std::string, std::string> DeviceManager::dumpProcessData() {
                            "': " + ec.message());
   }
 
-  // dump-<UTC>-<endSeq>.mmpd — the trailing sequence keeps two dumps in the same second distinct.
-  const auto nowSec = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
-  const std::string filename = std::format("dump-{:%Y%m%dT%H%M%SZ}-{}.mmpd", nowSec, endSeq);
-  const fs::path path = dir / filename;
-
-  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  // Stream into a unique temp file, then rename to dump-<UTC>-<endSeq>.mmpd once the span is known
+  // (the trailing sequence is only final after serialisation). Direct-to-file streaming avoids
+  // buffering the whole span in memory.
+  static std::atomic<uint64_t> tmpCounter{0};
+  const fs::path tmp =
+      dir / std::format("dump-{}.partial", tmpCounter.fetch_add(1, std::memory_order_relaxed));
+  std::ofstream out(tmp, std::ios::binary | std::ios::trunc);
   if (!out) {
-    return std::unexpected("could not open dump file '" + path.string() + "' for writing");
+    return std::unexpected("could not open dump file '" + tmp.string() + "' for writing");
   }
-  auto written = writeProcessDataDump(out, header, startSeq, endSeq,
-                                      [this](uint64_t seq, ProcessDataRing::Record& rec) {
-                                        return pd_->ring.readRecord(seq, rec);
-                                      });
+
+  auto span = serializeDump(out);
   out.close();
-  if (!written) {
-    std::error_code rmEc;
-    fs::remove(path, rmEc);  // do not leave a truncated file behind
-    return std::unexpected(written.error());
+  if (!span) {
+    fs::remove(tmp, ec);  // do not leave a truncated file behind
+    return std::unexpected(span.error());
   }
-  spdlog::info("Dumped {} process-data cycles ([{}, {})) to {}", *written, startSeq, endSeq,
-               path.string());
+
+  const auto nowSec = std::chrono::floor<std::chrono::seconds>(std::chrono::system_clock::now());
+  const fs::path path = dir / std::format("dump-{:%Y%m%dT%H%M%SZ}-{}.mmpd", nowSec, span->endSeq);
+  fs::rename(tmp, path, ec);
+  if (ec) {
+    fs::remove(tmp, ec);
+    return std::unexpected("could not finalise dump file '" + path.string() + "': " + ec.message());
+  }
+  spdlog::info("Dumped {} process-data cycles ([{}, {})) to {}", span->rows, span->startSeq,
+               span->endSeq, path.string());
   return path.string();
+}
+
+std::expected<std::string, std::string> DeviceManager::dumpProcessDataBuffer() {
+  std::ostringstream out(std::ios::binary);
+  auto span = serializeDump(out);
+  if (!span) {
+    return std::unexpected(span.error());
+  }
+  spdlog::info("Serialised {} process-data cycles ([{}, {})) for streaming", span->rows,
+               span->startSeq, span->endSeq);
+  return std::move(out).str();
 }
 
 std::vector<SlaveConfigInfo> DeviceManager::busConfig() const {

@@ -1671,6 +1671,37 @@ paths:
                     items:
                       $ref: "#/components/schemas/ProcessImageObject"
   /api/process-data/dump:
+    get:
+      summary: Stream the recorder ring as a binary .mmpd
+      description: >-
+        Streams the same `.mmpd` serialisation as the POST variant (the recorder's
+        current span, with the process image embedded as a header) directly in the
+        response body instead of writing a file — for the client SDK / browser,
+        which parses the bytes offline. Request with `Accept:
+        application/octet-stream`. Same span semantics as the POST; works in any
+        state.
+      operationId: streamProcessDataDump
+      responses:
+        "200":
+          description: The .mmpd dump bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "409":
+          description: >-
+            Nothing to dump — no process image has ever been mapped, or the recorder
+            is empty (no cycles recorded yet).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: Human-readable reason the dump could not be produced
     post:
       summary: Dump the recorder ring to a binary .mmpd file
       description: >-

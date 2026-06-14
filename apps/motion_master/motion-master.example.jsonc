@@ -69,6 +69,17 @@
     "directory": ""
   },
 
+  // CoE object-dictionary behaviour.
+  "parameters": {
+    // Read a device's object dictionary the first time it reaches PRE-OP (the earliest AL state
+    // with a live CoE mailbox), so object names and data types are known for recorder dumps,
+    // monitoring, and the Parameters page without a manual read. Cache-backed (see parameterCache),
+    // so a given device model pays the (one-time) enumeration once. The first such transition for a
+    // never-seen model takes a few extra seconds; set false to keep transitions minimal and load
+    // definitions lazily when a device's Parameters are opened.
+    "readObjectDictionaryOnPreop": true
+  },
+
   // TLS certificate for the HTTPS API and secure WebSocket.
   "tls": {
     "certPath": "cert.pem",

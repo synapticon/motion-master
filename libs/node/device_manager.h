@@ -131,6 +131,10 @@ struct DeviceManagerConfig {
   /// Directory for `.mmpd` recorder dumps. Empty resolves to a @c "motion-master" subdirectory of
   /// the OS temporary directory at dump time. Passed through to @c dumpProcessData.
   std::string dumpDir;
+  /// Read a device's object dictionary when it first reaches PRE-OP (definitions only, cache-first)
+  /// so dumps/monitoring/Parameters have names and data types without a manual read. See
+  /// @c transitionToState.
+  bool readObjectDictionaryOnPreop = true;
 };
 
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.

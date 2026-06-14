@@ -804,6 +804,27 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
     }
   }
 
+  // Read the object dictionary of any device that has just reached an exchange-capable state
+  // (CoE mailbox live from PRE-OP up) and has no parameters yet, so recorder dumps, monitoring, and
+  // the Parameters page have object names and data types without a manual read. Definitions only
+  // (no value uploads) and cache-first, so a given device model pays the (slow, hundreds of
+  // SDO-Info round-trips) enumeration only once — every later scan of the same hardware is an
+  // instant cache load. Done here under the same exclusive lock as the module reconcile above; the
+  // RT loop (lock-free PDO) and the WebSocket (separate loop) are unaffected — only other
+  // control-plane calls wait, and only during that one-time first read.
+  if (config_.readObjectDictionaryOnPreop) {
+    for (const auto& info : result) {
+      Device* device = findDevice(info.slavePosition);
+      if (!device || !device->mailboxActive() || !device->parameters().empty()) {
+        continue;
+      }
+      if (auto r = device->initializeParameters(/*readValues=*/false); !r) {
+        spdlog::warn("Device {}: object-dictionary read on reaching PRE-OP failed: {}",
+                     info.slavePosition, r.error());
+      }
+    }
+  }
+
   return result;
 }
 

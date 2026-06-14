@@ -134,9 +134,11 @@ int main(int argc, char** argv) {
       return 1;
     }
     if (auto result = deviceManager.init(
-            std::move(*driver), {.recorderHistorySeconds = opts.config.recorder.historySeconds,
-                                 .cyclePeriodUs = opts.config.gameLoop.periodUs,
-                                 .dumpDir = opts.config.recorder.dumpDir});
+            std::move(*driver),
+            {.recorderHistorySeconds = opts.config.recorder.historySeconds,
+             .cyclePeriodUs = opts.config.gameLoop.periodUs,
+             .dumpDir = opts.config.recorder.dumpDir,
+             .readObjectDictionaryOnPreop = opts.config.parameters.readObjectDictionaryOnPreop});
         !result) {
       spdlog::error("DeviceManager init failed: {}", result.error());
       return 1;
@@ -258,7 +260,8 @@ int main(int argc, char** argv) {
           .startedConfig = nlohmann::json(opts.config).dump(),
           .initDriver =
               [&deviceManager, makeDriver, historySeconds = opts.config.recorder.historySeconds,
-               periodUs = opts.config.gameLoop.periodUs, dumpDir = opts.config.recorder.dumpDir](
+               periodUs = opts.config.gameLoop.periodUs, dumpDir = opts.config.recorder.dumpDir,
+               readOdOnPreop = opts.config.parameters.readObjectDictionaryOnPreop](
                   const std::string& type,
                   const std::string& adapter) -> std::expected<void, std::string> {
             std::string ifname = adapter;
@@ -269,9 +272,11 @@ int main(int argc, char** argv) {
             }
             auto driver = makeDriver(type, ifname);
             if (!driver) return std::unexpected(driver.error());
-            return deviceManager.init(std::move(*driver), {.recorderHistorySeconds = historySeconds,
-                                                           .cyclePeriodUs = periodUs,
-                                                           .dumpDir = dumpDir});
+            return deviceManager.init(std::move(*driver),
+                                      {.recorderHistorySeconds = historySeconds,
+                                       .cyclePeriodUs = periodUs,
+                                       .dumpDir = dumpDir,
+                                       .readObjectDictionaryOnPreop = readOdOnPreop});
           },
           .getLog = [ringLogSink]() { return ringLogSink->entries(); },
           .refreshCert = [certFile = opts.config.tls.certPath, keyFile = opts.config.tls.keyPath,

@@ -67,6 +67,16 @@ struct ParameterCacheConfig {
   std::string directory;  ///< "" = a standard per-user cache directory; set to override.
 };
 
+/// @brief @c "parameters" block — CoE object-dictionary behaviour.
+struct ParametersConfig {
+  /// Read each device's object dictionary when it first reaches PRE-OP (the earliest AL state with
+  /// a live CoE mailbox), so object names and data types are known for recorder dumps, monitoring,
+  /// and the Parameters page without a manual read. Cache-backed (see @c parameterCache), so a
+  /// device model pays the (one-time) enumeration once. Disable to keep state transitions minimal —
+  /// definitions then load lazily when a device's Parameters are opened.
+  bool readObjectDictionaryOnPreop = true;
+};
+
 /// @brief The whole config file. Top-level keys map to these members.
 struct Config {
   ServerConfig server;
@@ -76,6 +86,7 @@ struct Config {
   GameLoopConfig gameLoop;
   RecorderConfig recorder;
   ParameterCacheConfig parameterCache;
+  ParametersConfig parameters;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ServerConfig, httpPort, wsPort, corsOrigin)
@@ -85,8 +96,9 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(GameLoopConfig, periodUs)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RecorderConfig, historySeconds, dumpDir)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParameterCacheConfig, enabled, cacheAllVendors,
                                                 directory)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParametersConfig, readObjectDictionaryOnPreop)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logLevel, tls, gameLoop,
-                                                recorder, parameterCache)
+                                                recorder, parameterCache, parameters)
 
 /// @brief Deserialises a parsed JSONC document into a @c Config, applying defaults for absent keys.
 ///

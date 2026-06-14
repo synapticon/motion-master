@@ -52,6 +52,32 @@ function flatten(file: MmpdFile): FlatEntry[] {
 
 const errorText = (e: unknown): string => (e instanceof Error ? e.message : String(e))
 
+// One object's checkbox row in the series picker (direction is conveyed by the column it sits in).
+function EntryCheckbox({
+  item,
+  checked,
+  onToggle,
+}: {
+  item: FlatEntry
+  checked: boolean
+  onToggle: () => void
+}) {
+  return (
+    <label
+      className={`flex items-center gap-2 py-0.5 text-[11px] ${
+        item.plottable ? 'cursor-pointer' : 'text-grey-400 cursor-not-allowed'
+      }`}
+      title={item.plottable ? item.entry.name : 'Not a plottable numeric type'}
+    >
+      <input type="checkbox" disabled={!item.plottable} checked={checked} onChange={onToggle} />
+      <span className="font-mono">
+        {formatHex(item.entry.index, 4)}:{formatHex(item.entry.subindex, 2, false)}
+      </span>
+      <span className="truncate">{item.entry.name}</span>
+    </label>
+  )
+}
+
 export default function RecorderPage() {
   const { api, host, httpPort } = useConnection()
 
@@ -139,14 +165,14 @@ export default function RecorderPage() {
 
   // Group the picker by device, preserving image order.
   const byDevice = useMemo(() => {
-    const groups: { position: number; name: string; entries: FlatEntry[] }[] = []
+    const groups: { position: number; name: string; outputs: FlatEntry[]; inputs: FlatEntry[] }[] = []
     for (const e of flat) {
       let g = groups.find((x) => x.position === e.devicePosition)
       if (!g) {
-        g = { position: e.devicePosition, name: e.deviceName, entries: [] }
+        g = { position: e.devicePosition, name: e.deviceName, outputs: [], inputs: [] }
         groups.push(g)
       }
-      g.entries.push(e)
+      ;(e.entry.isOutput ? g.outputs : g.inputs).push(e)
     }
     return groups
   }, [flat])
@@ -231,28 +257,41 @@ export default function RecorderPage() {
                   <p className="eyebrow mb-1">
                     {group.position} · {group.name}
                   </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4">
-                    {group.entries.map((e) => (
-                      <label
-                        key={e.key}
-                        className={`flex items-center gap-2 py-0.5 text-[11px] ${
-                          e.plottable ? 'cursor-pointer' : 'text-grey-400 cursor-not-allowed'
-                        }`}
-                        title={e.plottable ? e.entry.name : 'Not a plottable numeric type'}
-                      >
-                        <input
-                          type="checkbox"
-                          disabled={!e.plottable}
-                          checked={selected.has(e.key)}
-                          onChange={() => toggle(e.key)}
-                        />
-                        <span className="font-mono">
-                          {formatHex(e.entry.index, 4)}:{formatHex(e.entry.subindex, 2, false)}
-                        </span>
-                        <span className="text-grey-500">{e.entry.isOutput ? 'out' : 'in'}</span>
-                        <span className="truncate">{e.entry.name}</span>
-                      </label>
-                    ))}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wide text-grey-400 mb-0.5">
+                        Outputs
+                      </p>
+                      {group.outputs.length === 0 ? (
+                        <p className="text-[11px] text-grey-300">None</p>
+                      ) : (
+                        group.outputs.map((item) => (
+                          <EntryCheckbox
+                            key={item.key}
+                            item={item}
+                            checked={selected.has(item.key)}
+                            onToggle={() => toggle(item.key)}
+                          />
+                        ))
+                      )}
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-wide text-grey-400 mb-0.5">
+                        Inputs
+                      </p>
+                      {group.inputs.length === 0 ? (
+                        <p className="text-[11px] text-grey-300">None</p>
+                      ) : (
+                        group.inputs.map((item) => (
+                          <EntryCheckbox
+                            key={item.key}
+                            item={item}
+                            checked={selected.has(item.key)}
+                            onToggle={() => toggle(item.key)}
+                          />
+                        ))
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}

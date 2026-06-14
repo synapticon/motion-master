@@ -11,8 +11,10 @@ import {
 } from '@synapticon/motion-master-client'
 import PageHeader from '../components/PageHeader'
 import MonitoringChart from '../components/MonitoringChart'
+import CycleStatsBar from '../components/CycleStatsBar'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
+import { cycleStats } from '../utils/cycleStats'
 import { btnOutline } from '../utils/styles'
 
 // Pulls the server's { error } message out of a thrown request, for inline display.
@@ -152,6 +154,10 @@ export default function RecorderPage() {
     }
   }, [file, flat, selected])
 
+  // Cycle-time stats over the recording's own timestamps — same jitter readout as the live
+  // monitoring chart. Independent of which series are picked, so it reflects the recorded loop.
+  const stats = useMemo(() => (file ? cycleStats(file.timestampsUs()) : null), [file])
+
   function toggle(key: string) {
     setSelected((prev) => {
       const next = new Set(prev)
@@ -247,7 +253,10 @@ export default function RecorderPage() {
             </div>
 
             {chart.labels.length > 0 ? (
-              <MonitoringChart data={chart.data} labels={chart.labels} titles={chart.titles} />
+              <div>
+                <CycleStatsBar stats={stats} />
+                <MonitoringChart data={chart.data} labels={chart.labels} titles={chart.titles} />
+              </div>
             ) : (
               <p className="text-sm text-grey-500">Select one or more objects below to plot.</p>
             )}

@@ -4,6 +4,7 @@ import { adjectives, animals, colors, uniqueNamesGenerator } from 'unique-names-
 import { Eraser, Pause, Play, Plus, Trash2, X } from 'lucide-react'
 import type uPlot from 'uplot'
 import type { DeviceParameter, Monitoring } from '@synapticon/motion-master-client'
+import CycleStatsBar from '../components/CycleStatsBar'
 import MonitoringChart from '../components/MonitoringChart'
 import PageHeader from '../components/PageHeader'
 import ParameterPicker from '../components/ParameterPicker'
@@ -14,6 +15,7 @@ import {
   type SampleRows,
   useMonitoringSocket,
 } from '../contexts/MonitoringSocketContext'
+import { type CycleStats, cycleStats } from '../utils/cycleStats'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
@@ -60,45 +62,6 @@ function paramKey(pos: number, index: number, subindex: number): string {
 // shows them greyed-out and unselectable rather than offering them as a pick.
 function isPdoMappingObject(p: DeviceParameter): boolean {
   return (p.index >= 0x1600 && p.index <= 0x17ff) || (p.index >= 0x1a00 && p.index <= 0x1bff)
-}
-
-interface CycleStats {
-  mean: number
-  median: number
-  stdev: number
-  min: number
-  max: number
-}
-
-// Statistics of the cycle time — the Δt (µs) between consecutive samples — over the buffered
-// window. Each sample carries its real cycle timestamp, so these reflect the true cycle period and
-// its jitter (e.g. mean ≈ 1000 µs for a 1 ms loop), not the WebSocket flush cadence. stdev is the
-// population standard deviation, the headline jitter figure.
-function cycleStats(xs: number[]): CycleStats | null {
-  if (xs.length < 2) return null
-  let min = Infinity
-  let max = -Infinity
-  let sum = 0
-  const deltas = new Array<number>(xs.length - 1)
-  for (let i = 1; i < xs.length; i++) {
-    const d = xs[i] - xs[i - 1]
-    deltas[i - 1] = d
-    if (d < min) min = d
-    if (d > max) max = d
-    sum += d
-  }
-  const mean = sum / deltas.length
-  let sumSq = 0
-  for (const d of deltas) sumSq += (d - mean) * (d - mean)
-  const stdev = Math.sqrt(sumSq / deltas.length)
-  const sorted = [...deltas].sort((a, b) => a - b)
-  const mid = sorted.length >> 1
-  const median = sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
-  return { mean, median, stdev, min, max }
-}
-
-function micros(v: number): string {
-  return `${Math.round(v).toLocaleString()} µs`
 }
 
 // A memorable, URL-safe identifier + Title-cased label for a new monitoring, e.g. topic
@@ -429,16 +392,7 @@ function MonitoringCard({
             {playing ? 'live' : 'paused'}
           </span>
         </div>
-        {stats && (
-          <div className="mb-2 text-center text-xs text-grey-500 cursor-help" title="Cycle time — Δt between consecutive samples">
-            <span className="uppercase tracking-wide text-grey-400">Cycle time</span>{' '}
-            mean <span className="font-mono text-grey-700">{micros(stats.mean)}</span> · median{' '}
-            <span className="font-mono text-grey-700">{micros(stats.median)}</span> · σ{' '}
-            <span className="font-mono text-grey-700">{micros(stats.stdev)}</span> · min{' '}
-            <span className="font-mono text-grey-700">{micros(stats.min)}</span> · max{' '}
-            <span className="font-mono text-grey-700">{micros(stats.max)}</span>
-          </div>
-        )}
+        <CycleStatsBar stats={stats} />
         <MonitoringChart data={data} labels={labels} titles={titles} />
       </div>
     </div>

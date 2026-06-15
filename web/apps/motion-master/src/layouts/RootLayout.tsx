@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, Outlet } from 'react-router'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { BookOpenText, ChevronDown, Mail, RefreshCw } from 'lucide-react'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
 import SlavePositionBadge from '../components/SlavePositionBadge'
@@ -47,6 +47,17 @@ function alStateLabel(state?: DeviceState): string | null {
   return AL_STATE_LABEL[state.alState] ?? `0x${state.alState.toString(16)}`
 }
 
+// Mailbox (CoE/SDO) communication is live in PRE-OP, SAFE-OP and OP — independent of the
+// AL error flag (a device in SAFE-OP+error still answers). INIT has no mailbox and BOOT's
+// is FoE-only, so both count as inactive. Mirrors Device::mailboxActive() on the backend, so
+// it can be derived from the batched device-state poll instead of a per-device request.
+const MAILBOX_ACTIVE_STATES = new Set([2, 4, 8])
+
+function mailboxActiveFor(state?: DeviceState): boolean | null {
+  if (!state) return null
+  return MAILBOX_ACTIVE_STATES.has(state.alState)
+}
+
 function NavItem({ to, label, end }: { to: string; label: string; end?: boolean }) {
   return (
     <NavLink
@@ -87,13 +98,11 @@ function DeviceSection({
   // toggles it and that choice sticks; navigation alone never re-folds it.
   const [open, setOpen] = useState(true)
 
-  // Live mailbox probe. Read per-device (not batched) so one missing device reports
-  // inactive without disturbing the others. `null` while the first read is in flight.
-  const mailboxQuery = useQuery({
-    queryKey: ['deviceMailboxActive', deviceId],
-    queryFn: () => api.getDeviceMailboxActive(Number(deviceId)),
-  })
-  const mailboxActive: boolean | null = mailboxQuery.data?.data?.mailboxActive ?? null
+  // Mailbox availability is a pure function of the AL state, so we derive it from the
+  // batched device-state poll rather than issuing a per-device request (which would be one
+  // request per device every few seconds — N requests for N devices). `null` while no state
+  // has arrived yet.
+  const mailboxActive: boolean | null = mailboxActiveFor(state)
   const statusLabel =
     mailboxActive === null ? 'Checking…' : mailboxActive ? 'Mailbox active' : 'Mailbox inactive'
   const statusTitle =
@@ -236,7 +245,6 @@ function DeviceSection({
 export default function RootLayout() {
   const { api, host, httpPort, hasScanned, isInitialized } = useConnection()
   const online = useApiHealth(api)
-  const queryClient = useQueryClient()
   const [metaOpen, setMetaOpen] = useState(false)
   const [prefsOpen, setPrefsOpen] = useState(false)
   const { hintsInline, setHintsInline } = usePreferences()
@@ -253,6 +261,9 @@ export default function RootLayout() {
     queryKey: ['deviceStates'],
     queryFn: () => api.getDeviceStates(),
     enabled: hasScanned && devices.length > 0,
+    // AL state changes out-of-band (other clients, the drive's own faults, manual
+    // transitions), so poll a few-second cadence to keep the sidebar badges live.
+    refetchInterval: 3000,
   })
 
   const stateByPosition = new Map<number, DeviceState>(
@@ -271,7 +282,6 @@ export default function RootLayout() {
       const res = await devicesQuery.refetch()
       if ((res.data?.data.length ?? 0) > 0) {
         await statesQuery.refetch()
-        await queryClient.invalidateQueries({ queryKey: ['deviceMailboxActive'] })
       }
     } finally {
       const remaining = Math.max(0, 900 - (performance.now() - start))

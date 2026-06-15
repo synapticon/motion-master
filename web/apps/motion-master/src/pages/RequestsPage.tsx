@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import PageHeader from '../components/PageHeader'
-import { isHealthPollUrl, useRequests, type RequestEntry } from '../contexts/RequestsContext'
+import { isPollRequestUrl, useRequests, type RequestEntry } from '../contexts/RequestsContext'
 import { btnOutline } from '../utils/styles'
 
 function StatusBadge({ status, error }: { status?: number; error?: string }) {
@@ -175,10 +175,10 @@ function DetailView({ entry }: { entry: RequestEntry }) {
 export default function RequestsPage() {
   const { entries, clear } = useRequests()
   const [selectedId, setSelectedId] = useState<number | null>(null)
-  const [showHealthPolls, setShowHealthPolls] = useState(false)
+  const [showPollRequests, setShowPollRequests] = useState(false)
   const visibleEntries = useMemo(
-    () => (showHealthPolls ? entries : entries.filter(e => !isHealthPollUrl(e.url))),
-    [entries, showHealthPolls],
+    () => (showPollRequests ? entries : entries.filter(e => !isPollRequestUrl(e.url))),
+    [entries, showPollRequests],
   )
   const selected = useMemo(
     () => entries.find(e => e.id === selectedId) ?? null,
@@ -201,11 +201,11 @@ export default function RequestsPage() {
             <label className="flex items-center gap-1.5 text-xs text-grey-700 cursor-pointer">
               <input
                 type="checkbox"
-                checked={showHealthPolls}
-                onChange={e => setShowHealthPolls(e.target.checked)}
+                checked={showPollRequests}
+                onChange={e => setShowPollRequests(e.target.checked)}
                 className="cursor-pointer accent-syn-red"
               />
-              Show health polls
+              Show poll requests
             </label>
             <button
               onClick={clear}

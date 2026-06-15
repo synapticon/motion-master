@@ -77,9 +77,14 @@ function shouldCapture(url: string): boolean {
   }
 }
 
-export function isHealthPollUrl(url: string): boolean {
+// Background polls that fire on a fixed cadence and would otherwise drown the log: the API
+// health check (`/api/version`, every 5 s) and the sidebar device AL-state poll
+// (`/api/devices/state`, every 3 s). Hidden by default so the log shows user-driven traffic.
+const POLL_REQUEST_PATHS = new Set(['/api/version', '/api/devices/state'])
+
+export function isPollRequestUrl(url: string): boolean {
   try {
-    return new URL(url, window.location.origin).pathname === '/api/version'
+    return POLL_REQUEST_PATHS.has(new URL(url, window.location.origin).pathname)
   } catch {
     return false
   }

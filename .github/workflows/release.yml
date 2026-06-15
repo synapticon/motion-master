@@ -253,3 +253,68 @@ jobs:
             --generate-notes \
             $prerelease \
             dist/*
+
+  # ── Sign the Windows binary on-premise (USB token) ─────────────────────────
+  # The Authenticode code-signing certificate lives on a USB token that only
+  # exists on the self-hosted ci-belgrade-windows machine, so signing has to
+  # happen there — it cannot run on the GitHub-hosted windows leg above. This
+  # job runs in the SAME workflow run (needs: release), so the release with the
+  # unsigned zip already exists; we download that zip, sign motion-master.exe
+  # with signtool, re-zip, and replace the asset on the release with --clobber.
+  # No PAT/dispatch is needed (unlike the v5 split): a job in the same run only
+  # updates a release asset with the built-in GITHUB_TOKEN, it does not trigger
+  # a new workflow. Prerequisite: the USB token must be plugged in and unlocked
+  # on the runner, and signtool + gh must be on PATH (they are in the standard
+  # Belgrade CI image).
+  sign-windows:
+    needs: release
+    runs-on: ci-belgrade-windows
+    permissions:
+      contents: write
+    steps:
+      - name: Clean stale artifacts from a previous run
+        shell: pwsh
+        run: |
+          # The self-hosted workspace persists between runs; remove leftover
+          # zips/dirs so the globs below can't pick up a stale version.
+          Remove-Item -Path "signed" -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item -Path "motion-master-*-windows-x64.zip" -Force -ErrorAction SilentlyContinue
+
+      - name: Download the unsigned Windows zip from the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download "$env:GITHUB_REF_NAME" `
+            --repo "$env:GITHUB_REPOSITORY" `
+            --pattern "motion-master-*-windows-x64.zip" `
+            --clobber
+
+      - name: Unpack the zip
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Filter "motion-master-*-windows-x64.zip" | Select-Object -First 1
+          Expand-Archive -Path $zip.FullName -DestinationPath "signed" -Force
+
+      - name: Sign motion-master.exe
+        shell: pwsh
+        run: |
+          # /a auto-selects the best signing cert from the token's store;
+          # /tr + /td + /fd add an RFC-3161 SHA-256 timestamp so the signature
+          # stays valid after the cert expires.
+          signtool sign /tr http://timestamp.sectigo.com /td sha256 /fd sha256 /a "signed\motion-master.exe"
+
+      - name: Re-pack the signed zip
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Filter "motion-master-*-windows-x64.zip" | Select-Object -First 1
+          Remove-Item $zip.FullName -Force
+          Compress-Archive -Path "signed\*" -DestinationPath $zip.Name -Force
+
+      - name: Upload the signed zip, replacing the unsigned asset
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $zip = Get-ChildItem -Filter "motion-master-*-windows-x64.zip" | Select-Object -First 1
+          gh release upload "$env:GITHUB_REF_NAME" $zip.FullName --repo "$env:GITHUB_REPOSITORY" --clobber

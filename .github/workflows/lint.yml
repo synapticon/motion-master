@@ -19,7 +19,14 @@ jobs:
             | sudo tee /etc/apt/trusted.gpg.d/apt.llvm.org.asc
           echo "deb http://apt.llvm.org/noble/ llvm-toolchain-noble-22 main" \
             | sudo tee /etc/apt/sources.list.d/llvm.list
-          sudo apt-get update -q
+          # Update only the LLVM list. The ubuntu-24.04 runner image ships broken
+          # third-party repos (packages.microsoft.com) that intermittently return
+          # 403, which would otherwise abort the whole `apt-get update` and fail
+          # this job for reasons unrelated to our code.
+          sudo apt-get update -q \
+            -o Dir::Etc::sourcelist="sources.list.d/llvm.list" \
+            -o Dir::Etc::sourceparts="-" \
+            -o APT::Get::List-Cleanup="0"
           sudo apt-get install -y clang-format-22
 
       - name: Check formatting

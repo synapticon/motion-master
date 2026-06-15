@@ -17,17 +17,21 @@ jobs:
         with:
           submodules: recursive
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
           node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
-      - name: Install dependencies
-        working-directory: hil/api
-        run: npm ci --prefer-offline --no-audit
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Run API tests
-        working-directory: hil/api
-        run: npm test
+        run: pnpm --filter motion-master-api-tests test
         env:
           MM_URL: https://127.0.0.1:61447

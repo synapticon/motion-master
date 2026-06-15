@@ -451,7 +451,8 @@ ProcessImageInfo DeviceManager::processImageInfo() const {
   return info;
 }
 
-std::expected<DeviceManager::DumpSpan, std::string> DeviceManager::serializeDump(std::ostream& out) {
+std::expected<DeviceManager::DumpSpan, std::string> DeviceManager::serializeDump(
+    std::ostream& out) {
   // Shared lock: serialise against the exclusive mutators (init/scan/reset/configure) that rebuild
   // devices_ and the retained image generations, exactly as the other off-thread read surfaces do.
   // The RT producer is never blocked — it appends to the ring lock-free; we only read the ring.

@@ -336,7 +336,10 @@ void MonitoringManager::flushEntry(Entry& entry) {
   }
   const nlohmann::json envelope = {
       {"type", "monitoring"}, {"topic", entry.config.topic}, {"data", std::move(data)}};
-  publish_(entry.config.topic, envelope.dump());
+  // `replace` handler: a string-typed param carrying non-UTF-8 bytes must not throw here — this
+  // runs on the sampler thread with no surrounding catch, so a throw would terminate the server.
+  publish_(entry.config.topic,
+           envelope.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
 }
 
 nlohmann::json MonitoringManager::resourceJson(const Entry& entry) {

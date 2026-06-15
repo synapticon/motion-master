@@ -64,11 +64,14 @@ std::optional<std::vector<uint16_t>> parsePositions(Res* res, Req* req,
 }
 
 // Writes @p body as a 200 application/json response with the CORS header.
+// Uses the `replace` error handler so a string-typed value carrying non-UTF-8 bytes (e.g. a garbage
+// VISIBLE_STRING from a misbehaving device) is rendered with U+FFFD instead of throwing — a throw
+// here is uncaught on the uWS loop and terminates the whole server.
 template <typename Res>
 void sendJson(Res* res, std::string_view corsOrigin, const nlohmann::json& body) {
   res->writeHeader("Content-Type", "application/json")
       ->writeHeader("Access-Control-Allow-Origin", corsOrigin)
-      ->end(body.dump());
+      ->end(body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
 }
 
 // Writes a @p status response carrying a {"error": message} JSON body and the CORS header.

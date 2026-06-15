@@ -1,36 +1,34 @@
-import { createContext, useCallback, useContext, useMemo, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { Api } from '@synapticon/motion-master-client'
 
-const SESSION_KEY = 'mm:session'
 const ENDPOINT_KEY = 'mm:endpoint'
 
 const DEFAULT_HOST = 'local.motion-master.synapticon.com'
 const DEFAULT_HTTP_PORT = '61447'
 const DEFAULT_WS_PORT = '62281'
 
-export interface Session {
-  driver: 'soem' | 'spoe' | 'igh'
-  adapter: string
-}
-
-export function readSession(): Session | null {
-  try {
-    const raw = sessionStorage.getItem(SESSION_KEY)
-    return raw ? (JSON.parse(raw) as Session) : null
-  } catch {
-    return null
-  }
-}
+type Driver = 'soem' | 'spoe' | 'igh'
 
 interface Endpoint {
   host: string
   httpPort: string
   wsPort: string
+  // The last-used connection target. Persisted purely as a convenience default for the
+  // Init form — connection *state* (initialized / scanned) is derived from the server on
+  // open (see ServerStateProbe), never from storage.
+  driver: Driver
+  adapter: string
 }
 
 // The endpoint config persists to localStorage so a configured host/port survives reloads.
 function readEndpoint(): Endpoint {
-  const fallback: Endpoint = { host: DEFAULT_HOST, httpPort: DEFAULT_HTTP_PORT, wsPort: DEFAULT_WS_PORT }
+  const fallback: Endpoint = {
+    host: DEFAULT_HOST,
+    httpPort: DEFAULT_HTTP_PORT,
+    wsPort: DEFAULT_WS_PORT,
+    driver: 'soem',
+    adapter: '',
+  }
   try {
     const raw = localStorage.getItem(ENDPOINT_KEY)
     return raw ? { ...fallback, ...(JSON.parse(raw) as Partial<Endpoint>) } : fallback
@@ -59,19 +57,20 @@ interface ConnectionContextValue {
   /// Reset host/httpPort/wsPort back to the built-in defaults (and persist them).
   resetEndpoint: () => void
   api: Api
-  driver: 'soem' | 'spoe' | 'igh'
-  setDriver: (d: 'soem' | 'spoe' | 'igh') => void
+  driver: Driver
+  setDriver: (d: Driver) => void
   adapter: string
   setAdapter: (a: string) => void
   hasScanned: boolean
   setHasScanned: (val: boolean) => void
   /// True once the fieldbus driver is initialized on the server (after a
-  /// successful init, a 409 "already initialized", or a restored session).
-  /// Cleared on reset.
+  /// successful init, a 409 "already initialized", or when the on-open probe
+  /// found devices already present). Cleared on reset.
   isInitialized: boolean
   setIsInitialized: (val: boolean) => void
   /// True when init() was skipped because the fieldbus was already initialized
-  /// on the server (e.g. after a browser refresh that reused the stored session).
+  /// on the server — either a manual init returned 409, or the on-open probe
+  /// (ServerStateProbe) found an already-scanned bus from another instance.
   alreadyInitialized: boolean
   setAlreadyInitialized: (val: boolean) => void
 }
@@ -79,53 +78,32 @@ interface ConnectionContextValue {
 const ConnectionContext = createContext<ConnectionContextValue | null>(null)
 
 export function ConnectionProvider({ children }: { children: React.ReactNode }) {
-  const stored = readSession()
   const endpoint = readEndpoint()
-  const [host, setHostState] = useState(endpoint.host)
-  const [httpPort, setHttpPortState] = useState(endpoint.httpPort)
-  const [wsPort, setWsPortState] = useState(endpoint.wsPort)
-  const [driver, setDriver] = useState<'soem' | 'spoe' | 'igh'>(stored?.driver ?? 'soem')
-  const [adapter, setAdapter] = useState(stored?.adapter ?? '')
-  const [hasScanned, setHasScannedState] = useState(false)
+  const [host, setHost] = useState(endpoint.host)
+  const [httpPort, setHttpPort] = useState(endpoint.httpPort)
+  const [wsPort, setWsPort] = useState(endpoint.wsPort)
+  const [driver, setDriver] = useState<Driver>(endpoint.driver)
+  const [adapter, setAdapter] = useState(endpoint.adapter)
+  const [hasScanned, setHasScanned] = useState(false)
   const [isInitialized, setIsInitialized] = useState(false)
   const [alreadyInitialized, setAlreadyInitialized] = useState(false)
 
-  // Persist the endpoint config on every change so a configured host/port survives reloads.
-  const setHost = useCallback((value: string) => {
-    setHostState(value)
-    writeEndpoint({ host: value, httpPort, wsPort })
-  }, [httpPort, wsPort])
-  const setHttpPort = useCallback((value: string) => {
-    setHttpPortState(value)
-    writeEndpoint({ host, httpPort: value, wsPort })
-  }, [host, wsPort])
-  const setWsPort = useCallback((value: string) => {
-    setWsPortState(value)
-    writeEndpoint({ host, httpPort, wsPort: value })
-  }, [host, httpPort])
+  // Persist the endpoint config (host/port + last-used connection target) on every change
+  // so it survives reloads. This is a convenience default only; connection *state* is
+  // derived from the server on open (see ServerStateProbe), never from storage.
+  useEffect(() => {
+    writeEndpoint({ host, httpPort, wsPort, driver, adapter })
+  }, [host, httpPort, wsPort, driver, adapter])
 
   const resetEndpoint = useCallback(() => {
-    setHostState(DEFAULT_HOST)
-    setHttpPortState(DEFAULT_HTTP_PORT)
-    setWsPortState(DEFAULT_WS_PORT)
-    writeEndpoint({ host: DEFAULT_HOST, httpPort: DEFAULT_HTTP_PORT, wsPort: DEFAULT_WS_PORT })
+    setHost(DEFAULT_HOST)
+    setHttpPort(DEFAULT_HTTP_PORT)
+    setWsPort(DEFAULT_WS_PORT)
   }, [])
 
   const api = useMemo(
     () => new Api({ baseUrl: `https://${host}:${httpPort}` }),
     [host, httpPort],
-  )
-
-  const setHasScanned = useCallback(
-    (val: boolean) => {
-      setHasScannedState(val)
-      if (val) {
-        sessionStorage.setItem(SESSION_KEY, JSON.stringify({ driver, adapter }))
-      } else {
-        sessionStorage.removeItem(SESSION_KEY)
-      }
-    },
-    [driver, adapter],
   )
 
   return (

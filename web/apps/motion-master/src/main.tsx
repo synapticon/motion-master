@@ -7,7 +7,7 @@ import App from './App.tsx'
 import { ConnectionProvider } from './contexts/ConnectionContext'
 import { RequestsProvider } from './contexts/RequestsContext'
 import { PreferencesProvider } from './contexts/PreferencesContext'
-import { SessionRestore } from './components/SessionRestore'
+import { ServerStateProbe } from './components/ServerStateProbe'
 
 const queryClient = new QueryClient()
 
@@ -17,11 +17,11 @@ createRoot(document.getElementById('root')!).render(
       <PreferencesProvider>
         <RequestsProvider>
           <ConnectionProvider>
-            <SessionRestore>
+            <ServerStateProbe>
               <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
                 <App />
               </BrowserRouter>
-            </SessionRestore>
+            </ServerStateProbe>
           </ConnectionProvider>
         </RequestsProvider>
       </PreferencesProvider>

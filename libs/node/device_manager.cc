@@ -1115,6 +1115,57 @@ std::expected<void, std::string> DeviceManager::writeDeviceParameter(
   return device->writeParameter(index, subindex, std::move(newValue));
 }
 
+std::vector<OutputStageResult> DeviceManager::stageProcessDataOutputs(
+    std::span<const OutputStageRequest> requests) {
+  // One shared lock for the whole batch (per-item writeParameter takes each device's own
+  // parametersMutex_): serialise against the exclusive mutators that rebuild devices_/driver_, so
+  // every item in the batch sees one consistent device set and a stable published image.
+  std::shared_lock lock(busMutex_);
+  const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
+  std::vector<OutputStageResult> results;
+  results.reserve(requests.size());
+  for (const auto& req : requests) {
+    OutputStageResult r;
+    r.slavePosition = req.slavePosition;
+    r.index = req.index;
+    r.subindex = req.subindex;
+    Device* device = findDevice(req.slavePosition);
+    if (!device) {
+      r.error = "device " + std::to_string(req.slavePosition) + " not found";
+      results.push_back(std::move(r));
+      continue;
+    }
+    // Whether this object will land in the cyclic output image is exactly the gate writeParameter
+    // stages on: output-mapped in the published image AND the device exchanging. Capture it before
+    // the write so we can report staged vs written-but-not-cyclic with a precise reason.
+    auto loc = image ? image->find(req.slavePosition, req.index, req.subindex) : std::nullopt;
+    const bool outputMapped = loc && loc->isOutput;
+    const bool exchanging = device->exchangesProcessData();
+    if (auto w = device->writeParameter(req.index, req.subindex, req.value); !w) {
+      r.error = w.error();
+      results.push_back(std::move(r));
+      continue;
+    }
+    if (outputMapped && exchanging) {
+      r.staged = true;
+    } else if (!exchanging) {
+      r.error = "device not exchanging (not in SAFE-OP/OP) — value written but not cyclically sent";
+    } else {
+      r.error = "object not output-mapped — value written via SDO, not cyclically sent";
+    }
+    results.push_back(std::move(r));
+  }
+  return results;
+}
+
+void to_json(nlohmann::json& j, const OutputStageResult& result) {
+  j = {{"slavePosition", result.slavePosition},
+       {"index", result.index},
+       {"subindex", result.subindex},
+       {"staged", result.staged},
+       {"error", result.error}};
+}
+
 void to_json(nlohmann::json& j, const ProcessImageObjectInfo& obj) {
   j = {{"slavePosition", obj.slavePosition}, {"index", obj.index},
        {"subindex", obj.subindex},           {"name", obj.name},

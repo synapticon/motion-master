@@ -1892,6 +1892,61 @@ paths:
                     type: string
                     description: Human-readable reason the dump could not be produced
                     example: "the recorder is empty — no cycles have been recorded yet"
+  /api/process-data/outputs:
+    post:
+      summary: Stage a batch of output values into the process image
+      operationId: stageProcessDataOutputs
+      description: >
+        Stages many output (RxPDO) objects at once — the "send all" action of the Process Data
+        page. Each value is coerced to the object's declared data type and, when the object is
+        output-mapped and its device is exchanging (SAFE-OP/OP), written into the output image so
+        it is sent on the next real-time cycle and re-sent every cycle thereafter (set-once,
+        sent-continuously). The batch is best-effort atomic: values are staged sequentially, so a
+        batch can straddle two consecutive ~1 ms cycles. The request never fails as a whole — each
+        object gets its own result, so the client can flag any object that was not cyclically
+        staged (unknown device, coercion failure, object not output-mapped, or bus not exchanging;
+        in the last two cases the value is still written via SDO/cache, just not cyclically driven).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              description: >
+                Objects to stage, each as `[slavePosition, index, subindex, value]` — the
+                monitoring `[devicePosition, index, subindex]` shape with the value appended.
+              items:
+                type: array
+                minItems: 4
+                maxItems: 4
+                description: "[slavePosition, index, subindex, value]"
+                items: {}
+              example: [[1, 24698, 0, 5000], [1, 24640, 0, 15]]
+      responses:
+        "200":
+          description: Per-object staging outcomes, in request order
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OutputStageResult"
+        "400":
+          description: >
+            Invalid request — malformed body, an entry that is not a four-element array, a
+            non-integer id, or an unsupported value type.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
   /api/bus-config:
     get:
       summary: Inspect each slave's static EtherCAT Slave Controller configuration
@@ -2229,6 +2284,34 @@ components:
           type: integer
           description: Width of the value in bits
           example: 32
+    OutputStageResult:
+      type: object
+      required: [slavePosition, index, subindex, staged, error]
+      properties:
+        slavePosition:
+          type: integer
+          description: 1-based bus position of the owning device (echoes the request)
+          example: 1
+        index:
+          type: integer
+          description: CoE object index (echoes the request)
+          example: 24698
+        subindex:
+          type: integer
+          description: CoE object subindex (echoes the request)
+          example: 0
+        staged:
+          type: boolean
+          description: >-
+            True when the value landed in the published output image and will be sent on the next
+            exchange cycle
+          example: true
+        error:
+          type: string
+          description: >-
+            Empty on success; otherwise why the object was not cyclically staged (unknown device,
+            coercion failure, object not output-mapped, or the bus not exchanging)
+          example: ""
     SyncManagerConfig:
       type: object
       required: [index, physicalStart, length, flags, type]

@@ -79,6 +79,34 @@ void to_json(nlohmann::json& j, const ProcessImageObjectInfo& obj);
 /// @brief Serialises a ProcessImageInfo to JSON.
 void to_json(nlohmann::json& j, const ProcessImageInfo& info);
 
+/// @brief One object to stage into the output process image, as parsed from a batch write request.
+///
+/// The @c value is coerced to the object's declared data type by the write path
+/// (@c Device::writeParameter), so callers pass a loosely-typed @c DeviceParameterValue.
+struct OutputStageRequest {
+  uint16_t slavePosition = 0;  ///< 1-based bus position of the owning device.
+  uint16_t index = 0;          ///< CoE object index.
+  uint8_t subindex = 0;        ///< CoE object subindex.
+  DeviceParameterValue value;  ///< Value to write; coerced to the object's declared type.
+};
+
+/// @brief Per-object outcome of a batch output stage.
+///
+/// @c staged is true only when the value landed in the published output image and so will be sent
+/// on the next exchange cycle. When false, @c error explains why (unknown device, coercion failure,
+/// object not output-mapped, or the bus not exchanging — in the latter two cases the value is still
+/// written via SDO/cache, just not cyclically driven).
+struct OutputStageResult {
+  uint16_t slavePosition = 0;  ///< Echoes the request.
+  uint16_t index = 0;          ///< Echoes the request.
+  uint8_t subindex = 0;        ///< Echoes the request.
+  bool staged = false;         ///< Whether the value was staged into the cyclic output image.
+  std::string error;           ///< Empty on success; otherwise why the object was not staged.
+};
+
+/// @brief Serialises an OutputStageResult to JSON.
+void to_json(nlohmann::json& j, const OutputStageResult& result);
+
 /// @brief A slave's static ESC configuration plus its resolved device name.
 ///
 /// API-facing wrapper around @c mm::comm::SlaveConfig that adds the human-readable device
@@ -503,6 +531,24 @@ class DeviceManager {
   std::expected<void, std::string> writeDeviceParameter(uint16_t slavePosition, uint16_t index,
                                                         uint8_t subindex,
                                                         DeviceParameterValue newValue);
+
+  /// @brief Stages a batch of output objects into the process image in one call.
+  ///
+  /// Backs @c POST @c /api/process-data/outputs, the "send all" action of the Process Data page:
+  /// the user edits several outputs and ships them together. Each request is routed through
+  /// @c Device::writeParameter (same coercion + PDO-staging path as @c writeDeviceParameter), and
+  /// each gets an @c OutputStageResult reporting whether it actually landed in the cyclic output
+  /// image — so the UI can flag any object that was not staged without failing the whole batch.
+  ///
+  /// Best-effort atomicity: the slots are stored sequentially on this (non-RT) thread, so a batch
+  /// can straddle two consecutive RT cycles (≤1 ms skew worst case). Composing every slot in a
+  /// single cycle would require RT-side generation gating, which would break the lock-free output
+  /// path — out of scope; the brief skew is acceptable for manual process-data writes.
+  ///
+  /// @param requests  The objects to stage, each with a value coerced to its declared type.
+  /// @return One result per request, in the same order.
+  std::vector<OutputStageResult> stageProcessDataOutputs(
+      std::span<const OutputStageRequest> requests);
 
   // --- Off-thread sampling read surface (for monitoring) ---
   //

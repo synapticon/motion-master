@@ -146,6 +146,34 @@ export interface ProcessImageObject {
   bitLength: number;
 }
 
+export interface OutputStageResult {
+  /**
+   * 1-based bus position of the owning device (echoes the request)
+   * @example 1
+   */
+  slavePosition: number;
+  /**
+   * CoE object index (echoes the request)
+   * @example 24698
+   */
+  index: number;
+  /**
+   * CoE object subindex (echoes the request)
+   * @example 0
+   */
+  subindex: number;
+  /**
+   * True when the value landed in the published output image and will be sent on the next exchange cycle
+   * @example true
+   */
+  staged: boolean;
+  /**
+   * Empty on success; otherwise why the object was not cyclically staged (unknown device, coercion failure, object not output-mapped, or the bus not exchanging)
+   * @example ""
+   */
+  error: string;
+}
+
 export interface SyncManagerConfig {
   /**
    * Sync Manager number (0–7)

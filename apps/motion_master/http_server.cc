@@ -118,6 +118,43 @@ std::expected<mm::node::DeviceParameterValue, std::string> parseParameterValue(
   return std::unexpected<std::string>("unsupported value type; expected number, string, or array");
 }
 
+// Parses a POST /api/process-data/outputs body into stage requests. The body is an array of
+// [slavePosition, index, subindex, value] rows — the monitoring [[pos,index,sub]] shape with a
+// value appended, so the wire stays compact and consistent. The three ids must be non-negative
+// integers; value is anything parseParameterValue accepts and is coerced to the object's declared
+// type by the node layer. Returns the first shape problem as an error.
+std::expected<std::vector<mm::node::OutputStageRequest>, std::string> parseOutputStageRequests(
+    const nlohmann::json& body) {
+  if (!body.is_array()) {
+    return std::unexpected<std::string>(
+        "expected an array of [slavePosition, index, subindex, value] entries");
+  }
+  std::vector<mm::node::OutputStageRequest> requests;
+  requests.reserve(body.size());
+  for (const auto& row : body) {
+    if (!row.is_array() || row.size() != 4) {
+      return std::unexpected<std::string>(
+          "each entry must be [slavePosition, index, subindex, value]");
+    }
+    if (!row[0].is_number_unsigned() || !row[1].is_number_unsigned() ||
+        !row[2].is_number_unsigned()) {
+      return std::unexpected<std::string>(
+          "slavePosition, index, and subindex must be non-negative integers");
+    }
+    auto value = parseParameterValue(row[3]);
+    if (!value) {
+      return std::unexpected(value.error());
+    }
+    mm::node::OutputStageRequest req;
+    req.slavePosition = row[0].get<uint16_t>();
+    req.index = row[1].get<uint16_t>();
+    req.subindex = row[2].get<uint8_t>();
+    req.value = std::move(*value);
+    requests.push_back(std::move(req));
+  }
+  return requests;
+}
+
 // Serialises a process-data watchdog configuration. timeoutMs is the human unit the UI edits;
 // timeoutNs and the raw divider/ticks expose the exact programmed value (the timeout is rounded
 // to the device's watchdog tick base).
@@ -1033,6 +1070,34 @@ void HttpServer::run() {
                });
              }
            })
+      .post("/api/process-data/outputs",
+            [this](auto* res, auto* /*req*/) {
+              auto aborted = std::make_shared<bool>(false);
+              auto body = std::make_shared<std::string>();
+              res->onAborted([aborted]() { *aborted = true; });
+              res->onData([this, res, body, aborted](std::string_view chunk, bool last) {
+                body->append(chunk);
+                if (!last) return;
+                if (*aborted) return;
+                nlohmann::json j;
+                try {
+                  j = body->empty() ? nlohmann::json::array() : nlohmann::json::parse(*body);
+                } catch (const nlohmann::json::exception& e) {
+                  sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
+                  return;
+                }
+                auto requests = parseOutputStageRequests(j);
+                if (!requests) {
+                  sendError(res, "400 Bad Request", config_.corsOrigin, requests.error());
+                  return;
+                }
+                // Per-object outcomes (staged vs written-but-not-cyclic vs error); the batch never
+                // fails as a whole, so the UI can flag individual objects. 200, not 201 — this
+                // stages values, it does not create a resource.
+                auto results = deviceManager_.stageProcessDataOutputs(*requests);
+                sendJson(res, config_.corsOrigin, nlohmann::json{{"results", results}});
+              });
+            })
       .post("/api/devices/state",
             [this](auto* res, auto* /*req*/) {
               auto aborted = std::make_shared<bool>(false);

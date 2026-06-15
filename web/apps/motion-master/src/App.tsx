@@ -35,6 +35,7 @@ export default function App() {
         <Route path="bus-config" element={<BusConfigPage />} />
         <Route path="bus-diagnostics" element={<BusDiagnosticsPage />} />
         <Route path="dc-sync" element={<DcSyncPage />} />
+        <Route path="process-data" element={<ProcessDataPage />} />
         <Route path="monitorings" element={<MonitoringsPage />} />
         <Route path="recorder" element={<RecorderPage />} />
         <Route path="parameter-caches" element={<ParameterCachesPage />} />
@@ -53,7 +54,6 @@ export default function App() {
           <Route path="registers" element={<RegistersPage />} />
           <Route path="foe" element={<FoePage />} />
           <Route path="parameters" element={<ParametersPage />} />
-          <Route path="process-data" element={<ProcessDataPage />} />
         </Route>
       </Route>
     </Routes>

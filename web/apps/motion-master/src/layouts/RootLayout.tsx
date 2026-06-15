@@ -343,6 +343,7 @@ export default function RootLayout() {
           <NavItem to="/dc-sync" label="DC Sync" />
 
           <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Data</p>
+          <NavItem to="/process-data" label="Process Data" />
           <NavItem to="/monitorings" label="Monitorings" />
           <NavItem to="/recorder" label="Recorder" />
           <NavItem to="/parameter-caches" label="Parameter Caches" />

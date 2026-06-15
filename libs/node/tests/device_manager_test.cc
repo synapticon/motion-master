@@ -258,6 +258,47 @@ TEST(DeviceManagerDelegates, UnknownDeviceErrors) {
   EXPECT_FALSE(dm.deviceParameterView(99, 0x6064, 0x00, /*refreshFromBus=*/false).has_value());
 }
 
+TEST(DeviceManagerStageOutputs, ReportsPerItemWithoutFailingWholeBatch) {
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true, 1)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  std::vector<mm::node::OutputStageRequest> reqs = {
+      {.slavePosition = 99,  // unknown device
+       .index = 0x6040,
+       .subindex = 0x00,
+       .value = DeviceParameterValue{uint16_t{15}}},
+      {.slavePosition = 1,  // known device, but OD not enumerated and no image published
+       .index = 0x607A,
+       .subindex = 0x00,
+       .value = DeviceParameterValue{int32_t{5000}}}};
+  auto results = dm.stageProcessDataOutputs(reqs);
+
+  // One result per request, in order — the batch never fails as a whole.
+  ASSERT_EQ(results.size(), reqs.size());
+
+  // Unknown device: not staged, echoes the request, error names the position.
+  EXPECT_EQ(results[0].slavePosition, 99);
+  EXPECT_FALSE(results[0].staged);
+  EXPECT_NE(results[0].error.find("not found"), std::string::npos);
+
+  // Known device but nothing to stage into (no image, parameter not enumerated): not staged, with a
+  // non-empty reason, and the identity is echoed back.
+  EXPECT_EQ(results[1].slavePosition, 1);
+  EXPECT_EQ(results[1].index, 0x607A);
+  EXPECT_FALSE(results[1].staged);
+  EXPECT_FALSE(results[1].error.empty());
+}
+
+TEST(DeviceManagerStageOutputs, EmptyBatchYieldsEmptyResults) {
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true, 1)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  auto results = dm.stageProcessDataOutputs({});
+  EXPECT_TRUE(results.empty());
+}
+
 TEST(DeviceManagerWatchdog, GetReturnsDriverConfig) {
   auto driver = std::make_unique<FakeDriver>(true, 1);
   driver->watchdogConfig = {.enabled = true,

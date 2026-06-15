@@ -19,6 +19,7 @@ import {
   FoeErrorCode,
   Monitoring,
   ObjectDataTypeInfo,
+  OutputStageResult,
   ParameterCacheEntry,
   ProcessDataWatchdog,
   ProcessImageObject,
@@ -1382,6 +1383,29 @@ export class Api<
     >({
       path: `/api/process-data/dump`,
       method: "POST",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Stages many output (RxPDO) objects at once — the "send all" action of the Process Data page. Each value is coerced to the object's declared data type and, when the object is output-mapped and its device is exchanging (SAFE-OP/OP), written into the output image so it is sent on the next real-time cycle and re-sent every cycle thereafter (set-once, sent-continuously). The batch is best-effort atomic: values are staged sequentially, so a batch can straddle two consecutive ~1 ms cycles. The request never fails as a whole — each object gets its own result, so the client can flag any object that was not cyclically staged (unknown device, coercion failure, object not output-mapped, or bus not exchanging; in the last two cases the value is still written via SDO/cache, just not cyclically driven).
+   *
+   * @name StageProcessDataOutputs
+   * @summary Stage a batch of output values into the process image
+   * @request POST:/api/process-data/outputs
+   */
+  stageProcessDataOutputs = (data: any[][], params: RequestParams = {}) =>
+    this.request<
+      {
+        results: OutputStageResult[];
+      },
+      {
+        error: string;
+      }
+    >({
+      path: `/api/process-data/outputs`,
+      method: "POST",
+      body: data,
+      type: ContentType.Json,
       format: "json",
       ...params,
     });

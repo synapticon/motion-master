@@ -54,7 +54,7 @@ jobs:
         run: |
           dir=build/x64-linux-release/apps/motion_master
           cp setup.sh "$dir/setup.sh"
-          cp SETUP.md "$dir/SETUP.md"
+          cp SETUP-linux.md "$dir/SETUP.md"
           cp apps/motion_master/motion-master.example.jsonc "$dir/motion-master.example.jsonc"
           tar -czf "motion-master-${GITHUB_REF_NAME#v}-linux-x64.tar.gz" \
             -C "$dir" motion-master cert.pem key.pem setup.sh SETUP.md motion-master.example.jsonc
@@ -178,9 +178,10 @@ jobs:
       - name: Package tarball
         run: |
           dir=build/arm64-osx-release/apps/motion_master
+          cp SETUP-macos.md "$dir/SETUP.md"
           cp apps/motion_master/motion-master.example.jsonc "$dir/motion-master.example.jsonc"
           tar -czf "motion-master-${GITHUB_REF_NAME#v}-macos-arm64.tar.gz" \
-            -C "$dir" motion-master cert.pem key.pem motion-master.example.jsonc
+            -C "$dir" motion-master cert.pem key.pem SETUP.md motion-master.example.jsonc
 
       - name: Upload artifact
         uses: actions/upload-artifact@v5

@@ -430,27 +430,6 @@ void HttpServer::run() {
              }
              sendJson(res, config_.corsOrigin, nlohmann::json(*device));
            })
-      .get("/api/devices/:slavePosition/mailbox",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto param = req->getParameter("slavePosition");
-             auto [ptr, ec] = std::from_chars(param.data(), param.data() + param.size(), pos);
-             if (ec != std::errc() || ptr != param.data() + param.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             if (!deviceManager_.findDevice(pos)) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             auto r = deviceManager_.isDeviceMailboxActive(pos);
-             if (!r) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-               return;
-             }
-             sendJson(res, config_.corsOrigin,
-                      nlohmann::json{{"slavePosition", pos}, {"mailboxActive", *r}});
-           })
       .get("/api/devices/:slavePosition/registers/:address",
            [this](auto* res, auto* req) {
              uint16_t pos{};

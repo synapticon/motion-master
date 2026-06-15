@@ -935,23 +935,6 @@ DeviceManager::setProcessDataWatchdog(uint16_t slavePosition, std::chrono::nanos
   return driver_->setProcessDataWatchdog(slavePosition, timeout);
 }
 
-std::expected<bool, std::string> DeviceManager::isDeviceMailboxActive(uint16_t slavePosition) {
-  if (!driver_) {
-    return std::unexpected("no driver — call init() first");
-  }
-  const Device* device = findDevice(slavePosition);
-  if (!device) {
-    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
-  }
-  // Reading the single position refreshes the driver's cached AL status, which
-  // Device::mailboxActive() reads through — reusing the one place that defines it rather than
-  // duplicating the state check here.
-  if (auto states = getDeviceStates({slavePosition}); !states) {
-    return std::unexpected(states.error());
-  }
-  return device->mailboxActive();
-}
-
 std::expected<void, std::string> DeviceManager::initializeDeviceParameters(uint16_t slavePosition,
                                                                            bool readValues) {
   auto it = std::find_if(devices_.begin(), devices_.end(), [slavePosition](const Device& d) {

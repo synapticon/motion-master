@@ -123,11 +123,9 @@ export default function FieldbusPage() {
   async function refreshDevices() {
     const res = await devicesQuery.refetch()
     await readStatesFor(res.data?.data.map(d => d.slavePosition) ?? [])
-    // Keep the sidebar's shared queries in sync with fieldbus actions
-    // (scan / transition / manual refresh): AL state and the per-device mailbox probe,
-    // since a transition to/from INIT changes whether the mailbox is available.
+    // Keep the sidebar's shared AL-state query in sync with fieldbus actions
+    // (scan / transition / manual refresh); the sidebar derives the mailbox icon from it.
     void queryClient.invalidateQueries({ queryKey: ['deviceStates'] })
-    void queryClient.invalidateQueries({ queryKey: ['deviceMailboxActive'] })
   }
 
   const initMutation = useMutation({

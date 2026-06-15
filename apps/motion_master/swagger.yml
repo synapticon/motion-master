@@ -48,8 +48,6 @@ info:
       the device over File-over-EtherCAT (firmware, configuration, logs).
     - **SII (EEPROM)** — `GET …/sii` reads the Slave Information Interface, returning
       the parsed structure or the raw EEPROM bytes per the `Accept` header.
-    - **Mailbox** — `GET …/mailbox` probes whether a device's CoE/SDO mailbox is
-      active (AL state PRE-OP or above).
 
     The `/api/meta/*` endpoints expose static reference tables — AL status codes,
     ESC register definitions, FoE error codes, and CoE data types — so clients
@@ -482,51 +480,6 @@ paths:
           description: slavePosition is not a valid integer
         "404":
           description: No device at the given bus position
-  /api/devices/{slavePosition}/mailbox:
-    get:
-      summary: Check whether a device's mailbox is active
-      operationId: getDeviceMailboxActive
-      description: >
-        Performs a live AL-state read for the device and reports whether its CoE/SDO
-        mailbox is active — i.e. it is in PRE-OP, SAFE-OP, or OP. This is independent of
-        the AL error indicator: a device in SAFE-OP+error still answers mailbox requests.
-        Only INIT (no mailbox) and BOOT (FoE-only mailbox) report inactive. The device
-        must already be known from a prior scan. Reading one device at a time means a
-        single missing device reports inactive without failing the others.
-      parameters:
-        - name: slavePosition
-          in: path
-          required: true
-          schema:
-            type: integer
-            minimum: 1
-          description: 1-based position of the device on the fieldbus
-          example: 1
-      responses:
-        "200":
-          description: Mailbox status of the device
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [slavePosition, mailboxActive]
-                properties:
-                  slavePosition:
-                    type: integer
-                    description: 1-based position on the fieldbus
-                    example: 1
-                  mailboxActive:
-                    type: boolean
-                    description: >
-                      True when the device's CoE/SDO mailbox is active (AL state PRE-OP,
-                      SAFE-OP, or OP, regardless of the error indicator); false otherwise.
-                    example: true
-        "400":
-          description: slavePosition is not a valid integer
-        "404":
-          description: No device at the given bus position
-        "500":
-          $ref: "#/components/responses/DriverError"
   /api/init:
     post:
       summary: Initialise the fieldbus driver

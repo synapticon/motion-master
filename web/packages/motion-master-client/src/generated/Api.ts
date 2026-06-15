@@ -357,43 +357,6 @@ export class Api<
       ...params,
     });
   /**
-   * @description Performs a live AL-state read for the device and reports whether its CoE/SDO mailbox is active — i.e. it is in PRE-OP, SAFE-OP, or OP. This is independent of the AL error indicator: a device in SAFE-OP+error still answers mailbox requests. Only INIT (no mailbox) and BOOT (FoE-only mailbox) report inactive. The device must already be known from a prior scan. Reading one device at a time means a single missing device reports inactive without failing the others.
-   *
-   * @name GetDeviceMailboxActive
-   * @summary Check whether a device's mailbox is active
-   * @request GET:/api/devices/{slavePosition}/mailbox
-   */
-  getDeviceMailboxActive = (
-    slavePosition: number,
-    params: RequestParams = {},
-  ) =>
-    this.request<
-      {
-        /**
-         * 1-based position on the fieldbus
-         * @example 1
-         */
-        slavePosition: number;
-        /**
-         * True when the device's CoE/SDO mailbox is active (AL state PRE-OP, SAFE-OP, or OP, regardless of the error indicator); false otherwise.
-         * @example true
-         */
-        mailboxActive: boolean;
-      },
-      void | {
-        /**
-         * Human-readable error message from the driver
-         * @example "FPRD slave 1: wkc=0"
-         */
-        error: string;
-      }
-    >({
-      path: `/api/devices/${slavePosition}/mailbox`,
-      method: "GET",
-      format: "json",
-      ...params,
-    });
-  /**
    * @description Constructs the requested fieldbus driver, opens the network interface, and makes the driver available for subsequent calls to /api/scan. The driver defaults to SOEM when omitted. SOEM has no adapter auto-detect: a network adapter must be supplied, otherwise init fails.
    *
    * @name Init

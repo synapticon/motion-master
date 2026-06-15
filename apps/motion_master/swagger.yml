@@ -36,9 +36,12 @@ info:
     (`slavePosition`). The per-device endpoints cover the common service-plane
     operations:
 
-    - **Object dictionary (CoE)** — `GET …/sdo/{index}/{subindex}` uploads a
-      single entry; `POST …/parameters/init` enumerates the full dictionary and
-      `GET …/parameters` reads the cached result.
+    - **Object dictionary (CoE)** — `GET`/`PUT …/parameters/{index}/{subindex}`
+      read and write a single parameter by value, PDO-aware (the live process image
+      or staged output when exchanging, SDO otherwise, with a `source=cache` read
+      mode); `GET`/`PUT …/sdo/{index}/{subindex}` is the raw byte-level SDO transfer
+      with no PDO awareness; `POST …/parameters/init` enumerates the full dictionary
+      and `GET …/parameters` reads the cached result.
     - **ESC registers** — `GET`/`PUT …/registers/{address}` read and write raw
       EtherCAT Slave Controller register bytes.
     - **Files (FoE)** — `GET`/`PUT …/files/{filename}` transfer files to and from
@@ -786,6 +789,147 @@ paths:
           description: slavePosition is not a valid integer
         "404":
           description: No device at the given bus position
+  /api/devices/{slavePosition}/parameters/{index}/{subindex}:
+    get:
+      summary: Read a single parameter value (PDO-aware, with optional cache-only mode)
+      operationId: readParameter
+      description: >
+        Reads one parameter of the device at `slavePosition` and returns the full
+        `DeviceParameter` (value plus metadata: data type, access, sync state).
+
+        Unlike the raw `GET …/sdo/{index}/{subindex}` endpoint, this is PDO-aware.
+        With `source=auto` (the default) the value is taken from the live process
+        image when the device is exchanging and the object is PDO-mapped, otherwise
+        via an SDO upload, otherwise from the cache. With `source=cache` the cached
+        value is served with no bus access at all.
+
+        Both `index` and `subindex` accept decimal or hexadecimal notation; prefix
+        with `0x` for hex (e.g. `0x6064` or `24676` for object 0x6064).
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 65535
+          description: CoE object index in decimal (e.g. 24676 for 0x6064)
+          example: 24676
+        - name: subindex
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 255
+          description: CoE object subindex in decimal
+          example: 0
+        - name: source
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [auto, cache]
+            default: auto
+          description: >-
+            `auto` (default) reads PDO-when-exchanging else SDO else cache;
+            `cache` returns the cached value with no bus access.
+      responses:
+        "200":
+          description: The parameter (value plus metadata)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceParameter"
+        "400":
+          description: slavePosition, index, or subindex is missing or not a valid integer
+        "500":
+          $ref: "#/components/responses/DriverError"
+    put:
+      summary: Write a single parameter value (PDO-aware)
+      operationId: writeParameter
+      description: >
+        Writes one parameter of the device at `slavePosition`. The value is coerced
+        to the parameter's declared data type, then routed: staged into the process
+        image when the device is exchanging and the object is output (RxPDO) mapped —
+        sent on the next cycle — otherwise written via an SDO download, otherwise held
+        in the cache as pending until the device is back online.
+
+        This is the endpoint to set a target (e.g. target torque 0x6071) or the modes
+        of operation: it knows which objects are PDO-mapped and stages them into the
+        process data, falling back to SDO transparently. Returns the updated
+        `DeviceParameter` (with the coerced value and resulting sync state).
+
+        Both `index` and `subindex` accept decimal or hexadecimal notation; prefix
+        with `0x` for hex.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: index
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 65535
+          description: CoE object index in decimal (e.g. 24676 for 0x6064)
+          example: 24676
+        - name: subindex
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 0
+            maximum: 255
+          description: CoE object subindex in decimal
+          example: 0
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value:
+                  description: >-
+                    The value to set, coerced to the parameter's declared type. A
+                    number for integer/real objects, a string for string objects, or
+                    an array of bytes for octet/domain objects.
+                  oneOf:
+                    - type: number
+                    - type: string
+                    - type: array
+                      items:
+                        type: integer
+                        minimum: 0
+                        maximum: 255
+                  example: 100
+      responses:
+        "200":
+          description: The updated parameter (value plus metadata)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeviceParameter"
+        "400":
+          description: slavePosition, index, or subindex is invalid, or the body is malformed
+        "500":
+          $ref: "#/components/responses/DriverError"
   /api/devices/{slavePosition}/registers/{address}:
     get:
       summary: Read bytes from an ESC register

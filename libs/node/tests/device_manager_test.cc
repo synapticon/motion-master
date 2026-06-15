@@ -254,6 +254,8 @@ TEST(DeviceManagerDelegates, UnknownDeviceErrors) {
   EXPECT_FALSE(dm.readDeviceParameter(99, 0x6064, 0x00).has_value());
   EXPECT_FALSE(
       dm.writeDeviceParameter(99, 0x6064, 0x00, DeviceParameterValue{uint32_t{1}}).has_value());
+  EXPECT_FALSE(dm.deviceParameterView(99, 0x6064, 0x00, /*refreshFromBus=*/true).has_value());
+  EXPECT_FALSE(dm.deviceParameterView(99, 0x6064, 0x00, /*refreshFromBus=*/false).has_value());
 }
 
 TEST(DeviceManagerWatchdog, GetReturnsDriverConfig) {

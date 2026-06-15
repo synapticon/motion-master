@@ -470,6 +470,24 @@ class DeviceManager {
                                                                        uint16_t index,
                                                                        uint8_t subindex);
 
+  /// @brief Returns a full parameter struct (value + metadata), optionally refreshed from the bus.
+  ///
+  /// Backs the @c GET /api/devices/{pos}/parameters/{index}/{subindex} route. When
+  /// @p refreshFromBus is @c true (the @c ?source=auto default) the cache is first synced via the
+  /// live PDO image or an SDO upload (routing lives in @c Device::readParameter); when @c false
+  /// (the @c ?source=cache path) the cached struct is returned without any bus I/O. Either way the
+  /// returned value is a copy taken under the parameter-cache lock, so it is safe off-thread.
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @param index          CoE object index.
+  /// @param subindex       CoE object subindex.
+  /// @param refreshFromBus When @c true, sync the cache from the device before copying.
+  /// @return The parameter, or an error string if the device or parameter is unknown, or (when
+  ///         refreshing) the read fails.
+  std::expected<DeviceParameter, std::string> deviceParameterView(uint16_t slavePosition,
+                                                                  uint16_t index, uint8_t subindex,
+                                                                  bool refreshFromBus);
+
   /// @brief Convenience: finds a device by position and writes one of its parameters.
   ///
   /// Equivalent to @c findDevice(slavePosition)->writeParameter(index, subindex, value) —

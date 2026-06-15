@@ -225,14 +225,13 @@ export default function ParametersPage() {
     setRefreshingKeys(prev => new Set(prev).add(key))
     setRowMsg(null)
     try {
-      const res = await api.sdoUpload(slavePosition, p.index, p.subindex)
-      const decoded = decodeSdoBytes(p.dataTypeName, res.data.data)
+      // Smart read: PDO-aware (live process image when exchanging, SDO otherwise) and returns the
+      // full parameter (decoded value + sync state), so no client-side byte decode is needed.
+      const res = await api.readParameter(slavePosition, p.index, p.subindex)
       queryClient.setQueryData(paramsQueryKey, (prev: typeof paramsQuery.data) => {
         if (!prev) return prev
         const next = prev.data.map(x =>
-          x.index === p.index && x.subindex === p.subindex
-            ? { ...x, value: decoded, syncState: 'synced' as const }
-            : x,
+          x.index === p.index && x.subindex === p.subindex ? res.data : x,
         )
         return { ...prev, data: next }
       })
@@ -265,22 +264,21 @@ export default function ParametersPage() {
       setRowMsg({ key, message: encoded.error, kind: 'error' })
       return
     }
+    // Reuse the SDO encoder/decoder purely to validate the input and turn it into the typed JS
+    // value the smart write expects (number / string / byte array) — the server coerces it to the
+    // object's declared width.
+    const sent = decodeSdoBytes(p.dataTypeName, encoded.bytes)
     setSettingKeys(prev => new Set(prev).add(key))
     setRowMsg(null)
     try {
-      await api.sdoDownload(slavePosition, p.index, p.subindex, { data: encoded.bytes })
-      // The write was accepted by the mailbox, but the device may clamp, coerce, or
-      // ignore the value — so read it back rather than trusting what we sent, and
-      // show the device's actual value. (Write-only objects can't be read back, so
-      // for those we fall back to the bytes we wrote.)
-      const sent = decodeSdoBytes(p.dataTypeName, encoded.bytes)
+      // Smart write: PDO-staged when the object is output-mapped + exchanging, SDO otherwise. The
+      // device may still clamp, coerce, or ignore the value — so for readable objects read it back
+      // (PDO-aware) rather than trusting what we sent. Write-only objects keep the sent value.
+      const written = await api.writeParameter(slavePosition, p.index, p.subindex, { value: sent })
       const readBack = isReadable(p.access)
       const value = readBack
-        ? decodeSdoBytes(
-            p.dataTypeName,
-            (await api.sdoUpload(slavePosition, p.index, p.subindex)).data.data,
-          )
-        : sent
+        ? (await api.readParameter(slavePosition, p.index, p.subindex)).data.value
+        : written.data.value
       queryClient.setQueryData(paramsQueryKey, (prev: typeof paramsQuery.data) => {
         if (!prev) return prev
         const next = prev.data.map(x =>
@@ -396,10 +394,12 @@ export default function ParametersPage() {
         title="Parameters"
         description={
           <>
-            Read and write the device's CoE object dictionary over SDO (Service Data Object) — the
-            parameters addressed by index and subindex (e.g. 0x6064 position actual value). Upload a
-            single value to inspect it, download a value to set it, or browse the full dictionary.
-            SDO access runs over the EtherCAT mailbox and works from PRE-OP up.
+            Read and write the device's CoE object dictionary — the parameters addressed by index
+            and subindex (e.g. 0x6064 position actual value). Reading and setting a value in the
+            list below is PDO-aware: it uses the live process image (or stages an output, for an
+            RxPDO like a target) while the device is exchanging, and falls back to SDO over the
+            mailbox otherwise. The manual Upload/Download tool below is always raw SDO and works
+            from PRE-OP up.
           </>
         }
       />
@@ -408,8 +408,15 @@ export default function ParametersPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
 
         <section>
-          <p className="eyebrow mb-5">SDO Upload</p>
+          <p className="eyebrow mb-5">Read SDO</p>
           <div className="border border-grey-200 p-5 space-y-4">
+
+            <p className="text-xs text-grey-500">
+              Raw, byte-level CoE SDO read (<span className="font-mono">readSdo</span>) of any
+              object by index/subindex — no PDO awareness, always over the mailbox. To read a
+              parameter by value (PDO-aware), use the <span className="font-mono">↻</span> in the
+              parameter list below instead.
+            </p>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -441,7 +448,7 @@ export default function ParametersPage() {
             </div>
 
             <button onClick={handleUpload} disabled={!canUpload} className={btnCls}>
-              {uploading ? 'Uploading…' : 'Upload'}
+              {uploading ? 'Reading…' : 'Read SDO'}
             </button>
 
             {error && (
@@ -472,13 +479,15 @@ export default function ParametersPage() {
         </section>
 
         <section>
-          <p className="eyebrow mb-5">SDO Download</p>
+          <p className="eyebrow mb-5">Write SDO</p>
           <div className="border border-grey-200 p-5 space-y-4">
 
             <p className="text-xs text-grey-500">
-              Writes raw bytes straight to the device's object dictionary (CoE SDO download).
-              The cached value in the parameter list below is <strong>not</strong> updated —
-              read it back with the row's <span className="font-mono">↻</span> to confirm.
+              Raw, byte-level CoE SDO write (<span className="font-mono">writeSdo</span>) straight
+              to the device's object dictionary — no PDO awareness, always over the mailbox. The
+              cached value in the parameter list below is <strong>not</strong> updated — read it
+              back with the row's <span className="font-mono">↻</span> to confirm. To set a
+              parameter by value (PDO-aware), use the row's Set button instead.
             </p>
 
             <div className="grid grid-cols-2 gap-3">
@@ -547,7 +556,7 @@ export default function ParametersPage() {
             </div>
 
             <button onClick={handleDownload} disabled={!canDownload} className={btnCls}>
-              {downloading ? 'Downloading…' : 'Download'}
+              {downloading ? 'Writing…' : 'Write SDO'}
             </button>
 
             {dlError && (
@@ -576,6 +585,14 @@ export default function ParametersPage() {
         <section>
           <p className="eyebrow mb-5">Parameter list</p>
           <div className="border border-grey-200 p-5 space-y-4">
+            <p className="text-xs text-grey-500">
+              Reading (<span className="font-mono">↻</span>) and setting a value here is
+              <strong> PDO-aware</strong> (<span className="font-mono">readParameter</span> /{' '}
+              <span className="font-mono">writeParameter</span>): while the device is exchanging it
+              uses the live process image — or stages an output, for an RxPDO like a target — and
+              falls back to SDO over the mailbox otherwise. Use the Read/Write SDO tools above for
+              raw byte-level access by index.
+            </p>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
               {params.length > 0 && (
                 <div className="flex items-center gap-3 flex-1 min-w-[12rem]">
@@ -647,9 +664,10 @@ export default function ParametersPage() {
               <p className="text-xs text-grey-500">
                 Values are cached from the last read, not live. <strong>Reload</strong> re-fetches
                 the cache (no bus traffic); a row's <span className="font-mono">↻</span> reads that
-                one value live from the device via SDO upload. Edit a writable row's value and press
-                <strong> Set</strong> to write it back via SDO download — read-only objects are
-                locked.
+                one value live (readParameter — live process image when exchanging, SDO otherwise).
+                Edit a writable row's value and press <strong> Set</strong> to write it back
+                (writeParameter — staged as a process-data output when exchanging, SDO otherwise) —
+                read-only objects are locked.
               </p>
             )}
 
@@ -692,14 +710,14 @@ export default function ParametersPage() {
                                   onChange={e => setEditValues(prev => ({ ...prev, [key]: e.target.value }))}
                                   disabled={!writable || busy}
                                   className="border border-grey-300 px-2 py-1 text-xs font-mono w-36 bg-white disabled:bg-grey-50 disabled:text-grey-500 disabled:cursor-not-allowed"
-                                  title={writable ? 'Edit, then Set to write via SDO download' : 'Read-only object'}
+                                  title={writable ? 'Edit, then Set to write this parameter (PDO-aware: staged to the process image when exchanging, SDO otherwise)' : 'Read-only object'}
                                 />
                                 <button
                                   type="button"
                                   onClick={() => handleSetValue(p)}
                                   disabled={!writable || busy}
                                   className="inline-flex items-center justify-center border border-grey-300 px-3 text-xs text-syn-red hover:text-ocean hover:border-grey-400 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer font-display uppercase tracking-wide"
-                                  title={writable ? 'Write this value via SDO download' : 'Read-only object'}
+                                  title={writable ? 'Write this parameter (PDO-aware: staged to the process image when exchanging, SDO otherwise)' : 'Read-only object'}
                                 >
                                   {setting ? '…' : 'Set'}
                                 </button>
@@ -708,7 +726,7 @@ export default function ParametersPage() {
                                   onClick={() => handleRefreshValue(p)}
                                   disabled={busy}
                                   className="inline-flex items-center justify-center border border-grey-300 px-2 text-grey-400 hover:text-syn-red hover:border-grey-400 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer leading-none"
-                                  title="Refresh by SDO upload"
+                                  title="Refresh this parameter (PDO-aware: live process image when exchanging, SDO otherwise)"
                                   aria-label="Refresh value"
                                 >
                                   {refreshing ? '…' : '↻'}

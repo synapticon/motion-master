@@ -88,22 +88,27 @@ class Device {
   /// partially-operational bus route each device correctly.
   bool exchangesProcessData() const;
 
-  /// @brief Uploads an object dictionary entry from the device (CoE SDO upload).
+  /// @brief Reads an object dictionary entry from the device (CoE SDO upload).
+  ///
+  /// Raw SDO read with no cache or PDO awareness — for the typed, PDO-aware path use
+  /// @c readParameter instead.
   ///
   /// @param index     CoE object index.
   /// @param subindex  CoE object subindex.
   /// @return The bytes transferred on success, or an error string if the mailbox transfer fails.
-  std::expected<std::vector<uint8_t>, std::string> upload(uint16_t index, uint8_t subindex) const;
+  std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t index, uint8_t subindex) const;
 
-  /// @brief Downloads (writes) an object dictionary entry to the device (CoE SDO download).
+  /// @brief Writes an object dictionary entry to the device (CoE SDO download).
   ///
-  /// Requires the device to be in PRE-OP, SAFE-OP, or OP (mailbox communication active).
+  /// Raw SDO write with no cache or PDO awareness — for the typed, PDO-aware path use
+  /// @c writeParameter instead. Requires the device to be in PRE-OP, SAFE-OP, or OP (mailbox
+  /// communication active).
   ///
   /// @param index     CoE object index.
   /// @param subindex  CoE object subindex.
   /// @param data      Bytes to write; size must match the object's length.
   /// @return Void on success, or an error string if the mailbox transfer fails.
-  std::expected<void, std::string> download(uint16_t index, uint8_t subindex,
+  std::expected<void, std::string> writeSdo(uint16_t index, uint8_t subindex,
                                             std::span<const uint8_t> data) const;
 
   /// @brief Reads a file from this device via File over EtherCAT (FoE).
@@ -266,6 +271,17 @@ class Device {
   /// @param subindex  CoE object subindex.
   /// @return The cached value, or @c nullopt if the parameter is unknown.
   std::optional<DeviceParameterValue> value(uint16_t index, uint8_t subindex) const;
+
+  /// @brief Returns a copy of a full parameter struct (value + metadata), no bus access.
+  ///
+  /// The struct-level analogue of @c value: a deep copy taken under the cache lock, so it is safe
+  /// to call off the control-plane thread (unlike @c parameter, which hands out a raw pointer).
+  /// Reflects the last value stored by a read/refresh; it does not itself touch the bus.
+  ///
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @return A copy of the parameter, or @c nullopt if the parameter is unknown.
+  std::optional<DeviceParameter> parameterCopy(uint16_t index, uint8_t subindex) const;
 
   /// @brief Returns a parameter's declared ETG.1020 data-type code, thread-safely (cache lock).
   ///

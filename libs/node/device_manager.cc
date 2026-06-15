@@ -1074,6 +1074,32 @@ std::expected<DeviceParameterValue, std::string> DeviceManager::readDeviceParame
   return device->readParameter(index, subindex);
 }
 
+std::expected<DeviceParameter, std::string> DeviceManager::deviceParameterView(
+    uint16_t slavePosition, uint16_t index, uint8_t subindex, bool refreshFromBus) {
+  // Shared lock for the same reason as readDeviceParameter: serialise against the exclusive
+  // mutators that rebuild devices_, so the device pointer and its parameter map stay valid for the
+  // refresh + copy below.
+  std::shared_lock lock(busMutex_);
+  Device* device = findDevice(slavePosition);
+  if (!device) {
+    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
+  }
+  // refreshFromBus == false is the ?source=cache path: serve the cached struct without any bus I/O.
+  // refreshFromBus == true (?source=auto) first syncs the cache via the live PDO image or an SDO
+  // upload (routing lives in Device::readParameter), then returns the updated struct.
+  if (refreshFromBus) {
+    if (auto r = device->readParameter(index, subindex); !r) {
+      return std::unexpected(r.error());
+    }
+  }
+  auto copy = device->parameterCopy(index, subindex);
+  if (!copy) {
+    return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
+                                       slavePosition, index, subindex));
+  }
+  return *copy;
+}
+
 std::expected<void, std::string> DeviceManager::writeDeviceParameter(
     uint16_t slavePosition, uint16_t index, uint8_t subindex, DeviceParameterValue newValue) {
   // Shared lock: serialise against the exclusive mutators that rebuild devices_/driver_, so a

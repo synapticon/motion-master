@@ -308,6 +308,30 @@ TEST(DeviceReadParameter, UnknownParameterErrors) {
   EXPECT_FALSE(device.readParameter(0x1234, 0x00).has_value());
 }
 
+TEST(DeviceParameterCopy, ReturnsFullStructFromCacheWithoutBusAccess) {
+  SdoFakeDriver driver;
+  Device device = deviceWithU32Param(driver);
+  driver.state = kPreOp;
+  driver.programRead(0x6065, 0x00, u32le(16));
+  ASSERT_TRUE(device.readParameter(0x6065, 0x00).has_value());  // sync the cache to 16
+
+  const size_t writesBefore = driver.writes.size();
+  auto copy = device.parameterCopy(0x6065, 0x00);
+  ASSERT_TRUE(copy.has_value());
+  EXPECT_EQ(copy->index, 0x6065);
+  EXPECT_EQ(copy->subindex, 0x00);
+  EXPECT_EQ(copy->dataType, kU32);
+  EXPECT_EQ(copy->value, DeviceParameterValue{uint32_t{16}});
+  EXPECT_EQ(copy->syncState, SyncState::Synced);
+  EXPECT_EQ(driver.writes.size(), writesBefore);  // a copy never touches the bus
+}
+
+TEST(DeviceParameterCopy, UnknownParameterReturnsNullopt) {
+  SdoFakeDriver driver;
+  Device device = deviceWithU32Param(driver);
+  EXPECT_FALSE(device.parameterCopy(0x1234, 0x00).has_value());
+}
+
 TEST(DeviceWriteParameter, OnlineDownloadsAndMarksSynced) {
   SdoFakeDriver driver;
   Device device = deviceWithU32Param(driver);

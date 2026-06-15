@@ -59,12 +59,12 @@ bool Device::exchangesProcessData() const {
          (state == EtherCatState::SafeOp || state == EtherCatState::Op);
 }
 
-std::expected<std::vector<uint8_t>, std::string> Device::upload(uint16_t index,
-                                                                uint8_t subindex) const {
+std::expected<std::vector<uint8_t>, std::string> Device::readSdo(uint16_t index,
+                                                                 uint8_t subindex) const {
   return driver_.readSdo(slavePosition_, index, subindex);
 }
 
-std::expected<void, std::string> Device::download(uint16_t index, uint8_t subindex,
+std::expected<void, std::string> Device::writeSdo(uint16_t index, uint8_t subindex,
                                                   std::span<const uint8_t> data) const {
   return driver_.writeSdo(slavePosition_, index, subindex, data);
 }
@@ -165,7 +165,7 @@ std::expected<void, std::string> Device::initializeParameters(bool readValues) {
     p.value = defaultValueForDataType(p.dataType);
     p.syncState = SyncState::Unknown;
     if (readValues) {
-      auto bytes = upload(p.index, p.subindex);
+      auto bytes = readSdo(p.index, p.subindex);
       if (bytes) {
         auto decoded = decodeSdoBytes(p.dataType, *bytes);
         if (decoded) {
@@ -226,7 +226,7 @@ std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIn
   // Subindex 0 of the assignment object is the count of assigned PDO mapping objects. A
   // device with no PDOs in this direction may not implement the object at all — treat a
   // failed read (or a zero count) as "no entries here", which is not an error.
-  auto countBytes = upload(assignmentIndex, 0);
+  auto countBytes = readSdo(assignmentIndex, 0);
   if (!countBytes) {
     return {};
   }
@@ -236,7 +236,7 @@ std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIn
   // would make a `uint8_t i <= 255` guard permanently true (i wraps 255->0), spinning forever.
   // The subindex argument is narrowed back to uint8_t at the call.
   for (unsigned i = 1; i <= pdoCount; ++i) {
-    auto pdoIndexBytes = upload(assignmentIndex, static_cast<uint8_t>(i));
+    auto pdoIndexBytes = readSdo(assignmentIndex, static_cast<uint8_t>(i));
     if (!pdoIndexBytes) {
       return std::unexpected(std::format("0x{:04X}:{:02X} (PDO assignment) read failed: {}",
                                          assignmentIndex, i, pdoIndexBytes.error()));
@@ -247,7 +247,7 @@ std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIn
     }
 
     // Subindex 0 of the mapping object is the count of mapped entries.
-    auto entryCountBytes = upload(mappingIndex, 0);
+    auto entryCountBytes = readSdo(mappingIndex, 0);
     if (!entryCountBytes) {
       return std::unexpected(std::format("0x{:04X}:00 (PDO mapping) read failed: {}", mappingIndex,
                                          entryCountBytes.error()));
@@ -256,7 +256,7 @@ std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIn
 
     // Wider counter for the same reason as the outer loop: entryCount == 255 must still terminate.
     for (unsigned e = 1; e <= entryCount; ++e) {
-      auto entryBytes = upload(mappingIndex, static_cast<uint8_t>(e));
+      auto entryBytes = readSdo(mappingIndex, static_cast<uint8_t>(e));
       if (!entryBytes) {
         return std::unexpected(std::format("0x{:04X}:{:02X} (PDO mapping entry) read failed: {}",
                                            mappingIndex, e, entryBytes.error()));
@@ -365,6 +365,15 @@ std::optional<DeviceParameterValue> Device::value(uint16_t index, uint8_t subind
   return p->value;
 }
 
+std::optional<DeviceParameter> Device::parameterCopy(uint16_t index, uint8_t subindex) const {
+  std::lock_guard<std::mutex> lock(*parametersMutex_);
+  const DeviceParameter* p = parameter(index, subindex);
+  if (!p) {
+    return std::nullopt;
+  }
+  return *p;
+}
+
 std::optional<uint16_t> Device::dataType(uint16_t index, uint8_t subindex) const {
   std::lock_guard<std::mutex> lock(*parametersMutex_);
   const DeviceParameter* p = parameter(index, subindex);
@@ -408,7 +417,7 @@ std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t 
   if (!mailboxActive()) {
     return p->value;  // no mailbox: serve the cached value, never touch the bus
   }
-  auto bytes = upload(index, subindex);
+  auto bytes = readSdo(index, subindex);
   if (!bytes) {
     return std::unexpected(bytes.error());
   }
@@ -458,7 +467,7 @@ std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t 
     p->syncState = SyncState::Pending;
     return std::unexpected(bytes.error());
   }
-  if (auto w = download(index, subindex, *bytes); !w) {
+  if (auto w = writeSdo(index, subindex, *bytes); !w) {
     p->syncState = SyncState::Pending;
     return std::unexpected(w.error());
   }
@@ -500,7 +509,7 @@ uint16_t decodeEntryCount(std::span<const uint8_t> bytes) {
 std::expected<int, std::string> reconcileDetectedModules(const Device& device) {
   // 0xF050:00 — number of detected module slots. A slave that has no detected-module
   // list is simply not modular; treat that as "nothing to reconcile" rather than an error.
-  auto count = device.upload(kDetectedModuleIdentList, 0x00);
+  auto count = device.readSdo(kDetectedModuleIdentList, 0x00);
   if (!count) {
     spdlog::debug("Device {}: no detected-module list (0xF050); not a modular device",
                   device.slavePosition());
@@ -515,7 +524,7 @@ std::expected<int, std::string> reconcileDetectedModules(const Device& device) {
   // device reporting 65535 — and avoids truncating the subindex argument for sub > 255.
   const unsigned slotCount = std::min<unsigned>(slots, 0xFFu);
   for (unsigned sub = 1; sub <= slotCount; ++sub) {
-    auto detected = device.upload(kDetectedModuleIdentList, static_cast<uint8_t>(sub));
+    auto detected = device.readSdo(kDetectedModuleIdentList, static_cast<uint8_t>(sub));
     if (!detected || detected->size() != sizeof(uint32_t)) {
       continue;
     }
@@ -526,11 +535,11 @@ std::expected<int, std::string> reconcileDetectedModules(const Device& device) {
       continue;
     }
     // Skip the write when the configured list already matches — keeps this idempotent.
-    auto configured = device.upload(kConfiguredModuleIdentList, static_cast<uint8_t>(sub));
+    auto configured = device.readSdo(kConfiguredModuleIdentList, static_cast<uint8_t>(sub));
     if (configured && *configured == *detected) {
       continue;
     }
-    if (auto w = device.download(kConfiguredModuleIdentList, static_cast<uint8_t>(sub), *detected);
+    if (auto w = device.writeSdo(kConfiguredModuleIdentList, static_cast<uint8_t>(sub), *detected);
         !w) {
       if (!failures.empty()) {
         failures += "; ";

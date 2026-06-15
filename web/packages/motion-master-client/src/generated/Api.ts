@@ -607,6 +607,79 @@ export class Api<
       ...params,
     });
   /**
+   * @description Reads one parameter of the device at `slavePosition` and returns the full `DeviceParameter` (value plus metadata: data type, access, sync state). Unlike the raw `GET …/sdo/{index}/{subindex}` endpoint, this is PDO-aware. With `source=auto` (the default) the value is taken from the live process image when the device is exchanging and the object is PDO-mapped, otherwise via an SDO upload, otherwise from the cache. With `source=cache` the cached value is served with no bus access at all. Both `index` and `subindex` accept decimal or hexadecimal notation; prefix with `0x` for hex (e.g. `0x6064` or `24676` for object 0x6064).
+   *
+   * @name ReadParameter
+   * @summary Read a single parameter value (PDO-aware, with optional cache-only mode)
+   * @request GET:/api/devices/{slavePosition}/parameters/{index}/{subindex}
+   */
+  readParameter = (
+    slavePosition: number,
+    index: number,
+    subindex: number,
+    query?: {
+      /**
+       * `auto` (default) reads PDO-when-exchanging else SDO else cache; `cache` returns the cached value with no bus access.
+       * @default "auto"
+       */
+      source?: "auto" | "cache";
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      DeviceParameter,
+      void | {
+        /**
+         * Human-readable error message from the driver
+         * @example "FPRD slave 1: wkc=0"
+         */
+        error: string;
+      }
+    >({
+      path: `/api/devices/${slavePosition}/parameters/${index}/${subindex}`,
+      method: "GET",
+      query: query,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Writes one parameter of the device at `slavePosition`. The value is coerced to the parameter's declared data type, then routed: staged into the process image when the device is exchanging and the object is output (RxPDO) mapped — sent on the next cycle — otherwise written via an SDO download, otherwise held in the cache as pending until the device is back online. This is the endpoint to set a target (e.g. target torque 0x6071) or the modes of operation: it knows which objects are PDO-mapped and stages them into the process data, falling back to SDO transparently. Returns the updated `DeviceParameter` (with the coerced value and resulting sync state). Both `index` and `subindex` accept decimal or hexadecimal notation; prefix with `0x` for hex.
+   *
+   * @name WriteParameter
+   * @summary Write a single parameter value (PDO-aware)
+   * @request PUT:/api/devices/{slavePosition}/parameters/{index}/{subindex}
+   */
+  writeParameter = (
+    slavePosition: number,
+    index: number,
+    subindex: number,
+    data: {
+      /**
+       * The value to set, coerced to the parameter's declared type. A number for integer/real objects, a string for string objects, or an array of bytes for octet/domain objects.
+       * @example 100
+       */
+      value: number | string | number[];
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      DeviceParameter,
+      void | {
+        /**
+         * Human-readable error message from the driver
+         * @example "FPRD slave 1: wkc=0"
+         */
+        error: string;
+      }
+    >({
+      path: `/api/devices/${slavePosition}/parameters/${index}/${subindex}`,
+      method: "PUT",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
    * @description Reads `length` bytes from the ESC register at `address` on the slave at `slavePosition` using a Configured-Address Read (FPRD) datagram. Pass `address` in decimal (e.g. 272 for DL Status at 0x0110).
    *
    * @name ReadRegister

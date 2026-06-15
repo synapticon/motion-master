@@ -31,12 +31,6 @@ jobs:
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
 
-      # The HTTP client is generated from swagger.yml and gitignored, so it
-      # must be produced before the client package (and thus the tests) can
-      # resolve ./generated/http-client.
-      - name: Generate API client
-        run: pnpm --filter @synapticon/motion-master-client generate
-
       - name: Run API tests
         run: pnpm --filter motion-master-api-tests test
         env:

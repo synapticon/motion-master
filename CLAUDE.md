@@ -72,7 +72,7 @@ Build output goes to `build/<preset>/`. Compiler requirements: C++23, warnings a
 
 Files updated by the script: `VERSION`, `vcpkg.json`, the root workspace `package.json`, `web/apps/motion-master/package.json`, `web/packages/motion-master-client/package.json`, `hil/api/package.json`, `apps/motion_master/swagger.yml`, the `StringConstant` assertion in `libs/core/tests/version_test.cc`, and the sidebar badge in `web/apps/motion-master/src/layouts/RootLayout.tsx`.
 
-The generated HTTP API client (`web/packages/motion-master-client/src/generated/`) is produced from `swagger.yml` via `swagger-typescript-api` (`pnpm --filter @synapticon/motion-master-client generate`) and is gitignored — regenerate it if the API shape changed.
+The generated HTTP API client (`web/packages/motion-master-client/src/generated/`) is produced from `swagger.yml` via `swagger-typescript-api` (`pnpm --filter @synapticon/motion-master-client generate`) and is **committed to the repo** — regenerate and commit it whenever the API shape changes. The `api-client-drift` job in `lint.yml` regenerates from `swagger.yml` and fails on any diff, so a stale committed client is caught in CI.
 
 After bumping, commit all changed files, then push a `v<version>` tag to trigger `release.yml` — which builds the binaries **and** publishes `@synapticon/motion-master-client@<version>` to npm (prereleases under the `next` dist-tag; needs the `NPM_TOKEN` repo secret).
 

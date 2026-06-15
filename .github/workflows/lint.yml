@@ -59,3 +59,31 @@ jobs:
             --quiet \
             -I libs \
             apps libs
+
+  api-client-drift:
+    name: Generated API client is up to date
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+
+      - name: Install workspace dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate API client from swagger.yml
+        run: pnpm --filter @synapticon/motion-master-client generate
+
+      - name: Fail if the committed client is out of date
+        run: |
+          git diff --exit-code web/packages/motion-master-client/src/generated/ \
+            || { echo "::error::Generated API client is out of date. Run 'pnpm --filter @synapticon/motion-master-client generate' and commit the result."; exit 1; }

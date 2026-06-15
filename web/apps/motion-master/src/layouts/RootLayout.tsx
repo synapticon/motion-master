@@ -112,6 +112,11 @@ function DeviceSection({
     queryFn: () => api.getDeviceParameters(Number(deviceId)),
     staleTime: Infinity,
     retry: false,
+    // The backend reads the OD automatically once the device reaches PRE-OP, which is often
+    // after this query first runs and returns an empty list. With staleTime: Infinity that empty
+    // result would stick forever. Poll while empty so the green dictionary icon (and the shared
+    // Parameters page cache) pick up the auto-read; stop polling the moment it is populated.
+    refetchInterval: (query) => ((query.state.data?.data?.length ?? 0) > 0 ? false : 2000),
   })
   const parameterCount: number | null = parametersQuery.isPending
     ? null

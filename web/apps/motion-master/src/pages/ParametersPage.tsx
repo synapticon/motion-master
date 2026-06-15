@@ -190,6 +190,10 @@ export default function ParametersPage() {
     queryFn: () => api.getDeviceParameters(slavePosition),
     staleTime: Infinity,
     retry: false,
+    // The OD is read automatically when the device reaches PRE-OP, which can land after this
+    // query's first (empty) fetch; staleTime: Infinity would otherwise pin that empty list. Poll
+    // while empty so the list appears once the backend has enumerated it, then stop.
+    refetchInterval: (query) => ((query.state.data?.data?.length ?? 0) > 0 ? false : 2000),
   })
 
   const initMutation = useMutation({

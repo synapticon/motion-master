@@ -430,6 +430,37 @@ std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t 
   return p->value;
 }
 
+std::expected<void, std::string> Device::readAllParameters() {
+  // Snapshot the readable objects under the lock, then read each with the lock released — read
+  // parameter re-locks per transaction, so this multi-mailbox sweep never holds parametersMutex_
+  // across the whole duration (a concurrent cached read waits at most one round-trip). Write-only
+  // objects are skipped: an SDO upload of one would abort and only add a spurious failure log.
+  std::vector<std::pair<uint16_t, uint8_t>> targets;
+  {
+    std::lock_guard<std::mutex> lock(*parametersMutex_);
+    if (parameters_.empty()) {
+      return std::unexpected(std::format(
+          "device {}: no parameters loaded — initialise the parameter list first", slavePosition_));
+    }
+    targets.reserve(parameters_.size());
+    for (const auto& [key, p] : parameters_) {
+      if (p.isReadable()) {
+        targets.emplace_back(p.index, p.subindex);
+      }
+    }
+  }
+  // Best-effort, like initializeParameters(readValues=true): a per-entry failure keeps that entry's
+  // cached value and is logged, and the sweep still succeeds so one bad object never blocks the
+  // rest.
+  for (const auto& [index, subindex] : targets) {
+    if (auto r = readParameter(index, subindex); !r) {
+      spdlog::warn("Device {}: read 0x{:04X}:{:02X} failed: {}", slavePosition_, index, subindex,
+                   r.error());
+    }
+  }
+  return {};
+}
+
 std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t subindex,
                                                         DeviceParameterValue newValue) {
   // Held across the download below (one mailbox round-trip), like readParameter.

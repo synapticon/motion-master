@@ -946,6 +946,19 @@ std::expected<void, std::string> DeviceManager::initializeDeviceParameters(uint1
   return it->initializeParameters(readValues);
 }
 
+std::expected<void, std::string> DeviceManager::readAllDeviceParameters(uint16_t slavePosition) {
+  // Shared lock, like readDeviceParameter/deviceParameterView: serialise against the exclusive
+  // mutators that rebuild devices_/driver_ so the device pointer stays valid for the sweep, while
+  // still allowing concurrent off-thread reads. Device::readAllParameters re-takes the per-device
+  // parametersMutex_ per entry, so this holds only the shared bus lock for the duration.
+  std::shared_lock lock(busMutex_);
+  Device* device = findDevice(slavePosition);
+  if (!device) {
+    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
+  }
+  return device->readAllParameters();
+}
+
 std::optional<std::vector<uint8_t>> ProcessData::readPdo(uint16_t slavePosition, uint16_t index,
                                                          uint8_t subindex) const {
   const ProcessImage* img = image.load(std::memory_order_acquire);

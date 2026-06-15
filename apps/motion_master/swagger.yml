@@ -712,6 +712,42 @@ paths:
           description: slavePosition is not a valid integer
         "500":
           $ref: "#/components/responses/DriverError"
+  /api/devices/{slavePosition}/parameters/read:
+    post:
+      summary: Refresh the cached value of every parameter without re-enumerating the dictionary
+      operationId: readAllDeviceParameters
+      description: >
+        Re-reads the value of every readable parameter already loaded for the
+        device at `slavePosition`, leaving the parameter list itself intact (it
+        does not re-enumerate the object dictionary — use
+        `POST …/parameters/init` for that).  Each value is read PDO-aware: from
+        the live process image when the device is exchanging and the object is
+        PDO-mapped, otherwise via an SDO upload over the mailbox.  Write-only
+        objects are skipped.  Best-effort: an entry that fails to read keeps its
+        cached value and the call still succeeds.  Returns the refreshed list,
+        ordered by `(index, subindex)`.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: Refreshed parameter list ordered by (index, subindex)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/DeviceParameter"
+        "400":
+          description: slavePosition is not a valid integer
+        "500":
+          $ref: "#/components/responses/DriverError"
   /api/devices/{slavePosition}/parameters:
     get:
       summary: Read the previously initialised parameter list for a device

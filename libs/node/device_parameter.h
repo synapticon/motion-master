@@ -123,6 +123,12 @@ struct DeviceParameter {
     return setValue(DeviceParameterValue{v});
   }
 
+  /// @brief Whether the object is readable in any state (ETG.1000.6 ObjAccess read bits 0-2).
+  ///
+  /// Write-only objects (e.g. a command/trigger sub-object) report no read bits; an SDO upload of
+  /// one aborts, so a bulk value refresh should skip them rather than log a spurious failure.
+  bool isReadable() const { return (access & 0x07) != 0; }
+
   /// @brief Whether @p v lies within @c [minValue, maxValue].
   ///
   /// Bounds are compared via numeric coercion. Returns @c true when @p v is

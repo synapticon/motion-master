@@ -311,6 +311,23 @@ class Device {
   ///         unknown or, when online, the SDO upload / decode fails.
   std::expected<DeviceParameterValue, std::string> readParameter(uint16_t index, uint8_t subindex);
 
+  /// @brief Refreshes the cached value of every readable parameter, keeping the list intact.
+  ///
+  /// Re-reads each entry already in the map (it does not re-enumerate the object dictionary —
+  /// use @c initializeParameters for that) via @c readParameter, so each value is PDO-aware
+  /// (live process image when exchanging, SDO over the mailbox otherwise). The list of objects
+  /// is snapshotted under the lock first, then each is read with the lock released per entry
+  /// (one mailbox round-trip each), so a concurrent cached read of this device never waits for
+  /// the whole — potentially multi-second — sweep.
+  ///
+  /// Write-only objects are skipped (an SDO upload of one would abort). Best-effort, like
+  /// @c initializeParameters(readValues=true): an entry that fails to read keeps its cached value
+  /// and is logged, and the call still succeeds so one bad object never blocks the rest.
+  ///
+  /// @return Void on success (the always-taken best-effort path), or an error string if the
+  ///         device has no parameters loaded yet (call @c initializeParameters first).
+  std::expected<void, std::string> readAllParameters();
+
   /// @brief Writes a parameter value, always updating the cache first.
   ///
   /// @p value is coerced into the parameter's declared data type and stored in the cache

@@ -171,6 +171,7 @@ export default function ParametersPage() {
   const [readValues, setReadValues] = useState(false)
   const [filter, setFilter] = useState('')
   const [initElapsedMs, setInitElapsedMs] = useState<number | null>(null)
+  const [readAllElapsedMs, setReadAllElapsedMs] = useState<number | null>(null)
   const [reloadElapsedMs, setReloadElapsedMs] = useState<number | null>(null)
   const [refreshingKeys, setRefreshingKeys] = useState<Set<string>>(new Set())
   const [settingKeys, setSettingKeys] = useState<Set<string>>(new Set())
@@ -205,6 +206,24 @@ export default function ParametersPage() {
     },
     onMutate: () => {
       setInitElapsedMs(null)
+      setReadAllElapsedMs(null)
+      setReloadElapsedMs(null)
+    },
+    onSuccess: (res) => {
+      queryClient.setQueryData(paramsQueryKey, res)
+    },
+  })
+
+  const readAllMutation = useMutation({
+    mutationFn: async () => {
+      const start = performance.now()
+      const res = await api.readAllDeviceParameters(slavePosition)
+      setReadAllElapsedMs(performance.now() - start)
+      return res
+    },
+    onMutate: () => {
+      setInitElapsedMs(null)
+      setReadAllElapsedMs(null)
       setReloadElapsedMs(null)
     },
     onSuccess: (res) => {
@@ -214,6 +233,7 @@ export default function ParametersPage() {
 
   async function handleReload() {
     setReloadElapsedMs(null)
+    setReadAllElapsedMs(null)
     setInitElapsedMs(null)
     const start = performance.now()
     await paramsQuery.refetch()
@@ -311,7 +331,12 @@ export default function ParametersPage() {
   }
 
   const params: DeviceParameter[] = paramsQuery.data?.data ?? []
-  const initError = initMutation.error ? apiError(initMutation.error) : null
+  const listError = initMutation.error
+    ? apiError(initMutation.error)
+    : readAllMutation.error
+      ? apiError(readAllMutation.error)
+      : null
+  const listBusy = initMutation.isPending || readAllMutation.isPending || paramsQuery.isFetching
 
   const filterLower = filter.trim().toLowerCase()
   const filteredParams = filterLower
@@ -631,43 +656,53 @@ export default function ParametersPage() {
                     onChange={e => setReadValues(e.target.checked)}
                     className="cursor-pointer"
                   />
-                  <span>Read values during init (SDO upload per entry — slower)</span>
+                  <span>Read values during re-initialize (SDO upload per entry — slower)</span>
                 </label>
                 <button
                   className={btnCls}
-                  disabled={initMutation.isPending}
+                  disabled={listBusy}
                   onClick={() => initMutation.mutate()}
+                  title="Clear the parameter list and re-enumerate the device's object dictionary over SDO Info (rebuilds names/types/access). With the checkbox on, also reads every value during the rebuild. Can take several seconds."
                 >
-                  {initMutation.isPending ? 'Initialising…' : params.length === 0 ? 'Initialize' : 'Re-initialize'}
+                  {initMutation.isPending ? 'Re-initialising…' : params.length === 0 ? 'Initialize' : 'Re-initialize'}
                 </button>
                 <button
                   className={btnGhostCls}
-                  disabled={paramsQuery.isFetching || params.length === 0}
-                  onClick={handleReload}
-                  title="Re-fetch the cached parameter list (no SDO Info traffic). Use after values may have changed on the device."
+                  disabled={listBusy || params.length === 0}
+                  onClick={() => readAllMutation.mutate()}
+                  title="Re-read the value of every parameter without rebuilding the list (PDO-aware: live process image when exchanging, SDO otherwise). Write-only objects are skipped."
                 >
-                  {paramsQuery.isFetching ? 'Reloading…' : 'Reload'}
+                  {readAllMutation.isPending ? 'Reading…' : 'Read all values'}
                 </button>
-                {(initElapsedMs !== null || reloadElapsedMs !== null) && (
+                <button
+                  className={btnGhostCls}
+                  disabled={listBusy || params.length === 0}
+                  onClick={handleReload}
+                  title="Re-fetch the cached parameter list from the server (no bus traffic). Use to pick up values changed elsewhere."
+                >
+                  {paramsQuery.isFetching ? 'Reloading…' : 'Reload list'}
+                </button>
+                {(initElapsedMs ?? readAllElapsedMs ?? reloadElapsedMs) !== null && (
                   <span className="text-xs text-grey-500 font-mono whitespace-nowrap">
-                    took {formatElapsed(initElapsedMs ?? reloadElapsedMs!)}
+                    took {formatElapsed((initElapsedMs ?? readAllElapsedMs ?? reloadElapsedMs)!)}
                   </span>
                 )}
               </div>
             </div>
 
-            {initError && (
-              <p className="text-xs text-status-bad font-mono">{initError}</p>
+            {listError && (
+              <p className="text-xs text-status-bad font-mono">{listError}</p>
             )}
 
             {params.length > 0 && (
               <p className="text-xs text-grey-500">
-                Values are cached from the last read, not live. <strong>Reload</strong> re-fetches
-                the cache (no bus traffic); a row's <span className="font-mono">↻</span> reads that
-                one value live (readParameter — live process image when exchanging, SDO otherwise).
-                Edit a writable row's value and press <strong> Set</strong> to write it back
-                (writeParameter — staged as a process-data output when exchanging, SDO otherwise) —
-                read-only objects are locked.
+                <strong>Re-initialize</strong> rebuilds the list from the object dictionary (slow,
+                SDO Info); <strong>Read all values</strong> refreshes every value in place without
+                rebuilding (PDO-aware — live process image when exchanging, SDO otherwise);{' '}
+                <strong>Reload list</strong> re-fetches the cached list from the server (no bus
+                traffic). A row's <span className="font-mono">↻</span> reads one value live; edit a
+                writable row and press <strong>Set</strong> to write it back (staged as a
+                process-data output when exchanging, SDO otherwise) — read-only objects are locked.
               </p>
             )}
 
@@ -724,7 +759,7 @@ export default function ParametersPage() {
                                 <button
                                   type="button"
                                   onClick={() => handleRefreshValue(p)}
-                                  disabled={busy}
+                                  disabled={listBusy}
                                   className="inline-flex items-center justify-center border border-grey-300 px-2 text-grey-400 hover:text-syn-red hover:border-grey-400 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer leading-none"
                                   title="Refresh this parameter (PDO-aware: live process image when exchanging, SDO otherwise)"
                                   aria-label="Refresh value"

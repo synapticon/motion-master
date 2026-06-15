@@ -467,6 +467,18 @@ class DeviceManager {
   std::expected<void, std::string> initializeDeviceParameters(uint16_t slavePosition,
                                                               bool readValues);
 
+  /// @brief Refreshes the cached value of every readable parameter of one device, in place.
+  ///
+  /// Unlike @c initializeDeviceParameters this does not re-enumerate the object dictionary — it
+  /// re-reads the values of the parameters already loaded (PDO-aware per entry). See
+  /// @c Device::readAllParameters for the per-entry semantics. Best-effort: a single object that
+  /// fails to read is logged and the call still succeeds.
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @return Void on success, or an error string if the device is unknown or has no parameters
+  ///         loaded yet.
+  std::expected<void, std::string> readAllDeviceParameters(uint16_t slavePosition);
+
   /// @brief Convenience: finds a device by position and reads one of its parameters.
   ///
   /// Equivalent to @c findDevice(slavePosition)->readParameter(index, subindex) — see

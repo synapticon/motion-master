@@ -838,6 +838,23 @@ void HttpServer::run() {
               const auto* device = deviceManager_.findDevice(pos);
               sendJson(res, config_.corsOrigin, nlohmann::json(device->parametersOrdered()));
             })
+      .post("/api/devices/:slavePosition/parameters/read",
+            [this](auto* res, auto* req) {
+              uint16_t pos{};
+              auto posParam = req->getParameter("slavePosition");
+              auto [p, ec] =
+                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+              if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+                sendStatus(res, "400 Bad Request", config_.corsOrigin);
+                return;
+              }
+              if (auto r = deviceManager_.readAllDeviceParameters(pos); !r) {
+                sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
+                return;
+              }
+              const auto* device = deviceManager_.findDevice(pos);
+              sendJson(res, config_.corsOrigin, nlohmann::json(device->parametersOrdered()));
+            })
       .get("/api/devices/:slavePosition/parameters",
            [this](auto* res, auto* req) {
              uint16_t pos{};

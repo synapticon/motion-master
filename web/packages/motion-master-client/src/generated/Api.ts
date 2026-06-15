@@ -557,6 +557,32 @@ export class Api<
       ...params,
     });
   /**
+   * @description Re-reads the value of every readable parameter already loaded for the device at `slavePosition`, leaving the parameter list itself intact (it does not re-enumerate the object dictionary — use `POST …/parameters/init` for that).  Each value is read PDO-aware: from the live process image when the device is exchanging and the object is PDO-mapped, otherwise via an SDO upload over the mailbox.  Write-only objects are skipped.  Best-effort: an entry that fails to read keeps its cached value and the call still succeeds.  Returns the refreshed list, ordered by `(index, subindex)`.
+   *
+   * @name ReadAllDeviceParameters
+   * @summary Refresh the cached value of every parameter without re-enumerating the dictionary
+   * @request POST:/api/devices/{slavePosition}/parameters/read
+   */
+  readAllDeviceParameters = (
+    slavePosition: number,
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      DeviceParameter[],
+      void | {
+        /**
+         * Human-readable error message from the driver
+         * @example "FPRD slave 1: wkc=0"
+         */
+        error: string;
+      }
+    >({
+      path: `/api/devices/${slavePosition}/parameters/read`,
+      method: "POST",
+      format: "json",
+      ...params,
+    });
+  /**
    * @description Returns the parameter list populated by the most recent call to `POST /api/devices/{slavePosition}/parameters/init`.  Empty before the first call.  Entries are ordered ascending by `(index, subindex)`.
    *
    * @name GetDeviceParameters

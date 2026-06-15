@@ -64,11 +64,12 @@ class SdoFakeDriver : public FieldbusDriver {
     reads[key(index, subindex)] = std::move(bytes);
   }
 
-  void programOd(uint16_t index, uint8_t subindex, uint16_t dataType) {
+  void programOd(uint16_t index, uint8_t subindex, uint16_t dataType, uint16_t access = 0x3F) {
     OdEntry e{};
     e.index = index;
     e.subindex = subindex;
     e.dataType = dataType;
+    e.access = access;
     ods.push_back(e);
   }
 
@@ -306,6 +307,68 @@ TEST(DeviceReadParameter, UnknownParameterErrors) {
   Device device = deviceWithU32Param(driver);
   driver.state = kPreOp;
   EXPECT_FALSE(device.readParameter(0x1234, 0x00).has_value());
+}
+
+TEST(DeviceReadAllParameters, RefreshesEveryReadableValueInPlace) {
+  SdoFakeDriver driver;
+  driver.programOd(0x6065, 0x00, kU32);  // readable+writable (default access)
+  driver.programOd(0x6066, 0x00, kU32);
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  driver.state = kPreOp;
+  driver.programRead(0x6065, 0x00, u32le(16));
+  driver.programRead(0x6066, 0x00, u32le(32));
+
+  ASSERT_TRUE(device.readAllParameters().has_value());
+
+  const auto* a = device.parameter(0x6065, 0x00);
+  const auto* b = device.parameter(0x6066, 0x00);
+  ASSERT_NE(a, nullptr);
+  ASSERT_NE(b, nullptr);
+  EXPECT_EQ(a->value, DeviceParameterValue{uint32_t{16}});
+  EXPECT_EQ(a->syncState, SyncState::Synced);
+  EXPECT_EQ(b->value, DeviceParameterValue{uint32_t{32}});
+  EXPECT_EQ(b->syncState, SyncState::Synced);
+}
+
+TEST(DeviceReadAllParameters, SkipsWriteOnlyObjects) {
+  SdoFakeDriver driver;
+  driver.programOd(0x6040, 0x00, kU32, /*access=*/0x38);  // write-only: no read bits
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  driver.state = kPreOp;
+  // An SDO upload would be answered, but the object is write-only — readAllParameters must not
+  // attempt it. (No programRead, so any upload would also error; the skip keeps the call clean.)
+
+  ASSERT_TRUE(device.readAllParameters().has_value());
+
+  const auto* p = device.parameter(0x6040, 0x00);
+  ASSERT_NE(p, nullptr);
+  EXPECT_EQ(p->syncState, SyncState::Unknown);  // never read
+}
+
+TEST(DeviceReadAllParameters, SucceedsDespiteAPerEntryReadFailure) {
+  SdoFakeDriver driver;
+  driver.programOd(0x6065, 0x00, kU32);
+  driver.programOd(0x6066, 0x00, kU32);
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  driver.state = kPreOp;
+  driver.programRead(0x6065, 0x00, u32le(16));
+  // 0x6066 has no programmed response → its upload errors. Best-effort: the sweep still succeeds
+  // and the readable sibling is refreshed.
+
+  ASSERT_TRUE(device.readAllParameters().has_value());
+
+  const auto* a = device.parameter(0x6065, 0x00);
+  ASSERT_NE(a, nullptr);
+  EXPECT_EQ(a->syncState, SyncState::Synced);
+}
+
+TEST(DeviceReadAllParameters, ErrorsWhenNoParametersLoaded) {
+  SdoFakeDriver driver;
+  Device device(1, driver);
+  EXPECT_FALSE(device.readAllParameters().has_value());
 }
 
 TEST(DeviceParameterCopy, ReturnsFullStructFromCacheWithoutBusAccess) {

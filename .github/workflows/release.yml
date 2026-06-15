@@ -55,8 +55,9 @@ jobs:
           dir=build/x64-linux-release/apps/motion_master
           cp setup.sh "$dir/setup.sh"
           cp SETUP.md "$dir/SETUP.md"
+          cp apps/motion_master/motion-master.example.jsonc "$dir/motion-master.example.jsonc"
           tar -czf "motion-master-${GITHUB_REF_NAME#v}-linux-x64.tar.gz" \
-            -C "$dir" motion-master cert.pem key.pem setup.sh SETUP.md
+            -C "$dir" motion-master cert.pem key.pem setup.sh SETUP.md motion-master.example.jsonc
 
       - name: Create deb and rpm
         run: ./tools/package.sh x64-linux-release
@@ -123,7 +124,7 @@ jobs:
           $dlls = Get-ChildItem "$bin/*.dll" | Where-Object { $_.Name -notmatch 'gtest|gmock' }
           # Build one flat string[] for -Path (mixing literals with a FileInfo[] expression
           # confuses Compress-Archive); use the DLLs' full paths.
-          $files = @("$dir/motion-master.exe","$dir/cert.pem","$dir/key.pem","SETUP.md") + $dlls.FullName
+          $files = @("$dir/motion-master.exe","$dir/cert.pem","$dir/key.pem","SETUP.md","apps/motion_master/motion-master.example.jsonc") + $dlls.FullName
           $zip = "motion-master-$($env:GITHUB_REF_NAME -replace '^v','')-windows-x64.zip"
           Compress-Archive -Force -DestinationPath $zip -Path $files
 
@@ -178,8 +179,9 @@ jobs:
         run: |
           dir=build/arm64-osx-release/apps/motion_master
           cp SETUP.md "$dir/SETUP.md"
+          cp apps/motion_master/motion-master.example.jsonc "$dir/motion-master.example.jsonc"
           tar -czf "motion-master-${GITHUB_REF_NAME#v}-macos-arm64.tar.gz" \
-            -C "$dir" motion-master cert.pem key.pem SETUP.md
+            -C "$dir" motion-master cert.pem key.pem SETUP.md motion-master.example.jsonc
 
       - name: Upload artifact
         uses: actions/upload-artifact@v5

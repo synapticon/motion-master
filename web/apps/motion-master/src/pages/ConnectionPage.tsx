@@ -1,7 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { version as uiVersion } from 'virtual:swagger-spec'
+import Callout from '../components/Callout'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
+
+const RELEASES_URL = 'https://github.com/synapticon/motion-master/releases'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
@@ -118,6 +122,17 @@ export default function ConnectionPage() {
   })
   const system = systemQuery.data?.data
 
+  const versionQuery = useQuery({
+    queryKey: ['version'],
+    queryFn: () => api.getVersion(),
+  })
+  const serverVersion = versionQuery.data?.data.version
+  // Both this web app's build version (the swagger spec's info.version, bumped in lock-step with the
+  // app by tools/bump-version.sh) and the server's reported version come from the same VERSION file,
+  // so an exact string mismatch means the locally installed server is out of step with this PWA —
+  // which Synapticon always serves at its latest release.
+  const versionMismatch = !!serverVersion && serverVersion !== uiVersion
+
   const refreshMutation = useMutation({
     mutationFn: () => api.refreshCert(),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['cert'] }),
@@ -140,6 +155,49 @@ export default function ConnectionPage() {
         description="Configure the host and ports used to reach the Motion Master backend, check the TLS certificate status and refresh it, review the configuration the backend started with, and inspect the OS and hardware it is running on."
       />
       <div className="p-4 sm:p-8 space-y-8">
+        <Callout variant={versionMismatch ? 'warning' : 'info'}>
+          <p>
+            {versionMismatch ? (
+              <>
+                <span className="font-display font-medium">Version mismatch.</span> This web app is{' '}
+                <code>v{uiVersion}</code>, but the Motion Master server it is connected to reports{' '}
+                <code>v{serverVersion}</code>. Mismatched versions can cause features here to behave
+                unexpectedly or fail — install the matching server release to bring them back in
+                sync.
+              </>
+            ) : serverVersion ? (
+              <>
+                This web app and the connected Motion Master server are both{' '}
+                <code>v{uiVersion}</code>.
+              </>
+            ) : (
+              <>
+                This web app is <code>v{uiVersion}</code>. Install the matching Motion Master server
+                release, or browse all releases below.
+              </>
+            )}
+          </p>
+          <p className="mt-0.5">
+            <a
+              href={`${RELEASES_URL}/tag/v${uiVersion}`}
+              target="_blank"
+              rel="noreferrer"
+              className="text-ocean hover:underline"
+            >
+              Download v{uiVersion}
+            </a>
+            <span className="text-grey-400"> · </span>
+            <a
+              href={RELEASES_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="text-ocean hover:underline"
+            >
+              All releases
+            </a>
+          </p>
+        </Callout>
+
         <section>
           <div className="flex items-center justify-between mb-3">
             <h2 className="eyebrow">Endpoint</h2>

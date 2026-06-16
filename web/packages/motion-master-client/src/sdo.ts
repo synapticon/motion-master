@@ -34,11 +34,19 @@ const INT_ENC: Partial<Record<SdoType, { size: number; signed: boolean }>> = {
 }
 
 // Accepts decimal (with optional leading '-') or 0x-prefixed hex; returns null on anything else.
-function parseBigIntFlexible(s: string): bigint | null {
+// Signed hex is signed-magnitude ("-0x1"), not two's-complement — so a value round-trips through
+// the range check in encodeSdoValue regardless of the base it was entered in.
+export function parseIntegerFlexible(s: string): bigint | null {
   if (/^-?[0-9]+$/.test(s)) return BigInt(s)
   if (/^0[xX][0-9a-fA-F]+$/.test(s)) return BigInt(s)
   if (/^-0[xX][0-9a-fA-F]+$/.test(s)) return -BigInt(s.slice(1))
   return null
+}
+
+// True for the fixed-width integer types — the ones a value can meaningfully be shown and edited
+// in hexadecimal (floats and strings have no base; `raw` is already entered as hex bytes).
+export function isIntegerSdoType(type: SdoType): boolean {
+  return type in INT_ENC
 }
 
 // Encodes a human-entered value into the little-endian byte sequence for an SDO download.
@@ -47,7 +55,7 @@ export function encodeSdoValue(type: SdoType, raw: string): { bytes: number[] } 
 
   const meta = INT_ENC[type]
   if (meta) {
-    const n = parseBigIntFlexible(s)
+    const n = parseIntegerFlexible(s)
     if (n === null) return { error: 'Not a valid integer' }
     const bits = BigInt(meta.size * 8)
     const min = meta.signed ? -(1n << (bits - 1n)) : 0n

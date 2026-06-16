@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import DevicePageHeader from '../components/DevicePageHeader'
+import HexDecInput from '../components/HexDecInput'
 import { useConnection } from '../contexts/ConnectionContext'
 import {
   type DeviceParameter,
@@ -12,6 +13,7 @@ import {
   decodeSdoBytes,
   interpretSdoBytes,
   sdoTypeForDataTypeName,
+  isIntegerSdoType,
 } from '@synapticon/motion-master-client'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
@@ -559,12 +561,13 @@ export default function ParametersPage() {
               </div>
               <div>
                 <label className={labelCls}>Value</label>
-                <input
-                  type="text"
+                <HexDecInput
                   value={dlValue}
-                  onChange={e => { setDlValue(e.target.value); clearDownloadStatus() }}
+                  onChange={v => { setDlValue(v); clearDownloadStatus() }}
+                  canHex={isIntegerSdoType(dlType)}
                   placeholder={SDO_TYPE_HINT[dlType]}
-                  className={inputCls}
+                  wrapperClassName="flex w-full"
+                  inputClassName={inputCls}
                 />
                 <p className="text-xs mt-1 font-mono">
                   {encodeError ? (
@@ -739,13 +742,16 @@ export default function ParametersPage() {
                             <td className="px-3 py-1.5 font-mono text-grey-700">{formatAccess(p.access)}</td>
                             <td className="px-3 py-1.5 font-mono">
                               <div className="flex items-stretch gap-2">
-                                <input
-                                  type="text"
+                                <HexDecInput
                                   value={editValue}
-                                  onChange={e => setEditValues(prev => ({ ...prev, [key]: e.target.value }))}
+                                  onChange={v => setEditValues(prev => ({ ...prev, [key]: v }))}
+                                  canHex={isIntegerSdoType(sdoTypeForDataTypeName(p.dataTypeName))}
                                   disabled={!writable || busy}
-                                  className="border border-grey-300 px-2 py-1 text-xs font-mono w-36 bg-white disabled:bg-grey-50 disabled:text-grey-500 disabled:cursor-not-allowed"
-                                  title={writable ? 'Edit, then Set to write this parameter (PDO-aware: staged to the process image when exchanging, SDO otherwise)' : 'Read-only object'}
+                                  toggleDisabled={busy}
+                                  hexPadDigits={Math.max(2, Math.ceil(p.bitLength / 4))}
+                                  wrapperClassName="flex w-60"
+                                  inputClassName="border border-grey-300 px-2 py-1 text-xs font-mono bg-white disabled:bg-grey-50 disabled:text-grey-500 disabled:cursor-not-allowed"
+                                  title={writable ? 'Edit, then Set to write this parameter (PDO-aware: staged to the process image when exchanging, SDO otherwise). Toggle hex/dec to view or enter the value in either base.' : 'Read-only object'}
                                 />
                                 <button
                                   type="button"

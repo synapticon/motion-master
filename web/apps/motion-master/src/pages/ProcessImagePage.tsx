@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { type ProcessImageObject, formatHex } from '@synapticon/motion-master-client'
+import Callout from '../components/Callout'
 import PageHeader from '../components/PageHeader'
 import ProcessImageExplainer from '../components/ProcessImageExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
@@ -196,11 +197,11 @@ export default function ProcessImagePage() {
         {img && (img.configured || img.generations > 0) && (
           <>
             {!img.configured && (
-              <div className="border border-status-warn/40 bg-status-warn/5 px-4 py-3 text-xs text-grey-700">
+              <Callout variant="warning">
                 Not currently exchanging — all devices have left SAFE-OP/OP, so the live image was
                 torn down. Showing the most recent published image (generation {img.generations}).
                 Working-counter health does not apply while the bus is idle.
-              </div>
+              </Callout>
             )}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <Stat

@@ -215,6 +215,17 @@ uint32_t readU32(const std::vector<uint8_t>& b) {
   return v;
 }
 
+// EtherCAT SDO abort code for "object does not exist in the object dictionary" (ETG.1000.6
+// Table 39). The FieldbusDriver surfaces SDO failures only as text (no structured abort code
+// crosses the interface boundary yet — see the "error strings throughout for now" note in
+// CLAUDE.md), so we match the formatted code the driver appends to its message; the format is
+// fixed at "0x{:08X}" in SoemFieldbusDriver::readSdo.
+constexpr uint32_t kSdoAbortObjectDoesNotExist = 0x06020000u;
+
+bool isObjectDoesNotExistAbort(const std::string& error) {
+  return error.find(std::format("0x{:08X}", kSdoAbortObjectDoesNotExist)) != std::string::npos;
+}
+
 }  // namespace
 
 std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIndex,
@@ -249,6 +260,32 @@ std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIn
     // Subindex 0 of the mapping object is the count of mapped entries.
     auto entryCountBytes = readSdo(mappingIndex, 0);
     if (!entryCountBytes) {
+      // An assignment slot may point at a mapping object the firmware does not implement in its
+      // CoE dictionary. TwinCAT-generated ESIs append an alignment-padding PDO (e.g. 0x1701) to
+      // round a SyncManager's PDO set up to a 32-bit boundary and describe it only in the ESI's
+      // MDP section — never as a real object — so an SDO upload aborts with "object does not
+      // exist" (0x06020000). That is a legitimate, ESI-configured padding reference, not a fault:
+      // an ESI-driven master takes the mapping from the XML and never reads the pad over CoE. Skip
+      // it. SOEM already accounts for the pad bytes in the SM window length (it falls back to the
+      // SII/SM-register size when its own CoE mapping read fails), and buildProcessImage derives
+      // byte boundaries from that driver layout, so the padding needs no entry in our logical view.
+      //
+      // This skip is correct only because such padding is *trailing* — the last assignment slot,
+      // as 0x1C12:05 is here — so dropping it shifts no real object's bit offset. If a future
+      // (modular) device ever placed an alignment pad *between* real PDOs, skipping it without
+      // advancing `totalBits` would shift every later entry's offset; handling that would mean
+      // reconciling our summed bits against SOEM's per-slave Obits/Ibits (the true mapped totals)
+      // or reading the pad's bit size from the SII PDO category (parseSii decodes it). Neither is
+      // needed today, so we deliberately do not implement it.
+      if (isObjectDoesNotExistAbort(entryCountBytes.error())) {
+        spdlog::debug(
+            "Device {}: PDO assignment 0x{:04X}:{:02X} references mapping object 0x{:04X} which "
+            "the "
+            "device does not implement (SDO abort 0x{:08X}) — treating as alignment padding, "
+            "skipping",
+            slavePosition_, assignmentIndex, i, mappingIndex, kSdoAbortObjectDoesNotExist);
+        continue;
+      }
       return std::unexpected(std::format("0x{:04X}:00 (PDO mapping) read failed: {}", mappingIndex,
                                          entryCountBytes.error()));
     }

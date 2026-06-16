@@ -573,6 +573,29 @@ TEST(DeviceReadPdoMappings, UnreadableMappingObjectIsAnError) {
   EXPECT_NE(result.error().find("1600"), std::string::npos);
 }
 
+TEST(DeviceReadPdoMappings, TrailingAlignmentPaddingPdoIsSkipped) {
+  // A TwinCAT-style alignment-padding PDO (0x1701) is assigned in the last slot but is not
+  // implemented in the device's CoE dictionary, so uploading its subindex 0 aborts with
+  // "object does not exist" (0x06020000). readPdoMappings must treat it as padding and skip it,
+  // not fail the whole map — the real 0x1600 entries must come through unchanged.
+  SdoFakeDriver driver;
+  programCia402Mapping(driver);
+  // Re-point 0x1C12 to assign two RxPDOs: the real 0x1600 plus a trailing padding 0x1701.
+  driver.programRead(0x1C12, 0x00, u8le(2));
+  driver.programRead(0x1C12, 0x02, u16le(0x1701));
+  // 0x1701 aborts exactly as SoemFieldbusDriver::readSdo formats an SDO abort.
+  driver.reads[SdoFakeDriver::key(0x1701, 0x00)] =
+      std::unexpected("SDOread slave 1 0x1701:00 failed (SDO abort 0x06020000)");
+  Device device(1, driver);
+
+  ASSERT_TRUE(device.readPdoMappings().has_value());
+  const auto& m = device.pdoMappings();
+  ASSERT_EQ(m.outputs.size(), 3u);  // only 0x1600's entries; the pad contributes none
+  EXPECT_EQ(m.outputs[0].index, 0x6040);
+  EXPECT_EQ(m.outputs[2].index, 0x607A);
+  EXPECT_EQ(m.outputBits, 56u);
+}
+
 TEST(DeviceReadPdoMappings, MaxAssignmentCountTerminates) {
   // Regression: subindex 0 reporting 255 (the uint8_t max) must not wrap the loop counter.
   // With a `uint8_t i` the guard `i <= 255` is permanently true and i wraps 255->0; the

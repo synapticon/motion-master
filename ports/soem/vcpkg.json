@@ -1,6 +1,7 @@
 {
   "name": "soem",
   "version": "2.0.0",
+  "port-version": 1,
   "description": "Simple Open Source EtherCAT Master",
   "homepage": "https://github.com/OpenEtherCATsociety/SOEM",
   "license": "GPL-3.0-only",

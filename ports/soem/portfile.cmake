@@ -38,10 +38,20 @@ vcpkg_replace_string(
   winmm.lib
 )")
 
+# EC_MAXNAME caps the length of every readable name SOEM stores — slavelist
+# names and, crucially, CoE Object Dictionary entry names read via
+# ecx_readODdescription / ecx_readOEsingle. Upstream defaults to 40, which
+# truncates SOMANET OD names mid-word (e.g. the 50-char "Module ident of the
+# module detected on position 2" gets cut to "...detected on p"). The
+# previous-generation master raised this to 80; we match that so the full names
+# reach the API. Cost is only stack: the ec_ODlistt / ec_OElistt locals in
+# SoemFieldbusDriver::readObjectDictionary hold EC_MAXODLIST/EC_MAXOELIST rows
+# of EC_MAXNAME+1 bytes (~100 KB total at 80), trivial on the non-RT HTTP thread.
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS
         -DSOEM_BUILD_SAMPLES=OFF
+        -DEC_MAXNAME=80
 )
 
 vcpkg_cmake_install()

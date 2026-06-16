@@ -103,14 +103,26 @@ function DeviceSection({
   // request per device every few seconds — N requests for N devices). `null` while no state
   // has arrived yet.
   const mailboxActive: boolean | null = mailboxActiveFor(state)
+  // BOOT replaces the standard CoE/SDO mailbox with a FoE-only one (firmware transfer is the
+  // only thing the device can do there), so we swap the mail glyph for a "FoE" tag and a tooltip
+  // that says so, rather than showing the mailbox as plainly inactive.
+  const isBoot = state?.alState === 3
   const statusLabel =
-    mailboxActive === null ? 'Checking…' : mailboxActive ? 'Mailbox active' : 'Mailbox inactive'
+    mailboxActive === null
+      ? 'Checking…'
+      : isBoot
+        ? 'FoE only'
+        : mailboxActive
+          ? 'Mailbox active'
+          : 'Mailbox inactive'
   const statusTitle =
     mailboxActive === null
       ? 'Checking… — reading the device’s AL state on the bus'
-      : mailboxActive
-        ? 'Mailbox active — the device is in PRE-OP or higher, so its CoE/SDO mailbox answers (regardless of the AL error flag, which the state badge shows separately)'
-        : 'Mailbox inactive — no CoE/SDO mailbox: the device is in INIT or BOOT, or is not responding (powered off, unplugged, or left the bus)'
+      : isBoot
+        ? 'FoE only — the device is in BOOT, so its mailbox carries only File-over-EtherCAT (firmware transfer); CoE/SDO is unavailable until it leaves BOOT'
+        : mailboxActive
+          ? 'Mailbox active — the device is in PRE-OP or higher, so its CoE/SDO mailbox answers (regardless of the AL error flag, which the state badge shows separately)'
+          : 'Mailbox inactive — no CoE/SDO mailbox: the device is in INIT, or is not responding (powered off, unplugged, or left the bus)'
 
   // Object-dictionary read state. The backend enumerates a device's OD when it reaches
   // PRE-OP; we share the Parameters page's query cache (identical key) so this neither
@@ -210,12 +222,18 @@ function DeviceSection({
             aria-label={statusLabel}
             className={`shrink-0 flex items-center justify-center h-[18px] px-1.5 rounded-sm ${mailboxActive === null
               ? 'bg-white/15 animate-pulse'
-              : mailboxActive
-                ? 'bg-green-600'
-                : 'bg-white/15'
+              : isBoot
+                ? 'bg-status-warn text-grey-900'
+                : mailboxActive
+                  ? 'bg-green-600'
+                  : 'bg-white/15'
               }`}
           >
-            <Mail className="h-3 w-3 text-white" />
+            {isBoot ? (
+              <span className="font-display font-semibold leading-none">FoE</span>
+            ) : (
+              <Mail className="h-3 w-3 text-white" />
+            )}
           </span>
           <span
             title={dictionaryTitle}

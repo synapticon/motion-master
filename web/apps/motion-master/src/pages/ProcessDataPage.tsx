@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueries, useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Send } from 'lucide-react'
+import { Send } from 'lucide-react'
 import {
   type DeviceParameter,
   type ProcessImageObject,
   formatHex,
 } from '@synapticon/motion-master-client'
+import Callout from '../components/Callout'
 import PageHeader from '../components/PageHeader'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
@@ -161,18 +162,15 @@ export default function ProcessDataPage() {
       />
 
       <div className="px-4 sm:px-8 py-6 space-y-6">
-        <div className="flex items-start gap-2 border border-syn-red/40 bg-syn-red/5 px-4 py-3 text-xs text-grey-700">
-          <AlertTriangle className="h-4 w-4 text-syn-red shrink-0 mt-0.5" />
-          <p>
-            Writing an output stages it straight into the drive's process data and re-sends it every
-            cycle. Manually setting <span className="font-mono">controlword</span>, modes of
-            operation, or a motion target can cause the drive to move. Make sure the machine is safe
-            before sending.
-          </p>
-        </div>
+        <Callout variant="danger">
+          Writing an output stages it straight into the drive's process data and re-sends it every
+          cycle. Manually setting <span className="font-mono">controlword</span>, modes of operation,
+          or a motion target can cause the drive to move. Make sure the machine is safe before
+          sending.
+        </Callout>
 
         {imageQuery.isError && (
-          <p className="text-xs text-status-bad font-mono">Failed to load the process image.</p>
+          <Callout variant="error">Failed to load the process image.</Callout>
         )}
 
         {idle && (
@@ -184,11 +182,11 @@ export default function ProcessDataPage() {
         {img && !idle && (
           <>
             {!img.configured && (
-              <div className="border border-status-warn/40 bg-status-warn/5 px-4 py-3 text-xs text-grey-700">
+              <Callout variant="warning">
                 Not currently exchanging — all devices have left SAFE-OP/OP. Showing the most recent
                 published layout (generation {img.generations}); live values are unavailable and
                 writes are not cyclically sent until a device re-enters SAFE-OP/OP.
-              </div>
+              </Callout>
             )}
             <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-grey-600">
               <span>

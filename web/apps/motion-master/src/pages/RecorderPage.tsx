@@ -10,6 +10,7 @@ import {
   type MmpdPdoEntry,
 } from '@synapticon/motion-master-client'
 import PageHeader from '../components/PageHeader'
+import RecorderExplainer from '../components/RecorderExplainer'
 import MonitoringChart from '../components/MonitoringChart'
 import CycleStatsBar from '../components/CycleStatsBar'
 import SlavePositionBadge from '../components/SlavePositionBadge'
@@ -199,6 +200,8 @@ export default function RecorderPage() {
         }
       />
       <div className="p-4 sm:p-8 space-y-8">
+        <RecorderExplainer />
+
         <div className="border border-grey-200 px-4 py-3 max-w-2xl">
           <p className="eyebrow mb-1">Recorder dump</p>
           <p className="text-[11px] leading-snug text-grey-600">
@@ -211,16 +214,27 @@ export default function RecorderPage() {
             machine running Motion Master (for terminal use) and reports the path.
           </p>
           <div className="flex flex-wrap gap-2 mt-3">
-            <button onClick={recordAndView} disabled={loading} className={btnOutline}>
+            <button
+              onClick={recordAndView}
+              disabled={loading}
+              className={btnOutline}
+              title="Stream the current recorder ring into the browser and plot it"
+            >
               {loading ? 'Working…' : 'Record & view'}
             </button>
-            <button onClick={() => fileInputRef.current?.click()} disabled={loading} className={btnOutline}>
+            <button
+              onClick={() => fileInputRef.current?.click()}
+              disabled={loading}
+              className={btnOutline}
+              title="Load and decode a .mmpd dump you saved earlier"
+            >
               Open .mmpd file
             </button>
             <button
               onClick={() => dumpMutation.mutate()}
               disabled={dumpMutation.isPending}
               className={btnOutline}
+              title="Write a .mmpd dump on the machine running Motion Master and report its path"
             >
               {dumpMutation.isPending ? 'Dumping…' : 'Dump to disk'}
             </button>

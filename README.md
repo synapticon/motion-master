@@ -181,6 +181,44 @@ docker run --rm --network host \
   motion-master --driver soem --adapter eth0
 ```
 
+**Docker Hub**
+
+Publish the image to a personal Docker Hub account (`markosankovic/motion-master` in the example) so it can be pulled on other machines.
+
+```bash
+# 1. Authenticate — use a Docker Hub access token, not your password.
+#    Create one at Docker Hub → Account Settings → Personal access tokens.
+echo "$DOCKERHUB_TOKEN" | docker login -u markosankovic --password-stdin
+#    (or interactively, pasting the token at the password prompt)
+docker login -u markosankovic
+
+# 2. Build and tag in one step (VERSION = the repo's current version).
+DOCKER_BUILDKIT=1 docker build \
+  -t markosankovic/motion-master:6.0.0-alpha.31 \
+  -t markosankovic/motion-master:latest .
+
+# 3. Push both tags. The repo is auto-created (public) on first push.
+docker push markosankovic/motion-master:6.0.0-alpha.31
+docker push markosankovic/motion-master:latest
+```
+
+Tag with the version (matching the repo `VERSION`) so a specific build is identifiable — don't rely on `latest` alone. Already-built `motion-master` image? Re-tag it instead of rebuilding: `docker tag motion-master markosankovic/motion-master:latest`.
+
+**Run from Docker Hub**
+
+Pull and run the published image, mounting `cert.pem`/`key.pem` from the current directory. Source paths **must be absolute** — a relative `-v cert.pem:...` is interpreted as a *named volume*, not your local file, and the container silently falls back to a self-signed cert. Use `$(pwd)/` to force an absolute path:
+
+```bash
+docker run --rm --network host \
+  --cap-add NET_RAW --cap-add NET_ADMIN \
+  --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 \
+  -v "$(pwd)/cert.pem:/opt/motion-master/cert.pem:ro" \
+  -v "$(pwd)/key.pem:/opt/motion-master/key.pem:ro" \
+  markosankovic/motion-master:latest
+```
+
+`docker run` pulls the image automatically if it isn't present locally. Drop the two `-v` flags to let the container self-heal its cert instead (fetches a fresh Let's Encrypt cert at startup; see **Updating an expired cert** above).
+
 ## Local Development
 
 Production releases bundle a real Let's Encrypt TLS certificate for `local.motion-master.synapticon.com`, so the PWA at `https://motion-master.synapticon.com` connects without any browser warning.

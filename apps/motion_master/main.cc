@@ -220,15 +220,15 @@ int main(int argc, char** argv) {
     mm::core::openInBrowser("https://motion-master.synapticon.com/app/");
   }
 
-  GameLoop game_loop{std::chrono::microseconds{opts.config.gameLoop.periodUs}};
+  GameLoop gameLoop{std::chrono::microseconds{opts.config.gameLoop.periodUs}};
 
   // Exchange process data every cycle. No-op until devices are mapped and brought into
   // SAFE-OP/OP via the API, at which point DeviceManager publishes the image and the loop
   // begins driving PDO automatically.
   ProcessDataTask processDataTask{deviceManager};
-  game_loop.addTask(&processDataTask);
+  gameLoop.addTask(&processDataTask);
 
-  gGameLoop = &game_loop;
+  gGameLoop = &gameLoop;
 
   std::signal(SIGINT, [](int) {
     if (gGameLoop) {
@@ -241,7 +241,7 @@ int main(int argc, char** argv) {
     }
   });
 
-  game_loop.run();  // main thread IS the RT loop — blocks until stop()
+  gameLoop.run();  // main thread IS the RT loop — blocks until stop()
 
   gGameLoop = nullptr;
   monitoringManager.stop();  // stop sampling/publishing before the server loops go away

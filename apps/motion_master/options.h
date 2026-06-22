@@ -1,9 +1,7 @@
 #pragma once
 
-#include <optional>
 #include <string>
 
-#include "comm/base.h"
 #include "config.h"
 
 /// @brief Everything resolved from the command line and config file for one run.
@@ -12,11 +10,8 @@
 /// overlaid by explicit CLI flags). The remaining members are CLI-only: actions and runtime values
 /// that have no place in the config file.
 struct Options {
-  std::string configPath;  ///< --config path; empty if not given.
-  Config config;           ///< Settings: built-in defaults ⊕ config file ⊕ CLI overrides.
-  /// Network adapter resolved from @c config.fieldbus.adapter (or --adapter). Absent when neither
-  /// is set; resolution touches the live NICs so it happens here, not in the pure config layer.
-  std::optional<mm::comm::NetworkAdapter> adapter;
+  std::string configPath;   ///< --config path; empty if not given.
+  Config config;            ///< Settings: built-in defaults ⊕ config file ⊕ CLI overrides.
   bool openBrowser{false};  ///< Open the PWA in the default browser on start (--open).
   bool updateCert{false};   ///< Fetch a fresh cert/key, install them, and exit (--update-cert).
   std::string certUrl;      ///< --cert-url (CLI-only; defaults to the rolling release).
@@ -31,6 +26,7 @@ struct Options {
 /// @param argc Argument count forwarded from main().
 /// @param argv Argument vector forwarded from main().
 /// @return Fully populated Options.
-/// @note Never returns on --help, --version, --list-adapters, a CLI parse error, a config parse or
-///       validation failure, or an unresolvable adapter (config/adapter failures exit 1).
+/// @note Never returns on --help, --version, --list-adapters, a CLI parse error, or a config parse
+///       or validation failure (config failures exit 1). The configured adapter is resolved later,
+///       at driver init, not here.
 Options parseOptions(int argc, char** argv);

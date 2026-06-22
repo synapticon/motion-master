@@ -74,15 +74,5 @@ Options parseOptions(int argc, char** argv) {
     spdlog::debug("Loaded config from {}", opts.configPath);
   }
 
-  // Resolve the configured network adapter against the live NICs (kept out of the config layer).
-  if (!opts.config.fieldbus.adapter.empty()) {
-    auto adapter = mm::comm::resolveNetworkAdapter(opts.config.fieldbus.adapter);
-    if (!adapter) {
-      spdlog::error("{}", adapter.error());
-      std::exit(1);
-    }
-    opts.adapter = *adapter;
-  }
-
   return opts;
 }

@@ -10,6 +10,7 @@
 
 #include "cert_info.h"
 #include "cert_updater.h"
+#include "comm/base.h"
 #include "comm/fieldbus_driver.h"
 #include "comm/soem_fieldbus_driver.h"
 #include "core/platform.h"
@@ -55,27 +56,40 @@ int main(int argc, char** argv) {
        .cacheAllVendors = opts.config.parameterCache.cacheAllVendors,
        .directory = opts.config.parameterCache.directory});
 
-  auto makeDriver = [](const std::string& type, const std::string& adapter)
-      -> std::expected<std::unique_ptr<mm::comm::FieldbusDriver>, std::string> {
-    if (type == "soem") {
-      return std::make_unique<mm::comm::soem::SoemFieldbusDriver>(adapter);
+  // Runtime tuning for DeviceManager::init, derived once from the config and shared by both the
+  // eager startup init below and the POST /api/init callback.
+  const mm::node::DeviceManagerConfig deviceManagerConfig{
+      .recorderHistorySeconds = opts.config.recorder.historySeconds,
+      .cyclePeriodUs = opts.config.gameLoop.periodUs,
+      .dumpDir = opts.config.recorder.dumpDir,
+      .readObjectDictionaryOnPreop = opts.config.parameters.readObjectDictionaryOnPreop};
+
+  // Resolve the adapter, construct the concrete driver, and hand it to DeviceManager::init. Used
+  // both for the optional eager init below and as the POST /api/init callback, so the two paths
+  // share one set of driver-creation and adapter-resolution rules. main.cc is the only place that
+  // names concrete driver types (the composition root).
+  auto initDeviceManager = [&deviceManager, deviceManagerConfig](
+                               const std::string& type,
+                               const std::string& adapter) -> std::expected<void, std::string> {
+    std::string ifname;
+    if (!adapter.empty()) {
+      auto resolved = mm::comm::resolveNetworkAdapter(adapter);
+      if (!resolved) {
+        return std::unexpected(resolved.error());
+      }
+      ifname = resolved->adapterName;
     }
-    return std::unexpected("unsupported driver: " + type);
+    if (type != "soem") {
+      return std::unexpected("unsupported driver: " + type);
+    }
+    return deviceManager.init(std::make_unique<mm::comm::soem::SoemFieldbusDriver>(ifname),
+                              deviceManagerConfig);
   };
 
+  // Optional eager init from the config file; otherwise the bus is initialised later via
+  // POST /api/init. Failure here is fatal — a configured driver that cannot start is a hard error.
   if (!opts.config.fieldbus.driver.empty()) {
-    std::string ifname = opts.adapter ? opts.adapter->adapterName : "";
-    auto driver = makeDriver(opts.config.fieldbus.driver, ifname);
-    if (!driver) {
-      spdlog::error("{}", driver.error());
-      return 1;
-    }
-    if (auto result = deviceManager.init(
-            std::move(*driver),
-            {.recorderHistorySeconds = opts.config.recorder.historySeconds,
-             .cyclePeriodUs = opts.config.gameLoop.periodUs,
-             .dumpDir = opts.config.recorder.dumpDir,
-             .readObjectDictionaryOnPreop = opts.config.parameters.readObjectDictionaryOnPreop});
+    if (auto result = initDeviceManager(opts.config.fieldbus.driver, opts.config.fieldbus.adapter);
         !result) {
       spdlog::error("DeviceManager init failed: {}", result.error());
       return 1;
@@ -176,26 +190,7 @@ int main(int argc, char** argv) {
           .keyFile = opts.config.tls.keyPath,
           .version = std::string{mm::core::kVersion},
           .startedConfig = nlohmann::json(opts.config).dump(),
-          .initDriver =
-              [&deviceManager, makeDriver, historySeconds = opts.config.recorder.historySeconds,
-               periodUs = opts.config.gameLoop.periodUs, dumpDir = opts.config.recorder.dumpDir,
-               readOdOnPreop = opts.config.parameters.readObjectDictionaryOnPreop](
-                  const std::string& type,
-                  const std::string& adapter) -> std::expected<void, std::string> {
-            std::string ifname = adapter;
-            if (!adapter.empty()) {
-              auto resolved = mm::comm::resolveNetworkAdapter(adapter);
-              if (!resolved) return std::unexpected(resolved.error());
-              ifname = resolved->adapterName;
-            }
-            auto driver = makeDriver(type, ifname);
-            if (!driver) return std::unexpected(driver.error());
-            return deviceManager.init(std::move(*driver),
-                                      {.recorderHistorySeconds = historySeconds,
-                                       .cyclePeriodUs = periodUs,
-                                       .dumpDir = dumpDir,
-                                       .readObjectDictionaryOnPreop = readOdOnPreop});
-          },
+          .initDriver = initDeviceManager,
           .getLog = [ringLogSink]() { return ringLogSink->entries(); },
           .refreshCert = [certFile = opts.config.tls.certPath, keyFile = opts.config.tls.keyPath,
                           certUrl = opts.certUrl,

@@ -14,6 +14,7 @@ endif()
 add_library(core STATIC
     version.cc
     system_info.cc
+    platform.cc
     ${CYCLIC_TIMER_SRC}
 )
 add_library(mm::core ALIAS core)

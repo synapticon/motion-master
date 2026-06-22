@@ -3,29 +3,16 @@
 
 #include <chrono>
 #include <csignal>
-#include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <utility>
-
-#ifdef _WIN32
-// clang-format off
-#include <windows.h>
-#include <shellapi.h>  // ShellExecuteA — not pulled in by <windows.h> under WIN32_LEAN_AND_MEAN
-// clang-format on
-#else
-#include <unistd.h>
-#ifdef __APPLE__
-#include <mach-o/dyld.h>  // _NSGetExecutablePath — macOS has no /proc/self/exe
-#endif
-#endif
-
-#include <memory>
 
 #include "cert_info.h"
 #include "cert_updater.h"
 #include "comm/fieldbus_driver.h"
 #include "comm/soem_fieldbus_driver.h"
+#include "core/platform.h"
 #include "core/version.h"
 #include "game_loop.h"
 #include "http_server.h"
@@ -38,53 +25,7 @@
 
 namespace {
 
-/// @brief Return the directory that contains the running executable.
-/// @details argv[0] is not used — it can be a relative path, a bare command name resolved
-///          via PATH, or a symlink.
-///
-///          **Platform behaviour**
-///          - Linux: resolves `/proc/self/exe` via `std::filesystem::canonical`.
-///          - macOS: queries the path via `_NSGetExecutablePath` (no `/proc`).
-///          - Windows: queries the path via `GetModuleFileNameW`.
-/// @return Absolute path to the executable's parent directory.
-std::filesystem::path exeDir() {
-#ifdef _WIN32
-  wchar_t buf[MAX_PATH];
-  GetModuleFileNameW(nullptr, buf, MAX_PATH);
-  return std::filesystem::path{buf}.parent_path();
-#elif defined(__APPLE__)
-  // First call reports the required buffer size (including the null terminator).
-  uint32_t size = 0;
-  _NSGetExecutablePath(nullptr, &size);
-  std::string buf(size, '\0');
-  _NSGetExecutablePath(buf.data(), &size);
-  // The returned path may contain symlinks or `..`; canonical() resolves them.
-  return std::filesystem::canonical(buf.c_str()).parent_path();
-#else
-  return std::filesystem::canonical("/proc/self/exe").parent_path();
-#endif
-}
-
 GameLoop* gGameLoop = nullptr;  ///< Signal handler target; set before run(), cleared after.
-
-/// @brief Open the given URL in the system default browser.
-/// @details Non-blocking — returns immediately after spawning the browser process.
-///          Uses xdg-open on Linux, `open` on macOS, and ShellExecute on Windows.
-void openInBrowser(const char* url) {
-#ifdef _WIN32
-  ShellExecuteA(nullptr, "open", url, nullptr, nullptr, SW_SHOWNORMAL);
-#else
-  pid_t pid = fork();
-  if (pid == 0) {
-#ifdef __APPLE__
-    execlp("open", "open", url, nullptr);
-#else
-    execlp("xdg-open", "xdg-open", url, nullptr);
-#endif
-    _exit(1);
-  }
-#endif
-}
 
 }  // namespace
 
@@ -151,8 +92,8 @@ int main(int argc, char** argv) {
   // The install-dir cert/key — both the default served location and the target the self-heal and
   // --update-cert paths fetch into (it is writable by the same privileges that installed the
   // binary).
-  const auto defaultCert = exeDir() / "cert.pem";
-  const auto defaultKey = exeDir() / "key.pem";
+  const auto defaultCert = mm::core::exeDir() / "cert.pem";
+  const auto defaultKey = mm::core::exeDir() / "key.pem";
 
   // Resolve the TLS cert/key paths: explicit config wins, else discover (bundled → acme.sh), else
   // fall through to the install-dir default so the self-heal below has a target to fetch into. A
@@ -285,7 +226,7 @@ int main(int argc, char** argv) {
   monitoringManager.start();
 
   if (opts.openBrowser) {
-    openInBrowser("https://motion-master.synapticon.com/app/");
+    mm::core::openInBrowser("https://motion-master.synapticon.com/app/");
   }
 
   GameLoop game_loop{std::chrono::microseconds{opts.config.gameLoop.periodUs}};

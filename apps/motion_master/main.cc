@@ -80,11 +80,16 @@ int main(int argc, char** argv) {
     if (!adapter.empty()) {
       auto resolved = mm::comm::resolveNetworkAdapter(adapter);
       if (!resolved) {
+        // Log the failures this lambda originates (adapter resolution, unsupported driver) so they
+        // are recorded once on both the startup and POST /api/init paths. DeviceManager::init logs
+        // its own driver-init failures, so those are not re-logged here.
+        spdlog::error("Adapter resolution failed: {}", resolved.error());
         return std::unexpected(resolved.error());
       }
       ifname = resolved->adapterName;
     }
     if (type != "soem") {
+      spdlog::error("Unsupported fieldbus driver: {}", type);
       return std::unexpected("unsupported driver: " + type);
     }
     return deviceManager.init(std::make_unique<mm::comm::soem::SoemFieldbusDriver>(ifname),
@@ -93,13 +98,12 @@ int main(int argc, char** argv) {
 
   // Optional eager init from the config file; otherwise the bus is initialised later via
   // POST /api/init. Failure here is fatal — a configured driver that cannot start is a hard error.
+  // initDeviceManager and scan() log their own failures, so just bail on error.
   if (!opts.config.fieldbus.driver.empty()) {
-    if (auto result = initDeviceManager(opts.config.fieldbus.driver, opts.config.fieldbus.adapter);
-        !result) {
-      spdlog::error("DeviceManager init failed: {}", result.error());
+    if (!initDeviceManager(opts.config.fieldbus.driver, opts.config.fieldbus.adapter)) {
       return 1;
     }
-    if (auto result = deviceManager.scan(); !result) {
+    if (!deviceManager.scan()) {
       return 1;
     }
   }

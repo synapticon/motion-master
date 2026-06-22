@@ -23,11 +23,7 @@
 #include "ring_log_sink.h"
 #include "ws_server.h"
 
-namespace {
-
-GameLoop* gGameLoop = nullptr;  ///< Signal handler target; set before run(), cleared after.
-
-}  // namespace
+static GameLoop* gGameLoop = nullptr;  ///< Signal handler target; set before run(), cleared after.
 
 /// @brief Motion Master entry point: parse options, start subsystems, run the RT loop.
 /// @details Initialises the HTTP/WebSocket server and game loop, installs SIGINT/SIGTERM

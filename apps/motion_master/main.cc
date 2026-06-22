@@ -154,48 +154,29 @@ int main(int argc, char** argv) {
   const auto defaultCert = exeDir() / "cert.pem";
   const auto defaultKey = exeDir() / "key.pem";
 
-  // Auto-discover TLS cert/key when not supplied via --cert/--key:
-  //   1. cert.pem / key.pem next to the binary  (release install)
-  //   2. ~/.acme.sh/local.motion-master.synapticon.com_ecc/  (local acme.sh)
-  // Unlike before, a miss is not fatal here — the self-heal below fetches a fresh cert.
-  if (opts.config.tls.certPath.empty() || opts.config.tls.keyPath.empty()) {
-    if (std::filesystem::exists(defaultCert) && std::filesystem::exists(defaultKey)) {
-      opts.config.tls.certPath = defaultCert.string();
-      opts.config.tls.keyPath = defaultKey.string();
-      spdlog::info("TLS: bundled cert ({})", opts.config.tls.certPath);
-    } else if (const char* home = std::getenv("HOME")) {
-      const auto acmeDir =
-          std::filesystem::path(home) / ".acme.sh/local.motion-master.synapticon.com_ecc";
-      const auto acmeCert = acmeDir / "fullchain.cer";
-      const auto acmeKey = acmeDir / "local.motion-master.synapticon.com.key";
-      if (std::filesystem::exists(acmeCert) && std::filesystem::exists(acmeKey)) {
-        opts.config.tls.certPath = acmeCert.string();
-        opts.config.tls.keyPath = acmeKey.string();
-        spdlog::info("TLS: Let's Encrypt cert from acme.sh ({})", opts.config.tls.certPath);
-      }
-    }
+  // Resolve the TLS cert/key paths: explicit config wins, else discover (bundled → acme.sh), else
+  // fall through to the install-dir default so the self-heal below has a target to fetch into. A
+  // miss is not fatal here — unlike before, the self-heal can populate it.
+  const auto resolvedCert = mm::resolveCertPaths(opts.config.tls.certPath, opts.config.tls.keyPath,
+                                                 defaultCert, defaultKey);
+  opts.config.tls.certPath = resolvedCert.certPath;
+  opts.config.tls.keyPath = resolvedCert.keyPath;
+  if (!resolvedCert.source.empty()) {
+    spdlog::info("TLS: {}", resolvedCert.source);
   }
 
-  // --update-cert: fetch a fresh cert/key into the resolved path (or the install-dir default when
-  // nothing is configured), then exit without serving. The explicit path for terminal/headless use.
+  // --update-cert: fetch a fresh cert/key into the resolved path, then exit without serving. The
+  // explicit path for terminal/headless use.
   if (opts.updateCert) {
-    const std::string certTarget =
-        opts.config.tls.certPath.empty() ? defaultCert.string() : opts.config.tls.certPath;
-    const std::string keyTarget =
-        opts.config.tls.keyPath.empty() ? defaultKey.string() : opts.config.tls.keyPath;
     spdlog::info("Fetching TLS certificate from {}", opts.certUrl);
-    if (auto r = mm::fetchAndSwapCert(certTarget, keyTarget, opts.certUrl, opts.keyUrl); !r) {
+    if (auto r = mm::fetchAndSwapCert(opts.config.tls.certPath, opts.config.tls.keyPath,
+                                      opts.certUrl, opts.keyUrl);
+        !r) {
       spdlog::error("Certificate update failed: {}", r.error());
       return 1;
     }
-    spdlog::info("Installed fresh TLS certificate at {}", certTarget);
+    spdlog::info("Installed fresh TLS certificate at {}", opts.config.tls.certPath);
     return 0;
-  }
-
-  // Nothing resolved — target the install-dir default so the self-heal below can populate it.
-  if (opts.config.tls.certPath.empty() || opts.config.tls.keyPath.empty()) {
-    opts.config.tls.certPath = defaultCert.string();
-    opts.config.tls.keyPath = defaultKey.string();
   }
 
   // Decide whether the served cert needs refreshing. A missing cert means we cannot serve TLS at

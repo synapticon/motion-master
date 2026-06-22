@@ -1,6 +1,7 @@
 #pragma once
 
 #include <expected>
+#include <filesystem>
 #include <string>
 
 namespace mm {
@@ -38,5 +39,32 @@ std::expected<void, std::string> fetchAndSwapCert(const std::string& certPath,
                                                   const std::string& keyPath,
                                                   const std::string& certUrl,
                                                   const std::string& keyUrl);
+
+/// @brief The TLS cert/key paths the server should use, plus where they came from.
+struct ResolvedCert {
+  std::string certPath;  ///< Resolved certificate path (always populated).
+  std::string keyPath;   ///< Resolved private-key path (always populated).
+  /// Human-readable description of the discovered source (for the caller to log), or empty when
+  /// the paths were configured explicitly or fell through to the install-dir default.
+  std::string source;
+};
+
+/// @brief Resolve the TLS cert/key file paths, choosing by discovery when not configured.
+///
+/// If @p configCertPath and @p configKeyPath are both set (e.g. from the config file) they are
+/// used as-is. Otherwise both are chosen from the first available source:
+///   1. @p defaultCertPath / @p defaultKeyPath next to the binary (a release install),
+///   2. `~/.acme.sh/local.motion-master.synapticon.com_ecc/` (a local acme.sh install),
+///   3. failing both, @p defaultCertPath / @p defaultKeyPath unconditionally — so the result is
+///      always populated and the caller's self-heal can fetch into it.
+///
+/// @param configCertPath  Certificate path from configuration; empty if unset.
+/// @param configKeyPath   Private-key path from configuration; empty if unset.
+/// @param defaultCertPath Install-dir certificate path (next to the binary).
+/// @param defaultKeyPath  Install-dir private-key path (next to the binary).
+/// @return The resolved paths and the discovered source (empty @c source when not discovered).
+ResolvedCert resolveCertPaths(const std::string& configCertPath, const std::string& configKeyPath,
+                              const std::filesystem::path& defaultCertPath,
+                              const std::filesystem::path& defaultKeyPath);
 
 }  // namespace mm

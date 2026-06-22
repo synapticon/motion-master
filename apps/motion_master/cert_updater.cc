@@ -7,6 +7,7 @@
 #include <openssl/x509.h>
 
 #include <cstddef>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <ios>
@@ -171,6 +172,38 @@ std::expected<void, std::string> fetchAndSwapCert(const std::string& certPath,
     return r;
   }
   return {};
+}
+
+ResolvedCert resolveCertPaths(const std::string& configCertPath, const std::string& configKeyPath,
+                              const std::filesystem::path& defaultCertPath,
+                              const std::filesystem::path& defaultKeyPath) {
+  // Both already set by the config file — use them as-is and discover nothing.
+  if (!configCertPath.empty() && !configKeyPath.empty()) {
+    return {.certPath = configCertPath, .keyPath = configKeyPath, .source = {}};
+  }
+
+  // 1. cert.pem / key.pem next to the binary (a release install).
+  if (std::filesystem::exists(defaultCertPath) && std::filesystem::exists(defaultKeyPath)) {
+    return {.certPath = defaultCertPath.string(),
+            .keyPath = defaultKeyPath.string(),
+            .source = "bundled cert (" + defaultCertPath.string() + ")"};
+  }
+
+  // 2. A local acme.sh install, renewed automatically by its own cron.
+  if (const char* home = std::getenv("HOME")) {
+    const auto acmeDir =
+        std::filesystem::path(home) / ".acme.sh/local.motion-master.synapticon.com_ecc";
+    const auto acmeCert = acmeDir / "fullchain.cer";
+    const auto acmeKey = acmeDir / "local.motion-master.synapticon.com.key";
+    if (std::filesystem::exists(acmeCert) && std::filesystem::exists(acmeKey)) {
+      return {.certPath = acmeCert.string(),
+              .keyPath = acmeKey.string(),
+              .source = "Let's Encrypt cert from acme.sh (" + acmeCert.string() + ")"};
+    }
+  }
+
+  // 3. Nothing found — target the install-dir default so the caller's self-heal can populate it.
+  return {.certPath = defaultCertPath.string(), .keyPath = defaultKeyPath.string(), .source = {}};
 }
 
 }  // namespace mm

@@ -51,6 +51,13 @@ void GameLoop::run() {
   }
 }
 
+// stop() is documented as safe to call from a signal handler, which holds only if the store to
+// running_ is a lock-free atomic operation — a non-lock-free atomic would acquire an internal lock,
+// which is forbidden in a signal handler. atomic<bool> is lock-free on every supported platform;
+// assert it so the guarantee can never silently regress.
+static_assert(std::atomic<bool>::is_always_lock_free,
+              "GameLoop::stop() must be async-signal-safe: std::atomic<bool> must be lock-free");
+
 void GameLoop::stop() { running_.store(false, std::memory_order_relaxed); }
 
 uint64_t GameLoop::tick() const { return tick_.load(std::memory_order_relaxed); }

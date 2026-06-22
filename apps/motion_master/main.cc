@@ -1,6 +1,7 @@
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include <atomic>
 #include <chrono>
 #include <csignal>
 #include <filesystem>
@@ -24,7 +25,11 @@
 #include "ring_log_sink.h"
 #include "ws_server.h"
 
-static GameLoop* gGameLoop = nullptr;  ///< Signal handler target; set before run(), cleared after.
+/// @brief Signal-handler target for SIGINT/SIGTERM; set before run(), cleared after.
+/// @details Atomic rather than a plain pointer because the handler reads it concurrently with the
+///          main thread's writes. A signal handler may only access lock-free atomic objects, and
+///          @c std::atomic<GameLoop*> is always lock-free, so the load below is well-defined.
+static std::atomic<GameLoop*> gGameLoop{nullptr};
 
 /// @brief Motion Master entry point: parse options, start subsystems, run the RT loop.
 /// @details Initialises the HTTP/WebSocket server and game loop, installs SIGINT/SIGTERM
@@ -228,22 +233,25 @@ int main(int argc, char** argv) {
   ProcessDataTask processDataTask{deviceManager};
   gameLoop.addTask(&processDataTask);
 
-  gGameLoop = &gameLoop;
+  gGameLoop.store(&gameLoop, std::memory_order_relaxed);
 
+  // SIGINT/SIGTERM: flip the loop's stop flag so run() returns after the current cycle. Everything
+  // touched here is async-signal-safe — a lock-free atomic load of the pointer and stop()'s
+  // lock-free atomic store.
   std::signal(SIGINT, [](int) {
-    if (gGameLoop) {
-      gGameLoop->stop();
+    if (auto* loop = gGameLoop.load(std::memory_order_relaxed)) {
+      loop->stop();
     }
   });
   std::signal(SIGTERM, [](int) {
-    if (gGameLoop) {
-      gGameLoop->stop();
+    if (auto* loop = gGameLoop.load(std::memory_order_relaxed)) {
+      loop->stop();
     }
   });
 
   gameLoop.run();  // main thread IS the RT loop — blocks until stop()
 
-  gGameLoop = nullptr;
+  gGameLoop.store(nullptr, std::memory_order_relaxed);
   monitoringManager.stop();  // stop sampling/publishing before the server loops go away
   wsServer.stop();
   httpServer.stop();

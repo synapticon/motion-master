@@ -405,7 +405,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Scans the fieldbus for slaves and configures their sync managers and FMMUs. Must be called after a successful POST /api/init. Slaves remain in INIT state after this call; state transitions are driven by subsequent API calls.
+   * @description Scans the fieldbus for slaves and configures their sync managers and FMMUs. Must be called after a successful POST /api/init. Slaves remain in INIT state after this call; state transitions are driven by subsequent API calls. An empty bus is a successful scan returning 0 slaves, not an error: the master cannot distinguish a bus with no devices powered from a disconnected one, and the user recovers by powering devices on and scanning again. A 500 is returned only on a genuine driver failure (e.g. no driver initialised).
    *
    * @name Scan
    * @summary Scan the bus for slaves
@@ -415,7 +415,7 @@ export class Api<
     this.request<
       {
         /**
-         * Number of slaves discovered on the bus
+         * Number of slaves discovered on the bus (0 if empty/unpowered)
          * @example 3
          */
         slaves: number;

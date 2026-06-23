@@ -548,9 +548,15 @@ paths:
         Scans the fieldbus for slaves and configures their sync managers and FMMUs.
         Must be called after a successful POST /api/init. Slaves remain in INIT state
         after this call; state transitions are driven by subsequent API calls.
+
+
+        An empty bus is a successful scan returning 0 slaves, not an error: the master
+        cannot distinguish a bus with no devices powered from a disconnected one, and the
+        user recovers by powering devices on and scanning again. A 500 is returned only on
+        a genuine driver failure (e.g. no driver initialised).
       responses:
         "200":
-          description: Scan successful; returns the number of slaves found
+          description: Scan successful; returns the number of slaves found (0 for an empty or unpowered bus)
           content:
             application/json:
               schema:
@@ -559,7 +565,7 @@ paths:
                 properties:
                   slaves:
                     type: integer
-                    description: Number of slaves discovered on the bus
+                    description: Number of slaves discovered on the bus (0 if empty/unpowered)
                     example: 3
         "500":
           $ref: "#/components/responses/DriverError"

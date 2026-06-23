@@ -6,6 +6,7 @@
 
 #include <ctime>
 #include <memory>
+#include <optional>
 #include <string>
 
 namespace mm {
@@ -23,10 +24,17 @@ std::chrono::system_clock::time_point tmUtcToTimePoint(std::tm& tm) {
   return std::chrono::system_clock::from_time_t(t);
 }
 
-// Reads an ASN1_TIME (a certificate's notBefore/notAfter) into a time_point.
-std::chrono::system_clock::time_point asn1TimeToTimePoint(const ASN1_TIME* t) {
+// Reads an ASN1_TIME (a certificate's notBefore/notAfter) into a time_point, or nullopt when the
+// field is absent or cannot be parsed. Without this check a parse failure would leave tm zeroed and
+// silently yield the epoch (1970), making a valid cert look long expired.
+std::optional<std::chrono::system_clock::time_point> asn1TimeToTimePoint(const ASN1_TIME* t) {
+  if (t == nullptr) {
+    return std::nullopt;
+  }
   std::tm tm{};
-  ASN1_TIME_to_tm(t, &tm);
+  if (ASN1_TIME_to_tm(t, &tm) != 1) {
+    return std::nullopt;
+  }
   return tmUtcToTimePoint(tm);
 }
 
@@ -65,11 +73,17 @@ std::expected<CertInfo, std::string> readCertInfo(const std::string& certPath) {
     return std::unexpected("cannot parse PEM certificate: " + certPath);
   }
 
+  const auto notBefore = asn1TimeToTimePoint(X509_get0_notBefore(leaf.get()));
+  const auto notAfter = asn1TimeToTimePoint(X509_get0_notAfter(leaf.get()));
+  if (!notBefore || !notAfter) {
+    return std::unexpected("cannot parse certificate validity dates: " + certPath);
+  }
+
   CertInfo result{
       .subject = commonName(X509_get_subject_name(leaf.get())),
       .issuer = commonName(X509_get_issuer_name(leaf.get())),
-      .notBefore = asn1TimeToTimePoint(X509_get0_notBefore(leaf.get())),
-      .notAfter = asn1TimeToTimePoint(X509_get0_notAfter(leaf.get())),
+      .notBefore = *notBefore,
+      .notAfter = *notAfter,
       .chain = {},
   };
 

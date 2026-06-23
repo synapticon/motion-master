@@ -23,7 +23,7 @@ inline std::string defaultKeyUrl() {
 ///
 /// Fetches @p certUrl and @p keyUrl over HTTPS (following redirects), then validates the
 /// downloaded pair before touching the live files:
-///   - the certificate parses as PEM and its subject CN is @c kCertCommonName,
+///   - the certificate parses as PEM and its subject CN is @c local.motion-master.synapticon.com,
 ///   - the certificate is not already expired,
 ///   - the private key parses and matches the certificate.
 /// Only if all checks pass are @p certPath and @p keyPath atomically replaced (write-to-temp

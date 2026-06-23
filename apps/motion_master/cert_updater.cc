@@ -42,9 +42,9 @@ size_t appendToString(char* ptr, size_t size, size_t nmemb, void* userdata) {
   return bytes;
 }
 
-// Downloads @p url into @p out over HTTPS, following redirects (release asset URLs 302 to a
-// separate host) and failing on any HTTP status >= 400.
-std::expected<void, std::string> httpGet(const std::string& url, std::string* out) {
+// Downloads @p url over HTTPS, following redirects (release asset URLs 302 to a separate host) and
+// failing on any HTTP status >= 400. Returns the response body, or an error string.
+std::expected<std::string, std::string> httpGet(const std::string& url) {
   ensureCurlInit();
   CURL* curl = curl_easy_init();
   if (curl == nullptr) {
@@ -52,12 +52,13 @@ std::expected<void, std::string> httpGet(const std::string& url, std::string* ou
   }
   const std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> guard{curl, curl_easy_cleanup};
 
+  std::string body;
   char errbuf[CURL_ERROR_SIZE] = {0};
   curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
   curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
   curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, appendToString);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, out);
+  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
   curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
   curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
@@ -68,7 +69,7 @@ std::expected<void, std::string> httpGet(const std::string& url, std::string* ou
     const std::string detail = errbuf[0] != '\0' ? errbuf : curl_easy_strerror(rc);
     return std::unexpected("download failed for " + url + ": " + detail);
   }
-  return {};
+  return body;
 }
 
 std::string subjectCommonName(X509* cert) {
@@ -149,16 +150,16 @@ std::expected<void, std::string> fetchAndSwapCert(const std::string& certPath,
                                                   const std::string& keyPath,
                                                   const std::string& certUrl,
                                                   const std::string& keyUrl) {
-  std::string certPem;
-  std::string keyPem;
-  if (auto r = httpGet(certUrl, &certPem); !r) {
-    return r;
+  auto certPem = httpGet(certUrl);
+  if (!certPem) {
+    return std::unexpected(certPem.error());
   }
-  if (auto r = httpGet(keyUrl, &keyPem); !r) {
-    return r;
+  auto keyPem = httpGet(keyUrl);
+  if (!keyPem) {
+    return std::unexpected(keyPem.error());
   }
 
-  if (auto r = validatePair(certPem, keyPem); !r) {
+  if (auto r = validatePair(*certPem, *keyPem); !r) {
     return r;
   }
 
@@ -166,11 +167,11 @@ std::expected<void, std::string> fetchAndSwapCert(const std::string& certPath,
   // write never leaves a half-written live file. The pair was validated above, so the brief window
   // between the two renames still holds a matching cert/key.
   using std::filesystem::perms;
-  if (auto r = writeAtomic(keyPath, keyPem, perms::owner_read | perms::owner_write); !r) {
+  if (auto r = writeAtomic(keyPath, *keyPem, perms::owner_read | perms::owner_write); !r) {
     return r;
   }
   if (auto r = writeAtomic(
-          certPath, certPem,
+          certPath, *certPem,
           perms::owner_read | perms::owner_write | perms::group_read | perms::others_read);
       !r) {
     return r;

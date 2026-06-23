@@ -54,16 +54,42 @@ std::expected<int, std::string> SoemFieldbusDriver::scan() {
   // EEPROM back to the PDI, so any prior BOOT-SM tracking is now stale.
   bootMailboxSlaves_.clear();
   ctx_->manualstatechange = 1;
+  // ecx_config_init returns the broadcast-read working counter: > 0 is the slave count; a
+  // non-positive value means no slaves answered. Negative values are SOEM transport codes
+  // (EC_NOFRAME = -1, etc.); 0 is a returned frame that no slave incremented.
   int found = ecx_config_init(ctx_.get());
-  if (found < 0) {
-    return std::unexpected("ecx_config_init failed on " + ifname_);
+  if (found > 0) {
+    spdlog::debug("SOEM scan found {} slave(s) on '{}'", found, ifname_);
+    return found;
   }
-  // found == 0 is a valid result, not an error: the bus may simply have no devices powered. The
-  // master cannot distinguish "nothing powered" from "cable/NIC down" — both yield zero slaves — so
-  // report a successful scan of an empty bus and let the caller react (the user can power devices
-  // on and rescan).
-  spdlog::debug("SOEM scan found {} slave(s) on '{}'", found, ifname_);
-  return found;
+
+  // Too many slaves is the one genuinely distinguishable failure — a real misconfiguration — so it
+  // is an error. Every other non-positive result is an empty/unpowered/disconnected bus the master
+  // cannot tell apart, and which the user recovers from by powering devices on and rescanning; log
+  // the bus-level reason and report a successful scan of an empty bus (0 slaves).
+  if (found == EC_SLAVECOUNTEXCEEDED) {
+    spdlog::error("SOEM scan on '{}': too many slaves on the bus (exceeds EC_MAXSLAVE)", ifname_);
+    return std::unexpected("too many slaves on the bus (exceeds EC_MAXSLAVE) on " + ifname_);
+  }
+  switch (found) {
+    case EC_NOFRAME:
+      spdlog::warn("SOEM scan on '{}': no frame returned — bus empty, unpowered, or disconnected",
+                   ifname_);
+      break;
+    case EC_OTHERFRAME:
+      spdlog::warn(
+          "SOEM scan on '{}': unexpected frame during slave detection — possible cabling or "
+          "interference issue",
+          ifname_);
+      break;
+    case EC_ERROR:
+      spdlog::warn("SOEM scan on '{}': transport error during slave detection", ifname_);
+      break;
+    default:
+      spdlog::warn("SOEM scan on '{}': no slaves responded (working counter {})", ifname_, found);
+      break;
+  }
+  return 0;
 }
 
 namespace {

@@ -9,7 +9,6 @@
 #include <string>
 #include <utility>
 
-#include "cert_info.h"
 #include "cert_updater.h"
 #include "comm/base.h"
 #include "comm/fieldbus_driver.h"
@@ -139,52 +138,11 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  // Decide whether the served cert needs refreshing. A missing cert means we cannot serve TLS at
-  // all; an expired cert still binds (browsers can bypass) but should be refreshed. Both are healed
-  // by fetching from the rolling release unless --no-cert-update is set.
-  bool needFetch = false;
-  bool certMissing = !std::filesystem::exists(opts.config.tls.certPath) ||
-                     !std::filesystem::exists(opts.config.tls.keyPath);
-  if (certMissing) {
-    needFetch = true;
-    spdlog::warn("No TLS certificate at {}", opts.config.tls.certPath);
-  } else if (auto info = mm::readCertInfo(opts.config.tls.certPath)) {
-    const auto now = std::chrono::system_clock::now();
-    const auto daysRemaining =
-        std::chrono::duration_cast<std::chrono::hours>(info->notAfter - now).count() / 24;
-    if (now >= info->notAfter) {
-      needFetch = true;
-      spdlog::error("TLS certificate EXPIRED ({} days ago)", -daysRemaining);
-    } else if (daysRemaining < mm::kCertExpiryWarningDays) {
-      spdlog::warn("TLS certificate expires in {} days", daysRemaining);
-    } else {
-      spdlog::info("TLS certificate valid for {} more days", daysRemaining);
-    }
-  } else {
-    spdlog::warn("Could not read TLS certificate expiry: {}", info.error());
-  }
-
-  if (needFetch) {
-    if (!opts.config.tls.autoUpdate) {
-      if (certMissing) {
-        spdlog::error("No certificate and --no-cert-update set — cannot serve TLS");
-        return 1;
-      }
-      spdlog::error(
-          "Certificate expired and --no-cert-update set — serving the expired certificate");
-    } else {
-      spdlog::warn("Fetching fresh TLS certificate from {}", opts.certUrl);
-      if (auto r = mm::fetchAndSwapCert(opts.config.tls.certPath, opts.config.tls.keyPath,
-                                        opts.certUrl, opts.keyUrl);
-          r) {
-        spdlog::info("Installed fresh TLS certificate at {}", opts.config.tls.certPath);
-      } else if (certMissing) {
-        spdlog::error("Certificate fetch failed and no local certificate exists: {}", r.error());
-        return 1;
-      } else {
-        spdlog::error("Certificate fetch failed: {} — serving the expired certificate", r.error());
-      }
-    }
+  // Assess the served cert and self-heal it (fetch if missing/expired) unless --no-cert-update is
+  // set. healCertIfNeeded logs the outcome; it errors only when TLS cannot be served at all.
+  if (!mm::healCertIfNeeded(opts.config.tls.certPath, opts.config.tls.keyPath,
+                            opts.config.tls.autoUpdate, opts.certUrl, opts.keyUrl)) {
+    return 1;
   }
 
   // Owns the monitoring registry plus its background SDO-refresher and sampler threads. The HTTP

@@ -67,4 +67,27 @@ ResolvedCert resolveCertPaths(const std::string& configCertPath, const std::stri
                               const std::filesystem::path& defaultCertPath,
                               const std::filesystem::path& defaultKeyPath);
 
+/// @brief Assess the served TLS certificate and refresh it if missing or expired (the startup
+///        "cert self-heal").
+///
+/// Inspects @p certPath: a missing cert or an expired one triggers a fetch from @p certUrl /
+/// @p keyUrl via @c fetchAndSwapCert; a valid cert is left alone (an imminent expiry only warns).
+/// The outcome is logged. When @p autoUpdate is false no fetch is attempted.
+///
+/// The fatal case is "no certificate that can be served": the cert is missing and either fetching
+/// is disabled or the fetch failed. A present-but-expired cert is a degraded success — it still
+/// binds TLS (browsers can click through), so it is served with a warning rather than failing.
+///
+/// @param certPath   Path to the served certificate (overwritten on a successful fetch).
+/// @param keyPath    Path to the served private key (overwritten on a successful fetch).
+/// @param autoUpdate Whether a missing/expired cert may be fetched.
+/// @param certUrl    Source URL for the certificate fetch.
+/// @param keyUrl     Source URL for the private-key fetch.
+/// @return Empty on success (including the expired-but-served degraded case), or an error string
+///         when TLS cannot be served at all.
+std::expected<void, std::string> healCertIfNeeded(const std::string& certPath,
+                                                  const std::string& keyPath, bool autoUpdate,
+                                                  const std::string& certUrl,
+                                                  const std::string& keyUrl);
+
 }  // namespace mm

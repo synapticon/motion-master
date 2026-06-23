@@ -5,7 +5,9 @@
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
+#include <spdlog/spdlog.h>
 
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
@@ -15,6 +17,8 @@
 #include <mutex>
 #include <string>
 #include <system_error>
+
+#include "cert_info.h"
 
 namespace mm {
 
@@ -204,6 +208,58 @@ ResolvedCert resolveCertPaths(const std::string& configCertPath, const std::stri
 
   // 3. Nothing found — target the install-dir default so the caller's self-heal can populate it.
   return {.certPath = defaultCertPath.string(), .keyPath = defaultKeyPath.string(), .source = {}};
+}
+
+std::expected<void, std::string> healCertIfNeeded(const std::string& certPath,
+                                                  const std::string& keyPath, bool autoUpdate,
+                                                  const std::string& certUrl,
+                                                  const std::string& keyUrl) {
+  // Assess the served cert. A missing cert means we cannot serve TLS at all; an expired cert still
+  // binds (browsers can bypass) but should be refreshed; a valid cert is left alone.
+  bool needFetch = false;
+  const bool certMissing = !std::filesystem::exists(certPath) || !std::filesystem::exists(keyPath);
+  if (certMissing) {
+    needFetch = true;
+    spdlog::warn("No TLS certificate at {}", certPath);
+  } else if (auto info = readCertInfo(certPath)) {
+    const auto now = std::chrono::system_clock::now();
+    const auto daysRemaining =
+        std::chrono::duration_cast<std::chrono::hours>(info->notAfter - now).count() / 24;
+    if (now >= info->notAfter) {
+      needFetch = true;
+      spdlog::error("TLS certificate EXPIRED ({} days ago)", -daysRemaining);
+    } else if (daysRemaining < kCertExpiryWarningDays) {
+      spdlog::warn("TLS certificate expires in {} days", daysRemaining);
+    } else {
+      spdlog::info("TLS certificate valid for {} more days", daysRemaining);
+    }
+  } else {
+    spdlog::warn("Could not read TLS certificate expiry: {}", info.error());
+  }
+
+  if (!needFetch) {
+    return {};
+  }
+
+  if (!autoUpdate) {
+    if (certMissing) {
+      return std::unexpected("no certificate and cert auto-update is disabled — cannot serve TLS");
+    }
+    spdlog::error("Certificate expired and auto-update disabled — serving the expired certificate");
+    return {};
+  }
+
+  spdlog::warn("Fetching fresh TLS certificate from {}", certUrl);
+  if (auto r = fetchAndSwapCert(certPath, keyPath, certUrl, keyUrl); r) {
+    spdlog::info("Installed fresh TLS certificate at {}", certPath);
+    return {};
+  } else if (certMissing) {
+    return std::unexpected("certificate fetch failed and no local certificate exists: " +
+                           r.error());
+  } else {
+    spdlog::error("Certificate fetch failed: {} — serving the expired certificate", r.error());
+    return {};
+  }
 }
 
 }  // namespace mm

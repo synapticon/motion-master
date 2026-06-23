@@ -335,7 +335,8 @@ class FieldbusDriver {
   /// Must be called after a successful @c init(). Slaves remain in INIT state —
   /// state transitions are left entirely to the caller.
   ///
-  /// @return Number of slaves found on success, or an error string if the scan fails.
+  /// @return Number of slaves found (0 is a valid result — an empty/unpowered bus, which the master
+  ///         cannot distinguish from a disconnected one), or an error string if the scan fails.
   virtual std::expected<int, std::string> scan() = 0;
 
   /// @brief Returns the immutable identity fields for the slave at @p position.

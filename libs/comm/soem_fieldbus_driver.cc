@@ -55,9 +55,13 @@ std::expected<int, std::string> SoemFieldbusDriver::scan() {
   bootMailboxSlaves_.clear();
   ctx_->manualstatechange = 1;
   int found = ecx_config_init(ctx_.get());
-  if (found <= 0) {
-    return std::unexpected("ecx_config_init found no slaves on " + ifname_);
+  if (found < 0) {
+    return std::unexpected("ecx_config_init failed on " + ifname_);
   }
+  // found == 0 is a valid result, not an error: the bus may simply have no devices powered. The
+  // master cannot distinguish "nothing powered" from "cable/NIC down" — both yield zero slaves — so
+  // report a successful scan of an empty bus and let the caller react (the user can power devices
+  // on and rescan).
   spdlog::debug("SOEM scan found {} slave(s) on '{}'", found, ifname_);
   return found;
 }

@@ -96,15 +96,15 @@ int main(int argc, char** argv) {
   };
 
   // Optional eager init from the config file; otherwise the bus is initialised later via
-  // POST /api/init. Failure here is fatal — a configured driver that cannot start is a hard error.
-  // initDeviceManager and scan() log their own failures, so just bail on error.
+  // POST /api/init. A failed init is fatal — a configured driver that cannot start is a hard error.
+  // A failed scan is not: an empty/unscannable bus (no devices powered) is a valid state, so just
+  // start up and let the user power devices on and rescan via POST /api/scan. Both log their own
+  // outcome.
   if (!opts.config.fieldbus.driver.empty()) {
     if (!initDeviceManager(opts.config.fieldbus.driver, opts.config.fieldbus.adapter)) {
       return 1;
     }
-    if (!deviceManager.scan()) {
-      return 1;
-    }
+    static_cast<void>(deviceManager.scan());
   }
 
   // The install-dir cert/key — both the default served location and the target the self-heal and

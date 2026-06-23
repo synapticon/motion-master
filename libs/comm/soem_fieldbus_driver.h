@@ -43,7 +43,8 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// Sets @c manualstatechange so slaves remain in INIT after the scan —
   /// state transitions are left to the caller.
   ///
-  /// @return Number of slaves found on success, or an error string if no slaves are found.
+  /// @return Number of slaves found (0 is a valid result — an empty/unpowered bus), or an error
+  ///         string if the underlying scan fails.
   std::expected<int, std::string> scan() override;
 
   /// @brief Returns the immutable identity fields for the slave at @p position.

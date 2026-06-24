@@ -279,7 +279,7 @@ export default function FieldbusPage() {
                     className={inputCls}
                   >
                     <option value="soem">SOEM (Simple Open EtherCAT Master)</option>
-                    <option value="spoe">SPoE (SOMANET Protocol over Ethernet)</option>
+                    <option value="spoe" disabled>SPoE (SOMANET Protocol over Ethernet) — planned</option>
                   </select>
                 </div>
                 <div>

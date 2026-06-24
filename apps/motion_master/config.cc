@@ -23,9 +23,9 @@ std::expected<Config, std::string> parseConfig(const nlohmann::json& doc) {
   }
 
   if (!config.fieldbus.driver.empty()) {
-    static constexpr std::array kDrivers{"soem", "spoe", "igh"};
+    static constexpr std::array kDrivers{"soem", "spoe"};
     if (std::find(kDrivers.begin(), kDrivers.end(), config.fieldbus.driver) == kDrivers.end()) {
-      return std::unexpected("fieldbus.driver must be one of: soem, spoe, igh");
+      return std::unexpected("fieldbus.driver must be one of: soem, spoe");
     }
   }
 

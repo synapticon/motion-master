@@ -24,7 +24,7 @@ struct ServerConfig {
 /// @brief @c "fieldbus" block — the driver to auto-init at startup.
 /// An empty @c driver means "do not auto-init"; the fieldbus then waits for @c POST @c /api/init.
 struct FieldbusConfig {
-  std::string driver;   ///< "" | "soem" | "spoe" | "igh".
+  std::string driver;   ///< "" | "soem" | "spoe" (spoe planned; only soem is implemented today).
   std::string adapter;  ///< SOEM NIC: MAC or interface name. "" = none.
 };
 

@@ -88,8 +88,12 @@ int main(int argc, char** argv) {
       ifname = resolved->adapterName;
     }
     if (type != "soem") {
-      spdlog::error("Unsupported fieldbus driver: {}", type);
-      return std::unexpected("unsupported driver: " + type);
+      // soem is the only driver implemented today (spoe is planned). Config validation accepts the
+      // planned names, so be explicit at runtime about why a valid-looking driver is refused.
+      spdlog::error(
+          "Fieldbus driver '{}' is not implemented in this build — only 'soem' is available", type);
+      return std::unexpected("fieldbus driver '" + type +
+                             "' is not implemented in this build (only 'soem' is available)");
     }
     return deviceManager.init(std::make_unique<mm::comm::soem::SoemFieldbusDriver>(ifname),
                               deviceManagerConfig);

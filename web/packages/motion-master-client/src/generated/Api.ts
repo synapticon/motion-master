@@ -366,11 +366,11 @@ export class Api<
   init = (
     data?: {
       /**
-       * Fieldbus driver to use
+       * Fieldbus driver to use (only soem is implemented today; spoe is planned)
        * @default "soem"
        * @example "soem"
        */
-      driver?: "soem" | "spoe" | "igh";
+      driver?: "soem" | "spoe";
       /**
        * Network interface name or MAC address. Required for SOEM — there is no auto-detect, so an empty value makes init fail.
        * @example "eth0"

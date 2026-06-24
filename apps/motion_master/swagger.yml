@@ -15,8 +15,8 @@ info:
     created until you ask for it, so a fresh instance has no open network
     interface:
 
-    1. **Init** — `POST /api/init` constructs a fieldbus driver (`soem`, `spoe`,
-       or `igh`) and opens the network interface. SOEM has no adapter
+    1. **Init** — `POST /api/init` constructs a fieldbus driver (`soem`, or the
+       planned `spoe`) and opens the network interface. SOEM has no adapter
        auto-detect, so an adapter name or MAC address is required. `init` is
        one-shot: a second call returns `409` until you reset.
     2. **Scan** — `POST /api/scan` discovers the slaves on the bus and configures
@@ -498,8 +498,8 @@ paths:
               properties:
                 driver:
                   type: string
-                  description: Fieldbus driver to use
-                  enum: [soem, spoe, igh]
+                  description: Fieldbus driver to use (only soem is implemented today; spoe is planned)
+                  enum: [soem, spoe]
                   default: soem
                   example: "soem"
                 adapter:

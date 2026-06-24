@@ -55,7 +55,7 @@ TEST(ConfigTest, TlsBlockParsed) {
 }
 
 TEST(ConfigTest, AllValidDriversAccepted) {
-  for (const char* d : {"soem", "spoe", "igh"}) {
+  for (const char* d : {"soem", "spoe"}) {
     json doc = {{"fieldbus", {{"driver", d}}}};
     EXPECT_TRUE(parseConfig(doc).has_value()) << d;
   }
@@ -72,7 +72,11 @@ TEST(ConfigTest, InvalidLogLevelRejected) {
 }
 
 TEST(ConfigTest, InvalidDriverRejected) {
-  EXPECT_FALSE(parseConfig(json::parse(R"({"fieldbus": {"driver": "ethercat"}})")).has_value());
+  // "igh" was dropped from the accepted set; an unknown driver is likewise rejected.
+  for (const char* d : {"ethercat", "igh"}) {
+    json doc = {{"fieldbus", {{"driver", d}}}};
+    EXPECT_FALSE(parseConfig(doc).has_value()) << d;
+  }
 }
 
 TEST(ConfigTest, WrongScalarTypeRejected) {

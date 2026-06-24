@@ -17,9 +17,11 @@ std::expected<Config, std::string> parseConfig(const nlohmann::json& doc) {
     return std::unexpected(e.what());
   }
 
-  static constexpr std::array kLevels{"trace", "debug", "info", "warn", "error"};
+  static constexpr std::array kLevels{"trace", "debug",    "info", "warning",
+                                      "error", "critical", "off"};
   if (std::find(kLevels.begin(), kLevels.end(), config.logLevel) == kLevels.end()) {
-    return std::unexpected("logLevel must be one of: trace, debug, info, warn, error");
+    return std::unexpected(
+        "logLevel must be one of: trace, debug, info, warning, error, critical, off");
   }
 
   if (!config.fieldbus.driver.empty()) {

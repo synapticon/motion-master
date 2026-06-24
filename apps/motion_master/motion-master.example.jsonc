@@ -23,7 +23,7 @@
     // spoe will instead take a list of device addresses: "ipAddresses": ["192.168.0.10"]
   },
 
-  // Log verbosity: trace | debug | info | warn | error
+  // Log verbosity: trace | debug | info | warning | error | critical | off
   "logLevel": "info",
 
   // Real-time cyclic loop.

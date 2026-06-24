@@ -83,7 +83,7 @@ struct ParametersConfig {
 struct Config {
   ServerConfig server;
   FieldbusConfig fieldbus;
-  std::string logLevel = "info";  ///< trace | debug | info | warn | error.
+  std::string logLevel = "info";  ///< trace | debug | info | warning | error | critical | off.
   TlsConfig tls;
   GameLoopConfig gameLoop;
   RecorderConfig recorder;

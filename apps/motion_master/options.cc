@@ -36,7 +36,8 @@ Options parseOptions(int argc, char** argv) {
   app.add_flag("--open", opts.openBrowser,
                "Open https://motion-master.synapticon.com/app/ in the default browser");
   app.add_flag("--update-cert", opts.updateCert,
-               "Download a fresh TLS cert/key, install them next to the binary, and exit");
+               "Download a fresh TLS cert/key, install them at the configured (or default) path, "
+               "and exit");
   app.add_option("--cert-url", opts.certUrl, "Source URL for the TLS certificate")
       ->capture_default_str();
   app.add_option("--key-url", opts.keyUrl, "Source URL for the TLS private key")

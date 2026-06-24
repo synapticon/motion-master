@@ -6,12 +6,12 @@
 
 /// @brief Everything resolved from the command line and config file for one run.
 ///
-/// The tunable settings live in @c config (built-in defaults, overlaid by the @c --config file,
-/// overlaid by explicit CLI flags). The remaining members are CLI-only: actions and runtime values
-/// that have no place in the config file.
+/// The tunable settings live in @c config (built-in defaults, overlaid only by the @c --config
+/// file — none of them have a command-line flag). The remaining members are CLI-only: actions and
+/// cert-fetch sources that have no place in the config file.
 struct Options {
   std::string configPath;   ///< --config path; empty if not given.
-  Config config;            ///< Settings: built-in defaults ⊕ config file ⊕ CLI overrides.
+  Config config;            ///< Settings: built-in defaults overlaid by the config file.
   bool openBrowser{false};  ///< Open the PWA in the default browser on start (--open).
   bool updateCert{false};   ///< Fetch a fresh cert/key, install them, and exit (--update-cert).
   std::string certUrl;      ///< --cert-url (CLI-only; defaults to the rolling release).
@@ -19,10 +19,10 @@ struct Options {
 };
 
 /// @brief Parse argv and load the config file into an Options value.
-/// @details Loads the @c --config file first (JSONC, comments allowed) into @c Options::config,
-///          then lets explicit CLI flags override individual fields — precedence is
-///          CLI flag > config file > built-in default. On --list-adapters the adapters are printed
-///          and the process exits 0.
+/// @details Loads the @c --config file (JSONC, comments allowed) into @c Options::config, layering
+///          it over the built-in defaults; the settings themselves have no command-line flags — the
+///          CLI carries only actions and cert-fetch sources. On --list-adapters the adapters are
+///          printed and the process exits 0.
 /// @param argc Argument count forwarded from main().
 /// @param argv Argument vector forwarded from main().
 /// @return Fully populated Options.

@@ -11,8 +11,8 @@
 /// Each sub-struct mirrors one JSONC object; nlohmann's @c _WITH_DEFAULT (de)serialization fills
 /// any key the file omits from a default-constructed instance, so a partial config "overrides the
 /// defaults" with no per-field plumbing. @c parseConfig adds the enum/value checks nlohmann cannot
-/// express. This is deliberately separate from @c Options, which also carries CLI-only and runtime
-/// fields (actions, resolved network adapter, cert source URLs) that have no place in the file.
+/// express. This is deliberately separate from @c Options, which also carries CLI-only fields
+/// (actions and cert source URLs) that have no place in the file.
 
 /// @brief @c "server" block — the HTTP API and WebSocket listeners.
 struct ServerConfig {

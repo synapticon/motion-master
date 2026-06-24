@@ -30,7 +30,9 @@ struct FieldbusConfig {
 
 /// @brief @c "tls" block — certificate paths and startup self-heal policy.
 struct TlsConfig {
-  std::string certPath;    ///< "" = auto-discover (bundled cert, then acme.sh, then self-signed).
+  /// "" = auto-discover: bundled cert, then acme.sh, then the install-dir default — fetched from
+  /// the rolling release on startup if missing or expired (see @c autoUpdate).
+  std::string certPath;
   std::string keyPath;     ///< "" = auto-discover, paired with @c certPath.
   bool autoUpdate = true;  ///< Fetch a fresh cert when missing/expired (false ⇒ --no-cert-update).
 };

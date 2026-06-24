@@ -7,7 +7,7 @@ const DEFAULT_HOST = 'local.motion-master.synapticon.com'
 const DEFAULT_HTTP_PORT = '61447'
 const DEFAULT_WS_PORT = '62281'
 
-type Driver = 'soem' | 'spoe' | 'igh'
+type Driver = 'soem' | 'spoe'
 
 interface Endpoint {
   host: string

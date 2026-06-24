@@ -275,12 +275,11 @@ export default function FieldbusPage() {
                   <label className={labelCls}>Driver</label>
                   <select
                     value={driver}
-                    onChange={e => setDriver(e.target.value as 'soem' | 'spoe' | 'igh')}
+                    onChange={e => setDriver(e.target.value as 'soem' | 'spoe')}
                     className={inputCls}
                   >
                     <option value="soem">SOEM (Simple Open EtherCAT Master)</option>
                     <option value="spoe">SPoE (SOMANET Protocol over Ethernet)</option>
-                    <option value="igh">IgH EtherCAT Master</option>
                   </select>
                 </div>
                 <div>

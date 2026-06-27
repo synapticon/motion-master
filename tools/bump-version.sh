@@ -30,7 +30,9 @@ sed -i "s/\"version\": \"${OLD_ESC}\"/\"version\": \"${NEW_VERSION}\"/" \
 for f in \
   "$ROOT/package.json" \
   "$ROOT/web/apps/console/package.json" \
+  "$ROOT/web/apps/example/package.json" \
   "$ROOT/web/packages/motion-master-client/package.json" \
+  "$ROOT/web/packages/ui/package.json" \
   "$ROOT/hil/api/package.json"; do
   sed -i "s/\"version\": \"${OLD_ESC}\"/\"version\": \"${NEW_VERSION}\"/" "$f"
 done

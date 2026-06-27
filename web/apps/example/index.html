@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Example — Motion Master</title>
+    <meta name="theme-color" content="#004f5d" />
+    <link rel="icon" href="/favicon.ico" sizes="48x48" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon-180x180.png" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="Example" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <script>
+      // Restore a deep link encoded by the site's 404.html. A cold-loaded route
+      // (e.g. /apps/example/about) has no file on disk, so GitHub Pages' 404.html
+      // redirects here as /apps/example/?/about; rewrite it back to the real path
+      // before the router mounts. See web/404.html for the encoding side. Every PWA
+      // under /apps/ needs this snippet.
+      ;(function () {
+        var l = window.location
+        if (l.search.charAt(1) === '/') {
+          var decoded = l.search
+            .slice(1)
+            .split('&')
+            .map(function (s) {
+              return s.replace(/~and~/g, '&')
+            })
+            .join('?')
+          window.history.replaceState(null, null, l.pathname.slice(0, -1) + decoded + l.hash)
+        }
+      })()
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

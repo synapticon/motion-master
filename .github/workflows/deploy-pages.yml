@@ -61,15 +61,18 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build UI
-        env:
-          VITE_BASE: /apps/console
-        run: pnpm build
+        run: |
+          # Each app is served under /apps/<name>, so it is built with that base.
+          pnpm generate-api
+          VITE_BASE=/apps/console pnpm --filter console build
+          VITE_BASE=/apps/example pnpm --filter example build
 
       - name: Assemble Pages artifact
         run: |
-          mkdir -p build/pages/apps/console build/pages/docs
+          mkdir -p build/pages/apps/console build/pages/apps/example build/pages/docs
           cp web/landing/index.html build/pages/index.html
           cp -r web/apps/console/dist/. build/pages/apps/console/
+          cp -r web/apps/example/dist/. build/pages/apps/example/
           cp -r build/docs/html/. build/pages/docs/
           cp apps/motion_master/swagger.yml build/pages/swagger.yml
           # Generic 404: redirects deep links into any /apps/<app>/ PWA to that app's

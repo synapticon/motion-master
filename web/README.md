@@ -3,7 +3,9 @@
 All of Motion Master's browser/Node TypeScript lives here:
 
 - [`apps/console`](apps/console) — the Motion Master Console PWA (React + Vite + Tailwind).
-- [`packages/motion-master-client`](packages/motion-master-client) — `@synapticon/motion-master-client`, the published, isomorphic SDK (the generated HTTP API client + the WebSocket connection). The app consumes it as a `workspace:*` dependency.
+- [`apps/example`](apps/example) — a minimal starter PWA. It does nothing useful on its own; it exists to be copied when starting a new app and to show how to consume the shared packages. Built and deployed under `/apps/example` like any other app.
+- [`packages/motion-master-client`](packages/motion-master-client) — `@synapticon/motion-master-client`, the published, isomorphic SDK (the generated HTTP API client + the WebSocket connection). Apps consume it as a `workspace:*` dependency.
+- [`packages/ui`](packages/ui) — `@synapticon/ui`, the shared Synapticon design system (the Tailwind theme at `@synapticon/ui/theme.css`) and a starter set of React components (`Callout`, `PageHeader`, `Button`). Consumed as source via `workspace:*`. An app keeps the shared look by importing the theme; one that needs to diverge can drop the import and define its own.
 
 These are members of a single pnpm workspace **rooted at the repository root** (`pnpm-workspace.yaml`), alongside `hil/api`. So pnpm commands run from the repo root, not from `web/`.
 
@@ -18,10 +20,11 @@ These are members of a single pnpm workspace **rooted at the repository root** (
 
 Anything outside `/`, `/apps/*`, and `/docs/*` is a genuine 404.
 
-**Adding another PWA under `/apps/`** requires three things so deep links survive a cold load:
+**Adding another PWA under `/apps/`** — the quickest start is to copy [`apps/example`](apps/example), which already has all of the below wired up; rename the package and the `scope`/`start_url`/base. The pieces that matter:
 1. Build it with `VITE_BASE=/apps/<app>` and `BrowserRouter basename={import.meta.env.BASE_URL…}`.
-2. Copy the same deep-link **decoder snippet** that's in `apps/console/index.html` (`<head>`) into the new app's `index.html` — `web/404.html` redirects a cold-loaded route to `/apps/<app>/?/<route>`, and the decoder rewrites it back before the router mounts. `web/404.html` is app-agnostic; no change needed there.
-3. Add a copy step in `deploy-pages.yml` to place its `dist/` under `build/pages/apps/<app>/`.
+2. Copy the deep-link **decoder snippet** that's in `apps/example/index.html` (`<head>`) into the new app's `index.html` — `web/404.html` redirects a cold-loaded route to `/apps/<app>/?/<route>`, and the decoder rewrites it back before the router mounts. `web/404.html` is app-agnostic; no change needed there.
+3. Add a build + copy step in `deploy-pages.yml` (`VITE_BASE=/apps/<app> pnpm --filter <app> build`, then copy its `dist/` to `build/pages/apps/<app>/`).
+4. Import the shared design system (`import '@synapticon/ui/theme.css'`) to stay on-brand, and reuse `@synapticon/ui` components and the `@synapticon/motion-master-client` SDK as needed.
 
 ## Prerequisites
 

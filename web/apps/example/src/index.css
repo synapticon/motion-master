@@ -1,0 +1,4 @@
+/* The entire design system — Tailwind, design tokens, fonts, base layer — comes from
+   the shared package. An app that needs to diverge can drop this import and define
+   its own theme instead. */
+@import "@synapticon/ui/theme.css";

@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Page not found — Motion Master</title>
+  <link rel="icon" href="/apps/console/favicon.ico" />
+  <script>
+    // GitHub Pages serves this file (with an HTTP 404 status) for every path that
+    // has no matching file. Two cases:
+    //
+    //   1. A deep link into a PWA under /apps/<app>/… — a client-side route with no
+    //      file on disk (e.g. /apps/console/recorder). We can't boot the app from
+    //      here (each app has its own hashed assets), so redirect to the app's index
+    //      with the route encoded in the query string; the app's index.html restores
+    //      it before its router mounts. The redirect collapses the path to
+    //      /apps/<app>/ (two segments), so an unknown app name lands back here as a
+    //      two-segment path and falls through to the 404 below — no redirect loop.
+    //
+    //   2. Anything else (/app, typos, /apps/<unknown>, non-/apps non-/docs paths):
+    //      fall through and render the Not Found page below.
+    (function () {
+      var l = window.location
+      var segs = l.pathname.split('/').filter(Boolean)
+      if (segs[0] === 'apps' && segs.length > 2) {
+        var base = '/apps/' + segs[1] + '/'
+        var route = segs.slice(2).join('/')
+        l.replace(
+          base + '?/' + route +
+          (l.search ? '&' + l.search.slice(1).replace(/&/g, '~and~') : '') +
+          l.hash,
+        )
+      }
+    })()
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    @font-face {
+      font-family: "Synapticon Campton";
+      font-weight: 500;
+      font-style: normal;
+      src: url("/apps/console/fonts/CamptonMedium.woff2") format("woff2");
+    }
+
+    @font-face {
+      font-family: "Univers LT Pro";
+      font-weight: 400;
+      font-style: normal;
+      src: url("/apps/console/fonts/UniversLTPro-55Roman.woff2") format("woff2");
+    }
+
+    body {
+      font-family: "Univers LT Pro", "Inter", ui-sans-serif, system-ui, sans-serif;
+      background: #191817;
+      color: #d9d9d9;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      text-align: center;
+      letter-spacing: 0.03em;
+      line-height: 1.52;
+    }
+
+    .code {
+      font-family: "Synapticon Campton", "Raleway", ui-sans-serif, system-ui, sans-serif;
+      font-size: 5rem;
+      font-weight: 500;
+      letter-spacing: 0.05em;
+      line-height: 1;
+      color: #fafafa;
+    }
+
+    h1 {
+      font-family: "Synapticon Campton", "Raleway", ui-sans-serif, system-ui, sans-serif;
+      font-size: 1.5rem;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #fafafa;
+      margin-top: 1.25rem;
+    }
+
+    p {
+      margin-top: 0.75rem;
+      font-size: 0.9375rem;
+      color: #a9a9a9;
+      max-width: 32rem;
+    }
+
+    a.home {
+      display: inline-block;
+      margin-top: 2rem;
+      padding: 0.625rem 1.25rem;
+      border-left: 3px solid #e0004d;
+      background: #211f1e;
+      color: #fafafa;
+      text-decoration: none;
+      font-size: 0.875rem;
+      letter-spacing: 0.04em;
+      transition: background 0.15s;
+    }
+
+    a.home:hover { background: #2b2827; }
+  </style>
+</head>
+<body>
+  <div class="code">404</div>
+  <h1>Page not found</h1>
+  <p>The page you're looking for doesn't exist. It may have moved, or the address may be mistyped.</p>
+  <a class="home" href="/">Back to Motion Master</a>
+</body>
+</html>

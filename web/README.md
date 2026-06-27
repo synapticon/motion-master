@@ -7,6 +7,22 @@ All of Motion Master's browser/Node TypeScript lives here:
 
 These are members of a single pnpm workspace **rooted at the repository root** (`pnpm-workspace.yaml`), alongside `hil/api`. So pnpm commands run from the repo root, not from `web/`.
 
+## Deployment layout (GitHub Pages)
+
+`deploy-pages.yml` assembles the site served at `https://motion-master.synapticon.com`:
+
+- `/` — the landing page (`web/landing/index.html`)
+- `/apps/<app>/` — each PWA, built with Vite `base: /apps/<app>` (e.g. `/apps/console`)
+- `/docs/` — the Doxygen C++ reference
+- `404.html` — `web/404.html`, served (with an HTTP 404 status) for every unmatched path
+
+Anything outside `/`, `/apps/*`, and `/docs/*` is a genuine 404.
+
+**Adding another PWA under `/apps/`** requires three things so deep links survive a cold load:
+1. Build it with `VITE_BASE=/apps/<app>` and `BrowserRouter basename={import.meta.env.BASE_URL…}`.
+2. Copy the same deep-link **decoder snippet** that's in `apps/console/index.html` (`<head>`) into the new app's `index.html` — `web/404.html` redirects a cold-loaded route to `/apps/<app>/?/<route>`, and the decoder rewrites it back before the router mounts. `web/404.html` is app-agnostic; no change needed there.
+3. Add a copy step in `deploy-pages.yml` to place its `dist/` under `build/pages/apps/<app>/`.
+
 ## Prerequisites
 
 - Node.js 20+

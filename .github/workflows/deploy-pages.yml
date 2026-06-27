@@ -72,8 +72,9 @@ jobs:
           cp -r web/apps/console/dist/. build/pages/apps/console/
           cp -r build/docs/html/. build/pages/docs/
           cp apps/motion_master/swagger.yml build/pages/swagger.yml
-          # 404.html is the SPA shell so GitHub Pages deep-links into /apps/console/* work
-          cp build/pages/apps/console/index.html build/pages/404.html
+          # Generic 404: redirects deep links into any /apps/<app>/ PWA to that app's
+          # index (the app's index.html decodes the route); a real Not Found for the rest.
+          cp web/404.html build/pages/404.html
           echo "motion-master.synapticon.com" > build/pages/CNAME
 
       - name: Upload Pages artifact

@@ -52,7 +52,7 @@ motion-master [OPTIONS]
   -l, --log-level TEXT [info]   Log level: trace, debug, info, warn, error
   -a, --adapter TEXT            Network adapter for EtherCAT: interface name or MAC address
       --list-adapters           Print available network adapters and exit
-      --open                    Open https://motion-master.synapticon.com/app/ in the default browser after startup
+      --open                    Open https://motion-master.synapticon.com/apps/console/ in the default browser after startup
 ```
 
 On Linux, `motion-master` requires raw socket and RT scheduling capabilities. `./tools/build.sh` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw=eip` on the binary after linking — you will be prompted for your password. Without these capabilities the binary still runs but EtherCAT initialisation will fail.

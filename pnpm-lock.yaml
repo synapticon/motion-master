@@ -39,7 +39,7 @@ importers:
         specifier: ^2.0.0
         version: 2.1.9(@types/node@25.9.3)(@vitest/ui@2.1.9)(lightningcss@1.32.0)(terser@5.48.0)
 
-  web/apps/motion-master:
+  web/apps/console:
     dependencies:
       '@scalar/api-reference-react':
         specifier: ^0.9.41
@@ -5131,7 +5131,7 @@ snapshots:
   '@floating-ui/vue@1.1.9(vue@3.5.38(typescript@5.9.3))':
     dependencies:
       '@floating-ui/dom': 1.7.6
-      '@floating-ui/utils': 0.2.10
+      '@floating-ui/utils': 0.2.11
       vue-demi: 0.14.10(vue@3.5.38(typescript@5.9.3))
     transitivePeerDependencies:
       - '@vue/composition-api'

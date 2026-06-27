@@ -188,7 +188,7 @@ int main(int argc, char** argv) {
   monitoringManager.start();
 
   if (opts.openBrowser) {
-    mm::core::openInBrowser("https://motion-master.synapticon.com/app/");
+    mm::core::openInBrowser("https://motion-master.synapticon.com/apps/console/");
   }
 
   GameLoop gameLoop{std::chrono::microseconds{opts.config.gameLoop.periodUs}};

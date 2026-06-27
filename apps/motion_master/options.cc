@@ -34,7 +34,7 @@ Options parseOptions(int argc, char** argv) {
                  "and TLS (see motion-master.example.jsonc)")
       ->check(CLI::ExistingFile);
   app.add_flag("--open", opts.openBrowser,
-               "Open https://motion-master.synapticon.com/app/ in the default browser");
+               "Open https://motion-master.synapticon.com/apps/console/ in the default browser");
   app.add_flag("--update-cert", opts.updateCert,
                "Download a fresh TLS cert/key, install them at the configured (or default) path, "
                "and exit");

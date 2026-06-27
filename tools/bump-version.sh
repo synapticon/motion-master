@@ -29,7 +29,7 @@ sed -i "s/\"version\": \"${OLD_ESC}\"/\"version\": \"${NEW_VERSION}\"/" \
 # 3. JS/TS package manifests (root workspace manifest + every workspace member)
 for f in \
   "$ROOT/package.json" \
-  "$ROOT/web/apps/motion-master/package.json" \
+  "$ROOT/web/apps/console/package.json" \
   "$ROOT/web/packages/motion-master-client/package.json" \
   "$ROOT/hil/api/package.json"; do
   sed -i "s/\"version\": \"${OLD_ESC}\"/\"version\": \"${NEW_VERSION}\"/" "$f"
@@ -45,7 +45,7 @@ sed -i "s/kVersion, \"${OLD_ESC}\"/kVersion, \"${NEW_VERSION}\"/" \
 
 # 6. UI sidebar version badge
 sed -i "s/>v${OLD_ESC}</>v${NEW_VERSION}</" \
-  "$ROOT/web/apps/motion-master/src/layouts/RootLayout.tsx"
+  "$ROOT/web/apps/console/src/layouts/RootLayout.tsx"
 
 echo "Done — review with: git diff"
 echo "Note: tagging v${NEW_VERSION} publishes @synapticon/motion-master-client@${NEW_VERSION} to npm (release.yml)."

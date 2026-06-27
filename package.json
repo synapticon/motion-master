@@ -3,8 +3,8 @@
   "private": true,
   "version": "6.0.0-alpha.31",
   "scripts": {
-    "dev": "pnpm --filter motion-master dev",
-    "build": "pnpm --filter @synapticon/motion-master-client generate && pnpm --filter motion-master build",
+    "dev": "pnpm --filter console dev",
+    "build": "pnpm --filter @synapticon/motion-master-client generate && pnpm --filter console build",
     "generate-api": "pnpm --filter @synapticon/motion-master-client generate",
     "build:client": "pnpm --filter @synapticon/motion-master-client generate && pnpm --filter @synapticon/motion-master-client build",
     "test:api": "pnpm --filter motion-master-api-tests test"

@@ -57,8 +57,8 @@ export default defineConfig({
         theme_color: '#004f5d',
         background_color: '#004f5d',
         display: 'standalone',
-        scope: '/app',
-        start_url: '/app',
+        scope: '/apps/console',
+        start_url: '/apps/console',
         orientation: 'landscape',
         icons: [
           { src: 'pwa-64x64.png', sizes: '64x64', type: 'image/png' },

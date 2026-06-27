@@ -370,12 +370,34 @@ All scripts default to the `x64-linux-debug` preset. Pass a preset name as the f
 
 ## Versioning
 
-All components — C++ backend, React UI, OpenAPI spec, and npm packages — share a single semver. `VERSION` (repo root) is the canonical source; CMake reads it automatically to populate `libs/core/version.h`. Use the bump script to update every location in one shot:
+All components — C++ backend, React UI, OpenAPI spec, and npm packages — share a single semver. `VERSION` (repo root) is the **canonical source**: a one-line plain-text file (e.g. `6.0.0-alpha.31`). There is no auto-increment — a human picks the next version. Everything else is either *derived* from `VERSION` at build time or *kept in sync* with it by the bump script.
+
+### Bumping
+
+Never edit `VERSION` by hand. Run the bump script with the new version:
 
 ```bash
 ./tools/bump-version.sh 6.1.0
 ./tools/bump-version.sh 6.1.0-alpha.0
 ```
+
+It writes `VERSION`, then propagates the value to every location that *isn't* auto-derived: `vcpkg.json`, the `package.json` manifests (root workspace + `motion-master`, `motion-master-client`, `hil/api`), `swagger.yml` (`info.version`), the `version_test.cc` assertion, and the UI sidebar badge in `RootLayout.tsx`.
+
+### How it reaches the C++ binary
+
+CMake does the propagation into native code at configure time — `version.h` is **generated, never edited by hand**:
+
+1. `CMakeLists.txt` reads the file into a variable: `file(STRINGS "${CMAKE_SOURCE_DIR}/VERSION" MM_VERSION)`.
+2. `libs/core/CMakeLists.txt` runs `configure_file(version.h.in …)`, substituting `@MM_VERSION@` in the template to produce the build-dir `version.h`:
+
+   ```cpp
+   constexpr std::string_view kVersion = "6.0.0-alpha.31";
+   static_assert(semver::valid(kVersion));   // build fails on a malformed version
+   ```
+
+The `static_assert` is a compile-time guard: a malformed version in `VERSION` breaks the build rather than shipping a bad string. The `Doxyfile` version is propagated the same way.
+
+### Releasing
 
 After bumping, commit the changed files, then push a `v<version>` tag to trigger the release workflow:
 
@@ -385,6 +407,8 @@ git commit -m "chore: bump version to 6.1.0"
 git tag v6.1.0
 git push && git push --tags
 ```
+
+The `v*` tag builds the platform binaries **and** publishes `@synapticon/motion-master-client@<version>` to npm (prereleases under the `next` dist-tag). Two drift nets back the sync: `version_test.cc` fails if its hard-coded string falls out of step, and the `api-client-drift` CI job fails if the committed API client is stale against `swagger.yml`.
 
 ## CI
 

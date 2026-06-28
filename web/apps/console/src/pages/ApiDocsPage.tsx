@@ -126,7 +126,7 @@ const SCALAR_CSS = `
 .scalar-app .mm-spec-download__label {
   font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.025em;
   color: #656565;
 }
 .scalar-app .mm-spec-download button {

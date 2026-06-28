@@ -266,7 +266,7 @@ export default function FieldbusPage() {
 
             {/* Init */}
             <div className="border border-grey-200 p-5 space-y-4 2xl:col-span-3">
-              <h3 className="text-sm font-display uppercase tracking-widest">Init</h3>
+              <h3 className="text-sm font-display uppercase">Init</h3>
               <p className="text-xs text-grey-600">
                 Initialize the fieldbus driver with the selected protocol and network adapter. Must be called before scanning.
               </p>
@@ -348,7 +348,7 @@ export default function FieldbusPage() {
 
             {/* Reset */}
             <div className="border border-grey-200 p-5 space-y-4 2xl:col-span-1">
-              <h3 className="text-sm font-display uppercase tracking-widest">Reset</h3>
+              <h3 className="text-sm font-display uppercase">Reset</h3>
               <p className="text-xs text-grey-600">
                 Reset the fieldbus driver and clear the device list. Init must be performed again afterwards.
               </p>
@@ -376,7 +376,7 @@ export default function FieldbusPage() {
 
             {/* Scan + Devices */}
             <div className="border border-grey-200 p-5 space-y-4 2xl:col-span-3">
-              <h3 className="text-sm font-display uppercase tracking-widest">Scan</h3>
+              <h3 className="text-sm font-display uppercase">Scan</h3>
               <p className="text-xs text-grey-600">
                 Discover EtherCAT slaves on the bus. Requires a successful init first.
                 Re-discovers the bus and resets all slaves to INIT — use Refresh below to
@@ -563,7 +563,7 @@ export default function FieldbusPage() {
 
             {/* Transition to State */}
             <div className="border border-grey-200 p-5 space-y-4 2xl:col-span-1">
-              <h3 className="text-sm font-display uppercase tracking-widest">Transition to State</h3>
+              <h3 className="text-sm font-display uppercase">Transition to State</h3>
               <p className="text-xs text-grey-600">
                 Command all slaves to transition to an EtherCAT AL state. Requires a successful scan
                 first.

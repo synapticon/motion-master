@@ -408,7 +408,7 @@ function SourceBadge({ source }: { source: string }) {
           ? 'PDO — decoded live from the process image each tick'
           : 'SDO — polled in the background and read from cache'
       }
-      className={`px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wider uppercase cursor-help ${pdo ? 'bg-ocean/10 text-ocean' : 'bg-grey-100 text-grey-600'
+      className={`px-1.5 py-0.5 rounded-sm text-[10px] font-display tracking-wide uppercase cursor-help ${pdo ? 'bg-ocean/10 text-ocean' : 'bg-grey-100 text-grey-600'
         }`}
     >
       {source}

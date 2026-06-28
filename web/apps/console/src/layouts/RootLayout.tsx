@@ -64,7 +64,7 @@ function NavItem({ to, label, end }: { to: string; label: string; end?: boolean 
       to={to}
       end={end}
       className={({ isActive }) =>
-        `block px-5 py-2 text-xs font-display uppercase tracking-widest border-l-2 transition-colors ${isActive
+        `block px-5 py-2 text-xs font-display uppercase tracking-wide border-l-2 transition-colors ${isActive
           ? 'border-syn-red text-white bg-white/10'
           : 'border-transparent text-white/60 hover:text-white hover:border-white/30'
         }`
@@ -199,7 +199,7 @@ function DeviceSection({
             (mailbox presence, object-dictionary read state), each green when healthy and
             grey otherwise. Immutable identity (vendor/code/revision/serial) lives in the
             name tooltip. */}
-        <div className="mt-1.5 flex items-center gap-1 text-[10px] font-display tracking-wider">
+        <div className="mt-1.5 flex items-center gap-1 text-[10px] font-display tracking-wide">
           {stateLabel && (
             <span
               className={`shrink-0 inline-flex items-center h-[18px] px-1.5 rounded-sm ${state?.error
@@ -329,7 +329,7 @@ export default function RootLayout() {
                 }`}
             />
           </div>
-          <p className="text-white/30 text-xs font-display tracking-wider mt-0.5">v6.0.0-alpha.31</p>
+          <p className="text-white/30 text-xs font-display tracking-wide mt-0.5">v6.0.0-alpha.31</p>
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
@@ -449,7 +449,7 @@ export default function RootLayout() {
                   }
                 >
                   <span
-                    className={`text-xs font-display tracking-wider ${!isInitialized ? 'text-white/40' : 'text-status-warn'
+                    className={`text-xs font-display tracking-wide ${!isInitialized ? 'text-white/40' : 'text-status-warn'
                       }`}
                   >
                     {!isInitialized ? 'Not initialized' : 'Initialized · not scanned'}

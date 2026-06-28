@@ -8,30 +8,60 @@
 @source "./components/**/*.tsx";
 
 /* ─── Synapticon Design System — April 2026 ─────────────────────────────────
-   Shared by every app under web/apps. Fonts: Synapticon Campton (display) +
-   Univers LT Pro (body); drop the woff2 files in an app's public/fonts/ to
-   activate them, otherwise the stack falls back to system fonts.
+   Shared by every app under web/apps. Fonts: Montserrat (display) + Inter
+   (body) — both SIL Open Font License, self-hosted (latin subset) from the
+   ./fonts/ folder in this package; Vite bundles + fingerprints them into each
+   app, and the PWA precaches them. The static landing/404 pages copy the same
+   files to /fonts/ at deploy time. The generic fallbacks below only cover the
+   brief swap window. See ./fonts/{Montserrat,Inter}-OFL.txt for licenses.
    ────────────────────────────────────────────────────────────────────────── */
 
 @font-face {
-  font-family: "Synapticon Campton";
+  font-family: "Montserrat";
   font-weight: 300;
   font-style: normal;
-  src: url("/fonts/CamptonLight.woff2") format("woff2");
+  font-display: swap;
+  src: url("./fonts/Montserrat-Light.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: "Synapticon Campton";
+  font-family: "Montserrat";
   font-weight: 500;
   font-style: normal;
-  src: url("/fonts/CamptonMedium.woff2") format("woff2");
+  font-display: swap;
+  src: url("./fonts/Montserrat-Medium.woff2") format("woff2");
 }
 
 @font-face {
-  font-family: "Univers LT Pro";
+  font-family: "Inter";
   font-weight: 400;
   font-style: normal;
-  src: url("/fonts/UniversLTPro-55Roman.woff2") format("woff2");
+  font-display: swap;
+  src: url("./fonts/Inter-Regular.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+  src: url("./fonts/Inter-Medium.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  src: url("./fonts/Inter-SemiBold.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Inter";
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+  src: url("./fonts/Inter-Bold.woff2") format("woff2");
 }
 
 @theme {
@@ -60,8 +90,8 @@
   --color-status-info: #166fc0;  /* generic info */
 
   /* ── Typography ──────────────────────────────────────────────── */
-  --font-display: "Synapticon Campton", "Raleway", ui-sans-serif, system-ui, sans-serif;
-  --font-body:    "Univers LT Pro", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Montserrat", ui-sans-serif, system-ui, sans-serif;
+  --font-body:    "Inter", ui-sans-serif, system-ui, sans-serif;
 
   /* ── Radii — brand is squared off ────────────────────────────── */
   --radius-none:   0px;
@@ -101,7 +131,7 @@
     letter-spacing: 0.03em;
   }
 
-  /* Display headings — Campton, always uppercase */
+  /* Display headings — Montserrat, always uppercase */
   h1, h2, h3, h4, h5, h6 {
     font-family: var(--font-display);
     text-transform: uppercase;
@@ -119,7 +149,7 @@
     color: var(--color-syn-red);
   }
 
-  /* Buttons — squared, uppercase Campton */
+  /* Buttons — squared, uppercase Montserrat */
   button, [role="button"] {
     font-family: var(--font-display);
     text-transform: uppercase;

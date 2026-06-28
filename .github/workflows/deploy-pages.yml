@@ -69,8 +69,12 @@ jobs:
 
       - name: Assemble Pages artifact
         run: |
-          mkdir -p build/pages/apps/console build/pages/apps/example build/pages/docs
+          mkdir -p build/pages/apps/console build/pages/apps/example build/pages/docs build/pages/fonts
           cp web/landing/index.html build/pages/index.html
+          # Static root pages (landing/index.html + 404.html) reference /fonts/;
+          # the Vite apps bundle their own copies from @synapticon/ui. Serve the
+          # canonical woff2 from the shared package at the site root for the static pages.
+          cp web/packages/ui/src/fonts/*.woff2 build/pages/fonts/
           cp -r web/apps/console/dist/. build/pages/apps/console/
           cp -r web/apps/example/dist/. build/pages/apps/example/
           cp -r build/docs/html/. build/pages/docs/

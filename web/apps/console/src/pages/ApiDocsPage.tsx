@@ -46,7 +46,7 @@ function buildDownloadBar(): HTMLElement {
 // @font-face families (already loaded globally), so no extra font fetch here.
 const SCALAR_CSS = `
 .light-mode {
-  --scalar-font: "Univers LT Pro", "Inter", ui-sans-serif, system-ui, sans-serif;
+  --scalar-font: "Inter", ui-sans-serif, system-ui, sans-serif;
   --scalar-font-code: ui-monospace, "SFMono-Regular", "Menlo", monospace;
 
   --scalar-color-1: #191817;

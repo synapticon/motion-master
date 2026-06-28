@@ -49,7 +49,7 @@ export default defineConfig({
     swaggerSpec(),
     VitePWA({
       registerType: 'prompt',
-      includeAssets: ['favicon.ico', 'favicon.svg', 'apple-touch-icon-180x180.png', 'fonts/**/*'],
+      includeAssets: ['favicon.ico', 'favicon.svg', 'apple-touch-icon-180x180.png'],
       manifest: {
         name: 'Motion Master',
         short_name: 'Motion Master',

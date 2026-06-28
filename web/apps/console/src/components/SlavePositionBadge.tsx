@@ -1,9 +1,9 @@
 interface SlavePositionBadgeProps {
   position: number
   /**
-   * `solid` (default) — slate fill, for the light-background pages (Configuration,
+   * `solid` (default) — grey fill, for the light-background pages (Configuration,
    * Process Image, Diagnostics, DC Sync) where it should read as a distinct chip.
-   * `muted` — transparent fill for dark surfaces (the sidebar), where a slate chip
+   * `muted` — transparent fill for dark surfaces (the sidebar), where a grey chip
    * would over-dominate; the position is a secondary detail there, not the headline.
    */
   tone?: 'solid' | 'muted'
@@ -18,7 +18,7 @@ export default function SlavePositionBadge({ position, tone = 'solid' }: SlavePo
   const toneClasses =
     tone === 'muted'
       ? 'border-white/20 bg-white/10 text-white/60'
-      : 'border-white/25 bg-slate-200 text-grey-900'
+      : 'border-white/25 bg-grey-200 text-grey-900'
   return (
     <span
       className={`inline-flex shrink-0 cursor-help items-center justify-center rounded-sm border px-1.5 py-0.5 font-mono font-semibold leading-none ${toneClasses}`}

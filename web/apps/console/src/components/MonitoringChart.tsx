@@ -4,8 +4,8 @@ import 'uplot/dist/uPlot.min.css'
 
 // Distinct series colours (Synapticon-ish palette), cycled for parameters beyond the list.
 const COLORS = [
-  '#e2001a', // syn-red
-  '#0a6c9c', // ocean
+  '#e0004d', // syn-red
+  '#00849b', // ocean
   '#2e7d32',
   '#f9a825',
   '#6a1b9a',

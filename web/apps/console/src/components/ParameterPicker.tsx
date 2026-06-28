@@ -168,7 +168,7 @@ export default function ParameterPicker({
       </button>
 
       {open && (
-        <div className="absolute z-20 mt-1 w-full border border-grey-300 bg-white shadow-lg">
+        <div className="absolute z-20 mt-1 w-full border border-grey-300 bg-white shadow-overlay-2">
           <div className="flex items-center gap-2 border-b border-grey-200 px-2">
             <Search className="h-4 w-4 shrink-0 text-grey-400" />
             <input

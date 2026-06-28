@@ -202,7 +202,7 @@ function DeviceSection({
         <div className="mt-1.5 flex items-center gap-1 text-[10px] font-display tracking-wide">
           {stateLabel && (
             <span
-              className={`shrink-0 inline-flex items-center h-[18px] px-1.5 rounded-sm ${state?.error
+              className={`shrink-0 inline-flex items-center h-[18px] px-1.5 rounded-sm cursor-help ${state?.error
                 ? 'bg-status-bad text-white'
                 : AL_STATE_BADGE[state?.alState ?? -1] ?? 'bg-white/10 text-white/60'
                 }`}
@@ -220,7 +220,7 @@ function DeviceSection({
           <span
             title={statusTitle}
             aria-label={statusLabel}
-            className={`shrink-0 flex items-center justify-center h-[18px] px-1.5 rounded-sm ${mailboxActive === null
+            className={`shrink-0 flex items-center justify-center h-[18px] px-1.5 rounded-sm cursor-help ${mailboxActive === null
               ? 'bg-white/15 animate-pulse'
               : isBoot
                 ? 'bg-status-warn text-grey-900'
@@ -238,7 +238,7 @@ function DeviceSection({
           <span
             title={dictionaryTitle}
             aria-label={dictionaryLabel}
-            className={`shrink-0 flex items-center justify-center h-[18px] px-1.5 rounded-sm ${parameterCount === null
+            className={`shrink-0 flex items-center justify-center h-[18px] px-1.5 rounded-sm cursor-help ${parameterCount === null
               ? 'bg-white/15 animate-pulse'
               : parameterCount > 0
                 ? 'bg-green-600'

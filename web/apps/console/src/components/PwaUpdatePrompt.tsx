@@ -19,7 +19,7 @@ export default function PwaUpdatePrompt() {
   if (!offlineReady && !needRefresh) return null
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 flex items-center gap-3 bg-ocean-dark border border-white/20 px-4 py-3 shadow-lg text-white text-sm font-body">
+    <div className="fixed bottom-4 right-4 z-50 flex items-center gap-3 bg-ocean-dark border border-white/20 px-4 py-3 shadow-overlay-2 text-white text-sm font-body">
       {needRefresh ? (
         <>
           <span>New version available.</span>

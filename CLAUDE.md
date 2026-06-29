@@ -17,6 +17,7 @@ Key design mandates from NEXTGEN.md:
 - `DeviceManager` owns slave discovery and network scanning via `FieldbusDriver` — there is no separate `NetworkScanner`
 - `App` is the only place that instantiates concrete types (dependency injection at the composition root); `Server::Config` carries an `InitDriverFn` callback wired in `main.cc` so `POST /api/init` can create a driver without the server knowing concrete types
 - Namespaces mirror directory layout (`mm::core`, `mm::comm::soem`, `mm::node`, `mm::api`); do not use C++20 modules
+- C++ route plug-ins extend the HTTP API without touching `http_server.cc`. The transport glue lives in `mm::api` (`libs/api/web_api.h`): `RouteContext` (references to `DeviceManager`/`MonitoringManager` + `corsOrigin`), `RegisterRoutesFn`, and the `sendJson`/`sendError`/`sendStatus` helpers — this is the **only** layer that depends on uWebSockets, so `mm::node` stays transport-agnostic (do **not** add uWS/HTTP to `node`). A plug-in lib registers its own paths (`/api/yourapp/...`, never the `/api/*` or `/*` wildcards) via `HttpServer::addRoutes(fn)`, called from the composition root (`main.cc`) **before** `start()`; modules run once on the HTTP loop thread after the built-in routes and before the catch-all 404. `libs/example` (`mm::example`, `GET /api/example/devices`) is the copy-me starter — domain logic in `*_logic.{h,cc}` (HTTP-agnostic, unit-testable), formatting in `*_routes.cc`. Plug-in routes are **not** added to `swagger.yml` (that documents the stable built-in API only). See NEXTGEN.md, Session 2026-06-29.
 - Config file format is JSONC — parse via `nlohmann::json::parse(stream, nullptr, true, true)` (the fourth `true` enables `ignore_comments`); config files use the `.jsonc` extension and may freely use `//` and `/* */` comments
 
 ## Build System
@@ -114,7 +115,9 @@ motion-master/
   libs/
     core/              ← version, platform timers, cross-cutting utils
     comm/              ← fieldbus interfaces; soem.cc, spoe.cc, igh.cc alongside base
-    node/              ← Device, DeviceManager, CiA402, profiles (depends on mm::comm)
+    node/              ← Device, DeviceManager, CiA402, profiles (depends on mm::comm); transport-agnostic — no HTTP/uWS
+    api/               ← mm::api: HTTP-transport glue (web_api.h — RouteContext, RegisterRoutesFn, sendJson/Error/Status). Header-only; the only lib that knows uWebSockets
+    example/           ← mm::example: copy-me C++ route-plugin starter (/api/example/...); server-side analogue of web/apps/example
   hil/
     jitter_bench/      ← RT scheduling jitter benchmark (Linux only); CSV output + Python plot script
     api/               ← HTTP API + WebSocket integration tests (TypeScript / Vitest; Docker-managed)

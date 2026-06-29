@@ -9,6 +9,8 @@
 #include <thread>
 #include <vector>
 
+#include "api/web_api.h"
+
 namespace mm::node {
 class DeviceManager;
 class MonitoringManager;
@@ -84,12 +86,24 @@ class HttpServer {
   /// Idempotent: a second call after the server has already stopped is a no-op.
   void stop();
 
+  /// @brief Registers a route plug-in to be wired in when the server starts.
+  ///
+  /// Each registered module is invoked once on the server's event-loop thread, after the built-in
+  /// routes and before the CORS preflight / catch-all 404 / `listen()`, with a
+  /// @c mm::api::RouteContext bound to this server's device and monitoring managers. This is the
+  /// extension point for application-specific C++ endpoints (e.g. `/api/example/...`).
+  ///
+  /// Must be called **before** @c start(); modules added after the thread is running are ignored
+  /// (a warning is logged). Not thread-safe with respect to a concurrent @c start().
+  void addRoutes(mm::api::RegisterRoutesFn module);
+
  private:
   void run();
 
   Config config_;
   mm::node::DeviceManager& deviceManager_;
   mm::node::MonitoringManager& monitoringManager_;
+  std::vector<mm::api::RegisterRoutesFn> routeModules_;
   std::atomic<bool> running_{false};
   std::thread thread_;
   std::atomic<uWS::Loop*> loop_{nullptr};

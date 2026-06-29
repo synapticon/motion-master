@@ -344,6 +344,27 @@ curl -k 'https://localhost:61447/api/devices/diagnostics?positions=1,2'
 
 In the web UI these are the **Fieldbus** group's pages — Control (init / scan / state), Configuration, Process Image, and Diagnostics.
 
+### Extending the API (C++ routes)
+
+You can add your own HTTP endpoints in C++ without touching the server core. `libs/example` is a copy-me starter (the server-side counterpart of the `web/apps/example` PWA) that registers `GET /api/example/devices`:
+
+```bash
+curl -k https://localhost:61447/api/example/devices
+```
+
+To add your own:
+
+1. **Copy `libs/example`**, then rename the directory, the `mm::example` namespace, and the `/api/example/...` route prefix.
+2. **Put real logic in `*_logic.{h,cc}`** — plain, HTTP-agnostic functions that take a `DeviceManager&` (testable with no server). Format responses in `*_routes.cc` using the `mm::api::sendJson` / `sendError` / `sendStatus` helpers so the content type and CORS headers match the built-in routes.
+3. **Add the subdirectory** to the root `CMakeLists.txt` and link your lib into `apps/motion_master`.
+4. **Wire it in `main.cc`** before the server starts:
+
+   ```cpp
+   httpServer.addRoutes(mm::yourapp::registerRoutes);  // before httpServer.start()
+   ```
+
+Your `registerRoutes(uWS::SSLApp&, const mm::api::RouteContext&)` runs once on the HTTP event-loop thread, after the built-in routes and before the catch-all 404. Register only your own paths (e.g. `/api/yourapp/...`) — never the `/api/*` or `/*` wildcards. The transport glue lives in `libs/api` (`mm::api`); the domain layer (`mm::node`) stays free of any HTTP/uWebSockets dependency. These routes are intentionally **not** part of `swagger.yml` — that spec documents the stable built-in API only.
+
 ## Developer Scripts
 
 All scripts default to the `x64-linux-debug` preset. Pass a preset name as the first argument to override (e.g. `./tools/build.sh x64-linux-release`).

@@ -64,32 +64,12 @@ std::optional<std::vector<uint16_t>> parsePositions(Res* res, Req* req,
   return positions;
 }
 
-// Writes @p body as a 200 application/json response with the CORS header.
-// Uses the `replace` error handler so a string-typed value carrying non-UTF-8 bytes (e.g. a garbage
-// VISIBLE_STRING from a misbehaving device) is rendered with U+FFFD instead of throwing — a throw
-// here is uncaught on the uWS loop and terminates the whole server.
-template <typename Res>
-void sendJson(Res* res, std::string_view corsOrigin, const nlohmann::json& body) {
-  res->writeHeader("Content-Type", "application/json")
-      ->writeHeader("Access-Control-Allow-Origin", corsOrigin)
-      ->end(body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
-}
-
-// Writes a @p status response carrying a {"error": message} JSON body and the CORS header.
-template <typename Res>
-void sendError(Res* res, std::string_view status, std::string_view corsOrigin,
-               std::string_view message) {
-  res->writeStatus(status)
-      ->writeHeader("Content-Type", "application/json")
-      ->writeHeader("Access-Control-Allow-Origin", corsOrigin)
-      ->end(nlohmann::json{{"error", std::string(message)}}.dump());
-}
-
-// Writes a bare @p status response (no body) with the CORS header.
-template <typename Res>
-void sendStatus(Res* res, std::string_view status, std::string_view corsOrigin) {
-  res->writeStatus(status)->writeHeader("Access-Control-Allow-Origin", corsOrigin)->end();
-}
+// The JSON/error/status response helpers live in api/web_api.h so route plug-ins can share the
+// exact same response shape (content type + CORS) as the built-in routes. Pull them in unqualified
+// so the call sites below read the same as before.
+using mm::api::sendError;
+using mm::api::sendJson;
+using mm::api::sendStatus;
 
 // Parses the "value" field of a smart parameter-write body into a DeviceParameterValue. The exact
 // numeric width does not matter here — DeviceManager::writeDeviceParameter coerces the value to the
@@ -225,6 +205,14 @@ HttpServer::~HttpServer() {
   }
 }
 
+void HttpServer::addRoutes(mm::api::RegisterRoutesFn module) {
+  if (running_.load()) {
+    spdlog::warn("HttpServer::addRoutes called after start(); the module will not be registered");
+    return;
+  }
+  routeModules_.push_back(std::move(module));
+}
+
 void HttpServer::start() {
   bool expected = false;
   if (!running_.compare_exchange_strong(expected, true)) {
@@ -266,23 +254,25 @@ void HttpServer::run() {
   }};
   app_.store(&app);
 
-  std::move(app)
-      .get("/",
-           [](auto* res, auto* /*req*/) {
-             res->writeHeader("Content-Type", "text/html; charset=utf-8")
-                 ->end(
-                     "<!DOCTYPE html><html><head><title>Motion Master API</title></head>"
-                     "<body><h1>Motion Master API</h1>"
-                     "<p>This is the Motion Master local API server. "
-                     "For documentation and the web interface, visit "
-                     "<a href=\"https://synapticon.github.io/motion-master/\">"
-                     "https://synapticon.github.io/motion-master/</a>.</p>"
-                     "<ul>"
-                     "<li><a href=\"/api/log\">Log</a></li>"
-                     "<li><a href=\"/api/registers\">ESC registers</a></li>"
-                     "</ul>"
-                     "</body></html>");
-           })
+  // Register the built-in routes as a statement on `app` (not moved), then hand `app` to any
+  // registered plug-in modules so they can add their own routes, then finish with the CORS
+  // preflight, the catch-all 404, and listen(). All three phases operate on the same `app` object.
+  app.get("/",
+          [](auto* res, auto* /*req*/) {
+            res->writeHeader("Content-Type", "text/html; charset=utf-8")
+                ->end(
+                    "<!DOCTYPE html><html><head><title>Motion Master API</title></head>"
+                    "<body><h1>Motion Master API</h1>"
+                    "<p>This is the Motion Master local API server. "
+                    "For documentation and the web interface, visit "
+                    "<a href=\"https://synapticon.github.io/motion-master/\">"
+                    "https://synapticon.github.io/motion-master/</a>.</p>"
+                    "<ul>"
+                    "<li><a href=\"/api/log\">Log</a></li>"
+                    "<li><a href=\"/api/registers\">ESC registers</a></li>"
+                    "</ul>"
+                    "</body></html>");
+          })
       .get("/api/adapters",
            [this](auto* res, auto* /*req*/) {
              auto adapterMap = mm::comm::mapMacAddressesToInterfaces();
@@ -298,7 +288,8 @@ void HttpServer::run() {
            })
       .get("/api/config",
            [this](auto* res, auto* /*req*/) {
-             // Pre-serialized at startup; parse back so sendJson sets the JSON content type + CORS.
+             // Pre-serialized at startup; parse back so sendJson sets the JSON content type +
+             // CORS.
              sendJson(res, config_.corsOrigin,
                       config_.startedConfig.empty() ? nlohmann::json::object()
                                                     : nlohmann::json::parse(config_.startedConfig));
@@ -331,8 +322,8 @@ void HttpServer::run() {
                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                 return;
               }
-              // The fresh cert is on disk, but uSockets bound the old one at listen — restart to
-              // apply. Report the newly installed cert's details plus the restart hint.
+              // The fresh cert is on disk, but uSockets bound the old one at listen — restart
+              // to apply. Report the newly installed cert's details plus the restart hint.
               auto info = mm::readCertInfo(config_.certFile);
               nlohmann::json body =
                   info ? certInfoJson(*info, config_.certFile) : nlohmann::json::object();
@@ -478,9 +469,10 @@ void HttpServer::run() {
                sendStatus(res, "400 Bad Request", config_.corsOrigin);
                return;
              }
-             // Content negotiation: the raw EEPROM image is returned only when the client asks for
-             // it via Accept: application/octet-stream. Otherwise (Accept: application/json, */*,
-             // or absent) the parsed SII structure is returned — the default.
+             // Content negotiation: the raw EEPROM image is returned only when the client asks
+             // for it via Accept: application/octet-stream. Otherwise (Accept:
+             // application/json, */*, or absent) the parsed SII structure is returned — the
+             // default.
              const bool wantRaw = req->getHeader("accept").find("application/octet-stream") !=
                                   std::string_view::npos;
              const auto* device = deviceManager_.findDevice(pos);
@@ -530,8 +522,8 @@ void HttpServer::run() {
                }
                std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(body->data()),
                                              body->size()};
-               // Reject an image that does not parse before touching the EEPROM — a guard against
-               // bricking the device by writing garbage.
+               // Reject an image that does not parse before touching the EEPROM — a guard
+               // against bricking the device by writing garbage.
                if (auto parsed = mm::comm::parseSii(data); !parsed) {
                  sendError(res, "400 Bad Request", config_.corsOrigin,
                            std::string("not a valid SII image: ") + parsed.error());
@@ -551,10 +543,10 @@ void HttpServer::run() {
            })
       .post("/api/sii/parse",
             [this](auto* res, auto* /*req*/) {
-              // Bus-independent utility: parse a raw SII image uploaded in the request body (e.g. a
-              // previously downloaded .bin) and return the decoded structure. No device involved —
-              // the Tools SII page uses this to view EEPROM files offline through the same parser
-              // the device read path uses.
+              // Bus-independent utility: parse a raw SII image uploaded in the request body
+              // (e.g. a previously downloaded .bin) and return the decoded structure. No device
+              // involved — the Tools SII page uses this to view EEPROM files offline through
+              // the same parser the device read path uses.
               auto aborted = std::make_shared<bool>(false);
               auto body = std::make_shared<std::string>();
               res->onAborted([aborted]() { *aborted = true; });
@@ -888,9 +880,9 @@ void HttpServer::run() {
                sendStatus(res, "400 Bad Request", config_.corsOrigin);
                return;
              }
-             // ?source=cache serves the cached value with no bus I/O; anything else (including an
-             // absent source) is the smart "auto" read that refreshes from the live PDO image or an
-             // SDO upload. Routing lives in the node layer (Device::readParameter).
+             // ?source=cache serves the cached value with no bus I/O; anything else (including
+             // an absent source) is the smart "auto" read that refreshes from the live PDO
+             // image or an SDO upload. Routing lives in the node layer (Device::readParameter).
              bool refreshFromBus = req->getQuery("source") != "cache";
              auto r = deviceManager_.deviceParameterView(pos, *index, *subindex, refreshFromBus);
              if (!r) {
@@ -934,17 +926,17 @@ void HttpServer::run() {
                  sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
                  return;
                }
-               // Smart write: PDO-staged when the object is output-mapped + exchanging, else SDO,
-               // else held in the cache (offline). Coercion to the declared type is done in the
-               // node layer (DeviceParameter::setValue).
+               // Smart write: PDO-staged when the object is output-mapped + exchanging, else
+               // SDO, else held in the cache (offline). Coercion to the declared type is done
+               // in the node layer (DeviceParameter::setValue).
                if (auto w = deviceManager_.writeDeviceParameter(pos, *index, *subindex,
                                                                 std::move(value));
                    !w) {
                  sendError(res, "500 Internal Server Error", config_.corsOrigin, w.error());
                  return;
                }
-               // Echo the updated parameter from the cache (no extra bus I/O) so the client gets
-               // the coerced value and resulting syncState in the same round-trip.
+               // Echo the updated parameter from the cache (no extra bus I/O) so the client
+               // gets the coerced value and resulting syncState in the same round-trip.
                auto r = deviceManager_.deviceParameterView(pos, *index, *subindex, false);
                if (!r) {
                  sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
@@ -1035,10 +1027,10 @@ void HttpServer::run() {
             })
       .get("/api/process-data/dump",
            [this](auto* res, auto* /*req*/) {
-             // Streams the recorder span as a raw `.mmpd` — the binary the client SDK parses. (The
-             // POST variant writes the same bytes to a file and returns the path, for terminal
-             // users.) Serialisation blocks this HTTP loop, but the WebSocket runs on its own loop,
-             // so the monitoring stream is never stalled.
+             // Streams the recorder span as a raw `.mmpd` — the binary the client SDK parses.
+             // (The POST variant writes the same bytes to a file and returns the path, for
+             // terminal users.) Serialisation blocks this HTTP loop, but the WebSocket runs on
+             // its own loop, so the monitoring stream is never stalled.
              auto aborted = std::make_shared<bool>(false);
              res->onAborted([aborted]() { *aborted = true; });
              auto r = deviceManager_.dumpProcessDataBuffer();
@@ -1054,8 +1046,8 @@ void HttpServer::run() {
                  ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->writeHeader("Content-Disposition",
                                "attachment; filename=\"motion-master-recorder.mmpd\"");
-             // Backpressure-aware send: tryEnd what the socket accepts now, resume from the acked
-             // write offset in onWritable until the whole buffer is flushed.
+             // Backpressure-aware send: tryEnd what the socket accepts now, resume from the
+             // acked write offset in onWritable until the whole buffer is flushed.
              std::string_view full{*body};
              auto [ok, done] = res->tryEnd(full, full.size());
              if (!done) {
@@ -1087,9 +1079,9 @@ void HttpServer::run() {
                   sendError(res, "400 Bad Request", config_.corsOrigin, requests.error());
                   return;
                 }
-                // Per-object outcomes (staged vs written-but-not-cyclic vs error); the batch never
-                // fails as a whole, so the UI can flag individual objects. 200, not 201 — this
-                // stages values, it does not create a resource.
+                // Per-object outcomes (staged vs written-but-not-cyclic vs error); the batch
+                // never fails as a whole, so the UI can flag individual objects. 200, not 201 —
+                // this stages values, it does not create a resource.
                 auto results = deviceManager_.stageProcessDataOutputs(*requests);
                 sendJson(res, config_.corsOrigin, nlohmann::json{{"results", results}});
               });
@@ -1125,9 +1117,9 @@ void HttpServer::run() {
                     stateVal != static_cast<uint16_t>(S::Boot) &&
                     stateVal != static_cast<uint16_t>(S::SafeOp) &&
                     stateVal != static_cast<uint16_t>(S::Op)) {
-                  sendError(
-                      res, "400 Bad Request", config_.corsOrigin,
-                      "invalid state: use 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), or 8 (Op)");
+                  sendError(res, "400 Bad Request", config_.corsOrigin,
+                            "invalid state: use 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), or "
+                            "8 (Op)");
                   return;
                 }
                 auto targetState = static_cast<S>(stateVal);
@@ -1233,23 +1225,29 @@ void HttpServer::run() {
                  ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(std::string_view{reinterpret_cast<const char*>(raw->data()), raw->size()});
            })
-      .del("/api/parameter-caches/:id",
-           [this](auto* res, auto* req) {
-             if (deviceManager_.parameterCache().remove(req->getParameter("id"))) {
-               sendStatus(res, "204 No Content", config_.corsOrigin);
-             } else {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-             }
-           })
-      .options("/api/*",
-               [this](auto* res, auto* /*req*/) {
-                 res->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                     ->writeHeader("Access-Control-Allow-Methods",
-                                   "GET, POST, PUT, DELETE, OPTIONS")
-                     ->writeHeader("Access-Control-Allow-Headers", "Content-Type")
-                     ->writeStatus("204 No Content")
-                     ->end();
-               })
+      .del("/api/parameter-caches/:id", [this](auto* res, auto* req) {
+        if (deviceManager_.parameterCache().remove(req->getParameter("id"))) {
+          sendStatus(res, "204 No Content", config_.corsOrigin);
+        } else {
+          sendStatus(res, "404 Not Found", config_.corsOrigin);
+        }
+      });
+
+  // Let registered plug-in modules add their own routes (e.g. /api/example/...) on top of the
+  // built-in ones, before the CORS preflight and catch-all 404 are wired below.
+  mm::api::RouteContext routeContext{deviceManager_, monitoringManager_, config_.corsOrigin};
+  for (const auto& module : routeModules_) {
+    module(app, routeContext);
+  }
+
+  app.options("/api/*",
+              [this](auto* res, auto* /*req*/) {
+                res->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                    ->writeHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+                    ->writeHeader("Access-Control-Allow-Headers", "Content-Type")
+                    ->writeStatus("204 No Content")
+                    ->end();
+              })
       .listen("127.0.0.1", config_.port,
               [this](auto* token) {
                 if (token) {

@@ -15,6 +15,7 @@
 #include "comm/soem_fieldbus_driver.h"
 #include "core/platform.h"
 #include "core/version.h"
+#include "example/example_routes.h"
 #include "game_loop.h"
 #include "http_server.h"
 #include "node/device_manager.h"
@@ -171,6 +172,9 @@ int main(int argc, char** argv) {
           .corsOrigin = opts.config.server.corsOrigin,
       },
       deviceManager, monitoringManager};
+  // Wire the example C++ route plug-in (/api/example/...) before start(): the composition root is
+  // the only place that knows the concrete plug-in. Copy libs/example to add your own.
+  httpServer.addRoutes(mm::example::registerRoutes);
   httpServer.start();
 
   WebSocketServer wsServer{WebSocketServer::Config{

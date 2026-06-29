@@ -16,6 +16,12 @@ functionStatic:*/cyclic_timer_linux.cc
 functionStatic:*/cyclic_timer_windows.cc
 functionStatic:*/cyclic_timer_macos.cc
 
+// RouteContext is an aggregate whose members are references (DeviceManager& / MonitoringManager&).
+// cppcheck's uninitMemberVarNoCtor wants a constructor that initializes them, but a reference
+// member of an aggregate is always initialized by aggregate initialization — it cannot carry a
+// default initializer and needs no constructor, so it can never be uninitialized. False positive.
+uninitMemberVarNoCtor:*/web_api.h
+
 // cppcheck 2.20.0 tokenizer limitation: GTest's TEST() macro (which cppcheck
 // cannot expand without the system header) is misparsed as a syntax error when it
 // is the first construct inside an anonymous namespace — the layout these node

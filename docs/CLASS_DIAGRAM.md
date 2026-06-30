@@ -33,10 +33,23 @@ classDiagram
     }
     class HttpServer {
         +start() / stop()
+        +addRoutes(RegisterRoutesFn)
         -DeviceManager& deviceManager_
         -MonitoringManager& monitoringManager_
+        -vector~RegisterRoutesFn~ routeModules_
         -thread thread_ «port 61447»
         -atomic~uWS::Loop*~ loop_
+    }
+    class RouteContext {
+        <<mm::api>>
+        +DeviceManager& deviceManager
+        +MonitoringManager& monitoringManager
+        +string_view corsOrigin
+    }
+    class RoutePlugin {
+        <<mm::example — copy-me>>
+        +registerRoutes(SSLApp&, RouteContext&)
+        +summarizeDevices(DeviceManager&)
     }
     class WebSocketServer {
         +start() / stop()
@@ -147,6 +160,11 @@ classDiagram
     ProcessDataTask ..> DeviceManager : ref
     HttpServer ..> DeviceManager : ref
     HttpServer ..> MonitoringManager : ref
+    HttpServer o-- "0..*" RoutePlugin : addRoutes (RegisterRoutesFn)
+    HttpServer ..> RouteContext : builds, passes to each plugin
+    RouteContext ..> DeviceManager : ref
+    RouteContext ..> MonitoringManager : ref
+    RoutePlugin ..> RouteContext : reads (registration only)
     MonitoringManager ..> DeviceManager : ref
     MonitoringManager ..> WebSocketServer : publish cb (setPublish)
     MonitoringManager *-- ParameterRefresher
@@ -176,6 +194,7 @@ classDiagram
 | `GameLoop` | `timer_` | `CyclicTimer` | Yes | `apps/motion_master/game_loop.h` |
 | `ProcessDataTask` | `deviceManager_` | `DeviceManager&` | No | `apps/motion_master/process_data_task.h` |
 | `HttpServer` | `deviceManager_`, `monitoringManager_` | `&` | No | `apps/motion_master/http_server.h` |
+| `HttpServer` | `routeModules_` | `vector<mm::api::RegisterRoutesFn>` | **Yes** — queued plug-ins, run once at `start()` | `apps/motion_master/http_server.h` |
 | `WebSocketServer` | — (publish target for `MonitoringManager::setPublish`) | — | No | `apps/motion_master/ws_server.h` |
 | `MonitoringManager` | `refresher_` | `ParameterRefresher` | **Yes** | `libs/node/monitoring_manager.h` |
 | `MonitoringManager` | `deviceManager_` | `DeviceManager&` | No | `libs/node/monitoring_manager.h` |
@@ -216,6 +235,35 @@ constructed for a single operation (a stack local in an HTTP handler, or a membe
 no polymorphic container), `SomanetDrive → Cia402Drive → ProfileDevice` is a slicing-free is-a
 chain. Validate-then-bind via `createCia402Drive` / `createSomanetDrive`. See `NEXTGEN.md` for
 the rationale and the Somanet free-function design.
+
+## Route plug-ins (`mm::api`)
+
+The HTTP API is extensible without touching `http_server.cc`. `mm::api` (`libs/api/web_api.h`,
+header-only) is the **only** layer that depends on uWebSockets besides the app itself — so
+`mm::node` stays transport-agnostic. It carries three things:
+
+- **`RouteContext`** — an aggregate of references (`DeviceManager&`, `MonitoringManager&`) plus
+  `corsOrigin`. Handed to a plug-in *by const ref at registration time*; every referenced object
+  outlives the running server, but the `RouteContext` itself is a temporary, so a handler must
+  capture the individual fields it needs, never the context.
+- **`RegisterRoutesFn = function<void(uWS::SSLApp&, const RouteContext&)>`** — the plug-in
+  contract. `HttpServer::addRoutes(fn)` queues a module (rejected with a warning if called after
+  `start()`); the composition root (`main.cc`) is the only place that names a concrete plug-in
+  (`httpServer.addRoutes(mm::example::registerRoutes)`, before `start()`). Modules run **once, on
+  the HTTP event-loop thread, after the built-in routes and before the catch-all 404 + `listen()`**.
+  A plug-in must claim only its own paths (`/api/yourapp/...`), never `/api/*` or `/*`.
+- **`sendJson` / `sendError` / `sendStatus`** — response helpers so a plug-in emits the exact same
+  content-type + CORS shape as the built-in routes.
+
+`libs/example` (`mm::example`, `GET /api/example/devices`) is the copy-me starter: HTTP-agnostic,
+unit-testable domain logic in `example_logic.{h,cc}` (`summarizeDevices`), thin
+request-parse/format glue in `example_routes.cc`. It is the server-side analogue of the
+`web/apps/example` PWA. A plug-in's `registerRoutes` runs once on the HTTP loop thread, and its
+handlers run on that same thread for each request (thread 2 — see [THREADS.md](THREADS.md)). The
+example plug-in stops there, but a plug-in is ordinary C++ holding `DeviceManager&` — it **may**
+spawn its own background `std::jthread` for off-RT work (a long-running procedure, a poller),
+exactly as `MonitoringManager` does. Such a thread is bound by the same rules as any non-RT thread:
+serialize all bus access through `FieldbusDriver::socketMutex_` and never touch the RT path.
 
 ## Key value types
 

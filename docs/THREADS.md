@@ -5,11 +5,17 @@
 > synchronization design changes, update this file (file/line citations included to
 > make that easy).
 
-Motion Master runs **five threads**. The main thread *is* the real-time (RT) thread;
+Motion Master's core runs **five threads**. The main thread *is* the real-time (RT) thread;
 every other subsystem starts its own thread *before* `game_loop.run()` blocks the main
 thread. The HTTP API and the WebSocket run on **separate ports and separate
 event loops/threads** (61447 / 62281), so a slow or blocking HTTP handler can never stall
 the WebSocket.
+
+Five is the **built-in** count, not a hard ceiling: a C++ route plug-in (`mm::api`, see
+[CLASS_DIAGRAM.md](CLASS_DIAGRAM.md)) is ordinary code holding `DeviceManager&`, and may spawn
+its own off-RT `std::jthread` for long-running work — exactly as `MonitoringManager` (threads 4–5)
+does. Any such thread is bound by the same rules as every non-RT thread below: serialize bus
+access through `FieldbusDriver::socketMutex_` and never touch the RT path.
 
 ## Overview
 

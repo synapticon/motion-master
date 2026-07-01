@@ -33,7 +33,7 @@ class HttpServer {
   /// responsible for constructing the concrete @c FieldbusDriver and calling
   /// @c DeviceManager::init().  Lives in the composition root (main.cc) so that
   /// concrete driver types are never referenced inside the server.
-  using InitDriverFn =
+  using InitDeviceManagerFn =
       std::function<std::expected<void, std::string>(std::string driver, std::string adapter)>;
 
   /// @brief Callback type for `GET /api/log`.
@@ -58,7 +58,8 @@ class HttpServer {
     std::string version;    ///< Application version string served at `GET /api/version`.
     std::string
         startedConfig;        ///< Serialized JSON of the boot config; served at `GET /api/config`.
-    InitDriverFn initDriver;  ///< Handler for `POST /api/init`; required for API-driven init.
+    InitDeviceManagerFn
+        initDeviceManager;  ///< Handler for `POST /api/init`; required for API-driven init.
     GetLogFn getLog;          ///< Handler for `GET /api/log`; returns buffered log entries.
     RefreshCertFn refreshCert;  ///< Handler for `POST /api/cert/refresh`; fetches+installs a cert.
     /// Value sent in `Access-Control-Allow-Origin`. Defaults to the production PWA origin.

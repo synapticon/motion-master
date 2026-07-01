@@ -162,7 +162,7 @@ int main(int argc, char** argv) {
           .keyFile = opts.config.tls.keyPath,
           .version = std::string{mm::core::kVersion},
           .startedConfig = nlohmann::json(opts.config).dump(),
-          .initDriver = initDeviceManager,
+          .initDeviceManager = initDeviceManager,
           .getLog = [ringLogSink]() { return ringLogSink->entries(); },
           .refreshCert = [certFile = opts.config.tls.certPath, keyFile = opts.config.tls.keyPath,
                           certUrl = opts.certUrl,

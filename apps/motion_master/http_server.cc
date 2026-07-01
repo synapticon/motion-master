@@ -958,7 +958,7 @@ void HttpServer::run() {
                 body->append(data);
                 if (!last) return;
                 if (*aborted) return;
-                if (!config_.initDriver) {
+                if (!config_.initDeviceManager) {
                   sendStatus(res, "501 Not Implemented", config_.corsOrigin);
                   return;
                 }
@@ -975,7 +975,7 @@ void HttpServer::run() {
                       body->empty() ? nlohmann::json::object() : nlohmann::json::parse(*body);
                   std::string driver = j.value("driver", "soem");
                   std::string adapter = j.value("adapter", "");
-                  if (auto r = config_.initDriver(driver, adapter); !r) {
+                  if (auto r = config_.initDeviceManager(driver, adapter); !r) {
                     sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                     return;
                   }

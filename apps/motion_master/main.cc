@@ -115,14 +115,14 @@ int main(int argc, char** argv) {
   // The install-dir cert/key — both the default served location and the target the self-heal and
   // --update-cert paths fetch into (it is writable by the same privileges that installed the
   // binary).
-  const auto defaultCert = mm::core::exeDir() / "cert.pem";
-  const auto defaultKey = mm::core::exeDir() / "key.pem";
+  const auto defaultCertPath = mm::core::exeDir() / "cert.pem";
+  const auto defaultKeyPath = mm::core::exeDir() / "key.pem";
 
   // Resolve the TLS cert/key paths: explicit config wins, else discover (bundled → acme.sh), else
   // fall through to the install-dir default so the self-heal below has a target to fetch into. A
   // miss is not fatal here — unlike before, the self-heal can populate it.
   const auto resolvedCert = mm::resolveCertPaths(opts.config.tls.certPath, opts.config.tls.keyPath,
-                                                 defaultCert, defaultKey);
+                                                 defaultCertPath, defaultKeyPath);
   opts.config.tls.certPath = resolvedCert.certPath;
   opts.config.tls.keyPath = resolvedCert.keyPath;
   if (!resolvedCert.source.empty()) {

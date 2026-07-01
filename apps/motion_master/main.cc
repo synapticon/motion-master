@@ -195,12 +195,13 @@ int main(int argc, char** argv) {
     mm::core::openInBrowser("https://motion-master.synapticon.com/apps/console/");
   }
 
-  GameLoop gameLoop{std::chrono::microseconds{opts.config.gameLoop.periodUs}};
-
   // Exchange process data every cycle. No-op until devices are mapped and brought into
   // SAFE-OP/OP via the API, at which point DeviceManager publishes the image and the loop
-  // begins driving PDO automatically.
+  // begins driving PDO automatically. Declared before the loop so it is destroyed after it —
+  // a registered task must outlive every call to GameLoop::run().
   ProcessDataTask processDataTask{deviceManager};
+
+  GameLoop gameLoop{std::chrono::microseconds{opts.config.gameLoop.periodUs}};
   gameLoop.addTask(&processDataTask);
 
   gGameLoop.store(&gameLoop, std::memory_order_relaxed);

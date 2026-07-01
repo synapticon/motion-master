@@ -1140,3 +1140,21 @@ Pure documentation: the route-plugin work (2026-06-29) landed in code and in `CL
 - **Threading correction — the one substantive point, not just transcription.** The first cut of the class-diagram prose claimed plug-in handlers "add no thread and cross no RT boundary." That overreached: it's true of the *example* plugin and of the registration/handler model (registration runs once on the HTTP loop thread; handlers run on that thread per request), but a plug-in is **ordinary C++ holding `DeviceManager&`** and may spawn its own off-RT `std::jthread` for long-running work — exactly as `MonitoringManager`'s sampler/refresher do. The honest framing: the built-in process runs **five** threads, but five is the built-in count, **not a hard ceiling**. Any plug-in-spawned thread is bound by the same rules as every non-RT thread — serialize bus access through `FieldbusDriver::socketMutex_`, never touch the RT path. Fixed in all three docs (`CLASS_DIAGRAM.md`, `THREADS.md`, and the `CLAUDE.md` mandate bullet, which now says the *registration fn* runs once on the loop thread rather than implying all plug-in work stays there).
 
 No code change; `docs/` and `CLAUDE.md` only.
+
+## Session 2026-07-01 — `CyclicTask` lifetime: non-owning is correct; the invariant is "outlive `run()`", not "outlive the loop"
+
+A design-review question on `GameLoop`: it holds `std::vector<CyclicTask*>` (non-owning) and documented that a registered task "must outlive the loop." Is non-owning the right call, and is that the right contract? Two separate answers.
+
+**Non-owning is correct, and for the same reason ownership lives at the composition root everywhere else.** `GameLoop` is a pure RT scheduler — it ticks a `CyclicTimer` and calls `execute()` on a fixed set of tasks. The tasks themselves are thin adapters whose *real* lifetime is coupled to the domain objects they wrap: `ProcessDataTask` holds a `DeviceManager&`, and `DeviceManager` is owned at the composition root (`main.cc`). Making `GameLoop` own the tasks via `unique_ptr` would put the RT loop in charge of a lifetime that actually belongs to the DI graph. It would also fight the fixed-membership rule (Session 2026-06-05 — *RT tasks are fixed-membership*): membership never changes at runtime, so there is no lifecycle churn that would argue for the loop taking ownership. `GameLoop` stays a mechanism, not an owner — consistent with "`main.cc` is the only place concrete types are instantiated."
+
+**But the documented contract was one notch too strong, and `main.cc` actually violated its literal form.** The pointers in `tasks_` are only ever dereferenced *while the loop is executing* — never after `run()` returns. So the real invariant is "a task must outlive every call to `run()`," not "outlive the `GameLoop` object." The distinction mattered because the original `main.cc` declared `gameLoop` **before** `processDataTask`:
+
+```cpp
+GameLoop gameLoop{...};                // constructed first
+ProcessDataTask processDataTask{...};  // constructed later
+gameLoop.addTask(&processDataTask);
+```
+
+Reverse-order stack destruction destroys `processDataTask` first — so the task did **not** outlive the loop as the doc claimed. Harmless today only because `run()` has already returned by the time either destructor fires, but a latent footgun if anyone reordered these or touched tasks post-`run()`.
+
+**Fix: both, not either.** Swapped the declaration order in `main.cc` (task before loop, so the task is destroyed *after* the loop and the language-level lifetime honours the contract) **and** restated the precise invariant in the two doc comments (`game_loop.h::addTask`, `cyclic_task.h`) — "must outlive every call to `run()`," with a note that the pointer is dereferenced only while the loop executes. Also corrected "owned by the caller (App)" → "the composition root" in `cyclic_task.h`, since there is no `App` class yet. Docs + one declaration reorder; no behavioural change.

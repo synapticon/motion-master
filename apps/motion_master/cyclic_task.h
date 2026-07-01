@@ -7,7 +7,8 @@
 /// WebSocket) must be handed off to another thread via a lock-free channel.
 ///
 /// Tasks are registered with GameLoop::addTask() before run() is called and
-/// are owned by the caller (App).  GameLoop holds non-owning pointers.
+/// are owned by the caller (the composition root).  GameLoop holds non-owning
+/// pointers, so a task must outlive every call to run().
 class CyclicTask {
  public:
   /// @brief Virtual destructor.

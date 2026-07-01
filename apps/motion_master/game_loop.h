@@ -40,7 +40,9 @@ class GameLoop {
   /// Tasks are called in registration order after each timer tick.  Must be
   /// called before run() — not safe to call concurrently with a running loop.
   ///
-  /// @param task  Non-owning pointer.  The task must outlive the loop.
+  /// @param task  Non-owning pointer.  The task must outlive every call to
+  ///              run() — its pointer is only dereferenced while the loop is
+  ///              executing, never after run() returns.
   void addTask(CyclicTask* task);
 
   /// @brief Blocks the calling thread, running one cycle per period until

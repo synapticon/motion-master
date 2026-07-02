@@ -57,10 +57,10 @@ class HttpServer {
     std::string keyFile;    ///< Path to the TLS private key (PEM).
     std::string version;    ///< Application version string served at `GET /api/version`.
     std::string
-        startedConfig;        ///< Serialized JSON of the boot config; served at `GET /api/config`.
+        startedConfig;  ///< Serialized JSON of the boot config; served at `GET /api/config`.
     InitDeviceManagerFn
-        initDeviceManager;  ///< Handler for `POST /api/init`; required for API-driven init.
-    GetLogFn getLog;          ///< Handler for `GET /api/log`; returns buffered log entries.
+        initDeviceManager;      ///< Handler for `POST /api/init`; required for API-driven init.
+    GetLogFn getLog;            ///< Handler for `GET /api/log`; returns buffered log entries.
     RefreshCertFn refreshCert;  ///< Handler for `POST /api/cert/refresh`; fetches+installs a cert.
     /// Value sent in `Access-Control-Allow-Origin`. Defaults to the production PWA origin.
     std::string corsOrigin{"https://motion-master.synapticon.com"};

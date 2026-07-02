@@ -537,8 +537,8 @@ std::expected<std::string, std::string> DeviceManager::dumpProcessData() {
   // Resolve the output directory (empty => <temp>/motion-master, cross-platform) and create it.
   namespace fs = std::filesystem;
   std::error_code ec;
-  fs::path dir = config_.dumpDir.empty() ? fs::temp_directory_path(ec) / "motion-master"
-                                         : fs::path(config_.dumpDir);
+  fs::path dir = config_.recorderDumpDir.empty() ? fs::temp_directory_path(ec) / "motion-master"
+                                                 : fs::path(config_.recorderDumpDir);
   if (ec) {
     return std::unexpected("could not resolve a temporary directory: " + ec.message());
   }

@@ -158,7 +158,7 @@ struct DeviceManagerConfig {
   uint32_t cyclePeriodUs = 1000;
   /// Directory for `.mmpd` recorder dumps. Empty resolves to a @c "motion-master" subdirectory of
   /// the OS temporary directory at dump time. Passed through to @c dumpProcessData.
-  std::string dumpDir;
+  std::string recorderDumpDir;
   /// Read a device's object dictionary when it first reaches PRE-OP (definitions only, cache-first)
   /// so dumps/monitoring/Parameters have names and data types without a manual read. See
   /// @c transitionToState.
@@ -335,7 +335,8 @@ class DeviceManager {
   /// retained image generation. The header objects' names/data types come from each device's
   /// parameter map (empty/0 when the object dictionary has not been enumerated).
   ///
-  /// The file is written to the configured @c dumpDir (created if absent); an empty @c dumpDir
+  /// The file is written to the configured @c recorderDumpDir (created if absent); an empty
+  /// @c recorderDumpDir
   /// (the default) resolves to a @c "motion-master" subdirectory of the OS temporary directory. The
   /// filename is @c dump-<UTC-timestamp>-<endSequence>.mmpd. Motion Master binds @c 127.0.0.1, so
   /// the file is on the caller's own machine — the path is all that is returned (no

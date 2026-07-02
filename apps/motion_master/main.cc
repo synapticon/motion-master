@@ -66,7 +66,7 @@ int main(int argc, char** argv) {
   const mm::node::DeviceManagerConfig deviceManagerConfig{
       .recorderHistorySeconds = opts.config.recorder.historySeconds,
       .cyclePeriodUs = opts.config.gameLoop.periodUs,
-      .dumpDir = opts.config.recorder.dumpDir,
+      .recorderDumpDir = opts.config.recorder.dumpDir,
       .readObjectDictionaryOnPreop = opts.config.parameters.readObjectDictionaryOnPreop};
 
   // Resolve the adapter, construct the concrete driver, and hand it to DeviceManager::init. Used

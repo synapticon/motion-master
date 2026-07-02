@@ -150,19 +150,19 @@ void to_json(nlohmann::json& j, const DcSyncInfo& info);
 ///        caller can pass @c {} (or omit it) and override only what it cares about; new knobs can
 ///        be added here without changing the @c init signature.
 struct DeviceManagerConfig {
-  /// Depth of the process-data recorder ring in seconds; the ring is allocated at
-  /// @c configureProcessData to hold this many seconds of cycles.
-  uint32_t recorderHistorySeconds = 300;
   /// The GameLoop cycle period in microseconds, used with the history depth to size the ring
   /// (capacity = recorderHistorySeconds * 1e6 / cyclePeriodUs).
   uint32_t cyclePeriodUs = 1000;
-  /// Directory for `.mmpd` recorder dumps. Empty resolves to a @c "motion-master" subdirectory of
-  /// the OS temporary directory at dump time. Passed through to @c dumpProcessData.
-  std::string recorderDumpDir;
   /// Read a device's object dictionary when it first reaches PRE-OP (definitions only, cache-first)
   /// so dumps/monitoring/Parameters have names and data types without a manual read. See
   /// @c transitionToState.
   bool readObjectDictionaryOnPreop = true;
+  /// Directory for `.mmpd` recorder dumps. Empty resolves to a @c "motion-master" subdirectory of
+  /// the OS temporary directory at dump time. Passed through to @c dumpProcessData.
+  std::string recorderDumpDir;
+  /// Depth of the process-data recorder ring in seconds; the ring is allocated at
+  /// @c configureProcessData to hold this many seconds of cycles.
+  uint32_t recorderHistorySeconds = 300;
 };
 
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.

@@ -26,10 +26,10 @@ inline constexpr uint32_t kSynapticonVendorId = 0x000022D2;
 ///
 /// Mirrors the JSONC @c parameterCache block (mapped into this struct in @c main.cc).
 struct ParameterCacheConfig {
-  bool enabled = true;  ///< Master switch for the whole cache (false disables it entirely).
   bool cacheAllVendors =
-      false;              ///< false: cache Synapticon (0x22D2) only; true: cache every vendor.
+      false;  ///< false: cache Synapticon (0x22D2) only; true: cache every vendor.
   std::string directory;  ///< "" = a standard per-user cache directory (see @c resolveDir).
+  bool enabled = true;    ///< Master switch for the whole cache (false disables it entirely).
 };
 
 /// @brief On-disk cache of CoE parameter *definitions*, keyed by device identity.

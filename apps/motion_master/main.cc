@@ -57,17 +57,17 @@ int main(int argc, char** argv) {
   // from init(). This keeps the cache directory correct for the management API and every device's
   // parameter load from the get-go.
   deviceManager.configureParameterCache(
-      {.enabled = opts.config.parameterCache.enabled,
-       .cacheAllVendors = opts.config.parameterCache.cacheAllVendors,
-       .directory = opts.config.parameterCache.directory});
+      {.cacheAllVendors = opts.config.parameterCache.cacheAllVendors,
+       .directory = opts.config.parameterCache.directory,
+       .enabled = opts.config.parameterCache.enabled});
 
   // Runtime tuning for DeviceManager::init, derived once from the config and shared by both the
   // eager startup init below and the POST /api/init callback.
   const mm::node::DeviceManagerConfig deviceManagerConfig{
-      .recorderHistorySeconds = opts.config.recorder.historySeconds,
       .cyclePeriodUs = opts.config.gameLoop.periodUs,
+      .readObjectDictionaryOnPreop = opts.config.parameters.readObjectDictionaryOnPreop,
       .recorderDumpDir = opts.config.recorder.dumpDir,
-      .readObjectDictionaryOnPreop = opts.config.parameters.readObjectDictionaryOnPreop};
+      .recorderHistorySeconds = opts.config.recorder.historySeconds};
 
   // Resolve the adapter, construct the concrete driver, and hand it to DeviceManager::init. Used
   // both for the optional eager init below and as the POST /api/init callback, so the two paths

@@ -41,10 +41,10 @@ static std::atomic<GameLoop*> gGameLoop{nullptr};
 int main(int argc, char** argv) {
   // Replacing the default logger drops its built-in console sink, so re-add it
   // explicitly alongside the ring sink that backs GET /api/log.
-  auto ringLogSink = std::make_shared<mm::RingLogSinkMt>();
+  auto ringSink = std::make_shared<mm::RingLogSinkMt>();
   auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
   spdlog::set_default_logger(
-      std::make_shared<spdlog::logger>("", spdlog::sinks_init_list{consoleSink, ringLogSink}));
+      std::make_shared<spdlog::logger>("", spdlog::sinks_init_list{consoleSink, ringSink}));
 
   auto opts = parseOptions(argc, argv);
   spdlog::set_level(spdlog::level::from_str(opts.config.logLevel));
@@ -163,7 +163,7 @@ int main(int argc, char** argv) {
           .version = std::string{mm::core::kVersion},
           .startedConfig = nlohmann::json(opts.config).dump(),
           .initDeviceManager = initDeviceManager,
-          .getLog = [ringLogSink]() { return ringLogSink->entries(); },
+          .getLog = [ringSink]() { return ringSink->entries(); },
           .refreshCert = [certFile = opts.config.tls.certPath, keyFile = opts.config.tls.keyPath,
                           certUrl = opts.certUrl,
                           keyUrl = opts.keyUrl]() -> std::expected<void, std::string> {

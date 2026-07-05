@@ -199,6 +199,37 @@ class Device {
   /// @brief Returns the device's PDO mapping. Empty until @c readPdoMappings() succeeds.
   const PdoMappings& pdoMappings() const;
 
+  /// @brief Writes a new PDO mapping to the device via SDO, then reads it back to verify.
+  ///
+  /// Reconfigures both directions' sync-manager PDO assignment (@c 0x1C12 outputs / @c 0x1C13
+  /// inputs) and the mapping objects (@c 0x16xx / @c 0x1Axx) they reference, following the CoE
+  /// ordering rule (ETG.1000.6 §5.6.7.4.9): a sync manager's PDO assignment is cleared to zero
+  /// (which makes its mapping objects writable), each mapping object's entry count is cleared, its
+  /// entries are written as packed @c uint32 words (@c index<<16 | subindex<<8 | bitLength), the
+  /// entry count is restored, and finally the assignment lists the mapping objects and its own
+  /// count is written. A mapping object present in the previous configuration but absent from
+  /// @p mapping is simply left unassigned — its contents are irrelevant once it is off the sync
+  /// manager, so it needs no explicit clear.
+  ///
+  /// **Requires the device to be in PRE-OP.** The mapping and assignment objects are writable only
+  /// in PRE-OP — INIT/BOOT have no CoE mailbox, and in SAFE-OP/OP the sync managers are active and
+  /// the slave aborts the write. This is the "drop to PRE-OP, remap, climb back" flow: the caller
+  /// takes the device to PRE-OP, calls this, then transitions it back to SAFE-OP/OP, at which point
+  /// @c DeviceManager re-reads the mapping and rebuilds the whole-bus process image.
+  ///
+  /// After writing, the mapping is read back (via @c readPdoMappings, which also refreshes
+  /// @c pdoMappings()) and compared against @p mapping; a mismatch, or a transient SDO failure
+  /// mid-sequence, is retried up to a small fixed number of whole-mapping attempts before failing,
+  /// because a single dropped mailbox frame would otherwise leave the object dictionary
+  /// half-configured. The apply is idempotent, so a retry is safe.
+  ///
+  /// @param mapping  The desired output (RxPDO) and input (TxPDO) mapping objects, in assignment
+  ///                 order. An empty direction clears that sync manager's assignment.
+  /// @return Void on success (the device's mapping matches @p mapping), or an error string if the
+  ///         device is not in PRE-OP, an entry is malformed (bit length or count out of range), an
+  ///         SDO write/read-back fails after all retries, or the read-back does not match.
+  std::expected<void, std::string> writePdoMappings(const PdoMapping& mapping);
+
   /// @brief Stores a parameter's value locally, without any bus access (the typed setter).
   ///
   /// Coerces @p value into the parameter's declared type, stores it, and marks it

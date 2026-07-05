@@ -3,8 +3,9 @@
 #include <algorithm>
 #include <cstring>
 #include <string>
-#include <type_traits>
 #include <vector>
+
+#include "core/util.h"
 
 namespace mm::node {
 namespace {
@@ -12,14 +13,8 @@ namespace {
 // Appends an integer to the stream in little-endian byte order, width sizeof(T).
 template <typename T>
 void putLE(std::ostream& o, T value) {
-  static_assert(std::is_integral_v<T>, "putLE is for integral types");
-  using U = std::make_unsigned_t<T>;
-  const auto u = static_cast<U>(value);
-  uint8_t buf[sizeof(T)];
-  for (size_t i = 0; i < sizeof(T); ++i) {
-    buf[i] = static_cast<uint8_t>((u >> (8 * i)) & 0xFFu);
-  }
-  o.write(reinterpret_cast<const char*>(buf), sizeof(T));
+  const auto bytes = mm::core::toBytes(value);
+  o.write(reinterpret_cast<const char*>(bytes.data()), bytes.size());
 }
 
 // Appends a length-prefixed string: u16 byte count (clamped to 0xFFFF) then the bytes.

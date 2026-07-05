@@ -529,6 +529,20 @@ class DeviceManager {
                                                         uint8_t subindex,
                                                         DeviceParameterValue newValue);
 
+  /// @brief Convenience: finds a device by position and writes its PDO mapping.
+  ///
+  /// Equivalent to @c findDevice(slavePosition)->writePdoMappings(mapping) — see
+  /// @c Device::writePdoMappings for the procedure and the PRE-OP requirement. Does not itself
+  /// re-map the process image: the caller drives the device back to SAFE-OP/OP afterwards, and
+  /// @c transitionToState re-reads the mapping and rebuilds the whole-bus image at that point.
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @param mapping        Desired output (RxPDO) and input (TxPDO) mapping, in assignment order.
+  /// @return Void on success, or an error string if the device is unknown, is not in PRE-OP, or the
+  ///         mapping write/verify fails.
+  std::expected<void, std::string> writeDevicePdoMappings(uint16_t slavePosition,
+                                                          const PdoMapping& mapping);
+
   /// @brief Stages a batch of output objects into the process image in one call.
   ///
   /// Backs @c POST @c /api/process-data/outputs, the "send all" action of the Process Data page:

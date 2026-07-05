@@ -1111,6 +1111,20 @@ std::expected<void, std::string> DeviceManager::writeDeviceParameter(
   return device->writeParameter(index, subindex, std::move(newValue));
 }
 
+std::expected<void, std::string> DeviceManager::writeDevicePdoMappings(uint16_t slavePosition,
+                                                                       const PdoMapping& mapping) {
+  // Shared lock, like writeDeviceParameter: serialise against the exclusive mutators that rebuild
+  // devices_/driver_ so the device pointer stays valid, while the actual PRE-OP mailbox writes are
+  // serialised per transaction by the driver's socket mutex. The process image is not touched here
+  // — a subsequent transitionToState back to SAFE-OP/OP re-reads the mapping and re-maps.
+  std::shared_lock lock(busMutex_);
+  Device* device = findDevice(slavePosition);
+  if (!device) {
+    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
+  }
+  return device->writePdoMappings(mapping);
+}
+
 std::vector<OutputStageResult> DeviceManager::stageProcessDataOutputs(
     std::span<const OutputStageRequest> requests) {
   // One shared lock for the whole batch (per-item writeParameter takes each device's own

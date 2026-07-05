@@ -2,11 +2,16 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
+#include <bit>
 #include <cstdint>
 #include <string>
+#include <vector>
 
+using mm::core::fromBytes;
 using mm::core::isUrlSafeId;
 using mm::core::parseHexOrDec;
+using mm::core::toBytes;
 
 TEST(ParseHexOrDecTest, DecimalUint16) {
   EXPECT_EQ(parseHexOrDec<uint16_t>("0"), 0u);
@@ -78,4 +83,57 @@ TEST(IsUrlSafeIdTest, RejectsDisallowedCharacters) {
 TEST(IsUrlSafeIdTest, IsCaseSensitiveAndDistinct) {
   EXPECT_TRUE(isUrlSafeId("Motor"));
   EXPECT_TRUE(isUrlSafeId("motor"));
+}
+
+TEST(ToBytesTest, WidthMatchesType) {
+  EXPECT_EQ(toBytes<uint8_t>(0).size(), 1u);
+  EXPECT_EQ(toBytes<uint16_t>(0).size(), 2u);
+  EXPECT_EQ(toBytes<uint32_t>(0).size(), 4u);
+  EXPECT_EQ(toBytes<uint64_t>(0).size(), 8u);
+}
+
+TEST(ToBytesTest, LittleEndianByDefault) {
+  EXPECT_EQ(toBytes<uint8_t>(0xAB), (std::array<uint8_t, 1>{0xAB}));
+  EXPECT_EQ(toBytes<uint16_t>(0x1234), (std::array<uint8_t, 2>{0x34, 0x12}));
+  // A packed CoE PDO mapping word: index 0x607A, subindex 0x00, 32 bits → 0x607A0020.
+  EXPECT_EQ(toBytes<uint32_t>(0x607A0020), (std::array<uint8_t, 4>{0x20, 0x00, 0x7A, 0x60}));
+}
+
+TEST(ToBytesTest, BigEndianReversesByteOrder) {
+  EXPECT_EQ(toBytes<uint16_t>(0x1234, std::endian::big), (std::array<uint8_t, 2>{0x12, 0x34}));
+  EXPECT_EQ(toBytes<uint32_t>(0x607A0020, std::endian::big),
+            (std::array<uint8_t, 4>{0x60, 0x7A, 0x00, 0x20}));
+}
+
+TEST(ToBytesTest, EncodesSignedThroughTwosComplement) {
+  EXPECT_EQ(toBytes<int16_t>(-1), (std::array<uint8_t, 2>{0xFF, 0xFF}));
+  EXPECT_EQ(toBytes<int32_t>(-2), (std::array<uint8_t, 4>{0xFE, 0xFF, 0xFF, 0xFF}));
+}
+
+TEST(FromBytesTest, LittleEndianByDefault) {
+  EXPECT_EQ(fromBytes<uint8_t>(std::vector<uint8_t>{0xAB}), 0xABu);
+  EXPECT_EQ(fromBytes<uint16_t>(std::vector<uint8_t>{0x34, 0x12}), 0x1234u);
+  EXPECT_EQ(fromBytes<uint32_t>(std::vector<uint8_t>{0x20, 0x00, 0x7A, 0x60}), 0x607A0020u);
+}
+
+TEST(FromBytesTest, BigEndianReadsMostSignificantFirst) {
+  EXPECT_EQ(fromBytes<uint16_t>(std::vector<uint8_t>{0x12, 0x34}, std::endian::big), 0x1234u);
+  EXPECT_EQ(fromBytes<uint32_t>(std::vector<uint8_t>{0x60, 0x7A, 0x00, 0x20}, std::endian::big),
+            0x607A0020u);
+}
+
+TEST(FromBytesTest, ShortBufferReadsAsZeroPadded) {
+  EXPECT_EQ(fromBytes<uint8_t>(std::vector<uint8_t>{}), 0u);                      // empty
+  EXPECT_EQ(fromBytes<uint32_t>(std::vector<uint8_t>{0x34, 0x12}), 0x00001234u);  // 2 of 4 bytes
+}
+
+TEST(FromBytesTest, ExcessBytesIgnored) {
+  EXPECT_EQ(fromBytes<uint16_t>(std::vector<uint8_t>{0x34, 0x12, 0xFF, 0xFF}), 0x1234u);
+}
+
+TEST(BytesRoundTrip, EncodeThenDecodeIsIdentity) {
+  for (uint32_t v : {0u, 1u, 0xFFu, 0x1234u, 0xDEADBEEFu, 0xFFFFFFFFu}) {
+    EXPECT_EQ(fromBytes<uint32_t>(toBytes(v)), v);
+    EXPECT_EQ(fromBytes<uint32_t>(toBytes(v, std::endian::big), std::endian::big), v);
+  }
 }

@@ -1,10 +1,15 @@
 #pragma once
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <charconv>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
+#include <span>
 #include <string_view>
+#include <type_traits>
 
 namespace mm::core {
 
@@ -51,6 +56,56 @@ std::optional<T> parseHexOrDec(std::string_view s) {
     return std::nullopt;
   }
   return value;
+}
+
+/// @brief Encodes an integer into a fixed-width byte array in the given byte order.
+///
+/// The width is @c sizeof(T), so @c toBytes<uint8_t> yields one byte, @c uint16_t two, and so on.
+/// Signed values are encoded through their unsigned representation (two's complement), so the shift
+/// is always well-defined. Defaults to little-endian (EtherCAT/CoE wire order); pass
+/// @c std::endian::big for the reverse. The returned array is the natural argument for a byte-span
+/// sink such as @c FieldbusDriver::writeSdo — a temporary result lives to the end of the enclosing
+/// call.
+///
+/// @tparam T   Integral type whose size fixes the byte count.
+/// @param value  Value to encode.
+/// @param order  Byte order of the output (default little-endian).
+/// @return A @c std::array of @c sizeof(T) bytes in @p order.
+template <typename T>
+std::array<uint8_t, sizeof(T)> toBytes(T value, std::endian order = std::endian::little) {
+  static_assert(std::is_integral_v<T>, "toBytes is for integral types");
+  using U = std::make_unsigned_t<T>;
+  const auto u = static_cast<U>(value);
+  std::array<uint8_t, sizeof(T)> out{};
+  for (std::size_t i = 0; i < sizeof(T); ++i) {
+    const std::size_t byte = (order == std::endian::little) ? i : (sizeof(T) - 1 - i);
+    out[byte] = static_cast<uint8_t>((u >> (8 * i)) & 0xFFu);
+  }
+  return out;
+}
+
+/// @brief Decodes an integer from a raw byte buffer interpreted in the given byte order.
+///
+/// Reads up to @c sizeof(T) bytes. A short buffer is treated as if zero-padded (the missing
+/// most-significant bytes read as zero) — defensive against a slave returning fewer bytes than the
+/// type implies; excess bytes are ignored. Accumulation is done in the unsigned representation so
+/// the shift is well-defined for signed @c T. Defaults to little-endian (EtherCAT/CoE wire order).
+///
+/// @tparam T   Integral result type whose size fixes how many bytes are consumed.
+/// @param bytes  Source buffer (a @c std::vector<uint8_t> binds implicitly).
+/// @param order  Byte order to interpret @p bytes in (default little-endian).
+/// @return The decoded value.
+template <typename T>
+T fromBytes(std::span<const uint8_t> bytes, std::endian order = std::endian::little) {
+  static_assert(std::is_integral_v<T>, "fromBytes is for integral types");
+  using U = std::make_unsigned_t<T>;
+  U v = 0;
+  const std::size_t n = std::min(sizeof(T), bytes.size());
+  for (std::size_t i = 0; i < n; ++i) {
+    const std::size_t shift = (order == std::endian::little) ? (8 * i) : (8 * (n - 1 - i));
+    v |= static_cast<U>(bytes[i]) << shift;
+  }
+  return static_cast<T>(v);
 }
 
 }  // namespace mm::core

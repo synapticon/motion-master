@@ -26,8 +26,13 @@ using mm::comm::OdEntry;
 using mm::comm::SlaveInfo;
 using mm::node::Device;
 using mm::node::DeviceParameterValue;
+using mm::node::packMappingEntry;
+using mm::node::PdoMapping;
+using mm::node::PdoMappingEntry;
+using mm::node::PdoMappingObject;
 using mm::node::reconcileDetectedModules;
 using mm::node::SyncState;
+using mm::node::unpackMappingEntry;
 
 // ETG.1020 UNSIGNED32 data type code, used by the parameter read/write tests.
 constexpr uint16_t kU32 = 0x0007;
@@ -610,6 +615,197 @@ TEST(DeviceReadPdoMappings, MaxAssignmentCountTerminates) {
   auto result = device.readPdoMappings();
   ASSERT_TRUE(result.has_value());
   EXPECT_TRUE(device.pdoMappings().outputs.empty());
+}
+
+// --- pack / unpack mapping entry --------------------------------------------
+
+TEST(PdoMappingEntryCodec, PacksToCoeWord) {
+  // index 0x607A, subindex 0x00, 32 bits → 0x607A0020 (ETG.1000.6 §5.6.7.4.7).
+  EXPECT_EQ(packMappingEntry(PdoMappingEntry{.index = 0x607A, .subindex = 0, .bitLength = 32}),
+            0x607A0020u);
+  // A padding gap: index 0, 8 bits → 0x00000008.
+  EXPECT_EQ(packMappingEntry(PdoMappingEntry{.index = 0, .subindex = 0, .bitLength = 8}), 0x08u);
+}
+
+TEST(PdoMappingEntryCodec, UnpacksFromCoeWord) {
+  const PdoMappingEntry e = unpackMappingEntry(0x60410110);
+  EXPECT_EQ(e.index, 0x6041);
+  EXPECT_EQ(e.subindex, 0x01);
+  EXPECT_EQ(e.bitLength, 0x10);
+  EXPECT_EQ(e.bitOffset, 0u);  // not carried in the packed word; left at default
+}
+
+TEST(PdoMappingEntryCodec, RoundTripsIgnoringBitOffset) {
+  const PdoMappingEntry in{.index = 0x1234, .subindex = 0x56, .bitLength = 0x78, .bitOffset = 999};
+  const PdoMappingEntry out = unpackMappingEntry(packMappingEntry(in));
+  EXPECT_EQ(out.index, in.index);
+  EXPECT_EQ(out.subindex, in.subindex);
+  EXPECT_EQ(out.bitLength, in.bitLength);
+}
+
+// --- writePdoMappings -------------------------------------------------------
+//
+// The fake's readSdo answers from the programmed map, independent of what writeSdo records, so a
+// write test programs the read map to mirror the mapping it intends to write — that read-back is
+// what writePdoMappings verifies against. The shared kPreOp constant (defined near the top) is the
+// only state the write is legal in; the default 0 (INIT) and SAFE-OP exercise the guard.
+
+// A simple one-RxPDO / one-TxPDO CiA402 request: controlword + target position out, statusword +
+// position-actual in.
+PdoMapping cia402Request() {
+  PdoMapping m;
+  m.outputs.push_back({0x1600,
+                       {PdoMappingEntry{.index = 0x6040, .subindex = 0, .bitLength = 16},
+                        PdoMappingEntry{.index = 0x607A, .subindex = 0, .bitLength = 32}}});
+  m.inputs.push_back({0x1A00,
+                      {PdoMappingEntry{.index = 0x6041, .subindex = 0, .bitLength = 16},
+                       PdoMappingEntry{.index = 0x6064, .subindex = 0, .bitLength = 32}}});
+  return m;
+}
+
+// Programs the read map so a read-back reproduces cia402Request() exactly (so verification passes).
+void programCia402ReadBack(SdoFakeDriver& driver) {
+  driver.programRead(0x1C12, 0x00, u8le(1));
+  driver.programRead(0x1C12, 0x01, u16le(0x1600));
+  driver.programRead(0x1600, 0x00, u8le(2));
+  driver.programRead(0x1600, 0x01, pdoEntry(0x6040, 0x00, 16));
+  driver.programRead(0x1600, 0x02, pdoEntry(0x607A, 0x00, 32));
+  driver.programRead(0x1C13, 0x00, u8le(1));
+  driver.programRead(0x1C13, 0x01, u16le(0x1A00));
+  driver.programRead(0x1A00, 0x00, u8le(2));
+  driver.programRead(0x1A00, 0x01, pdoEntry(0x6041, 0x00, 16));
+  driver.programRead(0x1A00, 0x02, pdoEntry(0x6064, 0x00, 32));
+}
+
+// Matches one recorded write against (index, subindex, bytes).
+void expectWrite(const SdoFakeDriver::Write& w, uint16_t index, uint8_t subindex,
+                 const std::vector<uint8_t>& data) {
+  EXPECT_EQ(w.index, index);
+  EXPECT_EQ(w.subindex, subindex);
+  EXPECT_EQ(w.data, data);
+}
+
+TEST(DeviceWritePdoMappings, EmitsCoeSequenceInOrder) {
+  SdoFakeDriver driver;
+  driver.state = kPreOp;
+  programCia402ReadBack(driver);
+  Device device(1, driver);
+
+  ASSERT_TRUE(device.writePdoMappings(cia402Request()).has_value());
+
+  // 14 writes: for each direction — clear assignment, clear/fill/count the mapping object, then
+  // assign the object and write the assignment count. No retry, so exactly one pass.
+  ASSERT_EQ(driver.writes.size(), 14u);
+  size_t i = 0;
+  // Outputs → 0x1C12 / 0x1600
+  expectWrite(driver.writes[i++], 0x1C12, 0x00, u8le(0));            // clear SM2 assignment
+  expectWrite(driver.writes[i++], 0x1600, 0x00, u8le(0));            // clear mapping count
+  expectWrite(driver.writes[i++], 0x1600, 0x01, u32le(0x60400010));  // controlword, 16 bits
+  expectWrite(driver.writes[i++], 0x1600, 0x02, u32le(0x607A0020));  // target pos, 32 bits
+  expectWrite(driver.writes[i++], 0x1600, 0x00, u8le(2));            // restore mapping count
+  expectWrite(driver.writes[i++], 0x1C12, 0x01, u16le(0x1600));      // assign 0x1600
+  expectWrite(driver.writes[i++], 0x1C12, 0x00, u8le(1));            // SM2 assignment count
+  // Inputs → 0x1C13 / 0x1A00
+  expectWrite(driver.writes[i++], 0x1C13, 0x00, u8le(0));
+  expectWrite(driver.writes[i++], 0x1A00, 0x00, u8le(0));
+  expectWrite(driver.writes[i++], 0x1A00, 0x01, u32le(0x60410010));  // statusword, 16 bits
+  expectWrite(driver.writes[i++], 0x1A00, 0x02, u32le(0x60640020));  // pos actual, 32 bits
+  expectWrite(driver.writes[i++], 0x1A00, 0x00, u8le(2));
+  expectWrite(driver.writes[i++], 0x1C13, 0x01, u16le(0x1A00));
+  expectWrite(driver.writes[i++], 0x1C13, 0x00, u8le(1));
+
+  // The read-back refreshed the cached mapping to match the request.
+  ASSERT_EQ(device.pdoMappings().outputs.size(), 2u);
+  EXPECT_EQ(device.pdoMappings().outputs[0].index, 0x6040);
+  EXPECT_EQ(device.pdoMappings().inputs[1].index, 0x6064);
+}
+
+TEST(DeviceWritePdoMappings, RejectsWhenNotPreOp) {
+  SdoFakeDriver driver;
+  driver.state = 4;  // SAFE-OP: sync managers active, mapping objects not writable
+  Device device(1, driver);
+
+  auto result = device.writePdoMappings(cia402Request());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("PRE-OP"), std::string::npos);
+  EXPECT_TRUE(driver.writes.empty());  // guarded before any SDO write
+}
+
+TEST(DeviceWritePdoMappings, EmptyDirectionClearsAssignment) {
+  // Outputs empty: the RxPDO sync manager is cleared (count 0) and nothing is assigned; only the
+  // TxPDO is configured.
+  SdoFakeDriver driver;
+  driver.state = kPreOp;
+  driver.programRead(0x1C12, 0x00, u8le(0));  // read-back: no outputs
+  driver.programRead(0x1C13, 0x00, u8le(1));
+  driver.programRead(0x1C13, 0x01, u16le(0x1A00));
+  driver.programRead(0x1A00, 0x00, u8le(1));
+  driver.programRead(0x1A00, 0x01, pdoEntry(0x6041, 0x00, 16));
+
+  PdoMapping m;
+  m.inputs.push_back({0x1A00, {PdoMappingEntry{.index = 0x6041, .subindex = 0, .bitLength = 16}}});
+  Device device(1, driver);
+
+  ASSERT_TRUE(device.writePdoMappings(m).has_value());
+  // Outputs direction: clear assignment (0), then assignment count (0) — two writes, no objects.
+  expectWrite(driver.writes[0], 0x1C12, 0x00, u8le(0));
+  expectWrite(driver.writes[1], 0x1C12, 0x00, u8le(0));
+  EXPECT_TRUE(device.pdoMappings().outputs.empty());
+  ASSERT_EQ(device.pdoMappings().inputs.size(), 1u);
+}
+
+TEST(DeviceWritePdoMappings, RetriesThenFailsOnPersistentWriteError) {
+  // A mapping-object write that always fails is retried the whole sequence up to 3 times before the
+  // call gives up — turning a silent half-written mapping into a reported error.
+  SdoFakeDriver driver;
+  driver.state = kPreOp;
+  programCia402ReadBack(driver);
+  driver.failWrites.insert(SdoFakeDriver::key(0x1600, 0x01));  // controlword entry always aborts
+  Device device(1, driver);
+
+  auto result = device.writePdoMappings(cia402Request());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("after 3 attempts"), std::string::npos);
+  // Each attempt reaches the failing 0x1600:01 write: clear SM2, clear 0x1600 count, then the
+  // entry.
+  int failingWrites = 0;
+  for (const auto& w : driver.writes) {
+    if (w.index == 0x1600 && w.subindex == 0x01) {
+      ++failingWrites;
+    }
+  }
+  EXPECT_EQ(failingWrites, 3);
+}
+
+TEST(DeviceWritePdoMappings, ReadBackMismatchFails) {
+  // Writes succeed but the read-back does not match the request (device reports a different entry),
+  // so verification fails — caught, retried, and ultimately reported.
+  SdoFakeDriver driver;
+  driver.state = kPreOp;
+  programCia402ReadBack(driver);
+  // Corrupt the read-back: 0x1600:02 reports the wrong object.
+  driver.programRead(0x1600, 0x02, pdoEntry(0x1234, 0x00, 32));
+  Device device(1, driver);
+
+  auto result = device.writePdoMappings(cia402Request());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("output mapping entry 1"), std::string::npos);
+}
+
+TEST(DeviceWritePdoMappings, TooManyEntriesRejected) {
+  SdoFakeDriver driver;
+  driver.state = kPreOp;
+  Device device(1, driver);
+
+  PdoMapping m;
+  PdoMappingObject obj{0x1600, {}};
+  obj.entries.resize(256, PdoMappingEntry{.index = 0x6040, .subindex = 0, .bitLength = 8});
+  m.outputs.push_back(std::move(obj));
+
+  auto result = device.writePdoMappings(m);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("too many"), std::string::npos);
+  EXPECT_TRUE(driver.writes.empty());  // rejected before any write
 }
 
 // --- cache thread-safety -----------------------------------------------------

@@ -7,10 +7,12 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "core/util.h"
 #include "node/device_parameter.h"
 #include "node/parameter_cache.h"
 #include "node/process_data.h"
@@ -195,26 +197,6 @@ const std::unordered_map<uint32_t, DeviceParameter>& Device::parameters() const 
 
 namespace {
 
-// Little-endian integer readers over a raw SDO byte buffer. A short buffer reads as if
-// zero-padded — defensive against a slave returning fewer bytes than the type implies.
-uint8_t readU8(const std::vector<uint8_t>& b) { return b.empty() ? uint8_t{0} : b[0]; }
-
-uint16_t readU16(const std::vector<uint8_t>& b) {
-  uint16_t v = 0;
-  for (size_t i = 0; i < 2 && i < b.size(); ++i) {
-    v |= static_cast<uint16_t>(b[i]) << (8 * i);
-  }
-  return v;
-}
-
-uint32_t readU32(const std::vector<uint8_t>& b) {
-  uint32_t v = 0;
-  for (size_t i = 0; i < 4 && i < b.size(); ++i) {
-    v |= static_cast<uint32_t>(b[i]) << (8 * i);
-  }
-  return v;
-}
-
 // EtherCAT SDO abort code for "object does not exist in the object dictionary" (ETG.1000.6
 // Table 39). The FieldbusDriver surfaces SDO failures only as text (no structured abort code
 // crosses the interface boundary yet — see the "error strings throughout for now" note in
@@ -241,7 +223,7 @@ std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIn
   if (!countBytes) {
     return {};
   }
-  const uint8_t pdoCount = readU8(*countBytes);
+  const uint8_t pdoCount = core::fromBytes<uint8_t>(*countBytes);
 
   // The loop counter is wider than pdoCount's uint8_t on purpose: a device reporting 255 here
   // would make a `uint8_t i <= 255` guard permanently true (i wraps 255->0), spinning forever.
@@ -252,7 +234,7 @@ std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIn
       return std::unexpected(std::format("0x{:04X}:{:02X} (PDO assignment) read failed: {}",
                                          assignmentIndex, i, pdoIndexBytes.error()));
     }
-    const uint16_t mappingIndex = readU16(*pdoIndexBytes);
+    const uint16_t mappingIndex = core::fromBytes<uint16_t>(*pdoIndexBytes);
     if (mappingIndex == 0) {
       continue;  // unused assignment slot
     }
@@ -289,7 +271,7 @@ std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIn
       return std::unexpected(std::format("0x{:04X}:00 (PDO mapping) read failed: {}", mappingIndex,
                                          entryCountBytes.error()));
     }
-    const uint8_t entryCount = readU8(*entryCountBytes);
+    const uint8_t entryCount = core::fromBytes<uint8_t>(*entryCountBytes);
 
     // Wider counter for the same reason as the outer loop: entryCount == 255 must still terminate.
     for (unsigned e = 1; e <= entryCount; ++e) {
@@ -298,15 +280,8 @@ std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIn
         return std::unexpected(std::format("0x{:04X}:{:02X} (PDO mapping entry) read failed: {}",
                                            mappingIndex, e, entryBytes.error()));
       }
-      // Packed entry (ETG.1000.6 §5.6.7.4.7): bits 31..16 = object index,
-      // 15..8 = subindex, 7..0 = bit length. An index of 0 is an alignment gap.
-      const uint32_t packed = readU32(*entryBytes);
-      PdoMappingEntry entry{
-          .index = static_cast<uint16_t>(packed >> 16),
-          .subindex = static_cast<uint8_t>((packed >> 8) & 0xFF),
-          .bitLength = static_cast<uint16_t>(packed & 0xFF),
-          .bitOffset = totalBits,
-      };
+      PdoMappingEntry entry = unpackMappingEntry(core::fromBytes<uint32_t>(*entryBytes));
+      entry.bitOffset = totalBits;  // derived from the running offset, not the packed word
       totalBits += entry.bitLength;
       out.push_back(entry);
     }
@@ -330,6 +305,173 @@ std::expected<void, std::string> Device::readPdoMappings() {
 }
 
 const PdoMappings& Device::pdoMappings() const { return pdoMappings_; }
+
+namespace {
+
+// Confirms one direction's read-back mapping matches the request exactly — same entries
+// (index/subindex/bitLength) in the same order. @p dir names the direction for the error message.
+std::expected<void, std::string> matchesRequest(const std::vector<PdoMappingEntry>& readBack,
+                                                const std::vector<PdoMappingObject>& requested,
+                                                std::string_view dir) {
+  size_t r = 0;
+  for (const auto& obj : requested) {
+    for (const auto& want : obj.entries) {
+      if (r >= readBack.size()) {
+        return std::unexpected(
+            std::format("{} mapping: device reports fewer entries ({}) than the "
+                        "{} written",
+                        dir, readBack.size(), r + 1));
+      }
+      const PdoMappingEntry& got = readBack[r];
+      if (got.index != want.index || got.subindex != want.subindex ||
+          got.bitLength != want.bitLength) {
+        return std::unexpected(std::format(
+            "{} mapping entry {}: wrote 0x{:04X}:{:02X}/{} bit(s) but read back 0x{:04X}:{:02X}/{} "
+            "bit(s)",
+            dir, r, want.index, want.subindex, want.bitLength, got.index, got.subindex,
+            got.bitLength));
+      }
+      ++r;
+    }
+  }
+  if (r != readBack.size()) {
+    return std::unexpected(
+        std::format("{} mapping: device reports more entries ({}) than the {} written", dir,
+                    readBack.size(), r));
+  }
+  return {};
+}
+
+// Writes one direction's PDO mapping: clears the sync manager's assignment, rewrites the referenced
+// mapping objects, then re-assigns them (see Device::writePdoMappings). @p assignmentIndex is
+// 0x1C12 (outputs/RxPDO) or 0x1C13 (inputs/TxPDO). A free function taking the device rather than a
+// member, as it is a pure implementation detail of writePdoMappings and needs only the public
+// writeSdo.
+std::expected<void, std::string> writePdoDirection(Device& device, uint16_t assignmentIndex,
+                                                   const std::vector<PdoMappingObject>& objects) {
+  // 1. Clear the sync manager's PDO assignment count. With nothing assigned, the mapping objects it
+  //    referenced become writable — a slave rejects a write to a mapping object while it is
+  //    assigned to a sync manager. This also deassigns any object from the previous configuration
+  //    that is absent from `objects`, so those need no separate clear.
+  if (auto w = device.writeSdo(assignmentIndex, 0, core::toBytes<uint8_t>(0)); !w) {
+    return std::unexpected(std::format("0x{:04X}:00 (PDO assignment clear) write failed: {}",
+                                       assignmentIndex, w.error()));
+  }
+
+  // 2. Rewrite each mapping object: clear its entry count, write the packed entries to subindices
+  //    1..N, then restore the entry count (the CoE order — count must be zero before entries are
+  //    written).
+  for (const PdoMappingObject& obj : objects) {
+    if (auto w = device.writeSdo(obj.pdoIndex, 0, core::toBytes<uint8_t>(0)); !w) {
+      return std::unexpected(
+          std::format("0x{:04X}:00 (PDO mapping clear) write failed: {}", obj.pdoIndex, w.error()));
+    }
+    for (size_t e = 0; e < obj.entries.size(); ++e) {
+      const uint32_t packed = packMappingEntry(obj.entries[e]);
+      if (auto w =
+              device.writeSdo(obj.pdoIndex, static_cast<uint8_t>(e + 1), core::toBytes(packed));
+          !w) {
+        return std::unexpected(std::format("0x{:04X}:{:02X} (PDO mapping entry) write failed: {}",
+                                           obj.pdoIndex, e + 1, w.error()));
+      }
+    }
+    if (auto w = device.writeSdo(obj.pdoIndex, 0,
+                                 core::toBytes<uint8_t>(static_cast<uint8_t>(obj.entries.size())));
+        !w) {
+      return std::unexpected(
+          std::format("0x{:04X}:00 (PDO mapping count) write failed: {}", obj.pdoIndex, w.error()));
+    }
+  }
+
+  // 3. Assign the mapping objects to the sync manager (subindices 1..N in order), then write the
+  //    assignment count last — enabling the sync manager with the new PDO set.
+  for (size_t i = 0; i < objects.size(); ++i) {
+    if (auto w = device.writeSdo(assignmentIndex, static_cast<uint8_t>(i + 1),
+                                 core::toBytes(objects[i].pdoIndex));
+        !w) {
+      return std::unexpected(std::format("0x{:04X}:{:02X} (PDO assignment) write failed: {}",
+                                         assignmentIndex, i + 1, w.error()));
+    }
+  }
+  if (auto w = device.writeSdo(assignmentIndex, 0,
+                               core::toBytes<uint8_t>(static_cast<uint8_t>(objects.size())));
+      !w) {
+    return std::unexpected(std::format("0x{:04X}:00 (PDO assignment count) write failed: {}",
+                                       assignmentIndex, w.error()));
+  }
+  return {};
+}
+
+}  // namespace
+
+std::expected<void, std::string> Device::writePdoMappings(const PdoMapping& mapping) {
+  using mm::comm::EtherCatState;
+  const EtherCatState state = mm::comm::alState(driver_.slaveState(slavePosition_));
+  if (state != EtherCatState::PreOp) {
+    return std::unexpected(
+        std::format("device {}: PDO mapping can only be written in PRE-OP (device is in {})",
+                    slavePosition_, mm::comm::toString(state)));
+  }
+
+  // The assignment count, each object's entry count, and every object/entry position are
+  // single-byte SDO subindices, so at most 255 objects per sync manager and 255 entries per object.
+  // (bitLength is already a uint8_t, so it cannot overflow the packed 7..0 field.)
+  auto validate = [](const std::vector<PdoMappingObject>& objs,
+                     std::string_view dir) -> std::expected<void, std::string> {
+    if (objs.size() > 255) {
+      return std::unexpected(
+          std::format("too many {} PDO objects ({}, max 255)", dir, objs.size()));
+    }
+    const auto overfull = std::ranges::find_if(
+        objs, [](const PdoMappingObject& o) { return o.entries.size() > 255; });
+    if (overfull != objs.end()) {
+      return std::unexpected(std::format("0x{:04X}: too many entries ({}, max 255)",
+                                         overfull->pdoIndex, overfull->entries.size()));
+    }
+    return {};
+  };
+  if (auto r = validate(mapping.outputs, "output"); !r) {
+    return std::unexpected(r.error());
+  }
+  if (auto r = validate(mapping.inputs, "input"); !r) {
+    return std::unexpected(r.error());
+  }
+
+  // Apply both directions, read the mapping back, and confirm it matches — retrying the whole
+  // sequence on any transient SDO failure or mismatch. A single dropped mailbox frame mid-burst
+  // would otherwise silently leave a half-written mapping that the later re-map would treat as
+  // authoritative; the apply is idempotent, so re-running is safe.
+  constexpr int kMaxAttempts = 3;
+  std::string lastError;
+  for (int attempt = 1; attempt <= kMaxAttempts; ++attempt) {
+    auto applied = [&]() -> std::expected<void, std::string> {
+      if (auto r = writePdoDirection(*this, 0x1C12, mapping.outputs); !r) {
+        return r;
+      }
+      if (auto r = writePdoDirection(*this, 0x1C13, mapping.inputs); !r) {
+        return r;
+      }
+      // Read back (this also refreshes pdoMappings()) and verify it matches the request.
+      if (auto r = readPdoMappings(); !r) {
+        return std::unexpected("read-back failed: " + r.error());
+      }
+      if (auto r = matchesRequest(pdoMappings_.outputs, mapping.outputs, "output"); !r) {
+        return r;
+      }
+      return matchesRequest(pdoMappings_.inputs, mapping.inputs, "input");
+    }();
+    if (applied) {
+      spdlog::info("Device {}: PDO mapping written ({} output object(s), {} input object(s))",
+                   slavePosition_, mapping.outputs.size(), mapping.inputs.size());
+      return {};
+    }
+    lastError = std::move(applied).error();
+    spdlog::warn("Device {}: PDO mapping attempt {}/{} failed: {}", slavePosition_, attempt,
+                 kMaxAttempts, lastError);
+  }
+  return std::unexpected(std::format("device {}: PDO mapping failed after {} attempts: {}",
+                                     slavePosition_, kMaxAttempts, lastError));
+}
 
 std::expected<void, std::string> Device::setValue(uint16_t index, uint8_t subindex,
                                                   DeviceParameterValue newValue) {

@@ -48,7 +48,7 @@ DeviceParameter makeParam(uint16_t index, uint8_t subindex, uint16_t dataType) {
 // (cached by default) must return the schema and bounds verbatim, but with the value reset.
 TEST(ParameterCacheTest, RoundTripsDefinitionsButNotLiveValues) {
   ParameterCache cache(
-      {.enabled = true, .cacheAllVendors = false, .directory = makeTempDir("roundtrip").string()});
+      {.cacheAllVendors = false, .directory = makeTempDir("roundtrip").string(), .enabled = true});
 
   DeviceParameter withBounds = makeParam(0x6040, 0, kUnsigned32);
   withBounds.unit = 0x00010000u;
@@ -94,7 +94,7 @@ TEST(ParameterCacheTest, RoundTripsDefinitionsButNotLiveValues) {
 // 64-bit bounds must survive exactly (a double round-trip would lose the low bits).
 TEST(ParameterCacheTest, Preserves64BitBoundsExactly) {
   ParameterCache cache(
-      {.enabled = true, .cacheAllVendors = false, .directory = makeTempDir("u64").string()});
+      {.cacheAllVendors = false, .directory = makeTempDir("u64").string(), .enabled = true});
 
   DeviceParameter p = makeParam(0x2000, 0, kUnsigned64);
   const uint64_t big = 0xFEDCBA9876543210ull;
@@ -111,7 +111,7 @@ TEST(ParameterCacheTest, Preserves64BitBoundsExactly) {
 // The key is (vendor, product, revision): a different revision is a clean miss, not a wrong hit.
 TEST(ParameterCacheTest, MissesOnDifferentIdentity) {
   ParameterCache cache(
-      {.enabled = true, .cacheAllVendors = false, .directory = makeTempDir("identity").string()});
+      {.cacheAllVendors = false, .directory = makeTempDir("identity").string(), .enabled = true});
   cache.store(kSynapticonVendorId, 0x0201, 0x0A, {makeParam(0x6040, 0, kUnsigned32)});
 
   EXPECT_FALSE(cache.load(kSynapticonVendorId, 0x0201, 0x0B).has_value());  // other revision
@@ -121,9 +121,9 @@ TEST(ParameterCacheTest, MissesOnDifferentIdentity) {
 
 // Default policy: Synapticon is cached, other vendors are not — store is a no-op and load misses.
 TEST(ParameterCacheTest, OtherVendorsDisabledByDefault) {
-  ParameterCache cache({.enabled = true,
-                        .cacheAllVendors = false,
-                        .directory = makeTempDir("vendor-default").string()});
+  ParameterCache cache({.cacheAllVendors = false,
+                        .directory = makeTempDir("vendor-default").string(),
+                        .enabled = true});
 
   EXPECT_TRUE(cache.enabledForVendor(kSynapticonVendorId));
   EXPECT_FALSE(cache.enabledForVendor(kOtherVendor));
@@ -135,7 +135,7 @@ TEST(ParameterCacheTest, OtherVendorsDisabledByDefault) {
 // cacheAllVendors flips the policy on for every vendor.
 TEST(ParameterCacheTest, CacheAllVendorsEnablesOtherVendors) {
   ParameterCache cache(
-      {.enabled = true, .cacheAllVendors = true, .directory = makeTempDir("vendor-all").string()});
+      {.cacheAllVendors = true, .directory = makeTempDir("vendor-all").string(), .enabled = true});
 
   EXPECT_TRUE(cache.enabledForVendor(kOtherVendor));
   cache.store(kOtherVendor, 1, 1, {makeParam(0x6040, 0, kUnsigned32)});
@@ -145,7 +145,7 @@ TEST(ParameterCacheTest, CacheAllVendorsEnablesOtherVendors) {
 // The master switch disables the cache for everyone, Synapticon included.
 TEST(ParameterCacheTest, DisabledMasterSwitchCachesNothing) {
   ParameterCache cache(
-      {.enabled = false, .cacheAllVendors = true, .directory = makeTempDir("disabled").string()});
+      {.cacheAllVendors = true, .directory = makeTempDir("disabled").string(), .enabled = false});
 
   EXPECT_FALSE(cache.enabledForVendor(kSynapticonVendorId));
   cache.store(kSynapticonVendorId, 1, 1, {makeParam(0x6040, 0, kUnsigned32)});
@@ -155,7 +155,7 @@ TEST(ParameterCacheTest, DisabledMasterSwitchCachesNothing) {
 // A corrupt file is treated as a miss (the caller re-enumerates), never a throw.
 TEST(ParameterCacheTest, CorruptFileIsAMiss) {
   const fs::path dir = makeTempDir("corrupt");
-  ParameterCache cache({.enabled = true, .cacheAllVendors = false, .directory = dir.string()});
+  ParameterCache cache({.cacheAllVendors = false, .directory = dir.string(), .enabled = true});
 
   fs::create_directories(dir);
   std::ofstream(dir / "parameters-000022d2-00000001-00000001.json") << "{ not valid json ]";
@@ -166,7 +166,7 @@ TEST(ParameterCacheTest, CorruptFileIsAMiss) {
 // list() reports each stored file's identity and a parameter count, for the management UI.
 TEST(ParameterCacheTest, ListReportsStoredCaches) {
   ParameterCache cache(
-      {.enabled = true, .cacheAllVendors = false, .directory = makeTempDir("list").string()});
+      {.cacheAllVendors = false, .directory = makeTempDir("list").string(), .enabled = true});
   EXPECT_TRUE(cache.list().empty());
 
   cache.store(kSynapticonVendorId, 0x0201, 0x0A,
@@ -192,10 +192,10 @@ TEST(ParameterCacheTest, ListReportsStoredCaches) {
 // be cleaned up.
 TEST(ParameterCacheTest, ListIgnoresPolicy) {
   const fs::path dir = makeTempDir("list-policy");
-  ParameterCache writer({.enabled = true, .cacheAllVendors = false, .directory = dir.string()});
+  ParameterCache writer({.cacheAllVendors = false, .directory = dir.string(), .enabled = true});
   writer.store(kSynapticonVendorId, 1, 1, {makeParam(0x6040, 0, kUnsigned32)});
 
-  ParameterCache disabled({.enabled = false, .cacheAllVendors = false, .directory = dir.string()});
+  ParameterCache disabled({.cacheAllVendors = false, .directory = dir.string(), .enabled = false});
   EXPECT_EQ(disabled.list().size(), 1u);
 }
 
@@ -203,7 +203,7 @@ TEST(ParameterCacheTest, ListIgnoresPolicy) {
 // (the same one list() reports), and reject a malformed id.
 TEST(ParameterCacheTest, ReadRawAndRemove) {
   ParameterCache cache(
-      {.enabled = true, .cacheAllVendors = false, .directory = makeTempDir("rawremove").string()});
+      {.cacheAllVendors = false, .directory = makeTempDir("rawremove").string(), .enabled = true});
   cache.store(kSynapticonVendorId, 0x0201, 0x0A, {makeParam(0x6040, 0, kUnsigned32)});
   const std::string id = ParameterCache::makeId(kSynapticonVendorId, 0x0201, 0x0A);
 

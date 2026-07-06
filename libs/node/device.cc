@@ -376,7 +376,7 @@ std::expected<void, std::string> matchesRequest(const std::vector<PdoMappingEntr
 // 0x1C12 (outputs/RxPDO) or 0x1C13 (inputs/TxPDO). A free function taking the device rather than a
 // member, as it is a pure implementation detail of writePdoMapping and needs only the public
 // writeSdo.
-std::expected<void, std::string> writePdoDirection(Device& device, uint16_t assignmentIndex,
+std::expected<void, std::string> writePdoDirection(const Device& device, uint16_t assignmentIndex,
                                                    const std::vector<PdoMappingObject>& objects) {
   // 1. Clear the sync manager's PDO assignment count. With nothing assigned, the mapping objects it
   //    referenced become writable — a slave rejects a write to a mapping object while it is

@@ -151,7 +151,7 @@ main.cc  (composition root — the only place concrete types are instantiated; n
  │     ├── owns: std::vector<Device>    (each Device borrows FieldbusDriver& + ProcessData* + ParameterCache*)
  │     │     ├── slavePosition, name, vendorId, productCode, revisionNumber, serialNumber (immutable)
  │     │     ├── owns: parameters_  (index/subindex → DeviceParameter{ DeviceParameterValue variant })
- │     │     ├── owns: PdoMappings
+ │     │     ├── owns: flatPdoMapping_ (FlatPdoMapping — cached flat view; grouped read/write via readPdoMapping/writePdoMapping)
  │     │     └── parametersMutex_  (guards parameters_ vs the off-RT monitoring threads)
  │     └── init(), scan(), reset(), configureProcessData(), exchangeProcessData(), transitionToState()
  ├── GameLoop  (RT thread, SCHED_FIFO, 1 ms; the main thread blocks here)
@@ -259,9 +259,9 @@ The order is stable for the lifetime of a monitoring. `interval` is the flush **
 
 ### Fieldbus Capability Surface
 
-What the fieldbus exposes today, and what is deliberately deferred. **Bus-level** (sidebar group *Fieldbus*): Control (AL state), Configuration (static SM/FMMU/DC/mailbox/addresses), Process Image (PDO layout + WKC health, plus a recorder dump to `.mmpd` via `POST /api/process-data/dump`), Diagnostics (live ESC error counters / link / watchdog), DC Sync (live distributed-clock deviation — system-time difference 0x092C). **Per-device**: FoE, Parameters (CoE object dictionary + SDO), Registers (ESC read/write), SII (EEPROM read).
+What the fieldbus exposes today, and what is deliberately deferred. **Bus-level** (sidebar group *Fieldbus*): Control (AL state), Configuration (static SM/FMMU/DC/mailbox/addresses), Process Image (PDO layout + WKC health, plus a recorder dump to `.mmpd` via `POST /api/process-data/dump`), Diagnostics (live ESC error counters / link / watchdog), DC Sync (live distributed-clock deviation — system-time difference 0x092C). **Per-device**: FoE, Parameters (CoE object dictionary + SDO), PDO Mapping (read + write the cyclic mapping over CoE — `GET`/`PUT /api/devices/:slavePosition/pdo-mapping`; write reconfigures 0x1C12/0x1C13 + 0x16xx/0x1Axx in PRE-OP), Registers (ESC read/write), SII (EEPROM read).
 
-Deferred fieldbus work is catalogued in NEXTGEN.md (session 2026-06-01), ranked by value-vs-effort — read it before adding a new fieldbus view rather than re-deriving the list. Top of the queue: a **topology / cabling map** (near-pure presentation of data SOEM already caches — `topology`/`activeports`/`parent`/`parentport` + the per-port link state Diagnostics already reads) and a **master-side frame/WKC health timeline** (catches intermittent faults a point-in-time WKC reading misses). Lower priority / higher risk: CoE Diagnosis History (0x10F3), device-locate blink, DC SYNC0 activation, PDO remapping, SII write. Out of scope for SOMANET: cable redundancy and the non-CoE mailbox protocols (EoE/SoE/AoE/VoE).
+Deferred fieldbus work is catalogued in NEXTGEN.md (session 2026-06-01), ranked by value-vs-effort — read it before adding a new fieldbus view rather than re-deriving the list. Top of the queue: a **topology / cabling map** (near-pure presentation of data SOEM already caches — `topology`/`activeports`/`parent`/`parentport` + the per-port link state Diagnostics already reads) and a **master-side frame/WKC health timeline** (catches intermittent faults a point-in-time WKC reading misses). Lower priority / higher risk: CoE Diagnosis History (0x10F3), device-locate blink, DC SYNC0 activation, SII write. Out of scope for SOMANET: cable redundancy and the non-CoE mailbox protocols (EoE/SoE/AoE/VoE). PDO remapping shipped 2026-07-06 (see below).
 
 ### CiA402 / Somanet
 

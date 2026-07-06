@@ -15,7 +15,9 @@ Design documents with Mermaid diagrams (rendered natively on GitHub):
 - Ninja
 - GCC / Clang with C++23 support (or MSVC on Windows)
 - Git
-- **Windows only:** [Npcap](https://npcap.com) in WinPcap-compatible mode — required at runtime for raw EtherCAT packet capture (install with "Install Npcap in WinPcap API-compatible Mode" checked)
+- **Windows only:** two runtime dependencies for the packaged binary:
+  - [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) (x64) — the MSVC runtime the binary is linked against
+  - [Npcap](https://npcap.com) in WinPcap-compatible mode — raw EtherCAT packet capture (install with "Install Npcap in WinPcap API-compatible Mode" checked)
 
 ## Getting Started
 

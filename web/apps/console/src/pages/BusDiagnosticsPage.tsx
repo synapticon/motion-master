@@ -5,7 +5,6 @@ import PageHeader from '../components/PageHeader'
 import DiagnosticsExplainer from '../components/DiagnosticsExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
-import { usePreferences } from '../contexts/PreferencesContext'
 import { btnOutline } from '../utils/styles'
 
 // Unwraps the {error: {error: "..."}} shape the generated client rejects with.
@@ -59,14 +58,13 @@ function Bool({ value, good }: { value: boolean; good: boolean }) {
 }
 
 function Field({ label, value, hint }: { label: string; value: number; hint: string }) {
-  const { hintsInline } = usePreferences()
   return (
-    <div title={hintsInline ? undefined : hint} className={hintsInline ? undefined : 'cursor-help'}>
+    <div>
       <p className="text-[10px] uppercase tracking-wide text-grey-500 font-display">{label}</p>
       <p className={`font-mono text-sm mt-0.5 ${value > 0 ? 'text-status-bad font-bold' : 'text-grey-800'}`}>
         {value}
       </p>
-      {hintsInline && <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>}
+      <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>
     </div>
   )
 }
@@ -138,13 +136,11 @@ function PortTable({ ports }: { ports: PortDiagnostics[] }) {
 
 // A read-only labelled cell for the watchdog status/config breakdown.
 function Stat({ label, value, hint, cls }: { label: string; value: string; hint?: string; cls?: string }) {
-  const { hintsInline } = usePreferences()
-  const tooltip = hint && !hintsInline
   return (
-    <div title={tooltip ? hint : undefined} className={tooltip ? 'cursor-help' : undefined}>
+    <div>
       <p className="text-[10px] uppercase tracking-wide text-grey-500 font-display">{label}</p>
       <p className={`font-mono text-sm mt-0.5 ${cls ?? 'text-grey-800'}`}>{value}</p>
-      {hint && hintsInline && <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>}
+      {hint && <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>}
     </div>
   )
 }

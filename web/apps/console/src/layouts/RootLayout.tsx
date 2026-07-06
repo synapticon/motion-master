@@ -5,7 +5,6 @@ import { BookOpenText, ChevronDown, Mail, RefreshCw } from 'lucide-react'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
-import { usePreferences } from '../contexts/PreferencesContext'
 import { useApiHealth } from '../hooks/useApiHealth'
 import { formatHex } from '@synapticon/motion-master-client'
 
@@ -265,8 +264,6 @@ export default function RootLayout() {
   const { api, host, httpPort, hasScanned, isInitialized } = useConnection()
   const online = useApiHealth(api)
   const [metaOpen, setMetaOpen] = useState(false)
-  const [prefsOpen, setPrefsOpen] = useState(false)
-  const { hintsInline, setHintsInline } = usePreferences()
 
   const devicesQuery = useQuery({
     queryKey: ['devices'],
@@ -335,34 +332,6 @@ export default function RootLayout() {
 
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
           <NavItem to="/" label="Connection" end />
-
-          <div className="mt-6">
-            <button
-              type="button"
-              onClick={() => setPrefsOpen(o => !o)}
-              aria-expanded={prefsOpen}
-              className="group w-full flex items-center justify-between px-5 mb-1 cursor-pointer"
-            >
-              <span className="eyebrow text-white/40 group-hover:text-white/70 transition-colors">
-                Preferences
-              </span>
-              <ChevronDown
-                className={`h-3.5 w-3.5 text-white/40 group-hover:text-white/70 transition-transform ${prefsOpen ? 'rotate-180' : ''
-                  }`}
-              />
-            </button>
-            {prefsOpen && (
-              <label className="flex items-center gap-2 px-5 py-2 text-xs text-white/60 hover:text-white cursor-pointer select-none">
-                <input
-                  type="checkbox"
-                  checked={hintsInline}
-                  onChange={e => setHintsInline(e.target.checked)}
-                  className="accent-syn-red"
-                />
-                Show hints inline
-              </label>
-            )}
-          </div>
 
           <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Fieldbus</p>
           <NavItem to="/fieldbus" label="Control" />

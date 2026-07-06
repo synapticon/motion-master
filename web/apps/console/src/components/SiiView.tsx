@@ -1,6 +1,5 @@
 import type { ReactNode } from 'react'
 import { type SlaveInformationInterface, type SiiPdo, formatHex } from '@synapticon/motion-master-client'
-import { usePreferences } from '../contexts/PreferencesContext'
 
 type Sii = SlaveInformationInterface
 type SyncManager = NonNullable<Sii['category']['syncManagers']>[number]
@@ -28,13 +27,11 @@ const MBX_PROTOCOLS: [number, string, string][] = [
 const decodeProtocols = (bits: number) => MBX_PROTOCOLS.filter(([bit]) => bits & bit)
 
 function Field({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
-  const { hintsInline } = usePreferences()
-  const tooltip = hint && !hintsInline
   return (
-    <div title={tooltip ? hint : undefined} className={tooltip ? 'cursor-help' : undefined}>
+    <div>
       <p className="text-[10px] uppercase tracking-wide text-grey-500 font-display">{label}</p>
       <p className="font-mono text-sm text-grey-800 mt-0.5">{value}</p>
-      {hint && hintsInline && <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>}
+      {hint && <p className="text-[11px] text-grey-500 mt-1 leading-snug">{hint}</p>}
     </div>
   )
 }

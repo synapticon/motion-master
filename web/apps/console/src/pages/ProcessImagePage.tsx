@@ -5,7 +5,6 @@ import PageHeader from '../components/PageHeader'
 import ProcessImageExplainer from '../components/ProcessImageExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
-import { usePreferences } from '../contexts/PreferencesContext'
 import { btnOutline } from '../utils/styles'
 
 function Stat({
@@ -19,15 +18,11 @@ function Stat({
   tone?: string
   hint: string
 }) {
-  const { hintsInline } = usePreferences()
   return (
-    <div
-      title={hintsInline ? undefined : hint}
-      className={`border border-grey-200 px-4 py-3${hintsInline ? '' : ' cursor-help'}`}
-    >
+    <div className="border border-grey-200 px-4 py-3">
       <p className="text-[10px] uppercase tracking-wide text-grey-500 font-display">{label}</p>
       <p className={`font-mono text-lg mt-0.5 ${tone ?? 'text-grey-800'}`}>{value}</p>
-      {hintsInline && <p className="text-[11px] leading-snug text-grey-500 mt-1.5">{hint}</p>}
+      <p className="text-[11px] leading-snug text-grey-500 mt-1.5">{hint}</p>
     </div>
   )
 }

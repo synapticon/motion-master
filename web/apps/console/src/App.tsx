@@ -9,6 +9,7 @@ import ToolsSiiPage from './pages/ToolsSiiPage'
 import RegistersPage from './pages/RegistersPage'
 import FoePage from './pages/FoePage'
 import ParametersPage from './pages/ParametersPage'
+import PdoMappingPage from './pages/PdoMappingPage'
 import ProcessDataPage from './pages/ProcessDataPage'
 import ProcessImagePage from './pages/ProcessImagePage'
 import MonitoringsPage from './pages/MonitoringsPage'
@@ -54,6 +55,7 @@ export default function App() {
           <Route path="registers" element={<RegistersPage />} />
           <Route path="foe" element={<FoePage />} />
           <Route path="parameters" element={<ParametersPage />} />
+          <Route path="pdo-mapping" element={<PdoMappingPage />} />
         </Route>
       </Route>
     </Routes>

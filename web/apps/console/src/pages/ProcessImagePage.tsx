@@ -75,11 +75,17 @@ function MappingTable({
   entries: ProcessImageObject[]
   deviceName: (pos: number) => string
 }) {
+  const totalBits = entries.reduce((sum, e) => sum + e.bitLength, 0)
+  const totalBytes = Math.ceil(totalBits / 8)
   return (
     <section>
-      <p className="eyebrow mb-3">
-        {title} <span className="text-grey-400">({entries.length})</span>
-      </p>
+      <div className="flex items-baseline justify-between mb-3 gap-4">
+        <p className="eyebrow">{title}</p>
+        <p className="text-[11px] text-grey-500 font-mono whitespace-nowrap">
+          {entries.length} entr{entries.length === 1 ? 'y' : 'ies'} · {totalBits} bit
+          {totalBits === 1 ? '' : 's'} ({totalBytes} byte{totalBytes === 1 ? '' : 's'})
+        </p>
+      </div>
       {entries.length === 0 ? (
         <p className="text-xs text-grey-500">No objects mapped in this direction.</p>
       ) : (
@@ -233,8 +239,10 @@ export default function ProcessImagePage() {
               />
             </div>
 
-            <MappingTable title="Outputs · RxPDO" entries={img.outputs} deviceName={deviceName} />
-            <MappingTable title="Inputs · TxPDO" entries={img.inputs} deviceName={deviceName} />
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+              <MappingTable title="Outputs · RxPDO" entries={img.outputs} deviceName={deviceName} />
+              <MappingTable title="Inputs · TxPDO" entries={img.inputs} deviceName={deviceName} />
+            </div>
           </>
         )}
       </div>

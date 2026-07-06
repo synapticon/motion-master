@@ -2,6 +2,8 @@
 
 Next-generation motion control software for SOMANET servo drives. Browser-based control interface, real-time process data exchange, and a secure HTTP API and WebSocket interface — control from any language, any tool, any AI agent.
 
+See [FEATURES.md](FEATURES.md) for a full catalog of capabilities.
+
 ## Architecture
 
 Design documents with Mermaid diagrams (rendered natively on GitHub):

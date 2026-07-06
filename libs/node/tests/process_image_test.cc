@@ -53,7 +53,7 @@ std::vector<uint8_t> pdoEntry(uint16_t index, uint8_t subindex, uint8_t bits) {
                bits);
 }
 
-/// Fieldbus fake: serves canned SDO reads (so readPdoMappings works), returns a programmed
+/// Fieldbus fake: serves canned SDO reads (so readFlatPdoMapping works), returns a programmed
 /// process-data layout, and on exchange records the outputs it received and copies a canned
 /// input image back. Position-agnostic SDO map — every slave reports the same mapping.
 class FakeBus : public FieldbusDriver {
@@ -172,8 +172,8 @@ TEST(BuildProcessImage, RebasesEntriesOntoEachSlaveWindow) {
   // Two devices, each 6 bytes per direction; device 2's window follows device 1's.
   Device d1(1, bus);
   Device d2(2, bus);
-  ASSERT_TRUE(d1.readPdoMappings().has_value());
-  ASSERT_TRUE(d2.readPdoMappings().has_value());
+  ASSERT_TRUE(d1.readFlatPdoMapping().has_value());
+  ASSERT_TRUE(d2.readFlatPdoMapping().has_value());
   std::vector<Device> devices;
   devices.push_back(std::move(d1));
   devices.push_back(std::move(d2));
@@ -222,7 +222,7 @@ TEST(BuildProcessImage, RejectsMappingWiderThanItsWindow) {
   FakeBus bus;
   programMapping(bus);  // 48 output bits
   Device d(1, bus);
-  ASSERT_TRUE(d.readPdoMappings().has_value());
+  ASSERT_TRUE(d.readFlatPdoMapping().has_value());
   std::vector<Device> devices;
   devices.push_back(std::move(d));
 

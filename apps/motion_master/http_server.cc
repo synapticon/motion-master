@@ -32,6 +32,7 @@
 #include "node/device_manager.h"
 #include "node/device_parameter.h"
 #include "node/monitoring_manager.h"
+#include "node/pdo_mapping.h"
 
 namespace {
 
@@ -133,6 +134,79 @@ std::expected<std::vector<mm::node::OutputStageRequest>, std::string> parseOutpu
     requests.push_back(std::move(req));
   }
   return requests;
+}
+
+// Parses one direction ("outputs"/"inputs") of a PDO-mapping body into mapping objects. Each object
+// is {"pdoIndex": N, "entries": [{"index": N, "subindex": N, "bitLength": N}, ...]}. Numbers are
+// decimal unsigned and range-checked to their CoE field widths (pdoIndex/index 16-bit, subindex and
+// bitLength 8-bit). Returns the first shape/range problem as an error.
+std::expected<std::vector<mm::node::PdoMappingObject>, std::string> parsePdoMappingObjects(
+    const nlohmann::json& arr, const std::string& dir) {
+  if (!arr.is_array()) {
+    return std::unexpected<std::string>("\"" + dir + "\" must be an array of mapping objects");
+  }
+  std::vector<mm::node::PdoMappingObject> objects;
+  objects.reserve(arr.size());
+  for (const auto& o : arr) {
+    if (!o.is_object() || !o.contains("pdoIndex") || !o.contains("entries")) {
+      return std::unexpected<std::string>("each " + dir +
+                                          " object must have \"pdoIndex\" and \"entries\"");
+    }
+    const auto& idx = o.at("pdoIndex");
+    const auto& entries = o.at("entries");
+    if (!idx.is_number_unsigned() || idx.get<uint64_t>() > 0xFFFF) {
+      return std::unexpected<std::string>(dir + " pdoIndex must be a 16-bit unsigned integer");
+    }
+    if (!entries.is_array()) {
+      return std::unexpected<std::string>(dir + " entries must be an array");
+    }
+    mm::node::PdoMappingObject obj;
+    obj.pdoIndex = idx.get<uint16_t>();
+    obj.entries.reserve(entries.size());
+    for (const auto& e : entries) {
+      if (!e.is_object() || !e.contains("index") || !e.contains("subindex") ||
+          !e.contains("bitLength")) {
+        return std::unexpected<std::string>(
+            "each " + dir + " entry must have \"index\", \"subindex\", and \"bitLength\"");
+      }
+      const auto& ei = e.at("index");
+      const auto& es = e.at("subindex");
+      const auto& eb = e.at("bitLength");
+      if (!ei.is_number_unsigned() || ei.get<uint64_t>() > 0xFFFF || !es.is_number_unsigned() ||
+          es.get<uint64_t>() > 0xFF || !eb.is_number_unsigned() || eb.get<uint64_t>() > 0xFF) {
+        return std::unexpected<std::string>(
+            dir + " entry fields out of range (index 0-65535, subindex 0-255, bitLength 0-255)");
+      }
+      obj.entries.push_back({.index = ei.get<uint16_t>(),
+                             .subindex = es.get<uint8_t>(),
+                             .bitLength = eb.get<uint8_t>()});
+    }
+    objects.push_back(std::move(obj));
+  }
+  return objects;
+}
+
+// Parses a PUT /api/devices/:slavePosition/pdo-mapping body into a PdoMapping. The body is
+// {"outputs": [...], "inputs": [...]}; both directions must be present (an empty array clears that
+// sync manager's assignment, so an omitted key would be an accidental wipe and is rejected). Deeper
+// validation (PRE-OP, per-object counts, read-back) is the node layer's job.
+std::expected<mm::node::PdoMapping, std::string> parseDevicePdoMapping(const nlohmann::json& body) {
+  if (!body.is_object() || !body.contains("outputs") || !body.contains("inputs")) {
+    return std::unexpected<std::string>(
+        "expected an object with \"outputs\" and \"inputs\" arrays");
+  }
+  auto outputs = parsePdoMappingObjects(body.at("outputs"), "outputs");
+  if (!outputs) {
+    return std::unexpected(outputs.error());
+  }
+  auto inputs = parsePdoMappingObjects(body.at("inputs"), "inputs");
+  if (!inputs) {
+    return std::unexpected(inputs.error());
+  }
+  mm::node::PdoMapping mapping;
+  mapping.outputs = std::move(*outputs);
+  mapping.inputs = std::move(*inputs);
+  return mapping;
 }
 
 // Serialises a process-data watchdog configuration. timeoutMs is the human unit the UI edits;
@@ -675,6 +749,85 @@ void HttpServer::run() {
                  return;
                }
                sendJson(res, config_.corsOrigin, watchdogJson(pos, *r));
+             });
+           })
+      .get("/api/devices/:slavePosition/pdo-mapping",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p1, ec1] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             if (ec1 != std::errc() || p1 != posParam.data() + posParam.size()) {
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
+               return;
+             }
+             if (!deviceManager_.findDevice(pos)) {
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
+               return;
+             }
+             // Reads fresh over SDO, grouped by mapping object; requires the device's mailbox to be
+             // active (PRE-OP/SAFE-OP/OP), so a device in INIT/BOOT is a 409.
+             auto mapping = deviceManager_.readDevicePdoMapping(pos);
+             if (!mapping) {
+               sendError(res, "409 Conflict", config_.corsOrigin, mapping.error());
+               return;
+             }
+             sendJson(res, config_.corsOrigin, nlohmann::json(*mapping));
+           })
+      .put("/api/devices/:slavePosition/pdo-mapping",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p1, ec1] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             bool posOk = (ec1 == std::errc() && p1 == posParam.data() + posParam.size());
+             auto aborted = std::make_shared<bool>(false);
+             auto body = std::make_shared<std::string>();
+             res->onAborted([aborted]() { *aborted = true; });
+             res->onData([this, res, body, aborted, pos, posOk](std::string_view chunk, bool last) {
+               body->append(chunk);
+               if (!last) {
+                 return;
+               }
+               if (*aborted) {
+                 return;
+               }
+               if (!posOk) {
+                 sendStatus(res, "400 Bad Request", config_.corsOrigin);
+                 return;
+               }
+               mm::node::PdoMapping mapping;
+               try {
+                 auto parsed = parseDevicePdoMapping(nlohmann::json::parse(*body));
+                 if (!parsed) {
+                   sendError(res, "400 Bad Request", config_.corsOrigin, parsed.error());
+                   return;
+                 }
+                 mapping = std::move(*parsed);
+               } catch (const nlohmann::json::exception& e) {
+                 sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
+                 return;
+               }
+               if (!deviceManager_.findDevice(pos)) {
+                 sendStatus(res, "404 Not Found", config_.corsOrigin);
+                 return;
+               }
+               // A failed write is most often a device-state precondition (not in PRE-OP) or a
+               // rejected/verify-mismatched mapping — a conflict with the device's current state,
+               // not a server fault; report it as 409 with the node layer's detail.
+               auto r = deviceManager_.writeDevicePdoMapping(pos, mapping);
+               if (!r) {
+                 sendError(res, "409 Conflict", config_.corsOrigin, r.error());
+                 return;
+               }
+               // Echo the device's grouped read-back mapping (verified equal to the request), whose
+               // entries carry the derived bitOffsets the request did not specify.
+               auto readBack = deviceManager_.readDevicePdoMapping(pos);
+               if (!readBack) {
+                 sendError(res, "500 Internal Server Error", config_.corsOrigin, readBack.error());
+                 return;
+               }
+               sendJson(res, config_.corsOrigin, nlohmann::json(*readBack));
              });
            })
       .get("/api/devices/:slavePosition/sdo/:index/:subindex",

@@ -247,7 +247,7 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
     return std::unexpected(r.error());
   }
   for (auto& device : devices_) {
-    if (auto r = device.readPdoMappings(); !r) {
+    if (auto r = device.readFlatPdoMapping(); !r) {
       return std::unexpected(r.error());
     }
   }
@@ -641,8 +641,8 @@ void DeviceManager::updateExpectedWkc() {
         continue;  // error indicator set — treat as not contributing
       }
       expected += mm::comm::workingCounterContribution(mm::comm::alState(status),
-                                                       device.pdoMappings().outputBits > 0,
-                                                       device.pdoMappings().inputBits > 0);
+                                                       device.flatPdoMapping().outputBits > 0,
+                                                       device.flatPdoMapping().inputBits > 0);
     }
   }
   pd_->expectedWkc.store(expected, std::memory_order_relaxed);
@@ -1111,8 +1111,8 @@ std::expected<void, std::string> DeviceManager::writeDeviceParameter(
   return device->writeParameter(index, subindex, std::move(newValue));
 }
 
-std::expected<void, std::string> DeviceManager::writeDevicePdoMappings(uint16_t slavePosition,
-                                                                       const PdoMapping& mapping) {
+std::expected<void, std::string> DeviceManager::writeDevicePdoMapping(uint16_t slavePosition,
+                                                                      const PdoMapping& mapping) {
   // Shared lock, like writeDeviceParameter: serialise against the exclusive mutators that rebuild
   // devices_/driver_ so the device pointer stays valid, while the actual PRE-OP mailbox writes are
   // serialised per transaction by the driver's socket mutex. The process image is not touched here
@@ -1122,7 +1122,18 @@ std::expected<void, std::string> DeviceManager::writeDevicePdoMappings(uint16_t 
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
   }
-  return device->writePdoMappings(mapping);
+  return device->writePdoMapping(mapping);
+}
+
+std::expected<PdoMapping, std::string> DeviceManager::readDevicePdoMapping(uint16_t slavePosition) {
+  // Shared lock: keep the device pointer valid against the exclusive rebuilders while the SDO reads
+  // are serialised per transaction by the driver's socket mutex.
+  std::shared_lock lock(busMutex_);
+  Device* device = findDevice(slavePosition);
+  if (!device) {
+    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
+  }
+  return device->readPdoMapping();
 }
 
 std::vector<OutputStageResult> DeviceManager::stageProcessDataOutputs(

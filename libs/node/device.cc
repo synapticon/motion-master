@@ -210,18 +210,17 @@ bool isObjectDoesNotExistAbort(const std::string& error) {
 
 }  // namespace
 
-std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIndex,
-                                                           std::vector<PdoMappingEntry>& out,
-                                                           uint32_t& totalBits) {
-  out.clear();
-  totalBits = 0;
+std::expected<std::vector<PdoMappingObject>, std::string> Device::readPdoAssignment(
+    uint16_t assignmentIndex) {
+  std::vector<PdoMappingObject> objects;
+  uint32_t totalBits = 0;
 
   // Subindex 0 of the assignment object is the count of assigned PDO mapping objects. A
   // device with no PDOs in this direction may not implement the object at all — treat a
   // failed read (or a zero count) as "no entries here", which is not an error.
   auto countBytes = readSdo(assignmentIndex, 0);
   if (!countBytes) {
-    return {};
+    return objects;
   }
   const uint8_t pdoCount = core::fromBytes<uint8_t>(*countBytes);
 
@@ -274,6 +273,8 @@ std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIn
     const uint8_t entryCount = core::fromBytes<uint8_t>(*entryCountBytes);
 
     // Wider counter for the same reason as the outer loop: entryCount == 255 must still terminate.
+    PdoMappingObject obj;
+    obj.pdoIndex = mappingIndex;
     for (unsigned e = 1; e <= entryCount; ++e) {
       auto entryBytes = readSdo(mappingIndex, static_cast<uint8_t>(e));
       if (!entryBytes) {
@@ -283,28 +284,56 @@ std::expected<void, std::string> Device::readPdoAssignment(uint16_t assignmentIn
       PdoMappingEntry entry = unpackMappingEntry(core::fromBytes<uint32_t>(*entryBytes));
       entry.bitOffset = totalBits;  // derived from the running offset, not the packed word
       totalBits += entry.bitLength;
-      out.push_back(entry);
+      obj.entries.push_back(entry);
+    }
+    objects.push_back(std::move(obj));
+  }
+  return objects;
+}
+
+std::expected<PdoMapping, std::string> Device::readPdoMapping() {
+  PdoMapping mapping;
+  auto outputs = readPdoAssignment(0x1C12);
+  if (!outputs) {
+    return std::unexpected(outputs.error());
+  }
+  auto inputs = readPdoAssignment(0x1C13);
+  if (!inputs) {
+    return std::unexpected(inputs.error());
+  }
+  mapping.outputs = std::move(*outputs);
+  mapping.inputs = std::move(*inputs);
+  return mapping;
+}
+
+std::expected<void, std::string> Device::readFlatPdoMapping() {
+  // The flat view is the grouped mapping with object boundaries dropped: entries keep their
+  // (already derived) bitOffset, and each direction's total is the sum of its entry widths.
+  auto grouped = readPdoMapping();
+  if (!grouped) {
+    return std::unexpected(grouped.error());
+  }
+  FlatPdoMapping flat;
+  for (const auto& obj : grouped->outputs) {
+    for (const auto& e : obj.entries) {
+      flat.outputs.push_back(e);
+      flat.outputBits += e.bitLength;
     }
   }
-  return {};
-}
-
-std::expected<void, std::string> Device::readPdoMappings() {
-  PdoMappings mappings;
-  if (auto r = readPdoAssignment(0x1C12, mappings.outputs, mappings.outputBits); !r) {
-    return std::unexpected(r.error());
+  for (const auto& obj : grouped->inputs) {
+    for (const auto& e : obj.entries) {
+      flat.inputs.push_back(e);
+      flat.inputBits += e.bitLength;
+    }
   }
-  if (auto r = readPdoAssignment(0x1C13, mappings.inputs, mappings.inputBits); !r) {
-    return std::unexpected(r.error());
-  }
-  pdoMappings_ = std::move(mappings);
+  flatPdoMapping_ = std::move(flat);
   spdlog::debug("Device {}: PDO mapping - {} output entries ({} bits), {} input entries ({} bits)",
-                slavePosition_, pdoMappings_.outputs.size(), pdoMappings_.outputBits,
-                pdoMappings_.inputs.size(), pdoMappings_.inputBits);
+                slavePosition_, flatPdoMapping_.outputs.size(), flatPdoMapping_.outputBits,
+                flatPdoMapping_.inputs.size(), flatPdoMapping_.inputBits);
   return {};
 }
 
-const PdoMappings& Device::pdoMappings() const { return pdoMappings_; }
+const FlatPdoMapping& Device::flatPdoMapping() const { return flatPdoMapping_; }
 
 namespace {
 
@@ -343,9 +372,9 @@ std::expected<void, std::string> matchesRequest(const std::vector<PdoMappingEntr
 }
 
 // Writes one direction's PDO mapping: clears the sync manager's assignment, rewrites the referenced
-// mapping objects, then re-assigns them (see Device::writePdoMappings). @p assignmentIndex is
+// mapping objects, then re-assigns them (see Device::writePdoMapping). @p assignmentIndex is
 // 0x1C12 (outputs/RxPDO) or 0x1C13 (inputs/TxPDO). A free function taking the device rather than a
-// member, as it is a pure implementation detail of writePdoMappings and needs only the public
+// member, as it is a pure implementation detail of writePdoMapping and needs only the public
 // writeSdo.
 std::expected<void, std::string> writePdoDirection(Device& device, uint16_t assignmentIndex,
                                                    const std::vector<PdoMappingObject>& objects) {
@@ -404,7 +433,7 @@ std::expected<void, std::string> writePdoDirection(Device& device, uint16_t assi
 
 }  // namespace
 
-std::expected<void, std::string> Device::writePdoMappings(const PdoMapping& mapping) {
+std::expected<void, std::string> Device::writePdoMapping(const PdoMapping& mapping) {
   using mm::comm::EtherCatState;
   const EtherCatState state = mm::comm::alState(driver_.slaveState(slavePosition_));
   if (state != EtherCatState::PreOp) {
@@ -451,14 +480,14 @@ std::expected<void, std::string> Device::writePdoMappings(const PdoMapping& mapp
       if (auto r = writePdoDirection(*this, 0x1C13, mapping.inputs); !r) {
         return r;
       }
-      // Read back (this also refreshes pdoMappings()) and verify it matches the request.
-      if (auto r = readPdoMappings(); !r) {
+      // Read back (this also refreshes flatPdoMapping()) and verify it matches the request.
+      if (auto r = readFlatPdoMapping(); !r) {
         return std::unexpected("read-back failed: " + r.error());
       }
-      if (auto r = matchesRequest(pdoMappings_.outputs, mapping.outputs, "output"); !r) {
+      if (auto r = matchesRequest(flatPdoMapping_.outputs, mapping.outputs, "output"); !r) {
         return r;
       }
-      return matchesRequest(pdoMappings_.inputs, mapping.inputs, "input");
+      return matchesRequest(flatPdoMapping_.inputs, mapping.inputs, "input");
     }();
     if (applied) {
       spdlog::info("Device {}: PDO mapping written ({} output object(s), {} input object(s))",

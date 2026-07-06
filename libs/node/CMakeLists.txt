@@ -7,6 +7,7 @@ add_library(node STATIC
     monitoring_manager.cc
     parameter_cache.cc
     parameter_refresher.cc
+    pdo_mapping.cc
     process_data_dump.cc
     process_data_ring.cc
     process_image.cc

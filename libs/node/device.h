@@ -194,10 +194,20 @@ class Device {
   ///
   /// @return Void on success, or an error string if a mapping object referenced by an
   ///         assignment cannot be read (an inconsistent mapping the caller must not exchange).
-  std::expected<void, std::string> readPdoMappings();
+  std::expected<void, std::string> readFlatPdoMapping();
 
-  /// @brief Returns the device's PDO mapping. Empty until @c readPdoMappings() succeeds.
-  const PdoMappings& pdoMappings() const;
+  /// @brief Returns the device's PDO mapping. Empty until @c readFlatPdoMapping() succeeds.
+  const FlatPdoMapping& flatPdoMapping() const;
+
+  /// @brief Reads the device's PDO mapping grouped by mapping object (@c 0x16xx / @c 0x1Axx).
+  ///
+  /// The grouped counterpart of @c readFlatPdoMapping: instead of one flat list per direction, each
+  /// mapping object keeps its @c pdoIndex and its own entries (with derived @c bitOffset), so the
+  /// result round-trips into @c writePdoMapping. Reads fresh over SDO; does not touch the cached
+  /// @c flatPdoMapping(). Requires the device to be in PRE-OP, SAFE-OP, or OP (mailbox active).
+  ///
+  /// @return The grouped mapping, or an error string if a referenced mapping object cannot be read.
+  std::expected<PdoMapping, std::string> readPdoMapping();
 
   /// @brief Writes a new PDO mapping to the device via SDO, then reads it back to verify.
   ///
@@ -217,8 +227,8 @@ class Device {
   /// takes the device to PRE-OP, calls this, then transitions it back to SAFE-OP/OP, at which point
   /// @c DeviceManager re-reads the mapping and rebuilds the whole-bus process image.
   ///
-  /// After writing, the mapping is read back (via @c readPdoMappings, which also refreshes
-  /// @c pdoMappings()) and compared against @p mapping; a mismatch, or a transient SDO failure
+  /// After writing, the mapping is read back (via @c readFlatPdoMapping, which also refreshes
+  /// @c flatPdoMapping()) and compared against @p mapping; a mismatch, or a transient SDO failure
   /// mid-sequence, is retried up to a small fixed number of whole-mapping attempts before failing,
   /// because a single dropped mailbox frame would otherwise leave the object dictionary
   /// half-configured. The apply is idempotent, so a retry is safe.
@@ -228,7 +238,7 @@ class Device {
   /// @return Void on success (the device's mapping matches @p mapping), or an error string if the
   ///         device is not in PRE-OP, an entry is malformed (bit length or count out of range), an
   ///         SDO write/read-back fails after all retries, or the read-back does not match.
-  std::expected<void, std::string> writePdoMappings(const PdoMapping& mapping);
+  std::expected<void, std::string> writePdoMapping(const PdoMapping& mapping);
 
   /// @brief Stores a parameter's value locally, without any bus access (the typed setter).
   ///
@@ -427,16 +437,16 @@ class Device {
   /// @brief Mutable parameter lookup by @c (index, subindex). O(1); @c nullptr if absent.
   DeviceParameter* findParameter(uint16_t index, uint8_t subindex);
 
-  /// @brief Reads one PDO direction: the assignment object and the mapping objects it
-  ///        references, appending entries to @p out and accumulating the bit offset.
+  /// @brief Reads one PDO direction grouped by mapping object: the assignment object and each
+  ///        mapping object it references, with every entry's @c bitOffset derived from the running
+  ///        offset across the direction. The shared reader behind @c readPdoMapping and (flattened)
+  ///        @c readFlatPdoMapping.
   ///
   /// @param assignmentIndex  @c 0x1C12 (outputs/RxPDO) or @c 0x1C13 (inputs/TxPDO).
-  /// @param out              Destination entry list (cleared first).
-  /// @param totalBits        Set to the total mapped width across all entries.
-  /// @return Void on success, or an error string if a referenced mapping object fails to read.
-  std::expected<void, std::string> readPdoAssignment(uint16_t assignmentIndex,
-                                                     std::vector<PdoMappingEntry>& out,
-                                                     uint32_t& totalBits);
+  /// @return The mapping objects in assignment order (empty if the direction assigns nothing), or
+  ///         an error string if a referenced mapping object fails to read.
+  std::expected<std::vector<PdoMappingObject>, std::string> readPdoAssignment(
+      uint16_t assignmentIndex);
 
   uint16_t slavePosition_;
   mm::comm::FieldbusDriver& driver_;
@@ -464,7 +474,7 @@ class Device {
   // Device move-constructible (the pointer moves); a Device is never copied, only moved.
   std::unique_ptr<std::mutex> parametersMutex_;
   std::unordered_map<uint32_t, DeviceParameter> parameters_;
-  PdoMappings pdoMappings_;
+  FlatPdoMapping flatPdoMapping_;
 };
 
 /// @brief Serialises a Device to JSON.

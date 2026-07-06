@@ -70,7 +70,7 @@ std::expected<ProcessImage, std::string> buildProcessImage(const mm::comm::PdoLa
   image.expectedWkc = layout.expectedWkc;
 
   for (const auto& device : devices) {
-    const auto& mappings = device.pdoMappings();
+    const auto& mappings = device.flatPdoMapping();
     if (mappings.outputs.empty() && mappings.inputs.empty()) {
       continue;  // device contributes no process data
     }

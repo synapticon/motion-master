@@ -531,8 +531,8 @@ class DeviceManager {
 
   /// @brief Convenience: finds a device by position and writes its PDO mapping.
   ///
-  /// Equivalent to @c findDevice(slavePosition)->writePdoMappings(mapping) — see
-  /// @c Device::writePdoMappings for the procedure and the PRE-OP requirement. Does not itself
+  /// Equivalent to @c findDevice(slavePosition)->writePdoMapping(mapping) — see
+  /// @c Device::writePdoMapping for the procedure and the PRE-OP requirement. Does not itself
   /// re-map the process image: the caller drives the device back to SAFE-OP/OP afterwards, and
   /// @c transitionToState re-reads the mapping and rebuilds the whole-bus image at that point.
   ///
@@ -540,8 +540,18 @@ class DeviceManager {
   /// @param mapping        Desired output (RxPDO) and input (TxPDO) mapping, in assignment order.
   /// @return Void on success, or an error string if the device is unknown, is not in PRE-OP, or the
   ///         mapping write/verify fails.
-  std::expected<void, std::string> writeDevicePdoMappings(uint16_t slavePosition,
-                                                          const PdoMapping& mapping);
+  std::expected<void, std::string> writeDevicePdoMapping(uint16_t slavePosition,
+                                                         const PdoMapping& mapping);
+
+  /// @brief Convenience: finds a device by position and reads its PDO mapping grouped by object.
+  ///
+  /// Equivalent to @c findDevice(slavePosition)->readPdoMapping() — see @c Device::readPdoMapping.
+  /// Reads fresh over SDO (mailbox must be active: PRE-OP/SAFE-OP/OP). Used by the read side of the
+  /// PDO-mapping route and to echo the verified read-back after a write.
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @return The grouped mapping, or an error string if the device is unknown or a read fails.
+  std::expected<PdoMapping, std::string> readDevicePdoMapping(uint16_t slavePosition);
 
   /// @brief Stages a batch of output objects into the process image in one call.
   ///

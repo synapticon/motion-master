@@ -43,7 +43,7 @@ struct ProcessImageEntry {
 /// @brief The whole bus's process-data layout, resolved to absolute positions.
 ///
 /// Built by @c buildProcessImage from the driver's @c PdoLayout (per-slave windows + sizes)
-/// and each device's @c PdoMappings (per-object offsets within its window).  Immutable once
+/// and each device's @c FlatPdoMapping (per-object offsets within its window).  Immutable once
 /// built and published behind an atomic pointer; the RT loop reads only @c outputBytes /
 /// @c inputBytes / @c expectedWkc, while @c outputs / @c inputs serve non-RT value access.
 struct ProcessImage {
@@ -85,10 +85,10 @@ void insertBits(std::span<uint8_t> dst, uint32_t bitOffset, uint16_t bitLength,
 /// Matches each device to its window in @p layout by bus position and combines the window
 /// offset with the device's per-object bit offsets to produce absolute positions.  Padding
 /// entries (@c index == 0) are dropped — they bind to no object.  Devices must have had
-/// @c Device::readPdoMappings called already.
+/// @c Device::readFlatPdoMapping called already.
 ///
 /// @param layout   Per-slave windows and image sizes from @c FieldbusDriver::processDataLayout.
-/// @param devices  Devices whose @c pdoMappings() supply the per-object offsets.
+/// @param devices  Devices whose @c flatPdoMapping() supply the per-object offsets.
 /// @return The assembled image, or an error string if a device has a mapping but no matching
 ///         window in @p layout, or its mapped width overflows the window the driver reserved.
 std::expected<ProcessImage, std::string> buildProcessImage(const mm::comm::PdoLayout& layout,

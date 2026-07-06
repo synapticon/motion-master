@@ -113,6 +113,91 @@ export interface Monitoring {
   }[];
 }
 
+/** One mapping entry to write. Packs to the 32-bit CoE word index<<16 | subindex<<8 | bitLength. */
+export interface PdoMappingRequestEntry {
+  /**
+   * CoE object index; 0 marks an alignment-padding gap (no bound object)
+   * @min 0
+   * @max 65535
+   * @example 24640
+   */
+  index: number;
+  /**
+   * CoE object subindex
+   * @min 0
+   * @max 255
+   * @example 0
+   */
+  subindex: number;
+  /**
+   * Width of the entry in bits
+   * @min 0
+   * @max 255
+   * @example 16
+   */
+  bitLength: number;
+}
+
+/** One PDO mapping object to write and its ordered entries. */
+export interface PdoMappingRequestObject {
+  /**
+   * Mapping-object index (0x16xx RxPDO for outputs, 0x1Axx TxPDO for inputs)
+   * @min 0
+   * @max 65535
+   * @example 5632
+   */
+  pdoIndex: number;
+  entries: PdoMappingRequestEntry[];
+}
+
+/** A device's desired PDO configuration to write. `outputs` are RxPDO objects (master→slave, assigned to 0x1C12); `inputs` are TxPDO objects (slave→master, assigned to 0x1C13). Vector order is the sync-manager assignment order. Both keys are required; an empty array clears that direction. */
+export interface PdoMappingRequest {
+  outputs: PdoMappingRequestObject[];
+  inputs: PdoMappingRequestObject[];
+}
+
+/** One entry of a mapping object, as read back from the device. */
+export interface PdoMappingEntry {
+  /**
+   * CoE object index; 0 marks an alignment-padding gap
+   * @example 24640
+   */
+  index: number;
+  /**
+   * CoE object subindex
+   * @example 0
+   */
+  subindex: number;
+  /**
+   * Width of the entry in bits
+   * @example 16
+   */
+  bitLength: number;
+  /**
+   * Bit offset from the start of this direction's window (derived by the device)
+   * @example 0
+   */
+  bitOffset: number;
+}
+
+/** One mapping object as read back, with its ordered entries (offsets included). */
+export interface PdoMappingObject {
+  /**
+   * Mapping-object index (0x16xx RxPDO for outputs, 0x1Axx TxPDO for inputs)
+   * @example 5632
+   */
+  pdoIndex: number;
+  entries: PdoMappingEntry[];
+}
+
+/** A device's PDO mapping grouped by mapping object — the read/write-back shape. `outputs` are RxPDO objects (0x1C12), `inputs` are TxPDO objects (0x1C13), each in sync-manager assignment order with its entries and derived bit offsets. */
+export interface PdoMapping {
+  /** RxPDO objects (master→slave), in assignment order */
+  outputs: PdoMappingObject[];
+  /** TxPDO objects (slave→master), in assignment order */
+  inputs: PdoMappingObject[];
+}
+
 export interface ProcessImageObject {
   /**
    * 1-based bus position of the owning device

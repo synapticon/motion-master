@@ -21,6 +21,8 @@ import {
   ObjectDataTypeInfo,
   OutputStageResult,
   ParameterCacheEntry,
+  PdoMapping,
+  PdoMappingRequest,
   ProcessDataWatchdog,
   ProcessImageObject,
   SlaveConfig,
@@ -806,6 +808,58 @@ export class Api<
       }
     >({
       path: `/api/devices/${slavePosition}/watchdog`,
+      method: "PUT",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Reads the PDO mapping of the slave at `slavePosition` over CoE, grouped by mapping object: the sync-manager assignment (0x1C12 outputs / 0x1C13 inputs) and, for each assigned mapping object (0x16xx / 0x1Axx), its `pdoIndex` and ordered entries. `outputs` are RxPDO objects (master→slave), `inputs` are TxPDO objects (slave→master). Each entry carries its derived `bitOffset` within the direction's window. This is the grouped, round-trippable counterpart of the flat, whole-bus `GET /api/process-image`. Reads fresh over SDO, so the device's mailbox must be active (PRE-OP, SAFE-OP, or OP); a device in INIT or BOOT yields 409.
+   *
+   * @name GetDevicePdoMapping
+   * @summary Read a device's PDO mapping grouped by object (CoE)
+   * @request GET:/api/devices/{slavePosition}/pdo-mapping
+   */
+  getDevicePdoMapping = (slavePosition: number, params: RequestParams = {}) =>
+    this.request<
+      PdoMapping,
+      void | {
+        /**
+         * Human-readable error message from the driver
+         * @example "FPRD slave 1: wkc=0"
+         */
+        error: string;
+      }
+    >({
+      path: `/api/devices/${slavePosition}/pdo-mapping`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Reconfigures the PDO mapping of the slave at `slavePosition` over CoE: both directions' sync-manager assignment (0x1C12 outputs / 0x1C13 inputs) and the referenced mapping objects (0x16xx / 0x1Axx). `outputs` are RxPDO objects (master→slave), `inputs` are TxPDO objects (slave→master); the array order is the sync-manager assignment order, which fixes each object's position in the process image. Both directions must be present — an empty array clears that sync manager's assignment. **The device must be in PRE-OP.** The mapping and assignment objects are writable only in PRE-OP; in SAFE-OP/OP the sync managers are active and the slave rejects the write, and INIT/BOOT have no CoE mailbox. This is the "drop to PRE-OP, remap, climb back" flow: take the device to PRE-OP (`POST /api/devices/state`), call this, then transition it back to SAFE-OP/OP — at which point the whole-bus process image is re-mapped from the new mapping. The write follows the CoE ordering rule (clear assignment, rewrite each mapping object, then re-assign), is read back and verified, and is retried a few times so a dropped mailbox frame cannot leave the object dictionary half-configured. The response is the device's grouped read-back mapping (same shape as GET), whose `bitOffset` values are derived by the device (the request omits them). This endpoint does not itself change the AL state or re-map the process image.
+   *
+   * @name WriteDevicePdoMapping
+   * @summary Rewrite a device's PDO mapping (CoE)
+   * @request PUT:/api/devices/{slavePosition}/pdo-mapping
+   */
+  writeDevicePdoMapping = (
+    slavePosition: number,
+    data: PdoMappingRequest,
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      PdoMapping,
+      void | {
+        /**
+         * Human-readable error message from the driver
+         * @example "FPRD slave 1: wkc=0"
+         */
+        error: string;
+      }
+    >({
+      path: `/api/devices/${slavePosition}/pdo-mapping`,
       method: "PUT",
       body: data,
       type: ContentType.Json,

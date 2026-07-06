@@ -1121,6 +1121,102 @@ paths:
           description: No device at the given bus position
         "500":
           $ref: "#/components/responses/DriverError"
+  /api/devices/{slavePosition}/pdo-mapping:
+    get:
+      summary: Read a device's PDO mapping grouped by object (CoE)
+      operationId: getDevicePdoMapping
+      description: >
+        Reads the PDO mapping of the slave at `slavePosition` over CoE, grouped by mapping object:
+        the sync-manager assignment (0x1C12 outputs / 0x1C13 inputs) and, for each assigned mapping
+        object (0x16xx / 0x1Axx), its `pdoIndex` and ordered entries. `outputs` are RxPDO objects
+        (master→slave), `inputs` are TxPDO objects (slave→master). Each entry carries its derived
+        `bitOffset` within the direction's window. This is the grouped, round-trippable counterpart
+        of the flat, whole-bus `GET /api/process-image`.
+
+
+        Reads fresh over SDO, so the device's mailbox must be active (PRE-OP, SAFE-OP, or OP); a
+        device in INIT or BOOT yields 409.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The device's grouped PDO mapping
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PdoMapping"
+        "400":
+          description: slavePosition is not a valid integer
+        "404":
+          description: No device at the given bus position
+        "409":
+          description: The device's mailbox is not active (it is in INIT or BOOT)
+        "500":
+          $ref: "#/components/responses/DriverError"
+    put:
+      summary: Rewrite a device's PDO mapping (CoE)
+      operationId: writeDevicePdoMapping
+      description: >
+        Reconfigures the PDO mapping of the slave at `slavePosition` over CoE: both directions'
+        sync-manager assignment (0x1C12 outputs / 0x1C13 inputs) and the referenced mapping objects
+        (0x16xx / 0x1Axx). `outputs` are RxPDO objects (master→slave), `inputs` are TxPDO objects
+        (slave→master); the array order is the sync-manager assignment order, which fixes each
+        object's position in the process image. Both directions must be present — an empty array
+        clears that sync manager's assignment.
+
+
+        **The device must be in PRE-OP.** The mapping and assignment objects are writable only in
+        PRE-OP; in SAFE-OP/OP the sync managers are active and the slave rejects the write, and
+        INIT/BOOT have no CoE mailbox. This is the "drop to PRE-OP, remap, climb back" flow: take
+        the device to PRE-OP (`POST /api/devices/state`), call this, then transition it back to
+        SAFE-OP/OP — at which point the whole-bus process image is re-mapped from the new mapping.
+
+
+        The write follows the CoE ordering rule (clear assignment, rewrite each mapping object, then
+        re-assign), is read back and verified, and is retried a few times so a dropped mailbox frame
+        cannot leave the object dictionary half-configured. The response is the device's grouped
+        read-back mapping (same shape as GET), whose `bitOffset` values are derived by the device
+        (the request omits them). This endpoint does not itself change the AL state or re-map the
+        process image.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PdoMappingRequest"
+      responses:
+        "200":
+          description: The device's grouped read-back mapping, verified equal to the request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PdoMapping"
+        "400":
+          description: slavePosition is not a valid integer, or the body is malformed or out of range
+        "404":
+          description: No device at the given bus position
+        "409":
+          description: >
+            The write was rejected — most often because the device is not in PRE-OP, but also a
+            malformed mapping the device aborted, or a read-back that did not match the request
+        "500":
+          $ref: "#/components/responses/DriverError"
   /api/devices/{slavePosition}/sdo/{index}/{subindex}:
     get:
       summary: Upload an object dictionary entry from a device (CoE SDO upload)
@@ -2249,6 +2345,113 @@ components:
                   How the value is sourced — `pdo` (decoded from the live process image) or `sdo`
                   (polled in the background and read from cache).
                 example: "pdo"
+    PdoMappingRequestEntry:
+      type: object
+      required: [index, subindex, bitLength]
+      description: One mapping entry to write. Packs to the 32-bit CoE word index<<16 | subindex<<8 | bitLength.
+      properties:
+        index:
+          type: integer
+          minimum: 0
+          maximum: 65535
+          description: CoE object index; 0 marks an alignment-padding gap (no bound object)
+          example: 24640
+        subindex:
+          type: integer
+          minimum: 0
+          maximum: 255
+          description: CoE object subindex
+          example: 0
+        bitLength:
+          type: integer
+          minimum: 0
+          maximum: 255
+          description: Width of the entry in bits
+          example: 16
+    PdoMappingRequestObject:
+      type: object
+      required: [pdoIndex, entries]
+      description: One PDO mapping object to write and its ordered entries.
+      properties:
+        pdoIndex:
+          type: integer
+          minimum: 0
+          maximum: 65535
+          description: Mapping-object index (0x16xx RxPDO for outputs, 0x1Axx TxPDO for inputs)
+          example: 5632
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/PdoMappingRequestEntry"
+    PdoMappingRequest:
+      type: object
+      required: [outputs, inputs]
+      description: >
+        A device's desired PDO configuration to write. `outputs` are RxPDO objects (master→slave,
+        assigned to 0x1C12); `inputs` are TxPDO objects (slave→master, assigned to 0x1C13). Vector
+        order is the sync-manager assignment order. Both keys are required; an empty array clears
+        that direction.
+      properties:
+        outputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PdoMappingRequestObject"
+        inputs:
+          type: array
+          items:
+            $ref: "#/components/schemas/PdoMappingRequestObject"
+    PdoMappingEntry:
+      type: object
+      required: [index, subindex, bitLength, bitOffset]
+      description: One entry of a mapping object, as read back from the device.
+      properties:
+        index:
+          type: integer
+          description: CoE object index; 0 marks an alignment-padding gap
+          example: 24640
+        subindex:
+          type: integer
+          description: CoE object subindex
+          example: 0
+        bitLength:
+          type: integer
+          description: Width of the entry in bits
+          example: 16
+        bitOffset:
+          type: integer
+          description: Bit offset from the start of this direction's window (derived by the device)
+          example: 0
+    PdoMappingObject:
+      type: object
+      required: [pdoIndex, entries]
+      description: One mapping object as read back, with its ordered entries (offsets included).
+      properties:
+        pdoIndex:
+          type: integer
+          description: Mapping-object index (0x16xx RxPDO for outputs, 0x1Axx TxPDO for inputs)
+          example: 5632
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/PdoMappingEntry"
+    PdoMapping:
+      type: object
+      required: [outputs, inputs]
+      description: >
+        A device's PDO mapping grouped by mapping object — the read/write-back shape. `outputs` are
+        RxPDO objects (0x1C12), `inputs` are TxPDO objects (0x1C13), each in sync-manager assignment
+        order with its entries and derived bit offsets.
+      properties:
+        outputs:
+          type: array
+          description: RxPDO objects (master→slave), in assignment order
+          items:
+            $ref: "#/components/schemas/PdoMappingObject"
+        inputs:
+          type: array
+          description: TxPDO objects (slave→master), in assignment order
+          items:
+            $ref: "#/components/schemas/PdoMappingObject"
     ProcessImageObject:
       type: object
       required: [slavePosition, index, subindex, name, bitOffset, bitLength]

@@ -231,12 +231,30 @@ void MonitoringManager::recaptureIfRemapped(Entry& entry) {
   if (generation == entry.imageGeneration) {
     return;
   }
-  // A re-map may have shifted offsets — re-capture each PDO parameter's spec (nullopt if the
-  // object is no longer mapped, in which case it samples null until it returns).
+  // A re-map can change not just a mapped object's offset but whether it is PDO-mapped at all:
+  // adding an object to the mapping flips a parameter SDO→PDO, removing one flips it PDO→SDO. The
+  // generation only ever bumps on a successful (re)map that publishes a fresh image, so the freshly
+  // published image is authoritative here — re-classify every plan against it and move it between
+  // the PDO path and the SDO refresher accordingly, so both the sampled source and the reported
+  // source stay correct after a remap (a stale classification would sample the wrong path — null
+  // for a PDO plan whose object left, or a stale SDO cache for one that joined).
   for (auto& plan : entry.plans) {
-    if (plan.source == Source::Pdo) {
-      plan.pdoSpec = deviceManager_.pdoSampleSpec(plan.devicePosition, plan.index, plan.subindex);
+    auto spec = deviceManager_.pdoSampleSpec(plan.devicePosition, plan.index, plan.subindex);
+    const Source newSource = spec ? Source::Pdo : Source::Sdo;
+    if (newSource == plan.source) {
+      plan.pdoSpec = std::move(spec);  // unchanged classification; offsets may have shifted
+      continue;
     }
+    if (newSource == Source::Sdo) {
+      // PDO→SDO: the object left the image; start polling it in the background.
+      refresher_.acquire(plan.devicePosition, plan.index, plan.subindex, entry.config.interval);
+      plan.pdoSpec = std::nullopt;
+    } else {
+      // SDO→PDO: the object joined the image; stop the now-redundant background poll.
+      refresher_.release(plan.devicePosition, plan.index, plan.subindex);
+      plan.pdoSpec = std::move(spec);
+    }
+    plan.source = newSource;
   }
   entry.imageGeneration = generation;
 }

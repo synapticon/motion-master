@@ -132,8 +132,9 @@ class MonitoringManager {
     std::chrono::steady_clock::time_point nextDue{};  // default (epoch) => due on the next wake
   };
 
-  void flushEntry(Entry& entry);           // decode + publish [cursor, head); assumes mutex_ held
-  void recaptureIfRemapped(Entry& entry);  // re-capture PDO specs; assumes mutex_ held
+  void flushEntry(Entry& entry);  // decode + publish [cursor, head); assumes mutex_ held
+  void recaptureIfRemapped(
+      Entry& entry);  // re-classify source + re-capture specs; assumes mutex_ held
   static nlohmann::json resourceJson(const Entry& entry);  // assumes mutex_ held
 
   /// @brief Sampler thread body: waits until the nearest monitoring is due (or an

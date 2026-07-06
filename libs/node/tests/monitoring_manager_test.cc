@@ -213,6 +213,38 @@ TEST(MonitoringManagerTest, CreateClassifiesPdoAndSdoAndExposesSource) {
   EXPECT_EQ((*resource)["parameters"][1]["source"], "sdo");  // temperature
 }
 
+TEST(MonitoringManagerTest, RemapReclassifiesPdoObjectThatLeavesTheImageAsSdo) {
+  DeviceManager dm;
+  FakeBus* bus = setUp(dm);
+  MonitoringManager manager(dm);
+
+  Monitoring m;
+  m.topic = "pos";
+  m.interval = std::chrono::milliseconds{10};
+  m.parameters = {MonitoredParameter{1, 0x6064, 0x00}};  // actual position — PDO-mapped at create
+  ASSERT_TRUE(manager.create(m).has_value());
+  {
+    auto resource = manager.get("pos");
+    ASSERT_TRUE(resource.has_value());
+    EXPECT_EQ((*resource)["parameters"][0]["source"], "pdo");
+  }
+  EXPECT_EQ(manager.polledSdoCount(), 0u);  // nothing polled while it is PDO-sourced
+
+  // Re-map so 0x6064 is no longer in the TxPDO: 0x1A00 now maps only the statusword (2 bytes).
+  bus->program(0x1A00, 0x00, u8le(1));
+  bus->layout.inputBytes = 2;
+  bus->layout.slaves = {SlaveIo{
+      .slavePosition = 1, .outputOffset = 0, .outputBytes = 6, .inputOffset = 0, .inputBytes = 2}};
+  ASSERT_TRUE(dm.configureProcessData().has_value());  // new generation, image without 0x6064
+
+  manager.sampleAll();  // flush → recaptureIfRemapped re-classifies against the new image
+
+  auto resource = manager.get("pos");
+  ASSERT_TRUE(resource.has_value());
+  EXPECT_EQ((*resource)["parameters"][0]["source"], "sdo");  // reclassified: object left the image
+  EXPECT_EQ(manager.polledSdoCount(), 1u);  // now registered with the background SDO refresher
+}
+
 TEST(MonitoringManagerTest, CreateAutoEnumeratesObjectDictionaryWhenNeeded) {
   // A freshly-OP device whose object dictionary has NOT been read: configure + exchange, but skip
   // initializeDeviceParameters. Classification would otherwise fail (no data type to decode the

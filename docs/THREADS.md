@@ -116,4 +116,6 @@ Startup and shutdown order (`apps/motion_master/main.cc`):
 | **`ParameterRefresher::mutex_` + `cv_`** | `libs/node/parameter_refresher.h` | Tracked-object set + poll schedule | Refresher thread (lock released during the actual poll) |
 | **`std::atomic` loop pointers** | `apps/motion_master/http_server.h`, `apps/motion_master/ws_server.h` | Cross-thread access to each uWS loop for `defer()` (HTTP and WS loops are independent) | Any thread → the respective server thread |
 
-See also the [class diagram](CLASS_DIAGRAM.md) for ownership relationships.
+See also the [class diagram](CLASS_DIAGRAM.md) for ownership relationships, and
+[RT_SCHEDULING.md](RT_SCHEDULING.md) for a primer on the `SCHED_FIFO` / `mlockall`
+primitives thread 1 relies on.

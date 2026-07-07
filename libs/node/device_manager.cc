@@ -184,13 +184,6 @@ std::expected<int, std::string> DeviceManager::scan() {
     spdlog::info("  [{:2}] {} — vendor: {:#010x}  product: {:#010x}  rev: {:#010x}  serial: {}",
                  device.slavePosition(), device.name(), device.vendorId(), device.productCode(),
                  device.revisionNumber(), device.serialNumber());
-    // CoE mailbox capabilities as advertised in EEPROM (a hint, not a guarantee) — useful for
-    // deciding whether an operation like SDO Complete Access is worth attempting.
-    const auto& coe = device.coeCapabilities();
-    spdlog::debug(
-        "       CoE: sdo={} sdoInfo={} pdoAssign={} pdoConfig={} upload={} completeAccess={}",
-        coe.sdo, coe.sdoInfo, coe.pdoAssign, coe.pdoConfig, coe.uploadAtStartup,
-        coe.completeAccess);
   }
   return *result;
 }
@@ -604,11 +597,16 @@ std::vector<SlaveConfigInfo> DeviceManager::busConfig() const {
   auto configs = driver_->busConfig();
   out.reserve(configs.size());
   for (auto& c : configs) {
-    std::string name;
-    if (const Device* device = findDevice(c.slavePosition)) {
-      name = device->name();
+    SlaveConfigInfo info{};
+    info.config = std::move(c);
+    if (const Device* device = findDevice(info.config.slavePosition)) {
+      info.deviceName = device->name();
+      info.vendorId = device->vendorId();
+      info.productCode = device->productCode();
+      info.revisionNumber = device->revisionNumber();
+      info.serialNumber = device->serialNumber();
     }
-    out.push_back(SlaveConfigInfo{.config = std::move(c), .deviceName = std::move(name)});
+    out.push_back(std::move(info));
   }
   return out;
 }
@@ -1238,6 +1236,10 @@ void to_json(nlohmann::json& j, const SlaveConfigInfo& info) {
                  });
   j = {{"slavePosition", c.slavePosition},
        {"deviceName", info.deviceName},
+       {"vendorId", info.vendorId},
+       {"productCode", info.productCode},
+       {"revisionNumber", info.revisionNumber},
+       {"serialNumber", info.serialNumber},
        {"configuredAddress", c.configuredAddress},
        {"aliasAddress", c.aliasAddress},
        {"outputBits", c.outputBits},
@@ -1247,8 +1249,11 @@ void to_json(nlohmann::json& j, const SlaveConfigInfo& info) {
          {"writeOffset", c.mailbox.writeOffset},
          {"readLength", c.mailbox.readLength},
          {"readOffset", c.mailbox.readOffset},
-         {"protocols", c.mailbox.protocols}}},
-       {"coe", c.coe},
+         {"protocols", c.mailbox.protocols},
+         {"coeDetails", c.mailbox.coeDetails},
+         {"foeDetails", c.mailbox.foeDetails},
+         {"eoeDetails", c.mailbox.eoeDetails},
+         {"soeDetails", c.mailbox.soeDetails}}},
        {"dc",
         {{"capable", c.dc.capable},
          {"active", c.dc.active},

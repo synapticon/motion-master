@@ -21,9 +21,11 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
 - **Partial-bus operations** — one or more devices can be taken to BOOT (firmware) or
   PRE-OP (re-map) while the rest keep exchanging process data; bringing them back
   re-maps the whole bus.
-- **Static bus configuration inspection** — per-slave Sync Manager, FMMU, Distributed
-  Clock, mailbox, address, and advertised CoE mailbox capability configuration (`coe`:
-  SDO, SDO Info, PDO assign/config, upload, complete access) (`GET /api/bus-config`).
+- **Static bus configuration inspection** — per-slave identity (vendor/product/revision/
+  serial), Sync Manager, FMMU, Distributed Clock, mailbox windows, and advertised mailbox
+  capability bytes (CoE/FoE/EoE/SoE details, decoded into flags in the UI)
+  (`GET /api/bus-config`). Shown on the Configuration page; the SII page decodes the same
+  capability bytes from the raw EEPROM image.
 - **Live ESC health diagnostics** — per-slave EtherCAT Slave Controller error counters,
   port link state, and watchdog expirations (`GET /api/devices/diagnostics`).
 - **Distributed-clock sync status** — live DC system-time deviation across devices

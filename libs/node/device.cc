@@ -35,7 +35,6 @@ Device::Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver, Process
   productCode_ = info.productCode;
   revisionNumber_ = info.revisionNumber;
   serialNumber_ = info.serialNumber;
-  coe_ = info.coe;
 }
 
 uint16_t Device::slavePosition() const { return slavePosition_; }
@@ -44,7 +43,6 @@ uint32_t Device::vendorId() const { return vendorId_; }
 uint32_t Device::productCode() const { return productCode_; }
 uint32_t Device::revisionNumber() const { return revisionNumber_; }
 uint32_t Device::serialNumber() const { return serialNumber_; }
-const mm::comm::CoeCapabilities& Device::coeCapabilities() const { return coe_; }
 
 bool Device::mailboxActive() const {
   using mm::comm::EtherCatState;

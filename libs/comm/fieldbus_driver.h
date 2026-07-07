@@ -7,7 +7,6 @@
 #include <expected>
 #include <functional>
 #include <mutex>
-#include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -91,24 +90,6 @@ inline int workingCounterContribution(EtherCatState state, bool hasOutputs, bool
   }
 }
 
-/// @brief CoE (CANopen over EtherCAT) mailbox capabilities a slave advertises in its EEPROM (SII),
-///        decoded from the ECT_COEDET_* bits. Read with no bus traffic during configuration.
-///
-/// An advertisement, not a guarantee: firmware can under- or over-report (e.g. claim @c
-/// completeAccess without a correct implementation, or support it without setting the bit). Treat
-/// as a hint — the authoritative test is to attempt the operation and handle the abort.
-struct CoeCapabilities {
-  bool sdo = false;        ///< SDO object access (ECT_COEDET_SDO).
-  bool sdoInfo = false;    ///< SDO Information service — OD enumeration (ECT_COEDET_SDOINFO).
-  bool pdoAssign = false;  ///< PDO assignment configurable, 0x1C1x (ECT_COEDET_PDOASSIGN).
-  bool pdoConfig = false;  ///< PDO mapping configurable, 0x16xx/0x1Axx (ECT_COEDET_PDOCONFIG).
-  bool uploadAtStartup = false;  ///< Upload at startup (ECT_COEDET_UPLOAD).
-  bool completeAccess = false;   ///< SDO Complete Access (ECT_COEDET_SDOCA).
-};
-
-/// @brief Serialises CoE capabilities to JSON.
-void to_json(nlohmann::json& j, const CoeCapabilities& c);
-
 /// @brief Immutable identity fields read from a slave's EEPROM during configuration.
 struct SlaveInfo {
   std::string name;             ///< Human-readable name from SII.
@@ -116,7 +97,6 @@ struct SlaveInfo {
   uint32_t productCode = 0;     ///< Product code (EEprom ID field).
   uint32_t revisionNumber = 0;  ///< Revision number.
   uint32_t serialNumber = 0;    ///< Serial number.
-  CoeCapabilities coe;          ///< CoE mailbox capabilities advertised in EEPROM.
 };
 
 /// @brief Schema of a single object dictionary entry uploaded from a slave.
@@ -214,6 +194,14 @@ struct MailboxConfig {
   uint16_t readOffset = 0;   ///< Read mailbox physical ESC offset.
   uint16_t protocols = 0;    ///< Supported-protocol bits: 0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE,
                              ///< 0x10 SoE, 0x20 VoE.
+  // Per-protocol capability detail bytes as advertised in EEPROM (ECT_*DETAILS), refining the
+  // supported-protocol bits above. Raw bytes — the meaning of each bit is decoded by the client
+  // (CoE has a rich flag set; FoE/EoE are essentially an enable bit; SoE is a channel count). An
+  // advertisement, not a guarantee (see the CoE Complete-Access note in the parameter path).
+  uint8_t coeDetails = 0;  ///< CoE details (ECT_COEDET_*: SDO/Info/PDO-Assign/Config/Upload/CA).
+  uint8_t foeDetails = 0;  ///< FoE details (bit 0 = enabled).
+  uint8_t eoeDetails = 0;  ///< EoE details (bit 0 = enabled).
+  uint8_t soeDetails = 0;  ///< SoE details / channel count.
 };
 
 /// @brief Distributed-clock configuration for a slave.
@@ -241,9 +229,7 @@ struct SlaveConfig {
   uint16_t aliasAddress = 0;       ///< Configured station alias from EEPROM.
   uint16_t outputBits = 0;         ///< Mapped output (master→slave) bits.
   uint16_t inputBits = 0;          ///< Mapped input (slave→master) bits.
-  MailboxConfig mailbox;           ///< Mailbox transport windows.
-  CoeCapabilities coe;             ///< Advertised CoE mailbox capabilities (a refinement of the
-                                   ///< CoE bit in @c mailbox.protocols).
+  MailboxConfig mailbox;           ///< Mailbox transport windows + advertised protocol details.
   DcConfig dc;                     ///< Distributed-clock configuration.
   std::vector<SyncManagerConfig> syncManagers;  ///< Configured Sync Managers, by index.
   std::vector<FmmuConfig> fmmus;                ///< Configured FMMUs, by index.

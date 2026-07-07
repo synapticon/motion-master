@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { type SlaveInformationInterface, type SiiPdo, formatHex } from '@synapticon/motion-master-client'
+import MailboxCapabilities from './MailboxCapabilities'
 
 type Sii = SlaveInformationInterface
 type SyncManager = NonNullable<Sii['category']['syncManagers']>[number]
@@ -234,17 +235,32 @@ export default function SiiView({ sii }: { sii: SlaveInformationInterface }) {
       {/* General */}
       {general && (
         <Section title="General">
-          <div className="border border-grey-200 p-4 grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <Field label="Group" value={<StringRef idx={general.groupIdx ?? 0} strings={strings} />} hint="STRINGS-table group name" />
-            <Field label="Name" value={<StringRef idx={general.nameIdx ?? 0} strings={strings} />} hint="STRINGS-table device name" />
-            <Field label="Order" value={<StringRef idx={general.orderIdx ?? 0} strings={strings} />} hint="STRINGS-table order number" />
-            <Field label="Image" value={<StringRef idx={general.imgIdx ?? 0} strings={strings} />} hint="STRINGS-table image name" />
-            <Field label="CoE details" value={formatHex(general.coeDetails ?? 0, 2)} hint="CoE capability flags" />
-            <Field label="FoE details" value={formatHex(general.foeDetails ?? 0, 2)} hint="FoE capability flags" />
-            <Field label="EoE details" value={formatHex(general.eoeDetails ?? 0, 2)} hint="EoE capability flags" />
-            <Field label="Flags" value={formatHex(general.flags ?? 0, 2)} hint="General device flags" />
-            <Field label="DS402 channels" value={String(general.ds402Channels ?? 0)} hint="Number of DS402 channels" />
-            <Field label="E-Bus current" value={`${general.currentOnEBus ?? 0} mA`} hint="Current consumption on the E-Bus" />
+          <div className="border border-grey-200 p-4 space-y-4">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              <Field label="Group" value={<StringRef idx={general.groupIdx ?? 0} strings={strings} />} hint="STRINGS-table group name" />
+              <Field label="Name" value={<StringRef idx={general.nameIdx ?? 0} strings={strings} />} hint="STRINGS-table device name" />
+              <Field label="Order" value={<StringRef idx={general.orderIdx ?? 0} strings={strings} />} hint="STRINGS-table order number" />
+              <Field label="Image" value={<StringRef idx={general.imgIdx ?? 0} strings={strings} />} hint="STRINGS-table image name" />
+              <Field label="CoE details" value={formatHex(general.coeDetails ?? 0, 2)} hint="Raw CoE capability byte (decoded below)" />
+              <Field label="FoE details" value={formatHex(general.foeDetails ?? 0, 2)} hint="Raw FoE capability byte (decoded below)" />
+              <Field label="EoE details" value={formatHex(general.eoeDetails ?? 0, 2)} hint="Raw EoE capability byte (decoded below)" />
+              <Field label="Flags" value={formatHex(general.flags ?? 0, 2)} hint="General device flags" />
+              <Field label="DS402 channels" value={String(general.ds402Channels ?? 0)} hint="Number of DS402 channels" />
+              <Field label="E-Bus current" value={`${general.currentOnEBus ?? 0} mA`} hint="Current consumption on the E-Bus" />
+            </div>
+            <div className="space-y-1.5">
+              <p
+                className="text-[10px] uppercase tracking-wide text-grey-500 font-display cursor-help"
+                title="The CoE/FoE/EoE detail bytes above, decoded. Advertised in EEPROM — a hint, not a guarantee (firmware can under- or over-report)."
+              >
+                Mailbox capabilities
+              </p>
+              <MailboxCapabilities
+                coeDetails={general.coeDetails ?? 0}
+                foeDetails={general.foeDetails ?? 0}
+                eoeDetails={general.eoeDetails ?? 0}
+              />
+            </div>
           </div>
         </Section>
       )}

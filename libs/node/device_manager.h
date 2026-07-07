@@ -115,6 +115,12 @@ void to_json(nlohmann::json& j, const OutputStageResult& result);
 struct SlaveConfigInfo {
   mm::comm::SlaveConfig config;  ///< Raw ESC configuration as captured by the driver.
   std::string deviceName;        ///< Device name for this slave position, empty if unknown.
+  // Immutable identity, denormalised from the Device for this slave position (like deviceName) so
+  // the Configuration page can show it without a second endpoint. Zero when the slave is unknown.
+  uint32_t vendorId = 0;        ///< Vendor ID from EEPROM.
+  uint32_t productCode = 0;     ///< Product code from EEPROM.
+  uint32_t revisionNumber = 0;  ///< Revision number from EEPROM.
+  uint32_t serialNumber = 0;    ///< Serial number from EEPROM.
 };
 
 /// @brief Serialises a SlaveConfigInfo (and its nested SM/FMMU/mailbox/DC) to JSON.

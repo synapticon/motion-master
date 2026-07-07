@@ -2238,33 +2238,6 @@ paths:
           description: No cache file with this id (or the id is malformed).
 components:
   schemas:
-    CoeCapabilities:
-      type: object
-      description: >
-        CoE (CANopen over EtherCAT) mailbox capabilities the device advertises in its EEPROM (SII),
-        decoded from the ECT_COEDET_* bits. An advertisement, not a guarantee — firmware can
-        under- or over-report (e.g. claim completeAccess without a correct implementation), so treat
-        as a hint; the authoritative test is to attempt the operation and handle any abort.
-      required: [sdo, sdoInfo, pdoAssign, pdoConfig, uploadAtStartup, completeAccess]
-      properties:
-        sdo:
-          type: boolean
-          description: SDO object access (mailbox reads/writes).
-        sdoInfo:
-          type: boolean
-          description: SDO Information service — object-dictionary enumeration.
-        pdoAssign:
-          type: boolean
-          description: PDO assignment configurable (0x1C1x).
-        pdoConfig:
-          type: boolean
-          description: PDO mapping configurable (0x16xx/0x1Axx).
-        uploadAtStartup:
-          type: boolean
-          description: Upload at startup.
-        completeAccess:
-          type: boolean
-          description: SDO Complete Access (read/write a whole object in one transfer).
     ParameterCacheEntry:
       type: object
       description: Summary of one on-disk parameter-cache file (its identity, size, and count).
@@ -2608,8 +2581,8 @@ components:
     SlaveConfig:
       type: object
       required:
-        [slavePosition, deviceName, configuredAddress, aliasAddress, outputBits,
-         inputBits, mailbox, coe, dc, syncManagers, fmmus]
+        [slavePosition, deviceName, vendorId, productCode, revisionNumber, serialNumber,
+         configuredAddress, aliasAddress, outputBits, inputBits, mailbox, dc, syncManagers, fmmus]
       properties:
         slavePosition:
           type: integer
@@ -2619,6 +2592,26 @@ components:
           type: string
           description: Device name for this slave position, empty if unknown
           example: "SOMANET Node"
+        vendorId:
+          type: integer
+          format: int64
+          description: Vendor ID from EEPROM (0 if the slave is unknown)
+          example: 8914
+        productCode:
+          type: integer
+          format: int64
+          description: Product code from EEPROM
+          example: 769
+        revisionNumber:
+          type: integer
+          format: int64
+          description: Revision number from EEPROM
+          example: 285212675
+        serialNumber:
+          type: integer
+          format: int64
+          description: Serial number from EEPROM
+          example: 0
         configuredAddress:
           type: integer
           description: Station (configured) address assigned during scan
@@ -2637,7 +2630,9 @@ components:
           example: 128
         mailbox:
           type: object
-          required: [writeLength, writeOffset, readLength, readOffset, protocols]
+          required:
+            [writeLength, writeOffset, readLength, readOffset, protocols, coeDetails,
+             foeDetails, eoeDetails, soeDetails]
           properties:
             writeLength:
               type: integer
@@ -2661,8 +2656,25 @@ components:
                 Supported-protocol bits (0x01 AoE, 0x02 EoE, 0x04 CoE, 0x08 FoE,
                 0x10 SoE, 0x20 VoE) — decoded by the client
               example: 14
-        coe:
-          $ref: '#/components/schemas/CoeCapabilities'
+            coeDetails:
+              type: integer
+              description: >-
+                CoE detail bits, advertised in EEPROM — decoded by the client (0x01 SDO,
+                0x02 SDO-Info, 0x04 PDO-Assign, 0x08 PDO-Config, 0x10 Upload, 0x20 Complete-Access).
+                A hint, not a guarantee.
+              example: 15
+            foeDetails:
+              type: integer
+              description: FoE detail byte (bit 0 = enabled).
+              example: 1
+            eoeDetails:
+              type: integer
+              description: EoE detail byte (bit 0 = enabled).
+              example: 0
+            soeDetails:
+              type: integer
+              description: SoE detail byte / channel count.
+              example: 0
         dc:
           type: object
           required: [capable, active, propagationDelay, cycleTime, shift]

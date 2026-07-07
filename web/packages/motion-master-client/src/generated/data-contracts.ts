@@ -10,22 +10,6 @@
  * ---------------------------------------------------------------
  */
 
-/** CoE (CANopen over EtherCAT) mailbox capabilities the device advertises in its EEPROM (SII), decoded from the ECT_COEDET_* bits. An advertisement, not a guarantee — firmware can under- or over-report (e.g. claim completeAccess without a correct implementation), so treat as a hint; the authoritative test is to attempt the operation and handle any abort. */
-export interface CoeCapabilities {
-  /** SDO object access (mailbox reads/writes). */
-  sdo: boolean;
-  /** SDO Information service — object-dictionary enumeration. */
-  sdoInfo: boolean;
-  /** PDO assignment configurable (0x1C1x). */
-  pdoAssign: boolean;
-  /** PDO mapping configurable (0x16xx/0x1Axx). */
-  pdoConfig: boolean;
-  /** Upload at startup. */
-  uploadAtStartup: boolean;
-  /** SDO Complete Access (read/write a whole object in one transfer). */
-  completeAccess: boolean;
-}
-
 /** Summary of one on-disk parameter-cache file (its identity, size, and count). */
 export interface ParameterCacheEntry {
   /**
@@ -363,6 +347,30 @@ export interface SlaveConfig {
    */
   deviceName: string;
   /**
+   * Vendor ID from EEPROM (0 if the slave is unknown)
+   * @format int64
+   * @example 8914
+   */
+  vendorId: number;
+  /**
+   * Product code from EEPROM
+   * @format int64
+   * @example 769
+   */
+  productCode: number;
+  /**
+   * Revision number from EEPROM
+   * @format int64
+   * @example 285212675
+   */
+  revisionNumber: number;
+  /**
+   * Serial number from EEPROM
+   * @format int64
+   * @example 0
+   */
+  serialNumber: number;
+  /**
    * Station (configured) address assigned during scan
    * @example 4097
    */
@@ -408,9 +416,27 @@ export interface SlaveConfig {
      * @example 14
      */
     protocols: number;
+    /**
+     * CoE detail bits, advertised in EEPROM — decoded by the client (0x01 SDO, 0x02 SDO-Info, 0x04 PDO-Assign, 0x08 PDO-Config, 0x10 Upload, 0x20 Complete-Access). A hint, not a guarantee.
+     * @example 15
+     */
+    coeDetails: number;
+    /**
+     * FoE detail byte (bit 0 = enabled).
+     * @example 1
+     */
+    foeDetails: number;
+    /**
+     * EoE detail byte (bit 0 = enabled).
+     * @example 0
+     */
+    eoeDetails: number;
+    /**
+     * SoE detail byte / channel count.
+     * @example 0
+     */
+    soeDetails: number;
   };
-  /** CoE (CANopen over EtherCAT) mailbox capabilities the device advertises in its EEPROM (SII), decoded from the ECT_COEDET_* bits. An advertisement, not a guarantee — firmware can under- or over-report (e.g. claim completeAccess without a correct implementation), so treat as a hint; the authoritative test is to attempt the operation and handle any abort. */
-  coe: CoeCapabilities;
   dc: {
     /**
      * Slave has distributed-clock hardware

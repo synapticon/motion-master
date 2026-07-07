@@ -67,10 +67,6 @@ class Device {
   /// @brief Serial number from EEPROM.
   uint32_t serialNumber() const;
 
-  /// @brief CoE mailbox capabilities advertised by the slave's EEPROM (an advertisement, not a
-  ///        guarantee — see @c mm::comm::CoeCapabilities).
-  const mm::comm::CoeCapabilities& coeCapabilities() const;
-
   /// @brief Whether the device's CoE/SDO mailbox is currently active (AL state PRE-OP,
   ///        SAFE-OP, or OP).
   ///
@@ -488,7 +484,6 @@ class Device {
   uint32_t productCode_;
   uint32_t revisionNumber_;
   uint32_t serialNumber_;
-  mm::comm::CoeCapabilities coe_;  ///< CoE mailbox capabilities advertised in EEPROM (immutable).
   // Guards parameters_ against the off-RT monitoring threads (the refresher refreshes cached
   // values, the sampler reads them) racing the control-plane thread. Held only briefly — across
   // a cache read/write, or a single mailbox transaction in read/writeParameter; never across the

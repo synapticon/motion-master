@@ -3,6 +3,7 @@ import type { ReactNode } from 'react'
 import { type SlaveConfig, type SyncManagerConfig, type FmmuConfig, formatHex } from '@synapticon/motion-master-client'
 import PageHeader from '../components/PageHeader'
 import ConfigExplainer from '../components/ConfigExplainer'
+import MailboxCapabilities from '../components/MailboxCapabilities'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
@@ -49,20 +50,9 @@ const MBX_PROTOCOLS: [number, string, string][] = [
 
 const decodeProtocols = (bits: number) => MBX_PROTOCOLS.filter(([bit]) => bits & bit)
 
-// CoE mailbox capabilities (ECT_COEDET_* bits) the slave advertises in EEPROM — a finer breakdown
-// of the CoE protocol bit above. `key` indexes SlaveConfig.coe.
-const COE_CAPS: { key: keyof SlaveConfig['coe']; label: string; desc: string }[] = [
-  { key: 'sdo', label: 'SDO', desc: 'SDO object access (mailbox reads/writes).' },
-  { key: 'sdoInfo', label: 'SDO Info', desc: 'SDO Information service — object-dictionary enumeration.' },
-  { key: 'pdoAssign', label: 'PDO Assign', desc: 'PDO assignment configurable (0x1C1x).' },
-  { key: 'pdoConfig', label: 'PDO Config', desc: 'PDO mapping configurable (0x16xx/0x1Axx).' },
-  { key: 'uploadAtStartup', label: 'Upload', desc: 'Upload at startup.' },
-  {
-    key: 'completeAccess',
-    label: 'Complete Access',
-    desc: 'SDO Complete Access advertised in EEPROM. Advertised only — SOMANET drives support Complete Access even when this reads false, so Motion Master probes actual support at runtime rather than trusting this bit.',
-  },
-]
+function hex32(n: number) {
+  return `0x${n.toString(16).toUpperCase().padStart(8, '0')}`
+}
 
 function Field({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
   return (
@@ -220,6 +210,14 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
       <div className="p-4 space-y-5">
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <Field
+            label="Vendor ID"
+            value={hex32(slave.vendorId)}
+            hint="Manufacturer ID from EEPROM (0x22D2 = Synapticon)"
+          />
+          <Field label="Product code" value={hex32(slave.productCode)} hint="Product code from EEPROM" />
+          <Field label="Revision" value={hex32(slave.revisionNumber)} hint="Revision number from EEPROM" />
+          <Field label="Serial" value={String(slave.serialNumber)} hint="Serial number from EEPROM" />
+          <Field
             label="Output / Input"
             value={`${slave.outputBits} / ${slave.inputBits} bits`}
             hint="Mapped process-data bits per direction (master→slave / slave→master)"
@@ -278,29 +276,15 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
         <div className="space-y-1.5">
           <p
             className="eyebrow cursor-help"
-            title="CoE mailbox capabilities advertised in EEPROM — a finer breakdown of the CoE protocol above. A hint, not a guarantee: firmware can under- or over-report, so Motion Master verifies operations (e.g. Complete Access) at runtime rather than trusting these bits."
+            title="Mailbox capabilities advertised in EEPROM — a finer breakdown of the supported protocols above. A hint, not a guarantee: firmware can under- or over-report, so Motion Master verifies operations (e.g. Complete Access) at runtime rather than trusting these bits."
           >
-            CoE capabilities
+            Mailbox capabilities
           </p>
-          <div className="flex flex-wrap gap-1.5">
-            {COE_CAPS.map(({ key, label, desc }) => {
-              const on = slave.coe[key]
-              return (
-                <span
-                  key={key}
-                  title={desc}
-                  className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[10px] font-display uppercase tracking-wide cursor-help ${
-                    on ? 'border-status-good/40 text-status-good' : 'border-grey-200 text-grey-400'
-                  }`}
-                >
-                  <span
-                    className={`inline-block w-1 h-1 rounded-full ${on ? 'bg-status-good' : 'bg-grey-300'}`}
-                  />
-                  {label}
-                </span>
-              )
-            })}
-          </div>
+          <MailboxCapabilities
+            coeDetails={slave.mailbox.coeDetails}
+            foeDetails={slave.mailbox.foeDetails}
+            eoeDetails={slave.mailbox.eoeDetails}
+          />
         </div>
 
         <div className="space-y-2">

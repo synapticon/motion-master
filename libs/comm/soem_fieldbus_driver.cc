@@ -122,19 +122,6 @@ std::chrono::microseconds recommendedCyclePeriod(uint32_t processBytes, int slav
   return std::chrono::microseconds(static_cast<int64_t>((neededUs + 999.0) / 1000.0) * 1000);
 }
 
-// Decodes SOEM's per-slave CoE detail byte (ec_slavet.CoEdetails, read from EEPROM during
-// ecx_config_init) into the advertised CoE mailbox capabilities. Pure — no bus I/O.
-CoeCapabilities decodeCoeCapabilities(uint8_t coeDetails) {
-  return {
-      .sdo = (coeDetails & ECT_COEDET_SDO) != 0,
-      .sdoInfo = (coeDetails & ECT_COEDET_SDOINFO) != 0,
-      .pdoAssign = (coeDetails & ECT_COEDET_PDOASSIGN) != 0,
-      .pdoConfig = (coeDetails & ECT_COEDET_PDOCONFIG) != 0,
-      .uploadAtStartup = (coeDetails & ECT_COEDET_UPLOAD) != 0,
-      .completeAccess = (coeDetails & ECT_COEDET_SDOCA) != 0,
-  };
-}
-
 // Pops the most recent SOEM error (if any) after a failed SDO transfer and renders it as a short
 // human-readable suffix (" (SDO abort 0x...)", " (mailbox error)", ...). Empty when no error was
 // queued. Must be called under socketMutex_ (it touches the SOEM context error stack).
@@ -276,8 +263,12 @@ std::vector<SlaveConfig> SoemFieldbusDriver::busConfig() const {
                  .writeOffset = s.mbx_wo,
                  .readLength = s.mbx_rl,
                  .readOffset = s.mbx_ro,
-                 .protocols = s.mbx_proto};
-    c.coe = decodeCoeCapabilities(s.CoEdetails);
+                 .protocols = s.mbx_proto,
+                 // Advertised protocol detail bytes (EEPROM, no bus I/O) — decoded by the client.
+                 .coeDetails = s.CoEdetails,
+                 .foeDetails = s.FoEdetails,
+                 .eoeDetails = s.EoEdetails,
+                 .soeDetails = s.SoEdetails};
     c.dc = {.capable = s.hasdc != 0,
             .active = s.DCactive != 0,
             .propagationDelay = s.pdelay,
@@ -345,15 +336,12 @@ void SoemFieldbusDriver::stop() {}
 SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
   std::lock_guard<std::mutex> lock(socketMutex_);
   const auto& s = ctx_->slavelist[position];
-  // CoEdetails is the CoE mailbox capability byte SOEM reads from the slave's EEPROM during
-  // ecx_config_init — no bus traffic here.
   return {
       .name = std::string(s.name),
       .vendorId = s.eep_man,
       .productCode = s.eep_id,
       .revisionNumber = s.eep_rev,
       .serialNumber = s.eep_ser,
-      .coe = decodeCoeCapabilities(s.CoEdetails),
   };
 }
 

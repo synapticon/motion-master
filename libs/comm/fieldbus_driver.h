@@ -480,6 +480,30 @@ class FieldbusDriver {
                                                                    uint16_t index,
                                                                    uint8_t subindex) = 0;
 
+  /// @brief Reads an entire object in one CoE SDO upload using Complete Access.
+  ///
+  /// Uploads every subindex of @p index in a single mailbox transfer (SDO command with the
+  /// complete-access bit set, starting at subindex 0), replacing one @c readSdo per subindex.
+  /// The returned blob is what the slave sends: subindex 0 as a 16-bit value (1 data byte + 1
+  /// alignment pad), then subindices 1..N concatenated at their native bit lengths. The caller
+  /// slices it back into per-subindex values from the object's known entry layout.
+  ///
+  /// Complete access is optional in CoE — a slave, or an individual object, that does not
+  /// support it answers with an SDO abort. Callers must therefore treat any error as "fall back
+  /// to per-subindex @c readSdo", not as a hard failure. The default implementation reports it
+  /// unsupported; drivers backed by a real CoE mailbox override this.
+  ///
+  /// @param slavePosition  1-based slave position on the bus.
+  /// @param index          CoE object index.
+  /// @return The raw complete-access blob on success, or an error string (including when the
+  ///         driver or the slave does not support complete access).
+  virtual std::expected<std::vector<uint8_t>, std::string> readSdoComplete(uint16_t slavePosition,
+                                                                           uint16_t index) {
+    (void)slavePosition;
+    (void)index;
+    return std::unexpected("complete access not supported by this driver");
+  }
+
   /// @brief Writes an object dictionary entry to a slave (CoE SDO download).
   ///
   /// Performs a mailbox SDO download of @p data to (@p index, @p subindex). The slave

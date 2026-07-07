@@ -943,7 +943,7 @@ std::expected<void, std::string> DeviceManager::initializeDeviceParameters(uint1
   if (it == devices_.end()) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
   }
-  return it->initializeParameters(readValues);
+  return it->initializeParameters(readValues, config_.useCompleteAccess);
 }
 
 std::expected<void, std::string> DeviceManager::readAllDeviceParameters(uint16_t slavePosition) {

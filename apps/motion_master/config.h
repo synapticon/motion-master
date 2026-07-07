@@ -77,6 +77,12 @@ struct ParametersConfig {
   /// device model pays the (one-time) enumeration once. Disable to keep state transitions minimal —
   /// definitions then load lazily when a device's Parameters are opened.
   bool readObjectDictionaryOnPreop = true;
+  /// Read multi-subindex objects (ARRAY/RECORD) with a single CoE Complete Access upload instead of
+  /// one upload per subindex when reading parameter values, cutting mailbox round-trips on a full
+  /// value read. Support is probed once per device; a slave that rejects it transparently falls
+  /// back to per-subindex reads, so this is safe to leave enabled. Disable only to force
+  /// per-subindex reads on firmware with a broken Complete Access implementation.
+  bool useCompleteAccess = true;
 };
 
 /// @brief The whole config file. Top-level keys map to these members.
@@ -98,7 +104,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(GameLoopConfig, periodUs)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RecorderConfig, historySeconds, dumpDir)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParameterCacheConfig, enabled, cacheAllVendors,
                                                 directory)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParametersConfig, readObjectDictionaryOnPreop)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParametersConfig, readObjectDictionaryOnPreop,
+                                                useCompleteAccess)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logLevel, tls, gameLoop,
                                                 recorder, parameterCache, parameters)
 

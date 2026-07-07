@@ -66,6 +66,7 @@ int main(int argc, char** argv) {
   const mm::node::DeviceManagerConfig deviceManagerConfig{
       .cyclePeriodUs = opts.config.gameLoop.periodUs,
       .readObjectDictionaryOnPreop = opts.config.parameters.readObjectDictionaryOnPreop,
+      .useCompleteAccess = opts.config.parameters.useCompleteAccess,
       .recorderDumpDir = opts.config.recorder.dumpDir,
       .recorderHistorySeconds = opts.config.recorder.historySeconds};
 

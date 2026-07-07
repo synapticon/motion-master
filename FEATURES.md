@@ -50,7 +50,10 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
 ## Object Dictionary / Parameters (CoE / SDO)
 
 - **Parameter enumeration** — initialise a device's parameter list by enumerating its
-  object dictionary (`POST /api/devices/{slavePosition}/parameters/init`).
+  object dictionary (`POST /api/devices/{slavePosition}/parameters/init`). With
+  `?readValues=true`, multi-subindex objects (ARRAY/RECORD) are read in one CoE Complete
+  Access upload instead of one upload per subindex — far fewer mailbox round-trips, with a
+  transparent per-subindex fallback on slaves that don't support it.
 - **Bulk & single reads** — refresh cached values of all parameters
   (`POST .../parameters/read`), read the cached list (`GET .../parameters`), and read a
   single parameter, PDO-aware with optional cache-only mode

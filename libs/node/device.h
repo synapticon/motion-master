@@ -169,16 +169,23 @@ class Device {
   /// Requires the device to be in PRE-OP, SAFE-OP, or OP (mailbox communication
   /// active). One @c DeviceParameter is created per @c (index, subindex) pair returned
   /// by the SDO Info service, with @c value pre-initialised to a type-appropriate zero.
-  /// When @p readValues is @c true each entry is additionally read via SDO upload and
-  /// the decoded value stored on the parameter; entries that fail to read keep their
-  /// default value and the call still succeeds (per-entry errors are logged).
+  /// When @p readValues is @c true each entry is additionally read and the decoded value stored on
+  /// the parameter; entries that fail to read keep their default value and the call still succeeds
+  /// (per-entry errors are logged).
+  ///
+  /// When @p useCompleteAccess is @c true, multi-subindex objects (ARRAY/RECORD) are read with a
+  /// single CoE Complete Access upload instead of one upload per subindex — far fewer mailbox
+  /// round-trips. Support is probed once: if the slave rejects the first CA read, the whole pass
+  /// falls back to per-subindex reads. It has no effect unless @p readValues is @c true.
   ///
   /// Calling this method again replaces the existing parameter map.
   ///
-  /// @param readValues  When @c true, follow up each entry with an SDO upload.
+  /// @param readValues        When @c true, follow up each entry with an SDO upload.
+  /// @param useCompleteAccess  When @c true, use CoE Complete Access for multi-subindex objects.
   /// @return Void on success, or an error string if the object dictionary enumeration
   ///         itself fails (the slave does not support SDO Info, or all retries timed out).
-  std::expected<void, std::string> initializeParameters(bool readValues = false);
+  std::expected<void, std::string> initializeParameters(bool readValues = false,
+                                                        bool useCompleteAccess = true);
 
   /// @brief Reads the device's PDO mapping from its assignment and mapping objects.
   ///
@@ -436,6 +443,16 @@ class Device {
  private:
   /// @brief Mutable parameter lookup by @c (index, subindex). O(1); @c nullptr if absent.
   DeviceParameter* findParameter(uint16_t index, uint8_t subindex);
+
+  /// @brief Fills in live values on @p defs (the value-read pass of @c initializeParameters).
+  ///
+  /// Reads each object over CoE and stores the decoded value on its entries. When
+  /// @p useCompleteAccess is @c true, multi-subindex ARRAY/RECORD objects are read with a single
+  /// Complete Access upload (support probed once, per-object fallback); everything else — and any
+  /// object that is not CA-decodable or whose CA read fails — is read one subindex at a time. Runs
+  /// off the lock and mutates @p defs in place; the caller publishes the built map under
+  /// @c parametersMutex_. Per-entry failures are logged and leave the type default.
+  void readParameterValues(std::vector<DeviceParameter>& defs, bool useCompleteAccess);
 
   /// @brief Reads one PDO direction grouped by mapping object: the assignment object and each
   ///        mapping object it references, with every entry's @c bitOffset derived from the running

@@ -283,6 +283,8 @@ curl -k -X POST https://localhost:61447/api/init \
 #    are cached on disk per device identity, so later scans of the same hardware skip it. Enabled
 #    for Synapticon drives by default — see the parameterCache config block. Inspect or clear the
 #    cache via GET/DELETE /api/parameter-caches (or the Parameter Caches page in the UI).
+#    Reading parameter *values* (a separate step, not the schema above) batches each multi-subindex
+#    object into one CoE Complete Access upload by default — see the parameters config block.
 curl -k -X POST https://localhost:61447/api/scan
 
 # 4. List discovered devices

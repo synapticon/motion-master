@@ -16,6 +16,7 @@
 #include "node/device_parameter.h"
 #include "node/parameter_cache.h"
 #include "node/process_data.h"
+#include "node/process_image.h"
 
 namespace mm::node {
 
@@ -99,7 +100,8 @@ std::expected<void, std::string> Device::writeSii(std::span<const uint8_t> data)
   return driver_.writeSii(slavePosition_, data);
 }
 
-std::expected<void, std::string> Device::initializeParameters(bool readValues) {
+std::expected<void, std::string> Device::initializeParameters(bool readValues,
+                                                              bool useCompleteAccess) {
   // 1. Obtain the parameter *definitions*: a cache hit (no bus I/O), or a live SDO-Info
   //    enumeration. The cache holds the static schema only — never live values — so on a hit each
   //    definition's value is the type default and is filled in by the value-read pass below.
@@ -157,31 +159,22 @@ std::expected<void, std::string> Device::initializeParameters(bool readValues) {
     definitions = std::move(built);
   }
 
-  // 2. Build the live map from the definitions, optionally reading each value via SDO. The
-  //    per-entry uploads are slow and must not hold the cache lock (that would stall a concurrent
-  //    sampler cached-read for the whole enumeration), so build a local map and swap it in under
-  //    the lock in one move at the end.
-  std::unordered_map<uint32_t, DeviceParameter> built;
-  built.reserve(definitions->size());
-  for (auto& p : *definitions) {
+  // 2. Fill in live values (if requested). The per-entry uploads are slow and must not hold the
+  //    cache lock (that would stall a concurrent sampler cached-read for the whole enumeration), so
+  //    mutate the local `definitions` and swap the built map in under the lock in one move at the
+  //    end. Every value starts at its type default / Unknown; a successful read overwrites it.
+  auto& defs = *definitions;
+  for (auto& p : defs) {
     p.value = defaultValueForDataType(p.dataType);
     p.syncState = SyncState::Unknown;
-    if (readValues) {
-      auto bytes = readSdo(p.index, p.subindex);
-      if (bytes) {
-        auto decoded = decodeSdoBytes(p.dataType, *bytes);
-        if (decoded) {
-          p.value = std::move(*decoded);
-          p.syncState = SyncState::Synced;
-        } else {
-          spdlog::warn("Device {}: decode 0x{:04X}:{:02X} failed: {}", slavePosition_, p.index,
-                       p.subindex, decoded.error());
-        }
-      } else {
-        spdlog::warn("Device {}: SDO upload 0x{:04X}:{:02X} failed: {}", slavePosition_, p.index,
-                     p.subindex, bytes.error());
-      }
-    }
+  }
+  if (readValues) {
+    readParameterValues(defs, useCompleteAccess);
+  }
+
+  std::unordered_map<uint32_t, DeviceParameter> built;
+  built.reserve(defs.size());
+  for (auto& p : defs) {
     built.emplace(p.key(), std::move(p));
   }
 
@@ -189,6 +182,125 @@ std::expected<void, std::string> Device::initializeParameters(bool readValues) {
   std::lock_guard<std::mutex> lock(*parametersMutex_);
   parameters_ = std::move(built);
   return {};
+}
+
+namespace {
+
+// CoE object codes (ETG.1000-6 §5). Only ARRAY and RECORD have multiple subindices worth reading
+// as one Complete Access transfer; a VAR is a single value and gains nothing.
+constexpr uint16_t kOtypeArray = 0x0008;
+constexpr uint16_t kOtypeRecord = 0x0009;
+
+// Decodes a Complete Access blob into the subindex run [start, end) of @p defs, assigning each
+// entry's value. The blob layout (ETG): subindex 0 as a 16-bit value (1 data byte + 1 alignment
+// pad), then subindices 1..N concatenated at their native bit lengths. Callers guarantee the run
+// is contiguous from subindex 0 and every entry is byte-aligned. Returns false (leaving any
+// partially-applied values to be overwritten by the per-subindex fallback) if the blob is shorter
+// than the layout implies or any entry fails to decode.
+bool decodeCompleteAccess(std::vector<DeviceParameter>& defs, size_t start, size_t end,
+                          const std::vector<uint8_t>& blob) {
+  const uint32_t totalBits = static_cast<uint32_t>(blob.size()) * 8u;
+  uint32_t cursor = 0;
+  for (size_t k = start; k < end; ++k) {
+    DeviceParameter& p = defs[k];
+    if (cursor + p.bitLength > totalBits) {
+      return false;
+    }
+    const std::vector<uint8_t> slice =
+        extractBits(std::span<const uint8_t>(blob.data(), blob.size()), cursor, p.bitLength);
+    auto decoded = decodeSdoBytes(p.dataType, slice);
+    if (!decoded) {
+      return false;
+    }
+    p.value = std::move(*decoded);
+    p.syncState = SyncState::Synced;
+    // Subindex 0 occupies a padded 16-bit slot; every later entry follows at its native width.
+    cursor += (k == start) ? 16u : p.bitLength;
+  }
+  return true;
+}
+
+}  // namespace
+
+void Device::readParameterValues(std::vector<DeviceParameter>& defs, bool useCompleteAccess) {
+  // Reads one subindex the classic way: an individual SDO upload, decoded in place. Used for VARs,
+  // for objects whose layout is not Complete-Access-decodable, and as the fallback when a CA read
+  // or decode fails.
+  auto readOne = [&](DeviceParameter& p) {
+    auto bytes = readSdo(p.index, p.subindex);
+    if (!bytes) {
+      spdlog::warn("Device {}: SDO upload 0x{:04X}:{:02X} failed: {}", slavePosition_, p.index,
+                   p.subindex, bytes.error());
+      return;
+    }
+    auto decoded = decodeSdoBytes(p.dataType, *bytes);
+    if (!decoded) {
+      spdlog::warn("Device {}: decode 0x{:04X}:{:02X} failed: {}", slavePosition_, p.index,
+                   p.subindex, decoded.error());
+      return;
+    }
+    p.value = std::move(*decoded);
+    p.syncState = SyncState::Synced;
+  };
+
+  // Complete Access support is discovered once per device (the "probe"): the first eligible object
+  // is read with CA; if the slave rejects it (SDO abort), CA is disabled for the rest of this pass
+  // and everything falls back to per-subindex reads. Once a CA read has succeeded we keep using it,
+  // but a per-object failure only falls back for that object (support can vary per object).
+  enum class Ca { Unknown, Supported, Unsupported };
+  Ca ca = useCompleteAccess ? Ca::Unknown : Ca::Unsupported;
+
+  for (size_t start = 0; start < defs.size();) {
+    // Group the contiguous run of entries sharing this object index.
+    size_t end = start + 1;
+    while (end < defs.size() && defs[end].index == defs[start].index) {
+      ++end;
+    }
+    const size_t count = end - start;
+    const uint16_t objectCode = defs[start].objectCode;
+
+    // CA pays off only for multi-subindex ARRAY/RECORD objects. Require the run to be contiguous
+    // from subindex 0 with every entry byte-aligned, so the blob offsets line up with the layout
+    // and we never guess at sub-byte bit packing.
+    bool eligible = ca != Ca::Unsupported && count >= 2 &&
+                    (objectCode == kOtypeArray || objectCode == kOtypeRecord);
+    for (size_t k = 0; eligible && k < count; ++k) {
+      const DeviceParameter& p = defs[start + k];
+      if (p.subindex != static_cast<uint8_t>(k) || p.bitLength == 0 || (p.bitLength % 8u) != 0) {
+        eligible = false;
+      }
+    }
+
+    bool filled = false;
+    if (eligible) {
+      auto blob = driver_.readSdoComplete(slavePosition_, defs[start].index);
+      if (blob) {
+        ca = Ca::Supported;
+        if (decodeCompleteAccess(defs, start, end, *blob)) {
+          filled = true;
+        } else {
+          spdlog::warn(
+              "Device {}: complete-access layout for 0x{:04X} inconsistent; "
+              "falling back to per-subindex reads",
+              slavePosition_, defs[start].index);
+        }
+      } else if (ca == Ca::Unknown) {
+        ca = Ca::Unsupported;
+        spdlog::debug("Device {}: complete access unsupported ({}); using per-subindex reads",
+                      slavePosition_, blob.error());
+      } else {
+        spdlog::debug("Device {}: complete-access read of 0x{:04X} failed ({}); per-subindex",
+                      slavePosition_, defs[start].index, blob.error());
+      }
+    }
+
+    if (!filled) {
+      for (size_t k = start; k < end; ++k) {
+        readOne(defs[k]);
+      }
+    }
+    start = end;
+  }
 }
 
 const std::unordered_map<uint32_t, DeviceParameter>& Device::parameters() const {

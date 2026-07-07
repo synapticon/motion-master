@@ -77,7 +77,14 @@
     // so a given device model pays the (one-time) enumeration once. The first such transition for a
     // never-seen model takes a few extra seconds; set false to keep transitions minimal and load
     // definitions lazily when a device's Parameters are opened.
-    "readObjectDictionaryOnPreop": true
+    "readObjectDictionaryOnPreop": true,
+
+    // When reading parameter *values*, read each multi-subindex object (ARRAY/RECORD) with a single
+    // CoE Complete Access upload instead of one upload per subindex, cutting mailbox round-trips.
+    // Support is probed once per device; a slave that rejects it transparently falls back to
+    // per-subindex reads, so this is safe to leave on. Set false only for firmware with a broken
+    // Complete Access implementation.
+    "useCompleteAccess": true
   },
 
   // TLS certificate for the HTTPS API and secure WebSocket.

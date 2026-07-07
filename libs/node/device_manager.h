@@ -157,6 +157,10 @@ struct DeviceManagerConfig {
   /// so dumps/monitoring/Parameters have names and data types without a manual read. See
   /// @c transitionToState.
   bool readObjectDictionaryOnPreop = true;
+  /// Read multi-subindex objects with a single CoE Complete Access upload during a parameter value
+  /// read, falling back to per-subindex reads on slaves that do not support it. See
+  /// @c Device::initializeParameters.
+  bool useCompleteAccess = true;
   /// Directory for `.mmpd` recorder dumps. Empty resolves to a @c "motion-master" subdirectory of
   /// the OS temporary directory at dump time. Passed through to @c dumpProcessData.
   std::string recorderDumpDir;

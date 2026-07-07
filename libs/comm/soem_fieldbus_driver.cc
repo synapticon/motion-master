@@ -122,6 +122,26 @@ std::chrono::microseconds recommendedCyclePeriod(uint32_t processBytes, int slav
   return std::chrono::microseconds(static_cast<int64_t>((neededUs + 999.0) / 1000.0) * 1000);
 }
 
+// Pops the most recent SOEM error (if any) after a failed SDO transfer and renders it as a short
+// human-readable suffix (" (SDO abort 0x...)", " (mailbox error)", ...). Empty when no error was
+// queued. Must be called under socketMutex_ (it touches the SOEM context error stack).
+std::string sdoErrorSuffix(ecx_contextt* ctx) {
+  ec_errort err{};
+  if (!ecx_poperror(ctx, &err)) {
+    return {};
+  }
+  switch (err.Etype) {
+    case EC_ERR_TYPE_SDO_ERROR:
+      return std::format(" (SDO abort 0x{:08X})", static_cast<uint32_t>(err.AbortCode));
+    case EC_ERR_TYPE_MBX_ERROR:
+      return " (mailbox error)";
+    case EC_ERR_TYPE_PACKET_ERROR:
+      return " (packet/timeout error)";
+    default:
+      return std::format(" (etype {})", static_cast<int>(err.Etype));
+  }
+}
+
 }  // namespace
 
 std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
@@ -478,23 +498,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
   if (wkc <= 0) {
     std::string msg =
         std::format("SDOread slave {} 0x{:04X}:{:02X} failed", slavePosition, index, subindex);
-    ec_errort err{};
-    if (ecx_poperror(ctx_.get(), &err)) {
-      switch (err.Etype) {
-        case EC_ERR_TYPE_SDO_ERROR:
-          msg += std::format(" (SDO abort 0x{:08X})", static_cast<uint32_t>(err.AbortCode));
-          break;
-        case EC_ERR_TYPE_MBX_ERROR:
-          msg += " (mailbox error)";
-          break;
-        case EC_ERR_TYPE_PACKET_ERROR:
-          msg += " (packet/timeout error)";
-          break;
-        default:
-          msg += std::format(" (etype {})", static_cast<int>(err.Etype));
-          break;
-      }
-    }
+    msg += sdoErrorSuffix(ctx_.get());
     spdlog::log(sdoLevel, "{}", msg);
     return std::unexpected(msg);
   }
@@ -512,6 +516,31 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
   return data;
 }
 
+std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComplete(
+    uint16_t slavePosition, uint16_t index) {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  const auto sdoLevel = sdoLogQuiet ? spdlog::level::trace : spdlog::level::debug;
+  spdlog::log(sdoLevel, "SDOread(CA) slave {} 0x{:04X}", slavePosition, index);
+  std::vector<uint8_t> data(4096, 0);
+  int size = static_cast<int>(data.size());
+  // Complete access: start at subindex 0 with the CA flag TRUE, so SOEM sets the complete-access
+  // bit and the slave returns every subindex in one transfer (segmented internally if it exceeds
+  // the mailbox). The blob is sub0 as a 16-bit value (1 data byte + 1 pad) followed by sub1..N at
+  // their native widths — the node layer slices it back using the object's known entry layout.
+  int wkc =
+      ecx_SDOread(ctx_.get(), slavePosition, index, 0x00, TRUE, &size, data.data(), EC_TIMEOUTRXM);
+  if (wkc <= 0) {
+    std::string msg = std::format("SDOread(CA) slave {} 0x{:04X} failed", slavePosition, index);
+    msg += sdoErrorSuffix(ctx_.get());
+    spdlog::log(sdoLevel, "{}", msg);
+    return std::unexpected(msg);
+  }
+  data.resize(size);
+  spdlog::log(sdoLevel, "SDOread(CA) slave {} 0x{:04X} ok ({} bytes)", slavePosition, index,
+              data.size());
+  return data;
+}
+
 std::expected<void, std::string> SoemFieldbusDriver::writeSdo(uint16_t slavePosition,
                                                               uint16_t index, uint8_t subindex,
                                                               std::span<const uint8_t> data) {
@@ -525,23 +554,7 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSdo(uint16_t slavePosi
   if (wkc <= 0) {
     std::string msg =
         std::format("SDOwrite slave {} 0x{:04X}:{:02X} failed", slavePosition, index, subindex);
-    ec_errort err{};
-    if (ecx_poperror(ctx_.get(), &err)) {
-      switch (err.Etype) {
-        case EC_ERR_TYPE_SDO_ERROR:
-          msg += std::format(" (SDO abort 0x{:08X})", static_cast<uint32_t>(err.AbortCode));
-          break;
-        case EC_ERR_TYPE_MBX_ERROR:
-          msg += " (mailbox error)";
-          break;
-        case EC_ERR_TYPE_PACKET_ERROR:
-          msg += " (packet/timeout error)";
-          break;
-        default:
-          msg += std::format(" (etype {})", static_cast<int>(err.Etype));
-          break;
-      }
-    }
+    msg += sdoErrorSuffix(ctx_.get());
     spdlog::debug("{}", msg);
     return std::unexpected(msg);
   }

@@ -26,6 +26,13 @@ struct ServerConfig {
 struct FieldbusConfig {
   std::string driver;   ///< "" | "soem" | "spoe" (spoe planned; only soem is implemented today).
   std::string adapter;  ///< SOEM NIC: MAC or interface name. "" = none.
+  /// SOEM only. Keep SOEM 2.0's mailbox-status FMMU active — the extra input FMMU it maps the SM1
+  /// mailbox-status register (0x080D) into the cyclic image on every mailbox slave, letting the
+  /// master notice a waiting mailbox message without a separate read. Motion Master does not use
+  /// that optimisation, and on TI PRU-ICSS ESCs a register-space FMMU inside an LRW is fatal (every
+  /// cyclic frame is dropped, SAFE-OP → OP fails). Default false ⇒ the FMMU is deactivated after
+  /// mapping. Set true only for hardware that both needs and supports it.
+  bool mailboxStatusFmmu = false;
 };
 
 /// @brief @c "tls" block — certificate paths and startup self-heal policy.
@@ -98,7 +105,7 @@ struct Config {
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ServerConfig, httpPort, wsPort, corsOrigin)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FieldbusConfig, driver, adapter)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FieldbusConfig, driver, adapter, mailboxStatusFmmu)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TlsConfig, certPath, keyPath, autoUpdate)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(GameLoopConfig, periodUs)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RecorderConfig, historySeconds, dumpDir)

@@ -74,7 +74,8 @@ int main(int argc, char** argv) {
   // both for the optional eager init below and as the POST /api/init callback, so the two paths
   // share one set of driver-creation and adapter-resolution rules. main.cc is the only place that
   // names concrete driver types (the composition root).
-  auto initDeviceManager = [&deviceManager, deviceManagerConfig](
+  auto initDeviceManager = [&deviceManager, deviceManagerConfig,
+                            mailboxStatusFmmu = opts.config.fieldbus.mailboxStatusFmmu](
                                const std::string& type,
                                const std::string& adapter) -> std::expected<void, std::string> {
     std::string ifname;
@@ -97,7 +98,9 @@ int main(int argc, char** argv) {
       return std::unexpected("fieldbus driver '" + type +
                              "' is not implemented in this build (only 'soem' is available)");
     }
-    return deviceManager.init(std::make_unique<mm::comm::soem::SoemFieldbusDriver>(ifname),
+    return deviceManager.init(std::make_unique<mm::comm::soem::SoemFieldbusDriver>(
+                                  mm::comm::soem::SoemFieldbusDriverConfig{
+                                      .ifname = ifname, .mailboxStatusFmmu = mailboxStatusFmmu}),
                               deviceManagerConfig);
   };
 

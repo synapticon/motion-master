@@ -19,8 +19,15 @@
   // waits to be initialised from the client via POST /api/init.
   "fieldbus": {
     "driver": "soem",   // soem | spoe  (spoe planned; only soem is implemented today)
-    "adapter": "eth0"   // soem: NIC MAC (AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF) or interface name
+    "adapter": "eth0",  // soem: NIC MAC (AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF) or interface name
     // spoe will instead take a list of device addresses: "ipAddresses": ["192.168.0.10"]
+
+    // soem only. Keep SOEM 2.0's mailbox-status FMMU active — the extra input FMMU it maps the SM1
+    // mailbox-status register (0x080D) into the cyclic image on every mailbox slave. Motion Master
+    // does not use it, and on TI PRU-ICSS ESCs a register-space FMMU inside an LRW is fatal (every
+    // cyclic frame is dropped and SAFE-OP → OP fails). Default false deactivates it after mapping;
+    // set true only for hardware that both needs and supports it.
+    "mailboxStatusFmmu": false
   },
 
   // Log verbosity: trace | debug | info | warning | error | critical | off

@@ -13,6 +13,23 @@ struct ecx_context;
 
 namespace mm::comm::soem {
 
+/// @brief Construction-time configuration for @c SoemFieldbusDriver.
+///
+/// Groups the SOEM/EtherCAT-specific knobs so they stay off the @c FieldbusDriver interface and off
+/// other drivers (a future @c SpoeDriver takes IP addresses and has no concept of a mailbox-status
+/// FMMU). The composition root (@c main.cc) fills this from the SOEM slice of the config file.
+struct SoemFieldbusDriverConfig {
+  /// Resolved OS network interface name (e.g. @c "eth0", @c "enp3s0").
+  std::string ifname;
+  /// Keep SOEM 2.0's mailbox-status FMMU active — the extra input FMMU it maps the SM1 mailbox-
+  /// status register (0x080D) into the cyclic image on every mailbox slave, letting the master
+  /// notice a waiting mailbox message without a separate read. Motion Master does not use that
+  /// optimisation, and on TI PRU-ICSS ESCs a register-space FMMU inside an LRW is fatal (every
+  /// cyclic frame is dropped, SAFE-OP → OP fails). Default false ⇒ the FMMU is deactivated after
+  /// mapping. Set true only for hardware that both needs and supports it.
+  bool mailboxStatusFmmu = false;
+};
+
 /// @brief SOEM-backed EtherCAT fieldbus driver.
 ///
 /// Owns one @c ecx_contextt master context and its PDO I/O map.  @c App
@@ -20,9 +37,9 @@ namespace mm::comm::soem {
 /// @c GameLoop.
 class SoemFieldbusDriver : public FieldbusDriver {
  public:
-  /// @brief Constructs the driver for the given network interface.
-  /// @param ifname  OS network interface name (e.g. @c "eth0", @c "enp3s0").
-  explicit SoemFieldbusDriver(std::string ifname);
+  /// @brief Constructs the driver from its SOEM-specific configuration.
+  /// @param config  Network interface plus SOEM tuning knobs (see @c SoemFieldbusDriverConfig).
+  explicit SoemFieldbusDriver(SoemFieldbusDriverConfig config);
 
   /// @brief Closes the NIC if @c init() succeeded.
   ~SoemFieldbusDriver() override;
@@ -155,7 +172,21 @@ class SoemFieldbusDriver : public FieldbusDriver {
       std::function<void()> tick = nullptr, std::function<bool()> shouldAbort = nullptr) override;
 
  private:
+  /// @brief Deactivates SOEM 2.0's mailbox-status FMMU on every slave after a successful map.
+  ///
+  /// SOEM's @c ecx_config_create_mbxstatus_mappings programs an extra input FMMU mapping the SM1
+  /// mailbox-status register (@c ECT_REG_SM1STAT, 0x080D) into the cyclic logical image on each
+  /// mailbox-capable slave. Motion Master never consumes it (SDO/FoE poll the mailbox directly),
+  /// and on TI PRU-ICSS ESCs a register-space FMMU inside an LRW kills every cyclic frame. Clears
+  /// the FMMU's active bit both in the cached slavelist and on the ESC, reversing SOEM's WKC
+  /// bookkeeping for input-less slaves so @c processDataLayout's expected WKC stays consistent.
+  /// A no-op when @c mailboxStatusFmmu_ is set. Caller must hold @c socketMutex_.
+  std::expected<void, std::string> deactivateMailboxStatusFmmus();
+
   std::string ifname_;
+  // Keep SOEM 2.0's mailbox-status FMMU active (see the constructor). Default false: the FMMU is
+  // deactivated after every map by deactivateMailboxStatusFmmus().
+  bool mailboxStatusFmmu_ = false;
   // ecx_contextt is several hundred KB (EC_MAXSLAVE slave entries) — heap-
   // allocated and null until init() succeeds.
   std::unique_ptr<ecx_context> ctx_;

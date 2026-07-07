@@ -8,6 +8,7 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <cstddef>
 #include <cstring>
 #include <expected>
 #include <format>
@@ -27,7 +28,8 @@
 
 namespace mm::comm::soem {
 
-SoemFieldbusDriver::SoemFieldbusDriver(std::string ifname) : ifname_(std::move(ifname)) {}
+SoemFieldbusDriver::SoemFieldbusDriver(SoemFieldbusDriverConfig config)
+    : ifname_(std::move(config.ifname)), mailboxStatusFmmu_(config.mailboxStatusFmmu) {}
 
 SoemFieldbusDriver::~SoemFieldbusDriver() {}
 
@@ -197,6 +199,11 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
         std::format("process image {} bytes exceeds IOmap capacity {} bytes — reduce mapped PDOs",
                     usedSize, sizeof(map_)));
   }
+  // Turn off SOEM 2.0's mailbox-status FMMU (unless explicitly kept) before any AL transition into
+  // an exchange state — it is mapped by the ecx_config_map_group above and is fatal on TI ESCs.
+  if (auto r = deactivateMailboxStatusFmmus(); !r) {
+    return std::unexpected(std::move(r.error()));
+  }
   // Initialise the Distributed Clocks system: measure propagation delays and elect a reference
   // clock. We deliberately do not call ecx_dcsync0, so process data stays SM-synchronous
   // (free-run), driven by the GameLoop's software cycle — DC is initialised but no SYNC0 pulse
@@ -209,6 +216,53 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
       "Process data mapped: {} bytes (out {}, in {}) across {} slave(s); "
       "recommended GameLoop cycle >= {} us ({:.1f} ms)",
       usedSize, grp.Obytes, grp.Ibytes, ctx_->slavecount, period.count(), period.count() / 1000.0);
+  return {};
+}
+
+std::expected<void, std::string> SoemFieldbusDriver::deactivateMailboxStatusFmmus() {
+  // SOEM 2.0's ecx_config_create_mbxstatus_mappings() programs an extra *input* FMMU on every
+  // mailbox-capable slave that maps the SM1 mailbox-status register (ECT_REG_SM1STAT == 0x080D)
+  // into the cyclic logical image, so the master can spot a waiting mailbox message without a
+  // separate acyclic read. SOEM 1.x had no such FMMU. It is an optimisation we do not use — we
+  // never read slavelist[].mbxstatus; SDO/FoE poll the mailbox directly. On TI PRU-ICSS ESCs
+  // (ESC type 0x90) a register-space FMMU inside an LRW is unsupported: every cyclic frame dies in
+  // the processing unit (error counter 0x030C saturates at 255), the working counter stays 0, and
+  // SAFE-OP -> OP fails with AL status 0x001B (SM watchdog). Deactivating this one FMMU restores
+  // cyclic exchange; it is harmless on every other ESC because nothing consumes it. Gated off only
+  // when the config keeps it active for hardware that both needs and supports it.
+  if (mailboxStatusFmmu_) {
+    return {};
+  }
+  for (int i = 1; i <= ctx_->slavecount; ++i) {
+    ec_slavet& s = ctx_->slavelist[i];
+    for (int j = 0; j < EC_MAXFMMU; ++j) {
+      // The mailbox-status FMMU is the only one mapping physical address 0x080D. The mapper assigns
+      // PhysStart raw (no byte-swap), so this direct compare is correct on our little-endian
+      // targets.
+      if (s.FMMU[j].PhysStart != ECT_REG_SM1STAT || s.FMMU[j].FMMUactive == 0) {
+        continue;
+      }
+      s.FMMU[j].FMMUactive = 0;  // keep the cached snapshot (processDataLayout / busConfig) honest
+      uint8_t inactive = 0;
+      const uint16_t activateReg = static_cast<uint16_t>(ECT_REG_FMMU0 + sizeof(ec_fmmut) * j +
+                                                         offsetof(ec_fmmut, FMMUactive));
+      if (ecx_FPWR(&ctx_->port, s.configadr, activateReg, sizeof(inactive), &inactive,
+                   EC_TIMEOUTRET3) <= 0) {
+        return std::unexpected(
+            std::format("failed to deactivate mailbox-status FMMU on slave {} (FMMU{})", i, j));
+      }
+      // WKC bookkeeping: the mapper only bumped grouplist[0].inputsWKC for a slave that had no
+      // other input read (Ibytes == 0), because the working counter increments once per slave per
+      // read datagram, not per FMMU. Mirror that reversal so processDataLayout's expected WKC stays
+      // consistent and the bus is not permanently flagged unhealthy. Slaves with input PDOs (all
+      // real drives) never bumped it, so this branch is a no-op for them.
+      if (s.Ibytes == 0 && ctx_->grouplist[0].inputsWKC > 0) {
+        ctx_->grouplist[0].inputsWKC--;
+      }
+      spdlog::debug("Deactivated SOEM mailbox-status FMMU{} on slave {}", j, i);
+      break;  // at most one such FMMU per slave
+    }
+  }
   return {};
 }
 

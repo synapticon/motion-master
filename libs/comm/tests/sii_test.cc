@@ -62,10 +62,14 @@ TEST(SiiParseTest, DecodesGeneral) {
   const SiiCategoryGeneral& g = result->category.general;
   EXPECT_EQ(g.groupIdx, 1u);
   EXPECT_EQ(g.nameIdx, 2u);  // -> strings[1] "SOMANET Circulo CiA402 Drive" (1-based index).
-  EXPECT_EQ(g.foeDetails, 15u);
-  EXPECT_EQ(g.eoeDetails, 1u);
-  EXPECT_EQ(g.physicalPort, 0);
-  EXPECT_EQ(g.physicalMemoryAddress, 1u);
+  // General-category detail bytes, at the correct ETG.2000 offsets (a reserved byte precedes
+  // coeDetails at offset 5). coeDetails 0x0F = SDO | SDO-Info | PDO-Assign | PDO-Config, matching
+  // what SOEM's CoEdetails / the bus-config CoE capabilities report for this drive.
+  EXPECT_EQ(g.coeDetails, 0x0Fu);
+  EXPECT_EQ(g.foeDetails, 1u);
+  EXPECT_EQ(g.eoeDetails, 0u);
+  EXPECT_EQ(g.physicalPort, 1);
+  EXPECT_EQ(g.physicalMemoryAddress, 0x11u);
 }
 
 TEST(SiiParseTest, DecodesSyncManagers) {

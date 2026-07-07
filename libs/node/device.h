@@ -67,6 +67,10 @@ class Device {
   /// @brief Serial number from EEPROM.
   uint32_t serialNumber() const;
 
+  /// @brief CoE mailbox capabilities advertised by the slave's EEPROM (an advertisement, not a
+  ///        guarantee — see @c mm::comm::CoeCapabilities).
+  const mm::comm::CoeCapabilities& coeCapabilities() const;
+
   /// @brief Whether the device's CoE/SDO mailbox is currently active (AL state PRE-OP,
   ///        SAFE-OP, or OP).
   ///
@@ -362,19 +366,23 @@ class Device {
   /// @brief Refreshes the cached value of every readable parameter, keeping the list intact.
   ///
   /// Re-reads each entry already in the map (it does not re-enumerate the object dictionary —
-  /// use @c initializeParameters for that) via @c readParameter, so each value is PDO-aware
-  /// (live process image when exchanging, SDO over the mailbox otherwise). The list of objects
-  /// is snapshotted under the lock first, then each is read with the lock released per entry
-  /// (one mailbox round-trip each), so a concurrent cached read of this device never waits for
-  /// the whole — potentially multi-second — sweep.
+  /// use @c initializeParameters for that). PDO-mapped objects are read from the live process
+  /// image when exchanging; everything else is read over the mailbox — as one CoE Complete Access
+  /// upload per multi-subindex ARRAY/RECORD when @p useCompleteAccess is @c true (probed once, with
+  /// per-object fallback), or one SDO upload per subindex otherwise. The objects are snapshotted
+  /// under the lock first, then read with the lock released between objects (each transfer holds it
+  /// for one round-trip), so a concurrent cached read of this device never waits for the whole —
+  /// potentially multi-second — sweep.
   ///
   /// Write-only objects are skipped (an SDO upload of one would abort). Best-effort, like
   /// @c initializeParameters(readValues=true): an entry that fails to read keeps its cached value
   /// and is logged, and the call still succeeds so one bad object never blocks the rest.
   ///
+  /// @param useCompleteAccess  When @c true, use CoE Complete Access for multi-subindex objects
+  ///                           read over the mailbox.
   /// @return Void on success (the always-taken best-effort path), or an error string if the
   ///         device has no parameters loaded yet (call @c initializeParameters first).
-  std::expected<void, std::string> readAllParameters();
+  std::expected<void, std::string> readAllParameters(bool useCompleteAccess = true);
 
   /// @brief Writes a parameter value, always updating the cache first.
   ///
@@ -480,6 +488,7 @@ class Device {
   uint32_t productCode_;
   uint32_t revisionNumber_;
   uint32_t serialNumber_;
+  mm::comm::CoeCapabilities coe_;  ///< CoE mailbox capabilities advertised in EEPROM (immutable).
   // Guards parameters_ against the off-RT monitoring threads (the refresher refreshes cached
   // values, the sampler reads them) racing the control-plane thread. Held only briefly — across
   // a cache read/write, or a single mailbox transaction in read/writeParameter; never across the

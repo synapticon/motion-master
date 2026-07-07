@@ -54,20 +54,20 @@ struct SiiInfo {
 
 /// @brief General device information (SII category 30 / 0x1E).
 struct SiiCategoryGeneral {
-  uint8_t groupIdx = 0;               ///< STRINGS index of the group name.
-  uint8_t imgIdx = 0;                 ///< STRINGS index of the image name.
-  uint8_t orderIdx = 0;               ///< STRINGS index of the order number.
-  uint8_t nameIdx = 0;                ///< STRINGS index of the device name.
-  uint8_t coeDetails = 0;             ///< CoE capability flags.
-  uint8_t foeDetails = 0;             ///< FoE capability flags.
-  uint8_t eoeDetails = 0;             ///< EoE capability flags.
-  uint8_t soeChannels = 0;            ///< SoE channel count.
-  uint8_t ds402Channels = 0;          ///< DS402 channel count.
-  uint8_t sysmanClass = 0;            ///< Sync-manager class.
-  uint8_t flags = 0;                  ///< General device flags.
-  uint8_t currentOnEBus = 0;          ///< E-Bus current consumption (mA).
-  int16_t physicalPort = 0;           ///< Physical-port configuration (per-port nibbles).
-  uint8_t physicalMemoryAddress = 0;  ///< Physical-memory address (low byte; see parseSii note).
+  uint8_t groupIdx = 0;                ///< STRINGS index of the group name.
+  uint8_t imgIdx = 0;                  ///< STRINGS index of the image name.
+  uint8_t orderIdx = 0;                ///< STRINGS index of the order number.
+  uint8_t nameIdx = 0;                 ///< STRINGS index of the device name.
+  uint8_t coeDetails = 0;              ///< CoE capability flags.
+  uint8_t foeDetails = 0;              ///< FoE capability flags.
+  uint8_t eoeDetails = 0;              ///< EoE capability flags.
+  uint8_t soeChannels = 0;             ///< SoE channel count.
+  uint8_t ds402Channels = 0;           ///< DS402 channel count.
+  uint8_t sysmanClass = 0;             ///< Sync-manager class.
+  uint8_t flags = 0;                   ///< General device flags.
+  uint16_t currentOnEBus = 0;          ///< E-Bus current consumption (mA), 16-bit.
+  int16_t physicalPort = 0;            ///< Physical-port configuration (per-port nibbles).
+  uint16_t physicalMemoryAddress = 0;  ///< Physical-memory address (16-bit word, ETG.2000).
 };
 
 /// @brief One Sync-Manager default from SII category 41 (0x29).

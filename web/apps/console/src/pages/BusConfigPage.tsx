@@ -49,6 +49,21 @@ const MBX_PROTOCOLS: [number, string, string][] = [
 
 const decodeProtocols = (bits: number) => MBX_PROTOCOLS.filter(([bit]) => bits & bit)
 
+// CoE mailbox capabilities (ECT_COEDET_* bits) the slave advertises in EEPROM — a finer breakdown
+// of the CoE protocol bit above. `key` indexes SlaveConfig.coe.
+const COE_CAPS: { key: keyof SlaveConfig['coe']; label: string; desc: string }[] = [
+  { key: 'sdo', label: 'SDO', desc: 'SDO object access (mailbox reads/writes).' },
+  { key: 'sdoInfo', label: 'SDO Info', desc: 'SDO Information service — object-dictionary enumeration.' },
+  { key: 'pdoAssign', label: 'PDO Assign', desc: 'PDO assignment configurable (0x1C1x).' },
+  { key: 'pdoConfig', label: 'PDO Config', desc: 'PDO mapping configurable (0x16xx/0x1Axx).' },
+  { key: 'uploadAtStartup', label: 'Upload', desc: 'Upload at startup.' },
+  {
+    key: 'completeAccess',
+    label: 'Complete Access',
+    desc: 'SDO Complete Access advertised in EEPROM. Advertised only — SOMANET drives support Complete Access even when this reads false, so Motion Master probes actual support at runtime rather than trusting this bit.',
+  },
+]
+
 function Field({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
   return (
     <div>
@@ -258,6 +273,34 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
             }
             hint="DC capability and SYNC0 state, with the master-measured propagation delay and the SYNC0 cycle time / shift. SYNC0 is off for the SM-synchronous bring-up this driver uses, so cycle and shift read 0 until SYNC0 activation is enabled."
           />
+        </div>
+
+        <div className="space-y-1.5">
+          <p
+            className="eyebrow cursor-help"
+            title="CoE mailbox capabilities advertised in EEPROM — a finer breakdown of the CoE protocol above. A hint, not a guarantee: firmware can under- or over-report, so Motion Master verifies operations (e.g. Complete Access) at runtime rather than trusting these bits."
+          >
+            CoE capabilities
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {COE_CAPS.map(({ key, label, desc }) => {
+              const on = slave.coe[key]
+              return (
+                <span
+                  key={key}
+                  title={desc}
+                  className={`inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-[10px] font-display uppercase tracking-wide cursor-help ${
+                    on ? 'border-status-good/40 text-status-good' : 'border-grey-200 text-grey-400'
+                  }`}
+                >
+                  <span
+                    className={`inline-block w-1 h-1 rounded-full ${on ? 'bg-status-good' : 'bg-grey-300'}`}
+                  />
+                  {label}
+                </span>
+              )
+            })}
+          </div>
         </div>
 
         <div className="space-y-2">

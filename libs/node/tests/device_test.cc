@@ -482,6 +482,64 @@ TEST(DeviceInitParametersCompleteAccess, SingleSubindexVarSkipsCompleteAccess) {
   EXPECT_EQ(device.parameter(0x6065, 0x00)->value, DeviceParameterValue{uint32_t{16}});
 }
 
+TEST(DeviceReadAllParameters, UsesCompleteAccessForMultiSubObjects) {
+  SdoFakeDriver driver;
+  driver.programOd(0x1600, 0x00, kU8, 0x3F, 8, kArray);
+  driver.programOd(0x1600, 0x01, kU32, 0x3F, 32, kArray);
+  driver.programOd(0x1600, 0x02, kU32, 0x3F, 32, kArray);
+  driver.programOd(0x6060, 0x00, kU32, 0x3F, 32, /*objectCode=*/0x0007);  // a VAR
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  driver.state = kPreOp;  // mailbox active, not exchanging → SDO/CA path
+  driver.completeReads[0x1600] = completeBlob(2, {u32le(0xAAAA0001), u32le(0xAAAA0002)});
+  driver.programRead(0x6060, 0x00, u32le(7));
+  driver.perSubReads = 0;
+
+  ASSERT_TRUE(device.readAllParameters(/*useCompleteAccess=*/true).has_value());
+
+  // The record was read with one CA upload; only the VAR used a per-subindex read.
+  EXPECT_EQ(driver.completeReadIndices, (std::vector<uint16_t>{0x1600}));
+  EXPECT_EQ(driver.perSubReads, 1);
+  EXPECT_EQ(device.parameter(0x1600, 0x01)->value, DeviceParameterValue{uint32_t{0xAAAA0001}});
+  EXPECT_EQ(device.parameter(0x1600, 0x02)->value, DeviceParameterValue{uint32_t{0xAAAA0002}});
+  EXPECT_EQ(device.parameter(0x6060, 0x00)->value, DeviceParameterValue{uint32_t{7}});
+}
+
+TEST(DeviceReadAllParameters, FallsBackToPerSubindexWhenCompleteAccessUnsupported) {
+  SdoFakeDriver driver;
+  driver.programOd(0x1600, 0x00, kU8, 0x3F, 8, kArray);
+  driver.programOd(0x1600, 0x01, kU32, 0x3F, 32, kArray);
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  driver.state = kPreOp;
+  // completeReads left empty → the probe CA read is rejected, disabling CA for the sweep.
+  driver.programRead(0x1600, 0x00, {2});
+  driver.programRead(0x1600, 0x01, u32le(0x1234));
+
+  ASSERT_TRUE(device.readAllParameters(/*useCompleteAccess=*/true).has_value());
+
+  EXPECT_EQ(driver.completeReadIndices, (std::vector<uint16_t>{0x1600}));  // probed once
+  EXPECT_EQ(device.parameter(0x1600, 0x01)->value, DeviceParameterValue{uint32_t{0x1234}});
+  EXPECT_EQ(device.parameter(0x1600, 0x01)->syncState, SyncState::Synced);
+}
+
+TEST(DeviceReadAllParameters, DisabledFlagForcesPerSubindexReads) {
+  SdoFakeDriver driver;
+  driver.programOd(0x1600, 0x00, kU8, 0x3F, 8, kArray);
+  driver.programOd(0x1600, 0x01, kU32, 0x3F, 32, kArray);
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  driver.state = kPreOp;
+  driver.completeReads[0x1600] = completeBlob(1, {u32le(0x9999)});  // would work if attempted
+  driver.programRead(0x1600, 0x00, {1});
+  driver.programRead(0x1600, 0x01, u32le(0x4444));
+
+  ASSERT_TRUE(device.readAllParameters(/*useCompleteAccess=*/false).has_value());
+
+  EXPECT_TRUE(driver.completeReadIndices.empty());  // CA never attempted
+  EXPECT_EQ(device.parameter(0x1600, 0x01)->value, DeviceParameterValue{uint32_t{0x4444}});
+}
+
 TEST(DeviceParameterCopy, ReturnsFullStructFromCacheWithoutBusAccess) {
   SdoFakeDriver driver;
   Device device = deviceWithU32Param(driver);

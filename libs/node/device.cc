@@ -4,8 +4,10 @@
 
 #include <algorithm>
 #include <format>
+#include <map>
 #include <mutex>
 #include <nlohmann/json.hpp>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -33,6 +35,7 @@ Device::Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver, Process
   productCode_ = info.productCode;
   revisionNumber_ = info.revisionNumber;
   serialNumber_ = info.serialNumber;
+  coe_ = info.coe;
 }
 
 uint16_t Device::slavePosition() const { return slavePosition_; }
@@ -41,6 +44,7 @@ uint32_t Device::vendorId() const { return vendorId_; }
 uint32_t Device::productCode() const { return productCode_; }
 uint32_t Device::revisionNumber() const { return revisionNumber_; }
 uint32_t Device::serialNumber() const { return serialNumber_; }
+const mm::comm::CoeCapabilities& Device::coeCapabilities() const { return coe_; }
 
 bool Device::mailboxActive() const {
   using mm::comm::EtherCatState;
@@ -191,33 +195,108 @@ namespace {
 constexpr uint16_t kOtypeArray = 0x0008;
 constexpr uint16_t kOtypeRecord = 0x0009;
 
-// Decodes a Complete Access blob into the subindex run [start, end) of @p defs, assigning each
-// entry's value. The blob layout (ETG): subindex 0 as a 16-bit value (1 data byte + 1 alignment
-// pad), then subindices 1..N concatenated at their native bit lengths. Callers guarantee the run
-// is contiguous from subindex 0 and every entry is byte-aligned. Returns false (leaving any
-// partially-applied values to be overwritten by the per-subindex fallback) if the blob is shorter
-// than the layout implies or any entry fails to decode.
-bool decodeCompleteAccess(std::vector<DeviceParameter>& defs, size_t start, size_t end,
+// Whether a run of an object's subindex entries (in subindex order) can be read as one Complete
+// Access transfer: a multi-subindex ARRAY/RECORD, contiguous from subindex 0, with every entry
+// byte-aligned. Contiguity + byte-alignment let the blob be sliced by walking bit offsets, never
+// guessing at sub-byte packing or a gap left by a missing subindex.
+bool completeAccessEligible(std::span<DeviceParameter* const> subs) {
+  if (subs.size() < 2) {
+    return false;
+  }
+  const uint16_t objectCode = subs.front()->objectCode;
+  if (objectCode != kOtypeArray && objectCode != kOtypeRecord) {
+    return false;
+  }
+  for (size_t k = 0; k < subs.size(); ++k) {
+    const DeviceParameter* p = subs[k];
+    if (p->subindex != static_cast<uint8_t>(k) || p->bitLength == 0 || (p->bitLength % 8u) != 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Decodes a Complete Access blob into @p subs (subindex order), assigning each entry's value and
+// marking it synced. The blob layout (ETG): subindex 0 as a 16-bit value (1 data byte + 1 alignment
+// pad), then subindices 1..N concatenated at their native bit lengths. Callers guarantee the run is
+// eligible (see @c completeAccessEligible). Returns false (leaving any partially-applied values to
+// be overwritten by the per-subindex fallback) if the blob is shorter than the layout implies or
+// any entry fails to decode.
+bool decodeCompleteAccess(std::span<DeviceParameter* const> subs,
                           const std::vector<uint8_t>& blob) {
   const uint32_t totalBits = static_cast<uint32_t>(blob.size()) * 8u;
   uint32_t cursor = 0;
-  for (size_t k = start; k < end; ++k) {
-    DeviceParameter& p = defs[k];
-    if (cursor + p.bitLength > totalBits) {
+  for (size_t k = 0; k < subs.size(); ++k) {
+    DeviceParameter* p = subs[k];
+    if (cursor + p->bitLength > totalBits) {
       return false;
     }
     const std::vector<uint8_t> slice =
-        extractBits(std::span<const uint8_t>(blob.data(), blob.size()), cursor, p.bitLength);
-    auto decoded = decodeSdoBytes(p.dataType, slice);
+        extractBits(std::span<const uint8_t>(blob.data(), blob.size()), cursor, p->bitLength);
+    auto decoded = decodeSdoBytes(p->dataType, slice);
     if (!decoded) {
       return false;
     }
-    p.value = std::move(*decoded);
-    p.syncState = SyncState::Synced;
+    p->value = std::move(*decoded);
+    p->syncState = SyncState::Synced;
     // Subindex 0 occupies a padded 16-bit slot; every later entry follows at its native width.
-    cursor += (k == start) ? 16u : p.bitLength;
+    cursor += (k == 0) ? 16u : p->bitLength;
   }
   return true;
+}
+
+// Tracks Complete Access support across one read pass: probe once, then per-object fallback. CA is
+// optional in CoE, so the first eligible object is a probe — if the slave rejects it, CA is
+// disabled for the whole pass. After a CA read has succeeded, a later per-object failure falls back
+// for that object only (support can vary per object).
+class CompleteAccessProbe {
+ public:
+  explicit CompleteAccessProbe(bool useCompleteAccess)
+      : state_(useCompleteAccess ? State::Unknown : State::Unsupported) {}
+  // Whether to attempt CA for the next object (false once a probe proved it unsupported).
+  bool enabled() const { return state_ != State::Unsupported; }
+  void recordSuccess() { state_ = State::Supported; }
+  // Records a failed CA read. Returns true when this failure disabled CA pass-wide (the probe),
+  // false when it is a per-object failure after CA had already worked — the caller logs
+  // accordingly.
+  bool recordFailure() {
+    if (state_ == State::Unknown) {
+      state_ = State::Unsupported;
+      return true;
+    }
+    return false;
+  }
+
+ private:
+  enum class State { Unknown, Supported, Unsupported };
+  State state_;
+};
+
+// Reads one object via a single Complete Access upload and decodes it into @p subs (subindex
+// order), updating the probe. Returns true if the object was filled; false means the caller should
+// fall back to per-subindex reads. Logging is keyed off the probe so an unsupported slave logs once
+// rather than per object. @p subs must be eligible (see @c completeAccessEligible).
+bool readCompleteInto(mm::comm::FieldbusDriver& driver, uint16_t slavePosition,
+                      std::span<DeviceParameter* const> subs, CompleteAccessProbe& ca) {
+  const uint16_t index = subs.front()->index;
+  auto blob = driver.readSdoComplete(slavePosition, index);
+  if (!blob) {
+    if (ca.recordFailure()) {
+      spdlog::debug("Device {}: complete access unsupported ({}); using per-subindex reads",
+                    slavePosition, blob.error());
+    } else {
+      spdlog::debug("Device {}: complete-access read of 0x{:04X} failed ({}); per-subindex",
+                    slavePosition, index, blob.error());
+    }
+    return false;
+  }
+  ca.recordSuccess();
+  if (decodeCompleteAccess(subs, *blob)) {
+    return true;
+  }
+  spdlog::warn("Device {}: complete-access layout for 0x{:04X} inconsistent; per-subindex reads",
+               slavePosition, index);
+  return false;
 }
 
 }  // namespace
@@ -247,8 +326,7 @@ void Device::readParameterValues(std::vector<DeviceParameter>& defs, bool useCom
   // is read with CA; if the slave rejects it (SDO abort), CA is disabled for the rest of this pass
   // and everything falls back to per-subindex reads. Once a CA read has succeeded we keep using it,
   // but a per-object failure only falls back for that object (support can vary per object).
-  enum class Ca { Unknown, Supported, Unsupported };
-  Ca ca = useCompleteAccess ? Ca::Unknown : Ca::Unsupported;
+  CompleteAccessProbe ca(useCompleteAccess);
 
   for (size_t start = 0; start < defs.size();) {
     // Group the contiguous run of entries sharing this object index.
@@ -256,47 +334,16 @@ void Device::readParameterValues(std::vector<DeviceParameter>& defs, bool useCom
     while (end < defs.size() && defs[end].index == defs[start].index) {
       ++end;
     }
-    const size_t count = end - start;
-    const uint16_t objectCode = defs[start].objectCode;
-
-    // CA pays off only for multi-subindex ARRAY/RECORD objects. Require the run to be contiguous
-    // from subindex 0 with every entry byte-aligned, so the blob offsets line up with the layout
-    // and we never guess at sub-byte bit packing.
-    bool eligible = ca != Ca::Unsupported && count >= 2 &&
-                    (objectCode == kOtypeArray || objectCode == kOtypeRecord);
-    for (size_t k = 0; eligible && k < count; ++k) {
-      const DeviceParameter& p = defs[start + k];
-      if (p.subindex != static_cast<uint8_t>(k) || p.bitLength == 0 || (p.bitLength % 8u) != 0) {
-        eligible = false;
-      }
+    std::vector<DeviceParameter*> subs;
+    subs.reserve(end - start);
+    for (size_t k = start; k < end; ++k) {
+      subs.push_back(&defs[k]);
     }
 
-    bool filled = false;
-    if (eligible) {
-      auto blob = driver_.readSdoComplete(slavePosition_, defs[start].index);
-      if (blob) {
-        ca = Ca::Supported;
-        if (decodeCompleteAccess(defs, start, end, *blob)) {
-          filled = true;
-        } else {
-          spdlog::warn(
-              "Device {}: complete-access layout for 0x{:04X} inconsistent; "
-              "falling back to per-subindex reads",
-              slavePosition_, defs[start].index);
-        }
-      } else if (ca == Ca::Unknown) {
-        ca = Ca::Unsupported;
-        spdlog::debug("Device {}: complete access unsupported ({}); using per-subindex reads",
-                      slavePosition_, blob.error());
-      } else {
-        spdlog::debug("Device {}: complete-access read of 0x{:04X} failed ({}); per-subindex",
-                      slavePosition_, defs[start].index, blob.error());
-      }
-    }
-
-    if (!filled) {
-      for (size_t k = start; k < end; ++k) {
-        readOne(defs[k]);
+    if (!(ca.enabled() && completeAccessEligible(subs) &&
+          readCompleteInto(driver_, slavePosition_, subs, ca))) {
+      for (DeviceParameter* p : subs) {
+        readOne(*p);
       }
     }
     start = end;
@@ -750,32 +797,73 @@ std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t 
   return p->value;
 }
 
-std::expected<void, std::string> Device::readAllParameters() {
-  // Snapshot the readable objects under the lock, then read each with the lock released — read
-  // parameter re-locks per transaction, so this multi-mailbox sweep never holds parametersMutex_
-  // across the whole duration (a concurrent cached read waits at most one round-trip). Write-only
-  // objects are skipped: an SDO upload of one would abort and only add a spurious failure log.
-  std::vector<std::pair<uint16_t, uint8_t>> targets;
+std::expected<void, std::string> Device::readAllParameters(bool useCompleteAccess) {
+  // Snapshot the readable subindices grouped by object index under the lock, then read with it
+  // released — so this multi-mailbox sweep never holds parametersMutex_ across more than one
+  // object's transfer (a concurrent cached read waits at most that). Write-only objects are
+  // skipped: an SDO upload of one would abort and only add a spurious failure log.
+  std::map<uint16_t, std::vector<uint8_t>> objects;
   {
     std::lock_guard<std::mutex> lock(*parametersMutex_);
     if (parameters_.empty()) {
       return std::unexpected(std::format(
           "device {}: no parameters loaded — initialise the parameter list first", slavePosition_));
     }
-    targets.reserve(parameters_.size());
     for (const auto& [key, p] : parameters_) {
       if (p.isReadable()) {
-        targets.emplace_back(p.index, p.subindex);
+        objects[p.index].push_back(p.subindex);
       }
     }
   }
+  for (auto& [index, subindices] : objects) {
+    std::ranges::sort(
+        subindices);  // completeAccessEligible needs subindex order, contiguous from 0
+  }
+
+  // Fills one object via a single Complete Access upload, returning true on success. Runs the CA
+  // read + decode under parametersMutex_ — one mailbox round-trip, matching readParameter's own
+  // lock contract — so the re-found parameter pointers stay valid across the transfer.
+  CompleteAccessProbe ca(useCompleteAccess);
+  auto tryComplete = [&](uint16_t index, const std::vector<uint8_t>& subindices) -> bool {
+    std::lock_guard<std::mutex> lock(*parametersMutex_);
+    std::vector<DeviceParameter*> subs;
+    subs.reserve(subindices.size());
+    for (uint8_t si : subindices) {
+      DeviceParameter* p = findParameter(index, si);
+      if (!p) {
+        return false;  // map re-enumerated under us — fall back to the per-subindex path
+      }
+      subs.push_back(p);
+    }
+    if (!completeAccessEligible(subs)) {
+      return false;
+    }
+    // Prefer the live process image while exchanging: if any subindex is PDO-served, let the
+    // per-subindex path (readParameter) read it from the image rather than issuing an SDO here.
+    if (processData_ && exchangesProcessData()) {
+      const bool anyImageServed = std::ranges::any_of(subs, [&](const DeviceParameter* p) {
+        return processData_->readPdo(slavePosition_, index, p->subindex).has_value();
+      });
+      if (anyImageServed) {
+        return false;
+      }
+    }
+    return readCompleteInto(driver_, slavePosition_, subs, ca);
+  };
+
   // Best-effort, like initializeParameters(readValues=true): a per-entry failure keeps that entry's
   // cached value and is logged, and the sweep still succeeds so one bad object never blocks the
-  // rest.
-  for (const auto& [index, subindex] : targets) {
-    if (auto r = readParameter(index, subindex); !r) {
-      spdlog::warn("Device {}: read 0x{:04X}:{:02X} failed: {}", slavePosition_, index, subindex,
-                   r.error());
+  // rest. Multi-subindex objects try Complete Access first; single-subindex objects and any CA
+  // fallthrough go through the PDO-aware per-subindex readParameter.
+  for (const auto& [index, subindices] : objects) {
+    if (subindices.size() >= 2 && ca.enabled() && tryComplete(index, subindices)) {
+      continue;
+    }
+    for (uint8_t si : subindices) {
+      if (auto r = readParameter(index, si); !r) {
+        spdlog::warn("Device {}: read 0x{:04X}:{:02X} failed: {}", slavePosition_, index, si,
+                     r.error());
+      }
     }
   }
   return {};

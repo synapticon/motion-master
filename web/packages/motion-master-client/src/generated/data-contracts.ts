@@ -10,6 +10,22 @@
  * ---------------------------------------------------------------
  */
 
+/** CoE (CANopen over EtherCAT) mailbox capabilities the device advertises in its EEPROM (SII), decoded from the ECT_COEDET_* bits. An advertisement, not a guarantee — firmware can under- or over-report (e.g. claim completeAccess without a correct implementation), so treat as a hint; the authoritative test is to attempt the operation and handle any abort. */
+export interface CoeCapabilities {
+  /** SDO object access (mailbox reads/writes). */
+  sdo: boolean;
+  /** SDO Information service — object-dictionary enumeration. */
+  sdoInfo: boolean;
+  /** PDO assignment configurable (0x1C1x). */
+  pdoAssign: boolean;
+  /** PDO mapping configurable (0x16xx/0x1Axx). */
+  pdoConfig: boolean;
+  /** Upload at startup. */
+  uploadAtStartup: boolean;
+  /** SDO Complete Access (read/write a whole object in one transfer). */
+  completeAccess: boolean;
+}
+
 /** Summary of one on-disk parameter-cache file (its identity, size, and count). */
 export interface ParameterCacheEntry {
   /**
@@ -393,6 +409,8 @@ export interface SlaveConfig {
      */
     protocols: number;
   };
+  /** CoE (CANopen over EtherCAT) mailbox capabilities the device advertises in its EEPROM (SII), decoded from the ECT_COEDET_* bits. An advertisement, not a guarantee — firmware can under- or over-report (e.g. claim completeAccess without a correct implementation), so treat as a hint; the authoritative test is to attempt the operation and handle any abort. */
+  coe: CoeCapabilities;
   dc: {
     /**
      * Slave has distributed-clock hardware

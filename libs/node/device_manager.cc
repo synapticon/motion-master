@@ -184,6 +184,13 @@ std::expected<int, std::string> DeviceManager::scan() {
     spdlog::info("  [{:2}] {} — vendor: {:#010x}  product: {:#010x}  rev: {:#010x}  serial: {}",
                  device.slavePosition(), device.name(), device.vendorId(), device.productCode(),
                  device.revisionNumber(), device.serialNumber());
+    // CoE mailbox capabilities as advertised in EEPROM (a hint, not a guarantee) — useful for
+    // deciding whether an operation like SDO Complete Access is worth attempting.
+    const auto& coe = device.coeCapabilities();
+    spdlog::debug(
+        "       CoE: sdo={} sdoInfo={} pdoAssign={} pdoConfig={} upload={} completeAccess={}",
+        coe.sdo, coe.sdoInfo, coe.pdoAssign, coe.pdoConfig, coe.uploadAtStartup,
+        coe.completeAccess);
   }
   return *result;
 }
@@ -956,7 +963,7 @@ std::expected<void, std::string> DeviceManager::readAllDeviceParameters(uint16_t
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
   }
-  return device->readAllParameters();
+  return device->readAllParameters(config_.useCompleteAccess);
 }
 
 std::optional<std::vector<uint8_t>> ProcessData::readPdo(uint16_t slavePosition, uint16_t index,
@@ -1241,6 +1248,7 @@ void to_json(nlohmann::json& j, const SlaveConfigInfo& info) {
          {"readLength", c.mailbox.readLength},
          {"readOffset", c.mailbox.readOffset},
          {"protocols", c.mailbox.protocols}}},
+       {"coe", c.coe},
        {"dc",
         {{"capable", c.dc.capable},
          {"active", c.dc.active},

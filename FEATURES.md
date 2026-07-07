@@ -22,7 +22,8 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
   PRE-OP (re-map) while the rest keep exchanging process data; bringing them back
   re-maps the whole bus.
 - **Static bus configuration inspection** — per-slave Sync Manager, FMMU, Distributed
-  Clock, mailbox, and address configuration (`GET /api/bus-config`).
+  Clock, mailbox, address, and advertised CoE mailbox capability configuration (`coe`:
+  SDO, SDO Info, PDO assign/config, upload, complete access) (`GET /api/bus-config`).
 - **Live ESC health diagnostics** — per-slave EtherCAT Slave Controller error counters,
   port link state, and watchdog expirations (`GET /api/devices/diagnostics`).
 - **Distributed-clock sync status** — live DC system-time deviation across devices
@@ -57,7 +58,10 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
 - **Bulk & single reads** — refresh cached values of all parameters
   (`POST .../parameters/read`), read the cached list (`GET .../parameters`), and read a
   single parameter, PDO-aware with optional cache-only mode
-  (`GET .../parameters/{index}/{subindex}`).
+  (`GET .../parameters/{index}/{subindex}`). The bulk refresh reads PDO-mapped objects
+  from the live process image and everything else over the mailbox — batching each
+  multi-subindex object into one CoE Complete Access upload where supported, with a
+  transparent per-subindex fallback.
 - **Parameter writes** — write a single parameter, PDO-aware
   (`PUT .../parameters/{index}/{subindex}`).
 - **Raw SDO access** — upload/download an object dictionary entry directly over CoE SDO

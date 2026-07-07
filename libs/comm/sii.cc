@@ -82,24 +82,28 @@ std::vector<std::string> parseStrings(std::span<const uint8_t> p) {
 }
 
 SiiCategoryGeneral parseGeneral(std::span<const uint8_t> p) {
-  // NOTE: physicalMemoryAddress is read as a single byte at offset 14 to match the original
-  // TypeScript parser. ETG.1000.6 defines it as a 16-bit word; the values agree when its high
-  // byte is zero. See parseSii's doc note.
+  // ETG.2000 General-category layout (payload-relative): a reserved byte sits at offset 4 between
+  // nameIdx and the mailbox-detail bytes, so CoE Details is at offset 5 — not 4, as the original
+  // TypeScript parser had it (which shifted every field from coeDetails on down by one, leaving
+  // coeDetails reading the reserved 0x00). SOEM confirms the layout: it reads CoEdetails at
+  // siifind()+0x07, and siifind returns the category's size-word address, so its payload base is
+  // +2 → CoE at payload offset 5. currentOnEBus and physicalMemoryAddress are 16-bit words.
   return SiiCategoryGeneral{
       .groupIdx = rdU8(p, 0),
       .imgIdx = rdU8(p, 1),
       .orderIdx = rdU8(p, 2),
       .nameIdx = rdU8(p, 3),
-      .coeDetails = rdU8(p, 4),
-      .foeDetails = rdU8(p, 5),
-      .eoeDetails = rdU8(p, 6),
-      .soeChannels = rdU8(p, 7),
-      .ds402Channels = rdU8(p, 8),
-      .sysmanClass = rdU8(p, 9),
-      .flags = rdU8(p, 10),
-      .currentOnEBus = rdU8(p, 11),
-      .physicalPort = rdI16(p, 12),
-      .physicalMemoryAddress = rdU8(p, 14),
+      // offset 4: reserved
+      .coeDetails = rdU8(p, 5),
+      .foeDetails = rdU8(p, 6),
+      .eoeDetails = rdU8(p, 7),
+      .soeChannels = rdU8(p, 8),
+      .ds402Channels = rdU8(p, 9),
+      .sysmanClass = rdU8(p, 10),
+      .flags = rdU8(p, 11),
+      .currentOnEBus = rdU16(p, 12),
+      .physicalPort = rdI16(p, 14),
+      .physicalMemoryAddress = rdU16(p, 16),
   };
 }
 

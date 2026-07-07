@@ -327,7 +327,7 @@ export default function RootLayout() {
                 }`}
             />
           </div>
-          <p className="text-white/30 text-xs font-display tracking-wide mt-0.5">v6.0.0-alpha.33</p>
+          <p className="text-white/30 text-xs font-display tracking-wide mt-0.5">v6.0.0-alpha.34</p>
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">

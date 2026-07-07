@@ -1,7 +1,7 @@
 {
   "name": "motion-master-workspace",
   "private": true,
-  "version": "6.0.0-alpha.33",
+  "version": "6.0.0-alpha.34",
   "scripts": {
     "dev": "pnpm --filter console dev",
     "build": "pnpm --filter @synapticon/motion-master-client generate && pnpm --filter console build",

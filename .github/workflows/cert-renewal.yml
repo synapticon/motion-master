@@ -47,19 +47,9 @@ jobs:
             --dns dns_acmedns \
             --server letsencrypt
 
-      - name: Store renewed cert and key as secrets
-        env:
-          GH_TOKEN: ${{ secrets.GH_PAT_SECRETS }}
-        run: |
-          gh secret set TLS_CERT \
-            --repo "$GITHUB_REPOSITORY" \
-            --body "$(cat ~/.acme.sh/local.motion-master.synapticon.com_ecc/fullchain.cer)"
-          gh secret set TLS_KEY \
-            --repo "$GITHUB_REPOSITORY" \
-            --body "$(cat ~/.acme.sh/local.motion-master.synapticon.com_ecc/local.motion-master.synapticon.com.key)"
-
-      # Publish the fresh cert/key as assets on a rolling release with a fixed tag, so a running
-      # Motion Master can always fetch the current cert from a stable URL — independent of app
+      # Publish the fresh cert/key as assets on a rolling release with a fixed tag — the single
+      # source of truth for the certificate. Both the running binary's startup self-heal and every
+      # build-time bake (Dockerfile, release.yml) fetch from this stable URL, independent of app
       # releases (which may be months apart, by which point their bundled cert would have expired):
       #   https://github.com/synapticon/motion-master/releases/download/tls-cert/cert.pem
       #   https://github.com/synapticon/motion-master/releases/download/tls-cert/key.pem

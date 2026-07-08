@@ -79,3 +79,8 @@ Testing/
 # Node / pnpm (root workspace lives here; see pnpm-workspace.yaml)
 node_modules/
 .pnpm-store/
+
+# TLS certificates / private keys — never commit these (they belong in the rolling tls-cert
+# release; a stray repo-root cert.pem is also the Docker bind-mount footgun, see .dockerignore).
+*.pem
+*.key

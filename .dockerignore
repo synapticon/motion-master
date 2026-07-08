@@ -4,3 +4,9 @@
 .git/
 !.git/modules/
 build/
+
+# Never let a repo-root cert.pem/key.pem enter the build context — the image bakes the cert by
+# fetching it from the rolling tls-cert release (see Dockerfile). Excluding them also defuses the
+# Docker footgun where `-v "$(pwd)/cert.pem:..."` with no local file auto-creates a directory here.
+cert.pem
+key.pem

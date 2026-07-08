@@ -77,19 +77,16 @@ Motion Master also runs as a container image. Building the image and publishing 
 
 **TLS certificates**
 
-Release images have `cert.pem`/`key.pem` baked in (CI places them at the repo root before `docker build`). Developer images built from source fall back to the acme.sh cert or a self-signed cert. The discovery order is the same as `tools/run.sh`:
+Every image bakes `cert.pem`/`key.pem` in at build time by fetching them from the rolling `tls-cert` release (see [Development → Docker image](#docker-image)); an image built offline ships with empty placeholders and self-heals on start instead. The runtime discovery order is the same as `tools/run.sh`:
 
 ```bash
-# Release image — bundled cert used automatically
+# Bundled cert used automatically
 docker run --rm --network host motion-master
 
-# Developer image — mount acme.sh cert from host (no browser warning)
+# Mount an acme.sh cert from the host instead (e.g. for a locally-issued cert)
 docker run --rm --network host \
   -v "$HOME/.acme.sh/local.motion-master.synapticon.com_ecc:/root/.acme.sh/local.motion-master.synapticon.com_ecc:ro" \
   motion-master
-
-# Developer image — self-signed fallback (browser security exception required)
-docker run --rm --network host motion-master
 ```
 
 **Updating an expired cert on an older image**
@@ -290,7 +287,7 @@ git submodule update --init --recursive
 docker build -t motion-master .
 ```
 
-Developer images built this way have **no** baked-in Let's Encrypt cert — they fall back to a mounted acme.sh cert or a self-signed cert (release CI bakes the real cert in at the repo root before `docker build`). See [Installation → Docker](#docker) for running the image, the cert discovery order, and the `--cap-add` flags.
+The build fetches the current `cert.pem`/`key.pem` from the rolling `tls-cert` release and bakes them in — the same single source the running binary's self-heal uses, so no secrets are involved. An offline build bakes empty placeholders instead; the container then self-signs and the startup self-heal fetches a real cert on first run. See [Installation → Docker](#docker) for running the image, the cert discovery order, and the `--cap-add` flags.
 
 **Publishing to Docker Hub**
 
@@ -458,7 +455,7 @@ The `v*` tag builds the platform binaries **and** publishes `@synapticon/motion-
 | `build-macos-arm64.yml` | push / PR to `main` | Build & test (macOS Apple Silicon) |
 | `build-windows-x64.yml` | push / PR to `main` | Build & test (Windows x64) |
 | `lint.yml` | push / PR to `main` | clang-format + cpplint checks |
-| `cert-renewal.yml` | 1st of every month | Renew Let's Encrypt cert via acme-dns; update `TLS_CERT` / `TLS_KEY` secrets |
-| `release.yml` | `v*` tag push | Build all platforms, bundle cert + key from secrets, publish GitHub Release with `.tar.gz`, `.deb`, `.rpm` (Linux), `.zip` (Windows), and `.tar.gz` (macOS arm64) |
+| `cert-renewal.yml` | 1st of every month | Renew Let's Encrypt cert via acme-dns; publish it to the rolling `tls-cert` release |
+| `release.yml` | `v*` tag push | Build all platforms, bundle cert + key from the rolling `tls-cert` release, publish GitHub Release with `.tar.gz`, `.deb`, `.rpm` (Linux), `.zip` (Windows), and `.tar.gz` (macOS arm64) |
 
 The vcpkg cache key is OS + `vcpkg.json` hash. The first run after a dependency change rebuilds from source; subsequent runs restore from cache.

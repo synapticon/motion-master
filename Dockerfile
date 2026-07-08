@@ -17,8 +17,8 @@
 #
 # TLS certificate discovery order (same as tools/run.sh):
 #   1. CERT / KEY env vars — explicit override, highest priority
-#   2. cert.pem / key.pem baked into the image — present on release images
-#      (CI places them at the repo root before docker build)
+#   2. cert.pem / key.pem baked into the image — fetched from the rolling tls-cert
+#      release at build time (empty only if that build ran offline)
 #   3. ~/.acme.sh/local.motion-master.synapticon.com_ecc/ — mount from host
 #      for developer builds:
 #        docker run --rm --network host \
@@ -96,11 +96,17 @@ ENV CC=gcc-14 CXX=g++-14
 WORKDIR /src
 COPY . .
 
-# cert.pem / key.pem are not committed to git. In release builds they are
-# placed at the repo root by CI before docker build and end up here. In
-# developer builds they are absent; create empty placeholders so the COPY
-# in the runtime stage always has a source file.
-RUN [ -f cert.pem ] || touch cert.pem; [ -f key.pem ] || touch key.pem
+# cert.pem / key.pem are excluded from the build context (.dockerignore). Bake the current keypair
+# by fetching it from the rolling `tls-cert` release — the single source of truth (the same URL the
+# running binary's self-heal uses). The keypair only authenticates local.motion-master.synapticon.com
+# (→ 127.0.0.1), so baking it in is safe. If the fetch fails (offline build), bake empty placeholders
+# instead: the entrypoint self-signs and the binary's startup self-heal fetches a real cert on first run.
+RUN base=https://github.com/synapticon/motion-master/releases/download/tls-cert; \
+    curl -fsSL "$base/cert.pem" -o cert.pem.new && curl -fsSL "$base/key.pem" -o key.pem.new \
+      && mv cert.pem.new cert.pem && mv key.pem.new key.pem \
+      || echo "cert fetch failed — baking empty placeholder (runtime self-heal fetches on start)"; \
+    rm -f cert.pem.new key.pem.new; \
+    [ -f cert.pem ] || : > cert.pem; [ -f key.pem ] || : > key.pem
 
 # vcpkg binary cache is reused across image rebuilds when building with BuildKit.
 RUN --mount=type=cache,target=/root/.cache/vcpkg/archives \
@@ -128,6 +134,8 @@ RUN ldconfig
 
 WORKDIR /opt/motion-master
 COPY --from=build /src/build/x64-linux-release/apps/motion_master/motion-master .
+# Bake the cert/key fetched in the build stage (empty if that build ran offline).
+COPY --from=build /src/cert.pem /src/key.pem ./
 
 # 61447 = HTTP API, 62281 = WebSocket (separate loop/port so a slow HTTP request can't
 # stall the monitoring/control stream).

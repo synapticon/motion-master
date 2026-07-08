@@ -42,13 +42,11 @@ jobs:
         run: cmake --build --preset x64-linux-release
 
       - name: Bundle TLS certificate and key
-        env:
-          TLS_CERT: ${{ secrets.TLS_CERT }}
-          TLS_KEY: ${{ secrets.TLS_KEY }}
         run: |
           dir=build/x64-linux-release/apps/motion_master
-          echo "$TLS_CERT" > "$dir/cert.pem"
-          echo "$TLS_KEY"  > "$dir/key.pem"
+          base=https://github.com/synapticon/motion-master/releases/download/tls-cert
+          curl -fsSL "$base/cert.pem" -o "$dir/cert.pem"
+          curl -fsSL "$base/key.pem"  -o "$dir/key.pem"
 
       - name: Package tarball
         run: |
@@ -105,13 +103,11 @@ jobs:
 
       - name: Bundle TLS certificate and key
         shell: bash
-        env:
-          TLS_CERT: ${{ secrets.TLS_CERT }}
-          TLS_KEY: ${{ secrets.TLS_KEY }}
         run: |
           dir=build/x64-windows-release/apps/motion_master
-          echo "$TLS_CERT" > "$dir/cert.pem"
-          echo "$TLS_KEY"  > "$dir/key.pem"
+          base=https://github.com/synapticon/motion-master/releases/download/tls-cert
+          curl -fsSL "$base/cert.pem" -o "$dir/cert.pem"
+          curl -fsSL "$base/key.pem"  -o "$dir/key.pem"
 
       - name: Package zip
         shell: pwsh
@@ -167,13 +163,11 @@ jobs:
         run: cmake --build --preset arm64-osx-release
 
       - name: Bundle TLS certificate and key
-        env:
-          TLS_CERT: ${{ secrets.TLS_CERT }}
-          TLS_KEY: ${{ secrets.TLS_KEY }}
         run: |
           dir=build/arm64-osx-release/apps/motion_master
-          echo "$TLS_CERT" > "$dir/cert.pem"
-          echo "$TLS_KEY"  > "$dir/key.pem"
+          base=https://github.com/synapticon/motion-master/releases/download/tls-cert
+          curl -fsSL "$base/cert.pem" -o "$dir/cert.pem"
+          curl -fsSL "$base/key.pem"  -o "$dir/key.pem"
 
       - name: Package tarball
         run: |

@@ -67,23 +67,26 @@ ResolvedCert resolveCertPaths(const std::string& configCertPath, const std::stri
                               const std::filesystem::path& defaultCertPath,
                               const std::filesystem::path& defaultKeyPath);
 
-/// @brief Assess the served TLS certificate and refresh it if missing or expired (the startup
-///        "cert self-heal").
+/// @brief Assess the served TLS certificate and refresh it if missing, expired, or expiring soon
+///        (the startup "cert self-heal").
 ///
-/// Inspects @p certPath: a missing cert or an expired one triggers a fetch from @p certUrl /
-/// @p keyUrl via @c fetchAndSwapCert; a valid cert is left alone (an imminent expiry only warns).
-/// The outcome is logged. When @p autoUpdate is false no fetch is attempted.
+/// Inspects @p certPath: a missing cert, an expired one, or one expiring within
+/// @c kCertExpiryWarningDays triggers a fetch from @p certUrl / @p keyUrl via @c fetchAndSwapCert;
+/// a cert with ample life left is left alone, so a healthy boot makes no network call. Refreshing
+/// on imminent expiry — not just after it lapses — lets an ephemeral container (and the Docker
+/// entrypoint's 1-day self-signed fallback, which reads as expiring soon) self-heal to a fresh cert
+/// on start. The outcome is logged. When @p autoUpdate is false no fetch is attempted.
 ///
 /// The fatal case is "no certificate that can be served": the cert is missing and either fetching
-/// is disabled or the fetch failed. A present-but-expired cert is a degraded success — it still
-/// binds TLS (browsers can click through), so it is served with a warning rather than failing.
+/// is disabled or the fetch failed. A present cert (expired or expiring) is a degraded success — it
+/// still binds TLS, so it is served rather than failing when the fetch cannot run or fails.
 ///
 /// @param certPath   Path to the served certificate (overwritten on a successful fetch).
 /// @param keyPath    Path to the served private key (overwritten on a successful fetch).
-/// @param autoUpdate Whether a missing/expired cert may be fetched.
+/// @param autoUpdate Whether a missing/expired/expiring cert may be fetched.
 /// @param certUrl    Source URL for the certificate fetch.
 /// @param keyUrl     Source URL for the private-key fetch.
-/// @return Empty on success (including the expired-but-served degraded case), or an error string
+/// @return Empty on success (including the present-but-served degraded case), or an error string
 ///         when TLS cannot be served at all.
 std::expected<void, std::string> healCertIfNeeded(const std::string& certPath,
                                                   const std::string& keyPath, bool autoUpdate,

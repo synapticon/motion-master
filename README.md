@@ -94,7 +94,7 @@ docker run --rm --network host motion-master
 
 **Updating an expired cert on an older image**
 
-The bundled cert is renewed monthly, but an older image keeps its original cert. By default the container self-heals: if the baked-in cert is expired at startup it fetches a fresh one from the rolling release before serving (set `"tls": { "autoUpdate": false }` in a mounted config to disable, e.g. for air-gapped hosts). To pin your own cert instead, override it at runtime — the volume mount shadows the baked-in file:
+The bundled cert is renewed monthly, but an older image keeps its original cert. By default the container self-heals: if the baked-in cert is missing, expired, or expiring soon at startup it fetches a fresh one from the rolling release before serving (set `"tls": { "autoUpdate": false }` in a mounted config to disable, e.g. for air-gapped hosts). To pin your own cert instead, override it at runtime — the volume mount shadows the baked-in file:
 
 ```bash
 docker run --rm --network host \
@@ -251,7 +251,7 @@ It looks for a certificate in this order:
 2. `~/.acme.sh/local.motion-master.synapticon.com_ecc/` — if you have `acme.sh` installed locally with the Let's Encrypt cert (no browser warning)
 3. Self-signed fallback — generated on the fly; requires accepting a browser security exception once per server restart
 
-If the cert is missing or already expired at startup, the binary fetches a fresh one from the rolling release and installs it before serving (disable by setting `tls.autoUpdate` to `false` in the config). You can also refresh on demand — `motion-master --update-cert` (terminal) or the **Refresh certificate** button on the PWA's Connection page (`POST /api/cert/refresh`). The cert is rotated monthly and published at a stable URL, decoupled from app releases:
+If the cert is missing, expired, or expiring soon at startup, the binary fetches a fresh one from the rolling release and installs it before serving (disable by setting `tls.autoUpdate` to `false` in the config). You can also refresh on demand — `motion-master --update-cert` (terminal) or the **Refresh certificate** button on the PWA's Connection page (`POST /api/cert/refresh`). The cert is rotated monthly and published at a stable URL, decoupled from app releases:
 
 ```
 https://github.com/synapticon/motion-master/releases/download/tls-cert/{cert,key}.pem
@@ -294,7 +294,7 @@ Developer images built this way have **no** baked-in Let's Encrypt cert — they
 
 **Publishing to Docker Hub**
 
-Publish the image to a personal Docker Hub account (`markosankovic/motion-master` in the example) so it can be pulled on other machines.
+`tools/docker-build.sh` builds the image from the current `VERSION` and tags it with the **bare** version (Docker convention — no `v` prefix) plus a rolling tag: `latest` for a stable release, or `next` for a prerelease (a `-` in the version, e.g. `6.0.0-alpha.34`). It defaults to the `markosankovic/motion-master` repository; override with an argument or the `IMAGE` env var.
 
 ```bash
 # 1. Authenticate — use a Docker Hub access token, not your password.
@@ -303,17 +303,18 @@ echo "$DOCKERHUB_TOKEN" | docker login -u markosankovic --password-stdin
 #    (or interactively, pasting the token at the password prompt)
 docker login -u markosankovic
 
-# 2. Build and tag in one step (VERSION = the repo's current version).
-DOCKER_BUILDKIT=1 docker build \
-  -t markosankovic/motion-master:6.0.0-alpha.31 \
-  -t markosankovic/motion-master:latest .
+# 2. Build + tag from the current VERSION (version tag + latest/next).
+./tools/docker-build.sh
+#    …or publish under a different repository:
+IMAGE=myuser/motion-master ./tools/docker-build.sh
 
-# 3. Push both tags. The repo is auto-created (public) on first push.
-docker push markosankovic/motion-master:6.0.0-alpha.31
-docker push markosankovic/motion-master:latest
+# 3. Push both tags — the script prints these exact commands for the built version.
+#    The repo is auto-created (public) on first push.
+docker push markosankovic/motion-master:6.0.0-alpha.34
+docker push markosankovic/motion-master:next
 ```
 
-Tag with the version (matching the repo `VERSION`) so a specific build is identifiable — don't rely on `latest` alone. Already-built `motion-master` image? Re-tag it instead of rebuilding: `docker tag motion-master markosankovic/motion-master:latest`.
+Prereleases move `next`, not `latest`, so a plain `docker pull markosankovic/motion-master` (which resolves `latest`) always lands on the newest **stable** image.
 
 ### Extending the API (C++ routes)
 
@@ -353,6 +354,7 @@ All scripts default to the `x64-linux-debug` preset. Pass a preset name as the f
 | `./tools/clean.sh` | Remove the build directory |
 | `./tools/bump-version.sh <version>` | Bump the project semver everywhere (see [Versioning](#versioning)) |
 | `./tools/package.sh [preset]` | Build `.deb` and `.rpm` packages (requires `cert.pem`/`key.pem` in the build dir) |
+| `./tools/docker-build.sh [image]` | Build + tag the Docker image from the current `VERSION` (version tag + `latest`/`next`) |
 
 #### Code Quality Tools
 

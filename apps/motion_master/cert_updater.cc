@@ -215,21 +215,26 @@ std::expected<void, std::string> healCertIfNeeded(const std::string& certPath,
                                                   const std::string& keyPath, bool autoUpdate,
                                                   const std::string& certUrl,
                                                   const std::string& keyUrl) {
-  // Assess the served cert. A missing cert means we cannot serve TLS at all; an expired cert still
-  // binds (browsers can bypass) but should be refreshed; a valid cert is left alone.
-  bool needFetch = false;
+  // Assess the served cert and refresh it when it is missing, expired, or expiring soon. A missing
+  // cert means we cannot serve TLS at all; an expired or soon-to-expire cert still binds (and stays
+  // served if the fetch fails), but is refreshed proactively so an ephemeral container — or the
+  // entrypoint's 1-day self-signed fallback, which reads as expiring soon — self-heals to a fresh
+  // cert on start. A cert with ample life left is left alone, so a healthy boot makes no network
+  // call.
   const bool certMissing = !std::filesystem::exists(certPath) || !std::filesystem::exists(keyPath);
+  bool expired = false;
+  bool expiringSoon = false;
   if (certMissing) {
-    needFetch = true;
     spdlog::warn("No TLS certificate at {}", certPath);
   } else if (auto info = readCertInfo(certPath)) {
     const auto now = std::chrono::system_clock::now();
     const auto daysRemaining =
         std::chrono::duration_cast<std::chrono::hours>(info->notAfter - now).count() / 24;
     if (now >= info->notAfter) {
-      needFetch = true;
+      expired = true;
       spdlog::error("TLS certificate EXPIRED ({} days ago)", -daysRemaining);
     } else if (daysRemaining < kCertExpiryWarningDays) {
+      expiringSoon = true;
       spdlog::warn("TLS certificate expires in {} days", daysRemaining);
     } else {
       spdlog::info("TLS certificate valid for {} more days", daysRemaining);
@@ -238,7 +243,7 @@ std::expected<void, std::string> healCertIfNeeded(const std::string& certPath,
     spdlog::warn("Could not read TLS certificate expiry: {}", info.error());
   }
 
-  if (!needFetch) {
+  if (!certMissing && !expired && !expiringSoon) {
     return {};
   }
 
@@ -246,11 +251,11 @@ std::expected<void, std::string> healCertIfNeeded(const std::string& certPath,
     if (certMissing) {
       return std::unexpected("no certificate and cert auto-update is disabled — cannot serve TLS");
     }
-    spdlog::error("Certificate expired and auto-update disabled — serving the expired certificate");
+    spdlog::warn("Cert auto-update disabled — serving the current certificate as-is");
     return {};
   }
 
-  spdlog::warn("Fetching fresh TLS certificate from {}", certUrl);
+  spdlog::info("Fetching fresh TLS certificate from {}", certUrl);
   if (auto r = fetchAndSwapCert(certPath, keyPath, certUrl, keyUrl); r) {
     spdlog::info("Installed fresh TLS certificate at {}", certPath);
     return {};
@@ -258,7 +263,7 @@ std::expected<void, std::string> healCertIfNeeded(const std::string& certPath,
     return std::unexpected("certificate fetch failed and no local certificate exists: " +
                            r.error());
   } else {
-    spdlog::error("Certificate fetch failed: {} — serving the expired certificate", r.error());
+    spdlog::error("Certificate fetch failed: {} — serving the existing certificate", r.error());
     return {};
   }
 }

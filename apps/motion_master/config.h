@@ -41,7 +41,7 @@ struct TlsConfig {
   /// the rolling release on startup if missing or expired (see @c autoUpdate).
   std::string certPath;
   std::string keyPath;     ///< "" = auto-discover, paired with @c certPath.
-  bool autoUpdate = true;  ///< Fetch a fresh cert when missing/expired (false ⇒ --no-cert-update).
+  bool autoUpdate = true;  ///< Fetch a fresh cert when missing/expired (false ⇒ no auto-update).
 };
 
 /// @brief @c "gameLoop" block — the real-time cyclic loop.

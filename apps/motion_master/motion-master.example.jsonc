@@ -99,7 +99,7 @@
     "certPath": "cert.pem",
     "keyPath": "key.pem",
     // Auto-fetch a fresh certificate at startup when the current one is missing or expired.
-    // Set false for air-gapped installs (equivalent to the --no-cert-update flag).
+    // Set false for air-gapped installs.
     "autoUpdate": true
   }
 }

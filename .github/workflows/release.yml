@@ -71,7 +71,7 @@ jobs:
             motion-master-*-amd64.deb
             motion-master-*-x86_64.rpm
 
-  # ── Windows x64: NSIS installer (.exe) ─────────────────────────────────────
+  # ── Windows x64: .zip (exe + vcpkg runtime DLLs) ───────────────────────────
   windows:
     runs-on: windows-latest
     steps:

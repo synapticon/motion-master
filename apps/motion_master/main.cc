@@ -147,8 +147,8 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  // Assess the served cert and self-heal it (fetch if missing/expired) unless --no-cert-update is
-  // set. healCertIfNeeded logs the outcome; it errors only when TLS cannot be served at all.
+  // Assess the served cert and self-heal it (fetch if missing/expired) unless tls.autoUpdate is
+  // false. healCertIfNeeded logs the outcome; it errors only when TLS cannot be served at all.
   if (!mm::healCertIfNeeded(opts.config.tls.certPath, opts.config.tls.keyPath,
                             opts.config.tls.autoUpdate, opts.certUrl, opts.keyUrl)) {
     return 1;

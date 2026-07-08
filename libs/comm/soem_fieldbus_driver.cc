@@ -190,6 +190,12 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
     ecx_FPWR(&ctx_->port, ctx_->slavelist[i].configadr, ECT_REG_FMMU0, sizeof(zeroFmmus), zeroFmmus,
              EC_TIMEOUTRET3);
   }
+  // TI PRU-ICSS ESCs cannot process SOEM's combined read+write LRW process-data datagram; mark
+  // them so the map aggregates split LRD/LWR instead. Must run before ecx_config_map_group, which
+  // reads each slave's blockLRW to build the group's send plan.
+  if (auto r = blockLrwOnPruIcssSlaves(); !r) {
+    return std::unexpected(std::move(r.error()));
+  }
   const int usedSize = ecx_config_map_group(ctx_.get(), map_, 0);
   if (usedSize <= 0) {
     return std::unexpected("ecx_config_map_group mapped no process data");
@@ -261,6 +267,28 @@ std::expected<void, std::string> SoemFieldbusDriver::deactivateMailboxStatusFmmu
       }
       spdlog::debug("Deactivated SOEM mailbox-status FMMU{} on slave {}", j, i);
       break;  // at most one such FMMU per slave
+    }
+  }
+  return {};
+}
+
+std::expected<void, std::string> SoemFieldbusDriver::blockLrwOnPruIcssSlaves() {
+  // The ESC type lives in register 0x0000; its low byte identifies the controller family. 0x90 is
+  // the TI PRU-ICSS soft-ESC (e.g. SOMANET "Jasper"). Reading it live per slave costs one FPRD each
+  // and only happens on a (re)map, not on the RT cycle.
+  for (int i = 1; i <= ctx_->slavecount; ++i) {
+    ec_slavet& s = ctx_->slavelist[i];
+    uint16_t escType = 0;
+    if (ecx_FPRD(&ctx_->port, s.configadr, ECT_REG_TYPE, sizeof(escType), &escType,
+                 EC_TIMEOUTRET3) <= 0) {
+      return std::unexpected(std::format("failed to read ESC type register of slave {}", i));
+    }
+    if ((escType & 0x00ffu) == 0x90u) {
+      s.blockLRW = 1;  // ecx_config_map_group folds this into grouplist[0].blockLRW
+      spdlog::info(
+          "Slave {}: TI PRU-ICSS ESC (type 0x90) detected; using split LRD/LWR process data "
+          "instead of combined LRW",
+          i);
     }
   }
   return {};

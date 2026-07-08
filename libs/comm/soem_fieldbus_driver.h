@@ -183,6 +183,23 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// A no-op when @c mailboxStatusFmmu_ is set. Caller must hold @c socketMutex_.
   std::expected<void, std::string> deactivateMailboxStatusFmmus();
 
+  /// @brief Marks every TI PRU-ICSS slave to use split LRD/LWR process data instead of combined
+  /// LRW.
+  ///
+  /// SOEM maps one logical range covering both the output and input SyncManagers and exchanges it
+  /// with a single @c LRW that reads and writes in one pass. A TI PRU-ICSS ESC (ESC type register
+  /// 0x0000 == 0x90) cannot process that combined datagram: almost every cyclic frame dies in the
+  /// ESC processing unit (error counter 0x030C saturates), the working counter stays 0, and
+  /// monitoring appears frozen — even though register reads (FPRD) and the AL state machine work
+  /// normally. Reading its ESC type before the map and setting @c blockLRW makes
+  /// @c ecx_config_map_group aggregate the slave into the group's blockLRW count, so the send path
+  /// emits split @c LRD (inputs) + @c LWR (outputs) datagrams instead. SOEM emulates the LRW
+  /// working-counter accounting for LWR (output WKC counts ×2), so @c processDataLayout's
+  /// @c expectedWkc = outputsWKC*2 + inputsWKC stays correct. Targeted to type 0x90 only — every
+  /// other ESC keeps combined LRW, so there is no behaviour change for existing setups. Must be
+  /// called before @c ecx_config_map_group, under @c socketMutex_.
+  std::expected<void, std::string> blockLrwOnPruIcssSlaves();
+
   std::string ifname_;
   // Keep SOEM 2.0's mailbox-status FMMU active (see the constructor). Default false: the FMMU is
   // deactivated after every map by deactivateMailboxStatusFmmus().

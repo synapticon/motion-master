@@ -74,19 +74,14 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 10 * 1024 * 1024,
         runtimeCaching: [
           {
-            urlPattern: /^https:\/\/local\.motion-master\.synapticon\.com:61447\//,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'mm-api-cache',
-              networkTimeoutSeconds: 5,
-              expiration: {
-                maxEntries: 100,
-                maxAgeSeconds: 60 * 60,
-              },
-              cacheableResponse: {
-                statuses: [0, 200],
-              },
-            },
+            // Never serve API responses from cache. This is a live motion-control
+            // app: a cached response outliving the server is actively wrong. It
+            // also broke liveness detection — a NetworkFirst cache fell back to the
+            // last `200 /api/version` when the server was down, so the connection
+            // indicator stayed green after the process stopped. The app shell (JS/
+            // CSS/HTML) is still precached, so offline load of the UI is unaffected.
+            urlPattern: /^https:\/\/local\.motion-master\.synapticon\.com:61447\/api\//,
+            handler: 'NetworkOnly',
           },
         ],
       },

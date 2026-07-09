@@ -1356,4 +1356,40 @@ for (size_t a = 0; a < prog->axes.size(); ++a) {                        // ONE c
 
 **Everything else carries over unchanged** from the Trajectory / SineWave notes: one fixed-membership `TrajectoryCyclicTask` holding only `DeviceManager&`, registered in `main.cc` and a no-op until a program is active; per-cycle `findDevice()` re-resolution (never cache a `Device*`/view across a rescan); the lock-free `writePdo` output path; off-RT completion via a `completedGeneration` flip observed by a non-RT watcher (folded into the `MonitoringManager` sampler or the planned `NotificationBus` — RT does no I/O); `mlock`'d immutable buffers; and stop/rescan safety (a program must be stopped before a rescan, and the per-cycle `findDevice()` sits behind the same `scan()`/`reset()` drain the `ProcessData` path uses). **Ownership arbitration** is still required and is exactly what disjointness buys: within a program the coordinator is the sole writer of each axis's controlword + setpoints, and an active program gates out an HTTP `enable()` walk on the same device (same handshake as SineWave, layered on top of the RT-safe accessor from the RT-callable-view note).
 
-**The model in one line.** *Every RT control block is a depth-1 latest-wins mailbox on `DeviceManager`/`Device` (never a queue, never a handle to the task) — and a coordinated multi-axis move is one such mailbox holding a single immutable program with a column per axis and one shared cursor, launched by a coordinator that composes per-axis views off-RT; synchrony is by construction because there is exactly one cursor, and chaining, if ever needed, is a command queue added beside the slot, not a redesign of it.*
+**Outbound: notifying clients about execution — the same discipline, reversed.** An RT task must **never** call `WebSocketServer` directly: it runs its own uWS loop/thread (port 62281), a publish allocates and can block, and uWS is only safely callable from its own loop (via `loop->defer(...)`) — all three forbidden on RT. The `CyclicTask` contract already mandates the fix: *"Any async work (e.g. pushing data to a WebSocket) must be handed off to another thread via a lock-free channel."* So RT stores a **raw signal** — scalars only, no `std::format`/json/string — into a lock-free structure and moves on; an **off-RT watcher** drains it, builds the JSON, and calls `WebSocketServer::publish` (which itself `defer`s onto the uWS loop). The watcher is the reverse-direction analogue of the launcher — folded into the `MonitoringManager` sampler thread or the planned `NotificationBus`, never a handle from the task to the server. Three tiers, chosen by event semantics — the same depth-1-vs-FIFO fork as the inbound side, mirrored:
+
+1. **Lifecycle status (started / progress / done / faulted / aborted) → depth-1 latest-wins atomics on the control block.** RT flips `progress` / `status` / a bumped `statusGen`; the watcher polls and emits one notification *on change*. A dropped intermediate is harmless — newest is current. This is the inbound mailbox running RT→off-RT; the same `MotionProgram` struct carries both directions (different fields, different writers).
+2. **Per-cycle telemetry ("what is the drive doing right now") → not a new channel at all; it is already monitoring.** The trajectory's setpoints/actuals land in the recorder ring every cycle and `MonitoringManager` already streams every recorded cycle losslessly. A live plot of the move is a *monitoring subscription* on those objects — the task sends nothing.
+3. **Must-not-drop discrete events (each waypoint reached, distinct fault codes) → an SPSC ring the RT task produces into.** The one case that warrants a queue: each event is a distinct occurrence that latest-wins would collapse. RT pushes fixed-size records (event id, cycle, axis, code — scalars), the watcher drains and emits one message per record. Mirror of the "chaining needs a queue" escape hatch, on the outbound side; only when latest-wins genuinely loses information.
+
+End-to-end for tier 1 — RT stores scalars, the off-RT watcher does all formatting and the publish:
+
+```cpp
+struct MotionProgram {                    // ... axes, setpoints, cycles, generation as above ...
+  std::atomic<size_t>   progress{0};      // RT: current cycle index          (latest-wins)
+  std::atomic<uint32_t> status{0};        // RT: 0=running 1=done 2=faulted    (latest-wins)
+  std::atomic<uint64_t> statusGen{0};     // RT: bumped on each status change so the watcher wakes
+};
+
+// RT — TrajectoryCyclicTask::execute(), per active program: store scalars only, NEVER publish.
+prog->progress.store(cur, std::memory_order_relaxed);
+if (faulted)                      { prog->status.store(2, relaxed); prog->statusGen.fetch_add(1, release); }
+else if (cur + 1 >= prog->cycles) { prog->status.store(1, relaxed); prog->statusGen.fetch_add(1, release); }
+
+// OFF-RT — watcher on MonitoringManager's thread (or a small poller). ALL json + publish happens here.
+void TrajectoryWatcher::poll() {                        // ~every 20 ms, off-RT
+  for (size_t i = 0; i < pool_.size(); ++i) {
+    const auto* prog = pool_[i].load(std::memory_order_acquire);
+    if (!prog) continue;
+    uint64_t gen = prog->statusGen.load(std::memory_order_acquire);
+    if (gen == lastSeenGen_[i]) continue;               // unchanged → no message
+    lastSeenGen_[i] = gen;
+    publish_("trajectory", nlohmann::json{               // built OFF-RT; publish_ == WebSocketServer::publish
+      {"type", "notification"},
+      {"data", {{"event", statusName(prog->status.load(relaxed))},
+                {"progress", prog->progress.load(relaxed)}, {"cycles", prog->cycles}}}});
+  }
+}
+```
+
+**The model in one line.** *Every RT control block is a depth-1 latest-wins mailbox on `DeviceManager`/`Device` (never a queue, never a handle to the task) — and a coordinated multi-axis move is one such mailbox holding a single immutable program with a column per axis and one shared cursor, launched by a coordinator that composes per-axis views off-RT; synchrony is by construction because there is exactly one cursor, chaining (if ever needed) is a command queue added beside the slot rather than a redesign of it, and client notifications run the same mailbox in reverse — RT stores a raw status scalar, an off-RT watcher formats and publishes it, so the RT thread never touches the WebSocket.*

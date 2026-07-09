@@ -1216,3 +1216,92 @@ Two cert fixes, surfaced by a Docker report: a container logged `TLS certificate
 **Full retirement of the `TLS_CERT`/`TLS_KEY` secrets and the `GH_PAT_SECRETS` PAT.** They duplicated the rolling `tls-cert` release — both were written by the same `cert-renewal.yml` run — so the secret path was redundant. The **rolling release is now the single source of truth**: `cert-renewal.yml` only publishes there (default `GITHUB_TOKEN`, `contents: write` — no PAT); `release.yml`'s three build legs `curl` it into the artifacts instead of `echo`ing the secrets; the Dockerfile `curl`s it at build. The `gh secret set` step is gone. Because the binary now self-heals at runtime regardless of install method, a baked cert is just a fresh offline seed, not load-bearing — the hybrid we settled on (bake for offline + refresh when stale). Supersedes the secret-based description in the CI section above and in Session 2026-06-06. The now-unused `TLS_CERT`/`TLS_KEY` secrets and `GH_PAT_SECRETS` PAT can be deleted from repo settings.
 
 Also this session: `tools/docker-build.sh` (build + tag from `VERSION`; bare version + `latest`/`next` by stable/prerelease) and the README restructure (running vs. development, config-driven CLI, real platform/artefact set).
+
+---
+
+## Session 2026-07-09 — Trajectory playback: a fixed-membership RT task fed a precomputed setpoint buffer (design)
+
+**Extends** *Session 2026-06-05 — RT tasks are fixed-membership; off-RT procedures are background jobs*. A `TrajectoryTask` that plays back a vector of position points one-per-cycle (chirp, step sequence, replay, arbitrary offline-generated signal) is a textbook **Category-1 RT cyclic procedure** — it writes a fresh target into the output region every cycle, phase-locked to the bus — and so it obeys every rule that session set: **one fixed-membership `CyclicTask`** registered before `run()` in `main.cc` alongside `ProcessDataTask`, a **no-op per device until activated**, iterating devices each cycle and holding only `DeviceManager&`; a **per-device control block** flipped active/idle by the HTTP thread; **the launch lives on the view** (`Cia402Drive::startTrajectory(...)`/`stopTrajectory()`), which does the op-mode + enable handshake synchronously off-RT so the RT side has no state-machine logic and no error branch; and the fixed pool is **one control-block slot per `Device`**. This is the SineWave design with the generator swapped for a buffer reader — the trajectory is *precomputed* rather than computed from scalar params each cycle.
+
+**The one thing that changes: a `SeqLock<T>` cannot carry the control block, because the payload is a `vector`, not scalars.** SineWave's transport is `SeqLock<SineWaveParams>`, which requires `T` trivially copyable (a handful of doubles). A trajectory is an arbitrarily long `std::vector<int32_t>` — not trivially copyable, and far too large to copy on every RT `load()` even if it were. So swap the transport for the **atomic-raw-pointer + retained-generations** idiom already proven in `ProcessData` (`process_data.h`: `std::atomic<const ProcessImage*> image` + `std::vector<std::shared_ptr<const ProcessImage>> generations`; Session 2026-06-08). It is the *only* publish mechanism in this tree that is genuinely wait-free on the reader side — deliberately **not** `std::atomic<std::shared_ptr<>>`, whose `load()` is not lock-free on libstdc++ (spinlock / split-refcount fallback) and would inject jitter or a lock onto the RT thread.
+
+```cpp
+struct TrajectoryBuffer {                 // immutable once published; mlock'd off-RT
+  std::vector<int32_t> points;            // one target position (0x607A) per cycle
+  enum class EndPolicy : uint8_t { HoldLast, Stop, Loop } endPolicy;
+  uint64_t generation;                    // bumped per publish so RT detects a new buffer
+};
+
+struct TrajectoryControl {                                    // per-device, unique_ptr on Device
+  std::atomic<const TrajectoryBuffer*> buffer{nullptr};       // wait-free load on RT
+  std::atomic<bool> active{false};
+  std::atomic<uint64_t> completedGeneration{0};               // RT → off-RT completion signal
+  std::vector<std::shared_ptr<const TrajectoryBuffer>> generations;  // keep-alive, control-plane only
+};
+```
+
+**The handoff, off-RT (`Cia402Drive::startTrajectory`, HTTP thread).** (1) Parse the JSON point array into `vector<int32_t>`, **bounded by a config max length** so the allocation is predictable and a client can't ask for gigabytes. (2) Build the `TrajectoryBuffer`, wrap in `shared_ptr<const>`, and **`mlock` its backing storage** — the RT thread reads it every cycle, so an unpageable buffer avoids fault-induced jitter (same reasoning as the mlock'd recorder ring, Session 2026-06-08). (3) Do the CSP + enable handshake synchronously on this off-RT thread — `setOperationMode(CSP)`, **seed the output setpoint from the current actual position** (`positionActualValue()` → stage 0x607A) so enabling causes no jump, then `enable(timeout)`; bail with an `expected` error on any failure, leaving RT untouched. (4) Retain the `shared_ptr` in `control.generations`, then publish: `buffer.store(ptr.get(), release)` → `active.store(true, release)`. By the time the RT task observes `active`, the drive is already `OperationEnabled` + CSP — exactly the SineWave invariant that keeps all validation on the launcher's `expected<>` path.
+
+**The handoff, RT (`TrajectoryTask::execute`, per device).** Re-resolve the `Device` via `DeviceManager::findDevice` each cycle (never cache across a rescan). `active.load(acquire)`; if false, skip. `buffer.load(acquire)` — the wait-free raw-pointer read; never dangling because the control plane retains it in `generations` until `reset()`/`scan()`, exactly as `ProcessData` retains superseded images. Keep the **playback cursor as RT-only scratch** (a member on the task, off the published block — the same rule that keeps SineWave's `phase_`/`center_` off its seqlock: the block is HTTP→RT only, readers must never see RT scribbling the cursor back), reset to 0 on a `generation` change. Write the current point via the existing lock-free output path `ProcessData::writePdo(slavePos, 0x607A, 0, bytes)` (Design B, Session 2026-06-05 — safe from RT). At end of buffer apply `endPolicy` and store `completedGeneration`. Ordering: runs *after* `ProcessDataTask` in registration order like SineWave (one cycle of staging latency — fine for a chirp; register before it only if same-cycle staging is worth the coupling).
+
+**Stop, completion, lifetime — all deferred to off-RT, none on the RT thread.** *Stop* is `active.store(false)` plus the launcher's off-RT disable walk (state changes are never done on RT); the buffer stays alive in `generations` until the next `reset()`/`scan()` so an in-flight RT cycle never reads freed memory. *Completion* can't be an RT notification (no I/O on RT), so RT only flips `completedGeneration`; an off-RT watcher (a small poller, or folded into the existing `MonitoringManager` sampler thread) observes it and emits the WebSocket notification and/or auto-disables — the job of the planned `NotificationBus`. *Rescan safety*: the control block dies with its `Device`, so a trajectory must be stopped before a rescan (like `stopExchange`), and the task's per-cycle `findDevice()` must sit behind the same `scan()`/`reset()` drain the `ProcessData` path relies on — the same open guard flagged for SineWave.
+
+**When the whole-buffer publish is wrong.** It fits a **finite, precomputed** signal — a 1 kHz chirp for a minute is ~240 KB, trivial. If the trajectory is **open-ended / streamed** (generated live, does not fit in memory), replace the single buffer with an **SPSC lock-free ring**: HTTP thread pushes chunks, RT pops one point per cycle, a low-water mark notifies off-RT to refill, with explicit underrun handling. More moving parts, and only worth it when the buffer genuinely cannot be materialised up front — not the case here, so start with the buffer publish.
+
+**The model in one line.** *Trajectory playback is SineWave with the per-cycle generator replaced by a cursor into a precomputed buffer; every fixed-membership / view-launched / one-slot-per-`Device` rule carries over unchanged, and the only substitution is the control-block transport — `SeqLock<scalars>` becomes atomic-pointer-publish-with-retained-generations because the payload is a `vector`.*
+
+## Session 2026-07-09 — The profile view is RT-callable: `Cia402Drive(device)->state()` works verbatim in RT and non-RT (design)
+
+**The non-negotiable requirement.** `createCia402Drive(device)->state()` — and every other profile operation (`setControlword`, `shutdown`/`switchOn`/`enableOperation`, `setOperationMode`, `setTargetPosition`, all the CiA402 bit work) — must run **from the same call site, unchanged, on both the RT loop and an HTTP thread.** The alternative is a second copy of the state machine, the controlword-bit composition, and the mode handshakes living inside every RT task — a large, drift-prone duplication of exactly the knowledge `Cia402Drive`/`SomanetDrive` exist to hold *once*. So the profile layer stays single-source and RT-safety is pushed *below* it, into the one seam every profile method already bottoms out in: `Device::readValue<T>` / `writeValue<T>`. This is what an RT `TrajectoryTask` / `SineWaveTask` uses to drive state instead of reaching for `ProcessData::writePdo(pos, 0x607A, 0, bytes)` raw (as the 2026-07-09 Trajectory session sketched) — the raw call works but bypasses the profile, which is the very thing we refuse to reimplement.
+
+**Why it isn't true yet** (this reconciles the aspirational claim in *Session 2026-06-05 — Design B*, which already said `readParameter`/`writeParameter` serve the value "identically from an HTTP handler or an RT task"). Two things make the current path unsafe to call from the RT loop:
+1. `Device::readParameter`/`writeParameter` take `parametersMutex_` (a blocking `std::mutex`) around the **whole** body (`device.cc:761`, `:873`) — a lock on the RT cycle, priority-inversion against the monitoring/refresher/control-plane threads. Forbidden by this codebase's own RT rules.
+2. `ProcessData::readPdo` returns `std::optional<std::vector<uint8_t>>` — a heap allocation per read, per cycle.
+
+And `DeviceParameter::value` cannot itself be the shared RT cell (the tempting "just read the value from memory" model): it is a `DeviceParameterValue` variant whose alternatives include `std::string`/`std::vector`, so a cross-thread read while the RT loop writes it is a torn variant — mismatched discriminant vs. payload (UB), or a string read mid-reallocation (use-after-free). That is exactly *why* the lock-free RT structures are the fixed-width atomic `outputSlots` and the POD recorder ring, never the parameter map. The value the RT reader wants already lives in memory — in the ring record (inputs) / staging slot (outputs) — just not in `->value`.
+
+**The design: dispatch by bus-state, not by thread.** Make `readValue<T>`/`writeValue<T>` choose the transport at runtime on a condition that is RT-safe *exactly when the RT task needs it* — "**is a live image published**" (the device is exchanging), **not** "am I the RT thread":
+
+```cpp
+template <typename T>
+std::expected<T, std::string> readValue(uint16_t idx, uint8_t sub) {
+  if (processData_) {                          // fast path — lock-free, alloc-free
+    alignas(T) std::byte buf[sizeof(T)];
+    if (readPdoFast(idx, sub, buf))            // ring (inputs) / slot (outputs); T known ⇒ no map lookup
+      return decodeScalar<T>(buf);             // LE decode, no heap
+  }
+  return readParameter(idx, sub) ...;          // slow path — SDO/cache; reachable only when NOT exchanging
+}
+```
+
+The RT trajectory/sine task only runs while the device is in OP, so it **always** takes the fast path and can never reach the SDO branch. Off-RT callers take the fast path when exchanging and the SDO branch only when offline. One method body, safe in both, by construction — and the whole `Cia402Drive`/`SomanetDrive` chain above it stays transport-agnostic and never learns which world it is in.
+
+**Three pieces to build.**
+1. **A non-allocating `readPdo` overload** — `bool ProcessData::readPdo(pos, idx, sub, std::span<uint8_t> out)` decoding ≤8 bytes into a caller buffer (re-checking the ring sequence for tear-safety, same as the vector overload today), sitting alongside the vector-returning one the HTTP path keeps.
+2. **Thin `Device` helpers `readPdoFast` / `stageOutput`** — declared in `device.h`, **defined in `device.cc`.** Non-inline on purpose: an inline fast path would force `device.h` to `#include process_data.h` and drag the heavy recorder/buffers into every `mm::node` consumer, breaking the "only device.cc pulls the buffers" encapsulation. The helpers touch **neither** `parameters_` **nor** `parametersMutex_` — they delegate straight to `readPdo`/`writePdo`.
+3. **The fast path lives in the typed templates** — in `readValue<T>`/`writeValue<T>`, because `T` is known there, so decoding/encoding needs no data-type lookup in the parameter map (the lookup is *what forces the lock* in the non-template path). The non-template `readParameter`/`writeParameter` keep their locked+cached+SDO body verbatim for generic HTTP handlers that don't know `T`. Every RT-relevant CiA402 accessor is already templated with a known type (`statusword`→`readValue<uint16_t>`, `setControlword`→`writeValue(...,uint16_t)`, `setTargetPosition`→`writeValue(...,int32_t)`, …), so they all inherit the fast path for free.
+
+**Two behaviour changes this forces — both accepted.**
+- *The health/WKC gate becomes advisory, not a diverter.* Today `readPdo` returns `nullopt` for inputs on a short working counter, so `readValue` falls through to a **blocking** SDO upload — fatal on RT. So the fast path serves the newest ring record **unconditionally while exchanging** (the freshest real value we have), and health/WKC is surfaced separately for the caller to react to, not used to silently divert into SDO. Off-RT effect: an exchanging-but-momentarily-unhealthy bus now serves the last recorded value instead of a fresh SDO upload — consistent with what the wire actually carried, and the price of one uniform call. Design B already made the analogous change for *output* read-back; this extends it to *inputs* on the fast path.
+- *The live fast path does not write the cache.* Storing the decoded value into `parameters_` (as `readParameter` does at `device.cc:777`) needs the lock. So after this lands `parameter(0x6041)->value` reflects the last *offline/SDO* value while `readValue<uint16_t>(0x6041,0)` reflects *live* — arguably more correct (cache = offline snapshot, ring = live truth), but a real shift for any code reading `->value` expecting freshness. Monitoring reads the ring, not the cache, so it is unaffected.
+
+**The boundary: only the *waiting* differs, never the profile logic.** Every atomic profile op is shared verbatim (state decode, all transitions, mode/setpoint writes, all the `kCommandMask` bit work — none of it touches threads or transport, it all bottoms out in `readValue`/`writeValue`). The **only** method that is not RT-callable is `enable()`, and not for a profile reason: it `sleep`-polls for OperationEnabled, and sleeping is a non-RT construct. On RT you do not reimplement it — you drive the same shared transition methods **one step per cycle**, keyed off `state()`:
+
+```cpp
+auto drive = createCia402Drive(device);        // same factory, same view, re-resolved each cycle
+switch (*drive->state()) {                      // same decode, RT and non-RT
+  case State::Fault:            drive->faultReset();          break;
+  case State::SwitchOnDisabled: drive->shutdown();            break;
+  case State::ReadyToSwitchOn:  drive->switchOn();            break;
+  case State::SwitchedOn:       drive->enableOperation();     break;
+  case State::OperationEnabled: drive->setTargetPosition(next); break;
+}
+```
+
+This is precisely what *Session 2026-06-05 — borrowed views* meant by "single-shot, here-and-now operations only; multi-cycle procedures belong in a `CyclicTask` that re-resolves its `Device` each cycle." The sleep-poll (`enable()`) vs. the cross-cycle step is *sequencing across time* — a few lines in the task — **not** a second copy of CiA402.
+
+**Ownership still has to be arbitrated (unchanged from SineWave/Trajectory).** RT-safety of `writeValue` does not remove the coordination problem: the controlword is one output object = one last-writer-wins `outputSlot`, so if an active RT task and an HTTP `enable()` walk both write `0x6040` they race. When a trajectory/sine task is active it must be the **sole writer** of that device's controlword + setpoints, gated by the per-device control block (Sessions 2026-07-09 Trajectory, and the SineWave design). That is a separate, still-required handshake layered *on top of* the RT-safe accessor.
+
+**Status.** Design agreed 2026-07-09; implementing in the next few days. Scope: the non-allocating `readPdo` overload + `readPdoFast`/`stageOutput` on `Device` + the fast-path branch in `readValue`/`writeValue`, with tests that a PDO read/write from a non-RT thread neither locks nor allocates, and that the SDO branch is unreachable while exchanging. No change to the borrowed-view model; `parametersMutex_` stays entirely off the RT path, so the recorder ring remains the single RT-written structure.
+
+**The model in one line.** *Push RT-safety down into `Device::readValue`/`writeValue` — dispatched by bus-state, fast path in the typed template, health advisory, cache untouched — and the entire `Cia402Drive`/`SomanetDrive` view runs verbatim in both worlds; the only thing an RT task writes itself is the sequencing (step-per-cycle instead of sleep-poll), never the profile.*

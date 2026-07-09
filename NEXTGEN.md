@@ -1305,3 +1305,55 @@ This is precisely what *Session 2026-06-05 — borrowed views* meant by "single-
 **Status.** Design agreed 2026-07-09; implementing in the next few days. Scope: the non-allocating `readPdo` overload + `readPdoFast`/`stageOutput` on `Device` + the fast-path branch in `readValue`/`writeValue`, with tests that a PDO read/write from a non-RT thread neither locks nor allocates, and that the SDO branch is unreachable while exchanging. No change to the borrowed-view model; `parametersMutex_` stays entirely off the RT path, so the recorder ring remains the single RT-written structure.
 
 **The model in one line.** *Push RT-safety down into `Device::readValue`/`writeValue` — dispatched by bus-state, fast path in the typed template, health advisory, cache untouched — and the entire `Cia402Drive`/`SomanetDrive` view runs verbatim in both worlds; the only thing an RT task writes itself is the sequencing (step-per-cycle instead of sleep-poll), never the profile.*
+
+## Session 2026-07-09 — Multi-axis coordinated trajectory, and "depth-1, latest-wins" is the message discipline for every RT control block (design)
+
+**Extends** *Session 2026-07-09 — Trajectory playback* (which designed the single-axis, per-`Device` control block). Two questions came up that that note left open: (1) whether the control block should really be a shared latest-value slot or a proper **message-passing queue** to a specific task; (2) how **coordinated multi-axis** motion (a synchronised move across several drives — the interesting real case) changes the per-device decomposition. This session settles both: the block stays a **depth-1, latest-wins mailbox** (not a FIFO), and multi-axis is modelled as **one program with a column per axis**, not N synchronised per-device blocks.
+
+**The reframe: the control block already *is* message passing — a mailbox of depth 1, not "shared state the RT task polls".** `active` + an atomic buffer pointer *is* a message; the launcher is the producer, `execute()` is the consumer. So "control block vs. message passing" is a false choice; the real axes are (a) **depth-1 latest-wins vs. FIFO queue** and (b) **channel owned by `DeviceManager`/`Device` vs. a handle to the specific `CyclicTask`**. Axis (b) is decided by an existing mandate: a launcher holding a handle to a concrete task instance would couple the view/HTTP layer to task instances and `GameLoop` membership, breaking "`mm::node` is transport- and scheduler-agnostic" and "the launch lives on the view, not the scheduler." So **every channel hangs off `DeviceManager`/`Device`**; the task drains it, the launcher writes it, and the two never name each other. That coupling verdict is identical for a slot or a queue — it is orthogonal to axis (a).
+
+**Decision on axis (a): depth-1, latest-wins.** It is the correct semantics for setpoint generation, where the payload is *current intent that supersedes* — newest wins, a missed intermediate is harmless (the next read is current), memory is O(1) with no overflow path, and `active` doubles as start/stop (abort = publish `nullptr`/`active=false`). The clinching argument is lifetime on RT: a FIFO of trajectory buffers makes the RT consumer pop a `shared_ptr` and **drop its refcount — a potential `free()` on the RT thread** — which forces a reclaim thread or deferred-free list. The atomic-raw-pointer + retained-generations slot (Trajectory note; `ProcessData::image`) never frees on RT by construction, so depth-1 is not only sufficient, it is *simpler and safer* than a queue for a large payload consumed on RT.
+
+**The tradeoff this accepts, stated out loud: no chaining / no sequencing.** "Run segment A, then B back-to-back" cannot be two writes — the second clobbers the first before RT observes it. If that requirement ever lands (blended segments, a queued move list, a one-shot event like touch-probe latch that must not be collapsed), it comes back as a **small bounded SPSC command queue added *alongside* the slot** — events in the queue, bulk setpoint data still in the latest-wins slot — never a redesign of the slot into a FIFO. Do not build the queue speculatively; today's features (play one move, run one sine) are pure latest-wins.
+
+**Multi-axis is ONE program with a column per axis — not N per-device blocks.** Decomposing a coordinated move into independent per-`Device` control blocks re-creates three problems in the RT path that a single object avoids for free: **atomic start** (axis 1 must not begin on cycle *N* while axis 2 begins on *N+3* — separate blocks need a start barrier the RT side polls, fragile against a rescan or a mid-arm fault), **drift** (each block would carry its own cursor with nothing keeping them in lockstep), and **joint fault/completion** (a fault on one axis should quick-stop the whole group — with separate blocks "the group" is an emergent property you must reconstruct). Model the move as one immutable `MotionProgram` (participating axes + a **row-major setpoint matrix** + one shared cursor) and advance **one cursor once per cycle** applied to every column — synchrony is then true *by construction*, because there is only one clock.
+
+```cpp
+struct MotionProgram {                       // immutable once published; mlock'd off-RT
+  std::vector<uint16_t> axes;                // participating slavePositions; disjoint across programs
+  std::vector<int32_t>  setpoints;           // row-major: [cycle * axes.size() + axisIdx] → 0x607A
+  size_t                cycles;              // == setpoints.size() / axes.size()
+  cia402::OperationMode mode;                // e.g. CyclicSynchronousPosition
+  enum class EndPolicy : uint8_t { HoldLast, Stop, Loop } endPolicy;
+  uint64_t              generation;          // bumped per publish so RT detects a new program
+};
+```
+
+**Ownership moves off `Device` onto `DeviceManager`.** A coordinated move spans devices, so its block cannot live on any single `Device` — it lives on `DeviceManager`, the same place as `ProcessData`, the tree's other cross-device RT/non-RT channel. `DeviceManager` holds a **fixed pool** of published program slots (fixed membership preserved: what varies is the *contents* and *which axes*, both runtime data — never the number of tasks or slots), each an `std::atomic<const MotionProgram*>` with a retained-generations keep-alive vector, exactly the wait-free transport the Trajectory note chose (**not** `std::atomic<std::shared_ptr<>>`, whose `load()` is not lock-free on libstdc++). Independent groups run concurrently — left leg (3 axes) and right arm (4 axes) as two programs with independent cursors — with the invariant that **a given axis appears in at most one active program** (disjointness enforced by the launcher, so two programs never both write one axis's controlword/setpoints).
+
+**Launch graduates from a view to a coordinator — but still composes views, so CiA402 logic stays written once.** A `Cia402Drive` view binds one `Device&`, so single-axis launch stays on the view (`Cia402Drive::startTrajectory`, prior note). Multi-axis cannot bind one view, so it becomes a node-layer free function `startCoordinatedTrajectory(DeviceManager&, spec) -> expected<void,string>` that (1) resolves each axis and builds a per-axis `Cia402Drive` — *reusing the single-device op-mode + `enable()` handshake per axis, off-RT, so the RT side has no state-machine logic and no error branch*; (2) checks the requested axes are disjoint from every active program and claims a free pool slot; (3) builds the immutable `MotionProgram`, `mlock`s it, retains the `shared_ptr` in the slot's generations, and publishes with one `buffer.store(ptr.get(), release)` → `active.store(true, release)`. The HTTP handler just forwards and serialises the `expected<>` — it never sees the task or `GameLoop`. Single-axis is the `N=1` special case of the same coordinator (keep the thin `Cia402Drive::startTrajectory` for the common single-drive path).
+
+**RT scratch is keyed by pool-slot index, not a pointer→cursor map.** The naïve `std::unordered_map<const MotionProgram*, size_t> cursor_` grows unboundedly and hashes every cycle (a heap op on RT). Instead the task holds a **preallocated array indexed by pool slot**, and detects a newly-published program by comparing the loaded pointer against the last-seen pointer for that slot — which gives free, correct cursor reset on every re-arm (the whole point of latest-wins):
+
+```cpp
+struct AxisGroupScratch { const MotionProgram* seen = nullptr; size_t cursor = 0; };
+std::array<AxisGroupScratch, kMaxPrograms> scratch_;   // preallocated — no RT alloc, no hashing
+
+// TrajectoryCyclicTask::execute(), per pool slot i:
+auto* prog = dm_.motionPrograms()[i].load(std::memory_order_acquire);   // wait-free raw-pointer read
+if (!prog || !prog->activeFlag(i)) continue;
+if (prog != scratch_[i].seen) scratch_[i] = {prog, 0};                  // new program → fresh cursor
+auto& cur = scratch_[i].cursor;
+if (cur >= prog->cycles) { /* apply endPolicy; store completedGeneration for the off-RT watcher */ continue; }
+const size_t base = cur * prog->axes.size();
+for (size_t a = 0; a < prog->axes.size(); ++a) {                        // ONE cursor → all axes synchronous
+  int32_t target = prog->setpoints[base + a];
+  std::array<uint8_t, 4> le; std::memcpy(le.data(), &target, 4);
+  dm_.processData().writePdo(prog->axes[a], 0x607A, 0, le);            // Design B lock-free output path
+}
+++cur;
+```
+
+**Everything else carries over unchanged** from the Trajectory / SineWave notes: one fixed-membership `TrajectoryCyclicTask` holding only `DeviceManager&`, registered in `main.cc` and a no-op until a program is active; per-cycle `findDevice()` re-resolution (never cache a `Device*`/view across a rescan); the lock-free `writePdo` output path; off-RT completion via a `completedGeneration` flip observed by a non-RT watcher (folded into the `MonitoringManager` sampler or the planned `NotificationBus` — RT does no I/O); `mlock`'d immutable buffers; and stop/rescan safety (a program must be stopped before a rescan, and the per-cycle `findDevice()` sits behind the same `scan()`/`reset()` drain the `ProcessData` path uses). **Ownership arbitration** is still required and is exactly what disjointness buys: within a program the coordinator is the sole writer of each axis's controlword + setpoints, and an active program gates out an HTTP `enable()` walk on the same device (same handshake as SineWave, layered on top of the RT-safe accessor from the RT-callable-view note).
+
+**The model in one line.** *Every RT control block is a depth-1 latest-wins mailbox on `DeviceManager`/`Device` (never a queue, never a handle to the task) — and a coordinated multi-axis move is one such mailbox holding a single immutable program with a column per axis and one shared cursor, launched by a coordinator that composes per-axis views off-RT; synchrony is by construction because there is exactly one cursor, and chaining, if ever needed, is a command queue added beside the slot, not a redesign of it.*

@@ -1392,4 +1392,77 @@ void TrajectoryWatcher::poll() {                        // ~every 20 ms, off-RT
 }
 ```
 
-**The model in one line.** *Every RT control block is a depth-1 latest-wins mailbox on `DeviceManager`/`Device` (never a queue, never a handle to the task) — and a coordinated multi-axis move is one such mailbox holding a single immutable program with a column per axis and one shared cursor, launched by a coordinator that composes per-axis views off-RT; synchrony is by construction because there is exactly one cursor, chaining (if ever needed) is a command queue added beside the slot rather than a redesign of it, and client notifications run the same mailbox in reverse — RT stores a raw status scalar, an off-RT watcher formats and publishes it, so the RT thread never touches the WebSocket.*
+**Generalizing both channels — one shape per direction, not one class per task.** The bespoke `TrajectoryWatcher` above was an *illustration*; you do not write a watcher (or a launcher) per RT task. Each direction has exactly two task-specific functions and everything else is shared plumbing — but the two directions are **not** symmetric in one important way: outbound needs a bridging thread (RT can't call out, so something must poll and publish), inbound needs none (the HTTP thread writes the atomic mailbox directly and returns).
+
+*Outbound (RT → client): one `NotificationBus`, a registry of sources.* The thread, the poll loop, the change-dedup, and the single `WebSocketServer::publish` callback are written once; a feature registers only a **change token** (read an RT-bumped atomic) and a **render** (build the JSON, off-RT):
+
+```cpp
+class NotificationBus {                       // one off-RT thread; the SINGLE publisher to the WebSocket
+ public:
+  struct Source {
+    std::string                                    topic;
+    std::function<uint64_t()>                      changeToken;  // cheap: read RT-bumped atomic(s)
+    std::function<std::optional<nlohmann::json>()> render;       // off-RT: build the message
+  };
+  void addSource(Source s);                   // called once per feature at startup
+  // run(): every ~20 ms, for each source: if changeToken() != lastSeen[i], publish_(topic, *render())
+};
+```
+
+All three outbound tiers fit this one interface: tier-1 lifecycle status is `changeToken = statusGen`, `render = snapshot`; a tier-3 must-not-drop event stream is `changeToken = ring.writeCount()`, `render = drain-the-ring`. Same thread, same loop — only the two lambdas differ. Tier-2 per-cycle telemetry deliberately does **not** use the bus: it stays the high-rate lossless `MonitoringManager` stream.
+
+*Inbound (client → RT): no thread — the reusable pieces are the transport, the pool, and a launch skeleton.* Three write-once pieces replace the per-task control-block boilerplate:
+
+```cpp
+template <typename T>                         // T = immutable payload (MotionProgram, …)
+class RtMailbox {                             // the depth-1 latest-wins slot itself
+ public:
+  const T* current() const {                  // RT: wait-free, alloc-free; nullptr when idle
+    return active_.load(acquire) ? buffer_.load(acquire) : nullptr;
+  }
+  void arm(std::shared_ptr<const T> next) {   // off-RT: retain (RT never frees) + atomic publish
+    generations_.push_back(next); buffer_.store(next.get(), release); active_.store(true, release);
+  }
+  void disarm();  void reset();               // abort/stop; scan()/reset() once RT is drained
+ private:
+  std::atomic<const T*> buffer_{nullptr}; std::atomic<bool> active_{false};
+  std::vector<std::shared_ptr<const T>> generations_;   // control-plane keep-alive
+};                                            // (specializes to SeqLock<T> transport for trivial scalar T)
+
+template <typename T> class RtMailboxPool {   // fixed pool + the "an entity in ≤1 active slot" rule
+ public:
+  RtMailbox<T>& operator[](size_t i);  size_t size() const;      // RT iterates these
+  std::expected<RtMailbox<T>*, std::string> claim(std::span<const uint16_t> entities);  // disjointness + free slot
+};
+
+template <typename T, typename Spec>          // the launch skeleton — the two hooks are all a task writes
+std::expected<void, std::string> launchRtTask(
+    RtMailboxPool<T>& pool, const Spec& spec,
+    auto&& validateAndHandshake,              // per-task: op-mode/enable/limits — synchronous, OFF-RT
+    auto&& buildPayload) {                    // per-task: -> shared_ptr<const T> (immutable, mlock'd)
+  if (auto r = validateAndHandshake(); !r) return r;             // bail leaves RT untouched
+  auto box = pool.claim(spec.entities);       if (!box) return std::unexpected(box.error());
+  (*box)->arm(buildPayload());                return {};
+}
+```
+
+So the coordinated-trajectory launcher collapses to its two genuinely task-specific parts, mirroring the `Source`'s two:
+
+```cpp
+std::expected<void, std::string> startCoordinatedTrajectory(DeviceManager& dm, const CoordinatedSpec& s) {
+  return launchRtTask(dm.trajectoryPool(), s,
+      [&]{ return handshakeAllAxes(dm, s); },   // resolve per-axis views, op-mode + enable each
+      [&]{ return buildMotionProgram(s); });    // matrix → immutable, mlock'd MotionProgram
+}
+```
+
+`DeviceManager` owns one `RtMailboxPool<T>` per task family (`trajectoryPool()`, `sinePool()`); the RT task iterates `pool[i].current()` each cycle. Both directions use **composition, not inheritance** — lambdas/policies, no single-impl interface (repo rule). And **do not** generalize the HTTP *surface* into a command-bus routing a generic `POST /api/rt-tasks {type}`: routes stay explicit per `swagger.yml` and the plug-in design; only the plumbing *beneath* the handlers is generalized.
+
+| | Outbound (RT → client) | Inbound (client → RT) |
+|---|---|---|
+| Generalized as | `NotificationBus` + `Source{changeToken, render}` | `RtMailboxPool<T>` + `launchRtTask(validate, build)` |
+| Per-task surface | two functions | two functions |
+| Owns a thread? | **yes** — RT can't call out, a pump polls | **no** — HTTP thread writes the atomic directly |
+| Written once | thread, loop, dedup, publish | mailbox atomics, pool, disjointness, arm/keep-alive |
+
+**The model in one line.** *Every RT control block is a depth-1 latest-wins mailbox on `DeviceManager`/`Device` (never a queue, never a handle to the task) — a coordinated multi-axis move is one such mailbox holding a single immutable program with a column per axis and one shared cursor, launched by a coordinator that composes per-axis views off-RT; synchrony is by construction because there is exactly one cursor, chaining (if ever needed) is a command queue added beside the slot rather than a redesign of it, and client notifications run the same mailbox in reverse — RT stores a raw status scalar, an off-RT watcher formats and publishes it, so the RT thread never touches the WebSocket. Both directions generalize to two task-specific functions over shared plumbing — outbound a `NotificationBus` + `Source`, inbound an `RtMailboxPool` + `launchRtTask` — the only asymmetry being that outbound owns a bridging thread and inbound does not.*

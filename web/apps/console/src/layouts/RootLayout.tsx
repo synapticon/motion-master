@@ -333,25 +333,39 @@ export default function RootLayout() {
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
           <NavItem to="/" label="Connection" end />
 
-          <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Fieldbus</p>
-          <NavItem to="/fieldbus" label="Control" />
-          <NavItem to="/bus-config" label="Configuration" />
-          <NavItem to="/process-image" label="Process Image" />
-          <NavItem to="/bus-diagnostics" label="Diagnostics" />
-          <NavItem to="/dc-sync" label="DC Sync" />
+          {/* Everything below Connection except Requests (client-side log) and Reference
+              (bundled, static) needs the Motion Master API, so the whole group is hidden
+              while the API is offline — leaving only the pages that still work. */}
+          {online && (
+            <>
+              <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Fieldbus</p>
+              <NavItem to="/fieldbus" label="Control" />
+              <NavItem to="/bus-config" label="Configuration" />
+              <NavItem to="/process-image" label="Process Image" />
+              <NavItem to="/bus-diagnostics" label="Diagnostics" />
+              <NavItem to="/dc-sync" label="DC Sync" />
 
-          <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Data</p>
-          <NavItem to="/process-data" label="Process Data" />
-          <NavItem to="/monitorings" label="Monitorings" />
-          <NavItem to="/recorder" label="Recorder" />
-          <NavItem to="/parameter-caches" label="Parameter Caches" />
+              <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Data</p>
+              <NavItem to="/process-data" label="Process Data" />
+              <NavItem to="/monitorings" label="Monitorings" />
+              <NavItem to="/recorder" label="Recorder" />
+              <NavItem to="/parameter-caches" label="Parameter Caches" />
+            </>
+          )}
 
           <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Server</p>
-          <NavItem to="/log" label="Log" />
+          {/* Log reads from the API; Requests is a purely client-side log of HTTP
+              requests (failures included), so it stays visible — it's most useful
+              precisely when the connection is failing. */}
+          {online && <NavItem to="/log" label="Log" />}
           <NavItem to="/requests" label="Requests" />
 
-          <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Tools</p>
-          <NavItem to="/tools/sii" label="SII" />
+          {online && (
+            <>
+              <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Tools</p>
+              <NavItem to="/tools/sii" label="SII" />
+            </>
+          )}
 
           <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Reference</p>
           <NavItem to="/api-docs" label="API Docs" />

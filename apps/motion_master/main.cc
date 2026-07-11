@@ -6,12 +6,12 @@
 #include <csignal>
 #include <filesystem>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <utility>
 
 #include "cert_updater.h"
 #include "comm/base.h"
-#include "comm/fieldbus_driver.h"
 #include "comm/soem_fieldbus_driver.h"
 #include "core/platform.h"
 #include "core/version.h"

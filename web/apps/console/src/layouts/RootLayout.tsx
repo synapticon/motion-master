@@ -265,10 +265,13 @@ export default function RootLayout() {
   const online = useApiHealth(api)
   const [metaOpen, setMetaOpen] = useState(false)
 
+  // `hasScanned` is sticky (cleared only on reset), so it stays true after the server
+  // drops. Gate on `online` too, or these keep firing against a dead API — the states
+  // poll especially, every 3s — cluttering the Requests log for nothing.
   const devicesQuery = useQuery({
     queryKey: ['devices'],
     queryFn: () => api.getDevices(),
-    enabled: hasScanned,
+    enabled: online && hasScanned,
   })
 
   const devices = devicesQuery.data?.data ?? []
@@ -276,7 +279,7 @@ export default function RootLayout() {
   const statesQuery = useQuery({
     queryKey: ['deviceStates'],
     queryFn: () => api.getDeviceStates(),
-    enabled: hasScanned && devices.length > 0,
+    enabled: online && hasScanned && devices.length > 0,
     // AL state changes out-of-band (other clients, the drive's own faults, manual
     // transitions), so poll a few-second cadence to keep the sidebar badges live.
     refetchInterval: 3000,

@@ -24,8 +24,6 @@ namespace mm::node {
 
 namespace {
 
-constexpr char kReservedTopic[] = "pdos";  // the built-in high-frequency PDO stream's topic
-
 /// Serialises one sampled value to JSON: @c null when absent, otherwise the variant alternative
 /// (integers/floats → number, string → string, raw bytes → array of numbers).
 nlohmann::json valueToJson(const std::optional<DeviceParameterValue>& value) {
@@ -50,9 +48,6 @@ void MonitoringManager::setPublish(PublishFn publish) {
 std::expected<Monitoring, std::string> MonitoringManager::create(Monitoring config) {
   if (!mm::core::isUrlSafeId(config.topic)) {
     return std::unexpected("invalid topic: must match [A-Za-z0-9._-]{1,64}");
-  }
-  if (config.topic == kReservedTopic) {
-    return std::unexpected("topic 'pdos' is reserved");
   }
   // interval is the flush cadence, not a sample rate. Bounded so each batch stays a sane size: a
   // longer interval ships more recorded cycles per message (~one row per cycle), so 2000 ms caps

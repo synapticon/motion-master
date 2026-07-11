@@ -257,7 +257,7 @@ Two message types are sent over the WebSocket:
 GET /api/monitorings/{topic} → { ..., "parameters": [{"devicePosition":1,"index":24676,"subindex":0,"source":"pdo"}, ...] }
 ```
 
-The order is stable for the lifetime of a monitoring. `interval` is the flush **cadence** (bounded 5–2000 ms, not a sample rate): a longer interval ships more rows per message, never fewer cycles. Throughput is constant (~one row per cycle, ~450 bytes for ~40 × 32-bit values); interval only trades message size against frequency. Up to 5 simultaneous clients.
+The order is stable for the lifetime of a monitoring. `interval` is the flush **cadence** (bounded 5–2000 ms, not a sample rate): a longer interval ships more rows per message, never fewer cycles. Throughput is constant (~one row per cycle, ~450 bytes for ~40 × 32-bit values); interval only trades message size against frequency. Sized for ~5 simultaneous clients (a throughput budget, not an enforced cap — no connection limit in code).
 
 ### Fieldbus Capability Surface
 

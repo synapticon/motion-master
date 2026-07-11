@@ -39,7 +39,7 @@ namespace mm::node {
 ///   which polls it in the background, and the sampler reads the cached value.
 ///
 /// Monitoring is live-only: a parameter whose owning device is not exchanging (SAFE-OP/OP) samples
-/// @c null. Topics are unique; the WebSocket pub/sub topic @c "pdos" is reserved.
+/// @c null. Topics are unique.
 ///
 /// Thread-safe. Owns a private @c ParameterRefresher (the sampler is its sole client). The App
 /// wires only this manager (with a @c DeviceManager& and a publish callback).
@@ -64,7 +64,7 @@ class MonitoringManager {
   /// @brief Validates @p config, classifies its parameters, registers SDO ones with the refresher,
   ///        and registers the monitoring.
   ///
-  /// Validation: @c topic URL-safe and not the reserved @c "pdos"; not already registered;
+  /// Validation: @c topic URL-safe; not already registered;
   /// @c interval between 5 ms and 2000 ms (the flush cadence); @c parameters non-empty; and every
   /// parameter is either PDO-mapped or present in its device's object dictionary (otherwise it
   /// cannot be sourced).

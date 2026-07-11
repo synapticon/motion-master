@@ -1490,7 +1490,7 @@ export class Api<
   createMonitoring = (
     data: {
       /**
-       * URL-safe unique id; also the WebSocket topic. The name `pdos` is reserved.
+       * URL-safe unique id; also the WebSocket topic.
        * @pattern ^[A-Za-z0-9._-]{1,64}$
        * @example "left-leg"
        */

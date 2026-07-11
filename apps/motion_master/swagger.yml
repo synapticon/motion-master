@@ -2096,7 +2096,7 @@ paths:
                 topic:
                   type: string
                   pattern: "^[A-Za-z0-9._-]{1,64}$"
-                  description: URL-safe unique id; also the WebSocket topic. The name `pdos` is reserved.
+                  description: URL-safe unique id; also the WebSocket topic.
                   example: "left-leg"
                 name:
                   type: string
@@ -2132,7 +2132,7 @@ paths:
                 $ref: "#/components/schemas/Monitoring"
         "400":
           description: >
-            Invalid request — malformed body, non-URL-safe or reserved topic, interval outside
+            Invalid request — malformed body, non-URL-safe topic, interval outside
             5–2000 ms, empty parameters, or a parameter that is neither PDO-mapped nor in the
             device's object dictionary.
           content:

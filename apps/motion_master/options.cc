@@ -56,8 +56,9 @@ Options parseOptions(int argc, char** argv) {
     std::exit(0);
   }
 
-  // Load the config file (JSONC: comments allowed) into the typed settings tree. CLI::ExistingFile
-  // already guaranteed the path exists when --config was given.
+  // Load the config file (JSONC: comments allowed) into the typed settings tree. --config is
+  // optional: when omitted, configPath stays empty and opts.config keeps its in-code defaults.
+  // When given, CLI::ExistingFile already guaranteed the path exists during app.parse().
   if (!opts.configPath.empty()) {
     std::ifstream f{opts.configPath};
     auto doc =

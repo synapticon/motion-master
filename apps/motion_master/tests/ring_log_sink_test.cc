@@ -4,7 +4,6 @@
 #include <spdlog/logger.h>
 
 #include <memory>
-#include <mutex>
 
 namespace {
 

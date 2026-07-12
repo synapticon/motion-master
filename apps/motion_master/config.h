@@ -122,7 +122,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logLev
 /// @brief Deserialises a parsed JSONC document into a @c Config, applying defaults for absent keys.
 ///
 /// Pure: no file I/O, no process exit. Unknown keys are ignored (forward-compatible). nlohmann
-/// validates value *types*; this adds the enum checks it cannot (@c logLevel, @c fieldbus.driver).
+/// validates value *types*; this adds the enum and range checks it cannot (@c logLevel,
+/// @c fieldbus.driver; @c gameLoop.periodUs and @c recorder.historySeconds must be > 0).
 ///
 /// @param doc A parsed JSON value (must be an object).
 /// @return The populated @c Config, or an error string on a wrong top-level type, a field type

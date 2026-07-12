@@ -150,7 +150,7 @@ paths:
         The effective configuration after merging the JSONC config file (if any) over the built-in
         defaults — the same `Config` the server booted with. Read-only; changing it requires editing
         the config file and restarting. The shape mirrors the config file (server, fieldbus,
-        logLevel, tls, gameLoop, recorder).
+        logLevel, tls, gameLoop, recorder, parameterCache, parameters).
       operationId: getStartedConfig
       responses:
         "200":
@@ -162,11 +162,13 @@ paths:
                 additionalProperties: true
                 example:
                   server: { httpPort: 61447, wsPort: 62281, corsOrigin: "https://motion-master.synapticon.com" }
-                  fieldbus: { driver: "", adapter: "" }
+                  fieldbus: { driver: "", adapter: "", mailboxStatusFmmu: false }
                   logLevel: "info"
                   tls: { certPath: "", keyPath: "", autoUpdate: true }
                   gameLoop: { periodUs: 1000 }
-                  recorder: { historySeconds: 300 }
+                  recorder: { historySeconds: 300, dumpDir: "" }
+                  parameterCache: { enabled: true, cacheAllVendors: false, directory: "" }
+                  parameters: { readObjectDictionaryOnPreop: true, useCompleteAccess: true }
   /api/system-info:
     get:
       summary: Get host OS and hardware information

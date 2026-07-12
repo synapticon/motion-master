@@ -93,7 +93,8 @@ out, the next access triggers a **page fault** — potentially milliseconds of d
 which blows the cycle deadline and injects jitter. Fatal for a hard-RT EtherCAT loop.
 `mlockall` guarantees every page stays resident, so no page fault ever stalls the RT thread.
 
-This is also why the recorder ring (~120 MB, `ProcessDataRing`) is pre-allocated **and**
+This is also why the recorder ring (tens of MB per drive — ~128 B/cycle × the ring depth in
+cycles; ~38 MB for one drive at 300 s / 1 ms — `ProcessDataRing`) is pre-allocated **and**
 `mlock`'d at `configureProcessData`, off the RT path — so the RT loop never faults on it.
 
 ## Capabilities & limits

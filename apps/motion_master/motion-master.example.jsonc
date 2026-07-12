@@ -99,10 +99,14 @@
 
   // TLS certificate for the HTTPS API and secure WebSocket.
   "tls": {
-    "certPath": "cert.pem",
-    "keyPath": "key.pem",
-    // Auto-fetch a fresh certificate at startup when the current one is missing or expired.
-    // Set false for air-gapped installs.
+    // "" (default) = auto-discover: cert.pem/key.pem next to the binary (release install), then a
+    // local acme.sh install, then the install-dir default (which startup self-heal can populate).
+    // Set explicit paths to pin them and skip discovery; a relative path is resolved against the
+    // process working directory, not the binary's directory.
+    "certPath": "",
+    "keyPath": "",
+    // Auto-fetch a fresh certificate at startup when the current one is missing, expired, or
+    // expiring soon (within 7 days). Set false for air-gapped installs.
     "autoUpdate": true
   }
 }

@@ -1,0 +1,8 @@
+CompileFlags:
+  # These are GCC-only C++20-modules flags that leak in from vcpkg-built
+  # deps (fmt, cli11). clangd doesn't recognize them and errors with
+  # "Unknown argument". Strip them so clangd can parse the compile command.
+  Remove:
+    - -fmodules-ts
+    - -fmodule-mapper*
+    - -fmodule-file*

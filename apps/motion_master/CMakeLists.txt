@@ -33,7 +33,6 @@ target_link_libraries(motion_master PRIVATE
 if(NOT WIN32)
   find_package(Threads REQUIRED)
   target_link_libraries(motion_master PRIVATE Threads::Threads)
-
 endif()
 
 add_subdirectory(tests)

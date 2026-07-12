@@ -1,6 +1,7 @@
 #include "cert_info.h"
 
 #include <openssl/bio.h>
+#include <openssl/err.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
 
@@ -101,6 +102,10 @@ std::expected<CertInfo, std::string> readCertInfo(const std::string& certPath) {
     cur = PEM_read_bio_X509(bio.get(), nullptr, nullptr, nullptr);
   }
 
+  // PEM_read_bio_X509 pushes PEM_R_NO_START_LINE onto the thread-local error queue when it hits
+  // EOF (the normal loop-exit path above), so the queue is always dirty here. Clear it so a later
+  // OpenSSL caller on this thread (e.g. cert_updater) does not misread our leftover as its own.
+  ERR_clear_error();
   return result;
 }
 

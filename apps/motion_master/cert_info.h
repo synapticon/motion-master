@@ -8,9 +8,11 @@
 namespace mm {
 
 /// @brief Number of days before @c notAfter at which a certificate is considered
-///        "expiring soon" — drives the startup warning and the @c expiresSoon flag
-///        returned by @c GET /api/cert.
-inline constexpr int kCertExpiryWarningDays = 7;
+///        "expiring soon". A cert inside this window is refreshed proactively: it is one of
+///        the conditions that trigger the startup self-heal fetch (@c healCertIfNeeded), so
+///        a cert is renewed before it lapses rather than after. Also logs a startup warning
+///        and sets the @c expiresSoon flag returned by @c GET /api/cert.
+inline constexpr int kCertExpiringSoonDays = 7;
 
 /// @brief One certificate in the served chain — its subject/issuer common names plus the issuing
 ///        organization (the friendly CA name, e.g. "Let's Encrypt", which lives in the O field

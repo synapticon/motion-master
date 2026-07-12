@@ -71,7 +71,7 @@ ResolvedCert resolveCertPaths(const std::string& configCertPath, const std::stri
 ///        (the startup "cert self-heal").
 ///
 /// Inspects @p certPath: a missing cert, an expired one, or one expiring within
-/// @c kCertExpiryWarningDays triggers a fetch from @p certUrl / @p keyUrl via @c fetchAndSwapCert;
+/// @c kCertExpiringSoonDays triggers a fetch from @p certUrl / @p keyUrl via @c fetchAndSwapCert;
 /// a cert with ample life left is left alone, so a healthy boot makes no network call. Refreshing
 /// on imminent expiry — not just after it lapses — lets an ephemeral container (and the Docker
 /// entrypoint's 1-day self-signed fallback, which reads as expiring soon) self-heal to a fresh cert

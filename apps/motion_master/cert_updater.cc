@@ -233,7 +233,7 @@ std::expected<void, std::string> healCertIfNeeded(const std::string& certPath,
     if (now >= info->notAfter) {
       expired = true;
       spdlog::error("TLS certificate EXPIRED ({} days ago)", -daysRemaining);
-    } else if (daysRemaining < kCertExpiryWarningDays) {
+    } else if (daysRemaining < kCertExpiringSoonDays) {
       expiringSoon = true;
       spdlog::warn("TLS certificate expires in {} days", daysRemaining);
     } else {

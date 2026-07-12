@@ -238,7 +238,7 @@ std::string toIso8601Utc(std::chrono::system_clock::time_point tp) {
 
 // Builds the GET /api/cert body from a parsed certificate and the path it was read from.
 // daysRemaining is whole days until notAfter (negative once expired); expiresSoon trips inside
-// the kCertExpiryWarningDays window so the PWA can prompt the user to download a fresh release.
+// the kCertExpiringSoonDays window so the PWA can prompt the user to download a fresh release.
 nlohmann::json certInfoJson(const mm::CertInfo& info, const std::string& path) {
   const auto now = std::chrono::system_clock::now();
   const auto daysRemaining =
@@ -259,7 +259,7 @@ nlohmann::json certInfoJson(const mm::CertInfo& info, const std::string& path) {
           {"notAfter", toIso8601Utc(info.notAfter)},
           {"daysRemaining", daysRemaining},
           {"expired", expired},
-          {"expiresSoon", expired || daysRemaining < mm::kCertExpiryWarningDays},
+          {"expiresSoon", expired || daysRemaining < mm::kCertExpiringSoonDays},
           {"chain", chain}};
 }
 

@@ -214,6 +214,13 @@ int main(int argc, char** argv) {
   // SIGINT/SIGTERM: flip the loop's stop flag so run() returns after the current cycle. Everything
   // touched here is async-signal-safe — a lock-free atomic load of the pointer and stop()'s
   // lock-free atomic store.
+  //
+  // Both request an orderly shutdown and are catchable (unlike SIGKILL/9, which the kernel enforces
+  // with no chance to clean up), so we handle both and route them to the same graceful teardown:
+  //   SIGINT  (2)  — interactive interrupt, raised by Ctrl+C in the controlling terminal (delivered
+  //                  to the foreground process group). This is the dev-terminal stop path.
+  //   SIGTERM (15) — the default `kill <pid>` signal and what service managers (systemd) and
+  //                  `docker stop` send to ask a process to exit. This is the production stop path.
   std::signal(SIGINT, [](int) {
     if (auto* loop = gGameLoop.load(std::memory_order_relaxed)) {
       loop->stop();

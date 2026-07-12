@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import { Api } from '@synapticon/motion-master-client'
+import { useApiHealth } from '../hooks/useApiHealth'
 
 const ENDPOINT_KEY = 'mm:endpoint'
 
@@ -57,6 +58,11 @@ interface ConnectionContextValue {
   /// Reset host/httpPort/wsPort back to the built-in defaults (and persist them).
   resetEndpoint: () => void
   api: Api
+  /// True while the Motion Master HTTP API is reachable at the current endpoint.
+  /// Driven by a single `useApiHealth` probe here (the sole writer, so it also
+  /// stays the single writer of React Query's onlineManager) and consumed by
+  /// RootLayout (sidebar dot / link gating) and ConnectionPage (offline state).
+  online: boolean
   driver: Driver
   setDriver: (d: Driver) => void
   adapter: string
@@ -106,9 +112,11 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
     [host, httpPort],
   )
 
+  const online = useApiHealth(api)
+
   return (
     <ConnectionContext.Provider
-      value={{ host, httpPort, wsPort, setHost, setHttpPort, setWsPort, resetEndpoint, api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, isInitialized, setIsInitialized, alreadyInitialized, setAlreadyInitialized }}
+      value={{ host, httpPort, wsPort, setHost, setHttpPort, setWsPort, resetEndpoint, api, online, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, isInitialized, setIsInitialized, alreadyInitialized, setAlreadyInitialized }}
     >
       {children}
     </ConnectionContext.Provider>

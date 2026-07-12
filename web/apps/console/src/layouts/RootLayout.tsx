@@ -5,7 +5,6 @@ import { BookOpenText, ChevronDown, Mail, RefreshCw } from 'lucide-react'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
-import { useApiHealth } from '../hooks/useApiHealth'
 import { formatHex } from '@synapticon/motion-master-client'
 
 const deviceLinks = [
@@ -261,8 +260,7 @@ function DeviceSection({
 }
 
 export default function RootLayout() {
-  const { api, host, httpPort, hasScanned, isInitialized } = useConnection()
-  const online = useApiHealth(api)
+  const { api, host, httpPort, online, hasScanned, isInitialized } = useConnection()
   const [metaOpen, setMetaOpen] = useState(false)
 
   // `hasScanned` is sticky (cleared only on reset), so it stays true after the server
@@ -321,7 +319,7 @@ export default function RootLayout() {
               title={
                 online
                   ? `API online — the Motion Master HTTP server is reachable at https://${host}:${httpPort}`
-                  : `API offline — no response from https://${host}:${httpPort}. Make sure Motion Master is installed and running on your system, then accept its TLS certificate.`
+                  : `API offline — no response from https://${host}:${httpPort}. Make sure Motion Master is installed and running on your system.`
               }
               aria-label={online ? 'API online' : 'API offline'}
               className={`inline-block h-3 w-3 cursor-help rounded-full ring-2 ring-white ${online

@@ -101,7 +101,7 @@ function CertChain({ chain }: { chain: ChainLink[] }) {
 }
 
 export default function ConnectionPage() {
-  const { host, httpPort, wsPort, setHost, setHttpPort, setWsPort, resetEndpoint, api } = useConnection()
+  const { host, httpPort, wsPort, setHost, setHttpPort, setWsPort, resetEndpoint, api, online } = useConnection()
   const queryClient = useQueryClient()
 
   const certQuery = useQuery({
@@ -155,48 +155,72 @@ export default function ConnectionPage() {
         description="Configure the host and ports used to reach the Motion Master backend, check the TLS certificate status and refresh it, review the configuration the backend started with, and inspect the OS and hardware it is running on."
       />
       <div className="p-4 sm:p-8 space-y-8">
-        <Callout variant={versionMismatch ? 'warning' : 'info'}>
-          <p>
-            {versionMismatch ? (
-              <>
-                <span className="font-display font-medium">Version mismatch.</span> This web app is{' '}
-                <code>v{uiVersion}</code>, but the Motion Master server it is connected to reports{' '}
-                <code>v{serverVersion}</code>. Mismatched versions can cause features here to behave
-                unexpectedly or fail — install the matching server release to bring them back in
-                sync.
-              </>
-            ) : serverVersion ? (
-              <>
-                This web app and the connected Motion Master server are both{' '}
-                <code>v{uiVersion}</code>.
-              </>
-            ) : (
-              <>
-                This web app is <code>v{uiVersion}</code>. Install the matching Motion Master server
-                release, or browse all releases below.
-              </>
-            )}
-          </p>
-          <p className="mt-0.5">
-            <a
-              href={`${RELEASES_URL}/tag/v${uiVersion}`}
-              target="_blank"
-              rel="noreferrer"
-              className="text-ocean hover:underline"
-            >
-              Download v{uiVersion}
-            </a>
-            <span className="text-grey-400"> · </span>
-            <a
-              href={RELEASES_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="text-ocean hover:underline"
-            >
-              All releases
-            </a>
-          </p>
-        </Callout>
+        <div className="space-y-3">
+          <Callout variant={versionMismatch ? 'warning' : 'info'}>
+            <p>
+              {versionMismatch ? (
+                <>
+                  <span className="font-display font-medium">Version mismatch.</span> This web app
+                  is <code>v{uiVersion}</code>, but the Motion Master server it is connected to
+                  reports <code>v{serverVersion}</code>. Mismatched versions can cause features here
+                  to behave unexpectedly or fail — install the matching server release to bring them
+                  back in sync.
+                </>
+              ) : serverVersion ? (
+                <>
+                  This web app and the connected Motion Master server are both{' '}
+                  <code>v{uiVersion}</code>.
+                </>
+              ) : (
+                <>
+                  This web app is <code>v{uiVersion}</code>. Install the matching Motion Master
+                  server release, or browse all releases below.
+                </>
+              )}
+            </p>
+            <p className="mt-0.5">
+              <a
+                href={`${RELEASES_URL}/tag/v${uiVersion}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-ocean hover:underline"
+              >
+                Download v{uiVersion}
+              </a>
+              <span className="text-grey-400"> · </span>
+              <a
+                href={RELEASES_URL}
+                target="_blank"
+                rel="noreferrer"
+                className="text-ocean hover:underline"
+              >
+                All releases
+              </a>
+            </p>
+          </Callout>
+
+          {!online && (
+            <Callout variant="warning">
+              <p>
+                Not connected. No response from{' '}
+                <code>
+                  https://{host}:{httpPort}
+                </code>
+                {host === 'local.motion-master.synapticon.com' && (
+                  <>
+                    {' '}
+                    (which resolves to <code>127.0.0.1</code>, your own computer)
+                  </>
+                )}
+                .
+              </p>
+              <p className="mt-0.5">
+                Make sure Motion Master is installed and running there. Or fix the host and ports
+                below if the backend runs elsewhere.
+              </p>
+            </Callout>
+          )}
+        </div>
 
         <section>
           <div className="flex items-center justify-between mb-3">
@@ -261,161 +285,169 @@ export default function ConnectionPage() {
           </div>
         </section>
 
-        <section>
-          <h2 className="eyebrow mb-3">TLS Certificate</h2>
+        {online && (
+          <>
+            <section>
+              <h2 className="eyebrow mb-3">TLS Certificate</h2>
 
-          <div className="border border-grey-200 p-5 space-y-4">
-            {certQuery.isLoading && <p className="text-sm text-grey-600">Loading…</p>}
+              <div className="border border-grey-200 p-5 space-y-4">
+                {certQuery.isLoading && <p className="text-sm text-grey-600">Loading…</p>}
 
-            {certQuery.isError && (
-              <p className="text-status-bad text-sm">
-                Could not read certificate. Is the backend reachable at https://{host}:{httpPort}?
-              </p>
-            )}
+                {certQuery.isError && (
+                  <p className="text-status-bad text-sm">
+                    Could not read certificate. Is the backend reachable at https://{host}:
+                    {httpPort}?
+                  </p>
+                )}
 
-            {cert && status && (
-              <>
-                <p className={`text-sm font-display font-medium ${status.cls}`}>{status.label}</p>
-                <div className="grid grid-cols-1 2xl:grid-cols-3 gap-4">
-                  <div className="space-y-4 self-start">
-                    <Field label="Subject" value={cert.subject} />
-                    <Field label="Issuer" value={cert.issuer} />
-                    <Field label="File" value={cert.path} />
-                  </div>
-                  <div className="space-y-4 self-start">
-                    <Field label="Valid from" value={formatDate(cert.notBefore)} />
-                    <Field label="Valid until" value={formatDate(cert.notAfter)} />
-                  </div>
-                  {cert.chain && cert.chain.length > 0 && <CertChain chain={cert.chain} />}
-                </div>
-              </>
-            )}
-          </div>
-
-          <div className="mt-4">
-            <button
-              onClick={() => refreshMutation.mutate()}
-              disabled={refreshMutation.isPending}
-              className={btnOutline}
-            >
-              {refreshMutation.isPending ? 'Refreshing…' : 'Refresh certificate'}
-            </button>
-            <p className="text-xs text-grey-600 mt-2 max-w-prose">
-              Downloads the latest certificate from Synapticon's rolling release, verifies it, and
-              installs it next to the binary. It does not interrupt the running server — the new
-              certificate takes effect the next time you restart Motion Master.
-            </p>
-            <p className="text-xs text-grey-600 mt-2 max-w-prose">
-              Motion Master also self-heals on startup: if the certificate is missing or expired it
-              fetches a fresh one automatically (unless started with <code>--no-cert-update</code>),
-              so a restart normally suffices.
-            </p>
-            <p className="text-xs text-grey-600 mt-2 max-w-prose">
-              Once the certificate has already expired this button can no longer help — the PWA
-              itself can no longer reach the backend over a trusted connection. A plain restart
-              heals it via the startup fetch above; if Motion Master runs with{' '}
-              <code>--no-cert-update</code>, refresh explicitly first with{' '}
-              <code>motion-master --update-cert</code>, then restart.
-            </p>
-
-            {refreshMutation.isSuccess && (
-              <div className="border-l-2 border-status-info bg-status-info/10 px-3 py-2 mt-3">
-                <p className="text-xs font-display font-medium uppercase tracking-wide text-status-info">
-                  Certificate updated
-                </p>
-                <p className="text-xs text-grey-700 mt-0.5">
-                  A fresh certificate was installed. Restart Motion Master to start serving it.
-                </p>
+                {cert && status && (
+                  <>
+                    <p className={`text-sm font-display font-medium ${status.cls}`}>
+                      {status.label}
+                    </p>
+                    <div className="grid grid-cols-1 2xl:grid-cols-3 gap-4">
+                      <div className="space-y-4 self-start">
+                        <Field label="Subject" value={cert.subject} />
+                        <Field label="Issuer" value={cert.issuer} />
+                        <Field label="File" value={cert.path} />
+                      </div>
+                      <div className="space-y-4 self-start">
+                        <Field label="Valid from" value={formatDate(cert.notBefore)} />
+                        <Field label="Valid until" value={formatDate(cert.notAfter)} />
+                      </div>
+                      {cert.chain && cert.chain.length > 0 && <CertChain chain={cert.chain} />}
+                    </div>
+                  </>
+                )}
               </div>
-            )}
-            {refreshMutation.isError && (
-              <p className="text-status-bad text-xs mt-2">{apiError(refreshMutation.error)}</p>
-            )}
-          </div>
-        </section>
 
-        <section>
-          <h2 className="eyebrow mb-3">Started Configuration</h2>
-          <div className="border border-grey-200 p-5 space-y-3">
-            <p className="text-xs text-grey-600 max-w-prose">
-              The fully-resolved configuration Motion Master booted with. A JSONC config file
-              (passed with <code>-c</code>/<code>--config</code>) is the single source for ports, the
-              fieldbus driver and adapter, log level, the recorder, and TLS paths — there are no
-              command-line flags for these. Any key the file omits keeps its built-in default, so
-              what you see here is the file overlaid on those defaults; with no config file at all it
-              is the pure defaults.
-            </p>
-            <p className="text-xs text-grey-600 max-w-prose">
-              Read-only and captured at startup: it is not re-read while running. To change a value,
-              edit the JSONC file and restart Motion Master. The annotated{' '}
-              <a
-                href="https://github.com/synapticon/motion-master/blob/main/apps/motion_master/motion-master.example.jsonc"
-                target="_blank"
-                rel="noreferrer"
-                className="text-ocean hover:underline"
-              >
-                motion-master.example.jsonc
-              </a>{' '}
-              documents every property with inline comments — unlike the resolved values shown below,
-              which carry no descriptions.
-            </p>
+              <div className="mt-4">
+                <button
+                  onClick={() => refreshMutation.mutate()}
+                  disabled={refreshMutation.isPending}
+                  className={btnOutline}
+                >
+                  {refreshMutation.isPending ? 'Refreshing…' : 'Refresh certificate'}
+                </button>
+                <p className="text-xs text-grey-600 mt-2 max-w-prose">
+                  Downloads the latest certificate from Synapticon's rolling release, verifies it,
+                  and installs it next to the binary. It does not interrupt the running server — the
+                  new certificate takes effect the next time you restart Motion Master.
+                </p>
+                <p className="text-xs text-grey-600 mt-2 max-w-prose">
+                  Motion Master also self-heals on startup: if the certificate is missing or expired
+                  it fetches a fresh one automatically (unless started with{' '}
+                  <code>--no-cert-update</code>), so a restart normally suffices.
+                </p>
+                <p className="text-xs text-grey-600 mt-2 max-w-prose">
+                  Once the certificate has already expired this button can no longer help — the PWA
+                  itself can no longer reach the backend over a trusted connection. A plain restart
+                  heals it via the startup fetch above; if Motion Master runs with{' '}
+                  <code>--no-cert-update</code>, refresh explicitly first with{' '}
+                  <code>motion-master --update-cert</code>, then restart.
+                </p>
 
-            {configQuery.isLoading && <p className="text-sm text-grey-600">Loading…</p>}
-
-            {configQuery.isError && (
-              <p className="text-status-bad text-sm">
-                Could not read configuration. Is the backend reachable at https://{host}:{httpPort}?
-              </p>
-            )}
-
-            {startedConfig && (
-              <pre className="text-xs font-mono bg-grey-50 border border-grey-200 p-3 overflow-x-auto whitespace-pre">
-                {JSON.stringify(startedConfig, null, 2)}
-              </pre>
-            )}
-          </div>
-        </section>
-
-        <section>
-          <h2 className="eyebrow mb-3">System</h2>
-          <div className="border border-grey-200 p-5 space-y-3">
-            <p className="text-xs text-grey-600 max-w-prose">
-              The operating system and hardware the Motion Master backend is running on — useful
-              when the server is on a separate machine (e.g. a Raspberry Pi appliance). A snapshot
-              read live from the host each time this page loads; fields that cannot be determined on
-              the host's platform are shown as <code>—</code>.
-            </p>
-
-            {systemQuery.isLoading && <p className="text-sm text-grey-600">Loading…</p>}
-
-            {systemQuery.isError && (
-              <p className="text-status-bad text-sm">
-                Could not read system information. Is the backend reachable at https://{host}:
-                {httpPort}?
-              </p>
-            )}
-
-            {system && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-4">
-                <Field label="Operating system" value={system.osName || '—'} />
-                <Field label="Kernel / build" value={system.kernel || '—'} />
-                <Field label="Architecture" value={system.architecture || '—'} />
-                <Field label="Hostname" value={system.hostname || '—'} />
-                <Field label="CPU" value={system.cpuModel || '—'} />
-                <Field label="Logical cores" value={system.cpuCores || '—'} />
-                <Field label="Total memory" value={formatBytes(system.totalMemoryBytes)} />
-                <Field
-                  label="Disk (free / total)"
-                  value={`${formatBytes(system.diskFreeBytes)} / ${formatBytes(system.diskTotalBytes)}`}
-                />
-                <Field
-                  label="Docker / Container"
-                  value={containerSummary(system.container, system.dockerVersion)}
-                />
+                {refreshMutation.isSuccess && (
+                  <div className="border-l-2 border-status-info bg-status-info/10 px-3 py-2 mt-3">
+                    <p className="text-xs font-display font-medium uppercase tracking-wide text-status-info">
+                      Certificate updated
+                    </p>
+                    <p className="text-xs text-grey-700 mt-0.5">
+                      A fresh certificate was installed. Restart Motion Master to start serving it.
+                    </p>
+                  </div>
+                )}
+                {refreshMutation.isError && (
+                  <p className="text-status-bad text-xs mt-2">{apiError(refreshMutation.error)}</p>
+                )}
               </div>
-            )}
-          </div>
-        </section>
+            </section>
+
+            <section>
+              <h2 className="eyebrow mb-3">Started Configuration</h2>
+              <div className="border border-grey-200 p-5 space-y-3">
+                <p className="text-xs text-grey-600 max-w-prose">
+                  The fully-resolved configuration Motion Master booted with. A JSONC config file
+                  (passed with <code>-c</code>/<code>--config</code>) is the single source for ports,
+                  the fieldbus driver and adapter, log level, the recorder, and TLS paths — there are
+                  no command-line flags for these. Any key the file omits keeps its built-in default,
+                  so what you see here is the file overlaid on those defaults; with no config file at
+                  all it is the pure defaults.
+                </p>
+                <p className="text-xs text-grey-600 max-w-prose">
+                  Read-only and captured at startup: it is not re-read while running. To change a
+                  value, edit the JSONC file and restart Motion Master. The annotated{' '}
+                  <a
+                    href="https://github.com/synapticon/motion-master/blob/main/apps/motion_master/motion-master.example.jsonc"
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-ocean hover:underline"
+                  >
+                    motion-master.example.jsonc
+                  </a>{' '}
+                  documents every property with inline comments — unlike the resolved values shown
+                  below, which carry no descriptions.
+                </p>
+
+                {configQuery.isLoading && <p className="text-sm text-grey-600">Loading…</p>}
+
+                {configQuery.isError && (
+                  <p className="text-status-bad text-sm">
+                    Could not read configuration. Is the backend reachable at https://{host}:
+                    {httpPort}?
+                  </p>
+                )}
+
+                {startedConfig && (
+                  <pre className="text-xs font-mono bg-grey-50 border border-grey-200 p-3 overflow-x-auto whitespace-pre">
+                    {JSON.stringify(startedConfig, null, 2)}
+                  </pre>
+                )}
+              </div>
+            </section>
+
+            <section>
+              <h2 className="eyebrow mb-3">System</h2>
+              <div className="border border-grey-200 p-5 space-y-3">
+                <p className="text-xs text-grey-600 max-w-prose">
+                  The operating system and hardware the Motion Master backend is running on — useful
+                  when the server is on a separate machine (e.g. a Raspberry Pi appliance). A
+                  snapshot read live from the host each time this page loads; fields that cannot be
+                  determined on the host's platform are shown as <code>—</code>.
+                </p>
+
+                {systemQuery.isLoading && <p className="text-sm text-grey-600">Loading…</p>}
+
+                {systemQuery.isError && (
+                  <p className="text-status-bad text-sm">
+                    Could not read system information. Is the backend reachable at https://{host}:
+                    {httpPort}?
+                  </p>
+                )}
+
+                {system && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 2xl:grid-cols-3 gap-4">
+                    <Field label="Operating system" value={system.osName || '—'} />
+                    <Field label="Kernel / build" value={system.kernel || '—'} />
+                    <Field label="Architecture" value={system.architecture || '—'} />
+                    <Field label="Hostname" value={system.hostname || '—'} />
+                    <Field label="CPU" value={system.cpuModel || '—'} />
+                    <Field label="Logical cores" value={system.cpuCores || '—'} />
+                    <Field label="Total memory" value={formatBytes(system.totalMemoryBytes)} />
+                    <Field
+                      label="Disk (free / total)"
+                      value={`${formatBytes(system.diskFreeBytes)} / ${formatBytes(system.diskTotalBytes)}`}
+                    />
+                    <Field
+                      label="Docker / Container"
+                      value={containerSummary(system.container, system.dockerVersion)}
+                    />
+                  </div>
+                )}
+              </div>
+            </section>
+          </>
+        )}
       </div>
     </div>
   )

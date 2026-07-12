@@ -82,7 +82,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description The effective configuration after merging the JSONC config file (if any) over the built-in defaults — the same `Config` the server booted with. Read-only; changing it requires editing the config file and restarting. The shape mirrors the config file (server, fieldbus, logLevel, tls, gameLoop, recorder).
+   * @description The effective configuration after merging the JSONC config file (if any) over the built-in defaults — the same `Config` the server booted with. Read-only; changing it requires editing the config file and restarting. The shape mirrors the config file (server, fieldbus, logLevel, tls, gameLoop, recorder, parameterCache, parameters).
    *
    * @name GetStartedConfig
    * @summary Get the configuration Motion Master was started with

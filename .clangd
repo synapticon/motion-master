@@ -6,3 +6,4 @@ CompileFlags:
     - -fmodules-ts
     - -fmodule-mapper*
     - -fmodule-file*
+    - -fdeps-format*

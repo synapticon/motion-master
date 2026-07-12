@@ -53,7 +53,10 @@ struct GameLoopConfig {
 struct RecorderConfig {
   /// Depth of the recorder ring in seconds (must be > 0). The ring is allocated at process-image
   /// configuration to hold this many seconds of cycles at the GameLoop period, so RAM ≈
-  /// historySeconds × (1e6 / periodUs) × per-cycle image bytes (~400). 300 s ≈ 120 MB.
+  /// historySeconds × (1e6 / periodUs) × per-cycle record bytes. A record is 28 B fixed (20-byte
+  /// header + 8-byte publication word) plus the whole-bus IOmap — ~82 B per SOMANET drive (budget
+  /// ~100 B). So a single drive at 300 s / 1 ms ≈ 300k cycles × ~128 B ≈ 38 MB. It scales with
+  /// drive count and (inversely) with the loop period.
   uint32_t historySeconds = 300;
   /// Directory for `.mmpd` recorder dumps written by @c POST @c /api/process-data/dump. Empty
   /// means a @c "motion-master" subdirectory of the OS temporary directory (resolved at dump time,

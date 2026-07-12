@@ -7,6 +7,7 @@
 #include <openssl/x509.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
@@ -55,6 +56,10 @@ std::expected<std::string, std::string> httpGet(const std::string& url) {
   curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
   curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
   curl_easy_setopt(curl, CURLOPT_USERAGENT, "motion-master");
+  // httpGet also runs off the main thread (POST /api/cert/refresh). With the synchronous resolver
+  // libcurl may raise signals (SIGPIPE on a dead socket, historically SIGALRM around timeouts),
+  // which is unsafe off the main thread — disable them.
+  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 
   const CURLcode rc = curl_easy_perform(curl);
   if (rc != CURLE_OK) {
@@ -71,7 +76,10 @@ std::string subjectCommonName(X509* cert) {
   if (len < 0) {
     return {};
   }
-  return std::string(buf, static_cast<std::size_t>(len));
+  // len is the CN's full length, but the API copies at most sizeof(buf)-1 bytes and
+  // null-terminates, so clamp to what actually landed in buf — a CN >= sizeof(buf) would otherwise
+  // over-read.
+  return std::string(buf, std::min(static_cast<std::size_t>(len), sizeof(buf) - 1));
 }
 
 // Validates the downloaded pair before it is allowed anywhere near the live files: the cert parses

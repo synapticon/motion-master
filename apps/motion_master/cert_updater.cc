@@ -14,7 +14,6 @@
 #include <fstream>
 #include <ios>
 #include <memory>
-#include <mutex>
 #include <string>
 #include <system_error>
 
@@ -27,14 +26,6 @@ namespace {
 // Common name the fetched certificate must carry to be accepted.
 constexpr char kCertCommonName[] = "local.motion-master.synapticon.com";
 
-// curl_global_init is not thread-safe and must run once before any curl_easy_* use. The startup
-// self-heal call is single-threaded, but POST /api/cert/refresh runs on an HTTP thread, so guard
-// it.
-void ensureCurlInit() {
-  static std::once_flag once;
-  std::call_once(once, [] { curl_global_init(CURL_GLOBAL_DEFAULT); });
-}
-
 size_t appendToString(char* ptr, size_t size, size_t nmemb, void* userdata) {
   auto* out = static_cast<std::string*>(userdata);
   const size_t bytes = size * nmemb;
@@ -45,7 +36,8 @@ size_t appendToString(char* ptr, size_t size, size_t nmemb, void* userdata) {
 // Downloads @p url over HTTPS, following redirects (release asset URLs 302 to a separate host) and
 // failing on any HTTP status >= 400. Returns the response body, or an error string.
 std::expected<std::string, std::string> httpGet(const std::string& url) {
-  ensureCurlInit();
+  // curl_global_init runs once at the composition root (main.cc) before any thread starts; here we
+  // only create per-call easy handles, which is safe from any thread.
   CURL* curl = curl_easy_init();
   if (curl == nullptr) {
     return std::unexpected("failed to initialise HTTP client");

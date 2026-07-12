@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
     if (!initDeviceManager(opts.config.fieldbus.driver, opts.config.fieldbus.adapter)) {
       return 1;
     }
-    static_cast<void>(deviceManager.scan());
+    [[maybe_unused]] const auto scanResult = deviceManager.scan();
   }
 
   // The install-dir cert/key — both the default served location and the target the self-heal and

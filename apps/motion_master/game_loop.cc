@@ -2,6 +2,9 @@
 
 #include <spdlog/spdlog.h>
 
+#include <chrono>
+#include <nlohmann/json.hpp>
+
 #include "core/cyclic_timer.h"
 
 #ifndef _WIN32
@@ -14,12 +17,20 @@
 
 namespace {
 
-void setRealtimePriority() {
+struct RtSetupResult {
+  bool schedFifo = false;  // SCHED_FIFO priority acquired
+  bool memLocked = false;  // mlockall succeeded
+};
+
+RtSetupResult setRealtimePriority() {
+  RtSetupResult result;
 #ifndef _WIN32
   struct sched_param param = {};
   param.sched_priority = 80;
   if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &param) != 0) {
     spdlog::warn("GameLoop: failed to set SCHED_FIFO — running without RT scheduling");
+  } else {
+    result.schedFifo = true;
   }
 #endif
 #ifdef __linux__
@@ -27,8 +38,25 @@ void setRealtimePriority() {
   // introduce unbounded latency spikes.  macOS has no mlockall().
   if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
     spdlog::warn("GameLoop: failed to lock memory pages — page faults may cause jitter");
+  } else {
+    result.memLocked = true;
   }
 #endif
+  return result;
+}
+
+// Monotonic clock in ns — used for uptime (achievedHz) and per-cycle work timing.
+uint64_t nowMonoNs() {
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                   std::chrono::steady_clock::now().time_since_epoch())
+                                   .count());
+}
+
+// Wall-clock epoch µs — stamped into each health snapshot so the client's live-rate Δt is exact.
+uint64_t nowEpochUs() {
+  return static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::microseconds>(
+                                   std::chrono::system_clock::now().time_since_epoch())
+                                   .count());
 }
 
 }  // namespace
@@ -38,8 +66,11 @@ GameLoop::GameLoop(std::chrono::microseconds period) : period_(period) {}
 void GameLoop::addTask(CyclicTask* task) { tasks_.push_back(task); }
 
 void GameLoop::run() {
-  setRealtimePriority();
+  const RtSetupResult rt = setRealtimePriority();
+  schedFifo_.store(rt.schedFifo, std::memory_order_relaxed);
+  memLocked_.store(rt.memLocked, std::memory_order_relaxed);
   running_.store(true, std::memory_order_relaxed);
+  startMonoNs_.store(nowMonoNs(), std::memory_order_relaxed);
 
   mm::core::CyclicTimer timer(period_);
   while (running_.load(std::memory_order_relaxed)) {
@@ -53,9 +84,22 @@ void GameLoop::run() {
     const uint64_t totalSkipped =
         skippedCycles_.fetch_add(skipped, std::memory_order_relaxed) + skipped;
     const CycleContext ctx{.elapsed = executed + totalSkipped, .skipped = skipped};
+
+    // Time the task work (not the sleep) so /api/game-loop can report budget use.
+    // steady_clock::now() is a vDSO CLOCK_MONOTONIC read on Linux — cheap enough
+    // for the RT path; the three stores below are relaxed and single-writer.
+    const auto workStart = std::chrono::steady_clock::now();
     for (CyclicTask* task : tasks_) {
       task->execute(ctx);
     }
+    const auto workEnd = std::chrono::steady_clock::now();
+    const uint64_t execNs = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(workEnd - workStart).count());
+    lastExecNs_.store(execNs, std::memory_order_relaxed);
+    if (execNs > maxExecNs_.load(std::memory_order_relaxed)) {
+      maxExecNs_.store(execNs, std::memory_order_relaxed);
+    }
+    sumExecNs_.fetch_add(execNs, std::memory_order_relaxed);
   }
 }
 
@@ -73,3 +117,35 @@ uint64_t GameLoop::executedCycles() const {
 }
 
 uint64_t GameLoop::skippedCycles() const { return skippedCycles_.load(std::memory_order_relaxed); }
+
+GameLoopHealth GameLoop::health() const {
+  GameLoopHealth h;
+  h.periodUs = static_cast<uint64_t>(period_.count());
+  h.targetHz = h.periodUs > 0 ? 1'000'000.0 / static_cast<double>(h.periodUs) : 0.0;
+  h.executedCycles = executedCycles_.load(std::memory_order_relaxed);
+  h.skippedCycles = skippedCycles_.load(std::memory_order_relaxed);
+  h.lastExecNs = lastExecNs_.load(std::memory_order_relaxed);
+  h.maxExecNs = maxExecNs_.load(std::memory_order_relaxed);
+  const uint64_t sum = sumExecNs_.load(std::memory_order_relaxed);
+  h.avgExecNs = h.executedCycles > 0 ? sum / h.executedCycles : 0;
+  const uint64_t start = startMonoNs_.load(std::memory_order_relaxed);
+  if (start != 0) {
+    const uint64_t now = nowMonoNs();
+    const uint64_t upNs = now > start ? now - start : 0;
+    h.achievedHz =
+        upNs > 0 ? static_cast<double>(h.executedCycles) * 1e9 / static_cast<double>(upNs) : 0.0;
+  }
+  h.schedFifo = schedFifo_.load(std::memory_order_relaxed);
+  h.memLocked = memLocked_.load(std::memory_order_relaxed);
+  h.timestampUs = nowEpochUs();
+  return h;
+}
+
+void to_json(nlohmann::json& j, const GameLoopHealth& h) {
+  j = nlohmann::json{{"periodUs", h.periodUs},           {"targetHz", h.targetHz},
+                     {"achievedHz", h.achievedHz},       {"executedCycles", h.executedCycles},
+                     {"skippedCycles", h.skippedCycles}, {"lastExecNs", h.lastExecNs},
+                     {"maxExecNs", h.maxExecNs},         {"avgExecNs", h.avgExecNs},
+                     {"schedFifo", h.schedFifo},         {"memLocked", h.memLocked},
+                     {"timestampUs", h.timestampUs}};
+}

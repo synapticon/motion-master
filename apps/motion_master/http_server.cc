@@ -475,6 +475,15 @@ void HttpServer::run() {
            [this](auto* res, auto* /*req*/) {
              sendJson(res, config_.corsOrigin, nlohmann::json(deviceManager_.processImageInfo()));
            })
+      .get("/api/game-loop",
+           [this](auto* res, auto* /*req*/) {
+             if (!config_.gameLoopHealth) {
+               sendError(res, "501 Not Implemented", config_.corsOrigin,
+                         "game-loop health is not configured");
+               return;
+             }
+             sendJson(res, config_.corsOrigin, nlohmann::json(config_.gameLoopHealth()));
+           })
       .get("/api/bus-config",
            [this](auto* res, auto* /*req*/) {
              sendJson(res, config_.corsOrigin, nlohmann::json(deviceManager_.busConfig()));

@@ -173,6 +173,19 @@ int main(int argc, char** argv) {
   // server, which runs on its own port/loop so a slow HTTP handler can never stall the stream.
   mm::node::MonitoringManager monitoringManager{deviceManager};
 
+  // Exchange process data every cycle. No-op until devices are mapped and brought into SAFE-OP/OP
+  // via the API, at which point DeviceManager publishes the image and the loop begins driving PDO
+  // automatically. Declared before gameLoop so it is destroyed after it — a registered task must
+  // outlive every call to GameLoop::run().
+  ProcessDataTask processDataTask{deviceManager};
+
+  // The RT game loop is constructed here — before the servers — so HttpServer's GET /api/game-loop
+  // callback can borrow it via a lambda. Its constructor is side-effect-free; RT setup and the
+  // cycle loop happen in run() at the very end. Declared before httpServer so it outlives the HTTP
+  // thread that may invoke the callback.
+  GameLoop gameLoop{std::chrono::microseconds{opts.config.gameLoop.periodUs}};
+  gameLoop.addTask(&processDataTask);
+
   HttpServer httpServer{
       HttpServer::Config{
           .port = opts.config.server.httpPort,
@@ -187,6 +200,7 @@ int main(int argc, char** argv) {
                           keyUrl = opts.keyUrl]() -> std::expected<void, std::string> {
             return mm::fetchAndSwapCert(certFile, keyFile, certUrl, keyUrl);
           },
+          .gameLoopHealth = [&gameLoop] { return gameLoop.health(); },
           .corsOrigin = opts.config.server.corsOrigin,
       },
       deviceManager, monitoringManager};
@@ -212,15 +226,6 @@ int main(int argc, char** argv) {
   if (opts.openBrowser) {
     mm::core::openInBrowser("https://motion-master.synapticon.com/apps/console/");
   }
-
-  // Exchange process data every cycle. No-op until devices are mapped and brought into
-  // SAFE-OP/OP via the API, at which point DeviceManager publishes the image and the loop
-  // begins driving PDO automatically. Declared before the loop so it is destroyed after it —
-  // a registered task must outlive every call to GameLoop::run().
-  ProcessDataTask processDataTask{deviceManager};
-
-  GameLoop gameLoop{std::chrono::microseconds{opts.config.gameLoop.periodUs}};
-  gameLoop.addTask(&processDataTask);
 
   gGameLoop.store(&gameLoop, std::memory_order_relaxed);
 

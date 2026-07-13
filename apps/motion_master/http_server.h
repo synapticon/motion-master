@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "api/web_api.h"
+#include "game_loop.h"  // GameLoopHealth (returned by the GET /api/game-loop callback)
 
 namespace mm::node {
 class DeviceManager;
@@ -50,6 +51,14 @@ class HttpServer {
   /// the cert once at listen time).
   using RefreshCertFn = std::function<std::expected<void, std::string>()>;
 
+  /// @brief Callback type for `GET /api/game-loop`.
+  ///
+  /// Returns a snapshot of the RT game-loop's health (cycle counters, achieved
+  /// rate, task-execution timing, RT-scheduling flags).  Wired to
+  /// @c GameLoop::health() in main.cc so the server never references the loop
+  /// itself — the same composition-root pattern as @c GetLogFn.
+  using GameLoopHealthFn = std::function<GameLoopHealth()>;
+
   /// @brief Server configuration.
   struct Config {
     uint16_t port = 61447;  ///< TCP port to listen on (TLS).
@@ -62,6 +71,8 @@ class HttpServer {
         initDeviceManager;      ///< Handler for `POST /api/init`; required for API-driven init.
     GetLogFn getLog;            ///< Handler for `GET /api/log`; returns buffered log entries.
     RefreshCertFn refreshCert;  ///< Handler for `POST /api/cert/refresh`; fetches+installs a cert.
+    GameLoopHealthFn
+        gameLoopHealth;  ///< Handler for `GET /api/game-loop`; RT loop health snapshot.
     /// Value sent in `Access-Control-Allow-Origin`. Defaults to the production PWA origin.
     std::string corsOrigin{"https://motion-master.synapticon.com"};
   };

@@ -10,6 +10,72 @@
  * ---------------------------------------------------------------
  */
 
+/** Point-in-time health of the real-time game loop. Times are nanoseconds; rates are hertz. All fields are diagnostic (relaxed reads), not synchronised. */
+export interface GameLoopHealth {
+  /**
+   * Configured target cycle period, in microseconds
+   * @format int64
+   * @example 1000
+   */
+  periodUs: number;
+  /**
+   * Target cycle rate (1e6 / periodUs), in hertz
+   * @example 1000
+   */
+  targetHz: number;
+  /**
+   * Cumulative average rate since the loop started (executedCycles / uptime), in hertz; 0 before the loop starts. Below targetHz means the host cannot sustain the configured period.
+   * @example 999.56
+   */
+  achievedHz: number;
+  /**
+   * Loop iterations actually executed since start
+   * @format int64
+   * @example 2023
+   */
+  executedCycles: number;
+  /**
+   * Cycles skipped to catch up after overruns/stalls since start. A rising value means the loop is not meeting its period.
+   * @format int64
+   * @example 0
+   */
+  skippedCycles: number;
+  /**
+   * Task-execution time of the most recent cycle, in nanoseconds
+   * @format int64
+   * @example 104
+   */
+  lastExecNs: number;
+  /**
+   * Worst task-execution time since start, in nanoseconds
+   * @format int64
+   * @example 4009
+   */
+  maxExecNs: number;
+  /**
+   * Mean task-execution time since start, in nanoseconds
+   * @format int64
+   * @example 338
+   */
+  avgExecNs: number;
+  /**
+   * Whether SCHED_FIFO real-time priority was acquired (false on Windows, which never attempts it, and on Linux/macOS when the privilege is missing).
+   * @example false
+   */
+  schedFifo: boolean;
+  /**
+   * Whether mlockall succeeded to pin memory (Linux only; false elsewhere or when the privilege is missing).
+   * @example false
+   */
+  memLocked: boolean;
+  /**
+   * Server wall-clock timestamp (epoch microseconds) when sampled
+   * @format int64
+   * @example 1783968687738680
+   */
+  timestampUs: number;
+}
+
 /** Summary of one on-disk parameter-cache file (its identity, size, and count). */
 export interface ParameterCacheEntry {
   /**

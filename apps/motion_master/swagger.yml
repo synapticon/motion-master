@@ -1907,6 +1907,28 @@ paths:
                     description: Input-mapped objects (TxPDO), in image order
                     items:
                       $ref: "#/components/schemas/ProcessImageObject"
+  /api/game-loop:
+    get:
+      summary: Inspect real-time game-loop health
+      description: >-
+        Returns a point-in-time snapshot of the RT cyclic loop: the configured
+        period and target rate, the cumulative achieved rate since start, the
+        executed- and skipped-cycle counters, per-cycle task-execution timing
+        (last / worst / mean), and whether real-time scheduling was acquired.
+        Skipped cycles accumulate whenever the loop cannot meet its period
+        (common on non-RT hosts such as Windows userspace) — a steadily rising
+        `skippedCycles`, or an `achievedHz` well below `targetHz`, means the
+        configured period is too aggressive for the hardware. Poll this endpoint
+        and diff `executedCycles`/`skippedCycles` against `timestampUs` to chart
+        the instantaneous rate over time.
+      operationId: getGameLoop
+      responses:
+        "200":
+          description: Real-time game-loop health snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GameLoopHealth"
   /api/process-data/dump:
     get:
       summary: Stream the recorder ring as a binary .mmpd
@@ -2240,6 +2262,77 @@ paths:
           description: No cache file with this id (or the id is malformed).
 components:
   schemas:
+    GameLoopHealth:
+      type: object
+      description: >-
+        Point-in-time health of the real-time game loop. Times are nanoseconds;
+        rates are hertz. All fields are diagnostic (relaxed reads), not
+        synchronised.
+      required:
+        [periodUs, targetHz, achievedHz, executedCycles, skippedCycles,
+         lastExecNs, maxExecNs, avgExecNs, schedFifo, memLocked, timestampUs]
+      properties:
+        periodUs:
+          type: integer
+          format: int64
+          description: Configured target cycle period, in microseconds
+          example: 1000
+        targetHz:
+          type: number
+          description: Target cycle rate (1e6 / periodUs), in hertz
+          example: 1000.0
+        achievedHz:
+          type: number
+          description: >-
+            Cumulative average rate since the loop started (executedCycles /
+            uptime), in hertz; 0 before the loop starts. Below targetHz means
+            the host cannot sustain the configured period.
+          example: 999.56
+        executedCycles:
+          type: integer
+          format: int64
+          description: Loop iterations actually executed since start
+          example: 2023
+        skippedCycles:
+          type: integer
+          format: int64
+          description: >-
+            Cycles skipped to catch up after overruns/stalls since start. A
+            rising value means the loop is not meeting its period.
+          example: 0
+        lastExecNs:
+          type: integer
+          format: int64
+          description: Task-execution time of the most recent cycle, in nanoseconds
+          example: 104
+        maxExecNs:
+          type: integer
+          format: int64
+          description: Worst task-execution time since start, in nanoseconds
+          example: 4009
+        avgExecNs:
+          type: integer
+          format: int64
+          description: Mean task-execution time since start, in nanoseconds
+          example: 338
+        schedFifo:
+          type: boolean
+          description: >-
+            Whether SCHED_FIFO real-time priority was acquired (false on Windows,
+            which never attempts it, and on Linux/macOS when the privilege is
+            missing).
+          example: false
+        memLocked:
+          type: boolean
+          description: >-
+            Whether mlockall succeeded to pin memory (Linux only; false elsewhere
+            or when the privilege is missing).
+          example: false
+        timestampUs:
+          type: integer
+          format: int64
+          description: Server wall-clock timestamp (epoch microseconds) when sampled
+          example: 1783968687738680
     ParameterCacheEntry:
       type: object
       description: Summary of one on-disk parameter-cache file (its identity, size, and count).

@@ -3,9 +3,30 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <nlohmann/json_fwd.hpp>
 #include <vector>
 
 #include "cyclic_task.h"
+
+/// @brief Snapshot of game-loop real-time health for the GET /api/game-loop
+///        diagnostic endpoint. All fields are read with relaxed ordering — for
+///        monitoring, not synchronisation.
+struct GameLoopHealth {
+  uint64_t periodUs = 0;        ///< Configured target period (µs).
+  double targetHz = 0.0;        ///< Target rate = 1e6 / periodUs.
+  double achievedHz = 0.0;      ///< Cumulative avg = executedCycles / uptime; 0 pre-run.
+  uint64_t executedCycles = 0;  ///< Loop iterations run since run().
+  uint64_t skippedCycles = 0;   ///< Cycles skipped to catch up since run().
+  uint64_t lastExecNs = 0;      ///< Task-exec time of the most recent cycle (ns).
+  uint64_t maxExecNs = 0;       ///< Worst task-exec time since run() (ns).
+  uint64_t avgExecNs = 0;       ///< Mean task-exec time since run() (ns).
+  bool schedFifo = false;       ///< SCHED_FIFO acquired (false on Windows / failure).
+  bool memLocked = false;       ///< mlockall ok (Linux only; false elsewhere).
+  uint64_t timestampUs = 0;     ///< Server stamp (epoch µs) for exact client Δt.
+};
+
+/// @brief Serializes a GameLoopHealth to JSON (found via ADL by nlohmann::json).
+void to_json(nlohmann::json& j, const GameLoopHealth& h);
 
 /// @brief Fixed-period real-time loop.
 ///
@@ -88,10 +109,23 @@ class GameLoop {
   ///         diagnostics, not for synchronisation.
   uint64_t skippedCycles() const;
 
+  /// @brief Returns a snapshot of real-time loop health for diagnostics.
+  ///
+  /// Reads the counters, task-execution aggregates, and RT-scheduling flags with
+  /// relaxed ordering, and computes the cumulative achievedHz from uptime. Safe
+  /// to call from any thread; the dynamic fields are zero before run() starts.
+  GameLoopHealth health() const;
+
  private:
   std::chrono::microseconds period_;
   std::atomic<bool> running_{false};
   std::atomic<uint64_t> executedCycles_{0};
   std::atomic<uint64_t> skippedCycles_{0};
+  std::atomic<uint64_t> lastExecNs_{0};   // most recent cycle's task-execution time
+  std::atomic<uint64_t> maxExecNs_{0};    // worst task-execution time since run()
+  std::atomic<uint64_t> sumExecNs_{0};    // running sum → avg = sum / executedCycles
+  std::atomic<uint64_t> startMonoNs_{0};  // steady_clock ns at run() start; 0 until then
+  std::atomic<bool> schedFifo_{false};    // SCHED_FIFO acquired in run()
+  std::atomic<bool> memLocked_{false};    // mlockall succeeded in run()
   std::vector<CyclicTask*> tasks_;
 };

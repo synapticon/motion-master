@@ -17,6 +17,7 @@ import {
   DeviceParameter,
   EscRegister,
   FoeErrorCode,
+  GameLoopHealth,
   Monitoring,
   ObjectDataTypeInfo,
   OutputStageResult,
@@ -1377,6 +1378,20 @@ export class Api<
       any
     >({
       path: `/api/process-image`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Returns a point-in-time snapshot of the RT cyclic loop: the configured period and target rate, the cumulative achieved rate since start, the executed- and skipped-cycle counters, per-cycle task-execution timing (last / worst / mean), and whether real-time scheduling was acquired. Skipped cycles accumulate whenever the loop cannot meet its period (common on non-RT hosts such as Windows userspace) — a steadily rising `skippedCycles`, or an `achievedHz` well below `targetHz`, means the configured period is too aggressive for the hardware. Poll this endpoint and diff `executedCycles`/`skippedCycles` against `timestampUs` to chart the instantaneous rate over time.
+   *
+   * @name GetGameLoop
+   * @summary Inspect real-time game-loop health
+   * @request GET:/api/game-loop
+   */
+  getGameLoop = (params: RequestParams = {}) =>
+    this.request<GameLoopHealth, any>({
+      path: `/api/game-loop`,
       method: "GET",
       format: "json",
       ...params,

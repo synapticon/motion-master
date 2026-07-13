@@ -23,9 +23,11 @@
 /// - `skipped` — cycles skipped immediately before this one; 0 on the normal
 ///   path.  For anomaly policy (e.g. an opt-in strict mode that aborts a move
 ///   when the RT guarantee is badly violated), not for normal advancement.
+///   This is *this cycle's* skip count — distinct from the cumulative
+///   `GameLoop::skippedCycles()`, which is the running total since run().
 struct CycleContext {
-  uint64_t elapsed = 0;
-  uint64_t skipped = 0;
+  uint64_t elapsed = 0;  ///< Cycles elapsed since run() = executed + skipped (grid index).
+  uint64_t skipped = 0;  ///< Cycles skipped just before this cycle; 0 on the normal path.
 };
 
 /// @brief Interface for work executed once per game loop cycle.

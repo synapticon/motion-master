@@ -200,6 +200,8 @@ Use `std::visit` for type dispatch on `DeviceParameterValue`. `DeviceParameter` 
 
 `GameLoop::run()` blocks the **main thread** — this IS the RT thread. All other subsystems start their own threads before `run()` is called. Shutdown via signal sets an atomic flag checked after each cycle.
 
+At the top of `run()`, the file-local `setRealtimePriority()` (`game_loop.cc`) prepares the calling thread for RT: it raises it to `SCHED_FIFO` priority 80 (`pthread_setschedparam`, non-Windows) so the cycle is never preempted by normal `SCHED_OTHER` work, then `mlockall(MCL_CURRENT | MCL_FUTURE)` (Linux only — macOS has no `mlockall`) pins all pages so a mid-cycle page fault can't inject an unbounded latency spike. Both steps are **best-effort**: each failure only logs an `spdlog::warn` and continues (a `SCHED_FIFO` failure does not skip the `mlockall`), so a process lacking `CAP_SYS_NICE`/`CAP_IPC_LOCK` still runs — just non-deterministically. `hil/jitter_bench` calls the same routine to characterise real scheduling jitter.
+
 `GameLoop` calls `deviceManager_.exchangeProcessData()` each cycle via a `ProcessDataTask` (a `CyclicTask` adapter, so `GameLoop` has no knowledge of `DeviceManager` internals or `FieldbusDriver`). It is a no-op until a process image is published, so the loop runs unconditionally. HTTP handlers call SDO methods on `DeviceManager`/`Device` from their own threads; `FieldbusDriver` serializes all socket access via its internal mutex.
 
 PDO data crosses the RT/non-RT boundary through `ProcessData` (`libs/node/process_data.h`, owned by `DeviceManager`, pointer handed to each `Device`):

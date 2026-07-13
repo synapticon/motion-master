@@ -14,7 +14,9 @@ class ProcessDataTask : public CyclicTask {
   explicit ProcessDataTask(mm::node::DeviceManager& deviceManager)
       : deviceManager_(deviceManager) {}
 
-  void execute() override { deviceManager_.exchangeProcessData(); }
+  // Exchanges the freshest process data; ignores the timing context — skipped
+  // cycles just mean fewer exchanges, which is correct (never a catch-up burst).
+  void execute(const CycleContext&) override { deviceManager_.exchangeProcessData(); }
 
  private:
   mm::node::DeviceManager& deviceManager_;

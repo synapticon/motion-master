@@ -20,7 +20,7 @@ namespace mm::core {
 /// back-to-back (a burst that, on an EtherCAT bus, would spam stale process
 /// data), the timer skips the backlog and re-syncs to the next FUTURE grid
 /// point, preserving the original phase.  waitForNextCycle() returns how many
-/// cycles were skipped so the caller can count overruns.
+/// cycles it skipped so the caller can track them.
 ///
 /// Platform implementations:
 /// - Linux: `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...)`.  Works on
@@ -70,7 +70,7 @@ class CyclicTimer {
   /// @return Number of cycles skipped to catch up to the grid.  0 on the
   ///         normal path (deadline was met or the wake was merely late);
   ///         positive only after an overrun/stall.  Not `[[nodiscard]]` —
-  ///         callers that don't track overruns may ignore it.
+  ///         callers that don't track skips may ignore it.
   uint64_t waitForNextCycle();
 
  private:

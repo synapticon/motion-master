@@ -62,29 +62,36 @@ class GameLoop {
   /// Safe to call from a signal handler.  run() returns within one period.
   void stop();
 
-  /// @brief Returns the total number of cycles completed since run() was
+  /// @brief Returns the number of cycles actually executed since run() was
   ///        called.
-  /// @return Cycle count.  Reads with relaxed ordering — suitable for
+  ///
+  /// This counts loop iterations (calls to a task's execute()), which is
+  /// distinct from grid periods elapsed: a stall that skips N cycles advances
+  /// this by 1 (one iteration ran) while wall-clock time advanced by 1 + N
+  /// periods.  The grid index — executed + skipped — is `CycleContext::gridTick`.
+  ///
+  /// @return Executed-cycle count.  Reads with relaxed ordering — suitable for
   ///         diagnostics and logging, not for synchronisation.
   uint64_t tick() const;
 
-  /// @brief Returns the total number of cycles skipped to catch up after
-  ///        overruns or scheduling stalls since run() was called.
+  /// @brief Returns the total number of cycles skipped since run() was called.
   ///
-  /// The timer never runs missed cycles back-to-back; it skips the backlog and
-  /// re-syncs to the deadline grid (so the bus is never flooded with stale
-  /// process data).  This counter records how many cycles were skipped that
-  /// way — a nonzero, growing value indicates the loop is failing to meet its
-  /// period.  Intended to feed the planned master-side health timeline.
+  /// When a deadline is already past (an overrun or a scheduling stall — the
+  /// latter routine on a non-RT OS), the timer skips the backlog and re-syncs
+  /// to the grid rather than running missed cycles back-to-back (which would
+  /// flood the bus with stale process data).  This is the running total of
+  /// cycles skipped that way — a nonzero, growing value means the loop is not
+  /// meeting its period.  Intended to feed the planned master-side health
+  /// timeline.  `tick() + skippedCycles()` is the current grid index.
   ///
   /// @return Skipped-cycle count.  Reads with relaxed ordering — suitable for
   ///         diagnostics, not for synchronisation.
-  uint64_t overruns() const;
+  uint64_t skippedCycles() const;
 
  private:
   std::chrono::microseconds period_;
   std::atomic<bool> running_{false};
   std::atomic<uint64_t> tick_{0};
-  std::atomic<uint64_t> overruns_{0};
+  std::atomic<uint64_t> skippedCycles_{0};
   std::vector<CyclicTask*> tasks_;
 };

@@ -49,11 +49,11 @@ void GameLoop::run() {
     // for diagnostics; the RT path itself does no logging (skip-to-grid means
     // we never burst stale frames). Their sum is the absolute grid index.
     // This thread is the only writer, so load/compute/store needs no atomic RMW.
-    const uint64_t executed = tick_.load(std::memory_order_relaxed) + 1;
+    const uint64_t executed = executedCycles_.load(std::memory_order_relaxed) + 1;
     const uint64_t totalSkipped = skippedCycles_.load(std::memory_order_relaxed) + skipped;
-    tick_.store(executed, std::memory_order_relaxed);
+    executedCycles_.store(executed, std::memory_order_relaxed);
     skippedCycles_.store(totalSkipped, std::memory_order_relaxed);
-    const CycleContext ctx{.gridTick = executed + totalSkipped, .skipped = skipped};
+    const CycleContext ctx{.elapsed = executed + totalSkipped, .skipped = skipped};
     for (CyclicTask* task : tasks_) {
       task->execute(ctx);
     }
@@ -69,6 +69,8 @@ static_assert(std::atomic<bool>::is_always_lock_free,
 
 void GameLoop::stop() { running_.store(false, std::memory_order_relaxed); }
 
-uint64_t GameLoop::tick() const { return tick_.load(std::memory_order_relaxed); }
+uint64_t GameLoop::executedCycles() const {
+  return executedCycles_.load(std::memory_order_relaxed);
+}
 
 uint64_t GameLoop::skippedCycles() const { return skippedCycles_.load(std::memory_order_relaxed); }

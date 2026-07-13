@@ -68,11 +68,11 @@ class GameLoop {
   /// This counts loop iterations (calls to a task's execute()), which is
   /// distinct from grid periods elapsed: a stall that skips N cycles advances
   /// this by 1 (one iteration ran) while wall-clock time advanced by 1 + N
-  /// periods.  The grid index — executed + skipped — is `CycleContext::gridTick`.
+  /// periods.  `CycleContext::elapsed` = `executedCycles() + skippedCycles()`.
   ///
   /// @return Executed-cycle count.  Reads with relaxed ordering — suitable for
   ///         diagnostics and logging, not for synchronisation.
-  uint64_t tick() const;
+  uint64_t executedCycles() const;
 
   /// @brief Returns the total number of cycles skipped since run() was called.
   ///
@@ -82,7 +82,7 @@ class GameLoop {
   /// flood the bus with stale process data).  This is the running total of
   /// cycles skipped that way — a nonzero, growing value means the loop is not
   /// meeting its period.  Intended to feed the planned master-side health
-  /// timeline.  `tick() + skippedCycles()` is the current grid index.
+  /// timeline.  `CycleContext::elapsed` = `executedCycles() + skippedCycles()`.
   ///
   /// @return Skipped-cycle count.  Reads with relaxed ordering — suitable for
   ///         diagnostics, not for synchronisation.
@@ -91,7 +91,7 @@ class GameLoop {
  private:
   std::chrono::microseconds period_;
   std::atomic<bool> running_{false};
-  std::atomic<uint64_t> tick_{0};
+  std::atomic<uint64_t> executedCycles_{0};
   std::atomic<uint64_t> skippedCycles_{0};
   std::vector<CyclicTask*> tasks_;
 };

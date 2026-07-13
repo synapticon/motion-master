@@ -40,6 +40,10 @@ if(WIN32)
       "${NPCAP_SDK_PATH}/Lib/x64/Packet.lib")
 endif()
 
+# Ordered by dependency layer (foundation first, consumers last), not alphabetically:
+# mm::core -> mm::comm -> mm::node -> mm::api -> mm::example, then the apps that consume them.
+# CMake resolves link targets at generate time so any order would configure; this ordering
+# is for readability, keeping the architectural layering obvious at a glance.
 add_subdirectory(libs/core)
 add_subdirectory(libs/comm)
 add_subdirectory(libs/node)

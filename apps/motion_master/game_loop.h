@@ -68,9 +68,23 @@ class GameLoop {
   ///         diagnostics and logging, not for synchronisation.
   uint64_t tick() const;
 
+  /// @brief Returns the total number of cycles skipped to catch up after
+  ///        overruns or scheduling stalls since run() was called.
+  ///
+  /// The timer never runs missed cycles back-to-back; it skips the backlog and
+  /// re-syncs to the deadline grid (so the bus is never flooded with stale
+  /// process data).  This counter records how many cycles were skipped that
+  /// way — a nonzero, growing value indicates the loop is failing to meet its
+  /// period.  Intended to feed the planned master-side health timeline.
+  ///
+  /// @return Skipped-cycle count.  Reads with relaxed ordering — suitable for
+  ///         diagnostics, not for synchronisation.
+  uint64_t overruns() const;
+
  private:
   std::chrono::microseconds period_;
   std::atomic<bool> running_{false};
   std::atomic<uint64_t> tick_{0};
+  std::atomic<uint64_t> overruns_{0};
   std::vector<CyclicTask*> tasks_;
 };

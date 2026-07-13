@@ -43,8 +43,14 @@ void GameLoop::run() {
 
   mm::core::CyclicTimer timer(period_);
   while (running_.load(std::memory_order_relaxed)) {
-    timer.waitForNextCycle();
+    const uint64_t skipped = timer.waitForNextCycle();
     tick_.fetch_add(1, std::memory_order_relaxed);
+    // Cycles the timer skipped to catch up after an overrun or scheduling stall.
+    // Counted silently for diagnostics (exposed via overruns()); the RT path
+    // itself does no logging. Skip-to-grid means we never burst stale frames.
+    if (skipped != 0) {
+      overruns_.fetch_add(skipped, std::memory_order_relaxed);
+    }
     for (CyclicTask* task : tasks_) {
       task->execute();
     }
@@ -61,3 +67,5 @@ static_assert(std::atomic<bool>::is_always_lock_free,
 void GameLoop::stop() { running_.store(false, std::memory_order_relaxed); }
 
 uint64_t GameLoop::tick() const { return tick_.load(std::memory_order_relaxed); }
+
+uint64_t GameLoop::overruns() const { return overruns_.load(std::memory_order_relaxed); }

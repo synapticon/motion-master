@@ -31,11 +31,20 @@ CyclicTimer::CyclicTimer(std::chrono::microseconds period) : period_ns_(period.c
 
 CyclicTimer::~CyclicTimer() = default;
 
-void CyclicTimer::waitForNextCycle() {
-  next_nsec_ += period_ns_;
-  if (next_nsec_ >= 1'000'000'000L) {
-    next_nsec_ -= 1'000'000'000L;
-    next_sec_++;
+uint64_t CyclicTimer::waitForNextCycle() {
+  advanceOnePeriod();
+
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+
+  // Skip-to-grid: if the deadline is already behind us — an overrun or a
+  // multi-cycle stall — fast-forward to the next future grid point instead of
+  // firing the missed cycles back-to-back. Strict `<` so an exactly-due
+  // deadline is met, not skipped. The original grid phase is preserved.
+  uint64_t skipped = 0;
+  while (next_sec_ < now.tv_sec || (next_sec_ == now.tv_sec && next_nsec_ < now.tv_nsec)) {
+    advanceOnePeriod();
+    ++skipped;
   }
 
   static const mach_timebase_info_data_t tb = machTimebase();
@@ -45,9 +54,12 @@ void CyclicTimer::waitForNextCycle() {
   const uint64_t deadline_ticks = deadline_ns * tb.denom / tb.numer;
 
   // Absolute deadline: late wake-ups in one cycle don't shift the next, so
-  // drift never accumulates. mach_wait_until resumes toward the same deadline
-  // if interrupted, mirroring the Linux EINTR-retry contract.
-  mach_wait_until(deadline_ticks);
+  // drift never accumulates. Retry on KERN_ABORTED so a signal doesn't cut a
+  // cycle short — the sleep resumes toward the same absolute deadline,
+  // mirroring the Linux EINTR-retry contract.
+  while (mach_wait_until(deadline_ticks) == KERN_ABORTED) {
+  }
+  return skipped;
 }
 
 }  // namespace mm::core

@@ -44,15 +44,14 @@ void GameLoop::run() {
   mm::core::CyclicTimer timer(period_);
   while (running_.load(std::memory_order_relaxed)) {
     const uint64_t skipped = timer.waitForNextCycle();
-    // executed = loop iterations run; skipped = cycles the timer skipped to
-    // catch up after an overrun or scheduling stall. Both are counted silently
-    // for diagnostics; the RT path itself does no logging (skip-to-grid means
-    // we never burst stale frames). Their sum is the absolute grid index.
-    // This thread is the only writer, so load/compute/store needs no atomic RMW.
-    const uint64_t executed = executedCycles_.load(std::memory_order_relaxed) + 1;
-    const uint64_t totalSkipped = skippedCycles_.load(std::memory_order_relaxed) + skipped;
-    executedCycles_.store(executed, std::memory_order_relaxed);
-    skippedCycles_.store(totalSkipped, std::memory_order_relaxed);
+    // executed = loop iterations run; skipped = cycles the timer skipped to catch
+    // up after an overrun or scheduling stall. Counted silently for diagnostics —
+    // no logging on the RT path; skip-to-grid means we never burst stale frames.
+    // fetch_add returns the pre-increment value, so add back to get the new
+    // totals; their sum is the absolute grid index (elapsed).
+    const uint64_t executed = executedCycles_.fetch_add(1, std::memory_order_relaxed) + 1;
+    const uint64_t totalSkipped =
+        skippedCycles_.fetch_add(skipped, std::memory_order_relaxed) + skipped;
     const CycleContext ctx{.elapsed = executed + totalSkipped, .skipped = skipped};
     for (CyclicTask* task : tasks_) {
       task->execute(ctx);

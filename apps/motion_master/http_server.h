@@ -57,7 +57,7 @@ class HttpServer {
   /// rate, task-execution timing, RT-scheduling flags).  Wired to
   /// @c GameLoop::health() in main.cc so the server never references the loop
   /// itself — the same composition-root pattern as @c GetLogFn.
-  using GameLoopHealthFn = std::function<GameLoopHealth()>;
+  using GetGameLoopHealthFn = std::function<GameLoopHealth()>;
 
   /// @brief Server configuration.
   struct Config {
@@ -71,8 +71,8 @@ class HttpServer {
         initDeviceManager;      ///< Handler for `POST /api/init`; required for API-driven init.
     GetLogFn getLog;            ///< Handler for `GET /api/log`; returns buffered log entries.
     RefreshCertFn refreshCert;  ///< Handler for `POST /api/cert/refresh`; fetches+installs a cert.
-    GameLoopHealthFn
-        gameLoopHealth;  ///< Handler for `GET /api/game-loop`; RT loop health snapshot.
+    GetGameLoopHealthFn
+        getGameLoopHealth;  ///< Handler for `GET /api/game-loop`; RT loop health snapshot.
     /// Value sent in `Access-Control-Allow-Origin`. Defaults to the production PWA origin.
     std::string corsOrigin{"https://motion-master.synapticon.com"};
   };

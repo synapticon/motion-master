@@ -200,7 +200,7 @@ int main(int argc, char** argv) {
                           keyUrl = opts.keyUrl]() -> std::expected<void, std::string> {
             return mm::fetchAndSwapCert(certFile, keyFile, certUrl, keyUrl);
           },
-          .gameLoopHealth = [&gameLoop] { return gameLoop.health(); },
+          .getGameLoopHealth = [&gameLoop] { return gameLoop.health(); },
           .corsOrigin = opts.config.server.corsOrigin,
       },
       deviceManager, monitoringManager};

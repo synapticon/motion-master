@@ -477,12 +477,12 @@ void HttpServer::run() {
            })
       .get("/api/game-loop",
            [this](auto* res, auto* /*req*/) {
-             if (!config_.gameLoopHealth) {
+             if (!config_.getGameLoopHealth) {
                sendError(res, "501 Not Implemented", config_.corsOrigin,
                          "game-loop health is not configured");
                return;
              }
-             sendJson(res, config_.corsOrigin, nlohmann::json(config_.gameLoopHealth()));
+             sendJson(res, config_.corsOrigin, nlohmann::json(config_.getGameLoopHealth()));
            })
       .get("/api/bus-config",
            [this](auto* res, auto* /*req*/) {

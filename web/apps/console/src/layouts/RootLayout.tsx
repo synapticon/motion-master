@@ -366,9 +366,11 @@ export default function RootLayout() {
           )}
 
           <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Server</p>
-          {/* Log reads from the API; Requests is a purely client-side log of HTTP
+          {/* Game Loop and Log read from the API (the loop runs unconditionally, so
+              Game Loop needs no scan); Requests is a purely client-side log of HTTP
               requests (failures included), so it stays visible — it's most useful
               precisely when the connection is failing. */}
+          {online && <NavItem to="/game-loop" label="Game Loop" />}
           {online && <NavItem to="/log" label="Log" />}
           <NavItem to="/requests" label="Requests" />
 

@@ -18,6 +18,7 @@ import ParameterCachesPage from './pages/ParameterCachesPage'
 import BusConfigPage from './pages/BusConfigPage'
 import BusDiagnosticsPage from './pages/BusDiagnosticsPage'
 import DcSyncPage from './pages/DcSyncPage'
+import GameLoopPage from './pages/GameLoopPage'
 import LogPage from './pages/LogPage'
 import RequestsPage from './pages/RequestsPage'
 import EscRegistersPage from './pages/EscRegistersPage'
@@ -40,6 +41,7 @@ export default function App() {
         <Route path="monitorings" element={<MonitoringsPage />} />
         <Route path="recorder" element={<RecorderPage />} />
         <Route path="parameter-caches" element={<ParameterCachesPage />} />
+        <Route path="game-loop" element={<GameLoopPage />} />
         <Route path="log" element={<LogPage />} />
         <Route path="requests" element={<RequestsPage />} />
         <Route path="api-docs" element={<ApiDocsPage />} />

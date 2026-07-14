@@ -17,8 +17,10 @@ namespace mm::core {
 ///
 /// Accepts a non-empty string of at most 64 characters drawn from @c [A-Za-z0-9._-] — the
 /// unreserved subset that needs no percent-encoding in a URL path segment and carries no
-/// special meaning to the uWebSockets topic parser (notably no @c '/', which it treats as a
-/// hierarchy delimiter). Comparison is case-sensitive, so @c "Motor" and @c "motor" are
+/// special meaning to the uWebSockets topic parser. Rejecting @c '/' is doubly load-bearing:
+/// the id is a single REST path segment (e.g. @c GET @c /api/monitorings/{topic}), so a @c '/'
+/// would spill into extra segments and miss the route; and uWebSockets treats it as a topic
+/// hierarchy delimiter. Comparison is case-sensitive, so @c "Motor" and @c "motor" are
 /// distinct identifiers.
 ///
 /// @param s  Candidate identifier.

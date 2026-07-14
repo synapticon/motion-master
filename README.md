@@ -231,7 +231,7 @@ git submodule update --init --recursive
 
 The `motion-master` binary lands in `build/x64-linux-debug/apps/motion_master/`.
 
-On Linux, `./tools/build.sh` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw=eip` on the binary after linking — you will be prompted for your password. Without these capabilities the binary still runs but EtherCAT initialisation will fail.
+On Linux, `./tools/build.sh --setcap` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip` on the binary after linking — you will be prompted for your password. Without `cap_net_raw`/`cap_net_admin` EtherCAT initialisation fails; without `cap_sys_nice`/`cap_ipc_lock` the binary still runs but the RT game loop cannot raise its priority or pin its memory (visible as `mlockall: no` on the Game Loop page).
 
 ### Running locally
 

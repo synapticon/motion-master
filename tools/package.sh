@@ -99,7 +99,7 @@ install -m 644 %{_sourcedir}/motion-master.example.jsonc %{buildroot}/opt/motion
 ln -sf /opt/motion-master/motion-master %{buildroot}/usr/local/bin/motion-master
 
 %post
-setcap cap_sys_nice,cap_net_admin,cap_net_raw=eip /opt/motion-master/motion-master
+setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip /opt/motion-master/motion-master
 
 %files
 %defattr(-,root,root,-)

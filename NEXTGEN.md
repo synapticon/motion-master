@@ -538,7 +538,7 @@ struct SlaveInfo {
 
 **Linux capabilities**
 
-`motion-master` requires `cap_net_raw` (raw EtherCAT socket) and `cap_sys_nice` (SCHED_FIFO). `tools/build.sh` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw=eip` on the binary after linking so developers do not need to run the binary as root.
+`motion-master` requires `cap_net_raw` (raw EtherCAT socket), `cap_sys_nice` (SCHED_FIFO), and `cap_ipc_lock` (`mlockall` memory pinning). `tools/build.sh --setcap` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip` on the binary after linking so developers do not need to run the binary as root.
 
 ---
 

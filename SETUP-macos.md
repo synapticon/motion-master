@@ -32,8 +32,7 @@ sudo ./motion-master
 > `/dev/bpf*` permissions on boot. RT scheduling will still be unavailable without
 > elevated privileges, but the server runs fine non-RT for non-latency-critical use.
 
-The server listens on `https://local.motion-master.synapticon.com:61447`. Open the
-Motion Master Console web app at `https://motion-master.synapticon.com/apps/console/` to
-connect — it is launched from the landing page at `https://motion-master.synapticon.com`.
+The server listens on `https://local.motion-master.synapticon.com:61447`. To connect, open
+the Motion Master Console at `https://motion-master.synapticon.com/apps/console/`.
 
 For full usage options run `./motion-master --help`.

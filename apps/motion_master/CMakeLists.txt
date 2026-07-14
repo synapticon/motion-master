@@ -1,14 +1,14 @@
-add_executable(motion_master
-    main.cc
-    options.cc
-    config.cc
-    http_server.cc
-    ws_server.cc
-    game_loop.cc
-    monitoring_api.cc
-    cert_info.cc
-    cert_updater.cc
-)
+add_executable(
+  motion_master
+  main.cc
+  options.cc
+  config.cc
+  http_server.cc
+  ws_server.cc
+  game_loop.cc
+  monitoring_api.cc
+  cert_info.cc
+  cert_updater.cc)
 
 set_target_properties(motion_master PROPERTIES OUTPUT_NAME "motion-master")
 
@@ -19,16 +19,16 @@ find_package(unofficial-uwebsockets CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
 find_package(CURL REQUIRED)
 
-target_link_libraries(motion_master PRIVATE
-    mm::node
-    mm::example
-    CLI11::CLI11
-    nlohmann_json::nlohmann_json
-    spdlog::spdlog
-    unofficial::uwebsockets::uwebsockets
-    OpenSSL::Crypto
-    CURL::libcurl
-)
+target_link_libraries(
+  motion_master
+  PRIVATE mm::node
+          mm::example
+          CLI11::CLI11
+          nlohmann_json::nlohmann_json
+          spdlog::spdlog
+          unofficial::uwebsockets::uwebsockets
+          OpenSSL::Crypto
+          CURL::libcurl)
 
 if(NOT WIN32)
   find_package(Threads REQUIRED)

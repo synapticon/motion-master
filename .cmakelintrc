@@ -1,0 +1,2 @@
+# cmakelint config — align with the repo's 100-column limit (see .clang-format).
+linelength=100

@@ -4,14 +4,10 @@
 add_library(api INTERFACE)
 add_library(mm::api ALIAS api)
 
-target_include_directories(api INTERFACE
-    ${CMAKE_SOURCE_DIR}/libs
-)
+target_include_directories(api INTERFACE ${CMAKE_SOURCE_DIR}/libs)
 
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(unofficial-uwebsockets CONFIG REQUIRED)
 
-target_link_libraries(api INTERFACE
-    nlohmann_json::nlohmann_json
-    unofficial::uwebsockets::uwebsockets
-)
+target_link_libraries(api INTERFACE nlohmann_json::nlohmann_json
+                                    unofficial::uwebsockets::uwebsockets)

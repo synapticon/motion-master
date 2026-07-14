@@ -1,0 +1,4 @@
+# cmake-format / cmake-lint config — align with the repo's 100-column limit
+# (see .clang-format). cmake-lint's C0301 "Line too long" uses format.line_width.
+format:
+  line_width: 100

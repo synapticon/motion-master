@@ -10,11 +10,10 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 if(MSVC)
   add_compile_options(/W4 /WX /utf-8)
-  # Standard C functions (strerror, etc.) trip MSVC's C4996 "unsafe" deprecation,
-  # which /WX makes fatal. The POSIX/C names are portable and intended here.
-  # NOMINMAX stops <windows.h> from defining min()/max() macros that clobber
-  # std::numeric_limits<>::max() in semver/uWebSockets; WIN32_LEAN_AND_MEAN trims
-  # the <windows.h> surface (and keeps winsock v1 out).
+  # Standard C functions (strerror, etc.) trip MSVC's C4996 "unsafe" deprecation, which /WX makes
+  # fatal. The POSIX/C names are portable and intended here. NOMINMAX stops <windows.h> from
+  # defining min()/max() macros that clobber std::numeric_limits<>::max() in semver/uWebSockets;
+  # WIN32_LEAN_AND_MEAN trims the <windows.h> surface (and keeps winsock v1 out).
   add_compile_definitions(_CRT_SECURE_NO_WARNINGS NOMINMAX WIN32_LEAN_AND_MEAN)
 else()
   add_compile_options(-Wall -Wextra -Wpedantic -Werror)
@@ -22,28 +21,27 @@ endif()
 
 enable_testing()
 
-# SOEM's EtherCAT NIC driver on Windows talks to Npcap. We vendor the Npcap SDK
-# (headers + import libs) at a fixed in-repo path so consumers link it from a
-# stable location — SOEM's own bundled copy lives in the vcpkg buildtree, which
-# does not survive binary-cache restores. comm wires it up (see libs/comm).
-# Runtime still requires the Npcap driver itself (npcap.com); the installer prompts.
+# SOEM's EtherCAT NIC driver on Windows talks to Npcap. We vendor the Npcap SDK (headers + import
+# libs) at a fixed in-repo path so consumers link it from a stable location — SOEM's own bundled
+# copy lives in the vcpkg buildtree, which does not survive binary-cache restores. comm wires it up
+# (see libs/comm). Runtime still requires the Npcap driver itself (npcap.com); the installer
+# prompts.
 if(WIN32)
   set(NPCAP_SDK_PATH "${CMAKE_SOURCE_DIR}/extern/npcap-sdk-1.16")
-  # Reusable target carrying the Npcap headers + import libs. Anything that
-  # consumes <soem/soem.h> (which pulls in the win32 nicdrv.h -> <pcap.h>) links
-  # this — comm and the playground scratch app both build against soem directly.
+  # Reusable target carrying the Npcap headers + import libs. Anything that consumes <soem/soem.h>
+  # (which pulls in the win32 nicdrv.h -> <pcap.h>) links this — comm and the playground scratch app
+  # both build against soem directly.
   add_library(npcap INTERFACE)
   add_library(mm::npcap ALIAS npcap)
   target_include_directories(npcap INTERFACE "${NPCAP_SDK_PATH}/Include")
-  target_link_libraries(npcap INTERFACE
-      "${NPCAP_SDK_PATH}/Lib/x64/wpcap.lib"
-      "${NPCAP_SDK_PATH}/Lib/x64/Packet.lib")
+  target_link_libraries(npcap INTERFACE "${NPCAP_SDK_PATH}/Lib/x64/wpcap.lib"
+                                        "${NPCAP_SDK_PATH}/Lib/x64/Packet.lib")
 endif()
 
-# Ordered by dependency layer (foundation first, consumers last), not alphabetically:
-# mm::core -> mm::comm -> mm::node -> mm::api -> mm::example, then the apps that consume them.
-# CMake resolves link targets at generate time so any order would configure; this ordering
-# is for readability, keeping the architectural layering obvious at a glance.
+# Ordered by dependency layer (foundation first, consumers last), not alphabetically: mm::core ->
+# mm::comm -> mm::node -> mm::api -> mm::example, then the apps that consume them. CMake resolves
+# link targets at generate time so any order would configure; this ordering is for readability,
+# keeping the architectural layering obvious at a glance.
 add_subdirectory(libs/core)
 add_subdirectory(libs/comm)
 add_subdirectory(libs/node)

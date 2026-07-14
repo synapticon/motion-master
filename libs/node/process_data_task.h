@@ -1,6 +1,6 @@
 #pragma once
 
-#include "cyclic_task.h"
+#include "core/cyclic_task.h"
 #include "node/device_manager.h"
 
 /// @brief Game-loop task that exchanges one cycle of process data.

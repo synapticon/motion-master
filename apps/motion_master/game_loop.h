@@ -6,7 +6,7 @@
 #include <nlohmann/json_fwd.hpp>
 #include <vector>
 
-#include "cyclic_task.h"
+#include "core/cyclic_task.h"
 
 /// @brief Snapshot of game-loop real-time health for the GET /api/game-loop
 ///        diagnostic endpoint. All fields are read with relaxed ordering — for

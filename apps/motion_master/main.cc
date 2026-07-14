@@ -21,8 +21,8 @@
 #include "http_server.h"
 #include "node/device_manager.h"
 #include "node/monitoring_manager.h"
+#include "node/process_data_task.h"
 #include "options.h"
-#include "process_data_task.h"
 #include "ring_log_sink.h"
 #include "ws_server.h"
 

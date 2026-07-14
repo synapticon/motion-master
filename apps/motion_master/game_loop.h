@@ -102,8 +102,8 @@ class GameLoop {
   /// to the grid rather than running missed cycles back-to-back (which would
   /// flood the bus with stale process data).  This is the running total of
   /// cycles skipped that way — a nonzero, growing value means the loop is not
-  /// meeting its period.  Intended to feed the planned master-side health
-  /// timeline.  `CycleContext::elapsed` = `executedCycles() + skippedCycles()`.
+  /// meeting its period.  Read via health() (GET /api/game-loop, the console
+  /// Game Loop page).  `CycleContext::elapsed` = `executedCycles() + skippedCycles()`.
   ///
   /// @return Skipped-cycle count.  Reads with relaxed ordering — suitable for
   ///         diagnostics, not for synchronisation.

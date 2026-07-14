@@ -33,8 +33,14 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
 
 ## Process Data (PDO) Exchange
 
-- **Real-time cyclic exchange** — an RT game loop (`SCHED_FIFO`, 1 ms, `mlockall`)
-  exchanges process data every cycle, lock-free on the PDO path.
+- **Real-time cyclic exchange** — an RT game loop (`SCHED_FIFO`, 1 ms default,
+  `mlockall`) exchanges process data every cycle, lock-free on the PDO path.
+- **Game-loop health & runtime retiming** — inspect a live snapshot of the RT loop
+  (configured/achieved rate, executed/skipped-cycle counters, per-cycle task timing,
+  whether RT scheduling was acquired) via `GET /api/game-loop`, and retime the running
+  loop to a new cycle period with `PUT /api/game-loop`. The retime takes effect within
+  one cycle, is transient (not written back to config), and starts a fresh health epoch;
+  the recorder ring is period-independent, so nothing else is resized.
 - **Process image inspection** — inspect the published PDO layout and working-counter
   (WKC) health (`GET /api/process-image`).
 - **Output staging** — stage a batch of output values into the process image lock-free
@@ -88,9 +94,11 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
 - **Profile views** — a borrowed-view chain `ProfileDevice ← Cia402Drive ← SomanetDrive`
   binds a `Device` for one operation via validated factories, providing CiA402 state
   machine and SOMANET-specific object-dictionary access.
-- **Sine-wave / target generators** *(planned)* — RT cyclic target generators launched
-  from the profile view (`Cia402Drive::startSineWave(...)`), gated active/idle by a
-  per-device control block.
+- **Trajectory playback** *(planned)* — an RT cyclic task plays back a precomputed
+  setpoint buffer one point per cycle (sine/chirp/ramp/step are userspace-generated
+  buffers plus a `repeat` flag, not separate tasks). Launched from the profile view for
+  one device (`Cia402Drive::startTrajectory(...)`) or a node-layer coordinator for a
+  coordinated multi-axis move, gated active/idle by a depth-1 latest-wins control block.
 
 ## Monitoring (Live Telemetry)
 
@@ -120,6 +128,7 @@ A React PWA at `https://motion-master.synapticon.com` provides UI for the above:
   Bus Diagnostics, DC Sync.
 - **Per-device** — Parameters, Object Dictionary, PDO Mapping, Registers, SII, FoE.
 - **Process Data / Recorder** — live process-data view and recorder page.
+- **Game Loop** — RT loop health and runtime cycle-period control.
 - **Monitorings** — configure and plot live telemetry.
 - **Tools & reference** — SII parser, AL Status Codes, ESC Registers, FoE Error Codes,
   Data Types, HTTP request inspector, Log, Parameter Caches, and bundled API Docs.

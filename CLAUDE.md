@@ -40,6 +40,7 @@ All common tasks have wrapper scripts in `tools/`. They default to the `x64-linu
 ./tools/run.sh                    # generate a tmp self-signed cert and run the binary
 ./tools/test.sh                   # ctest --output-on-failure
 ./tools/format.sh                 # clang-format all sources
+./tools/format-cmake.sh           # cmake-format all CMake files (--check to verify; requires: pip install cmakelang)
 ./tools/lint.sh                   # cpplint (requires: pip install cpplint)
 ./tools/cppcheck.sh               # cppcheck static analysis
 ./tools/check.sh                  # format + cppcheck + lint in sequence

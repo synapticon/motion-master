@@ -38,7 +38,8 @@ inline bool isUrlSafeId(std::string_view s) {
 
 /// @brief Parses an unsigned integer from a string in decimal or hexadecimal notation.
 ///
-/// Accepts an optional @c 0x / @c 0X prefix to select hexadecimal; any other input
+/// Accepts a @c 0x / @c 0X prefix (C-style) or a @c #x / @c #X prefix (as EtherCAT ESI/XML
+/// files write hex constants, e.g. @c "#x00000201") to select hexadecimal; any other input
 /// is parsed as decimal. Trailing characters and out-of-range values are rejected.
 ///
 /// @tparam T  Unsigned integer type to parse into (e.g. @c uint16_t, @c uint8_t).
@@ -49,7 +50,7 @@ template <typename T>
 std::optional<T> parseHexOrDec(std::string_view s) {
   T value{};
   std::from_chars_result r;
-  if (s.size() >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+  if (s.size() >= 2 && (s[0] == '0' || s[0] == '#') && (s[1] == 'x' || s[1] == 'X')) {
     r = std::from_chars(s.data() + 2, s.data() + s.size(), value, 16);
   } else {
     r = std::from_chars(s.data(), s.data() + s.size(), value);

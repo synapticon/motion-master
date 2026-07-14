@@ -36,6 +36,13 @@ TEST(ParseHexOrDecTest, HexUint8) {
   EXPECT_EQ(parseHexOrDec<uint8_t>("0xff"), 255u);
 }
 
+TEST(ParseHexOrDecTest, HexEsiHashPrefix) {
+  EXPECT_EQ(parseHexOrDec<uint16_t>("#x6064"), 24676u);
+  EXPECT_EQ(parseHexOrDec<uint16_t>("#X6064"), 24676u);
+  EXPECT_EQ(parseHexOrDec<uint32_t>("#x00000201"), 513u);
+  EXPECT_EQ(parseHexOrDec<uint8_t>("#xff"), 255u);
+}
+
 TEST(ParseHexOrDecTest, RejectsEmpty) { EXPECT_EQ(parseHexOrDec<uint16_t>(""), std::nullopt); }
 
 TEST(ParseHexOrDecTest, RejectsTrailingChars) {

@@ -8,6 +8,11 @@ set -euo pipefail
 # paths — leave tls.certPath/keyPath empty to fall back to the baked-in cert next to the binary).
 # Otherwise this entrypoint resolves a TLS cert/key and generates a minimal config pointing at it.
 
+# `exec` replaces this shell with the binary rather than spawning a child: the binary becomes the
+# container's PID 1 so `docker stop`'s SIGTERM reaches it directly for a graceful shutdown (a
+# lingering parent shell would not forward signals). exec never returns on success, so if this
+# branch is taken the process is replaced here and nothing below runs; the fall-through path at the
+# end applies only when MM_CONFIG is unset and this exec was skipped.
 if [[ -n "${MM_CONFIG:-}" ]]; then
     exec /opt/motion-master/motion-master --config "$MM_CONFIG" "$@"
 fi
@@ -52,4 +57,7 @@ cat > "$CONFIG" <<EOF
 { "tls": { "certPath": "$CERT", "keyPath": "$KEY" } }
 EOF
 
+# exec (see the note above) — replaces the shell so the binary is PID 1 and gets SIGTERM directly.
+# Because exec never returns, the EXIT trap set above never fires; that is intentional, as the
+# self-signed cert in $tmpdir must outlive this script and stay readable for the binary's lifetime.
 exec /opt/motion-master/motion-master --config "$CONFIG" "$@"

@@ -1,5 +1,4 @@
-#ifndef LIBS_CORE_SYSTEM_INFO_H_
-#define LIBS_CORE_SYSTEM_INFO_H_
+#pragma once
 
 #include <cstdint>
 #include <nlohmann/json_fwd.hpp>
@@ -32,5 +31,3 @@ SystemInfo collectSystemInfo();
 void to_json(nlohmann::json& j, const SystemInfo& info);
 
 }  // namespace mm::core
-
-#endif  // LIBS_CORE_SYSTEM_INFO_H_

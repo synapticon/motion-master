@@ -1,5 +1,4 @@
-#ifndef LIBS_CORE_PLATFORM_H_
-#define LIBS_CORE_PLATFORM_H_
+#pragma once
 
 #include <filesystem>
 #include <string>
@@ -24,5 +23,3 @@ std::filesystem::path exeDir();
 void openInBrowser(const std::string& url);
 
 }  // namespace mm::core
-
-#endif  // LIBS_CORE_PLATFORM_H_

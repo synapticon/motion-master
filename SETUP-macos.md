@@ -33,6 +33,7 @@ sudo ./motion-master
 > elevated privileges, but the server runs fine non-RT for non-latency-critical use.
 
 The server listens on `https://local.motion-master.synapticon.com:61447`. Open the
-Motion Master web app at `https://motion-master.synapticon.com` to connect.
+Motion Master Console web app at `https://motion-master.synapticon.com/apps/console/` to
+connect — it is launched from the landing page at `https://motion-master.synapticon.com`.
 
 For full usage options run `./motion-master --help`.

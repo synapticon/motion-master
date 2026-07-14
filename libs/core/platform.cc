@@ -9,7 +9,8 @@
 #include <unistd.h>
 #ifdef __APPLE__
 #include <mach-o/dyld.h>  // _NSGetExecutablePath — macOS has no /proc/self/exe
-#include <cstdint>        // uint32_t — only the macOS exeDir() branch uses it
+
+#include <cstdint>  // uint32_t — only the macOS exeDir() branch uses it
 #endif
 #endif
 

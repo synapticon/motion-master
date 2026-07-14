@@ -36,7 +36,8 @@ void to_json(nlohmann::json& j, const GameLoopHealth& h);
 /// stop them after run() returns.
 ///
 /// Each cycle waits for the next absolute deadline via CyclicTimer, then
-/// executes the loop body.  The period is fixed at construction.
+/// executes the loop body.  The period is set at construction and may be
+/// retimed while running via setPeriod() (see below).
 ///
 /// Shutdown is cooperative: stop() sets an atomic flag that run() checks after
 /// each cycle completes.  The loop exits cleanly within one period.

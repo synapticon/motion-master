@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import type { GameLoopHealth } from '@synapticon/motion-master-client'
 import PageHeader from '../components/PageHeader'
 import Callout from '../components/Callout'
+import GameLoopExplainer from '../components/GameLoopExplainer'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
@@ -127,6 +128,8 @@ export default function GameLoopPage() {
         }
       />
       <div className="p-4 sm:p-8 space-y-6">
+        <GameLoopExplainer />
+
         <div className="flex items-center justify-between gap-4">
           {health ? (
             keepingUp && !skipping ? (

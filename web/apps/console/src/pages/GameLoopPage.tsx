@@ -35,7 +35,7 @@ const POLL_INTERVAL_MS = 1000
 
 // A loop meeting its period sits within a hair of targetHz. We flag a sustained shortfall below this
 // fraction as "not keeping up" — the coarse-timer degradation described in CLAUDE.md.
-const KEEPING_UP_FRACTION = 0.99
+const KEEPING_UP_FRACTION = 0.95
 
 // Format a hertz figure with a sensible number of decimals for the magnitude.
 function formatHz(hz: number): string {
@@ -187,17 +187,31 @@ export default function GameLoopPage() {
       <div className="p-4 sm:p-8 space-y-6">
         <GameLoopExplainer />
 
-        <div className="flex items-center justify-between gap-4">
+        {/* Always-present status line — the skip state changes its text/colour in this fixed slot
+            rather than inserting a callout that shifts the tiles below. */}
+        <div className="flex items-start justify-between gap-4">
           {health ? (
-            keepingUp && !skipping ? (
-              <p className="text-xs text-status-good">
-                Loop is meeting its {formatHz(health.targetHz)} target.
-              </p>
-            ) : (
-              <p className="text-xs text-status-bad font-medium">
-                Loop is running below its {formatHz(health.targetHz)} target.
-              </p>
-            )
+            <p
+              className={`text-xs flex items-start gap-2 ${
+                skipping || !keepingUp ? 'text-status-bad font-medium' : 'text-status-good'
+              }`}
+            >
+              <span
+                aria-hidden
+                className={`mt-1 shrink-0 inline-block w-2 h-2 rounded-full ${
+                  skipping || !keepingUp ? 'bg-status-bad' : 'bg-status-good'
+                }`}
+              />
+              <span>
+                {skipping
+                  ? `Loop is skipping cycles${
+                      instant && instant.skipHz >= 1 ? ` (~${Math.round(instant.skipHz)}/s)` : ''
+                    } — this machine can’t sustain the ${health.periodUs} µs period; raise it (e.g. to 2 ms).`
+                  : keepingUp
+                    ? `Loop is meeting its ${formatHz(health.targetHz)} target.`
+                    : `Loop is running below its ${formatHz(health.targetHz)} target.`}
+              </span>
+            </p>
           ) : (
             <span />
           )}
@@ -216,18 +230,6 @@ export default function GameLoopPage() {
 
         {health && (
           <>
-            {skipping && (
-              <Callout variant="warning">
-                The loop is skipping cycles
-                {instant && instant.skipHz >= 1 ? ` (~${Math.round(instant.skipHz)}/s)` : ''} to stay
-                on its grid — this machine cannot sustain the configured{' '}
-                {health.periodUs} µs period. Each executed cycle stays phase-locked to a real grid
-                point, so there is no drift or burst, but EtherCAT drives get a fresh frame in only
-                some sync windows. Raise the configured period (e.g. to 2 ms) so the loop can meet
-                its grid.
-              </Callout>
-            )}
-
             {!health.schedFifo && (
               <Callout variant="info">
                 The loop is not running with real-time scheduling
@@ -262,8 +264,10 @@ export default function GameLoopPage() {
                     ? `+${Math.round(instant.skipHz)}/s — not keeping up`
                     : 'grid points dropped after overruns'
                 }
-                tone={health.skippedCycles > 0 ? 'bad' : 'good'}
-                title="Cycles skipped to catch up after overruns/stalls since start"
+                tone={
+                  instant && instant.skipHz >= 1 ? 'bad' : health.skippedCycles > 0 ? 'muted' : 'good'
+                }
+                title="Cumulative cycles skipped since start (the value); highlighted red only while the loop is currently skipping (≥1/s)"
               />
               <Metric
                 label="Executed cycles"

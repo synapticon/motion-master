@@ -3,7 +3,7 @@
 // Master and no live bus. All multi-byte integers are little-endian.
 //
 // Layout:
-//   Prefix (40 bytes): magic 'MMPD', u16 formatVersion, u16 flags, u32 cyclePeriodUs,
+//   Prefix (36 bytes): magic 'MMPD', u16 formatVersion, u16 flags,
 //     u64 startSequence, u64 rowCount, u32 inputBytes, u32 outputBytes, u32 deviceCount.
 //   Device table (deviceCount): u16 slavePosition, u32 vendorId/productCode/revisionNumber/
 //     serialNumber, str name, u32 entryCount, then per entry: u16 index, u8 subindex,
@@ -45,8 +45,6 @@ export interface MmpdDevice {
 export interface MmpdHeader {
   formatVersion: number
   flags: number
-  /// GameLoop cycle period; lets a reader place rows on a time axis.
-  cyclePeriodUs: number
   /// Sequence number of the first row (oldest cycle in the span).
   startSequence: bigint
   /// Number of rows in the file.
@@ -181,7 +179,7 @@ export function parseMmpd(data: ArrayBuffer | Uint8Array): MmpdFile {
   const u8 = data instanceof Uint8Array ? data : new Uint8Array(data)
   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength)
 
-  if (u8.byteLength < 40 || dv.getUint32(0, true) !== MAGIC) {
+  if (u8.byteLength < 36 || dv.getUint32(0, true) !== MAGIC) {
     throw new Error('Not a .mmpd file (bad magic)')
   }
   const formatVersion = dv.getUint16(4, true)
@@ -192,16 +190,15 @@ export function parseMmpd(data: ArrayBuffer | Uint8Array): MmpdFile {
   const header: MmpdHeader = {
     formatVersion,
     flags: dv.getUint16(6, true),
-    cyclePeriodUs: dv.getUint32(8, true),
-    startSequence: dv.getBigUint64(12, true),
-    rowCount: Number(dv.getBigUint64(20, true)),
-    inputBytes: dv.getUint32(28, true),
-    outputBytes: dv.getUint32(32, true),
+    startSequence: dv.getBigUint64(8, true),
+    rowCount: Number(dv.getBigUint64(16, true)),
+    inputBytes: dv.getUint32(24, true),
+    outputBytes: dv.getUint32(28, true),
     devices: [],
   }
-  const deviceCount = dv.getUint32(36, true)
+  const deviceCount = dv.getUint32(32, true)
 
-  const cursor = new Cursor(dv, u8, 40)
+  const cursor = new Cursor(dv, u8, 36)
   for (let d = 0; d < deviceCount; d++) {
     const device: MmpdDevice = {
       slavePosition: cursor.u16(),

@@ -119,13 +119,9 @@ std::expected<void, std::string> DeviceManager::init(
   if (driver_) {
     return std::unexpected("already initialised — call reset() before init()");
   }
-  // Retain the config for configureProcessData, which allocates the recorder ring once the image
-  // (and hence the per-record byte size) is known. Guard cyclePeriodUs against 0 so the ring-size
-  // division is always safe (capacity = recorderHistorySeconds * 1e6 / cyclePeriodUs).
+  // Retain the config for configureProcessData, which allocates the recorder ring (recorderCapacity
+  // cycles) once the image — and hence the per-record byte size — is known.
   config_ = config;
-  if (config_.cyclePeriodUs == 0) {
-    config_.cyclePeriodUs = 1000;
-  }
   driver_ = std::move(driver);
   auto result = driver_->init();
   if (!result) {
@@ -286,9 +282,7 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
   // layout-changing re-map restarts the recording — records under the old layout are undecodable
   // under the new one. Exchange is drained (stopExchange above) and the image is not yet published,
   // so the RT writer cannot touch the ring while it is being rebuilt.
-  const size_t ringCapacity =
-      static_cast<size_t>(config_.recorderHistorySeconds) * (1'000'000u / config_.cyclePeriodUs);
-  pd_->ring.allocate(image->inputBytes, image->outputBytes, ringCapacity);
+  pd_->ring.allocate(image->inputBytes, image->outputBytes, config_.recorderCapacity);
 
   auto shared = std::make_shared<const ProcessImage>(std::move(*image));
   pd_->generations.push_back(shared);
@@ -483,7 +477,6 @@ std::expected<DeviceManager::DumpSpan, std::string> DeviceManager::serializeDump
   // directions) resolved to name + data type from its parameter map (empty/0 if the OD was not
   // enumerated), in image order.
   DumpHeader header;
-  header.cyclePeriodUs = config_.cyclePeriodUs;
   header.inputBytes = image->inputBytes;
   header.outputBytes = image->outputBytes;
 

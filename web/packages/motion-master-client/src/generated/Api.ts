@@ -1397,6 +1397,33 @@ export class Api<
       ...params,
     });
   /**
+   * @description Retimes the running RT loop to a new cycle period, in microseconds. The change takes effect within one cycle and is transient — it is not written back to the config file, so a restart reverts to the configured `gameLoop.periodUs`. Intended for tuning on hosts that cannot sustain the configured rate: if `skippedCycles` climbs steadily (common on Windows userspace), raise the period (e.g. from 1000 to 2000 µs) until the loop meets its grid. Only the master cadence is retimed — the process-data recorder ring is not resized, and no drive-side watchdog is touched, so raising the period toward a drive's PDO/SM watchdog window can fault that drive. Applying a period starts a fresh health epoch: the cumulative counters (`executedCycles`, `skippedCycles`, the `achievedHz` average, and `maxExecNs`/`avgExecNs`) reset so the snapshot reflects only the new period — letting you see straight away whether the change improved the loop's health. Returns the updated health snapshot.
+   *
+   * @name SetGameLoopPeriod
+   * @summary Change the real-time cycle period
+   * @request PUT:/api/game-loop
+   */
+  setGameLoopPeriod = (
+    data: {
+      /**
+       * New cycle period in microseconds. Must be greater than 0.
+       * @format int64
+       * @min 1
+       * @example 2000
+       */
+      periodUs: number;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<GameLoopHealth, void>({
+      path: `/api/game-loop`,
+      method: "PUT",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
    * @description Streams the same `.mmpd` serialisation as the POST variant (the recorder's current span, with the process image embedded as a header) directly in the response body instead of writing a file — for the client SDK / browser, which parses the bytes offline. Request with `Accept: application/octet-stream`. Same span semantics as the POST; works in any state.
    *
    * @name StreamProcessDataDump

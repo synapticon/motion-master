@@ -38,7 +38,6 @@ void writeHeader(std::ostream& o, const DumpHeader& header, uint64_t startSeq) {
   o.write(kDumpMagic.data(), kDumpMagic.size());
   putLE<uint16_t>(o, kDumpFormatVersion);
   putLE<uint16_t>(o, 0);  // flags (reserved)
-  putLE<uint32_t>(o, header.cyclePeriodUs);
   putLE<uint64_t>(o, startSeq);
   putLE<uint64_t>(o, 0);  // rowCount placeholder, patched after the rows are streamed
   putLE<uint32_t>(o, header.inputBytes);

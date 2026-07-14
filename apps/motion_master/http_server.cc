@@ -484,6 +484,38 @@ void HttpServer::run() {
              }
              sendJson(res, config_.corsOrigin, nlohmann::json(config_.getGameLoopHealth()));
            })
+      .put("/api/game-loop",
+           [this](auto* res, auto* /*req*/) {
+             auto aborted = std::make_shared<bool>(false);
+             auto body = std::make_shared<std::string>();
+             res->onAborted([aborted]() { *aborted = true; });
+             res->onData([this, res, body, aborted](std::string_view chunk, bool last) {
+               body->append(chunk);
+               if (!last) return;
+               if (*aborted) return;
+               if (!config_.setGameLoopPeriod) {
+                 sendError(res, "501 Not Implemented", config_.corsOrigin,
+                           "game-loop control is not configured");
+                 return;
+               }
+               uint32_t periodUs = 0;
+               try {
+                 nlohmann::json j = nlohmann::json::parse(*body);
+                 periodUs = j.at("periodUs").get<uint32_t>();
+               } catch (const nlohmann::json::exception& e) {
+                 sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
+                 return;
+               }
+               // Validation lives in the callback (main.cc) — the HTTP layer just forwards. A
+               // rejected value (e.g. 0) comes back as an error string.
+               auto r = config_.setGameLoopPeriod(periodUs);
+               if (!r) {
+                 sendError(res, "400 Bad Request", config_.corsOrigin, r.error());
+                 return;
+               }
+               sendJson(res, config_.corsOrigin, nlohmann::json(config_.getGameLoopHealth()));
+             });
+           })
       .get("/api/bus-config",
            [this](auto* res, auto* /*req*/) {
              sendJson(res, config_.corsOrigin, nlohmann::json(deviceManager_.busConfig()));

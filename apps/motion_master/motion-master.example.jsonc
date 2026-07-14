@@ -40,12 +40,12 @@
 
   // Lossless process-data recorder (the flight-data ring every RT cycle is appended to).
   "recorder": {
-    // Depth of the ring in seconds; sized at process-image configuration to hold this many
-    // seconds of cycles at the gameLoop period. RAM ≈ historySeconds × (1e6/periodUs) × per-cycle
-    // record bytes: 28 B fixed (20-byte header + 8-byte publication word) plus the whole-bus IOmap
-    // (~82 B per SOMANET drive, budget ~100 B). A single drive at 300 s / 1 ms ≈ 300k cycles ×
-    // ~128 B ≈ 38 MB; it scales with drive count and inversely with the loop period.
-    "historySeconds": 300,
+    // Depth of the ring in cycles/rows; sized at process-image configuration to hold exactly this
+    // many cycles, independent of the gameLoop period (records carry absolute timestamps). RAM ≈
+    // capacity × per-cycle record bytes: 28 B fixed (20-byte header + 8-byte publication word) plus
+    // the whole-bus IOmap (~82 B per SOMANET drive, budget ~100 B). A single drive at 300000 cycles
+    // × ~128 B ≈ 38 MB (≈ 5 min at a 1 ms period); it scales with drive count.
+    "capacity": 300000,
     // Directory for .mmpd dumps written by POST /api/process-data/dump.
     // Empty = a "motion-master" subdirectory of the OS temp directory (created on first dump).
     "dumpDir": ""

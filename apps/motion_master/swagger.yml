@@ -166,7 +166,7 @@ paths:
                   logLevel: "info"
                   tls: { certPath: "", keyPath: "", autoUpdate: true }
                   gameLoop: { periodUs: 1000 }
-                  recorder: { historySeconds: 300, dumpDir: "" }
+                  recorder: { capacity: 300000, dumpDir: "" }
                   parameterCache: { enabled: true, cacheAllVendors: false, directory: "" }
                   parameters: { readObjectDictionaryOnPreop: true, useCompleteAccess: true }
   /api/system-info:
@@ -1929,6 +1929,49 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GameLoopHealth"
+    put:
+      summary: Change the real-time cycle period
+      description: >-
+        Retimes the running RT loop to a new cycle period, in microseconds. The
+        change takes effect within one cycle and is transient — it is not written
+        back to the config file, so a restart reverts to the configured
+        `gameLoop.periodUs`. Intended for tuning on hosts that cannot sustain the
+        configured rate: if `skippedCycles` climbs steadily (common on Windows
+        userspace), raise the period (e.g. from 1000 to 2000 µs) until the loop
+        meets its grid. Only the master cadence is retimed — the process-data
+        recorder ring is not resized, and no drive-side watchdog is touched, so
+        raising the period toward a drive's PDO/SM watchdog window can fault that
+        drive. Applying a period starts a fresh health epoch: the cumulative
+        counters (`executedCycles`, `skippedCycles`, the `achievedHz` average, and
+        `maxExecNs`/`avgExecNs`) reset so the snapshot reflects only the new
+        period — letting you see straight away whether the change improved the
+        loop's health. Returns the updated health snapshot.
+      operationId: setGameLoopPeriod
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [periodUs]
+              properties:
+                periodUs:
+                  type: integer
+                  format: int64
+                  minimum: 1
+                  description: New cycle period in microseconds. Must be greater than 0.
+                  example: 2000
+      responses:
+        "200":
+          description: Period applied; returns the updated health snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GameLoopHealth"
+        "400":
+          description: Invalid period (e.g. missing/zero `periodUs` or malformed body)
+        "501":
+          description: Game-loop control is not configured on this server
   /api/process-data/dump:
     get:
       summary: Stream the recorder ring as a binary .mmpd

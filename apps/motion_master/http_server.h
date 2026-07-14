@@ -59,6 +59,16 @@ class HttpServer {
   /// itself — the same composition-root pattern as @c GetLogFn.
   using GetGameLoopHealthFn = std::function<GameLoopHealth()>;
 
+  /// @brief Callback type for `PUT /api/game-loop`.
+  ///
+  /// Applies a new RT cycle period (microseconds). Validates the value and, on
+  /// success, retimes the running loop and updates the period recorded for the
+  /// recorder dumps.  Lives in main.cc so the server references neither the
+  /// @c GameLoop nor the @c DeviceManager for this — the same composition-root
+  /// pattern as @c GetGameLoopHealthFn.  Returns an error string on an invalid
+  /// value.
+  using SetGameLoopPeriodFn = std::function<std::expected<void, std::string>(uint32_t periodUs)>;
+
   /// @brief Server configuration.
   struct Config {
     uint16_t port = 61447;  ///< TCP port to listen on (TLS).
@@ -73,6 +83,8 @@ class HttpServer {
     RefreshCertFn refreshCert;  ///< Handler for `POST /api/cert/refresh`; fetches+installs a cert.
     GetGameLoopHealthFn
         getGameLoopHealth;  ///< Handler for `GET /api/game-loop`; RT loop health snapshot.
+    SetGameLoopPeriodFn
+        setGameLoopPeriod;  ///< Handler for `PUT /api/game-loop`; retimes the RT loop.
     /// Value sent in `Access-Control-Allow-Origin`. Defaults to the production PWA origin.
     std::string corsOrigin{"https://motion-master.synapticon.com"};
   };

@@ -40,8 +40,8 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
 - **Output staging** — stage a batch of output values into the process image lock-free
   (`POST /api/process-data/outputs`); the RT loop composes them into the wire image.
 - **Lossless recorder** — a circular ring records every PDO cycle (raw input + output
-  IOmap, epoch-ns timestamp, working counter), sized for a configurable history window
-  (default 300 s). It is the source for live monitoring, point reads, and dumps.
+  IOmap, epoch-ns timestamp, working counter), sized for a configurable capacity in cycles
+  (default 300000 ≈ 5 min at 1 ms). It is the source for live monitoring, point reads, and dumps.
 - **Recorder dump** — stream or write the recorder ring as a binary `.mmpd` file
   (`GET`/`POST /api/process-data/dump`), works in any state including OP.
 - **PDO mapping** — read a device's cyclic mapping grouped by object, and rewrite it

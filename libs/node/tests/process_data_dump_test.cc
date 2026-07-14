@@ -66,7 +66,6 @@ void writeSeq(ProcessDataRing& ring, uint64_t seq, uint32_t inBytes, uint32_t ou
 
 DumpHeader makeHeader(uint32_t inputBytes, uint32_t outputBytes) {
   DumpHeader h;
-  h.cyclePeriodUs = 1000;
   h.inputBytes = inputBytes;
   h.outputBytes = outputBytes;
   DumpDevice d{.slavePosition = 1,
@@ -114,13 +113,12 @@ TEST(ProcessDataDumpTest, RoundTripsHeaderAndRows) {
   // Magic + version + flags.
   EXPECT_EQ(r.getBytes(4), std::vector<uint8_t>(kDumpMagic.begin(), kDumpMagic.end()));
   EXPECT_EQ(r.getLE<uint16_t>(), kDumpFormatVersion);
-  EXPECT_EQ(r.getLE<uint16_t>(), 0u);     // flags
-  EXPECT_EQ(r.getLE<uint32_t>(), 1000u);  // cyclePeriodUs
-  EXPECT_EQ(r.getLE<uint64_t>(), 0u);     // startSequence
-  EXPECT_EQ(r.getLE<uint64_t>(), 10u);    // rowCount (patched)
-  EXPECT_EQ(r.getLE<uint32_t>(), kIn);    // inputBytes
-  EXPECT_EQ(r.getLE<uint32_t>(), kOut);   // outputBytes
-  ASSERT_EQ(r.getLE<uint32_t>(), 1u);     // deviceCount
+  EXPECT_EQ(r.getLE<uint16_t>(), 0u);    // flags
+  EXPECT_EQ(r.getLE<uint64_t>(), 0u);    // startSequence
+  EXPECT_EQ(r.getLE<uint64_t>(), 10u);   // rowCount (patched)
+  EXPECT_EQ(r.getLE<uint32_t>(), kIn);   // inputBytes
+  EXPECT_EQ(r.getLE<uint32_t>(), kOut);  // outputBytes
+  ASSERT_EQ(r.getLE<uint32_t>(), 1u);    // deviceCount
 
   // Device record.
   EXPECT_EQ(r.getLE<uint16_t>(), 1u);           // slavePosition
@@ -172,7 +170,7 @@ TEST(ProcessDataDumpTest, EmptySpanWritesHeaderOnlyWithZeroRows) {
   EXPECT_EQ(*written, 0u);
 
   DumpReader r(out.str());
-  r.skip(20);                          // magic..startSequence
+  r.skip(16);                          // magic..startSequence
   EXPECT_EQ(r.getLE<uint64_t>(), 0u);  // rowCount patched to 0
 }
 
@@ -195,7 +193,7 @@ TEST(ProcessDataDumpTest, PadsAndTruncatesRegionsToHeaderSizes) {
   EXPECT_EQ(*written, 1u);
 
   DumpReader r(os.str());
-  r.skip(28);                           // magic..startSequence + rowCount (up to inputBytes)
+  r.skip(24);                           // magic..startSequence + rowCount (up to inputBytes)
   EXPECT_EQ(r.getLE<uint32_t>(), 4u);   // inputBytes
   EXPECT_EQ(r.getLE<uint32_t>(), 12u);  // outputBytes
   ASSERT_EQ(r.getLE<uint32_t>(), 1u);   // deviceCount
@@ -236,7 +234,7 @@ TEST(ProcessDataDumpTest, SkipsUnreadableRecordsAndCountsRest) {
   EXPECT_EQ(*written, 3u);  // seqs 0, 2, 4
 
   DumpReader r(out.str());
-  r.skip(20);
+  r.skip(16);
   EXPECT_EQ(r.getLE<uint64_t>(), 3u);  // rowCount
 }
 

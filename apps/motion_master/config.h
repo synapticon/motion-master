@@ -51,13 +51,14 @@ struct GameLoopConfig {
 
 /// @brief @c "recorder" block — the lossless process-data recorder ring.
 struct RecorderConfig {
-  /// Depth of the recorder ring in seconds (must be > 0). The ring is allocated at process-image
-  /// configuration to hold this many seconds of cycles at the GameLoop period, so RAM ≈
-  /// historySeconds × (1e6 / periodUs) × per-cycle record bytes. A record is 28 B fixed (20-byte
-  /// header + 8-byte publication word) plus the whole-bus IOmap — ~82 B per SOMANET drive (budget
-  /// ~100 B). So a single drive at 300 s / 1 ms ≈ 300k cycles × ~128 B ≈ 38 MB. It scales with
-  /// drive count and (inversely) with the loop period.
-  uint32_t historySeconds = 300;
+  /// Depth of the recorder ring in cycles/rows (must be > 0). The ring is allocated at
+  /// process-image configuration to hold exactly this many cycles, independent of the GameLoop
+  /// period — records carry absolute timestamps, so the depth-in-seconds is simply capacity ×
+  /// period. RAM ≈ capacity × per-cycle record bytes. A record is 28 B fixed (20-byte header +
+  /// 8-byte publication word) plus the whole-bus IOmap — ~82 B per SOMANET drive (budget ~100 B).
+  /// So a single drive at 300000 cycles × ~128 B ≈ 38 MB (≈ 5 min at a 1 ms period). It scales with
+  /// drive count.
+  uint32_t capacity = 300000;
   /// Directory for `.mmpd` recorder dumps written by @c POST @c /api/process-data/dump. Empty
   /// means a @c "motion-master" subdirectory of the OS temporary directory (resolved at dump time,
   /// cross-platform — never a hardcoded @c /tmp). The directory is created on first dump.
@@ -111,7 +112,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ServerConfig, httpPort, wsPort, 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FieldbusConfig, driver, adapter, mailboxStatusFmmu)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TlsConfig, certPath, keyPath, autoUpdate)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(GameLoopConfig, periodUs)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RecorderConfig, historySeconds, dumpDir)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RecorderConfig, capacity, dumpDir)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParameterCacheConfig, enabled, cacheAllVendors,
                                                 directory)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParametersConfig, readObjectDictionaryOnPreop,
@@ -123,7 +124,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logLev
 ///
 /// Pure: no file I/O, no process exit. Unknown keys are ignored (forward-compatible). nlohmann
 /// validates value *types*; this adds the enum and range checks it cannot (@c logLevel,
-/// @c fieldbus.driver; @c gameLoop.periodUs and @c recorder.historySeconds must be > 0).
+/// @c fieldbus.driver; @c gameLoop.periodUs and @c recorder.capacity must be > 0).
 ///
 /// @param doc A parsed JSON value (must be an object).
 /// @return The populated @c Config, or an error string on a wrong top-level type, a field type

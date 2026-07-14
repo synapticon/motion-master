@@ -83,6 +83,28 @@ class GameLoop {
   /// Safe to call from a signal handler.  run() returns within one period.
   void stop();
 
+  /// @brief Changes the cycle period while the loop is running.
+  ///
+  /// Stores the new period; the running loop picks it up on its next iteration
+  /// and re-anchors the CyclicTimer's deadline grid to that instant (see
+  /// CyclicTimer::setPeriod).  Takes effect within one cycle.  Safe to call from
+  /// any thread — the store is a relaxed atomic and the RT loop is the only
+  /// reader.  Also updates the period reported by health().
+  ///
+  /// Applying a change also starts a fresh health epoch: the loop resets its
+  /// cumulative counters (executed/skipped cycles, task-time max/avg) and
+  /// re-anchors the achievedHz baseline to that instant, so health() reflects
+  /// only the new period.  Without this the old, worse figures would linger and
+  /// mask the improvement the change was meant to produce.
+  ///
+  /// Changing the period only re-times the master cadence; it does not touch the
+  /// process-data recorder ring or any drive-side watchdog.  Raising the period
+  /// toward a drive's PDO/SM watchdog window can fault that drive — the caller is
+  /// responsible for choosing a sane value.
+  ///
+  /// @param period  New cycle period.  Must be > 0 (validated by the caller).
+  void setPeriod(std::chrono::microseconds period);
+
   /// @brief Returns the number of cycles actually executed since run() was
   ///        called.
   ///
@@ -117,7 +139,9 @@ class GameLoop {
   GameLoopHealth health() const;
 
  private:
-  std::chrono::microseconds period_;
+  // Cycle period; read by the RT loop each iteration, written by setPeriod from another thread.
+  // std::chrono::microseconds is an 8-byte trivially-copyable type, so this atomic is lock-free.
+  std::atomic<std::chrono::microseconds> period_;
   std::atomic<bool> running_{false};
   std::atomic<uint64_t> executedCycles_{0};
   std::atomic<uint64_t> skippedCycles_{0};

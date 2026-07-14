@@ -72,9 +72,31 @@ void GameLoop::run() {
   running_.store(true, std::memory_order_relaxed);
   startMonoNs_.store(nowMonoNs(), std::memory_order_relaxed);
 
-  mm::core::CyclicTimer timer(period_);
+  std::chrono::microseconds currentPeriod = period_.load(std::memory_order_relaxed);
+  mm::core::CyclicTimer timer(currentPeriod);
   while (running_.load(std::memory_order_relaxed)) {
     const uint64_t skipped = timer.waitForNextCycle();
+
+    // Apply a pending period change (setPeriod, from another thread). Re-anchor
+    // the timer's deadline grid to now so the change takes effect next cycle
+    // without a spurious skip burst. One relaxed load per cycle — negligible.
+    const std::chrono::microseconds newPeriod = period_.load(std::memory_order_relaxed);
+    if (newPeriod != currentPeriod) {
+      currentPeriod = newPeriod;
+      timer.setPeriod(newPeriod);
+      // A period change starts a fresh health epoch. The point of changing the period is to
+      // improve the loop's health, so the cumulative counters must not carry the pre-change
+      // regime — otherwise the achieved rate and skip total would still show the old, worse
+      // numbers and hide the very improvement the change made. Reset them here (single-writer:
+      // this RT thread owns every counter below, so plain relaxed stores don't race the reads in
+      // health()) and re-anchor the achievedHz baseline to now, in lockstep with the timer grid
+      // re-anchor above. This cycle's fetch_add below seeds the new epoch as cycle 1.
+      executedCycles_.store(0, std::memory_order_relaxed);
+      skippedCycles_.store(0, std::memory_order_relaxed);
+      maxExecNs_.store(0, std::memory_order_relaxed);
+      sumExecNs_.store(0, std::memory_order_relaxed);
+      startMonoNs_.store(nowMonoNs(), std::memory_order_relaxed);
+    }
     // executed = loop iterations run; skipped = cycles the timer skipped to catch
     // up after an overrun or scheduling stall. Counted silently for diagnostics —
     // no logging on the RT path; skip-to-grid means we never burst stale frames.
@@ -112,6 +134,10 @@ static_assert(std::atomic<bool>::is_always_lock_free,
 
 void GameLoop::stop() { running_.store(false, std::memory_order_relaxed); }
 
+void GameLoop::setPeriod(std::chrono::microseconds period) {
+  period_.store(period, std::memory_order_relaxed);
+}
+
 uint64_t GameLoop::executedCycles() const {
   return executedCycles_.load(std::memory_order_relaxed);
 }
@@ -120,7 +146,7 @@ uint64_t GameLoop::skippedCycles() const { return skippedCycles_.load(std::memor
 
 GameLoopHealth GameLoop::health() const {
   GameLoopHealth h;
-  h.periodUs = static_cast<uint64_t>(period_.count());
+  h.periodUs = static_cast<uint64_t>(period_.load(std::memory_order_relaxed).count());
   h.targetHz = h.periodUs > 0 ? 1'000'000.0 / static_cast<double>(h.periodUs) : 0.0;
   h.executedCycles = executedCycles_.load(std::memory_order_relaxed);
   h.skippedCycles = skippedCycles_.load(std::memory_order_relaxed);

@@ -77,11 +77,10 @@ int main(int argc, char** argv) {
   // Runtime tuning for DeviceManager::init, derived once from the config and shared by both the
   // eager startup init below and the POST /api/init callback.
   const mm::node::DeviceManagerConfig deviceManagerConfig{
-      .cyclePeriodUs = opts.config.gameLoop.periodUs,
       .readObjectDictionaryOnPreop = opts.config.parameters.readObjectDictionaryOnPreop,
       .useCompleteAccess = opts.config.parameters.useCompleteAccess,
       .recorderDumpDir = opts.config.recorder.dumpDir,
-      .recorderHistorySeconds = opts.config.recorder.historySeconds};
+      .recorderCapacity = opts.config.recorder.capacity};
 
   // Resolve the adapter, construct the concrete driver, and hand it to DeviceManager::init. Used
   // both for the optional eager init below and as the POST /api/init callback, so the two paths
@@ -201,6 +200,17 @@ int main(int argc, char** argv) {
             return mm::fetchAndSwapCert(certFile, keyFile, certUrl, keyUrl);
           },
           .getGameLoopHealth = [&gameLoop] { return gameLoop.health(); },
+          .setGameLoopPeriod = [&gameLoop](uint32_t periodUs) -> std::expected<void, std::string> {
+            // Same rule as config validation (config.cc): a zero period is meaningless. No upper
+            // clamp — a too-aggressive period fails visibly via skippedCycles, not silently.
+            if (periodUs == 0) {
+              return std::unexpected("periodUs must be greater than 0");
+            }
+            // Retime the RT loop. The change is transient — it does not rewrite the config file.
+            // The recorder ring is period-independent (sized in cycles), so nothing else to touch.
+            gameLoop.setPeriod(std::chrono::microseconds{periodUs});
+            return {};
+          },
           .corsOrigin = opts.config.server.corsOrigin,
       },
       deviceManager, monitoringManager};

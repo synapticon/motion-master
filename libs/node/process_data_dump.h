@@ -19,17 +19,16 @@ namespace mm::node {
 ///
 /// Layout (all multi-byte integers little-endian):
 ///
-///   File prefix (fixed 40 bytes — @c rowCount sits at a fixed offset so it can be patched after
+///   File prefix (fixed 36 bytes — @c rowCount sits at a fixed offset so it can be patched after
 ///   the rows are streamed):
 ///     0   char  magic[4]      = 'M','M','P','D'
 ///     4   u16   formatVersion = kDumpFormatVersion
 ///     6   u16   flags         = 0 (reserved)
-///     8   u32   cyclePeriodUs
-///     12  u64   startSequence (sequence of the first row; oldest cycle in the span)
-///     20  u64   rowCount      (number of rows actually written)        <- patched at the end
-///     28  u32   inputBytes    (per-row input region size)
-///     32  u32   outputBytes   (per-row output region size)
-///     36  u32   deviceCount
+///     8   u64   startSequence (sequence of the first row; oldest cycle in the span)
+///     16  u64   rowCount      (number of rows actually written)        <- patched at the end
+///     24  u32   inputBytes    (per-row input region size)
+///     28  u32   outputBytes   (per-row output region size)
+///     32  u32   deviceCount
 ///   Device table (deviceCount entries):
 ///     u16 slavePosition
 ///     u32 vendorId · u32 productCode · u32 revisionNumber · u32 serialNumber
@@ -55,7 +54,7 @@ inline constexpr uint16_t kDumpFormatVersion = 1;
 
 /// @brief Byte offset of the @c rowCount field within the fixed prefix. The writer streams rows
 ///        first, then seeks here to patch the final count — so the stream must be seekable.
-inline constexpr std::streamoff kDumpRowCountOffset = 20;
+inline constexpr std::streamoff kDumpRowCountOffset = 16;
 
 /// @brief One PDO-mapped object as recorded in the dump header.
 struct DumpPdoEntry {
@@ -81,9 +80,8 @@ struct DumpDevice {
 
 /// @brief The embedded process-image header: everything needed to decode the rows offline.
 struct DumpHeader {
-  uint32_t cyclePeriodUs = 0;  ///< GameLoop cycle period; lets a reader place rows on a time axis.
-  uint32_t inputBytes = 0;     ///< Per-row input region size (the published image's input size).
-  uint32_t outputBytes = 0;    ///< Per-row output region size.
+  uint32_t inputBytes = 0;   ///< Per-row input region size (the published image's input size).
+  uint32_t outputBytes = 0;  ///< Per-row output region size.
   std::vector<DumpDevice> devices;
 };
 

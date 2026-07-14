@@ -38,6 +38,15 @@ CyclicTimer::~CyclicTimer() {
   CloseHandle(static_cast<HANDLE>(handle_));
 }
 
+void CyclicTimer::setPeriod(std::chrono::microseconds period) {
+  // period (µs) → QPC ticks: ticks = µs * freq / 1e6.
+  periodTicks_ = period.count() * qpcFreq_ / 1'000'000;
+  // Re-anchor the grid at the current QPC reading, matching the constructor.
+  LARGE_INTEGER now{};
+  QueryPerformanceCounter(&now);
+  next_ = now.QuadPart;
+}
+
 uint64_t CyclicTimer::waitForNextCycle() {
   next_ += periodTicks_;
 

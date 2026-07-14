@@ -73,6 +73,23 @@ class CyclicTimer {
   ///         callers that don't track skips may ignore it.
   uint64_t waitForNextCycle();
 
+  /// @brief Changes the cycle period and re-anchors the deadline grid to now.
+  ///
+  /// Recomputes the internal period and resets the deadline baseline to the
+  /// current time, so the next waitForNextCycle() targets `now + period` on a
+  /// fresh grid — exactly as construction does. Re-anchoring (rather than
+  /// keeping the old baseline) means a period change does not manifest as a
+  /// spurious skip burst: without it, a longer period against a baseline in the
+  /// past would report a pile of skipped cycles, and a shorter one would leave
+  /// the deadline stranded far in the future.
+  ///
+  /// Intended to be called only by the thread that drives waitForNextCycle()
+  /// (the RT loop), between cycles — it mutates the same deadline state and
+  /// holds no lock.
+  ///
+  /// @param period  New cycle period. Must be > 0.
+  void setPeriod(std::chrono::microseconds period);
+
  private:
 #ifdef _WIN32
   void* handle_ = nullptr;   // HANDLE — avoids pulling <windows.h> into every consumer

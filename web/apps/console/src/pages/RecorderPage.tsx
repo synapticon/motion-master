@@ -263,7 +263,6 @@ export default function RecorderPage() {
               <span className="font-medium text-grey-800">{source}</span>
               {' · '}
               {file.header.devices.length} device{file.header.devices.length === 1 ? '' : 's'}
-              {' · '}cycle {file.header.cyclePeriodUs} µs
             </div>
 
             {chart.labels.length > 0 ? (

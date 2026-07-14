@@ -13,6 +13,14 @@ CyclicTimer::CyclicTimer(std::chrono::microseconds period) : period_ns_(period.c
 
 CyclicTimer::~CyclicTimer() = default;
 
+void CyclicTimer::setPeriod(std::chrono::microseconds period) {
+  period_ns_ = period.count() * 1000;
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  next_sec_ = now.tv_sec;
+  next_nsec_ = now.tv_nsec;
+}
+
 uint64_t CyclicTimer::waitForNextCycle() {
   advanceOnePeriod();
 

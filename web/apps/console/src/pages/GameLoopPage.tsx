@@ -1,11 +1,32 @@
 import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import type { GameLoopHealth } from '@synapticon/motion-master-client'
 import PageHeader from '../components/PageHeader'
 import Callout from '../components/Callout'
 import GameLoopExplainer from '../components/GameLoopExplainer'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
+
+const inputCls = 'border border-grey-300 px-2 py-1 text-xs w-28 font-mono bg-white'
+const btnCls =
+  'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
+
+// Flatten the client's nested {error:{error}} / {status} shape into a single message.
+function apiError(err: unknown): string {
+  if (err && typeof err === 'object') {
+    if ('error' in err) {
+      const inner = (err as { error: unknown }).error
+      if (inner && typeof inner === 'object' && 'error' in inner) {
+        return String((inner as { error: unknown }).error)
+      }
+      if (typeof inner === 'string') return inner
+    }
+    if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
+      return `HTTP ${(err as { status: number }).status}`
+    }
+  }
+  return 'Unknown error'
+}
 
 // Poll cadence. The endpoint reports cumulative averages plus raw counters + a server timestamp, so
 // we diff successive polls to derive the *instantaneous* rate the loop is achieving right now. One
@@ -78,6 +99,42 @@ export default function GameLoopPage() {
   })
 
   const health = query.data?.data
+
+  // Cycle-period control. Prefill the input from the loop's current period once, then leave it under
+  // the user's control (the 1 s poll must not clobber what they are typing).
+  const [periodInput, setPeriodInput] = useState('')
+  const [periodError, setPeriodError] = useState<string | null>(null)
+  const prefilled = useRef(false)
+  useEffect(() => {
+    if (health && !prefilled.current) {
+      setPeriodInput(String(health.periodUs))
+      prefilled.current = true
+    }
+  }, [health])
+
+  const setPeriodMutation = useMutation({
+    mutationFn: (periodUs: number) => api.setGameLoopPeriod({ periodUs }),
+  })
+
+  function applyPeriod() {
+    setPeriodError(null)
+    const periodUs = Number(periodInput)
+    if (!Number.isInteger(periodUs) || periodUs <= 0) {
+      setPeriodError('Enter a whole number of microseconds greater than 0.')
+      return
+    }
+    setPeriodMutation.mutate(periodUs, {
+      onSuccess: () => {
+        // The server reset its health counters for the new period, so drop our diff baseline —
+        // otherwise the next poll diffs the fresh (smaller) counters against the pre-change sample
+        // and renders a one-tick bogus rate. Same reset as the reconnect path below.
+        prev.current = null
+        setInstant(null)
+        void query.refetch()
+      },
+      onError: (err) => setPeriodError(apiError(err)),
+    })
+  }
 
   // Derive the instantaneous rate by diffing this sample against the previous one: how many cycles
   // the loop actually ran, over the real wall-clock interval between the two server timestamps. This
@@ -231,6 +288,50 @@ export default function GameLoopPage() {
                 }
                 title="Whether the loop acquired real-time priority and pinned its memory"
               />
+            </div>
+
+            <div className="border border-grey-200 p-4 space-y-3">
+              <p className="eyebrow text-grey-500">Cycle period</p>
+              <p className="text-xs text-grey-600">
+                Retimes the running loop to a new period. Takes effect within one cycle. The change
+                is transient — it is not saved to the config file, so a restart reverts to the
+                configured value. If the skip count above climbs steadily, raise the period (e.g.
+                1000 → 2000 µs) until the loop meets its grid. Applying a period resets the counters
+                above so you can see straight away whether it helped.{' '}
+                <span className="text-grey-700">
+                  Only the master cadence changes: the recorder ring is not resized and drive
+                  watchdogs are not touched, so raising the period toward a drive&rsquo;s PDO/SM
+                  watchdog window can fault that drive — change it while drives are not enabled if
+                  unsure.
+                </span>
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  className={inputCls}
+                  value={periodInput}
+                  inputMode="numeric"
+                  placeholder={String(health.periodUs)}
+                  onChange={(e) => {
+                    setPeriodInput(e.target.value)
+                    setPeriodMutation.reset()
+                    setPeriodError(null)
+                  }}
+                />
+                <span className="text-xs text-grey-500">µs</span>
+                <button
+                  className={btnCls}
+                  onClick={applyPeriod}
+                  disabled={setPeriodMutation.isPending}
+                >
+                  {setPeriodMutation.isPending ? 'Applying…' : 'Apply period'}
+                </button>
+              </div>
+              {periodError && <p className="text-xs text-status-bad">{periodError}</p>}
+              {setPeriodMutation.isSuccess && !periodError && (
+                <p className="text-xs text-status-good">
+                  Period applied — loop now targeting {formatHz(health.targetHz)}.
+                </p>
+              )}
             </div>
           </>
         )}

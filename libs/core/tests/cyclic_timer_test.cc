@@ -78,3 +78,35 @@ TEST(CyclicTimerTest, ResyncsAfterStall) {
   }
   EXPECT_GE(elapsedUs(start), kPostCycles * kPeriod.count() * 9 / 10);
 }
+
+// setPeriod must retime subsequent cycles: after switching to a longer period,
+// N cycles take at least N of the *new* period. Proves the new value actually
+// governs the cadence, not the constructed one.
+TEST(CyclicTimerTest, SetPeriodChangesCadence) {
+  constexpr int kCycles = 10;
+  constexpr auto kLongPeriod = std::chrono::microseconds(4000);  // 2× kPeriod
+  mm::core::CyclicTimer timer(kPeriod);
+  timer.waitForNextCycle();  // align to the initial grid
+
+  timer.setPeriod(kLongPeriod);
+  const auto start = steady_clock::now();
+  for (int i = 0; i < kCycles; ++i) {
+    timer.waitForNextCycle();
+  }
+  EXPECT_GE(elapsedUs(start), kCycles * kLongPeriod.count() * 9 / 10);
+}
+
+// setPeriod must re-anchor the grid to now, so the change does not manifest as a
+// spurious skip burst — the immediate next cycle reports no skips even though
+// the old baseline is long in the past relative to the new (larger) period.
+TEST(CyclicTimerTest, SetPeriodDoesNotBurstSkips) {
+  mm::core::CyclicTimer timer(kPeriod);
+  timer.waitForNextCycle();
+
+  // Sit well past the old grid, then change period. A naive impl that kept the
+  // old baseline would fast-forward over the gap and report many skips.
+  std::this_thread::sleep_for(5 * kPeriod);
+  timer.setPeriod(std::chrono::microseconds(4000));
+
+  EXPECT_EQ(timer.waitForNextCycle(), 0u);
+}

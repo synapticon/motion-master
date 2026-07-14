@@ -206,7 +206,7 @@ export default function GameLoopPage() {
                 {skipping
                   ? `Loop is skipping cycles${
                       instant && instant.skipHz >= 1 ? ` (~${Math.round(instant.skipHz)}/s)` : ''
-                    } — this machine can’t sustain the ${health.periodUs} µs period; raise it (e.g. to 2 ms).`
+                    } — this machine can’t sustain the ${health.periodUs} µs period; raise it.`
                   : keepingUp
                     ? `Loop is meeting its ${formatHz(health.targetHz)} target.`
                     : `Loop is running below its ${formatHz(health.targetHz)} target.`}

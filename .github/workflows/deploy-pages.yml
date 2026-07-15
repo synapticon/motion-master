@@ -11,11 +11,14 @@ permissions:
   pages: write
   id-token: write
 
-# Only one deployment at a time; don't cancel in-progress runs so a queued
-# deploy is not dropped when a new push arrives.
+# One deployment at a time. Cancel a superseded in-progress run: an atomic
+# `git push origin main v<tag>` fires two events (branch + tag), so two runs would
+# otherwise start together and both try to deploy Pages — the loser fails with a
+# spurious red X. Every run rebuilds the whole site (latest wins), so cancelling the
+# older run drops nothing.
 concurrency:
   group: pages
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   build:

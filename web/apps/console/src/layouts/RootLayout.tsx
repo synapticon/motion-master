@@ -85,6 +85,64 @@ function NavItem({
   )
 }
 
+// A uniform collapsible sidebar group: an eyebrow heading with a chevron that toggles its
+// items, plus an optional trailing action (e.g. the Devices refresh button). Owns its
+// open/closed state; `defaultOpen` sets the initial state (Meta and Tools start collapsed).
+// Every group uses this so they all look and behave identically.
+function SidebarGroup({
+  label,
+  labelTitle,
+  defaultOpen = true,
+  collapsible = true,
+  trailing,
+  children,
+}: {
+  label: string
+  labelTitle?: string
+  defaultOpen?: boolean
+  collapsible?: boolean
+  trailing?: ReactNode
+  children: ReactNode
+}) {
+  const [open, setOpen] = useState(defaultOpen)
+  const expanded = collapsible ? open : true
+  const labelSpan = (
+    <span
+      title={labelTitle}
+      className={`eyebrow leading-none text-white/40 truncate ${collapsible ? 'group-hover:text-white/70 transition-colors' : ''
+        }`}
+    >
+      {label}
+    </span>
+  )
+  return (
+    <div className="mt-6">
+      {/* border-l-2 (transparent) matches NavItem's active-indicator border so the group
+          label lines up exactly with its links below, which are inset by that border. */}
+      <div className="flex items-center gap-2 border-l-2 border-transparent px-5 mb-1.5">
+        {collapsible ? (
+          <button
+            type="button"
+            onClick={() => setOpen(o => !o)}
+            aria-expanded={open}
+            className="group flex flex-1 min-w-0 items-center justify-between cursor-pointer"
+          >
+            {labelSpan}
+            <ChevronDown
+              className={`h-3.5 w-3.5 shrink-0 text-white/40 group-hover:text-white/70 transition-transform ${open ? 'rotate-180' : ''
+                }`}
+            />
+          </button>
+        ) : (
+          <div className="flex flex-1 min-w-0 items-center">{labelSpan}</div>
+        )}
+        {trailing}
+      </div>
+      {expanded && <div>{children}</div>}
+    </div>
+  )
+}
+
 function DeviceSection({
   deviceId,
   name,
@@ -273,7 +331,6 @@ function DeviceSection({
 
 export default function RootLayout() {
   const { api, host, httpPort, online, hasScanned, isInitialized } = useConnection()
-  const [metaOpen, setMetaOpen] = useState(false)
 
   // `hasScanned` is sticky (cleared only on reset), so it stays true after the server
   // drops. Gate on `online` too, or these keep firing against a dead API — the states
@@ -363,15 +420,15 @@ export default function RootLayout() {
             }
           />
 
-          {/* Sidebar links unlock in tiers by how much of the stack is live:
+          {/* Groups unlock in tiers by how much of the stack is live:
               - API online: the group headings + the pages that work without slaves —
                 Control (where init/scan/reset happen) and Parameter Caches (reads the
                 on-disk OD cache, independent of any live scan).
               - Bus scanned (hasScanned): the per-slave bus views and the process-data /
-                monitoring pages, which need discovered devices to show anything. */}
+                monitoring pages, which need discovered devices to show anything.
+              Every group is a SidebarGroup — same look, same collapse behaviour. */}
           {online && (
-            <>
-              <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Fieldbus</p>
+            <SidebarGroup label="Fieldbus">
               <NavItem to="/fieldbus/control" label="Control" />
               {hasScanned && (
                 <>
@@ -381,8 +438,11 @@ export default function RootLayout() {
                   <NavItem to="/fieldbus/dc-sync" label="DC Sync" />
                 </>
               )}
+            </SidebarGroup>
+          )}
 
-              <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Data</p>
+          {online && (
+            <SidebarGroup label="Data">
               {hasScanned && (
                 <>
                   <NavItem to="/data/process-data" label="Process Data" />
@@ -391,84 +451,65 @@ export default function RootLayout() {
                 </>
               )}
               <NavItem to="/data/parameter-caches" label="Parameter Caches" />
-            </>
+            </SidebarGroup>
           )}
 
-          <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Server</p>
-          {/* Game Loop and Log read from the API (the loop runs unconditionally, so
-              Game Loop needs no scan); Requests is a purely client-side log of HTTP
-              requests (failures included), so it stays visible — it's most useful
+          {/* Game Loop and Log read from the API (the loop runs unconditionally, so Game
+              Loop needs no scan); Requests is a purely client-side log of HTTP requests
+              (failures included), so it stays visible even offline — it's most useful
               precisely when the connection is failing. */}
-          {online && <NavItem to="/server/game-loop" label="Game Loop" />}
-          {online && <NavItem to="/server/log" label="Log" />}
-          <NavItem to="/server/requests" label="Requests" />
+          <SidebarGroup label="Server">
+            {online && <NavItem to="/server/game-loop" label="Game Loop" />}
+            {online && <NavItem to="/server/log" label="Log" />}
+            <NavItem to="/server/requests" label="Requests" />
+          </SidebarGroup>
 
           {online && (
-            <>
-              <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Tools</p>
+            <SidebarGroup label="Tools" defaultOpen={false}>
               <NavItem to="/tools/sii" label="SII" />
-            </>
+            </SidebarGroup>
           )}
 
-          <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Reference</p>
-          <NavItem to="/reference/api-docs" label="API Docs" />
+          <SidebarGroup label="Reference">
+            <NavItem to="/reference/api-docs" label="API Docs" />
+          </SidebarGroup>
 
           {online && (
-            <div className="mt-6">
-              <button
-                type="button"
-                onClick={() => setMetaOpen(o => !o)}
-                aria-expanded={metaOpen}
-                className="group w-full flex items-center justify-between px-5 mb-1 cursor-pointer"
-              >
-                <span className="eyebrow text-white/40 group-hover:text-white/70 transition-colors">
-                  Meta
-                </span>
-                <ChevronDown
-                  className={`h-3.5 w-3.5 text-white/40 group-hover:text-white/70 transition-transform ${metaOpen ? 'rotate-180' : ''
-                    }`}
-                />
-              </button>
-              {metaOpen && (
-                <div>
-                  <NavItem to="/meta/al-status-codes" label="AL Status Codes" />
-                  <NavItem to="/meta/esc-registers" label="ESC Registers" />
-                  <NavItem to="/meta/foe-error-codes" label="FoE Error Codes" />
-                  <NavItem to="/meta/object-data-types" label="Object Data Types" />
-                </div>
-              )}
-            </div>
+            <SidebarGroup label="Meta" defaultOpen={false}>
+              <NavItem to="/meta/al-status-codes" label="AL Status Codes" />
+              <NavItem to="/meta/esc-registers" label="ESC Registers" />
+              <NavItem to="/meta/foe-error-codes" label="FoE Error Codes" />
+              <NavItem to="/meta/object-data-types" label="Object Data Types" />
+            </SidebarGroup>
           )}
 
           {online && (
-            <div className="px-5 mt-6 mb-2">
-              <div className="flex items-center justify-between mb-1.5">
-                <p
-                  className={`eyebrow text-white/40 ${hasScanned ? 'cursor-help' : ''}`}
-                  title={
-                    hasScanned
-                      ? `Scanned — the bus was enumerated and ${devices.length} ${devices.length === 1 ? 'device is' : 'devices are'} present.`
-                      : undefined
-                  }
-                >
-                  Devices{hasScanned && ` (${devices.length})`}
-                </p>
-                {hasScanned && (
+            <SidebarGroup
+              label={`Devices${hasScanned ? ` (${devices.length})` : ''}`}
+              collapsible={false}
+              labelTitle={
+                hasScanned
+                  ? `Scanned — the bus was enumerated and ${devices.length} ${devices.length === 1 ? 'device is' : 'devices are'} present.`
+                  : undefined
+              }
+              trailing={
+                hasScanned ? (
                   <button
                     type="button"
                     onClick={refreshAll}
                     disabled={refreshing}
                     title="Refresh all devices — re-read the device list and AL states without re-scanning the bus (slaves keep their current state)"
                     aria-label="Refresh all devices — re-read the device list and AL states without re-scanning the bus"
-                    className="text-white/40 hover:text-white disabled:opacity-40 disabled:cursor-default cursor-pointer transition-colors"
+                    className="shrink-0 text-white/40 hover:text-white disabled:opacity-40 disabled:cursor-default cursor-pointer transition-colors"
                   >
                     <RefreshCw className={`h-3.5 w-3.5 ${refreshing ? 'animate-spin' : ''}`} />
                   </button>
-                )}
-              </div>
-              {!hasScanned && (
+                ) : undefined
+              }
+            >
+              {!hasScanned ? (
                 <div
-                  className="cursor-help"
+                  className="border-l-2 border-transparent px-5 cursor-help"
                   title={
                     !isInitialized
                       ? 'Not initialized — no fieldbus driver is loaded. Initialize one on the Control page.'
@@ -482,23 +523,22 @@ export default function RootLayout() {
                     {!isInitialized ? 'Not initialized' : 'Initialized · not scanned'}
                   </span>
                 </div>
+              ) : (
+                devices.map(d => (
+                  <DeviceSection
+                    key={d.slavePosition}
+                    deviceId={String(d.slavePosition)}
+                    name={d.name}
+                    vendorId={d.vendorId}
+                    productCode={d.productCode}
+                    revisionNumber={d.revisionNumber}
+                    serialNumber={d.serialNumber}
+                    state={stateByPosition.get(d.slavePosition)}
+                  />
+                ))
               )}
-            </div>
+            </SidebarGroup>
           )}
-
-          {online &&
-            devices.map(d => (
-              <DeviceSection
-                key={d.slavePosition}
-                deviceId={String(d.slavePosition)}
-                name={d.name}
-                vendorId={d.vendorId}
-                productCode={d.productCode}
-                revisionNumber={d.revisionNumber}
-                serialNumber={d.serialNumber}
-                state={stateByPosition.get(d.slavePosition)}
-              />
-            ))}
         </nav>
 
         <div className="px-5 py-3 border-t border-white/10 bg-black/20">

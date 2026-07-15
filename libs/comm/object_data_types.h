@@ -6,6 +6,15 @@
 #include <nlohmann/json_fwd.hpp>
 #include <string_view>
 
+// <cmath>/<math.h> — pulled in transitively by the STL headers above — defines the obsolete
+// SVID matherr macro DOMAIN on macOS/Clang and Windows/MSVC. Left in place it would expand
+// inside the ObjectDataType enum below and break the build. glibc gates the macro behind a
+// feature test that -std=c++2b disables, so only the non-Linux toolchains hit this. The
+// matherr interface is long dead; drop the macro so the ETG.1020 DOMAIN enumerator survives.
+#ifdef DOMAIN
+#undef DOMAIN
+#endif
+
 namespace mm::comm {
 
 /// @brief CoE object dictionary data type codes.

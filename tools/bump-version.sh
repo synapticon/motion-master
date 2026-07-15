@@ -50,4 +50,13 @@ sed -i "s/>v${OLD_ESC}</>v${NEW_VERSION}</" \
   "$ROOT/web/apps/console/src/layouts/RootLayout.tsx"
 
 echo "Done — review with: git diff"
-echo "Note: tagging v${NEW_VERSION} publishes @synapticon/motion-master-client@${NEW_VERSION} to npm (release.yml)."
+echo
+echo "To release, commit and push the bump and its tag together — the atomic push"
+echo "updates both refs at once so every CI job (binaries + Pages apps) sees the new"
+echo "tag from the start and there is no window where main exists without it:"
+echo
+echo "  git commit -am \"chore: bump version to ${NEW_VERSION}\""
+echo "  git push --atomic origin main v${NEW_VERSION}"
+echo
+echo "Tagging v${NEW_VERSION} builds the release binaries, deploys the tagged web apps"
+echo "to Pages, and publishes @synapticon/motion-master-client@${NEW_VERSION} to npm."

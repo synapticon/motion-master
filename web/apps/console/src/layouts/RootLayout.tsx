@@ -396,7 +396,7 @@ export default function RootLayout() {
           <span className="mt-3 font-display text-sm font-medium uppercase tracking-wide text-grey-50">
             Motion Master
           </span>
-          <p className="mt-0.5 text-xs font-display tracking-wide text-white/30">v6.0.0-alpha.43</p>
+          <p className="mt-0.5 text-xs font-display tracking-wide text-white/30">v6.0.0-alpha.44</p>
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">

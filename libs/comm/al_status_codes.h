@@ -29,7 +29,14 @@ struct AlStatusCode {
 /// @param c  AL Status Code entry to serialise.
 void to_json(nlohmann::json& j, const AlStatusCode& c);
 
-/// @brief Catalogue of AL Status Codes defined in ETG.1000.6 Table 11.
+/// @brief Catalogue of AL Status Codes.
+///
+/// The first block is a faithful transcription of ETG.1000.6 V1.0.4 Table 11 (the latest
+/// released revision). The second block adds codes that are **not** in that table but are
+/// reported by real slaves and carried by SOEM's own @c ec_ALstatuscodelist — most relevantly
+/// the firmware/EEPROM/FMMU failures raised during BOOT/FoE flashing and re-mapping. They earn
+/// their place here because @ref isAlStatusCodeTerminal must classify them so
+/// @ref FieldbusDriver::transitionToState fails fast instead of spinning to timeout.
 inline constexpr auto kAlStatusCodes = std::to_array<AlStatusCode>({
     {0x0000, "No error", "No error"},
     {0x0001, "Unspecified error", "Unspecified error"},
@@ -90,7 +97,32 @@ inline constexpr auto kAlStatusCodes = std::to_array<AlStatusCode>({
     {0x0060, "Slave restarted locally", "The slave has restarted locally"},
     {0x0061, "Device Identification value updated", "Device identification value has been updated"},
     {0x00F0, "Application controller available", "An application controller is available"},
+
+    // --- Beyond ETG.1000.6 V1.0.4 Table 11: vendor/de-facto codes (mirrors SOEM's table) ---
+    // Observed from real slaves; not part of the released spec. Kept here so terminal
+    // classification and name decoding cover the firmware/config failures that actually occur.
+    {0x0004, "Invalid revision", "The slave revision does not match the one expected by the master",
+     true},
+    {0x0006, "SII/EEPROM mismatch", "SII/EEPROM information does not match the firmware", true},
+    {0x0007, "Firmware update failed",
+     "Firmware update was not successful — the old firmware is still running", true},
+    {0x000E, "License error", "The slave firmware license is invalid or missing", true},
+    {0x002E, "Invalid input FMMU config", "The FMMU input configuration is invalid", true},
+    {0x0052, "External hardware not ready", "External hardware is not ready"},
+    {0x0070, "Module ident mismatch",
+     "The detected module ident list does not match the configured one", true},
+    {0x0080, "Supply voltage too low", "The slave supply voltage is too low"},
+    {0x0081, "Supply voltage too high", "The slave supply voltage is too high"},
+    {0x0082, "Temperature too low", "The slave temperature is too low"},
+    {0x0083, "Temperature too high", "The slave temperature is too high"},
 });
+
+/// @brief Looks up @p code in @ref kAlStatusCodes, or returns nullptr if it is not catalogued.
+constexpr const AlStatusCode* findAlStatusCode(uint16_t code) {
+  const auto it = std::find_if(kAlStatusCodes.begin(), kAlStatusCodes.end(),
+                               [code](const AlStatusCode& entry) { return entry.code == code; });
+  return it != kAlStatusCodes.end() ? &*it : nullptr;
+}
 
 /// @brief Returns true if @p code indicates a state-transition failure that cannot
 ///        be resolved by retrying the same writestate.
@@ -100,21 +132,19 @@ inline constexpr auto kAlStatusCodes = std::to_array<AlStatusCode>({
 /// master must change something (re-init, reflash, power cycle) before another
 /// transition attempt can succeed. Unknown codes are treated as non-terminal.
 constexpr bool isAlStatusCodeTerminal(uint16_t code) {
-  const auto it = std::find_if(kAlStatusCodes.begin(), kAlStatusCodes.end(),
-                               [code](const AlStatusCode& entry) { return entry.code == code; });
-  return it != kAlStatusCodes.end() && it->terminal;
+  const AlStatusCode* entry = findAlStatusCode(code);
+  return entry != nullptr && entry->terminal;
 }
 
 /// @brief Returns the short name for @p code, or an empty view if @p code is not a known
-///        ETG.1000.6 AL Status Code.
+///        AL Status Code.
 ///
-/// An empty result is the signal that a slave reported a code outside the standard table —
+/// An empty result is the signal that a slave reported a code outside the catalogue —
 /// vendor-specific, or a stale/garbage read — which a caller should flag rather than present
 /// as a decoded error.
 constexpr std::string_view alStatusCodeName(uint16_t code) {
-  const auto it = std::find_if(kAlStatusCodes.begin(), kAlStatusCodes.end(),
-                               [code](const AlStatusCode& entry) { return entry.code == code; });
-  return it != kAlStatusCodes.end() ? it->name : std::string_view{};
+  const AlStatusCode* entry = findAlStatusCode(code);
+  return entry != nullptr ? entry->name : std::string_view{};
 }
 
 }  // namespace mm::comm

@@ -1224,7 +1224,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
             "Device {}: error bit set while reaching state 0x{:02X} — AL status 0x{:04X}, "
             "code 0x{:04X} ({})",
             pos, targetRaw, state, alStatusCode,
-            name.empty() ? "unknown — not in ETG.1000.6" : name);
+            name.empty() ? "unknown — not a known AL status code" : name);
       }
       // Exact match required: OP+ERROR (0x18) must not pass as OP (0x08).
       if (state == targetRaw) {
@@ -1269,7 +1269,8 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
       std::string_view name = alStatusCodeName(alStatusCode);
       spdlog::error(
           "Device {}: failed to reach state 0x{:02X} — AL status 0x{:04X}, code 0x{:04X} ({})", pos,
-          targetRaw, alStatus, alStatusCode, name.empty() ? "unknown — not in ETG.1000.6" : name);
+          targetRaw, alStatus, alStatusCode,
+          name.empty() ? "unknown — not a known AL status code" : name);
     }
   }
 }

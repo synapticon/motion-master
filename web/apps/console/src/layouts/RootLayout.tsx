@@ -321,7 +321,7 @@ export default function RootLayout() {
     <div className="flex h-screen bg-grey-50 text-grey-900">
       {/* Sidebar — Ocean Dark */}
       <aside className="w-60 shrink-0 bg-ocean-dark flex flex-col border-r border-white/10">
-        <div className="flex flex-col items-center border-b border-white/10 bg-black/20 px-5 py-4">
+        <div className="flex flex-col items-center border-b border-white/10 bg-grey-900 px-5 py-4">
           <img
             src={`${import.meta.env.BASE_URL}pwa-192x192.png`}
             alt="Motion Master logo"

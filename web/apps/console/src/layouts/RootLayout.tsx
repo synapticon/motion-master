@@ -498,7 +498,7 @@ export default function RootLayout() {
             ))}
         </nav>
 
-        <div className="px-5 py-3 border-t border-white/10 bg-black/20">
+        <div className="px-5 py-3 border-t border-white/10 bg-grey-900">
           <p className="text-white/20 text-xs">© {new Date().getFullYear()} Synapticon GmbH</p>
         </div>
       </aside>

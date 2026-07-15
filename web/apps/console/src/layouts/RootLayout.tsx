@@ -334,7 +334,9 @@ export default function RootLayout() {
               : 'ring-1 ring-white/10'
               }`}
           />
-          <span className="mt-3 font-display text-sm font-medium uppercase tracking-widest text-white">
+          {/* Match the landing page's <h1> wordmark styling (Montserrat medium, uppercase,
+              0.025em tracking, grey-50) — only the size differs, scaled down for the sidebar. */}
+          <span className="mt-3 font-display text-sm font-medium uppercase tracking-wide text-grey-50">
             Motion Master
           </span>
           <p className="mt-0.5 text-xs font-display tracking-wide text-white/30">v6.0.0-alpha.42</p>

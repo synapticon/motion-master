@@ -78,7 +78,7 @@ const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
 const btnCls =
   'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full transition-colors'
 
-export default function FieldbusPage() {
+export default function ControlPage() {
   const queryClient = useQueryClient()
   const { api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, setIsInitialized, alreadyInitialized, setAlreadyInitialized } = useConnection()
   const AL_STATE_LABEL: Record<number, string> = { 1: 'Init', 2: 'PreOp', 3: 'Boot', 4: 'SafeOp', 8: 'Op' }
@@ -236,7 +236,7 @@ export default function FieldbusPage() {
   })
 
   // When the device list first appears without us having read states yet — a page
-  // refresh that restored the session, or navigating back to the fieldbus page — read
+  // refresh that restored the session, or navigating back to the Control page — read
   // the actual AL states once so the table isn't blank until a manual refresh.
   // Scan/transition set states themselves, so this only fills the initial gap.
   const autoReadStates = useRef(false)

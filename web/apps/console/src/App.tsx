@@ -1,7 +1,7 @@
 import { Routes, Route } from 'react-router'
 import RootLayout from './layouts/RootLayout'
 import ConnectionPage from './pages/ConnectionPage'
-import FieldbusPage from './pages/FieldbusPage'
+import ControlPage from './pages/ControlPage'
 import EthercatStatePage from './pages/EthercatStatePage'
 import ObjectDictionaryPage from './pages/ObjectDictionaryPage'
 import SiiPage from './pages/SiiPage'
@@ -32,7 +32,7 @@ export default function App() {
     <Routes>
       <Route path="/" element={<RootLayout />}>
         <Route index element={<ConnectionPage />} />
-        <Route path="fieldbus" element={<FieldbusPage />} />
+        <Route path="control" element={<ControlPage />} />
         <Route path="process-image" element={<ProcessImagePage />} />
         <Route path="bus-config" element={<BusConfigPage />} />
         <Route path="bus-diagnostics" element={<BusDiagnosticsPage />} />

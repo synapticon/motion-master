@@ -343,7 +343,7 @@ export default function RootLayout() {
           {online && (
             <>
               <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Fieldbus</p>
-              <NavItem to="/fieldbus" label="Control" />
+              <NavItem to="/control" label="Control" />
               {hasScanned && (
                 <>
                   <NavItem to="/bus-config" label="Configuration" />
@@ -442,7 +442,7 @@ export default function RootLayout() {
                   className="cursor-help"
                   title={
                     !isInitialized
-                      ? 'Not initialized — no fieldbus driver is loaded. Initialize one on the Fieldbus page.'
+                      ? 'Not initialized — no fieldbus driver is loaded. Initialize one on the Control page.'
                       : 'Initialized, not scanned — a driver is loaded but the bus has not been scanned yet, so no devices are known. Scan to discover them.'
                   }
                 >

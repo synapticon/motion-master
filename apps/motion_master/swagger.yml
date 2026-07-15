@@ -658,10 +658,10 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/FoeErrorCode"
-  /api/meta/data-types:
+  /api/meta/object-data-types:
     get:
       summary: List all known CoE object dictionary data types
-      operationId: getDataTypes
+      operationId: getObjectDataTypes
       description: >
         Returns the static catalogue of ETG.1020 data type codes used in CoE object
         dictionary entries.  Each entry of a `DeviceParameter` carries a `dataType`

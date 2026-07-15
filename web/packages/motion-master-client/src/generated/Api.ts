@@ -514,13 +514,13 @@ export class Api<
   /**
    * @description Returns the static catalogue of ETG.1020 data type codes used in CoE object dictionary entries.  Each entry of a `DeviceParameter` carries a `dataType` field whose value is one of the codes listed here.
    *
-   * @name GetDataTypes
+   * @name GetObjectDataTypes
    * @summary List all known CoE object dictionary data types
-   * @request GET:/api/meta/data-types
+   * @request GET:/api/meta/object-data-types
    */
-  getDataTypes = (params: RequestParams = {}) =>
+  getObjectDataTypes = (params: RequestParams = {}) =>
     this.request<ObjectDataTypeInfo[], any>({
-      path: `/api/meta/data-types`,
+      path: `/api/meta/object-data-types`,
       method: "GET",
       format: "json",
       ...params,

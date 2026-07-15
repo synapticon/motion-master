@@ -45,10 +45,10 @@ export default function App() {
         <Route path="log" element={<LogPage />} />
         <Route path="requests" element={<RequestsPage />} />
         <Route path="api-docs" element={<ApiDocsPage />} />
-        <Route path="meta/esc-registers" element={<EscRegistersPage />} />
         <Route path="meta/al-status-codes" element={<AlStatusCodesPage />} />
+        <Route path="meta/esc-registers" element={<EscRegistersPage />} />
         <Route path="meta/foe-error-codes" element={<FoeErrorCodesPage />} />
-        <Route path="meta/data-types" element={<DataTypesPage />} />
+        <Route path="meta/object-data-types" element={<DataTypesPage />} />
         <Route path="tools/sii" element={<ToolsSiiPage />} />
         <Route path="devices/:deviceId">
           <Route path="ethercat-state" element={<EthercatStatePage />} />

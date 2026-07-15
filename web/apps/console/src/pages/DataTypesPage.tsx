@@ -8,7 +8,7 @@ export default function DataTypesPage() {
 
   const query = useQuery({
     queryKey: ['dataTypes'],
-    queryFn: () => api.getDataTypes(),
+    queryFn: () => api.getObjectDataTypes(),
     staleTime: Infinity,
   })
 

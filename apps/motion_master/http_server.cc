@@ -1139,7 +1139,7 @@ void HttpServer::run() {
                sendJson(res, config_.corsOrigin, nlohmann::json(*r));
              });
            })
-      .get("/api/meta/data-types",
+      .get("/api/meta/object-data-types",
            [this](auto* res, auto* /*req*/) {
              sendJson(res, config_.corsOrigin, nlohmann::json(mm::comm::kObjectDataTypes));
            })

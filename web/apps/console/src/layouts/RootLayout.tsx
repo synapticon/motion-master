@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import { NavLink, Outlet } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { BookOpenText, ChevronDown, Mail, RefreshCw } from 'lucide-react'
@@ -57,19 +57,30 @@ function mailboxActiveFor(state?: DeviceState): boolean | null {
   return MAILBOX_ACTIVE_STATES.has(state.alState)
 }
 
-function NavItem({ to, label, end }: { to: string; label: string; end?: boolean }) {
+function NavItem({
+  to,
+  label,
+  end,
+  trailing,
+}: {
+  to: string
+  label: string
+  end?: boolean
+  trailing?: ReactNode
+}) {
   return (
     <NavLink
       to={to}
       end={end}
       className={({ isActive }) =>
-        `block px-5 py-2 text-xs font-display uppercase tracking-wide border-l-2 transition-colors ${isActive
+        `flex items-center justify-between gap-2 px-5 py-2 text-xs font-display uppercase tracking-wide border-l-2 transition-colors ${isActive
           ? 'border-syn-red text-white bg-white/10'
           : 'border-transparent text-white/60 hover:text-white hover:border-white/30'
         }`
       }
     >
-      {label}
+      <span>{label}</span>
+      {trailing}
     </NavLink>
   )
 }
@@ -310,29 +321,44 @@ export default function RootLayout() {
     <div className="flex h-screen bg-grey-50 text-grey-900">
       {/* Sidebar — Ocean Dark */}
       <aside className="w-60 shrink-0 bg-ocean-dark flex flex-col border-r border-white/10">
-        <div className="px-5 py-4 border-b border-white/10">
-          <div className="flex items-center justify-between">
-            <span className="font-display text-sm font-medium uppercase tracking-widest text-white">
-              Motion Master
-            </span>
-            <span
-              title={
-                online
-                  ? `API online — the Motion Master HTTP server is reachable at https://${host}:${httpPort}`
-                  : `API offline — no response from https://${host}:${httpPort}. Make sure Motion Master is installed and running on your system.`
-              }
-              aria-label={online ? 'API online' : 'API offline'}
-              className={`inline-block h-3 w-3 cursor-help rounded-full ring-2 ring-white ${online
-                ? 'bg-status-good shadow-[0_0_8px_2px_var(--color-status-good)]'
-                : 'bg-status-bad shadow-[0_0_8px_2px_var(--color-status-bad)] animate-pulse'
-                }`}
-            />
-          </div>
-          <p className="text-white/30 text-xs font-display tracking-wide mt-0.5">v6.0.0-alpha.39</p>
+        <div className="flex flex-col items-center border-b border-white/10 bg-black/20 px-5 py-4">
+          <img
+            src={`${import.meta.env.BASE_URL}pwa-192x192.png`}
+            alt="Motion Master logo"
+            width={56}
+            height={56}
+            title={online ? 'API online' : 'API offline'}
+            className={`h-14 w-14 rounded-md transition-shadow ${online
+              ? 'ring-2 ring-status-good/70 shadow-[0_0_16px_3px_var(--color-status-good)]'
+              : 'ring-1 ring-white/10'
+              }`}
+          />
+          <span className="mt-3 font-display text-sm font-medium uppercase tracking-widest text-white">
+            Motion Master
+          </span>
+          <p className="mt-0.5 text-xs font-display tracking-wide text-white/30">v6.0.0-alpha.39</p>
         </div>
 
         <nav className="flex-1 overflow-y-auto py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb:hover]:bg-white/40">
-          <NavItem to="/" label="Connection" end />
+          <NavItem
+            to="/"
+            label="Connection"
+            end
+            trailing={
+              <span
+                title={
+                  online
+                    ? `API online — the Motion Master HTTP server is reachable at https://${host}:${httpPort}`
+                    : `API offline — no response from https://${host}:${httpPort}. Make sure Motion Master is installed and running on your system.`
+                }
+                aria-label={online ? 'API online' : 'API offline'}
+                className={`inline-block h-2.5 w-2.5 shrink-0 cursor-help rounded-full ring-2 ring-white ${online
+                  ? 'bg-status-good shadow-[0_0_8px_2px_var(--color-status-good)]'
+                  : 'bg-status-bad shadow-[0_0_6px_2px_var(--color-status-bad)] animate-pulse'
+                  }`}
+              />
+            }
+          />
 
           {/* Sidebar links unlock in tiers by how much of the stack is live:
               - API online: the group headings + the pages that work without slaves —
@@ -472,7 +498,7 @@ export default function RootLayout() {
             ))}
         </nav>
 
-        <div className="px-5 py-3 border-t border-white/10">
+        <div className="px-5 py-3 border-t border-white/10 bg-black/20">
           <p className="text-white/20 text-xs">© {new Date().getFullYear()} Synapticon GmbH</p>
         </div>
       </aside>

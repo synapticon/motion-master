@@ -37,5 +37,7 @@ export default defineConfig({
       devOptions: { enabled: false },
     }),
   ],
-  base: process.env.VITE_BASE ?? '/',
+  // Normalize to a trailing slash: Vite requires it, and `import.meta.env.BASE_URL`
+  // is inlined verbatim, so `${BASE_URL}foo.png` breaks if VITE_BASE lacks the slash.
+  base: (process.env.VITE_BASE ?? '/').replace(/\/?$/, '/'),
 })

@@ -329,7 +329,7 @@ export default function RootLayout() {
             height={56}
             title={online ? 'API online' : 'API offline'}
             className={`h-14 w-14 rounded-md transition-shadow ${online
-              ? 'ring-2 ring-status-good/30 shadow-[0_0_16px_3px_var(--color-status-good)]'
+              ? 'ring-2 ring-ocean/30 shadow-[0_0_60px_18px_var(--color-ocean)]'
               : 'ring-1 ring-white/10'
               }`}
           />

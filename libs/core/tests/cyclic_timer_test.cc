@@ -47,13 +47,21 @@ TEST(CyclicTimerTest, SkipsBacklogAfterStall) {
 
   // Stall ~5 periods inside the "cycle body". The next deadline (grid+1) and
   // several after it are now in the past.
+  const auto beforeStall = steady_clock::now();
   std::this_thread::sleep_for(5 * kPeriod);
 
   const uint64_t skipped = timer.waitForNextCycle();
+
   // Slept past ~5 grid points; skip count is a robust lower bound (sleep_for
   // may overshoot, and alignment adds slack, so don't pin the exact value).
   EXPECT_GE(skipped, 3u);
-  EXPECT_LE(skipped, 20u);
+  // Upper bound: the timer can't skip more grid points than wall-clock time
+  // actually passed. A loaded CI runner can overshoot sleep_for wildly (macOS
+  // runners have been seen turning a 10 ms sleep into ~50 ms), so derive the
+  // ceiling from measured elapsed time rather than a fixed constant — this
+  // still catches a runaway skip count without flaking on a slow scheduler.
+  const uint64_t elapsedPeriods = static_cast<uint64_t>(elapsedUs(beforeStall) / kPeriod.count());
+  EXPECT_LE(skipped, elapsedPeriods + 2);
 }
 
 // Once the backlog is cleared, the timer must re-sync to the grid and sleep

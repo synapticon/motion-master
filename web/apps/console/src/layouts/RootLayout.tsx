@@ -206,9 +206,10 @@ function DeviceSection({
         </div>
 
         {/* Status — one quiet line under the identity row: AL state badge, then two glyphs
-            (mailbox presence, object-dictionary read state), each green when healthy and
-            grey otherwise. Immutable identity (vendor/code/revision/serial) lives in the
-            name tooltip. */}
+            (mailbox presence, object-dictionary read state), each teal (ocean) when healthy
+            and grey otherwise. Teal, not green — green is reserved for the OP AL state, the
+            more important signal. Immutable identity (vendor/code/revision/serial) lives in
+            the name tooltip. */}
         <div className="mt-1.5 flex items-center gap-1 text-[10px] font-display tracking-wide">
           {stateLabel && (
             <span
@@ -235,7 +236,7 @@ function DeviceSection({
               : isBoot
                 ? 'bg-status-warn text-grey-900'
                 : mailboxActive
-                  ? 'bg-green-600'
+                  ? 'bg-ocean'
                   : 'bg-white/15'
               }`}
           >
@@ -251,7 +252,7 @@ function DeviceSection({
             className={`shrink-0 flex items-center justify-center h-[18px] px-1.5 rounded-sm cursor-help ${parameterCount === null
               ? 'bg-white/15 animate-pulse'
               : parameterCount > 0
-                ? 'bg-green-600'
+                ? 'bg-ocean'
                 : 'bg-white/15'
               }`}
           >

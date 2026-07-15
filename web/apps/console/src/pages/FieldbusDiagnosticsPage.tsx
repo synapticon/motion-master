@@ -311,7 +311,7 @@ function DeviceCard({ device }: { device: DeviceDiagnostics }) {
   )
 }
 
-export default function BusDiagnosticsPage() {
+export default function FieldbusDiagnosticsPage() {
   const { api } = useConnection()
 
   const query = useQuery({

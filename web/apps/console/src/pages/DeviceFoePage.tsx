@@ -89,7 +89,7 @@ function SomanetFileLinks({
   )
 }
 
-export default function FoePage() {
+export default function DeviceFoePage() {
   const { deviceId } = useParams()
   const { api } = useConnection()
   const slavePosition = Number(deviceId)

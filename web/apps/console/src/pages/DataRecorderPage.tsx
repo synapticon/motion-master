@@ -82,7 +82,7 @@ function EntryCheckbox({
   )
 }
 
-export default function RecorderPage() {
+export default function DataRecorderPage() {
   const { api, host, httpPort } = useConnection()
 
   const [file, setFile] = useState<MmpdFile | null>(null)

@@ -301,7 +301,7 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
   )
 }
 
-export default function BusConfigPage() {
+export default function FieldbusConfigurationPage() {
   const { api } = useConnection()
 
   const query = useQuery({

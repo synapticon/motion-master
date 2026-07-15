@@ -3,7 +3,7 @@ import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
-export default function EscRegistersPage() {
+export default function MetaEscRegistersPage() {
   const { api } = useConnection()
 
   const registersQuery = useQuery({

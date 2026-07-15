@@ -4,7 +4,7 @@ import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
-export default function LogPage() {
+export default function ServerLogPage() {
   const { host, httpPort } = useConnection()
   const bottomRef = useRef<HTMLDivElement>(null)
 

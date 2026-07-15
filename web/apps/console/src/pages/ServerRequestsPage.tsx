@@ -172,7 +172,7 @@ function DetailView({ entry }: { entry: RequestEntry }) {
   )
 }
 
-export default function RequestsPage() {
+export default function ServerRequestsPage() {
   const { entries, clear } = useRequests()
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [showPollRequests, setShowPollRequests] = useState(false)

@@ -3,28 +3,29 @@ import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
-export default function FoeErrorCodesPage() {
+export default function MetaObjectDataTypesPage() {
   const { api } = useConnection()
 
   const query = useQuery({
-    queryKey: ['foeErrorCodes'],
-    queryFn: () => api.getFoeErrorCodes(),
+    queryKey: ['dataTypes'],
+    queryFn: () => api.getObjectDataTypes(),
     staleTime: Infinity,
   })
 
-  const codes = query.data?.data ?? []
+  const types = query.data?.data ?? []
 
   return (
     <div>
       <PageHeader
         eyebrow="Meta"
-        title="FoE Error Codes"
+        title="Object Data Types"
         description={
           <>
-            Standard File-over-EtherCAT (FoE) error codes, assembled from{' '}
-            <span className="font-mono">ETG.1000.6 §5.8.5, Table 93</span>. Codes in the
-            <span className="font-mono"> 0x8000</span> range are standardised by the EtherCAT
-            Technology Group; vendor-specific codes fall outside this range and are not listed here.
+            CANopen-over-EtherCAT (CoE) object dictionary data type codes. Base numbering follows{' '}
+            SOEM / <span className="font-mono">CiA 301</span> (what the wire reports), extended with
+            the record and array types from{' '}
+            <span className="font-mono">ETG.1020 §26</span> (Base Data Types). The code is the 16-bit
+            DataType field returned when reading an object's metadata from the dictionary.
           </>
         }
       />
@@ -39,14 +40,14 @@ export default function FoeErrorCodesPage() {
           </button>
         </div>
         {query.isError && (
-          <p className="text-xs text-status-bad font-mono">Failed to load FoE error codes.</p>
+          <p className="text-xs text-status-bad font-mono">Failed to load data types.</p>
         )}
         {query.isSuccess && (
           <div className="border border-grey-200 overflow-x-auto">
             <table className="w-full text-xs border-collapse">
               <thead>
                 <tr className="border-b border-grey-200 bg-grey-50">
-                  {['Code', 'Hex', 'Name', 'Description'].map(h => (
+                  {['Code', 'Hex', 'Name', 'Bit Size'].map(h => (
                     <th key={h} className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap">
                       {h}
                     </th>
@@ -54,12 +55,12 @@ export default function FoeErrorCodesPage() {
                 </tr>
               </thead>
               <tbody>
-                {codes.map(c => (
-                  <tr key={c.code} className="border-b border-grey-100 last:border-0">
-                    <td className="px-4 py-2 font-mono">{c.code}</td>
-                    <td className="px-4 py-2 font-mono">0x{c.code.toString(16).toUpperCase().padStart(8, '0')}</td>
-                    <td className="px-4 py-2 font-mono">{c.name}</td>
-                    <td className="px-4 py-2 text-grey-600">{c.description}</td>
+                {types.map(t => (
+                  <tr key={t.code} className="border-b border-grey-100 last:border-0">
+                    <td className="px-4 py-2 font-mono">{t.code}</td>
+                    <td className="px-4 py-2 font-mono">0x{t.code.toString(16).toUpperCase().padStart(4, '0')}</td>
+                    <td className="px-4 py-2 font-mono">{t.name}</td>
+                    <td className="px-4 py-2 font-mono">{t.bitSize === 0 ? '—' : t.bitSize}</td>
                   </tr>
                 ))}
               </tbody>

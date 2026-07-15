@@ -89,7 +89,7 @@ function RtFlag({ ok, children }: { ok: boolean; children: React.ReactNode }) {
   )
 }
 
-export default function GameLoopPage() {
+export default function ServerGameLoopPage() {
   const { api } = useConnection()
 
   const query = useQuery({

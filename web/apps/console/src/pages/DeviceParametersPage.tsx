@@ -150,7 +150,7 @@ function SyncBadge({ state }: { state: DeviceParameter['syncState'] }) {
   )
 }
 
-export default function ParametersPage() {
+export default function DeviceParametersPage() {
   const { deviceId } = useParams()
   const { api } = useConnection()
   const slavePosition = Number(deviceId)

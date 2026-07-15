@@ -14,7 +14,7 @@ import { btnOutline } from '../utils/styles'
 // decimal (a full EEPROM read is many small transactions and can take a noticeable moment).
 const formatDuration = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`)
 
-export default function SiiPage() {
+export default function DeviceSiiPage() {
   const { deviceId } = useParams()
   const slavePosition = Number(deviceId)
   const { api } = useConnection()

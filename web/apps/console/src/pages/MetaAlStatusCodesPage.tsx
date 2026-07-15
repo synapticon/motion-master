@@ -3,7 +3,7 @@ import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
-export default function AlStatusCodesPage() {
+export default function MetaAlStatusCodesPage() {
   const { api } = useConnection()
 
   const query = useQuery({

@@ -151,7 +151,7 @@ const SCALAR_CSS = `
 }
 `
 
-export default function ApiDocsPage() {
+export default function ReferenceApiDocsPage() {
   const rootRef = useRef<HTMLDivElement>(null)
 
   // Scalar owns the introduction DOM, so we inject our download bar there once

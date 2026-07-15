@@ -343,25 +343,25 @@ export default function RootLayout() {
           {online && (
             <>
               <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Fieldbus</p>
-              <NavItem to="/control" label="Control" />
+              <NavItem to="/fieldbus/control" label="Control" />
               {hasScanned && (
                 <>
-                  <NavItem to="/bus-config" label="Configuration" />
-                  <NavItem to="/process-image" label="Process Image" />
-                  <NavItem to="/bus-diagnostics" label="Diagnostics" />
-                  <NavItem to="/dc-sync" label="DC Sync" />
+                  <NavItem to="/fieldbus/configuration" label="Configuration" />
+                  <NavItem to="/fieldbus/process-image" label="Process Image" />
+                  <NavItem to="/fieldbus/diagnostics" label="Diagnostics" />
+                  <NavItem to="/fieldbus/dc-sync" label="DC Sync" />
                 </>
               )}
 
               <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Data</p>
               {hasScanned && (
                 <>
-                  <NavItem to="/process-data" label="Process Data" />
-                  <NavItem to="/monitorings" label="Monitorings" />
-                  <NavItem to="/recorder" label="Recorder" />
+                  <NavItem to="/data/process-data" label="Process Data" />
+                  <NavItem to="/data/monitorings" label="Monitorings" />
+                  <NavItem to="/data/recorder" label="Recorder" />
                 </>
               )}
-              <NavItem to="/parameter-caches" label="Parameter Caches" />
+              <NavItem to="/data/parameter-caches" label="Parameter Caches" />
             </>
           )}
 
@@ -370,9 +370,9 @@ export default function RootLayout() {
               Game Loop needs no scan); Requests is a purely client-side log of HTTP
               requests (failures included), so it stays visible — it's most useful
               precisely when the connection is failing. */}
-          {online && <NavItem to="/game-loop" label="Game Loop" />}
-          {online && <NavItem to="/log" label="Log" />}
-          <NavItem to="/requests" label="Requests" />
+          {online && <NavItem to="/server/game-loop" label="Game Loop" />}
+          {online && <NavItem to="/server/log" label="Log" />}
+          <NavItem to="/server/requests" label="Requests" />
 
           {online && (
             <>
@@ -382,7 +382,7 @@ export default function RootLayout() {
           )}
 
           <p className="eyebrow text-white/40 px-5 mt-6 mb-1.5">Reference</p>
-          <NavItem to="/api-docs" label="API Docs" />
+          <NavItem to="/reference/api-docs" label="API Docs" />
 
           {online && (
             <div className="mt-6">

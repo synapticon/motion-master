@@ -10,7 +10,7 @@
     // has no matching file. Two cases:
     //
     //   1. A deep link into a PWA under /apps/<app>/… — a client-side route with no
-    //      file on disk (e.g. /apps/console/recorder). We can't boot the app from
+    //      file on disk (e.g. /apps/console/data/recorder). We can't boot the app from
     //      here (each app has its own hashed assets), so redirect to the app's index
     //      with the route encoded in the query string; the app's index.html restores
     //      it before its router mounts. The redirect collapses the path to

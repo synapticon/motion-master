@@ -29,7 +29,7 @@ function interpretBytes(bytes: number[]): string | null {
   return null
 }
 
-export default function RegistersPage() {
+export default function DeviceRegistersPage() {
   const { deviceId } = useParams()
   const { api } = useConnection()
   const slavePosition = Number(deviceId)

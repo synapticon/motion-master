@@ -387,7 +387,7 @@ function DirectionEditor({
   )
 }
 
-export default function PdoMappingPage() {
+export default function DevicePdoMappingPage() {
   const { deviceId } = useParams()
   const { api } = useConnection()
   const queryClient = useQueryClient()

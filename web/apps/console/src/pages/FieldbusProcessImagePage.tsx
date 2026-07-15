@@ -135,7 +135,7 @@ function MappingTable({
   )
 }
 
-export default function ProcessImagePage() {
+export default function FieldbusProcessImagePage() {
   const { api } = useConnection()
 
   const query = useQuery({

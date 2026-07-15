@@ -12,7 +12,7 @@ const hex = (n: number) => `0x${n.toString(16).toUpperCase()}`
 const formatSize = (bytes: number) =>
   bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
 
-export default function ParameterCachesPage() {
+export default function DataParameterCachesPage() {
   const { api } = useConnection()
   const queryClient = useQueryClient()
   const [downloadingId, setDownloadingId] = useState<string | null>(null)

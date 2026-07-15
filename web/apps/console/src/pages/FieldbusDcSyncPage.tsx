@@ -53,7 +53,7 @@ function RoleBadge({ device }: { device: DcSyncStatus }) {
   )
 }
 
-export default function DcSyncPage() {
+export default function FieldbusDcSyncPage() {
   const { api } = useConnection()
 
   const query = useQuery({

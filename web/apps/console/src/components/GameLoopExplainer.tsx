@@ -3,7 +3,7 @@ import Explainer from './Explainer'
 // The teaching panel for the Server → Game Loop page. It explains what the cyclic RT loop is, then
 // documents every card on the page — what it means and exactly how it is derived from the two things
 // the endpoint returns each poll (cumulative counters + a server timestamp). Kept in sync with the
-// tiles rendered by GameLoopPage.
+// tiles rendered by ServerGameLoopPage.
 export default function GameLoopExplainer() {
   return (
     <Explainer title="What is the game loop, and what do these numbers mean?">

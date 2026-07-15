@@ -98,7 +98,7 @@ function formatLive(v: number | null): string {
   return String(v)
 }
 
-export default function ProcessDataPage() {
+export default function DataProcessDataPage() {
   const { api, hasScanned, host, wsPort } = useConnection()
   const wsUrl = `wss://${host}:${wsPort}`
 

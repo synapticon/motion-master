@@ -8,10 +8,13 @@
 
 namespace mm::comm {
 
-/// @brief ETG.1020 object dictionary data type codes.
+/// @brief CoE object dictionary data type codes.
 ///
 /// Maps the 16-bit DataType field returned by @c ecx_readOE to its symbolic name.
-/// Source: ETG.1020 §4.1.7 (Data Types) and ETG.5001 / ETG.1000 cross-references.
+/// Base numbering follows SOEM (@c ec_type.h) / CiA 301 — what the wire actually
+/// reports — extended with the record/array/DEFTYPE codes from ETG.1020 v1.6.0
+/// (§26 Base Data Types, Tables 119-121) plus ETG.5001 / ETG.5120 cross-references.
+/// Where SOEM and ETG.1020 disagree (notably 0x000B, see below) SOEM's numbering wins.
 enum class ObjectDataType : uint16_t {
   UNSPECIFIED = 0x0000,  ///< Undefined or unknown data type.
 
@@ -66,7 +69,10 @@ enum class ObjectDataType : uint16_t {
 
   VISIBLE_STRING = 0x0009,  ///< Null-terminated ASCII string.
   OCTET_STRING = 0x000A,    ///< Variable-length byte array.
-  UNICODE_STRING = 0x000B,  ///< Null-terminated UCS-2 string.
+  // 0x000B is UNICODE_STRING per SOEM (ec_type.h) / CiA 301, which is what ecx_readOE and
+  // SOMANET drives actually report.  ETG.1020 v1.6.0 instead lists 0x000B as ARRAY_OF_UINT and
+  // moves UNICODE_STRING to 0x0268 — deliberately not followed here; we decode the wire.
+  UNICODE_STRING = 0x000B,  ///< UCS-2 string (SOEM/CiA numbering; see note above).
 
   TIME_OF_DAY = 0x000C,      ///< Time of day (ETG.1020).
   TIME_DIFFERENCE = 0x000D,  ///< Time difference (ETG.1020).

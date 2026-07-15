@@ -21,11 +21,11 @@ export default function DataTypesPage() {
         title="Object Data Types"
         description={
           <>
-            CANopen-over-EtherCAT (CoE) object dictionary data type codes, assembled from{' '}
-            <span className="font-mono">ETG.1020 §4.1.7</span> (Data Types) with{' '}
-            <span className="font-mono">ETG.5001</span> / <span className="font-mono">ETG.1000</span>{' '}
-            cross-references. The code is the 16-bit DataType field returned when reading an object's
-            metadata from the dictionary.
+            CANopen-over-EtherCAT (CoE) object dictionary data type codes. Base numbering follows{' '}
+            SOEM / <span className="font-mono">CiA 301</span> (what the wire reports), extended with
+            the record and array types from{' '}
+            <span className="font-mono">ETG.1020 §26</span> (Base Data Types). The code is the 16-bit
+            DataType field returned when reading an object's metadata from the dictionary.
           </>
         }
       />

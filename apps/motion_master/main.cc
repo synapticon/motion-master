@@ -21,7 +21,7 @@
 #include "http_server.h"
 #include "node/device_manager.h"
 #include "node/monitoring_manager.h"
-#include "node/process_data_task.h"
+#include "node/process_data_cyclic_task.h"
 #include "options.h"
 #include "ring_log_sink.h"
 #include "ws_server.h"
@@ -176,14 +176,14 @@ int main(int argc, char** argv) {
   // via the API, at which point DeviceManager publishes the image and the loop begins driving PDO
   // automatically. Declared before gameLoop so it is destroyed after it — a registered task must
   // outlive every call to GameLoop::run().
-  ProcessDataTask processDataTask{deviceManager};
+  ProcessDataCyclicTask processDataCyclicTask{deviceManager};
 
   // The RT game loop is constructed here — before the servers — so HttpServer's GET /api/game-loop
   // callback can borrow it via a lambda. Its constructor is side-effect-free; RT setup and the
   // cycle loop happen in run() at the very end. Declared before httpServer so it outlives the HTTP
   // thread that may invoke the callback.
   GameLoop gameLoop{std::chrono::microseconds{opts.config.gameLoop.periodUs}};
-  gameLoop.addTask(&processDataTask);
+  gameLoop.addTask(&processDataCyclicTask);
 
   HttpServer httpServer{
       HttpServer::Config{

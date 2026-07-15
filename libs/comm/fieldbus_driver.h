@@ -315,7 +315,7 @@ struct ProcessDataWatchdogConfig {
 
 /// @brief Abstract interface for an EtherCAT fieldbus driver.
 ///
-/// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeDriver (SPoE).
+/// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeFieldbusDriver (SPoE).
 /// @c App instantiates exactly one and injects it into @c DeviceManager and
 /// @c GameLoop.
 ///

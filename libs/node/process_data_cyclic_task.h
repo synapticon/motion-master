@@ -9,9 +9,9 @@
 /// been published (i.e. devices have been mapped and brought into SAFE-OP/OP). Registering it
 /// unconditionally is therefore safe: the RT loop drives PDO automatically as soon as the bus
 /// is configured, and stops again when it is torn down — no wiring changes per state.
-class ProcessDataTask : public CyclicTask {
+class ProcessDataCyclicTask : public CyclicTask {
  public:
-  explicit ProcessDataTask(mm::node::DeviceManager& deviceManager)
+  explicit ProcessDataCyclicTask(mm::node::DeviceManager& deviceManager)
       : deviceManager_(deviceManager) {}
 
   // Exchanges the freshest process data; ignores the timing context — skipped

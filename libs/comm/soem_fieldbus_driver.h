@@ -16,8 +16,9 @@ namespace mm::comm::soem {
 /// @brief Construction-time configuration for @c SoemFieldbusDriver.
 ///
 /// Groups the SOEM/EtherCAT-specific knobs so they stay off the @c FieldbusDriver interface and off
-/// other drivers (a future @c SpoeDriver takes IP addresses and has no concept of a mailbox-status
-/// FMMU). The composition root (@c main.cc) fills this from the SOEM slice of the config file.
+/// other drivers (a future @c SpoeFieldbusDriver takes IP addresses and has no concept of a
+/// mailbox-status FMMU). The composition root (@c main.cc) fills this from the SOEM slice of the
+/// config file.
 struct SoemFieldbusDriverConfig {
   /// Resolved OS network interface name (e.g. @c "eth0", @c "enp3s0").
   std::string ifname;

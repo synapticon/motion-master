@@ -9,7 +9,7 @@
 /// timer skips the backlog and re-syncs rather than firing missed cycles
 /// back-to-back.  A task that generates a time-indexed target (e.g. trajectory
 /// playback) needs to know that happened; a task that only acts on the freshest
-/// state (e.g. ProcessDataTask) ignores this entirely.
+/// state (e.g. ProcessDataCyclicTask) ignores this entirely.
 ///
 /// The two views of the same event (both counts of cycles — the struct name
 /// supplies that unit):

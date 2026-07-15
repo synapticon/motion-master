@@ -191,7 +191,7 @@ function DeviceSection({
         {/* Identity — slave position leads on the left, then the device name. */}
         <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0">
-            <SlavePositionBadge position={Number(deviceId)} tone="muted" />
+            <SlavePositionBadge position={Number(deviceId)} />
             <span
               className="truncate font-display text-sm tracking-wide text-white/90 cursor-help"
               title={identityTitle}

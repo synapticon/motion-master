@@ -1,27 +1,21 @@
 interface SlavePositionBadgeProps {
   position: number
-  /**
-   * `solid` (default) — grey fill, for the light-background pages (Configuration,
-   * Process Image, Diagnostics, DC Sync) where it should read as a distinct chip.
-   * `muted` — transparent fill for dark surfaces (the sidebar), where a grey chip
-   * would over-dominate; the position is a secondary detail there, not the headline.
-   */
-  tone?: 'solid' | 'muted'
 }
 
 /**
- * The slave-position chip used wherever a device's 1-based EtherCAT bus
- * position is shown (sidebar, Configuration, Process Image, Diagnostics, DC
- * Sync). Padded to two digits so the styling reads identically across views.
+ * The slave-position chip used wherever a device's 1-based EtherCAT bus position is
+ * shown (sidebar, Configuration, Process Image, Diagnostics, DC Sync). A filled
+ * orange chip (the `position` accent) with dark text, styled identically on light
+ * pages and the dark sidebar alike so the identifier is instantly recognisable
+ * everywhere. Padded to two digits so the width is stable across views.
  */
-export default function SlavePositionBadge({ position, tone = 'solid' }: SlavePositionBadgeProps) {
-  const toneClasses =
-    tone === 'muted'
-      ? 'border-white/20 bg-white/10 text-white/60'
-      : 'border-white/25 bg-grey-200 text-grey-900'
+export default function SlavePositionBadge({ position }: SlavePositionBadgeProps) {
   return (
     <span
-      className={`inline-flex shrink-0 cursor-help items-center justify-center rounded-sm border px-1.5 py-0.5 font-mono font-semibold leading-none ${toneClasses}`}
+      // pt is 2px more than pb on purpose: with leading-none the monospace digits
+      // sit high in the line box (the empty descent slack falls to the bottom), so a
+      // touch of extra top padding optically centres them. Don't collapse to py-1.
+      className="inline-flex shrink-0 cursor-help items-center justify-center rounded-sm border border-position bg-position px-2.5 pt-[6px] pb-1 font-mono text-sm font-semibold leading-none text-grey-900"
       title="Slave position — the device’s 1-based position on the EtherCAT bus, used in API endpoint paths, e.g. /api/devices/{slavePosition}/parameters"
     >
       {String(position).padStart(2, '0')}

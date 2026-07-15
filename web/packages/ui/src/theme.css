@@ -70,6 +70,9 @@
   --color-ocean:          #00849b;  /* PMS 7712C — tech / motion accent */
   --color-ocean-dark:     #004f5d;  /* nav surfaces, dark accents */
   --color-safety-yellow:  #ffcc00;  /* sparing highlight only */
+  --color-position:       #f97316;  /* off-palette by design — the slave-position
+                                       identifier, deliberately high-visibility so
+                                       it reads the same everywhere it appears */
 
   /* ── Grey scale (10-step) ────────────────────────────────────── */
   --color-grey-50:  #fafafa;

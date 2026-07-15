@@ -3,6 +3,7 @@ name: Deploy Pages
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
 
 permissions:
@@ -22,6 +23,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+        with:
+          # Full history + tags so the app build can be pinned to the latest release tag.
+          fetch-depth: 0
 
       - name: Checkout theme submodule
         run: git submodule update --init extern/doxygen-awesome-css
@@ -47,38 +51,73 @@ jobs:
       - name: Build docs
         run: doxygen build/Doxyfile
 
+      # The web apps (web/apps/*) are pinned to the latest release tag, not main, so the
+      # hosted apps always match a released server binary (both ship on v* tags). Their
+      # bytes only change when a new tag is cut, so the build output is cached per tag and
+      # reused on ordinary main pushes — a docs/landing commit deploys without rebuilding
+      # (or even installing) the apps. Docs + landing track main (built above / copied
+      # below); Pages publishes one artifact for the whole site, so every deploy still
+      # reassembles it, but only a new tag pays the app build cost.
+      - name: Resolve latest release tag
+        id: tag
+        run: echo "tag=$(git describe --tags --abbrev=0 --match 'v*')" >> "$GITHUB_OUTPUT"
+
+      - name: Cache built apps
+        id: apps-cache
+        uses: actions/cache@v5
+        with:
+          path: apps-dist
+          key: pages-apps-v1-${{ steps.tag.outputs.tag }}
+
       - uses: pnpm/action-setup@v4
+        if: steps.apps-cache.outputs.cache-hit != 'true'
         with:
           version: 10
 
       - uses: actions/setup-node@v4
+        if: steps.apps-cache.outputs.cache-hit != 'true'
         with:
           node-version: '22'
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
 
-      - name: Install workspace dependencies
-        run: pnpm install --frozen-lockfile
-
-      - name: Build UI
+      - name: Build apps from ${{ steps.tag.outputs.tag }}
+        if: steps.apps-cache.outputs.cache-hit != 'true'
         run: |
-          # Each app is served under /apps/<name>, so it is built with that base.
+          git worktree add "$RUNNER_TEMP/release" "${{ steps.tag.outputs.tag }}"
+          cd "$RUNNER_TEMP/release"
+          pnpm install --frozen-lockfile
           pnpm generate-api
-          VITE_BASE=/apps/console pnpm --filter console build
-          VITE_BASE=/apps/example pnpm --filter example build
+          # Build every app under web/apps/*, each served under /apps/<name>, and stage
+          # the bundles at a stable workspace path for caching + assembly.
+          for dir in web/apps/*/; do
+            name=$(basename "$dir")
+            echo "Building app: $name"
+            VITE_BASE="/apps/$name" pnpm --filter "./$dir" build
+            mkdir -p "$GITHUB_WORKSPACE/apps-dist/$name"
+            cp -r "${dir}dist/." "$GITHUB_WORKSPACE/apps-dist/$name/"
+          done
+          # Serve the released API spec (from the tag), cached with the apps so a
+          # cache-hit run (no worktree) still has it. The `*/` glob in assembly copies
+          # only the app dirs, so this file is left for its own explicit copy.
+          cp apps/motion_master/swagger.yml "$GITHUB_WORKSPACE/apps-dist/swagger.yml"
 
       - name: Assemble Pages artifact
         run: |
-          mkdir -p build/pages/apps/console build/pages/apps/example build/pages/docs build/pages/fonts
+          mkdir -p build/pages/apps build/pages/docs build/pages/fonts
           cp web/landing/index.html build/pages/index.html
           # Static root pages (landing/index.html + 404.html) reference /fonts/;
           # the Vite apps bundle their own copies from @synapticon/ui. Serve the
           # canonical woff2 from the shared package at the site root for the static pages.
           cp web/packages/ui/src/fonts/*.woff2 build/pages/fonts/
-          cp -r web/apps/console/dist/. build/pages/apps/console/
-          cp -r web/apps/example/dist/. build/pages/apps/example/
+          # Every prebuilt app (from apps-dist, cached per release tag) → /apps/<name>/.
+          for dir in apps-dist/*/; do
+            name=$(basename "$dir")
+            mkdir -p "build/pages/apps/$name"
+            cp -r "${dir}." "build/pages/apps/$name/"
+          done
           cp -r build/docs/html/. build/pages/docs/
-          cp apps/motion_master/swagger.yml build/pages/swagger.yml
+          cp apps-dist/swagger.yml build/pages/swagger.yml
           # Generic 404: redirects deep links into any /apps/<app>/ PWA to that app's
           # index (the app's index.html decodes the route); a real Not Found for the rest.
           cp web/404.html build/pages/404.html

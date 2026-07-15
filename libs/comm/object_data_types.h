@@ -70,21 +70,28 @@ enum class ObjectDataType : uint16_t {
 
   TIME_OF_DAY = 0x000C,      ///< Time of day (ETG.1020).
   TIME_DIFFERENCE = 0x000D,  ///< Time difference (ETG.1020).
+  DOMAIN = 0x000F,           ///< Application-specific domain (ETG.1020).
 
-  ARRAY_OF_INT = 0x0260,    ///< Sequence of INT (IEC 61131-3).
-  ARRAY_OF_SINT = 0x0261,   ///< Sequence of SINT.
-  ARRAY_OF_DINT = 0x0262,   ///< Sequence of DINT.
-  ARRAY_OF_UDINT = 0x0263,  ///< Sequence of UDINT.
+  ARRAY_OF_INT = 0x0260,       ///< Sequence of INT (IEC 61131-3).
+  ARRAY_OF_SINT = 0x0261,      ///< Sequence of SINT.
+  ARRAY_OF_DINT = 0x0262,      ///< Sequence of DINT.
+  ARRAY_OF_UDINT = 0x0263,     ///< Sequence of UDINT.
+  ARRAY_OF_BITARR8 = 0x0264,   ///< Sequence of BITARR8.
+  ARRAY_OF_BITARR16 = 0x0265,  ///< Sequence of BITARR16.
+  ARRAY_OF_BITARR32 = 0x0266,  ///< Sequence of BITARR32.
+  ARRAY_OF_USINT = 0x0267,     ///< Sequence of USINT.
+  ARRAY_OF_REAL = 0x0269,      ///< Sequence of REAL.
+  ARRAY_OF_LREAL = 0x026A,     ///< Sequence of LREAL.
 
-  PDO_MAPPING = 0x0021,               ///< PDO mapping (ETG.1000).
-  IDENTITY = 0x0023,                  ///< Identity object (ETG.1000).
-  COMMAND_PAR = 0x0025,               ///< Command parameter (ETG.1000).
-  PDO_PARAMETER = 0x0027,             ///< PDO parameter (ETG.1020).
-  ENUM = 0x0028,                      ///< Enumeration (ETG.1020).
-  SM_SYNCHRONIZATION = 0x0029,        ///< Sync manager synchronization (ETG.1000).
-  RECORD = 0x002A,                    ///< Generic record structure.
-  BACKUP_PARAMETER = 0x002B,          ///< Backup parameter (ETG.1020).
-  MODULAR_DEVICE_PARAMETER = 0x002C,  ///< Modular device parameter (ETG.5001).
+  PDO_MAPPING = 0x0021,             ///< PDO mapping (ETG.1000).
+  IDENTITY = 0x0023,                ///< Identity object (ETG.1000).
+  COMMAND_PAR = 0x0025,             ///< Command parameter (ETG.1000).
+  PDO_PARAMETER = 0x0027,           ///< PDO parameter (ETG.1020).
+  ENUM = 0x0028,                    ///< Enumeration (ETG.1020).
+  SM_SYNCHRONISATION = 0x0029,      ///< Sync manager synchronisation (ETG.1000).
+  RECORD = 0x002A,                  ///< Generic record structure.
+  BACKUP_PARAMETER = 0x002B,        ///< Backup parameter (ETG.1020).
+  MODULAR_DEVICE_PROFILE = 0x002C,  ///< Modular device profile (ETG.5001).
 
   ERROR_SETTING = 0x0281,           ///< Error setting (ETG.1020).
   DIAGNOSIS_HISTORY = 0x0282,       ///< Diagnosis history (ETG.1020).
@@ -126,6 +133,7 @@ inline constexpr auto kObjectDataTypes = std::to_array<ObjectDataTypeInfo>({
     {0x000B, "UNICODE_STRING", 0},
     {0x000C, "TIME_OF_DAY", 48},
     {0x000D, "TIME_DIFFERENCE", 48},
+    {0x000F, "DOMAIN", 0},
     {0x0010, "INTEGER24", 24},
     {0x0011, "REAL64", 64},
     {0x0012, "INTEGER40", 40},
@@ -146,10 +154,10 @@ inline constexpr auto kObjectDataTypes = std::to_array<ObjectDataTypeInfo>({
     {0x0025, "COMMAND_PAR", 0},
     {0x0027, "PDO_PARAMETER", 0},
     {0x0028, "ENUM", 0},
-    {0x0029, "SM_SYNCHRONIZATION", 0},
+    {0x0029, "SM_SYNCHRONISATION", 0},
     {0x002A, "RECORD", 0},
     {0x002B, "BACKUP_PARAMETER", 0},
-    {0x002C, "MODULAR_DEVICE_PARAMETER", 0},
+    {0x002C, "MODULAR_DEVICE_PROFILE", 0},
     {0x002D, "BITARR8", 8},
     {0x002E, "BITARR16", 16},
     {0x002F, "BITARR32", 32},
@@ -173,6 +181,12 @@ inline constexpr auto kObjectDataTypes = std::to_array<ObjectDataTypeInfo>({
     {0x0261, "ARRAY_OF_SINT", 0},
     {0x0262, "ARRAY_OF_DINT", 0},
     {0x0263, "ARRAY_OF_UDINT", 0},
+    {0x0264, "ARRAY_OF_BITARR8", 0},
+    {0x0265, "ARRAY_OF_BITARR16", 0},
+    {0x0266, "ARRAY_OF_BITARR32", 0},
+    {0x0267, "ARRAY_OF_USINT", 0},
+    {0x0269, "ARRAY_OF_REAL", 0},
+    {0x026A, "ARRAY_OF_LREAL", 0},
     {0x0281, "ERROR_SETTING", 0},
     {0x0282, "DIAGNOSIS_HISTORY", 0},
     {0x0283, "EXTERNAL_SYNC_STATUS", 0},

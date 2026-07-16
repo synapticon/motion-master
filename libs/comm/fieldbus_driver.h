@@ -433,10 +433,26 @@ class FieldbusDriver {
   /// shutdown). After @c stop() returns, @c exchangeProcessData() must not be called again.
   virtual void stop() = 0;
 
-  /// @brief AL Status and AL Status Code for a single slave.
+  /// @brief One slave's AL Status and AL Status Code registers — the "where" and the "why".
+  ///
+  /// They answer different questions, from two ESC registers (ETG.1000.6 §6.4.1):
+  ///   - @c alStatus (register 0x0130): the slave's current situation — the AL state in bits 3:0
+  ///     (1=INIT, 2=PRE-OP, 3=BOOT, 4=SAFE-OP, 8=OP) plus a bit-4 error indicator, set when the
+  ///     slave rejects a requested state change or faults. Decode via @c alState / @c alHasError.
+  ///   - @c alStatusCode (register 0x0134): *why* an error was raised — a diagnostic code for a
+  ///     failed transition. Meaningful only while @c alStatus's error bit is set (else 0x0000).
+  ///     Decode via @c alStatusCodeName / @c isAlStatusCodeTerminal.
+  ///
+  /// Examples:
+  ///   - Healthy in OP: @c alStatus 0x0008 (OP, error bit clear), @c alStatusCode 0x0000.
+  ///   - Couldn't hold OP after outputs stopped: @c alStatus 0x0014 (SAFE-OP | error bit),
+  ///     @c alStatusCode 0x001B ("Sync manager watchdog").
+  ///   - Illegal INIT->OP jump rejected: @c alStatus 0x0011 (INIT | error bit), @c alStatusCode
+  ///     0x0011 ("Invalid requested state change"). The two share the value 0x0011 only by
+  ///     coincidence and mean completely different things — which is why they are separate.
   struct SlaveStateRaw {
-    uint16_t alStatus = 0;      ///< Raw AL Status register (bits 3:0 = state, bit 4 = error).
-    uint16_t alStatusCode = 0;  ///< AL Status Code register (ETG.1000.6 §6.4.1).
+    uint16_t alStatus = 0;      ///< AL Status register 0x0130: state (bits 3:0) + error bit 4.
+    uint16_t alStatusCode = 0;  ///< AL Status Code register 0x0134: error reason; 0 when no error.
   };
 
   /// @brief Reads the current AL Status for each slave in @p positions.

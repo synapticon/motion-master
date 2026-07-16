@@ -423,9 +423,14 @@ class FieldbusDriver {
   ///         contribute this cycle.  Returns 0 when no driver is initialised.
   virtual int exchangeProcessData(std::span<const uint8_t> outputs, std::span<uint8_t> inputs) = 0;
 
-  /// @brief Transitions all slaves to INIT state and closes the network interface.
+  /// @brief Closes the network interface, releasing the master context.
   ///
-  /// After @c stop() returns, @c exchangeProcessData() must not be called again.
+  /// Does @b not command any AL state change — it only closes the transport (for SOEM,
+  /// @c ecx_close, which just destroys the mailbox-pool mutex and closes the raw socket; nothing
+  /// is sent on the wire). Slaves left in SAFE-OP/OP are not driven back to INIT by the master;
+  /// once process-data frames stop arriving, each slave's own sync-manager watchdog trips and it
+  /// drops out of OP on its own (the safety guarantee for comms loss, independent of any graceful
+  /// shutdown). After @c stop() returns, @c exchangeProcessData() must not be called again.
   virtual void stop() = 0;
 
   /// @brief AL Status and AL Status Code for a single slave.

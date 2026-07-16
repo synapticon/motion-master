@@ -80,8 +80,10 @@ enum class ObjectDataType : uint16_t {
   OCTET_STRING = 0x000A,    ///< Variable-length byte array.
   // 0x000B is UNICODE_STRING per SOEM (ec_type.h) / CiA 301, which is what ecx_readOE and
   // SOMANET drives actually report.  ETG.1020 v1.6.0 instead lists 0x000B as ARRAY_OF_UINT and
-  // moves UNICODE_STRING to 0x0268 — deliberately not followed here; we decode the wire.
+  // puts UNICODE_STRING at 0x0268 — we keep 0x000B for wire decoding and also catalogue the
+  // ETG.1020 code as WSTRING (below) so a spec-numbered device still decodes.
   UNICODE_STRING = 0x000B,  ///< UCS-2 string (SOEM/CiA numbering; see note above).
+  WSTRING = 0x0268,         ///< UCS-2/wide string — ETG.1020's UNICODE_STRING code (cf. 0x000B).
 
   TIME_OF_DAY = 0x000C,      ///< Time of day (ETG.1020).
   TIME_DIFFERENCE = 0x000D,  ///< Time difference (ETG.1020).
@@ -200,6 +202,7 @@ inline constexpr auto kObjectDataTypes = std::to_array<ObjectDataTypeInfo>({
     {0x0265, "ARRAY_OF_BITARR16", 0},
     {0x0266, "ARRAY_OF_BITARR32", 0},
     {0x0267, "ARRAY_OF_USINT", 0},
+    {0x0268, "WSTRING", 0},
     {0x0269, "ARRAY_OF_REAL", 0},
     {0x026A, "ARRAY_OF_LREAL", 0},
     {0x0281, "ERROR_SETTING", 0},

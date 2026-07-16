@@ -14,11 +14,18 @@ namespace mm::comm {
 ///
 /// Every EtherCAT slave carries a non-volatile EEPROM wired to its ESC; the ESC auto-loads its
 /// first words at power-on to configure itself before the master communicates. The SII is the
-/// standardised layout of that EEPROM (ETG.1000.6 §5.4): a fixed 128-byte header (identity +
-/// mailbox configuration) followed by a sequence of variable-length, self-describing categories
-/// (strings, general info, FMMU/Sync-Manager defaults, default PDO mappings, distributed-clock
-/// settings). The raw bytes are read off the bus with @c FieldbusDriver::readSii; @c parseSii
-/// decodes them into the structures below, which serialise 1:1 to JSON for the SII UI page.
+/// standardised layout of that EEPROM: a fixed 128-byte header (identity + mailbox configuration)
+/// followed by a sequence of variable-length, self-describing categories (strings, general info,
+/// FMMU/Sync-Manager defaults, default PDO mappings, distributed-clock settings). The raw bytes are
+/// read off the bus with @c FieldbusDriver::readSii; @c parseSii decodes them into the structures
+/// below, which serialise 1:1 to JSON for the SII UI page.
+///
+/// Reference: ETG.2010 (EtherCAT SubDevice Information Interface / SII specification) is the
+/// authoritative layout — the fixed header (Table 2), the category directory (Tables 3 & 5), and
+/// the per-category structures (General Table 7, FMMU Table 9, SyncM Table 11, TxPDO/RxPDO Table
+/// 14, DC Table 12). ETG.2010 extends the base layout originally defined in ETG.1000.6 §5.4; where
+/// the two differ (wider category ranges, the extended category IDs, signed CurrentOnEBus) ETG.2010
+/// governs. Individual decoders below cite their specific ETG.2010 table.
 ///
 /// All multi-byte fields are little-endian. The parser is a pure, hardware-independent transform
 /// over a byte span — it is unit-tested against a captured EEPROM image with no fieldbus present.
@@ -65,9 +72,9 @@ struct SiiCategoryGeneral {
   uint8_t ds402Channels = 0;           ///< DS402 channel count.
   uint8_t sysmanClass = 0;             ///< Sync-manager class.
   uint8_t flags = 0;                   ///< General device flags.
-  uint16_t currentOnEBus = 0;          ///< E-Bus current consumption (mA), 16-bit.
-  int16_t physicalPort = 0;            ///< Physical-port configuration (per-port nibbles).
-  uint16_t physicalMemoryAddress = 0;  ///< Physical-memory address (16-bit word, ETG.2000).
+  int16_t currentOnEBus = 0;           ///< E-Bus current consumption (mA); negative = feed-in.
+  uint16_t physicalPort = 0;           ///< Physical-port configuration (per-port nibbles).
+  uint16_t physicalMemoryAddress = 0;  ///< Physical-memory address (16-bit word, ETG.2010 Table 7).
 };
 
 /// @brief One Sync-Manager default from SII category 41 (0x29).
@@ -118,7 +125,7 @@ struct SiiCategoryDistributedClockElement {
 struct SiiCategorySection {
   std::vector<std::string> strings;                         ///< STRINGS table (category 10).
   SiiCategoryGeneral general;                               ///< GENERAL (category 30).
-  std::vector<uint16_t> fmmus;                              ///< FMMU defaults (category 40).
+  std::vector<uint8_t> fmmus;                               ///< FMMU defaults (category 40).
   std::vector<SiiCategorySyncManagerElement> syncManagers;  ///< SYNC_M defaults (category 41).
   std::vector<SiiCategoryPdoElement> rxPdos;                ///< Default RxPDOs (category 51).
   std::vector<SiiCategoryPdoElement> txPdos;                ///< Default TxPDOs (category 50).
@@ -131,10 +138,14 @@ struct SlaveInformationInterface {
   SiiCategorySection category;
 };
 
-/// @brief Recognised SII category type identifiers (ETG.1000.6 §5.4, Table 17).
+/// @brief Recognised SII category type identifiers (ETG.2010 Table 5).
 ///
-/// Several spec ranges collapse to a single representative (e.g. all vendor-specific values map to
-/// @c VendorSpecific); see @c resolveSiiCategoryType.
+/// ETG.2010 is the authoritative SII spec; its Table 5 supersedes ETG.1000.6 Table 19. The base IDs
+/// up to @c Dc (60) are common to both; the extended IDs (@c FmmuX, @c SyncUnit, @c Timeouts,
+/// @c Dictionary, @c Hardware, @c VendorInformation, @c Images, @c ApplicationSpecific) and the
+/// wider vendor/application ranges (see @c resolveSiiCategoryType) are ETG.2010's. Several spec
+/// ranges collapse to a single representative (e.g. all vendor-specific values map to
+/// @c VendorSpecific); the category-type word is a full Unsigned16 (no vendor-specific flag bit).
 enum class SiiCategoryType : uint16_t {
   Nop = 0,
   DeviceSpecific = 1,
@@ -174,9 +185,6 @@ std::optional<SiiCategoryType> resolveSiiCategoryType(uint16_t value);
 /// marker. Unrecognised categories are skipped; multiple PDO categories accumulate. The walk is
 /// bounds-checked: a category claiming more bytes than remain is clamped, never read past the end.
 ///
-/// @note Faithful port of the original TypeScript parser, including its treatment of the GENERAL
-///       category's physical-memory address as a single byte. ETG.1000.6 defines that field as a
-///       16-bit word; the two agree whenever its high byte is zero (the usual case).
 ///
 /// @param buffer  Raw SII bytes (at least 128 for a valid header).
 /// @return The parsed structure, or an error string if @p buffer is shorter than the fixed header.

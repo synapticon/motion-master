@@ -36,7 +36,8 @@ uint32_t rdU32(std::span<const uint8_t> b, size_t off) {
 constexpr size_t kHeaderBytes = 128;
 
 SiiInfo parseHeader(std::span<const uint8_t> b) {
-  // Byte offsets per ETG.1000.6 §5.4; reserved gaps at 10–13, 32–39, 58–123 are skipped.
+  // Byte offsets per ETG.2010 Table 2 (SII Area); reserved gaps at 10–13, 32–39, 58–123 are
+  // skipped.
   return SiiInfo{
       .pdiControl = rdU16(b, 0),
       .pdiConfiguration = rdU16(b, 2),
@@ -82,12 +83,15 @@ std::vector<std::string> parseStrings(std::span<const uint8_t> p) {
 }
 
 SiiCategoryGeneral parseGeneral(std::span<const uint8_t> p) {
-  // ETG.2000 General-category layout (payload-relative): a reserved byte sits at offset 4 between
-  // nameIdx and the mailbox-detail bytes, so CoE Details is at offset 5 — not 4, as the original
-  // TypeScript parser had it (which shifted every field from coeDetails on down by one, leaving
-  // coeDetails reading the reserved 0x00). SOEM confirms the layout: it reads CoEdetails at
-  // siifind()+0x07, and siifind returns the category's size-word address, so its payload base is
-  // +2 → CoE at payload offset 5. currentOnEBus and physicalMemoryAddress are 16-bit words.
+  // ETG.2010 Table 7 General-category layout (payload-relative). A reserved byte
+  // sits at offset 4 between nameIdx and the mailbox-detail bytes, so CoE Details is at offset 5 —
+  // not 4, as the original TypeScript parser had it (which shifted every field from coeDetails on
+  // down by one, leaving coeDetails reading the reserved 0x00). SOEM confirms this base: it reads
+  // CoEdetails at siifind()+0x07 and Ebuscurrent at siifind()+0x0e, and siifind returns the
+  // category's size-word address, so its payload base is +2 → CoE at payload offset 5 and
+  // currentOnEBus (Integer16) at payload offset 12. A further 2-byte gap follows currentOnEBus — a
+  // duplicate GroupIdx (0x0e) and a reserved byte (0x0f) — so Physical Port is at offset 16 and
+  // Physical Memory Address at offset 18, both Unsigned16.
   return SiiCategoryGeneral{
       .groupIdx = rdU8(p, 0),
       .imgIdx = rdU8(p, 1),
@@ -101,16 +105,21 @@ SiiCategoryGeneral parseGeneral(std::span<const uint8_t> p) {
       .ds402Channels = rdU8(p, 9),
       .sysmanClass = rdU8(p, 10),
       .flags = rdU8(p, 11),
-      .currentOnEBus = rdU16(p, 12),
-      .physicalPort = rdI16(p, 14),
-      .physicalMemoryAddress = rdU16(p, 16),
+      .currentOnEBus = rdI16(p, 12),
+      // offset 14: duplicate GroupIdx; offset 15: reserved
+      .physicalPort = rdU16(p, 16),
+      .physicalMemoryAddress = rdU16(p, 18),
   };
 }
 
-std::vector<uint16_t> parseFmmu(std::span<const uint8_t> p) {
-  std::vector<uint16_t> fmmus;
-  for (size_t i = 0; i + 2 <= p.size(); i += 2) {
-    fmmus.push_back(rdU16(p, i));
+std::vector<uint8_t> parseFmmu(std::span<const uint8_t> p) {
+  // ETG.2010 Table 9: one Unsigned8 per FMMU (0x00/0xFF unused, 0x01 Outputs, 0x02 Inputs,
+  // 0x03 SyncM status, 0x04 dynamic Outputs, 0x05 dynamic Inputs) — a byte array, not 16-bit
+  // words. SOEM's ecx_siiFMMU reads each FMMUn with a single ecx_siigetbyte. A trailing pad byte
+  // keeps the category word-aligned when the FMMU count is odd.
+  std::vector<uint8_t> fmmus;
+  for (size_t i = 0; i < p.size(); ++i) {
+    fmmus.push_back(rdU8(p, i));
   }
   return fmmus;
 }

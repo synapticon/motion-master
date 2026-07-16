@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <vector>
 
 namespace mm::comm {
 namespace {
@@ -68,8 +69,11 @@ TEST(SiiParseTest, DecodesGeneral) {
   EXPECT_EQ(g.coeDetails, 0x0Fu);
   EXPECT_EQ(g.foeDetails, 1u);
   EXPECT_EQ(g.eoeDetails, 0u);
-  EXPECT_EQ(g.physicalPort, 1);
-  EXPECT_EQ(g.physicalMemoryAddress, 0x11u);
+  // Physical Port at payload offset 16 (after the currentOnEBus word + the duplicate-GroupIdx and
+  // reserved bytes): 0x0011 = port 0 MII, port 1 MII — the two-port Circulo daisy-chain. Physical
+  // Memory Address (offset 18) is 0: this drive mirrors its ID selector via AL status, not PhyMem.
+  EXPECT_EQ(g.physicalPort, 0x0011u);
+  EXPECT_EQ(g.physicalMemoryAddress, 0u);
 }
 
 TEST(SiiParseTest, DecodesSyncManagers) {
@@ -88,10 +92,50 @@ TEST(SiiParseTest, DecodesSyncManagers) {
 TEST(SiiParseTest, FmmuPresentNoPdoOrDc) {
   auto result = parseSii(kIntegroSii);
   ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(result->category.fmmus.size(), 2u);  // category 40 payload is 2 words.
+  // Category 40 payload is 4 bytes, one Unsigned8 per FMMU (ETG.2010 Table 9): FMMU0 Outputs,
+  // FMMU1 Inputs, FMMU2 SyncM-status (read mailbox), plus a trailing pad byte for word alignment.
+  ASSERT_EQ(result->category.fmmus.size(), 4u);
+  EXPECT_EQ(result->category.fmmus[0], 0x01u);  // Outputs.
+  EXPECT_EQ(result->category.fmmus[1], 0x02u);  // Inputs.
+  EXPECT_EQ(result->category.fmmus[2], 0x03u);  // SyncM status (read mailbox).
+  EXPECT_EQ(result->category.fmmus[3], 0x00u);  // Padding.
   EXPECT_TRUE(result->category.rxPdos.empty());
   EXPECT_TRUE(result->category.txPdos.empty());
   EXPECT_TRUE(result->category.distributedClocks.empty());
+}
+
+TEST(SiiParseTest, DecodesAllMailboxCapabilityBits) {
+  // Synthetic image: a 128-byte header with every mailbox-protocol bit set, then a GENERAL category
+  // with every CoE-detail bit set (plus FoE/EoE enabled), then the END marker. The captured Integro
+  // fixture only carries CoE+FoE, so this locks the full bitfield decode — the AoE/EoE/SoE/VoE
+  // protocol bits and CoE detail bits 4-5 (Upload, Complete Access) — through the parser, proving
+  // the header word and the General detail bytes are read at the right offsets with no masking.
+  constexpr size_t kHeaderBytes = 128;
+  std::vector<uint8_t> img(kHeaderBytes, 0);
+  img[56] = 0x3F;  // mailboxProtocol (word 0x1C, low byte): AoE|EoE|CoE|FoE|SoE|VoE.
+
+  // GENERAL category (type 30): type word + following-word-size word + 16-word payload.
+  constexpr uint16_t kGeneralWords = 16;
+  img.push_back(30);  // Category type low byte.
+  img.push_back(0);   // Category type high byte.
+  img.push_back(static_cast<uint8_t>(kGeneralWords));
+  img.push_back(static_cast<uint8_t>(kGeneralWords >> 8));
+  std::vector<uint8_t> general(static_cast<size_t>(kGeneralWords) * 2, 0);
+  general[5] = 0x3F;  // coeDetails: SDO|SDO-Info|PDO-Assign|PDO-Config|Upload|Complete-Access.
+  general[6] = 0x01;  // foeDetails: FoE enabled.
+  general[7] = 0x01;  // eoeDetails: EoE enabled.
+  img.insert(img.end(), general.begin(), general.end());
+
+  img.push_back(0xFF);  // END marker.
+  img.push_back(0xFF);
+
+  auto result = parseSii(img);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->info.mailboxProtocol, 0x3Fu);  // All six mailbox protocols advertised.
+  const SiiCategoryGeneral& g = result->category.general;
+  EXPECT_EQ(g.coeDetails, 0x3Fu);  // All six CoE detail bits.
+  EXPECT_EQ(g.foeDetails, 0x01u);
+  EXPECT_EQ(g.eoeDetails, 0x01u);
 }
 
 TEST(SiiParseTest, RejectsTruncatedHeader) {

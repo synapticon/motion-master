@@ -9,8 +9,9 @@ export default function SiiExplainer() {
         <strong>SII</strong> stands for <strong>Slave Information Interface</strong>. It is the
         standardised read interface to the <strong>EEPROM</strong> — a small non-volatile memory
         chip on every EtherCAT slave, wired directly to the ESC (EtherCAT Slave Controller). The
-        EtherCAT standard (ETG.1000) calls the data the “SII”; in practice people use “SII” and
-        “EEPROM” interchangeably.
+        EtherCAT standard calls the data the “SII” — its layout is specified in{' '}
+        <strong>ETG.2010</strong> (the SII specification), which extends the base EEPROM content
+        from ETG.1000.6; in practice people use “SII” and “EEPROM” interchangeably.
       </p>
       <p>
         It holds the slave's <strong>identity and self-description</strong>: vendor ID, product

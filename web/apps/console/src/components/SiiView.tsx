@@ -27,6 +27,19 @@ const MBX_PROTOCOLS: [number, string, string][] = [
 
 const decodeProtocols = (bits: number) => MBX_PROTOCOLS.filter(([bit]) => bits & bit)
 
+// FMMU usage byte (SII category 40, ETG.2010 Table 9): one Unsigned8 per FMMU.
+const FMMU_USAGE: Record<number, string> = {
+  0x00: 'unused',
+  0x01: 'Outputs',
+  0x02: 'Inputs',
+  0x03: 'SyncM status',
+  0x04: 'dynamic Outputs',
+  0x05: 'dynamic Inputs',
+  0xff: 'unused',
+}
+
+const fmmuUsage = (v: number) => `(${FMMU_USAGE[v] ?? 'reserved'})`
+
 function Field({ label, value, hint }: { label: string; value: ReactNode; hint?: string }) {
   return (
     <div>
@@ -315,9 +328,9 @@ export default function SiiView({ sii }: { sii: SlaveInformationInterface }) {
               <span
                 key={i}
                 className="border border-grey-200 px-3 py-1.5 text-xs font-mono"
-                title="Raw FMMU configuration word from the EEPROM"
+                title="FMMU usage byte from the EEPROM (ETG.2010 Table 9)"
               >
-                FMMU{i}: {formatHex(f, 4)}
+                FMMU{i}: {formatHex(f, 2)} {fmmuUsage(f)}
               </span>
             ))}
           </div>

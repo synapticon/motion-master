@@ -25,8 +25,8 @@ void to_json(nlohmann::json& j, const FoeErrorCode& e);
 
 /// @brief Catalogue of FoE error codes defined in ETG.1000.6 §5.8.5, Table 93.
 ///
-/// Codes in the 0x8000 range are the standard EtherCAT FoE error codes.
-/// Vendor-specific codes are outside this range and are not listed here.
+/// Codes in the 0x8000 range are the standard EtherCAT FoE error codes. The 0x00000000 entry is a
+/// catch-all for unspecified or vendor-specific errors, which otherwise fall outside this range.
 inline constexpr auto kFoeErrorCodes = std::to_array<FoeErrorCode>({
     {0x00000000, "Undefined", "Unspecified or vendor-specific FoE error"},
     {0x00008000, "Not defined", "General FoE error with no further classification"},

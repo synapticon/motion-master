@@ -10,7 +10,7 @@ namespace mm::comm {
 /// @brief Metadata for a single ESC register entry.
 struct EscRegister {
   uint16_t address = 0;   ///< Register address in the ESC address space.
-  uint8_t length = 0;     ///< Width in bytes (1, 2, 4, or 8).
+  uint8_t length = 0;     ///< Width in bytes (1/2/4/8 for scalars; 8/16 for the SM/FMMU blocks).
   std::string_view name;  ///< Short snake_case identifier.
   std::string_view
       description;  ///< Human-readable description from ETG.1000.4 / Beckhoff ESC datasheet.
@@ -59,13 +59,20 @@ inline constexpr auto kEscRegisters = std::to_array<EscRegister>({
     {0x0120, 2, "al_control",
      "AL control: state request (1=Init, 2=Pre-Op, 4=Safe-Op, 8=Op) + error ack"},
     {0x0130, 2, "al_status", "AL status: current EtherCAT state + error indicator"},
+    {0x0132, 2, "dls_user_r5",
+     "DL-user register R5: meaning defined by the application layer (unused by standard AL); "
+     "PDI-writable, master-readable"},
     {0x0134, 2, "al_status_code", "AL status error code; non-zero when a state transition fails"},
 
     // ── PDI ─────────────────────────────────────────────────────────────────
     {0x0140, 1, "pdi_control",
-     "Process data interface type (0=EEPROM, 4=SPI, 5=EtherCAT Network Controller, 8=on-chip bus)"},
+     "Process data interface type (0=deactivated, 4=digital I/O, 5=SPI slave, 8=async uC, "
+     "0x0A=sync uC, 0x80=on-chip bus)"},
     {0x0141, 1, "esc_configuration",
      "ESC configuration: AL status auto-update, enhanced link detect, DC sync/latch"},
+    {0x0150, 4, "pdi_configuration",
+     "PDI configuration: PDI-specific settings (SPI mode / uC bus config) + SYNC/LATCH PDI signal "
+     "config"},
 
     // ── Interrupt / Event ───────────────────────────────────────────────────
     {0x0200, 2, "ecat_event_mask", "Mask for ECAT-side IRQ events"},
@@ -73,7 +80,7 @@ inline constexpr auto kEscRegisters = std::to_array<EscRegister>({
     {0x0210, 2, "ecat_event_request",
      "Pending ECAT-side events (DC latch, DL/AL status change, SM events)"},
     {0x0220, 4, "al_event_request",
-     "Pending PDI-side events (state change, DC, SyncManager, EEPROM, watchdog)"},
+     "Pending PDI-side events (state change, DC, SyncManager change, EEPROM, SM channels 0-15)"},
 
     // ── Error Counters ──────────────────────────────────────────────────────
     {0x0300, 8, "rx_error_counter",
@@ -100,6 +107,16 @@ inline constexpr auto kEscRegisters = std::to_array<EscRegister>({
      "EEPROM command register, write-enable, busy/error status"},
     {0x0504, 4, "eeprom_address", "EEPROM word address for read/write operations"},
     {0x0508, 8, "eeprom_data", "EEPROM data buffer (64-bit; 32-bit for older ESCs)"},
+
+    // ── MII Management (optional; PHY register access) ──────────────────────
+    {0x0510, 2, "mii_control_status",
+     "MII management control/status: write-enable, PDI access, link detection, read/write "
+     "operation, error, busy"},
+    {0x0512, 1, "mii_phy_address", "MII: PHY address to access"},
+    {0x0513, 1, "mii_phy_register_address", "MII: PHY register address to access"},
+    {0x0514, 2, "mii_phy_data", "MII: data read from / to be written to the PHY register"},
+    {0x0516, 2, "mii_access",
+     "MII management access: ECAT/PDI access assignment and PDI access state"},
 
     // ── FMMU 0 (stride 16 bytes for FMMU 1–7) ──────────────────────────────
     {0x0600, 16, "fmmu0",
@@ -133,9 +150,16 @@ inline constexpr auto kEscRegisters = std::to_array<EscRegister>({
     {0x0930, 2, "dc_speed_counter_start",
      "DC: speed counter start value for clock drift compensation"},
     {0x0932, 2, "dc_speed_counter_diff", "DC: current clock period deviation"},
+    {0x0934, 2, "dc_filter_depth",
+     "DC: control-loop filter depths (system-time-difference and speed-counter filtering)"},
     {0x0980, 1, "dc_cyclic_unit_control", "DC: selects SYNC/LATCH control source (ECAT or PDI)"},
     {0x0981, 1, "dc_activation", "DC: activate SYNC out unit and pulse generation"},
     {0x0982, 2, "dc_sync_pulse_length", "DC: SYNC0/SYNC1 pulse duration in units of 10 ns"},
+    {0x0984, 1, "dc_activation_status",
+     "DC: SYNC out unit activation status (SYNC0/SYNC1 activated, start time in future)"},
+    {0x0985, 1, "dc_user_p14", "DC user parameter P14 (implementation-specific)"},
+    {0x098E, 1, "dc_sync0_status", "DC: SYNC0 pulse status; read to acknowledge (ack mode only)"},
+    {0x098F, 1, "dc_sync1_status", "DC: SYNC1 pulse status; read to acknowledge (ack mode only)"},
     {0x0990, 8, "dc_start_time_cyclic",
      "DC: system time for first SYNC0 pulse (written by master)"},
     {0x0998, 8, "dc_next_sync1_pulse", "DC: system time of the next SYNC1 pulse"},

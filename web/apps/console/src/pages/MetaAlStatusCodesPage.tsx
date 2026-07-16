@@ -21,9 +21,11 @@ export default function MetaAlStatusCodesPage() {
         title="AL Status Codes"
         description={
           <>
-            EtherCAT Application Layer (AL) status codes, assembled from{' '}
-            <span className="font-mono">ETG.1000.6 Table 11</span> — reported by a slave when a
-            requested EtherCAT state transition fails.
+            EtherCAT Application Layer (AL) status codes — reported by a slave when a requested
+            EtherCAT state transition fails. Assembled from{' '}
+            <span className="font-mono">ETG.1000.6 Table 11</span>, plus vendor/firmware codes
+            observed from real slaves (mirroring SOEM&rsquo;s status-code table) that the released
+            spec does not list.
           </>
         }
       />

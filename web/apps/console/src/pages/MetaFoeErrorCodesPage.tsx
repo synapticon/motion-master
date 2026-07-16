@@ -24,7 +24,8 @@ export default function MetaFoeErrorCodesPage() {
             Standard File-over-EtherCAT (FoE) error codes, assembled from{' '}
             <span className="font-mono">ETG.1000.6 §5.8.5, Table 93</span>. Codes in the
             <span className="font-mono"> 0x8000</span> range are standardised by the EtherCAT
-            Technology Group; vendor-specific codes fall outside this range and are not listed here.
+            Technology Group; <span className="font-mono">0x00000000</span> is a catch-all for
+            unspecified or vendor-specific errors, which otherwise fall outside this range.
           </>
         }
       />

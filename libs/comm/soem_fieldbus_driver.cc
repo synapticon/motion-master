@@ -666,6 +666,24 @@ int retrySdoInfo(F&& call) {
   return result;
 }
 
+// Decodes an ecx_FOEread/ecx_FOEwrite failure return value into a human-readable suffix. SOEM
+// reports the FoE error kind as a negated ec_err_type in the return value (not via the error
+// list, and without the wire error code), so we classify from -wkc.
+std::string foeErrorDetail(int wkc) {
+  switch (-wkc) {
+    case EC_ERR_TYPE_FOE_FILE_NOTFOUND:
+      return " (file not found)";
+    case EC_ERR_TYPE_FOE_BUF2SMALL:
+      return " (buffer too small)";
+    case EC_ERR_TYPE_FOE_PACKETNUMBER:
+      return " (packet number mismatch)";
+    case EC_ERR_TYPE_FOE_ERROR:
+      return " (FoE error)";
+    default:
+      return std::format(" (wkc {})", wkc);
+  }
+}
+
 }  // namespace
 
 std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectDictionary(
@@ -803,27 +821,11 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
   int wkc =
       ecx_FOEread(ctx_.get(), slavePosition, name.data(), 0, &size, data.data(), EC_TIMEOUTRXM);
   if (wkc <= 0) {
+    // SOEM signals the FoE error kind through the negated return value, not the error list: the
+    // FoE path never calls ecx_pusherror, so ecx_poperror would return nothing here. It also
+    // discards the wire error code (0x800x), keeping only file-not-found vs. generic. Decode -wkc.
     std::string msg = std::format("FOEread slave {} '{}' failed", slavePosition, filename);
-    ec_errort err{};
-    if (ecx_poperror(ctx_.get(), &err)) {
-      switch (err.Etype) {
-        case EC_ERR_TYPE_FOE_ERROR:
-          msg += std::format(" (FoE error 0x{:08X})", static_cast<uint32_t>(err.AbortCode));
-          break;
-        case EC_ERR_TYPE_FOE_BUF2SMALL:
-          msg += " (buffer too small)";
-          break;
-        case EC_ERR_TYPE_FOE_PACKETNUMBER:
-          msg += " (packet number mismatch)";
-          break;
-        case EC_ERR_TYPE_FOE_FILE_NOTFOUND:
-          msg += " (file not found)";
-          break;
-        default:
-          msg += std::format(" (etype {})", static_cast<int>(err.Etype));
-          break;
-      }
-    }
+    msg += foeErrorDetail(wkc);
     spdlog::debug("{}", msg);
     return std::unexpected(msg);
   }
@@ -841,27 +843,9 @@ std::expected<void, std::string> SoemFieldbusDriver::writeFile(uint16_t slavePos
   int wkc = ecx_FOEwrite(ctx_.get(), slavePosition, name.data(), 0, static_cast<int>(data.size()),
                          const_cast<uint8_t*>(data.data()), EC_TIMEOUTRXM);
   if (wkc <= 0) {
+    // See readFile: the FoE error kind is in the negated return value, not the error list.
     std::string msg = std::format("FOEwrite slave {} '{}' failed", slavePosition, filename);
-    ec_errort err{};
-    if (ecx_poperror(ctx_.get(), &err)) {
-      switch (err.Etype) {
-        case EC_ERR_TYPE_FOE_ERROR:
-          msg += std::format(" (FoE error 0x{:08X})", static_cast<uint32_t>(err.AbortCode));
-          break;
-        case EC_ERR_TYPE_FOE_BUF2SMALL:
-          msg += " (buffer too small)";
-          break;
-        case EC_ERR_TYPE_FOE_PACKETNUMBER:
-          msg += " (packet number mismatch)";
-          break;
-        case EC_ERR_TYPE_FOE_FILE_NOTFOUND:
-          msg += " (file not found)";
-          break;
-        default:
-          msg += std::format(" (etype {})", static_cast<int>(err.Etype));
-          break;
-      }
-    }
+    msg += foeErrorDetail(wkc);
     spdlog::debug("{}", msg);
     return std::unexpected(msg);
   }

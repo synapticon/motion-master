@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "comm/al_status_codes.h"
+#include "comm/sdo_abort_codes.h"
 #include "comm/sdo_log.h"
 
 namespace mm::comm::soem {
@@ -133,8 +134,12 @@ std::string sdoErrorSuffix(ecx_contextt* ctx) {
     return {};
   }
   switch (err.Etype) {
-    case EC_ERR_TYPE_SDO_ERROR:
-      return std::format(" (SDO abort 0x{:08X})", static_cast<uint32_t>(err.AbortCode));
+    case EC_ERR_TYPE_SDO_ERROR: {
+      const auto code = static_cast<uint32_t>(err.AbortCode);
+      const std::string_view reason = sdoAbortCodeDescription(code);
+      return reason.empty() ? std::format(" (SDO abort 0x{:08X})", code)
+                            : std::format(" (SDO abort 0x{:08X}: {})", code, reason);
+    }
     case EC_ERR_TYPE_MBX_ERROR:
       return " (mailbox error)";
     case EC_ERR_TYPE_PACKET_ERROR:

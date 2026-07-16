@@ -706,6 +706,19 @@ export interface FoeErrorCode {
   description: string;
 }
 
+export interface SdoAbortCode {
+  /**
+   * 32-bit CoE SDO abort code (ETG.1000.6 §5.6.2.7.2, Table 41)
+   * @example 100794368
+   */
+  code: number;
+  /**
+   * Human-readable meaning of the abort
+   * @example "The object does not exist in the object dictionary"
+   */
+  description: string;
+}
+
 export interface ObjectDataTypeInfo {
   /**
    * ETG.1020 data type code

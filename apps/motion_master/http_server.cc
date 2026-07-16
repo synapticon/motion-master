@@ -25,6 +25,7 @@
 #include "comm/fieldbus_driver.h"
 #include "comm/foe_error_codes.h"
 #include "comm/object_data_types.h"
+#include "comm/sdo_abort_codes.h"
 #include "comm/sii.h"
 #include "core/system_info.h"
 #include "core/util.h"
@@ -427,6 +428,10 @@ void HttpServer::run() {
       .get("/api/meta/foe-error-codes",
            [this](auto* res, auto* /*req*/) {
              sendJson(res, config_.corsOrigin, nlohmann::json(mm::comm::kFoeErrorCodes));
+           })
+      .get("/api/meta/sdo-abort-codes",
+           [this](auto* res, auto* /*req*/) {
+             sendJson(res, config_.corsOrigin, nlohmann::json(mm::comm::kSdoAbortCodes));
            })
       .get("/api/devices/state",
            [this](auto* res, auto* req) {

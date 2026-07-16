@@ -6,6 +6,7 @@ add_library(
   fieldbus_driver.cc
   foe_error_codes.cc
   object_data_types.cc
+  sdo_abort_codes.cc
   sii.cc
   soem_fieldbus_driver.cc)
 add_library(mm::comm ALIAS comm)

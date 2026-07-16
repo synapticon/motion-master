@@ -18,6 +18,7 @@ import MetaAlStatusCodesPage from './pages/MetaAlStatusCodesPage'
 import MetaEscRegistersPage from './pages/MetaEscRegistersPage'
 import MetaFoeErrorCodesPage from './pages/MetaFoeErrorCodesPage'
 import MetaObjectDataTypesPage from './pages/MetaObjectDataTypesPage'
+import MetaSdoAbortCodesPage from './pages/MetaSdoAbortCodesPage'
 import ToolsSiiPage from './pages/ToolsSiiPage'
 import DeviceEthercatStatePage from './pages/DeviceEthercatStatePage'
 import DeviceObjectDictionaryPage from './pages/DeviceObjectDictionaryPage'
@@ -58,6 +59,7 @@ export default function App() {
           <Route path="esc-registers" element={<MetaEscRegistersPage />} />
           <Route path="foe-error-codes" element={<MetaFoeErrorCodesPage />} />
           <Route path="object-data-types" element={<MetaObjectDataTypesPage />} />
+          <Route path="sdo-abort-codes" element={<MetaSdoAbortCodesPage />} />
         </Route>
         <Route path="tools">
           <Route path="sii" element={<ToolsSiiPage />} />

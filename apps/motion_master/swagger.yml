@@ -50,8 +50,8 @@ info:
       the parsed structure or the raw EEPROM bytes per the `Accept` header.
 
     The `/api/meta/*` endpoints expose static reference tables — AL status codes,
-    ESC register definitions, FoE error codes, and CoE data types — so clients
-    can decode numeric values without hard-coding them.
+    ESC register definitions, FoE error codes, SDO abort codes, and CoE data types —
+    so clients can decode numeric values without hard-coding them.
 
     ## Monitoring WebSocket
 
@@ -658,6 +658,24 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/FoeErrorCode"
+  /api/meta/sdo-abort-codes:
+    get:
+      summary: List all known CoE SDO abort codes
+      operationId: getSdoAbortCodes
+      description: >
+        Returns the static catalogue of CoE SDO abort codes defined in ETG.1000.6
+        §5.6.2.7.2, Table 41 (which reproduces the CANopen CiA 301 abort transfer
+        codes).  A slave returns one of these when a mailbox SDO read/write fails;
+        the code is embedded in the error text returned by the SDO endpoints.
+      responses:
+        "200":
+          description: Array of SDO abort code descriptors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SdoAbortCode"
   /api/meta/object-data-types:
     get:
       summary: List all known CoE object dictionary data types
@@ -3017,6 +3035,18 @@ components:
           type: string
           description: Full description of the error condition
           example: "The requested file does not exist on the slave"
+    SdoAbortCode:
+      type: object
+      required: [code, description]
+      properties:
+        code:
+          type: integer
+          description: 32-bit CoE SDO abort code (ETG.1000.6 §5.6.2.7.2, Table 41)
+          example: 100794368
+        description:
+          type: string
+          description: Human-readable meaning of the abort
+          example: "The object does not exist in the object dictionary"
     ObjectDataTypeInfo:
       type: object
       required: [code, name, bitSize]

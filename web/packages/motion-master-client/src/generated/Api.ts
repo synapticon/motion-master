@@ -26,6 +26,7 @@ import {
   PdoMappingRequest,
   ProcessDataWatchdog,
   ProcessImageObject,
+  SdoAbortCode,
   SlaveConfig,
   SlaveInformationInterface,
 } from "./data-contracts";
@@ -507,6 +508,20 @@ export class Api<
   getFoeErrorCodes = (params: RequestParams = {}) =>
     this.request<FoeErrorCode[], any>({
       path: `/api/meta/foe-error-codes`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Returns the static catalogue of CoE SDO abort codes defined in ETG.1000.6 §5.6.2.7.2, Table 41 (which reproduces the CANopen CiA 301 abort transfer codes).  A slave returns one of these when a mailbox SDO read/write fails; the code is embedded in the error text returned by the SDO endpoints.
+   *
+   * @name GetSdoAbortCodes
+   * @summary List all known CoE SDO abort codes
+   * @request GET:/api/meta/sdo-abort-codes
+   */
+  getSdoAbortCodes = (params: RequestParams = {}) =>
+    this.request<SdoAbortCode[], any>({
+      path: `/api/meta/sdo-abort-codes`,
       method: "GET",
       format: "json",
       ...params,

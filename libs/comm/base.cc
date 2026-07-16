@@ -167,7 +167,8 @@ std::vector<NetworkAdapter> enumerateNetworkAdapters() {
     freeifaddrs(ifaddr);
   }
 #else
-  ec_adaptert* adapter = ec_find_adapters();
+  ec_adaptert* adaptersHead = ec_find_adapters();
+  ec_adaptert* adapter = adaptersHead;
   while (adapter != nullptr) {
     int fd = socket(PF_INET, SOCK_DGRAM, IPPROTO_IP);
     if (fd < 0) {
@@ -194,7 +195,7 @@ std::vector<NetworkAdapter> enumerateNetworkAdapters() {
 
     adapter = adapter->next;
   }
-  ec_free_adapters(adapter);
+  ec_free_adapters(adaptersHead);
 #endif
   return adapters;
 }

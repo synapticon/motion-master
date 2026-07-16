@@ -185,7 +185,6 @@ std::optional<SiiCategoryType> resolveSiiCategoryType(uint16_t value);
 /// marker. Unrecognised categories are skipped; multiple PDO categories accumulate. The walk is
 /// bounds-checked: a category claiming more bytes than remain is clamped, never read past the end.
 ///
-///
 /// @param buffer  Raw SII bytes (at least 128 for a valid header).
 /// @return The parsed structure, or an error string if @p buffer is shorter than the fixed header.
 std::expected<SlaveInformationInterface, std::string> parseSii(std::span<const uint8_t> buffer);

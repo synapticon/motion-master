@@ -33,9 +33,9 @@ struct SoemFieldbusDriverConfig {
 
 /// @brief SOEM-backed EtherCAT fieldbus driver.
 ///
-/// Owns one @c ecx_contextt master context and its PDO I/O map.  @c App
-/// creates exactly one instance and injects it into @c DeviceManager and
-/// @c GameLoop.
+/// Owns one @c ecx_contextt master context and its PDO I/O map. The composition root
+/// (@c main.cc) creates exactly one instance and injects it into @c DeviceManager via
+/// @c DeviceManager::init; @c GameLoop does not reference it.
 ///
 /// @note As with the @c FieldbusDriver interface, the slave-indexed methods trust @c slavePosition
 /// and index SOEM's fixed-size @c slavelist without bounds-checking — pass only valid, discovered

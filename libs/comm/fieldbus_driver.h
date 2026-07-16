@@ -315,9 +315,10 @@ struct ProcessDataWatchdogConfig {
 
 /// @brief Abstract interface for an EtherCAT fieldbus driver.
 ///
-/// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeFieldbusDriver (SPoE).
-/// @c App instantiates exactly one and injects it into @c DeviceManager and
-/// @c GameLoop.
+/// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeFieldbusDriver (SPoE, planned).
+/// The composition root (@c main.cc) constructs exactly one and injects it into @c DeviceManager
+/// via @c DeviceManager::init. @c GameLoop never references the driver — it runs @c CyclicTasks
+/// (e.g. @c ProcessDataCyclicTask) that reach the bus only through @c DeviceManager.
 ///
 /// The driver owns @c socketMutex_, which serialises the control-plane
 /// operations (mailbox/SDO, FoE, ESC register, and state access) amongst

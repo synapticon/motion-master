@@ -477,35 +477,37 @@ export default function DevicePdoMappingPage() {
         description="Edit which objects the device exchanges cyclically, and where they sit in the process image."
       />
       <div className="p-4 sm:p-8 space-y-6">
-        <Callout variant="info">
-          Rewrites the device's sync-manager PDO assignment (0x1C12 / 0x1C13) and mapping objects
-          (0x16xx / 0x1Axx) over CoE. <strong>The device must be in PRE-OP</strong> — the mapping is
-          writable only there. Take it to PRE-OP on the Control page, write here, then bring it back
-          to SAFE-OP/OP, which re-maps the whole-bus process image. The write is verified against a
-          read-back; it does not change the AL state itself.
-        </Callout>
-
-        {state && !inPreOp && (
-          <Callout variant="warning">
-            The device is not in PRE-OP, so a write will be rejected. Take it to PRE-OP first
-            (Control page) to edit its mapping.
-          </Callout>
-        )}
-
-        {query.isError && (
-          <Callout variant="error">
-            Could not read the current mapping: {apiError(query.error)}. The device's mailbox must be
-            active (PRE-OP or higher).
-          </Callout>
-        )}
-
-        {paramsQuery.data && params.length === 0 && (
+        <div className="space-y-4">
           <Callout variant="info">
-            The object dictionary has not been enumerated for this device, so the parameter picker is
-            empty — you can still enter index, subindex, and bit length by hand. Open the Parameters
-            page to read the dictionary.
+            Rewrites the device's sync-manager PDO assignment (0x1C12 / 0x1C13) and mapping objects
+            (0x16xx / 0x1Axx) over CoE. <strong>The device must be in PRE-OP</strong> — the mapping
+            is writable only there. Take it to PRE-OP on the Control page, write here, then bring it
+            back to SAFE-OP/OP, which re-maps the whole-bus process image. The write is verified
+            against a read-back; it does not change the AL state itself.
           </Callout>
-        )}
+
+          {state && !inPreOp && (
+            <Callout variant="warning">
+              The device is not in PRE-OP, so a write will be rejected. Take it to PRE-OP first
+              (Control page) to edit its mapping.
+            </Callout>
+          )}
+
+          {query.isError && (
+            <Callout variant="error">
+              Could not read the current mapping: {apiError(query.error)}. The device's mailbox must
+              be active (PRE-OP or higher).
+            </Callout>
+          )}
+
+          {paramsQuery.data && params.length === 0 && (
+            <Callout variant="info">
+              The object dictionary has not been enumerated for this device, so the parameter picker
+              is empty — you can still enter index, subindex, and bit length by hand. Open the
+              Parameters page to read the dictionary.
+            </Callout>
+          )}
+        </div>
 
         <div className="flex items-center gap-3">
           <button className={btnOutline} onClick={() => query.refetch()} disabled={query.isFetching}>

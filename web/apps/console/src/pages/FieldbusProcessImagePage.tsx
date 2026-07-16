@@ -169,7 +169,7 @@ export default function FieldbusProcessImagePage() {
           </>
         }
       />
-      <div className="p-4 sm:p-8 space-y-8">
+      <div className="p-4 sm:p-8 space-y-6">
         <ProcessImageExplainer />
 
         <div className="flex justify-end">

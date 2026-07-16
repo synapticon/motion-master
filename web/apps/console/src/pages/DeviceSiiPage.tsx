@@ -115,7 +115,7 @@ export default function DeviceSiiPage() {
           </>
         }
       />
-      <div className="p-4 sm:p-8 space-y-8">
+      <div className="p-4 sm:p-8 space-y-6">
         <SiiExplainer />
 
         <div className="flex items-center justify-between gap-3">

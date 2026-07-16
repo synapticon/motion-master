@@ -143,7 +143,7 @@ export default function DataProcessDataPage() {
     return (
       <div>
         <PageHeader eyebrow="Data" title="Process Data" />
-        <p className="px-8 py-6 text-sm text-grey-600">
+        <p className="p-4 sm:p-8 text-sm text-grey-600">
           Connect and scan the bus, then bring devices to SAFE-OP or OP to view and write process
           data.
         </p>
@@ -161,17 +161,19 @@ export default function DataProcessDataPage() {
         description="Live two-column view of the whole process image: read inputs (TxPDO) streaming from the devices, and write outputs (RxPDO). Set output values and send them all at once — each is staged into the output image and sent on the next real-time cycle, then re-sent every cycle."
       />
 
-      <div className="px-4 sm:px-8 py-6 space-y-6">
-        <Callout variant="danger">
-          Writing an output stages it straight into the drive's process data and re-sends it every
-          cycle. Manually setting <span className="font-mono">controlword</span>, modes of operation,
-          or a motion target can cause the drive to move. Make sure the machine is safe before
-          sending.
-        </Callout>
+      <div className="p-4 sm:p-8 space-y-6">
+        <div className="space-y-4">
+          <Callout variant="danger">
+            Writing an output stages it straight into the drive's process data and re-sends it every
+            cycle. Manually setting <span className="font-mono">controlword</span>, modes of
+            operation, or a motion target can cause the drive to move. Make sure the machine is safe
+            before sending.
+          </Callout>
 
-        {imageQuery.isError && (
-          <Callout variant="error">Failed to load the process image.</Callout>
-        )}
+          {imageQuery.isError && (
+            <Callout variant="error">Failed to load the process image.</Callout>
+          )}
+        </div>
 
         {idle && (
           <p className="text-xs text-grey-600">

@@ -75,7 +75,7 @@ export default function DataParameterCachesPage() {
         title="Parameter Caches"
         description="Manage Motion Master's on-disk cache of device object dictionaries. Download a cached definition to inspect it offline, or delete one to force a fresh enumeration on the next scan."
       />
-      <div className="p-4 sm:p-8 space-y-8">
+      <div className="p-4 sm:p-8 space-y-6">
         <ParameterCacheExplainer />
 
         <div className="flex items-center justify-between gap-3">

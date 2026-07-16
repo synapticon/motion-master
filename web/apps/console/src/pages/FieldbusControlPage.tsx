@@ -255,7 +255,7 @@ export default function FieldbusControlPage() {
         title="Control"
         description="Initialize the EtherCAT fieldbus, scan for slave devices, and command AL state transitions across the bus."
       />
-      <div className="p-4 sm:p-8 space-y-8">
+      <div className="p-4 sm:p-8 space-y-6">
         <ControlExplainer />
 
         {/* Row 1 — Init + Reset */}

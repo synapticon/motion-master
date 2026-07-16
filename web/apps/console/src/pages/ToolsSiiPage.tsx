@@ -50,7 +50,7 @@ export default function ToolsSiiPage() {
         title="SII"
         description="Load a previously downloaded SII (EEPROM) image and decode it offline — no device required. Use the Download SII button on a device's SII page to capture one."
       />
-      <div className="p-4 sm:p-8 space-y-8">
+      <div className="p-4 sm:p-8 space-y-6">
         <SiiExplainer />
 
         <div className="flex items-center gap-3">

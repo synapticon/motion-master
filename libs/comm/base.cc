@@ -2,11 +2,13 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
-#include <cstdlib>
-#include <map>
+#include <nlohmann/json.hpp>
+#include <regex>
 #include <string>
+#include <vector>
 
 #ifdef _WIN32
 // clang-format off
@@ -46,22 +48,20 @@
 
 namespace mm::comm {
 
+void to_json(nlohmann::json& j, const NetworkAdapter& a) {
+  j = nlohmann::json{
+      {"macLinux", a.macLinux},
+      {"macWindows", a.macWindows},
+      {"name", a.name},
+  };
+}
+
 bool isMacAddress(const std::string& s) {
-  if (s.size() != 17) {
-    return false;
-  }
-  for (int i = 0; i < 17; ++i) {
-    if (i % 3 == 2) {
-      if (s[i] != ':' && s[i] != '-') {
-        return false;
-      }
-    } else {
-      if (!std::isxdigit(static_cast<unsigned char>(s[i]))) {
-        return false;
-      }
-    }
-  }
-  return true;
+  // Six hex octets separated by a single, consistent delimiter: the first separator is captured and
+  // the backreference (\1) forces the remaining four to match it, so mixed colon/dash forms
+  // (e.g. "AA:BB-CC:...") are rejected. Built once (static): std::regex construction is expensive.
+  static const std::regex kMacRe{R"(^[0-9A-Fa-f]{2}([:-])(?:[0-9A-Fa-f]{2}\1){4}[0-9A-Fa-f]{2}$)"};
+  return std::regex_match(s, kMacRe);
 }
 
 std::string normalizeMac(const std::string& raw, char sep) {
@@ -77,8 +77,8 @@ std::string normalizeMac(const std::string& raw, char sep) {
   return result;
 }
 
-std::map<std::string, std::string> mapMacAddressesToInterfaces() {
-  std::map<std::string, std::string> map;
+std::vector<NetworkAdapter> enumerateNetworkAdapters() {
+  std::vector<NetworkAdapter> adapters;
 #ifdef _WIN32
   {
     int nAddressCount = 0;
@@ -94,7 +94,7 @@ std::map<std::string, std::string> mapMacAddressesToInterfaces() {
 
     pAddresses = reinterpret_cast<PIP_ADAPTER_ADDRESSES>(HeapAlloc(hHeap, 0x00, ulBufLen));
     if (pAddresses == nullptr) {
-      return map;
+      return adapters;
     }
 
     dwRetVal = GetAdaptersAddresses(ulFamily, ulFlags, nullptr, pAddresses, &ulBufLen);
@@ -104,7 +104,7 @@ std::map<std::string, std::string> mapMacAddressesToInterfaces() {
     }
 
     if (pAddresses == nullptr) {
-      return map;
+      return adapters;
     }
 
     dwRetVal = GetAdaptersAddresses(ulFamily, ulFlags, nullptr, pAddresses, &ulBufLen);
@@ -133,7 +133,9 @@ std::map<std::string, std::string> mapMacAddressesToInterfaces() {
             ss << ":";
           }
         }
-        map[ss.str()] = "\\Device\\NPF_" + std::string(pCurrAddresses->AdapterName);
+        std::string mac = ss.str();
+        std::string name = "\\Device\\NPF_" + std::string(pCurrAddresses->AdapterName);
+        adapters.push_back({.macLinux = mac, .macWindows = normalizeMac(mac, '-'), .name = name});
         pCurrAddresses = pCurrAddresses->Next;
       }
     }
@@ -159,7 +161,8 @@ std::map<std::string, std::string> mapMacAddressesToInterfaces() {
       char mac[18];
       snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", hw[0], hw[1], hw[2], hw[3], hw[4],
                hw[5]);
-      map[mac] = ifa->ifa_name;
+      adapters.push_back(
+          {.macLinux = mac, .macWindows = normalizeMac(mac, '-'), .name = ifa->ifa_name});
     }
     freeifaddrs(ifaddr);
   }
@@ -186,37 +189,36 @@ std::map<std::string, std::string> mapMacAddressesToInterfaces() {
     const auto* hw = reinterpret_cast<const unsigned char*>(ifr.ifr_hwaddr.sa_data);
     snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", hw[0], hw[1], hw[2], hw[3], hw[4],
              hw[5]);
-    map[mac] = adapter->name;
+    adapters.push_back(
+        {.macLinux = mac, .macWindows = normalizeMac(mac, '-'), .name = adapter->name});
 
     adapter = adapter->next;
   }
   ec_free_adapters(adapter);
 #endif
-  return map;
+  return adapters;
 }
 
 std::expected<NetworkAdapter, std::string> resolveNetworkAdapter(const std::string& input) {
-  auto adapters = mapMacAddressesToInterfaces();
+  auto adapters = enumerateNetworkAdapters();
 
   if (isMacAddress(input)) {
     std::string macLinux = normalizeMac(input, ':');
-    std::string macWindows = normalizeMac(input, '-');
-    auto it = adapters.find(macLinux);
+    auto it = std::find_if(adapters.begin(), adapters.end(),
+                           [&](const NetworkAdapter& a) { return a.macLinux == macLinux; });
     if (it == adapters.end()) {
       return std::unexpected("no network adapter found with MAC " + macLinux);
     }
-    return NetworkAdapter{
-        .macLinux = macLinux, .macWindows = macWindows, .adapterName = it->second};
+    return *it;
   }
 
   // Reverse lookup by interface name.
-  for (const auto& [mac, name] : adapters) {
-    if (name == input) {
-      return NetworkAdapter{
-          .macLinux = mac, .macWindows = normalizeMac(mac, '-'), .adapterName = input};
-    }
+  auto it = std::find_if(adapters.begin(), adapters.end(),
+                         [&](const NetworkAdapter& a) { return a.name == input; });
+  if (it == adapters.end()) {
+    return std::unexpected("network adapter '" + input + "' not found");
   }
-  return std::unexpected("network adapter '" + input + "' not found");
+  return *it;
 }
 
 }  // namespace mm::comm

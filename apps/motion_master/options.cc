@@ -50,8 +50,8 @@ Options parseOptions(int argc, char** argv) {
   }
 
   if (listAdapters) {
-    for (const auto& [mac, iface] : mm::comm::mapMacAddressesToInterfaces()) {
-      std::cout << mac << "  " << iface << "\n";
+    for (const auto& adapter : mm::comm::enumerateNetworkAdapters()) {
+      std::cout << adapter.macLinux << "  " << adapter.name << "\n";
     }
     std::exit(0);
   }

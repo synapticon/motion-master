@@ -50,7 +50,12 @@ export class Api<
          * MAC address in colon-separated uppercase format
          * @example "AA:BB:CC:DD:EE:FF"
          */
-        mac: string;
+        macLinux: string;
+        /**
+         * MAC address in dash-separated uppercase format
+         * @example "AA-BB-CC-DD-EE-FF"
+         */
+        macWindows: string;
         /**
          * OS interface name (e.g. eth0 on Linux, \\Device\\NPF_{GUID} on Windows)
          * @example "eth0"

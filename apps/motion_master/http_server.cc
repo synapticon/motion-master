@@ -351,11 +351,7 @@ void HttpServer::run() {
           })
       .get("/api/adapters",
            [this](auto* res, auto* /*req*/) {
-             auto adapterMap = mm::comm::mapMacAddressesToInterfaces();
-             nlohmann::json arr = nlohmann::json::array();
-             for (const auto& [mac, name] : adapterMap) {
-               arr.push_back({{"mac", mac}, {"name", name}});
-             }
+             nlohmann::json arr = mm::comm::enumerateNetworkAdapters();
              sendJson(res, config_.corsOrigin, arr);
            })
       .get("/api/version",

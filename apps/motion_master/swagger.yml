@@ -117,12 +117,16 @@ paths:
                 type: array
                 items:
                   type: object
-                  required: [mac, name]
+                  required: [macLinux, macWindows, name]
                   properties:
-                    mac:
+                    macLinux:
                       type: string
                       description: MAC address in colon-separated uppercase format
                       example: "AA:BB:CC:DD:EE:FF"
+                    macWindows:
+                      type: string
+                      description: MAC address in dash-separated uppercase format
+                      example: "AA-BB-CC-DD-EE-FF"
                     name:
                       type: string
                       description: OS interface name (e.g. eth0 on Linux, \\Device\\NPF_{GUID} on Windows)

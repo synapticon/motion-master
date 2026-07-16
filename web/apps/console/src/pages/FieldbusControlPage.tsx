@@ -302,13 +302,13 @@ export default function FieldbusControlPage() {
                   {adaptersQuery.isSuccess && adaptersQuery.data.data.length > 0 && (
                     <ul className="border border-grey-200 divide-y divide-grey-100 mt-2">
                       {adaptersQuery.data.data.map(a => (
-                        <li key={a.mac}>
+                        <li key={a.macLinux}>
                           <button
                             onClick={() => setAdapter(a.name)}
                             className="w-full text-left px-3 py-2 text-xs hover:bg-grey-50 transition-colors"
                           >
                             <span>{a.name}</span>
-                            <span className="text-grey-500 ml-2 font-mono">{a.mac}</span>
+                            <span className="text-grey-500 ml-2 font-mono">{a.macLinux}</span>
                           </button>
                         </li>
                       ))}

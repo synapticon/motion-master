@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
         spdlog::error("Adapter resolution failed: {}", resolved.error());
         return std::unexpected(resolved.error());
       }
-      ifname = resolved->adapterName;
+      ifname = resolved->name;
     }
     if (type != "soem") {
       // soem is the only driver implemented today (spoe is planned). Config validation accepts the

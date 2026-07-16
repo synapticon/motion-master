@@ -12,3 +12,16 @@ export function downloadBytes(bytes: Uint8Array, filename: string) {
   a.remove()
   URL.revokeObjectURL(url)
 }
+
+// Same object-URL trick as downloadBytes, for text payloads (CSV, JSON, logs).
+export function downloadText(text: string, filename: string, mime = 'text/plain') {
+  const blob = new Blob([text], { type: mime })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename || 'file.txt'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}

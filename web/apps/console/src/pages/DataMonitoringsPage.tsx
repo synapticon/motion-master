@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useMutation, useQueries, useQuery, useQueryClient } from '@tanstack/react-query'
 import { adjectives, animals, colors, uniqueNamesGenerator } from 'unique-names-generator'
-import { Eraser, Pause, Play, Plus, Trash2, X } from 'lucide-react'
+import { Download, Eraser, Pause, Play, Plus, Trash2, X } from 'lucide-react'
 import type uPlot from 'uplot'
 import type { DeviceParameter, Monitoring } from '@synapticon/motion-master-client'
 import CycleStatsBar from '../components/CycleStatsBar'
@@ -16,6 +16,7 @@ import {
   useMonitoringSocket,
 } from '../contexts/MonitoringSocketContext'
 import { type CycleStats, cycleStats } from '../utils/cycleStats'
+import { downloadText } from '../utils/download'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
@@ -292,6 +293,21 @@ function MonitoringCard({
     statsAtRef.current = 0
   }
 
+  // Export the retained buffer as CSV: one column per parameter, header is the object address
+  // in hex (index:subindex, e.g. 0x6040:00), one row per collected sample in capture order. A
+  // value is blank while its device was not exchanging (null on the wire).
+  function downloadCsv() {
+    const ys = ysRef.current
+    const rowCount = xsRef.current.length
+    if (rowCount === 0) return
+    const header = params.map((p) => `${toHex(p.index, 4)}:${toHex(p.subindex, 2).slice(2)}`)
+    const lines = [header.join(',')]
+    for (let r = 0; r < rowCount; r++) {
+      lines.push(ys.map((series) => (series[r] == null ? '' : String(series[r]))).join(','))
+    }
+    downloadText(lines.join('\n'), `${monitoring.topic}.csv`, 'text/csv')
+  }
+
   return (
     <div className="border border-grey-200 bg-white">
       <div className="flex items-start justify-between px-5 py-3 border-b border-grey-100">
@@ -312,6 +328,7 @@ function MonitoringCard({
           className={`${btnGhostCls} inline-flex items-center gap-1.5`}
           onClick={onDelete}
           disabled={deleting}
+          title="Delete this monitoring on the server — it stops recording and is removed for all clients. The samples buffered in this browser are discarded; export to CSV first if you need them."
         >
           <Trash2 className="h-4 w-4" />
           {deleting ? 'Deleting…' : 'Delete'}
@@ -362,6 +379,11 @@ function MonitoringCard({
               }
               setPlaying((p) => !p)
             }}
+            title={
+              playing
+                ? 'Freeze the chart and stop appending samples. The server keeps recording; this only stops this browser from consuming the stream.'
+                : 'Resume consuming the stream. The buffer is cleared first, because the gap accumulated while paused would otherwise distort the trace and cycle-time stats.'
+            }
           >
             {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
             {playing ? 'Pause' : 'Resume'}
@@ -370,9 +392,20 @@ function MonitoringCard({
             type="button"
             className={`${btnGhostCls} inline-flex items-center gap-1.5`}
             onClick={clear}
+            title="Discard the samples buffered in this browser and start the chart over. Does not affect server-side recording."
           >
             <Eraser className="h-4 w-4" />
             Clear
+          </button>
+          <button
+            type="button"
+            className={`${btnGhostCls} inline-flex items-center gap-1.5`}
+            onClick={downloadCsv}
+            disabled={count === 0}
+            title="Download the retained samples as CSV — one column per parameter (header is the object address in hex, e.g. 0x6040:00), one row per collected cycle."
+          >
+            <Download className="h-4 w-4" />
+            CSV
           </button>
           <label className="text-xs text-grey-500 flex items-center gap-1.5">
             Retain
@@ -509,6 +542,7 @@ function CreateMonitoringForm({
           reroll() // seed a funny topic + name so creating one is a single click
           setOpen(true)
         }}
+        title="Open the form to define a new monitoring — pick the drive parameters to record and a flush interval."
       >
         New monitoring
       </button>
@@ -572,6 +606,7 @@ function CreateMonitoringForm({
               { ...emptyRow, devicePosition: rs[rs.length - 1]?.devicePosition ?? '' },
             ])
           }
+          title="Add another parameter row to record in this monitoring. The device from the last row is carried over."
         >
           <Plus className="h-4 w-4" />
           Append parameter
@@ -581,10 +616,21 @@ function CreateMonitoringForm({
       {error && <p className="text-sm text-syn-red">{error}</p>}
 
       <div className="flex gap-2">
-        <button type="button" className={btnCls} onClick={submit} disabled={createMutation.isPending}>
+        <button
+          type="button"
+          className={btnCls}
+          onClick={submit}
+          disabled={createMutation.isPending}
+          title="Create the monitoring on the server and start recording the listed parameters."
+        >
           {createMutation.isPending ? 'Creating…' : 'Create'}
         </button>
-        <button type="button" className={btnGhostCls} onClick={() => setOpen(false)}>
+        <button
+          type="button"
+          className={btnGhostCls}
+          onClick={() => setOpen(false)}
+          title="Discard this form without creating a monitoring."
+        >
           Cancel
         </button>
       </div>

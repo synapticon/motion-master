@@ -16,7 +16,7 @@ Design documents with Mermaid diagrams (rendered natively on GitHub):
 Release packages are available on the [Releases](../../releases) page. Every release ships binaries for Linux, Windows, and macOS:
 
 | Artefact | Format | Install on |
-|---|---|---|
+| --- | --- | --- |
 | `motion-master-<version>-linux-x64.tar.gz` | Tarball | Any Linux x86-64 |
 | `motion-master-<version>-amd64.deb` | Debian package | Ubuntu / Debian |
 | `motion-master-<version>-x86_64.rpm` | RPM package | Fedora / RHEL / openSUSE |
@@ -75,7 +75,7 @@ Motion Master also runs as a container image. Building the image and publishing 
 
 `--network host` is required on all `docker run` commands — the server binds to `127.0.0.1` and Docker's port forwarding never reaches the loopback interface.
 
-**TLS certificates**
+#### TLS certificates
 
 Every image bakes `cert.pem`/`key.pem` in at build time by fetching them from the rolling `tls-cert` release (see [Development → Docker image](#docker-image)); an image built offline ships with empty placeholders and self-heals on start instead. The runtime discovery order is the same as `tools/run.sh`:
 
@@ -89,7 +89,7 @@ docker run --rm --network host \
   motion-master
 ```
 
-**Updating an expired cert on an older image**
+#### Updating an expired cert on an older image
 
 The bundled cert is renewed monthly, but an older image keeps its original cert. By default the container self-heals: if the baked-in cert is missing, expired, or expiring soon at startup it fetches a fresh one from the rolling release before serving (set `"tls": { "autoUpdate": false }` in a mounted config to disable, e.g. for air-gapped hosts). To pin your own cert instead, override it at runtime — the volume mount shadows the baked-in file:
 
@@ -110,12 +110,12 @@ docker run --rm --network host \
   motion-master
 ```
 
-**Capabilities**
+#### Capabilities
 
 Docker drops most Linux capabilities by default. On a bare-metal install `postinst`/`setup.sh` stamps the binary with `setcap` so any user can run it and it receives the required capabilities automatically. Inside a container, file capabilities are ignored — you grant the equivalent capabilities to the container process with `--cap-add` at `docker run` time instead.
 
 | Capability | What it unlocks | Required for |
-|---|---|---|
+| --- | --- | --- |
 | `CAP_NET_RAW` | Open raw/packet sockets | SOEM sending/receiving raw EtherCAT frames |
 | `CAP_NET_ADMIN` | Configure network interfaces | SOEM putting the NIC into promiscuous mode |
 | `CAP_SYS_NICE` | Set `SCHED_FIFO` scheduling policy and RT priority | Real-time game loop |
@@ -147,7 +147,7 @@ docker run --rm --network host \
   motion-master --config /config.jsonc
 ```
 
-**Run from a registry**
+#### Run from a registry
 
 Pull and run a published image, mounting `cert.pem`/`key.pem` from the current directory. Source paths **must be absolute** — a relative `-v cert.pem:...` is interpreted as a *named volume*, not your local file, and the container silently falls back to a self-signed cert. Use `$(pwd)/` to force an absolute path:
 
@@ -176,7 +176,7 @@ Requirements for running a release binary (building from source has its own — 
 ### Platform Support
 
 | Platform | Status |
-|---|---|
+| --- | --- |
 | Linux x86-64 | Primary target — `.tar.gz`, `.deb`, `.rpm` |
 | Windows x64 | Supported — `.zip` |
 | macOS (Apple Silicon) | Supported — `.tar.gz` |
@@ -186,7 +186,7 @@ Requirements for running a release binary (building from source has its own — 
 
 The command line carries only *actions* and the cert-fetch source URLs. Every tunable **setting** — ports, fieldbus driver/adapter, log level, CORS origin, TLS cert/key paths, and cert auto-update — lives in the JSONC config file, which you pass with `-c`/`--config` (see [`motion-master.example.jsonc`](apps/motion_master/motion-master.example.jsonc)).
 
-```
+```text
 motion-master [OPTIONS]
 
 OPTIONS:
@@ -244,13 +244,14 @@ For development, the run script picks up a cert automatically:
 ```
 
 It looks for a certificate in this order:
+
 1. `cert.pem` / `key.pem` next to the binary (present in release builds)
 2. `~/.acme.sh/local.motion-master.synapticon.com_ecc/` — if you have `acme.sh` installed locally with the Let's Encrypt cert (no browser warning)
 3. Self-signed fallback — generated on the fly; requires accepting a browser security exception once per server restart
 
 If the cert is missing, expired, or expiring soon at startup, the binary fetches a fresh one from the rolling release and installs it before serving (disable by setting `tls.autoUpdate` to `false` in the config). You can also refresh on demand — `motion-master --update-cert` (terminal) or the **Refresh certificate** button on the PWA's Connection page (`POST /api/cert/refresh`). The cert is rotated monthly and published at a stable URL, decoupled from app releases:
 
-```
+```text
 https://github.com/synapticon/motion-master/releases/download/tls-cert/{cert,key}.pem
 ```
 
@@ -289,7 +290,7 @@ docker build -t motion-master .
 
 The build fetches the current `cert.pem`/`key.pem` from the rolling `tls-cert` release and bakes them in — the same single source the running binary's self-heal uses, so no secrets are involved. An offline build bakes empty placeholders instead; the container then self-signs and the startup self-heal fetches a real cert on first run. See [Installation → Docker](#docker) for running the image, the cert discovery order, and the `--cap-add` flags.
 
-**Publishing to Docker Hub**
+#### Publishing to Docker Hub
 
 `tools/docker-build.sh` builds the image from the current `VERSION` and tags it with the **bare** version (Docker convention — no `v` prefix) plus a rolling tag: `latest` for a stable release, or `next` for a prerelease (a `-` in the version, e.g. `6.0.0-alpha.34`). It defaults to the `markosankovic/motion-master` repository; override with an argument or the `IMAGE` env var.
 
@@ -339,7 +340,7 @@ Your `registerRoutes(uWS::SSLApp&, const mm::api::RouteContext&)` runs once on t
 All scripts default to the `x64-linux-debug` preset. Pass a preset name as the first argument to override (e.g. `./tools/build.sh x64-linux-release`).
 
 | Script | Description |
-|---|---|
+| --- | --- |
 | `./tools/configure.sh` | Run CMake configure |
 | `./tools/build.sh` | Build all targets |
 | `./tools/run.sh` | Run the binary with the best available TLS cert (real cert if acme.sh is set up, self-signed otherwise) |
@@ -364,7 +365,7 @@ All scripts default to the `x64-linux-debug` preset. Pass a preset name as the f
 Managed via [vcpkg](https://vcpkg.io). No manual installation needed — vcpkg downloads and builds everything on first configure.
 
 | Package | Purpose |
-|---|---|
+| --- | --- |
 | CLI11 | Command-line argument parsing |
 | spdlog | Structured logging |
 | nlohmann-json | JSONC config file parsing (comments enabled) and HTTP response serialization |
@@ -449,7 +450,7 @@ The `v*` tag builds the platform binaries **and** publishes `@synapticon/motion-
 ### CI
 
 | Workflow | Trigger | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `build-linux-x64.yml` | push / PR to `main` | Build & test (Linux x64); vcpkg packages cached |
 | `build-linux-arm64.yml` | push / PR to `main` | Build & test (Linux ARM64) |
 | `build-macos-arm64.yml` | push / PR to `main` | Build & test (macOS Apple Silicon) |

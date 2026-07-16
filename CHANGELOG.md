@@ -19,6 +19,19 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.46] - 2026-07-16
+
+### Changed
+
+- `GET /api/adapters` now returns each network adapter as `{ macLinux, macWindows, name }` instead of `{ mac, name }`, exposing both platform MAC-address forms.
+- Unified the logo and wordmark across the landing page and the console sidebar.
+- The process-data write callout now uses the warning colour to flag its effect.
+
+### Fixed
+
+- SII page: FMMU defaults now decode correctly — one entry per FMMU, each labelled with its role (Outputs, Inputs, SyncM status) — instead of showing garbled 16-bit values and the wrong count. The General category's Physical Port and Physical Memory Address now show the correct values.
+- Network-adapter matching now rejects MAC addresses that mix `:` and `-` separators.
+
 ## [6.0.0-alpha.45] - 2026-07-16
 
 ### Added
@@ -297,7 +310,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.45...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.46...HEAD
+[6.0.0-alpha.46]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.45...v6.0.0-alpha.46
 [6.0.0-alpha.45]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.44...v6.0.0-alpha.45
 [6.0.0-alpha.44]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.43...v6.0.0-alpha.44
 [6.0.0-alpha.43]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.42...v6.0.0-alpha.43

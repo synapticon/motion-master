@@ -386,9 +386,15 @@ export default function RootLayout() {
             width={56}
             height={56}
             title={online ? 'API online' : 'API offline'}
-            className={`h-14 w-14 rounded-md transition-shadow ${online
-              ? 'ring-2 ring-ocean/30 shadow-[0_0_60px_18px_var(--color-ocean)]'
-              : 'ring-1 ring-white/10'
+            // The logo PNG is a square tile; rounded-lg is what rounds it. drop-shadow
+            // (a `filter`), not a ring/box-shadow, for the glow: drop-shadow follows the
+            // element's rendered, border-radius-clipped silhouette, so it hugs the rounded
+            // tile; a box-shadow traces the padding-box rectangle (which sits outside the
+            // art) and leaves dark notches at the corners. Online: a teal (ocean #00849b)
+            // core + softer halo. Offline: no glow at all — the absence is the status cue.
+            className={`h-14 w-14 rounded-lg transition-[filter] ${online
+              ? '[filter:drop-shadow(0_0_20px_rgb(0_132_155_/_1))_drop-shadow(0_0_50px_rgb(0_132_155_/_0.95))_drop-shadow(0_0_96px_rgb(0_132_155_/_0.7))]'
+              : ''
               }`}
           />
           {/* Match the landing page's <h1> wordmark styling (Montserrat medium, uppercase,

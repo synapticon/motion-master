@@ -59,7 +59,12 @@
     .logo-icon {
       width: 128px;
       height: 128px;
-      border-radius: 16px;
+      /* The logo PNG is a square tile — this radius is what rounds it. 18px on
+         128px matches the console sidebar's rounded-lg (8px) on its 56px logo —
+         same ~14.3% corner ratio, so the icon reads identically in both. No glow
+         here: the console's teal glow is its API-online indicator, which has no
+         meaning on the landing page. */
+      border-radius: 18px;
       object-fit: contain;
     }
 

@@ -50,6 +50,11 @@ function encodeFilename(name: string): string {
 }
 
 
+// Human-readable elapsed time for a FoE transfer — sub-second in ms, otherwise seconds.
+function formatDuration(ms: number): string {
+  return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`
+}
+
 function decodeUtf8(bytes: Uint8Array): string | null {
   try {
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes)
@@ -104,6 +109,7 @@ export default function DeviceFoePage() {
 
   const [filename, setFilename] = useState('')
   const [reading, setReading] = useState(false)
+  const [readMs, setReadMs] = useState<number | null>(null)
   const [result, setResult] = useState<Uint8Array | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'bytes' | 'text'>('bytes')
@@ -116,6 +122,7 @@ export default function DeviceFoePage() {
   const [writeFilename, setWriteFilename] = useState('')
   const [writeBytes, setWriteBytes] = useState<Uint8Array | null>(null)
   const [writing, setWriting] = useState(false)
+  const [writeMs, setWriteMs] = useState<number | null>(null)
   const [writeOk, setWriteOk] = useState(false)
   const [writeError, setWriteError] = useState<string | null>(null)
 
@@ -140,8 +147,11 @@ export default function DeviceFoePage() {
     setReading(true)
     setResult(null)
     setError(null)
+    setReadMs(null)
+    const start = performance.now()
     try {
       const bytes = await readRaw(name)
+      setReadMs(performance.now() - start)
       setResult(bytes)
       setView('bytes')
     } catch (err) {
@@ -225,6 +235,8 @@ export default function DeviceFoePage() {
     setWriting(true)
     setWriteOk(false)
     setWriteError(null)
+    setWriteMs(null)
+    const start = performance.now()
     try {
       const url = `${api.baseUrl}/api/devices/${slavePosition}/files/${encodeFilename(writeFilename)}`
       const response = await fetch(url, {
@@ -235,6 +247,7 @@ export default function DeviceFoePage() {
         const json = await response.json().catch(() => null)
         throw new Error(json?.error ?? `HTTP ${response.status}`)
       }
+      setWriteMs(performance.now() - start)
       setWriteOk(true)
       if (isSynapticon && files) handleList()
     } catch (err) {
@@ -377,7 +390,8 @@ export default function DeviceFoePage() {
             )}
             {writeOk && (
               <p className="text-xs text-status-good font-mono">
-                Wrote {writeBytes?.length.toLocaleString() ?? 0} byte(s) to {writeFilename}.
+                Wrote {writeBytes?.length.toLocaleString() ?? 0} byte(s) to {writeFilename}
+                {writeMs !== null && ` in ${formatDuration(writeMs)}`}.
               </p>
             )}
           </div>
@@ -452,7 +466,10 @@ export default function DeviceFoePage() {
           <section>
             <div className="flex items-center gap-4 mb-4">
               <p className="eyebrow">Result</p>
-              <span className="text-xs text-grey-500 font-mono">{result.length.toLocaleString()} bytes</span>
+              <span className="text-xs text-grey-500 font-mono">
+                {result.length.toLocaleString()} bytes
+                {readMs !== null && ` · read in ${formatDuration(readMs)}`}
+              </span>
               <button onClick={() => downloadBytes(result, filename)} className={btnCls}>
                 Download
               </button>

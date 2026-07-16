@@ -424,8 +424,8 @@ class FieldbusDriver {
 
   /// @brief AL Status and AL Status Code for a single slave.
   struct SlaveStateRaw {
-    uint16_t alStatus;      ///< Raw AL Status register (bits 3:0 = state, bit 4 = error).
-    uint16_t alStatusCode;  ///< AL Status Code register (ETG.1000.6 §6.4.1).
+    uint16_t alStatus = 0;      ///< Raw AL Status register (bits 3:0 = state, bit 4 = error).
+    uint16_t alStatusCode = 0;  ///< AL Status Code register (ETG.1000.6 §6.4.1).
   };
 
   /// @brief Reads the current AL Status for each slave in @p positions.
@@ -515,10 +515,8 @@ class FieldbusDriver {
   /// @param index          CoE object index.
   /// @return The raw complete-access blob on success, or an error string (including when the
   ///         driver or the slave does not support complete access).
-  virtual std::expected<std::vector<uint8_t>, std::string> readSdoComplete(uint16_t slavePosition,
-                                                                           uint16_t index) {
-    (void)slavePosition;
-    (void)index;
+  virtual std::expected<std::vector<uint8_t>, std::string> readSdoComplete(
+      uint16_t /*slavePosition*/, uint16_t /*index*/) {
     return std::unexpected("complete access not supported by this driver");
   }
 

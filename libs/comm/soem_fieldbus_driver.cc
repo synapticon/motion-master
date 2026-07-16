@@ -33,7 +33,7 @@ namespace mm::comm::soem {
 SoemFieldbusDriver::SoemFieldbusDriver(SoemFieldbusDriverConfig config)
     : ifname_(std::move(config.ifname)), mailboxStatusFmmu_(config.mailboxStatusFmmu) {}
 
-SoemFieldbusDriver::~SoemFieldbusDriver() {}
+SoemFieldbusDriver::~SoemFieldbusDriver() { closeContext(); }
 
 std::expected<void, std::string> SoemFieldbusDriver::init() {
   std::lock_guard<std::mutex> lock(socketMutex_);
@@ -423,10 +423,29 @@ int SoemFieldbusDriver::exchangeProcessData(std::span<const uint8_t> outputs,
   return wkc;
 }
 
-void SoemFieldbusDriver::stop() {}
+void SoemFieldbusDriver::stop() { closeContext(); }
+
+void SoemFieldbusDriver::closeContext() {
+  std::lock_guard<std::mutex> lock(socketMutex_);
+  // ecx_init opened the raw socket; ecx_close releases it (via ecx_closenic) and takes the NIC
+  // out of promiscuous mode. Without it every reset()/re-init cycle leaks the socket fd.
+  // Idempotent by construction: ctx_.reset() below is std::unique_ptr::reset — it frees the
+  // context and nulls the pointer — so the first call (from stop()) establishes ctx_ == nullptr
+  // and the second (from the destructor) sees the guard fail and does nothing; ecx_close never
+  // runs twice. The two are sequential, not concurrent — DeviceManager::reset() runs stop() fully
+  // (and stopExchange() before it, so no lock-free exchangeProcessData is in flight against ctx_)
+  // before driver_.reset() fires the destructor.
+  if (ctx_) {
+    ecx_close(ctx_.get());
+    ctx_.reset();  // unique_ptr::reset: destroy the ecx_context, leave ctx_ holding nullptr
+  }
+}
 
 SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return {};
+  }
   const auto& s = ctx_->slavelist[position];
   return {
       .name = std::string(s.name),
@@ -452,6 +471,9 @@ uint16_t SoemFieldbusDriver::slaveState(uint16_t position) const {
 std::expected<std::vector<FieldbusDriver::SlaveStateRaw>, std::string>
 SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
   ecx_readstate(ctx_.get());
   std::vector<SlaveStateRaw> result;
   result.reserve(positions.size());
@@ -588,6 +610,10 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
   // so they don't flood the log, while a direct (user-initiated) read keeps its debug trace.
   const auto sdoLevel = sdoLogQuiet ? spdlog::level::trace : spdlog::level::debug;
   spdlog::log(sdoLevel, "SDOread slave {} 0x{:04X}:{:02X}", slavePosition, index, subindex);
+  // 4096-byte upload buffer: ample for every scalar/string parameter a SOMANET drive exposes. An
+  // object larger than this is silently truncated to 4096 bytes (ecx_SDOread fills the buffer and
+  // reports that size with a positive wkc — no overflow indication), so a genuinely oversized
+  // object would come back short. Grow this cap if such an object ever appears.
   std::vector<uint8_t> data(4096, 0);
   int size = static_cast<int>(data.size());
   int wkc = ecx_SDOread(ctx_.get(), slavePosition, index, subindex, FALSE, &size, data.data(),
@@ -764,10 +790,10 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSii(
   if (!ctx_) {
     return std::unexpected("driver not initialised");
   }
-  if (slavePosition < 1 || slavePosition > ctx_->slavecount) {
-    return std::unexpected(
-        std::format("slave {} out of range (1..{})", slavePosition, ctx_->slavecount));
-  }
+  // No position bounds check: the node layer (DeviceManager) validates every slavePosition against
+  // the live device set before any driver call and 404s an unknown one, so the driver trusts the
+  // position and indexes slavelist directly — the same contract every other slave-indexed accessor
+  // here relies on (see DeviceManager::validatePositions and the single-device findDevice guards).
   // SOMANET EEPROMs report a large declared size (the 'size' word, ETG.1000.6 §5.4) but populate
   // only the first few hundred bytes, terminated by the END (0xFFFF) category. Reading a fixed
   // conservative window keeps the read bounded and always covers the real content; the parser
@@ -789,10 +815,8 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSii(uint16_t slavePosi
   if (!ctx_) {
     return std::unexpected("driver not initialised");
   }
-  if (slavePosition < 1 || slavePosition > ctx_->slavecount) {
-    return std::unexpected(
-        std::format("slave {} out of range (1..{})", slavePosition, ctx_->slavecount));
-  }
+  // No position bounds check: see readSii — the caller (DeviceManager) validates slavePosition
+  // against the live device set first, and every slave-indexed accessor here trusts that.
   if (data.size() % 2 != 0) {
     return std::unexpected(
         std::format("SII image length {} is odd; EEPROM is written in 16-bit words", data.size()));
@@ -996,6 +1020,8 @@ std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::setPro
   return decodeWatchdog(divider, ticks, status);
 }
 
+namespace {
+
 // BOOT and PRE-OP use different mailbox sizes (e.g. 1024 vs 128 bytes on Integro
 // devices). After a firmware download the slave context still holds BOOT SM parameters;
 // without reprogramming them here an INIT→PRE-OP transition would reuse stale BOOT
@@ -1092,6 +1118,8 @@ void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState 
   // ecx_config_init, which also leaves EEPROM with the PDI before requesting a state change.
   ecx_eeprom2pdi(ctx, slave);
 }
+
+}  // namespace
 
 void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& positions,
                                            std::optional<EtherCatState> requiredState,

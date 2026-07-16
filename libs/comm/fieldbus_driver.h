@@ -327,6 +327,16 @@ struct ProcessDataWatchdogConfig {
 /// PDO touches disjoint state (the process-data IOmap) from the control plane
 /// (mailbox pool, slave state). Keeping PDO out of the mutex keeps the RT cycle
 /// unbounded by a slow SDO or object-dictionary enumeration.
+///
+/// @note Precondition on @c slavePosition/@c position: every slave-indexed method here trusts
+/// its position argument and indexes a fixed-size slave table @b without bounds-checking. Callers
+/// must pass a valid, discovered bus position (1..number-of-slaves) — an unknown or out-of-range
+/// value is undefined behaviour (an out-of-bounds access, and for a write a datagram to a bogus
+/// station). This is deliberate: the driver is a thin transport, and validating the position is
+/// the caller's responsibility. @c DeviceManager does this for every call (it rejects an unknown
+/// position with a 404 before reaching the driver); a program using a driver directly must
+/// validate positions itself. The same "caller owns the preconditions" contract applies to
+/// lifecycle ordering (@c init → @c scan → @c configureProcessData) and slave AL state.
 class FieldbusDriver {
  public:
   virtual ~FieldbusDriver() = default;

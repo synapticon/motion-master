@@ -36,6 +36,11 @@ struct SoemFieldbusDriverConfig {
 /// Owns one @c ecx_contextt master context and its PDO I/O map.  @c App
 /// creates exactly one instance and injects it into @c DeviceManager and
 /// @c GameLoop.
+///
+/// @note As with the @c FieldbusDriver interface, the slave-indexed methods trust @c slavePosition
+/// and index SOEM's fixed-size @c slavelist without bounds-checking — pass only valid, discovered
+/// positions (1..@c slaveCount). @c DeviceManager guarantees this; a direct caller must validate
+/// positions itself.
 class SoemFieldbusDriver : public FieldbusDriver {
  public:
   /// @brief Constructs the driver from its SOEM-specific configuration.
@@ -200,6 +205,12 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// other ESC keeps combined LRW, so there is no behaviour change for existing setups. Must be
   /// called before @c ecx_config_map_group, under @c socketMutex_.
   std::expected<void, std::string> blockLrwOnPruIcssSlaves();
+
+  /// @brief Closes the SOEM NIC (ecx_close) and releases the master context, if open.
+  ///
+  /// Non-virtual so the destructor can call it without a virtual dispatch; @c stop() forwards
+  /// here. Idempotent — a second call is a no-op once @c ctx_ is null. Takes @c socketMutex_.
+  void closeContext();
 
   std::string ifname_;
   // Keep SOEM 2.0's mailbox-status FMMU active (see the constructor). Default false: the FMMU is

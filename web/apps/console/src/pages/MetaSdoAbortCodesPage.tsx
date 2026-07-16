@@ -29,7 +29,7 @@ export default function MetaSdoAbortCodesPage() {
           </>
         }
       />
-      <div className="p-4 sm:p-8">
+      <div className="p-4 sm:px-8 sm:py-7">
         <div className="flex justify-end mb-4">
           <button
             onClick={() => query.refetch()}

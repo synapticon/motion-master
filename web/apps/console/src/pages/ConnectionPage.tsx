@@ -154,7 +154,7 @@ export default function ConnectionPage() {
         title="Connection"
         description="Configure the host and ports used to reach the Motion Master backend, check the TLS certificate status and refresh it, review the configuration the backend started with, and inspect the OS and hardware it is running on."
       />
-      <div className="p-4 sm:p-8 space-y-6">
+      <div className="p-4 sm:px-8 sm:py-7 space-y-6">
         <div className="space-y-4">
           <Callout variant={versionMismatch ? 'warning' : 'info'}>
             <p>

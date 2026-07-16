@@ -476,7 +476,7 @@ export default function DevicePdoMappingPage() {
         title="PDO Mapping"
         description="Edit which objects the device exchanges cyclically, and where they sit in the process image."
       />
-      <div className="p-4 sm:p-8 space-y-6">
+      <div className="p-4 sm:px-8 sm:py-7 space-y-6">
         <div className="space-y-4">
           <Callout variant="info">
             Rewrites the device's sync-manager PDO assignment (0x1C12 / 0x1C13) and mapping objects

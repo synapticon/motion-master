@@ -31,7 +31,7 @@ export default function ServerLogPage() {
         title="Log"
         description="View the backend's diagnostic log — the in-memory ring buffer of server-side events (up to 100 000 entries), useful for troubleshooting fieldbus and API operations."
       />
-      <div className="p-4 sm:p-8 flex flex-col flex-1 min-h-0 space-y-4">
+      <div className="p-4 sm:px-8 sm:py-7 flex flex-col flex-1 min-h-0 space-y-4">
         <div className="flex items-center justify-end">
           <button
             onClick={() => logQuery.refetch()}

@@ -324,7 +324,7 @@ export default function FieldbusConfigurationPage() {
           </>
         }
       />
-      <div className="p-4 sm:p-8 space-y-6">
+      <div className="p-4 sm:px-8 sm:py-7 space-y-6">
         <ConfigExplainer />
 
         <div className="flex justify-end">

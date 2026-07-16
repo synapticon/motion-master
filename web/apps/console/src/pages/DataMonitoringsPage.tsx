@@ -145,7 +145,7 @@ export default function DataMonitoringsPage() {
     return (
       <div>
         <PageHeader eyebrow="Data" title="Monitorings" />
-        <p className="p-4 sm:p-8 text-sm text-grey-600">
+        <p className="p-4 sm:px-8 sm:py-7 text-sm text-grey-600">
           Connect and scan the bus to create and view monitorings.
         </p>
       </div>
@@ -160,7 +160,7 @@ export default function DataMonitoringsPage() {
         description="Record drive parameters over time. PDO-mapped objects are read live from the process image; others are polled over SDO. Monitoring collects only while a device is in SAFE-OP/OP."
       />
 
-      <div className="p-4 sm:p-8 space-y-6">
+      <div className="p-4 sm:px-8 sm:py-7 space-y-6">
         <CreateMonitoringForm
           devices={devices}
           paramsByDevice={paramsByDevice}

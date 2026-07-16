@@ -184,7 +184,7 @@ export default function ServerGameLoopPage() {
           </>
         }
       />
-      <div className="p-4 sm:p-8 space-y-6">
+      <div className="p-4 sm:px-8 sm:py-7 space-y-6">
         <GameLoopExplainer />
 
         {/* Always-present status line — the skip state changes its text/colour in this fixed slot

@@ -719,6 +719,24 @@ export interface SdoAbortCode {
   description: string;
 }
 
+export interface MailboxErrorCode {
+  /**
+   * 16-bit mailbox error Detail code (ETG.1000.4, Table 30)
+   * @example 1
+   */
+  code: number;
+  /**
+   * Symbolic name
+   * @example "MBXERR_SYNTAX"
+   */
+  name: string;
+  /**
+   * Human-readable meaning of the error
+   * @example "Syntax of the 6-octet mailbox header is wrong"
+   */
+  description: string;
+}
+
 export interface ObjectDataTypeInfo {
   /**
    * ETG.1020 data type code

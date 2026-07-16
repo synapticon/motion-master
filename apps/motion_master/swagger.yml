@@ -50,8 +50,8 @@ info:
       the parsed structure or the raw EEPROM bytes per the `Accept` header.
 
     The `/api/meta/*` endpoints expose static reference tables — AL status codes,
-    ESC register definitions, FoE error codes, SDO abort codes, and CoE data types —
-    so clients can decode numeric values without hard-coding them.
+    ESC register definitions, FoE error codes, SDO abort codes, mailbox error codes,
+    and CoE data types — so clients can decode numeric values without hard-coding them.
 
     ## Monitoring WebSocket
 
@@ -676,6 +676,25 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SdoAbortCode"
+  /api/meta/mailbox-error-codes:
+    get:
+      summary: List all known CoE mailbox error codes
+      operationId: getMailboxErrorCodes
+      description: >
+        Returns the static catalogue of CoE mailbox error codes defined in
+        ETG.1000.4, Table 30 ("Error Reply Service Data").  A slave returns one of
+        these when the mailbox layer (below a specific protocol such as CoE/FoE)
+        rejects a transfer; the code is embedded in the error text the mailbox
+        endpoints return.
+      responses:
+        "200":
+          description: Array of mailbox error code descriptors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MailboxErrorCode"
   /api/meta/object-data-types:
     get:
       summary: List all known CoE object dictionary data types
@@ -3047,6 +3066,22 @@ components:
           type: string
           description: Human-readable meaning of the abort
           example: "The object does not exist in the object dictionary"
+    MailboxErrorCode:
+      type: object
+      required: [code, name, description]
+      properties:
+        code:
+          type: integer
+          description: 16-bit mailbox error Detail code (ETG.1000.4, Table 30)
+          example: 1
+        name:
+          type: string
+          description: Symbolic name
+          example: "MBXERR_SYNTAX"
+        description:
+          type: string
+          description: Human-readable meaning of the error
+          example: "Syntax of the 6-octet mailbox header is wrong"
     ObjectDataTypeInfo:
       type: object
       required: [code, name, bitSize]

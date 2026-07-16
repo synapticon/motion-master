@@ -5,6 +5,7 @@ add_library(
   esc_registers.cc
   fieldbus_driver.cc
   foe_error_codes.cc
+  mailbox_error_codes.cc
   object_data_types.cc
   sdo_abort_codes.cc
   sii.cc

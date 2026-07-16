@@ -24,6 +24,7 @@
 #include <vector>
 
 #include "comm/al_status_codes.h"
+#include "comm/mailbox_error_codes.h"
 #include "comm/sdo_abort_codes.h"
 #include "comm/sdo_log.h"
 
@@ -140,8 +141,12 @@ std::string sdoErrorSuffix(ecx_contextt* ctx) {
       return reason.empty() ? std::format(" (SDO abort 0x{:08X})", code)
                             : std::format(" (SDO abort 0x{:08X}: {})", code, reason);
     }
-    case EC_ERR_TYPE_MBX_ERROR:
-      return " (mailbox error)";
+    case EC_ERR_TYPE_MBX_ERROR: {
+      const auto code = static_cast<uint16_t>(err.ErrorCode);
+      const std::string_view reason = mailboxErrorCodeDescription(code);
+      return reason.empty() ? std::format(" (mailbox error 0x{:04X})", code)
+                            : std::format(" (mailbox error 0x{:04X}: {})", code, reason);
+    }
     case EC_ERR_TYPE_PACKET_ERROR:
       return " (packet/timeout error)";
     default:

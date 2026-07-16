@@ -18,6 +18,7 @@ import {
   EscRegister,
   FoeErrorCode,
   GameLoopHealth,
+  MailboxErrorCode,
   Monitoring,
   ObjectDataTypeInfo,
   OutputStageResult,
@@ -522,6 +523,20 @@ export class Api<
   getSdoAbortCodes = (params: RequestParams = {}) =>
     this.request<SdoAbortCode[], any>({
       path: `/api/meta/sdo-abort-codes`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Returns the static catalogue of CoE mailbox error codes defined in ETG.1000.4, Table 30 ("Error Reply Service Data").  A slave returns one of these when the mailbox layer (below a specific protocol such as CoE/FoE) rejects a transfer; the code is embedded in the error text the mailbox endpoints return.
+   *
+   * @name GetMailboxErrorCodes
+   * @summary List all known CoE mailbox error codes
+   * @request GET:/api/meta/mailbox-error-codes
+   */
+  getMailboxErrorCodes = (params: RequestParams = {}) =>
+    this.request<MailboxErrorCode[], any>({
+      path: `/api/meta/mailbox-error-codes`,
       method: "GET",
       format: "json",
       ...params,

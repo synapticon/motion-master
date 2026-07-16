@@ -390,13 +390,18 @@ class FieldbusDriver {
   /// layout is empty (zero-sized spans, no slaves).
   virtual PdoLayout processDataLayout() = 0;
 
-  /// @brief Returns the static ESC configuration of every slave, captured by the last scan.
+  /// @brief Returns the static ESC configuration of every slave, as last programmed by the master.
   ///
   /// A diagnostic snapshot (Sync Managers, FMMUs, mailbox, distributed clock, addresses) of what
-  /// the master programmed into each slave's EtherCAT Slave Controller. Read from cached state —
-  /// no bus I/O — and valid once @c scan()/@c configureProcessData() have run. Optional capability:
-  /// the default returns an empty vector for transports without an ESC (e.g. SPoE); the SOEM
-  /// driver overrides it.
+  /// the master programmed into each slave's EtherCAT Slave Controller. Read from cached state — no
+  /// bus I/O — so it mirrors what the master believes it programmed, not a live ESC read. It is
+  /// built up across control-plane operations, not one: @c scan() sets identity, addresses, the
+  /// mailbox SMs and DC capability; @c configureProcessData() adds the process-data SMs, FMMUs and
+  /// DC timing (and rebuilds the FMMUs on a re-map); and a BOOT state transition transiently
+  /// reprograms the mailbox SMs (reset on the return to PRE-OP). A meaningful snapshot therefore
+  /// needs @c scan(), plus @c configureProcessData() for the process-data SMs/FMMUs. Optional
+  /// capability: the default returns an empty vector for transports without an ESC (e.g. SPoE); the
+  /// SOEM driver overrides it.
   ///
   /// @return Per-slave configuration in bus order, or an empty vector if unsupported / unscanned.
   virtual std::vector<SlaveConfig> busConfig() const { return {}; }

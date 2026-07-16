@@ -517,6 +517,15 @@ class FieldbusDriver {
   /// bytes the slave sent (resized to the actual transfer size).
   /// Called from HTTP handler threads; must not overlap with @c exchangeProcessData.
   ///
+  /// Returns an owning @c std::vector, not a @c std::span, deliberately: the bytes are produced
+  /// by this call and their ownership must transfer to the caller, which a non-owning view cannot
+  /// do (a span would have to alias driver state that the next call clobbers, or storage nothing
+  /// frees). Nor can the caller lend a sized buffer the way @c readRegister does — an SDO object's
+  /// size is unknown until the transfer completes (expedited vs. segmented), which is exactly why
+  /// the implementation over-allocates and resizes. The return is moved out, so this costs no copy.
+  /// (@c std::span is used elsewhere in this interface only for borrowed *inputs* — e.g.
+  /// @c writeSdo / @c exchangeProcessData — never to hand back freshly produced data.)
+  ///
   /// @param slavePosition  1-based slave position on the bus.
   /// @param index          CoE object index.
   /// @param subindex       CoE object subindex.

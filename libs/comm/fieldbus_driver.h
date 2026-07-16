@@ -376,8 +376,11 @@ class FieldbusDriver {
   /// FMMUs, and fills the driver-owned IOmap.  Slaves must be in PRE-OP (mailbox active)
   /// so the assignment can be read.  Run again to re-map after the slave set changes (e.g.
   /// a device returning from a firmware download) — the previous @c PdoLayout is invalidated.
-  /// Serialised with other control-plane operations via the socket mutex; must not overlap
-  /// with @c exchangeProcessData.
+  /// Serialised with other control-plane operations via the socket mutex. This is the one
+  /// operation that must @b not overlap @c exchangeProcessData — it rewrites the IOmap the RT
+  /// cycle reads — and, since the lock-free PDO path does not take the socket mutex, that
+  /// exclusion is enforced by the caller (@c DeviceManager drains exchange and unpublishes the
+  /// process image before re-mapping), not by the mutex.
   ///
   /// @return Void on success, or an error string if no driver is initialised, no process
   ///         data is mapped, or the image exceeds @c kMaxProcessImageBytes.
@@ -476,7 +479,8 @@ class FieldbusDriver {
   /// counters. The counters are monotonic since the last clear (power cycle / explicit write), so
   /// callers compare successive snapshots and alert on a rising delta — a single non-zero value is
   /// historical, a climbing one is an active fault. Serialised with other control-plane operations
-  /// via the socket mutex; must not overlap with @c exchangeProcessData.
+  /// via the socket mutex; runs concurrently with the lock-free @c exchangeProcessData and never
+  /// blocks the RT cycle.
   ///
   /// Optional capability: the default returns an error for transports without an ESC (e.g. SPoE);
   /// the SOEM driver overrides it.
@@ -498,7 +502,8 @@ class FieldbusDriver {
   /// SAFE-OP/OP (the reference time is distributed in the cyclic frame), and the difference
   /// converges toward zero as the slaves' drift-compensation loops settle — poll this and watch
   /// for one that stays large or grows. Serialised with other control-plane operations via the
-  /// socket mutex; must not overlap with @c exchangeProcessData.
+  /// socket mutex; runs concurrently with the lock-free @c exchangeProcessData and never blocks
+  /// the RT cycle.
   ///
   /// Optional capability: the default returns an error for transports without an ESC (e.g. SPoE);
   /// the SOEM driver overrides it.
@@ -515,7 +520,9 @@ class FieldbusDriver {
   ///
   /// Allocates up to 4096 bytes, performs a mailbox SDO upload, and returns the exact
   /// bytes the slave sent (resized to the actual transfer size).
-  /// Called from HTTP handler threads; must not overlap with @c exchangeProcessData.
+  /// Called from HTTP handler threads; serialised with other control-plane operations via the
+  /// socket mutex, but runs concurrently with the lock-free @c exchangeProcessData — a slow SDO
+  /// never blocks the RT cycle (the reason the PDO path stays out of the mutex).
   ///
   /// Returns an owning @c std::vector, not a @c std::span, deliberately: the bytes are produced
   /// by this call and their ownership must transfer to the caller, which a non-owning view cannot
@@ -561,7 +568,8 @@ class FieldbusDriver {
   /// Performs a mailbox SDO download of @p data to (@p index, @p subindex). The slave
   /// must be in PRE-OP, SAFE-OP, or OP (mailbox communication active).
   /// Called from non-RT (HTTP handler) threads; serialized with other control-plane
-  /// operations via the driver's socket mutex. Must not overlap with @c exchangeProcessData.
+  /// operations via the driver's socket mutex, and runs concurrently with the lock-free
+  /// @c exchangeProcessData (never blocks the RT cycle).
   ///
   /// @param slavePosition  1-based slave position on the bus.
   /// @param index          CoE object index.
@@ -592,10 +600,11 @@ class FieldbusDriver {
   /// Reads the slave's EEPROM through the ESC's EEPROM-control registers and returns the raw
   /// byte image — a fixed 128-byte header followed by the self-describing category section
   /// (strings, general info, FMMU/Sync-Manager and PDO defaults, distributed-clock settings).
-  /// Decode it with @c mm::comm::parseSii. EEPROM access is a control-plane operation: it takes
-  /// the socket mutex per transaction, must not overlap with @c exchangeProcessData, and is most
-  /// reliable while the slave is in INIT or PRE-OP. The driver hands EEPROM control back to the
-  /// slave's PDI before returning.
+  /// Decode it with @c mm::comm::parseSii. EEPROM access is a control-plane operation serialised
+  /// on the socket mutex per transaction (it runs concurrently with the lock-free
+  /// @c exchangeProcessData); the real constraint is slave state — it is most reliable while the
+  /// slave is in INIT or PRE-OP. The driver hands EEPROM control back to the slave's PDI before
+  /// returning.
   ///
   /// Optional capability: the default returns an error for transports without an ESC EEPROM
   /// (e.g. SPoE); the SOEM driver overrides it.
@@ -612,9 +621,10 @@ class FieldbusDriver {
   /// Writes @p data to the slave's EEPROM through the ESC's EEPROM-control registers, one 16-bit
   /// word at a time from word address 0. @p data must be a whole number of 16-bit words (even
   /// length). This is a destructive control-plane operation: a malformed image can leave the slave
-  /// unidentifiable until re-flashed. EEPROM access takes the socket mutex, must not overlap with
-  /// @c exchangeProcessData, and is only safe while the slave is in INIT or PRE-OP. The slave does
-  /// not adopt the new contents until its ESC reloads the EEPROM — i.e. after a power cycle.
+  /// unidentifiable until re-flashed. EEPROM access takes the socket mutex (running concurrently
+  /// with the lock-free @c exchangeProcessData) and is only safe while the slave is in INIT or
+  /// PRE-OP. The slave does not adopt the new contents until its ESC reloads the EEPROM — i.e.
+  /// after a power cycle.
   ///
   /// Optional capability: the default returns an error for transports without an ESC EEPROM
   /// (e.g. SPoE); the SOEM driver overrides it.
@@ -633,7 +643,8 @@ class FieldbusDriver {
   /// Sends an FoE read request for @p filename and collects all data packets from the slave.
   /// FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is
   /// responsible for ensuring the device is in a suitable state.
-  /// Called from HTTP handler threads; must not overlap with @c exchangeProcessData.
+  /// Called from HTTP handler threads; serialised with other control-plane operations via the
+  /// socket mutex, and runs concurrently with the lock-free @c exchangeProcessData.
   ///
   /// @param slavePosition  1-based slave position on the bus.
   /// @param filename       FoE filename as recognised by the slave firmware.
@@ -660,7 +671,8 @@ class FieldbusDriver {
   /// @brief Reads bytes from an ESC register via a Configured-Address Read (FPRD) datagram.
   ///
   /// @p data.size() bytes are read from register @p address of the slave at @p slavePosition.
-  /// Called from HTTP handler threads; must not overlap with @c exchangeProcessData.
+  /// Called from HTTP handler threads; serialised with other control-plane operations via the
+  /// socket mutex, and runs concurrently with the lock-free @c exchangeProcessData.
   ///
   /// @param slavePosition  1-based slave position on the bus.
   /// @param address        ESC register address (e.g. @c 0x0130 for DL Status).
@@ -672,7 +684,8 @@ class FieldbusDriver {
   /// @brief Writes bytes to an ESC register via a Configured-Address Write (FPWR) datagram.
   ///
   /// @p data.size() bytes are written to register @p address of the slave at @p slavePosition.
-  /// Called from HTTP handler threads; must not overlap with @c exchangeProcessData.
+  /// Called from HTTP handler threads; serialised with other control-plane operations via the
+  /// socket mutex, and runs concurrently with the lock-free @c exchangeProcessData.
   ///
   /// @param slavePosition  1-based slave position on the bus.
   /// @param address        ESC register address.
@@ -688,7 +701,7 @@ class FieldbusDriver {
   /// @c ticks × 40 ns × (divider + 2) plus the live running/expired status. A zero time register
   /// means the watchdog is disabled. Unlike @c readDiagnostics (which returns the expiration
   /// counter), this returns the configured timeout and its current run state. Serialised via the
-  /// socket mutex; must not overlap with @c exchangeProcessData.
+  /// socket mutex; runs concurrently with the lock-free @c exchangeProcessData.
   ///
   /// Optional capability: the default returns an error for transports without an ESC (e.g. SPoE);
   /// the SOEM driver overrides it.
@@ -711,8 +724,8 @@ class FieldbusDriver {
   /// current divider can represent (more than 65535 ticks) — the error names the maximum.
   ///
   /// The write persists across re-maps and re-scans (SOEM never reprograms these registers) until
-  /// the ESC reloads EEPROM (power cycle / explicit reload). Serialised via the socket mutex; must
-  /// not overlap with @c exchangeProcessData.
+  /// the ESC reloads EEPROM (power cycle / explicit reload). Serialised via the socket mutex; runs
+  /// concurrently with the lock-free @c exchangeProcessData.
   ///
   /// Optional capability: the default returns an error for transports without an ESC (e.g. SPoE);
   /// the SOEM driver overrides it.

@@ -81,11 +81,8 @@ std::vector<NetworkAdapter> enumerateNetworkAdapters() {
   std::vector<NetworkAdapter> adapters;
 #ifdef _WIN32
   {
-    int nAddressCount = 0;
     ULONG ulFlags = GAA_FLAG_INCLUDE_ALL_COMPARTMENTS;
     ULONG ulFamily = AF_UNSPEC;
-    unsigned char* pszBuff = nullptr;
-    unsigned char** pszAddress = &pszBuff;
     PIP_ADAPTER_ADDRESSES pCurrAddresses = nullptr;
     PIP_ADAPTER_ADDRESSES pAddresses = nullptr;
     DWORD dwRetVal = 0;
@@ -111,18 +108,6 @@ std::vector<NetworkAdapter> enumerateNetworkAdapters() {
     if (dwRetVal == NO_ERROR) {
       pCurrAddresses = pAddresses;
       while (pCurrAddresses) {
-        pCurrAddresses = pCurrAddresses->Next;
-        ++nAddressCount;
-      }
-
-      *pszAddress = reinterpret_cast<unsigned char*>(
-          HeapAlloc(hHeap, 0x00, MAX_ADAPTER_ADDRESS_LENGTH * nAddressCount));
-      pCurrAddresses = pAddresses;
-      nAddressCount = 0;
-      while (pCurrAddresses) {
-        RtlCopyMemory(*pszAddress + (MAX_ADAPTER_ADDRESS_LENGTH * nAddressCount++),
-                      pCurrAddresses->PhysicalAddress, MAX_ADAPTER_ADDRESS_LENGTH);
-
         std::stringstream ss;
         ss << std::hex << std::uppercase;
         constexpr int kMacLen = 6;

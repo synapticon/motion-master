@@ -74,7 +74,7 @@ function Metric({
           : 'text-grey-900'
   return (
     <div className="border border-grey-200 p-4" title={title}>
-      <p className="eyebrow text-grey-500 mb-2">{label}</p>
+      <p className="eyebrow text-grey-500 mb-2 cursor-help">{label}</p>
       <p className={`font-display text-3xl font-light tabular-nums ${valueTone}`}>{value}</p>
       {sub && <p className="text-xs text-grey-600 mt-1">{sub}</p>}
     </div>

@@ -163,7 +163,7 @@ export default function DataProcessDataPage() {
 
       <div className="p-4 sm:px-8 sm:py-7 space-y-6">
         <div className="space-y-4">
-          <Callout variant="danger">
+          <Callout variant="warning">
             Writing an output stages it straight into the drive's process data and re-sends it every
             cycle. Manually setting <span className="font-mono">controlword</span>, modes of
             operation, or a motion target can cause the drive to move. Make sure the machine is safe

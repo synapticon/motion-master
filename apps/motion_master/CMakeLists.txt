@@ -1,11 +1,11 @@
 # Embed swagger.yml into the binary (served verbatim at GET /api/swagger.yml) so a client can fetch
 # the running server's exact contract with no packaged file. Regenerated whenever the spec changes;
 # byte-array embedding (see cmake/embed_file.cmake) round-trips arbitrary content safely.
-set(swagger_spec_h "${CMAKE_CURRENT_BINARY_DIR}/swagger_spec.h")
+set(SWAGGER_SPEC_H "${CMAKE_CURRENT_BINARY_DIR}/swagger_spec.h")
 add_custom_command(
-  OUTPUT "${swagger_spec_h}"
+  OUTPUT "${SWAGGER_SPEC_H}"
   COMMAND ${CMAKE_COMMAND} -DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/swagger.yml
-          -DOUTPUT=${swagger_spec_h} -DVAR=kSwaggerYml -P ${CMAKE_SOURCE_DIR}/cmake/embed_file.cmake
+          -DOUTPUT=${SWAGGER_SPEC_H} -DVAR=kSwaggerYml -P ${CMAKE_SOURCE_DIR}/cmake/embed_file.cmake
   DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/swagger.yml" "${CMAKE_SOURCE_DIR}/cmake/embed_file.cmake"
   COMMENT "Embedding swagger.yml"
   VERBATIM)
@@ -21,7 +21,7 @@ add_executable(
   monitoring_api.cc
   cert_info.cc
   cert_updater.cc
-  "${swagger_spec_h}")
+  "${SWAGGER_SPEC_H}")
 
 # The generated swagger_spec.h lives in the binary dir; http_server.cc includes it from there.
 target_include_directories(motion_master PRIVATE ${CMAKE_CURRENT_BINARY_DIR})

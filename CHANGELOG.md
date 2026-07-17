@@ -19,6 +19,17 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.47] - 2026-07-17
+
+### Added
+
+- `GET /api/swagger.yml` serves the OpenAPI spec directly from the running server, and a spec-driven Python reference client (with runnable examples) ships alongside it.
+- Console: FoE read results can now be viewed as JSON.
+
+### Fixed
+
+- Disabled TLS 1.3 session tickets to stop intermittent WebSocket-upgrade hangs.
+
 ## [6.0.0-alpha.46] - 2026-07-16
 
 ### Changed
@@ -310,7 +321,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.46...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.47...HEAD
+[6.0.0-alpha.47]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.46...v6.0.0-alpha.47
 [6.0.0-alpha.46]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.45...v6.0.0-alpha.46
 [6.0.0-alpha.45]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.44...v6.0.0-alpha.45
 [6.0.0-alpha.44]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.43...v6.0.0-alpha.44

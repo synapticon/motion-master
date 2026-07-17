@@ -20,7 +20,7 @@ streaming live process data and tearing back down.
 | `examples/02_scan.py` | `POST /api/scan` — discover slaves. |
 | `examples/03_transition_preop.py` | `POST /api/devices/state` — move all devices to PRE-OP. |
 | `examples/04_read_sdo.py` | `GET .../sdo/{index}/{subindex}` — raw CoE SDO upload. |
-| `examples/05_read_file.py` | `GET .../files/{filename}` — read a file over FoE. |
+| `examples/05_read_file.py` | `GET .../files/{filename}` — read a file over FoE (saved into the git-ignored `files/`). |
 | `examples/06_read_parameters.py` | `POST .../parameters/init?readValues=true` — dump the full object dictionary with values. |
 | `examples/07_transition_op.py` | `POST /api/devices/state` — climb PRE-OP → SAFE-OP → OP. |
 | `examples/08_monitor.py` | `POST /api/monitorings` + WebSocket — stream live process data. |
@@ -55,8 +55,9 @@ source of truth instead of duplicating them. Four things fall out of that:
   construction — point it at an older or newer Motion Master and it adapts; it
   can't be a stale client against a fresh server.
 - **It's standalone.** Because the contract is fetched live, there's no bundled
-  spec, no code generation, and no checkout of this repository — copy the four
-  `.py` files anywhere, `pip install`, and point at a server.
+  spec, no code generation, and no checkout of this repository — copy the two
+  client files (`mm_client.py` + `common.py`) anywhere, `pip install`, and point
+  at a server.
 - **It reads as a teaching client.** Each call says "invoke *this named
   operation*" — a clean tour of the API surface — instead of a pile of URL
   string-building that hides what's being shown.
@@ -106,7 +107,7 @@ python examples/02_scan.py
 python examples/03_transition_preop.py
 python examples/04_read_sdo.py                      # Statusword 0x6041:00 by default
 python examples/04_read_sdo.py --index 0x6064 --subindex 0
-python examples/05_read_file.py --filename log.csv
+python examples/05_read_file.py --filename log.csv   # saved to files/ (git-ignored)
 python examples/06_read_parameters.py               # dump the object dictionary + values
 python examples/07_transition_op.py                 # climb to OP (exchanging state)
 python examples/08_monitor.py --count 10            # stream 10 batches, then stop

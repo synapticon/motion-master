@@ -1,4 +1,4 @@
-"""A tiny Motion Master HTTP API client driven by the OpenAPI spec.
+"""A reference Motion Master HTTP API client driven by the OpenAPI spec.
 
 On construction the client fetches the running server's own OpenAPI spec from
 GET /api/swagger.yml, indexes every operation by its operationId, and resolves

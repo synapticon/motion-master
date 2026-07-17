@@ -1,10 +1,9 @@
-# Motion Master Python client examples
+# Motion Master reference Python client
 
-A small, dependency-light Python client for the Motion Master HTTP API and
+A reference Python client for the Motion Master HTTP API and
 monitoring WebSocket, driven directly by the server's own OpenAPI spec, which it
-fetches at startup from `GET /api/swagger.yml`: operations are resolved by
-`operationId`, never hardcoded as URLs, so the client stays correct as the API
-evolves and always matches the exact contract of the server it talks to. Each script demonstrates
+fetches at startup from `GET /api/swagger.yml` (see [Why it reads the
+spec](#why-it-reads-the-spec)). Each script demonstrates
 one part of the API and runs on its own; against a freshly started,
 **uninitialised** Motion Master the numbered scripts also read in order as a
 walkthrough of the full fieldbus lifecycle — from bringing up a driver to
@@ -34,6 +33,44 @@ Every request goes through one method — `MMClient.call(operationId, ...)` — 
 client.call("init", body={"driver": "soem", "adapter": "eth0"})
 client.call("sdoUpload", path={"slavePosition": 1, "index": 0x6041, "subindex": 0})
 ```
+
+## Why it reads the spec
+
+Notice the scripts name an **`operationId`** — `init`, `sdoUpload` — never a URL or
+an HTTP verb. At startup the client fetches `GET /api/swagger.yml`, walks the
+spec's `paths`, and builds one lookup table, `operationId → (method, URL
+template)`. `call()` then resolves the id, fills the template's `{...}`
+placeholders from `path`, and fires the request. The URLs and verbs live in
+exactly one place — the server's own spec — and the client reads them from the
+source of truth instead of duplicating them. Four things fall out of that:
+
+- **One source of truth, no drift.** The server implements the API *and* serves
+  the spec describing it, both from the same binary. Hardcoded URLs would be a
+  second, hand-maintained copy of the contract that silently rots when the API
+  moves; resolving by `operationId` (a stable logical name) means a URL
+  restructuring on the server just flows through — the script keeps working with
+  no edit.
+- **It always matches the server it's talking to.** The spec comes from the
+  *running* server, so the client is correct against *that* server's contract by
+  construction — point it at an older or newer Motion Master and it adapts; it
+  can't be a stale client against a fresh server.
+- **It's standalone.** Because the contract is fetched live, there's no bundled
+  spec, no code generation, and no checkout of this repository — copy the four
+  `.py` files anywhere, `pip install`, and point at a server.
+- **It reads as a teaching client.** Each call says "invoke *this named
+  operation*" — a clean tour of the API surface — instead of a pile of URL
+  string-building that hides what's being shown.
+
+The spec is parsed with a plain `yaml.safe_load`: the client only needs
+`operationId → method + path`, so a generic YAML load is enough — and it avoids a
+strict OpenAPI validator rejecting perfectly legal media types such as the
+`text/yaml` this very endpoint declares.
+
+The cost is one round-trip at startup and needing the server reachable when the
+client is built — free for an examples client that can't do anything until the
+server is up. The committed TypeScript client makes the opposite trade: it bakes
+the contract in at build time (zero startup cost, offline construction) at the
+price of regeneration whenever the spec changes. Different tool, different job.
 
 ## Setup
 

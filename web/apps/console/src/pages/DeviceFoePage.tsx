@@ -63,6 +63,16 @@ function decodeUtf8(bytes: Uint8Array): string | null {
   }
 }
 
+// Pretty-print `text` as indented JSON, or null if it does not parse.
+function formatJson(text: string | null): string | null {
+  if (text === null) return null
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2)
+  } catch {
+    return null
+  }
+}
+
 function SomanetFileLinks({
   files,
   selected,
@@ -112,7 +122,7 @@ export default function DeviceFoePage() {
   const [readMs, setReadMs] = useState<number | null>(null)
   const [result, setResult] = useState<Uint8Array | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [view, setView] = useState<'bytes' | 'text'>('bytes')
+  const [view, setView] = useState<'bytes' | 'text' | 'json'>('bytes')
 
   const [files, setFiles] = useState<SomanetFile[] | null>(null)
   const [listing, setListing] = useState(false)
@@ -278,6 +288,7 @@ export default function DeviceFoePage() {
   }
 
   const textContent = result ? decodeUtf8(result) : null
+  const jsonContent = formatJson(textContent)
 
   return (
     <div>
@@ -474,21 +485,27 @@ export default function DeviceFoePage() {
                 Download
               </button>
               <div className="flex ml-auto">
-                {(['bytes', 'text'] as const).map(v => (
-                  <button
-                    key={v}
-                    onClick={() => setView(v)}
-                    disabled={v === 'text' && textContent === null}
-                    title={v === 'text' && textContent === null ? 'Not valid UTF-8' : undefined}
-                    className={`px-3 py-1.5 text-xs border transition-colors first:border-r-0
-                      ${view === v
-                        ? 'bg-grey-900 text-white border-grey-900'
-                        : 'border-grey-300 text-grey-700 hover:bg-grey-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer'
-                      }`}
-                  >
-                    {v === 'bytes' ? 'Bytes' : 'Text'}
-                  </button>
-                ))}
+                {(['bytes', 'text', 'json'] as const).map(v => {
+                  const disabled =
+                    (v === 'text' && textContent === null) || (v === 'json' && jsonContent === null)
+                  const disabledTitle =
+                    v === 'text' ? 'Not valid UTF-8' : v === 'json' ? 'Not valid JSON' : undefined
+                  return (
+                    <button
+                      key={v}
+                      onClick={() => setView(v)}
+                      disabled={disabled}
+                      title={disabled ? disabledTitle : undefined}
+                      className={`px-3 py-1.5 text-xs border transition-colors not-first:border-l-0
+                        ${view === v
+                          ? 'bg-grey-900 text-white border-grey-900'
+                          : 'border-grey-300 text-grey-700 hover:bg-grey-50 disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer'
+                        }`}
+                    >
+                      {v === 'bytes' ? 'Bytes' : v === 'text' ? 'Text' : 'JSON'}
+                    </button>
+                  )
+                })}
               </div>
             </div>
 
@@ -506,6 +523,12 @@ export default function DeviceFoePage() {
             {view === 'text' && textContent !== null && (
               <pre className="text-xs font-mono bg-grey-50 border border-grey-200 p-4 overflow-x-auto whitespace-pre-wrap break-words max-h-96 leading-5">
                 {textContent}
+              </pre>
+            )}
+
+            {view === 'json' && jsonContent !== null && (
+              <pre className="text-xs font-mono bg-grey-50 border border-grey-200 p-4 overflow-x-auto whitespace-pre max-h-96 leading-5">
+                {jsonContent}
               </pre>
             )}
           </section>

@@ -15,10 +15,9 @@ from common import load_config, make_client  # noqa: E402
 
 
 def main():
-    cfg = load_config()
-    client = make_client(cfg)
+    client = make_client()
 
-    fieldbus = cfg["fieldbus"]
+    fieldbus = load_config()["fieldbus"]
     print(f"init: driver={fieldbus['driver']} adapter={fieldbus['adapter']}")
 
     r = client.call("init", body=fieldbus, check=False)

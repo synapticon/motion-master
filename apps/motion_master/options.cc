@@ -4,6 +4,7 @@
 
 #include <CLI/CLI.hpp>
 #include <cstdlib>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
@@ -13,6 +14,7 @@
 #include "cert_updater.h"
 #include "comm/base.h"
 #include "config.h"
+#include "core/platform.h"
 #include "core/version.h"
 
 Options parseOptions(int argc, char** argv) {
@@ -30,8 +32,9 @@ Options parseOptions(int argc, char** argv) {
                "Print network adapters (MAC -> interface) and exit");
 
   app.add_option("-c,--config", opts.configPath,
-                 "Path to a JSONC config file — the only way to set ports, fieldbus, log level, "
-                 "and TLS (see motion-master.example.jsonc)")
+                 "Path to a JSONC config file — ports, fieldbus, log level, and TLS live only in "
+                 "such a file (see motion-master.example.jsonc). Overrides the motion-master.jsonc "
+                 "auto-discovered next to the executable")
       ->check(CLI::ExistingFile);
   app.add_flag("--open", opts.openBrowser,
                "Open https://motion-master.synapticon.com/apps/console/ in the default browser");
@@ -56,24 +59,39 @@ Options parseOptions(int argc, char** argv) {
     std::exit(0);
   }
 
-  // Load the config file (JSONC: comments allowed) into the typed settings tree. --config is
-  // optional: when omitted, configPath stays empty and opts.config keeps its in-code defaults.
-  // When given, CLI::ExistingFile already guaranteed the path exists during app.parse().
-  if (!opts.configPath.empty()) {
-    std::ifstream f{opts.configPath};
+  // Resolve which config file to load (JSONC: comments allowed). An explicit --config always wins;
+  // CLI::ExistingFile already guaranteed its path exists during app.parse(). Absent --config, fall
+  // back to a "motion-master.jsonc" sitting next to the executable — the auto-discovered bundled
+  // config the Windows release ships to raise the RT period (this is the only implicit path, and it
+  // is deliberately next-to-the-binary, never a system-wide /etc lookup). With neither, opts.config
+  // keeps its in-code defaults.
+  std::string configPath = opts.configPath;
+  bool autoDiscovered = false;
+  if (configPath.empty()) {
+    const auto bundled = mm::core::exeDir() / "motion-master.jsonc";
+    std::error_code ec;
+    if (std::filesystem::exists(bundled, ec)) {
+      configPath = bundled.string();
+      autoDiscovered = true;
+    }
+  }
+
+  if (!configPath.empty()) {
+    std::ifstream f{configPath};
     auto doc =
         nlohmann::json::parse(f, nullptr, /*allow_exceptions=*/false, /*ignore_comments=*/true);
     if (doc.is_discarded()) {
-      spdlog::error("Failed to parse config file: {}", opts.configPath);
+      spdlog::error("Failed to parse config file: {}", configPath);
       std::exit(1);
     }
     auto parsed = parseConfig(doc);
     if (!parsed) {
-      spdlog::error("Config error in {}: {}", opts.configPath, parsed.error());
+      spdlog::error("Config error in {}: {}", configPath, parsed.error());
       std::exit(1);
     }
     opts.config = std::move(*parsed);
-    spdlog::debug("Loaded config from {}", opts.configPath);
+    opts.configPath = configPath;
+    spdlog::debug("Loaded {}config from {}", autoDiscovered ? "auto-discovered " : "", configPath);
   }
 
   return opts;

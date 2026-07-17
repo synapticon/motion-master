@@ -1,0 +1,16 @@
+// motion-master.jsonc — auto-loaded config bundled with the Windows release.
+//
+// Motion Master auto-loads a "motion-master.jsonc" placed next to the executable — no --config
+// needed (an explicit --config, if given, overrides this file). This file ships in the Windows
+// package to raise the real-time cycle period to 4 ms, which most stock Windows systems can sustain
+// reliably: the 1 ms built-in default overruns on typical Windows timer granularity (~1.5 ms), so
+// the loop degrades to skip-to-grid and drops cycles. 4 ms leaves comfortable headroom.
+//
+// Every other setting keeps its built-in default — see the fully annotated motion-master.example.jsonc
+// alongside this file for the complete list. This is JSONC: // and /* */ comments are allowed.
+{
+  // Real-time cyclic loop.
+  "gameLoop": {
+    "periodUs": 4000  // 4 ms — robust on stock Windows; the built-in default is 1000 (1 ms)
+  }
+}

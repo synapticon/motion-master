@@ -58,7 +58,7 @@ sudo ./setup.sh    # sets capabilities once; re-run after any OS update that res
 
 ### Windows
 
-Unzip `motion-master-<version>-windows-x64.zip` — it contains `motion-master.exe`, the bundled `cert.pem`/`key.pem`, an example config, and the required vcpkg runtime DLLs. Install the two runtime dependencies listed under [Usage → Prerequisites](#prerequisites) (Visual C++ Redistributable and Npcap), then run `motion-master.exe` from the extracted directory.
+Unzip `motion-master-<version>-windows-x64.zip` — it contains `motion-master.exe`, the bundled `cert.pem`/`key.pem`, an auto-loaded `motion-master.jsonc` (preset to a 4 ms real-time cycle, robust on stock Windows timers), the annotated `motion-master.example.jsonc`, and the required vcpkg runtime DLLs. Install the two runtime dependencies listed under [Usage → Prerequisites](#prerequisites) (Visual C++ Redistributable and Npcap), then run `motion-master.exe` from the extracted directory — it picks up the neighbouring `motion-master.jsonc` automatically (edit it to change the cycle period or any other setting).
 
 ### macOS (Apple Silicon)
 
@@ -184,7 +184,7 @@ Requirements for running a release binary (building from source has its own — 
 
 ### Command-line options
 
-The command line carries only *actions* and the cert-fetch source URLs. Every tunable **setting** — ports, fieldbus driver/adapter, log level, CORS origin, TLS cert/key paths, and cert auto-update — lives in the JSONC config file, which you pass with `-c`/`--config` (see [`motion-master.example.jsonc`](apps/motion_master/motion-master.example.jsonc)).
+The command line carries only *actions* and the cert-fetch source URLs. Every tunable **setting** — ports, fieldbus driver/adapter, log level, CORS origin, TLS cert/key paths, and cert auto-update — lives in a JSONC config file (see [`motion-master.example.jsonc`](apps/motion_master/motion-master.example.jsonc)). Motion Master loads that file from one of two places: the path you pass with `-c`/`--config`, or, absent that, a `motion-master.jsonc` sitting next to the executable (auto-discovered — `--config` wins over it). With neither, all built-in defaults apply. The Windows release ships such a `motion-master.jsonc` preconfigured to a 4 ms real-time cycle (robust on stock Windows timers); Linux and macOS keep the 1 ms default and ship only the annotated example.
 
 ```text
 motion-master [OPTIONS]
@@ -193,8 +193,9 @@ OPTIONS:
   -h, --help              Print this help message and exit
       --version           Display program version information and exit
       --list-adapters     Print network adapters (MAC -> interface) and exit
-  -c, --config TEXT:FILE  Path to a JSONC config file — the only way to set ports,
-                          fieldbus, log level, and TLS (see motion-master.example.jsonc)
+  -c, --config TEXT:FILE  Path to a JSONC config file — ports, fieldbus, log level,
+                          and TLS live only in such a file (see motion-master.example.jsonc).
+                          Overrides the motion-master.jsonc auto-discovered next to the executable
       --open              Open https://motion-master.synapticon.com/apps/console/ in the
                           default browser
       --update-cert       Download a fresh TLS cert/key, install them at the configured

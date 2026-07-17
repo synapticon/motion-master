@@ -118,9 +118,13 @@ jobs:
           # zlib, fmt, spdlog, ...). Exclude test-only libs (gtest/gmock); wpcap.dll comes
           # from the Npcap driver at runtime.
           $dlls = Get-ChildItem "$bin/*.dll" | Where-Object { $_.Name -notmatch 'gtest|gmock' }
+          # Windows ships a real, auto-loaded config: motion-master.jsonc sits next to the exe and is
+          # picked up on start (no --config), raising the RT period to 4 ms — robust on stock Windows.
+          # Copy the Windows-specific source to that basename so it lands as motion-master.jsonc.
+          Copy-Item "apps/motion_master/motion-master.windows.jsonc" "$dir/motion-master.jsonc"
           # Build one flat string[] for -Path (mixing literals with a FileInfo[] expression
           # confuses Compress-Archive); use the DLLs' full paths.
-          $files = @("$dir/motion-master.exe","$dir/cert.pem","$dir/key.pem","apps/motion_master/motion-master.example.jsonc") + $dlls.FullName
+          $files = @("$dir/motion-master.exe","$dir/cert.pem","$dir/key.pem","$dir/motion-master.jsonc","apps/motion_master/motion-master.example.jsonc") + $dlls.FullName
           $zip = "motion-master-$($env:GITHUB_REF_NAME -replace '^v','')-windows-x64.zip"
           Compress-Archive -Force -DestinationPath $zip -Path $files
 

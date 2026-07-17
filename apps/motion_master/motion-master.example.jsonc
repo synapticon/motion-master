@@ -1,10 +1,14 @@
-// motion-master.example.jsonc — example configuration (NOT loaded automatically).
+// motion-master.example.jsonc — example configuration (this file is NOT loaded automatically).
 //
-// Copy this file, edit it, and pass it explicitly:   motion-master --config <path>
-// This file is the ONLY way to set ports, fieldbus, log level, and TLS — there are no CLI flags
-// for these. Motion Master loads a config ONLY when --config is given; there is no default search
-// path. Every key below shows its built-in default — delete the ones you don't override.
+// A JSONC config file is the ONLY way to set ports, fieldbus, log level, and TLS — there are no
+// CLI flags for these. Motion Master loads one of two config files, in this order:
+//   1. --config <path>            — an explicit path always wins.
+//   2. motion-master.jsonc        — auto-discovered next to the executable, if present.
+// With neither, all built-in defaults apply (there is no system-wide /etc search path). To use
+// this example, copy it to "motion-master.jsonc" beside the binary, or pass it via --config.
+// (The Windows release already ships a motion-master.jsonc that raises the RT period to 4 ms.)
 //
+// Every key below shows its built-in default — delete the ones you don't override.
 // This file is JSONC: // line comments and /* block comments */ are allowed.
 {
   // HTTP API and WebSocket servers (each on its own port / loop / thread).

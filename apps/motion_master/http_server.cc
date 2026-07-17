@@ -35,6 +35,7 @@
 #include "node/device_parameter.h"
 #include "node/monitoring_manager.h"
 #include "node/pdo_mapping.h"
+#include "swagger_spec.h"
 
 namespace {
 
@@ -344,11 +345,21 @@ void HttpServer::run() {
                     "<a href=\"https://synapticon.github.io/motion-master/\">"
                     "https://synapticon.github.io/motion-master/</a>.</p>"
                     "<ul>"
+                    "<li><a href=\"/api/swagger.yml\">API specification (swagger.yml)</a></li>"
                     "<li><a href=\"/api/log\">Log</a></li>"
                     "<li><a href=\"/api/registers\">ESC registers</a></li>"
                     "</ul>"
                     "</body></html>");
           })
+      .get("/api/swagger.yml",
+           [this](auto* res, auto* /*req*/) {
+             // Embedded at build time (swagger_spec.h). text/yaml renders inline in a browser;
+             // a client fetches it to resolve the running server's exact API contract.
+             res->writeHeader("Content-Type", "text/yaml; charset=utf-8")
+                 ->writeHeader("Content-Disposition", "inline")
+                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                 ->end(mm::kSwaggerYml);
+           })
       .get("/api/adapters",
            [this](auto* res, auto* /*req*/) {
              nlohmann::json arr = mm::comm::enumerateNetworkAdapters();

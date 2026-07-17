@@ -1,0 +1,7 @@
+# Local config with your adapter/MAC -- never commit it.
+config.toml
+
+# Python
+__pycache__/
+*.pyc
+.venv/

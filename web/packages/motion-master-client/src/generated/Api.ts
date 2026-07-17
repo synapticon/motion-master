@@ -90,6 +90,19 @@ export class Api<
       ...params,
     });
   /**
+   * @description Returns this document — the OpenAPI specification embedded in the running binary — as YAML. Lets a client discover the exact API contract of the server it is talking to without a packaged file or a matching source checkout; the served spec always matches the running version.
+   *
+   * @name GetSwaggerYml
+   * @summary Get this OpenAPI specification
+   * @request GET:/api/swagger.yml
+   */
+  getSwaggerYml = (params: RequestParams = {}) =>
+    this.request<string, any>({
+      path: `/api/swagger.yml`,
+      method: "GET",
+      ...params,
+    });
+  /**
    * @description The effective configuration after merging the JSONC config file (if any) over the built-in defaults — the same `Config` the server booted with. Read-only; changing it requires editing the config file and restarting. The shape mirrors the config file (server, fieldbus, logLevel, tls, gameLoop, recorder, parameterCache, parameters).
    *
    * @name GetStartedConfig
@@ -444,7 +457,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Transitions all slaves to INIT state, closes the network interface, and removes all Device objects. After this returns, POST /api/init and POST /api/scan may be called again.
+   * @description Tears down all master-side state — unpublishes the process image, frees the recorder, removes all Device objects, and closes the network interface (releasing the NIC). It does not command the slaves to any AL state; the master simply stops talking to the bus. After this returns, POST /api/init and POST /api/scan may be called again.
    *
    * @name Reset
    * @summary Reset the fieldbus driver and clear the device list

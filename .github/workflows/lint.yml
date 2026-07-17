@@ -94,3 +94,48 @@ jobs:
         run: |
           git diff --exit-code web/packages/motion-master-client/src/generated/ \
             || { echo "::error::Generated API client is out of date. Run 'pnpm --filter @synapticon/motion-master-client generate' and commit the result."; exit 1; }
+
+  python-client-example:
+    name: Python client example
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r clients/python/requirements.txt
+
+      - name: Byte-compile
+        run: python -m py_compile clients/python/*.py clients/python/examples/*.py
+
+      # Guard against swagger drift: every operationId the examples call must
+      # still exist in swagger.yml (mirrors the api-client-drift job for the
+      # generated TS client). The runtime client fetches the spec from a live
+      # server, so this check parses the repo's swagger.yml directly instead --
+      # no server needed in CI, and the file is right here in the checkout.
+      - name: Check example operationIds resolve against swagger.yml
+        working-directory: clients/python
+        run: |
+          python - <<'PY'
+          import pathlib, re
+          import yaml
+
+          spec = yaml.safe_load(pathlib.Path("../../apps/motion_master/swagger.yml").read_text())
+          ops = {op["operationId"]
+                 for item in spec["paths"].values()
+                 for op in item.values()
+                 if isinstance(op, dict) and "operationId" in op}
+
+          used = set()
+          for f in pathlib.Path("examples").glob("*.py"):
+              used |= set(re.findall(r'call\(\s*["\']([A-Za-z]+)["\']', f.read_text()))
+
+          missing = used - ops
+          print("operationIds used by examples:", sorted(used))
+          if missing:
+              raise SystemExit(f"::error::operationIds not in swagger.yml: {sorted(missing)}")
+          print("all example operationIds resolve")
+          PY

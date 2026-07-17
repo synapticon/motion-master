@@ -1,0 +1,30 @@
+# Motion Master Python client example configuration.
+#
+# Copy this file to config.toml and edit it for your setup:
+#     cp config.example.toml config.toml
+#
+# config.toml is git-ignored so your local adapter/MAC never gets committed.
+
+# Host running Motion Master. The default resolves to 127.0.0.1 and matches the
+# bundled TLS cert. Motion Master is TLS-only, so both ports below are secure
+# (https:// for the API, wss:// for the WebSocket).
+host = "local.motion-master.synapticon.com"
+
+# Motion Master exposes two ports on separate event loops:
+#   http_port -> request/response HTTP API (init, scan, SDO, FoE, state, ...)
+#   ws_port   -> monitoring WebSocket (live process-data batches, notifications)
+http_port = 61447
+ws_port = 62281
+
+# TLS certificate verification:
+#   false            -> skip verification (self-signed dev cert; run.sh fallback)
+#   "/path/cert.pem" -> verify against this certificate bundle
+verify = false
+
+# Fieldbus driver to bring up with POST /api/init.
+# Assumes Motion Master was started uninitialized (no driver open yet).
+[fieldbus]
+driver = "soem"                 # soem | spoe (spoe is planned)
+# Network interface name (e.g. "eth0") or MAC address.
+# SOEM has no adapter auto-detect, so this is required.
+adapter = "aa:bb:cc:dd:ee:ff"

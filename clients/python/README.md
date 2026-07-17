@@ -81,9 +81,17 @@ so no checkout of this repository is needed.
 
 ```bash
 cd clients/python
+source setup.sh                                     # creates .venv, activates it, installs requirements
+cp config.example.toml config.toml                  # then edit driver + adapter
+```
+
+`setup.sh` runs `python -m venv .venv && source .venv/bin/activate && pip
+install -r requirements.txt`. Source it so the activation sticks in your shell.
+To do it by hand instead (e.g. on Windows):
+
+```bash
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
-cp config.example.toml config.toml                  # then edit driver + adapter
 ```
 
 The `venv` line creates a *virtual environment* — a throwaway `.venv` folder that

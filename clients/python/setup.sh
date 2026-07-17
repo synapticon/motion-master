@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Create a local virtual environment and activate it.
+#
+# Source this script so the activation sticks in your shell:
+#
+#   source setup.sh
+#
+# (Running it as ./setup.sh creates the venv but the activation is lost
+#  when the subshell exits.)
+
+python -m venv .venv && source .venv/bin/activate && pip install -r requirements.txt

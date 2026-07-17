@@ -19,6 +19,12 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.49] - 2026-07-17
+
+### Added
+
+- Motion Master now auto-loads a `motion-master.jsonc` placed next to the executable — no `--config` needed (an explicit `--config` still overrides it). The Windows release ships such a file preset to a 4 ms real-time cycle period, which stock Windows timers can sustain reliably; Linux and macOS keep the 1 ms default and ship only the annotated `motion-master.example.jsonc`.
+
 ## [6.0.0-alpha.48] - 2026-07-17
 
 ### Changed
@@ -327,7 +333,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.48...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.49...HEAD
+[6.0.0-alpha.49]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.48...v6.0.0-alpha.49
 [6.0.0-alpha.48]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.47...v6.0.0-alpha.48
 [6.0.0-alpha.47]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.46...v6.0.0-alpha.47
 [6.0.0-alpha.46]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.45...v6.0.0-alpha.46

@@ -52,6 +52,16 @@ int main(int argc, char** argv) {
 
   spdlog::info("Motion Master v{}", mm::core::kVersion);
 
+  // Refuse to start a second instance: exactly one Motion Master per machine may own the EtherCAT
+  // NIC, the RT loop, and the HTTP/WebSocket ports. Held for the whole of main() (the OS releases
+  // it on any exit, so there is no stale lock to clear). This is the primary guard — the exclusive
+  // port bind below is a backstop for the case where some *other* process holds a port.
+  auto instanceLock = mm::core::acquireSingleInstanceLock();
+  if (!instanceLock) {
+    spdlog::error("{}", instanceLock.error());
+    return 1;
+  }
+
   // libcurl global state is process-wide and must be initialised exactly once, before any other
   // thread starts — curl_global_init also initialises libraries (OpenSSL) that are unsafe to set up
   // concurrently, so it belongs here at the composition root rather than lazily inside any one cURL
@@ -217,14 +227,22 @@ int main(int argc, char** argv) {
   // Wire the example C++ route plug-in (/api/example/...) before start(): the composition root is
   // the only place that knows the concrete plug-in. Copy libs/example to add your own.
   httpServer.addRoutes(mm::example::registerRoutes);
-  httpServer.start();
+  if (!httpServer.start()) {
+    spdlog::error("HTTP server could not bind port {} — is another process using it?",
+                  opts.config.server.httpPort);
+    return 1;
+  }
 
   WebSocketServer wsServer{WebSocketServer::Config{
       .port = opts.config.server.wsPort,
       .certFile = opts.config.tls.certPath,
       .keyFile = opts.config.tls.keyPath,
   }};
-  wsServer.start();
+  if (!wsServer.start()) {
+    spdlog::error("WebSocket server could not bind port {} — is another process using it?",
+                  opts.config.server.wsPort);
+    return 1;
+  }
 
   // Publish each sampled batch to the WebSocket topic named after its monitoring, then start the
   // sampler + refresher threads. (Not added to the RT GameLoop — sampling runs off the RT thread.)

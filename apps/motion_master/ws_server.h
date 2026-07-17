@@ -4,6 +4,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <future>
 #include <string>
 #include <thread>
 #include <unordered_set>
@@ -42,8 +43,14 @@ class WebSocketServer {
   /// @brief Destructor.  Calls stop() if the server is still running.
   ~WebSocketServer();
 
-  /// @brief Starts the server background thread and begins accepting connections. Idempotent.
-  void start();
+  /// @brief Starts the server background thread and begins accepting connections.
+  ///
+  /// Blocks until the listen attempt completes and reports whether the port was bound. The port is
+  /// claimed exclusively (@c LIBUS_LISTEN_EXCLUSIVE_PORT), so a port already in use fails here
+  /// instead of silently sharing it via @c SO_REUSEPORT. Idempotent: a second call while already
+  /// running returns @c true.
+  /// @return @c true if the server is listening; @c false if the port could not be bound.
+  bool start();
 
   /// @brief Stops the server, closes the listen socket, and joins the thread. Idempotent.
   void stop();
@@ -68,4 +75,6 @@ class WebSocketServer {
   std::atomic<uWS::Loop*> loop_{nullptr};
   std::atomic<uWS::SSLApp*> app_{nullptr};
   std::unordered_set<uWS::WebSocket<true, true, WsData>*> connections_;
+  /// Signals the listen outcome from the loop thread back to start(); set exactly once per run().
+  std::promise<bool> listenResult_;
 };

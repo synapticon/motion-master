@@ -5,6 +5,7 @@
 #include <atomic>
 #include <expected>
 #include <functional>
+#include <future>
 #include <string>
 #include <thread>
 #include <vector>
@@ -102,8 +103,13 @@ class HttpServer {
 
   /// @brief Starts the server background thread and begins accepting connections.
   ///
-  /// Idempotent: a second call while already running is a no-op.
-  void start();
+  /// Blocks until the listen attempt completes, so the caller learns synchronously whether the
+  /// port was bound. The port is claimed exclusively (@c LIBUS_LISTEN_EXCLUSIVE_PORT), so a port
+  /// already in use fails here instead of silently sharing it via @c SO_REUSEPORT.
+  ///
+  /// Idempotent: a second call while already running is a no-op that returns @c true.
+  /// @return @c true if the server is listening; @c false if the port could not be bound.
+  bool start();
 
   /// @brief Stops the server, closes the listen socket, and joins the thread.
   ///
@@ -132,4 +138,6 @@ class HttpServer {
   std::thread thread_;
   std::atomic<uWS::Loop*> loop_{nullptr};
   std::atomic<uWS::SSLApp*> app_{nullptr};
+  /// Signals the listen outcome from the loop thread back to start(); set exactly once per run().
+  std::promise<bool> listenResult_;
 };

@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Changed
+
+- Motion Master now refuses to start a second instance on the same machine, exiting with a clear error instead of silently running two masters that would fight over the EtherCAT NIC and share the API/WebSocket ports. A port already held by any other process now fails fast at startup rather than being silently shared.
+
 ## [6.0.0-alpha.47] - 2026-07-17
 
 ### Added

@@ -290,12 +290,15 @@ void HttpServer::addRoutes(mm::api::RegisterRoutesFn module) {
   routeModules_.push_back(std::move(module));
 }
 
-void HttpServer::start() {
+bool HttpServer::start() {
   bool expected = false;
   if (!running_.compare_exchange_strong(expected, true)) {
-    return;
+    return true;  // already running
   }
   thread_ = std::thread([this]() { run(); });
+  // Block until the listen callback fires on the loop thread, so start() reports the bind outcome
+  // synchronously to the composition root (which treats a failure as fatal).
+  return listenResult_.get_future().get();
 }
 
 void HttpServer::stop() {
@@ -1459,13 +1462,16 @@ void HttpServer::run() {
                     ->writeStatus("204 No Content")
                     ->end();
               })
-      .listen("127.0.0.1", config_.port,
+      .listen("127.0.0.1", config_.port, LIBUS_LISTEN_EXCLUSIVE_PORT,
               [this](auto* token) {
                 if (token) {
                   spdlog::info("HTTP server listening on port {}", config_.port);
+                  listenResult_.set_value(true);
                 } else {
-                  spdlog::error("HTTP server failed to listen on port {}", config_.port);
+                  spdlog::error("HTTP server failed to listen on port {} (already in use?)",
+                                config_.port);
                   running_ = false;
+                  listenResult_.set_value(false);
                 }
               })
       .run();

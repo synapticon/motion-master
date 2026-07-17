@@ -14,6 +14,7 @@ else()
     docs
     COMMAND ${CMAKE_COMMAND} -E echo
             "Doxygen not found -- install with: sudo dnf install doxygen  # or apt/brew"
+    COMMENT "Doxygen unavailable -- printing install hint"
     VERBATIM)
   message(STATUS "Doxygen not found -- 'docs' target will print an install hint")
 endif()

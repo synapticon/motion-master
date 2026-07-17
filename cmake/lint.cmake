@@ -15,6 +15,7 @@ else()
   add_custom_target(
     lint
     COMMAND ${CMAKE_COMMAND} -E echo "cpplint not found -- install with: pip install cpplint"
+    COMMENT "cpplint unavailable -- printing install hint"
     VERBATIM)
   message(STATUS "cpplint not found -- 'lint' target will print an install hint")
 endif()
@@ -33,6 +34,7 @@ else()
   add_custom_target(
     format
     COMMAND ${CMAKE_COMMAND} -E echo "clang-format not found"
+    COMMENT "clang-format unavailable -- printing install hint"
     VERBATIM)
   message(STATUS "clang-format not found -- 'format' target unavailable")
 endif()
@@ -54,6 +56,7 @@ else()
   add_custom_target(
     cppcheck
     COMMAND ${CMAKE_COMMAND} -E echo "cppcheck not found"
+    COMMENT "cppcheck unavailable -- printing install hint"
     VERBATIM)
   message(STATUS "cppcheck not found -- 'cppcheck' target unavailable")
 endif()

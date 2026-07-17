@@ -5,3 +5,6 @@ config.toml
 __pycache__/
 *.pyc
 .venv/
+
+# Files downloaded from a device via FoE (05_read_file.py).
+files/

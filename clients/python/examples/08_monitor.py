@@ -7,7 +7,10 @@ rows as they arrive.
 
 Monitoring is live-only: a value is `null` until its device is exchanging
 (SAFE-OP/OP), so run 07_transition_op first for non-null data. By default this
-samples slave 1's Statusword (0x6041:00) and Position actual value (0x6064:00).
+samples slave 1's Timestamp (0x20F0:00), Position actual value (0x6064:00), DC
+link circuit voltage (0x6079:00), and Drive temperature (0x2031:01). Each object
+is sourced from the process image if PDO-mapped, otherwise by a background SDO
+poll; the server decides per object and reports it (the `(pdo)`/`(sdo)` tags).
 
     python 08_monitor.py --slave 1 --interval 100 --count 10
     python 08_monitor.py                 # runs until Ctrl-C
@@ -32,9 +35,15 @@ def main():
     args = ap.parse_args()
 
     # Each parameter is [devicePosition, index, subindex].
+    # The server classifies each object's source automatically: if it is in the
+    # device's PDO map it is decoded from the process image ("pdo"), otherwise it
+    # is read by a background SDO poll ("sdo"). GET /api/monitorings/{topic}
+    # reports the resolved source per parameter (see the header printed below).
     parameters = [
-        [args.slave, 0x6041, 0],  # Statusword
+        [args.slave, 0x20F0, 0],  # Timestamp
         [args.slave, 0x6064, 0],  # Position actual value
+        [args.slave, 0x6079, 0],  # DC link circuit voltage
+        [args.slave, 0x2031, 1],  # Drive temperature
     ]
 
     client = make_client()

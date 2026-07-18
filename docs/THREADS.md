@@ -15,7 +15,7 @@ Five is the **built-in** count, not a hard ceiling: a C++ route plug-in (`mm::ap
 [CLASS_DIAGRAM.md](CLASS_DIAGRAM.md)) is ordinary code holding `DeviceManager&`, and may spawn
 its own off-RT `std::jthread` for long-running work — exactly as `MonitoringManager` (threads 4–5)
 does. Any such thread is bound by the same rules as every non-RT thread below: serialize bus
-access through `FieldbusDriver::socketMutex_` and never touch the RT path.
+access through `FieldbusDriver::controlPlaneMutex_` and never touch the RT path.
 
 ## Overview
 
@@ -43,7 +43,7 @@ flowchart TB
     EPD -->|append one record<br/>per cycle, wait-free| RING[(ProcessDataRing<br/>recorder)]
     MS -->|read every cycle<br/>via read cursor| RING
     HTTP -.->|point read head-1| RING
-    HTTP -->|SDO / FoE / state / registers| SM{{FieldbusDriver::socketMutex_}}
+    HTTP -->|SDO / FoE / state / registers| SM{{FieldbusDriver::controlPlaneMutex_}}
     PR -->|SDO poll| SM
     SM --> DRV[FieldbusDriver / SOEM]
     EPD -->|PDO LRW, no lock| DRV
@@ -59,7 +59,7 @@ flowchart TB
 | 2 | **HTTP server** | `std::thread` — `apps/motion_master/http_server.cc:152` | uWebSockets HTTPS event loop on **port 61447**; all REST routes. **One loop, not a thread pool** | Normal | `uWS::Loop::defer()` (atomic job queue) for cross-thread work; `std::atomic` `loop_` / `app_` pointers |
 | 3 | **WebSocket server** | `std::thread` — `apps/motion_master/ws_server.cc:26` | Separate uWebSockets WSS event loop on **port 62281**; the WebSocket connection — monitoring batches, notifications, procedure progress out; subscribe in. Isolated from HTTP so a blocking handler can't stall the 1 ms-critical stream | Normal | `uWS::Loop::defer()` for cross-thread `broadcast()` / `publish()`; `std::atomic` `loop_` / `app_` pointers |
 | 4 | **Monitoring sampler** | `std::thread` — `libs/node/monitoring_manager.cc:154` | **Lossless.** Each flush ships *every* recorded cycle since each monitoring's read cursor (`[cursor, head)` of the recorder ring) as one batch, then advances the cursor; hands each batch to the `setPublish` callback (wired to `WebSocketServer::publish`). `interval` is the flush **cadence** (5–2000 ms, default 16), not a sample rate | Normal; `cv_.wait_until(nearest deadline)` | `mutex_` + `cv_`; decodes PDO values from the lock-free recorder ring (never touches the bus); SDO-only params from the refresher cache |
-| 5 | **Parameter refresher** | `std::thread` — `libs/node/parameter_refresher.cc:86` | Background SDO polling for objects **not** in the PDO image, into a cache the sampler reads — decouples slow mailbox access from high-frequency sampling | Normal; ≥10 ms floor + exponential backoff | `mutex_` + `cv_`; takes `FieldbusDriver::socketMutex_` per SDO (releases its own lock during the poll) |
+| 5 | **Parameter refresher** | `std::thread` — `libs/node/parameter_refresher.cc:86` | Background SDO polling for objects **not** in the PDO image, into a cache the sampler reads — decouples slow mailbox access from high-frequency sampling | Normal; ≥10 ms floor + exponential backoff | `mutex_` + `cv_`; takes `FieldbusDriver::controlPlaneMutex_` per SDO (releases its own lock during the poll) |
 
 ## Control-plane vs PDO-path locking
 
@@ -81,7 +81,7 @@ process-image IOmap, the atomic `outputSlots`, and the recorder ring (a wait-fre
   that raced the copy; a live cursor lapped by more than a whole ring is detected and
   resynced to `oldestValidSeq()`. No lock either side.
 - **Control plane (threads 2 & 4):** every SDO read/write, FoE transfer, ESC register
-  access, and AL-state transition serializes through `FieldbusDriver::socketMutex_`, held
+  access, and AL-state transition serializes through `FieldbusDriver::controlPlaneMutex_`, held
   for a single socket transaction only — never across a sleep, a blocking wait, or a user
   callback. A slow SDO read therefore never stalls the 1 ms cycle.
 
@@ -111,7 +111,7 @@ Startup and shutdown order (`apps/motion_master/main.cc`):
 |---|---|---|---|
 | **`ProcessDataRing`** (recorder) | `libs/node/process_data_ring.h` | Lossless per-cycle history of the raw IOmap (inputs + outputs + timestamp + WKC); source for the live stream and point reads | RT loop (single writer, wait-free append) → sampler + HTTP readers (lock-free via per-slot sequence re-check) |
 | **`ProcessData::outputSlots`** (atomic `uint64_t[]`) | `libs/node/process_data.h` | Per-output-object setpoint staging — one lock-free slot per output object | Any thread stages its own object lock-free (last-writer-wins); RT loop composes all slots into the wire image (Design B) |
-| **`FieldbusDriver::socketMutex_`** | `libs/comm/fieldbus_driver.h` | Control-plane socket access (SDO, FoE, registers, state) | HTTP thread + refresher thread — one transaction at a time |
+| **`FieldbusDriver::controlPlaneMutex_`** | `libs/comm/fieldbus_driver.h` | Control-plane socket access (SDO, FoE, registers, state) | HTTP thread + refresher thread — one transaction at a time |
 | **`MonitoringManager::mutex_` + `cv_`** | `libs/node/monitoring_manager.h` | Monitoring registry + sampling schedule | Sampler thread, woken on add/remove/stop |
 | **`ParameterRefresher::mutex_` + `cv_`** | `libs/node/parameter_refresher.h` | Tracked-object set + poll schedule | Refresher thread (lock released during the actual poll) |
 | **`std::atomic` loop pointers** | `apps/motion_master/http_server.h`, `apps/motion_master/ws_server.h` | Cross-thread access to each uWS loop for `defer()` (HTTP and WS loops are independent) | Any thread → the respective server thread |

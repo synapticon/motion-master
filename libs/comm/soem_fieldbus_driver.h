@@ -191,7 +191,7 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// and on TI PRU-ICSS ESCs a register-space FMMU inside an LRW kills every cyclic frame. Clears
   /// the FMMU's active bit both in the cached slavelist and on the ESC, reversing SOEM's WKC
   /// bookkeeping for input-less slaves so @c processDataLayout's expected WKC stays consistent.
-  /// A no-op when @c mailboxStatusFmmu_ is set. Caller must hold @c socketMutex_.
+  /// A no-op when @c mailboxStatusFmmu_ is set. Caller must hold @c controlPlaneMutex_.
   std::expected<void, std::string> deactivateMailboxStatusFmmus();
 
   /// @brief Marks every TI PRU-ICSS slave to use split LRD/LWR process data instead of combined
@@ -208,13 +208,13 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// working-counter accounting for LWR (output WKC counts ×2), so @c processDataLayout's
   /// @c expectedWkc = outputsWKC*2 + inputsWKC stays correct. Targeted to type 0x90 only — every
   /// other ESC keeps combined LRW, so there is no behaviour change for existing setups. Must be
-  /// called before @c ecx_config_map_group, under @c socketMutex_.
+  /// called before @c ecx_config_map_group, under @c controlPlaneMutex_.
   std::expected<void, std::string> blockLrwOnPruIcssSlaves();
 
   /// @brief Closes the SOEM NIC (ecx_close) and releases the master context, if open.
   ///
   /// Non-virtual so the destructor can call it without a virtual dispatch; @c stop() forwards
-  /// here. Idempotent — a second call is a no-op once @c ctx_ is null. Takes @c socketMutex_.
+  /// here. Idempotent — a second call is a no-op once @c ctx_ is null. Takes @c controlPlaneMutex_.
   void closeContext();
 
   std::string ifname_;
@@ -236,7 +236,7 @@ class SoemFieldbusDriver : public FieldbusDriver {
   // correct PRE-OP mailbox SMs for every slave during scan(), so a fresh-scan
   // INIT→PRE-OP needs no reprogramming; only a slave returning from BOOT (e.g.
   // after a firmware download) carries stale BOOT SMs that must be reset.
-  // Guarded by socketMutex_. Cleared by scan() (which re-runs ecx_config_init).
+  // Guarded by controlPlaneMutex_. Cleared by scan() (which re-runs ecx_config_init).
   std::set<uint16_t> bootMailboxSlaves_;
 };
 

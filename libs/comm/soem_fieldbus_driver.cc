@@ -36,7 +36,7 @@ SoemFieldbusDriver::SoemFieldbusDriver(SoemFieldbusDriverConfig config)
 SoemFieldbusDriver::~SoemFieldbusDriver() { closeContext(); }
 
 std::expected<void, std::string> SoemFieldbusDriver::init() {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   // SOEM has no auto-detect — an empty interface name would reach ecx_init and
   // fail with a cryptic "No such device". Reject it up front with a clear error.
   if (ifname_.empty()) {
@@ -57,7 +57,7 @@ std::expected<void, std::string> SoemFieldbusDriver::init() {
 }
 
 std::expected<int, std::string> SoemFieldbusDriver::scan() {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -145,7 +145,7 @@ std::chrono::microseconds recommendedCyclePeriod(uint32_t processBytes, int slav
 
 // Pops the most recent SOEM error (if any) after a failed SDO transfer and renders it as a short
 // human-readable suffix (" (SDO abort 0x...)", " (mailbox error)", ...). Empty when no error was
-// queued. Called with socketMutex_ held (it touches the SOEM context error stack).
+// queued. Called with controlPlaneMutex_ held (it touches the SOEM context error stack).
 std::string sdoErrorSuffix(ecx_contextt* ctx) {
   ec_errort err{};
   if (!ecx_poperror(ctx, &err)) {
@@ -174,7 +174,7 @@ std::string sdoErrorSuffix(ecx_contextt* ctx) {
 }  // namespace
 
 std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("configureProcessData: no driver — call init() first");
   }
@@ -329,7 +329,7 @@ std::expected<void, std::string> SoemFieldbusDriver::blockLrwOnPruIcssSlaves() {
 }
 
 PdoLayout SoemFieldbusDriver::processDataLayout() {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   PdoLayout layout;
   if (!ctx_) {
     return layout;
@@ -361,7 +361,7 @@ PdoLayout SoemFieldbusDriver::processDataLayout() {
 }
 
 std::vector<SlaveConfig> SoemFieldbusDriver::busConfig() const {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   std::vector<SlaveConfig> out;
   if (!ctx_) {
     return out;
@@ -428,7 +428,7 @@ std::vector<SlaveConfig> SoemFieldbusDriver::busConfig() const {
 }
 
 // Intentionally lock-free: the RT PDO cycle relies on SOEM's internally
-// thread-safe port layer rather than socketMutex_, so a slow control-plane
+// thread-safe port layer rather than controlPlaneMutex_, so a slow control-plane
 // transfer can never stall process-data exchange. See FieldbusDriver class doc.
 int SoemFieldbusDriver::exchangeProcessData(std::span<const uint8_t> outputs,
                                             std::span<uint8_t> inputs) {
@@ -452,7 +452,7 @@ int SoemFieldbusDriver::exchangeProcessData(std::span<const uint8_t> outputs,
 void SoemFieldbusDriver::stop() { closeContext(); }
 
 void SoemFieldbusDriver::closeContext() {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   // ecx_init opened the raw socket; ecx_close releases it (via ecx_closenic) and takes the NIC
   // out of promiscuous mode. Without it every reset()/re-init cycle leaks the socket fd.
   // Idempotent by construction: ctx_.reset() below is std::unique_ptr::reset — it frees the
@@ -468,7 +468,7 @@ void SoemFieldbusDriver::closeContext() {
 }
 
 SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return {};
   }
@@ -483,12 +483,12 @@ SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
 }
 
 int SoemFieldbusDriver::slaveCount() const {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   return ctx_ ? ctx_->slavecount : 0;
 }
 
 uint16_t SoemFieldbusDriver::slaveState(uint16_t position) const {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   // SOEM caches the AL status in slavelist[].state, refreshed by ecx_readstate (via
   // readStates) and ecx_writestate (via transitionToState). No bus I/O here.
   return ctx_ ? ctx_->slavelist[position].state : 0;
@@ -496,7 +496,7 @@ uint16_t SoemFieldbusDriver::slaveState(uint16_t position) const {
 
 std::expected<std::vector<FieldbusDriver::SlaveStateRaw>, std::string>
 SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -512,7 +512,7 @@ SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
 
 std::expected<std::vector<SlaveDiagnostics>, std::string> SoemFieldbusDriver::readDiagnostics(
     const std::vector<uint16_t>& positions) {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -572,7 +572,7 @@ std::expected<std::vector<SlaveDiagnostics>, std::string> SoemFieldbusDriver::re
 
 std::expected<std::vector<DcSyncDiagnostics>, std::string> SoemFieldbusDriver::readDcSync(
     const std::vector<uint16_t>& positions) {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -631,7 +631,7 @@ std::expected<std::vector<DcSyncDiagnostics>, std::string> SoemFieldbusDriver::r
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uint16_t slavePosition,
                                                                              uint16_t index,
                                                                              uint8_t subindex) {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -677,7 +677,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
 
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComplete(
     uint16_t slavePosition, uint16_t index) {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -719,7 +719,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComp
 std::expected<void, std::string> SoemFieldbusDriver::writeSdo(uint16_t slavePosition,
                                                               uint16_t index, uint8_t subindex,
                                                               std::span<const uint8_t> data) {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -779,27 +779,27 @@ std::string foeErrorDetail(int wkc) {
 
 std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectDictionary(
     uint16_t slavePosition) {
-  // Fine-grained locking: socketMutex_ is taken per individual SDO Info
+  // Fine-grained locking: controlPlaneMutex_ is taken per individual SDO Info
   // transaction (and released during retrySdoInfo's back-off sleeps), so this
   // multi-second enumeration never blocks another control-plane caller for more
   // than a single transfer.
   //
   // Accepted caveat — this method does NOT hold ctx_ stable for its whole duration. Because
-  // socketMutex_ is dropped between transactions, a concurrent scan()/reset()/stop() landing in one
-  // of those gaps frees ctx_, and the next transaction then dereferences a dangling context: a
-  // use-after-free. Within Motion Master this cannot happen — DeviceManager serialises every
+  // controlPlaneMutex_ is dropped between transactions, a concurrent scan()/reset()/stop() landing
+  // in one of those gaps frees ctx_, and the next transaction then dereferences a dangling context:
+  // a use-after-free. Within Motion Master this cannot happen — DeviceManager serialises every
   // control-plane operation on its busMutex_, held for this call's entire duration, so no
   // scan/reset can interleave. An embedder driving SoemFieldbusDriver directly MUST provide the
   // same guarantee: do not call scan()/reset()/stop() while a readObjectDictionary() is in flight
   // on another thread. This is not a wart unique to this method — it is the driver's uniform
   // lifetime contract: exchangeProcessData() carries the identical one on the RT path, reading ctx_
-  // lock-free (no socketMutex_) and so relying on the caller not tearing the context down mid-cycle
-  // (see closeContext's note on stopExchange ordering). "Do not destroy the context while an
-  // operation is in flight" holds for every operation, not just this enumeration. The up-front ctx_
-  // check below is only a pre-init guard, not protection against this race (which is why it is not
-  // re-checked inside the loop).
+  // lock-free (no controlPlaneMutex_) and so relying on the caller not tearing the context down
+  // mid-cycle (see closeContext's note on stopExchange ordering). "Do not destroy the context while
+  // an operation is in flight" holds for every operation, not just this enumeration. The up-front
+  // ctx_ check below is only a pre-init guard, not protection against this race (which is why it is
+  // not re-checked inside the loop).
   {
-    std::lock_guard<std::mutex> lock(socketMutex_);
+    std::lock_guard<std::mutex> lock(controlPlaneMutex_);
     if (!ctx_) {
       return std::unexpected("no driver — call init() first");
     }
@@ -807,7 +807,7 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
   spdlog::debug("readObjectDictionary slave {}", slavePosition);
   ec_ODlistt odList{};
   if (retrySdoInfo([&] {
-        std::lock_guard<std::mutex> lock(socketMutex_);
+        std::lock_guard<std::mutex> lock(controlPlaneMutex_);
         return ecx_readODlist(ctx_.get(), slavePosition, &odList);
       }) <= 0) {
     return std::unexpected(std::format("readODlist slave {} failed after retries", slavePosition));
@@ -818,7 +818,7 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
 
   for (uint16_t i = 0; i < odList.Entries; ++i) {
     if (retrySdoInfo([&] {
-          std::lock_guard<std::mutex> lock(socketMutex_);
+          std::lock_guard<std::mutex> lock(controlPlaneMutex_);
           return ecx_readODdescription(ctx_.get(), i, &odList);
         }) <= 0) {
       return std::unexpected(std::format("readODdescription slave {} index 0x{:04X} failed",
@@ -833,7 +833,7 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
     ec_OElistt oeList{};
     for (uint8_t sub = 0; sub <= odList.MaxSub[i]; ++sub) {
       if (retrySdoInfo([&] {
-            std::lock_guard<std::mutex> lock(socketMutex_);
+            std::lock_guard<std::mutex> lock(controlPlaneMutex_);
             return ecx_readOEsingle(ctx_.get(), i, sub, &odList, &oeList);
           }) <= 0) {
         spdlog::warn("Device {}: readOEsingle 0x{:04X}:{:02X} failed", slavePosition,
@@ -862,7 +862,7 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
 
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSii(
     uint16_t slavePosition) {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -890,7 +890,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSii(
 
 std::expected<void, std::string> SoemFieldbusDriver::writeSii(uint16_t slavePosition,
                                                               std::span<const uint8_t> data) {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -925,7 +925,7 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSii(uint16_t slavePosi
 
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
     uint16_t slavePosition, const std::string& filename) {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -953,7 +953,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
 std::expected<void, std::string> SoemFieldbusDriver::writeFile(uint16_t slavePosition,
                                                                const std::string& filename,
                                                                std::span<const uint8_t> data) {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -975,7 +975,7 @@ std::expected<void, std::string> SoemFieldbusDriver::writeFile(uint16_t slavePos
 std::expected<void, std::string> SoemFieldbusDriver::readRegister(uint16_t slavePosition,
                                                                   uint16_t address,
                                                                   std::span<uint8_t> data) {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -995,7 +995,7 @@ std::expected<void, std::string> SoemFieldbusDriver::readRegister(uint16_t slave
 std::expected<void, std::string> SoemFieldbusDriver::writeRegister(uint16_t slavePosition,
                                                                    uint16_t address,
                                                                    std::span<const uint8_t> data) {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -1038,7 +1038,7 @@ mm::comm::ProcessDataWatchdogConfig decodeWatchdog(uint16_t divider, uint16_t ti
 
 std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::processDataWatchdog(
     uint16_t slavePosition) {
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -1071,7 +1071,7 @@ std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::setPro
   if (timeout < std::chrono::nanoseconds::zero()) {
     return std::unexpected("watchdog timeout must not be negative");
   }
-  std::lock_guard<std::mutex> lock(socketMutex_);
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -1226,7 +1226,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
                                            std::function<void()> tick,
                                            std::function<bool()> shouldAbort) {
   {
-    std::lock_guard<std::mutex> lock(socketMutex_);
+    std::lock_guard<std::mutex> lock(controlPlaneMutex_);
     if (!ctx_) {
       spdlog::error("transitionToState: no driver — call init() first");
       return;
@@ -1234,7 +1234,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
   }
   const auto targetRaw = static_cast<uint16_t>(targetState);
 
-  // socketMutex_ is taken only around the discrete socket transactions below and
+  // controlPlaneMutex_ is taken only around the discrete socket transactions below and
   // is never held across the poll sleep or the tick()/shouldAbort() callbacks, so
   // a multi-second transition does not block other control-plane callers (and the
   // PDO tick, being lock-free, never contends here).
@@ -1251,7 +1251,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
   if (targetState != EtherCatState::Init) {
     std::vector<uint16_t> kicked;
     {
-      std::lock_guard<std::mutex> lock(socketMutex_);
+      std::lock_guard<std::mutex> lock(controlPlaneMutex_);
       ecx_readstate(ctx_.get());
       for (uint16_t pos : positions) {
         const uint16_t stateClean = ctx_->slavelist[pos].state & 0x000Fu;
@@ -1272,7 +1272,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
 
   std::set<uint16_t> pending;
   {
-    std::lock_guard<std::mutex> lock(socketMutex_);
+    std::lock_guard<std::mutex> lock(controlPlaneMutex_);
     ecx_readstate(ctx_.get());
     for (uint16_t pos : positions) {
       uint16_t state = ctx_->slavelist[pos].state;
@@ -1333,7 +1333,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
 
     // Locked for the rest of this iteration (state read, evaluation, resend) —
     // released at the loop-body scope exit before the next tick()/sleep.
-    std::lock_guard<std::mutex> lock(socketMutex_);
+    std::lock_guard<std::mutex> lock(controlPlaneMutex_);
     ecx_readstate(ctx_.get());
 
     for (auto it = pending.begin(); it != pending.end();) {
@@ -1383,7 +1383,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
   }
 
   if (!aborted) {
-    std::lock_guard<std::mutex> lock(socketMutex_);
+    std::lock_guard<std::mutex> lock(controlPlaneMutex_);
     for (uint16_t pos : pending) {
       // Report both registers: the AL Status (0x0130 — actual state + error bit, so the slave's
       // real position is visible rather than just the requested target) and the AL Status Code

@@ -941,11 +941,11 @@ std::expected<void, std::string> DeviceManager::initializeDeviceParameters(uint1
   // (scan/reset/transitionToState) that rebuild devices_/driver_ regardless of caller thread. Both
   // callers today are on the HTTP loop thread (so serialised with those mutators anyway), but this
   // triggers the multi-second readObjectDictionary enumeration — during which
-  // SoemFieldbusDriver::readObjectDictionary releases the driver's socketMutex_ between SDO-Info
-  // transactions on the promise that the bus lock keeps the context alive — so not relying on the
-  // single-thread invariant here is the robust choice. Held shared for the read's duration; the RT
-  // loop (lock-free PDO) and WebSocket (separate loop) are unaffected — only exclusive mutators
-  // wait.
+  // SoemFieldbusDriver::readObjectDictionary releases the driver's controlPlaneMutex_ between
+  // SDO-Info transactions on the promise that the bus lock keeps the context alive — so not relying
+  // on the single-thread invariant here is the robust choice. Held shared for the read's duration;
+  // the RT loop (lock-free PDO) and WebSocket (separate loop) are unaffected — only exclusive
+  // mutators wait.
   std::shared_lock lock(busMutex_);
   Device* device = findDevice(slavePosition);
   if (!device) {

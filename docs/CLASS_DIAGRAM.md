@@ -107,7 +107,7 @@ classDiagram
         +readSdo()* / writeSdo()*
         +exchangeProcessData()* «lock-free»
         +transitionToState()*
-        #mutex socketMutex_
+        #mutex controlPlaneMutex_
     }
     class SoemFieldbusDriver {
         -string ifname_
@@ -263,7 +263,7 @@ handlers run on that same thread for each request (thread 2 — see [THREADS.md]
 example plug-in stops there, but a plug-in is ordinary C++ holding `DeviceManager&` — it **may**
 spawn its own background `std::jthread` for off-RT work (a long-running procedure, a poller),
 exactly as `MonitoringManager` does. Such a thread is bound by the same rules as any non-RT thread:
-serialize all bus access through `FieldbusDriver::socketMutex_` and never touch the RT path.
+serialize all bus access through `FieldbusDriver::controlPlaneMutex_` and never touch the RT path.
 
 ## Key value types
 

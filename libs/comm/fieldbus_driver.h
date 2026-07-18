@@ -322,7 +322,7 @@ struct ProcessDataWatchdogConfig {
 /// via @c DeviceManager::init. @c GameLoop never references the driver — it runs @c CyclicTasks
 /// (e.g. @c ProcessDataCyclicTask) that reach the bus only through @c DeviceManager.
 ///
-/// The driver owns @c socketMutex_, which serialises the control-plane
+/// The driver owns @c controlPlaneMutex_, which serialises the control-plane
 /// operations (mailbox/SDO, FoE, ESC register, and state access) amongst
 /// non-RT callers. The real-time PDO path (@c exchangeProcessData) runs
 /// lock-free: SOEM's port layer is internally thread-safe (per-datagram index
@@ -777,7 +777,7 @@ class FieldbusDriver {
   /// sleep, a blocking wait, or a user callback. The PDO path does not take this
   /// lock (see the class-level note). @c mutable so the @c const accessors
   /// (@c slaveInfo, @c slaveCount) can lock.
-  mutable std::mutex socketMutex_;
+  mutable std::mutex controlPlaneMutex_;
 };
 
 }  // namespace mm::comm

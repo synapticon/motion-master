@@ -45,17 +45,19 @@ std::expected<void, std::string> appendEntries(std::vector<ProcessImageEntry>& o
 
 std::expected<ProcessImage, std::string> buildProcessImage(const mm::comm::PdoLayout& layout,
                                                            const std::vector<Device>& devices) {
-  // Each direction is exchanged through a fixed-capacity ProcessBuffer (kMaxProcessImageBytes),
-  // and exchangeProcessData spans scratch.bytes over that capacity. Bound the layout here — the
-  // one place every driver's image is assembled — so an oversized layout (a non-SOEM transport,
-  // or a future change) is rejected with a clear error rather than producing out-of-bounds spans
-  // downstream. The SOEM driver also enforces this on its IOmap, but the cap must not depend on a
-  // single driver getting it right.
-  if (layout.outputBytes > mm::comm::kMaxProcessImageBytes ||
-      layout.inputBytes > mm::comm::kMaxProcessImageBytes) {
+  // The whole bus is exchanged as one combined IOmap ([all outputs | all inputs]); on SOEM that is
+  // a single kMaxProcessImageBytes buffer, so it is the *combined* size that must fit. Bound it
+  // here — the one place every driver's image is assembled — so an oversized layout (a non-SOEM
+  // transport, or a future change) is rejected with a clear error rather than producing
+  // out-of-bounds spans downstream. This also keeps each per-direction ProcessBuffer scratch in
+  // bounds, since either direction alone is <= the combined total. The SOEM driver also enforces
+  // this on its IOmap, but the cap must not depend on a single driver getting it right.
+  const std::size_t combinedBytes =
+      static_cast<std::size_t>(layout.outputBytes) + layout.inputBytes;
+  if (combinedBytes > mm::comm::kMaxProcessImageBytes) {
     return std::unexpected(std::format(
-        "process image too large: {} output / {} input bytes exceeds the {}-byte capacity",
-        layout.outputBytes, layout.inputBytes, mm::comm::kMaxProcessImageBytes));
+        "process image too large: {} output + {} input = {} bytes exceeds the {}-byte capacity",
+        layout.outputBytes, layout.inputBytes, combinedBytes, mm::comm::kMaxProcessImageBytes));
   }
 
   std::unordered_map<uint16_t, const mm::comm::SlaveIo*> windows;

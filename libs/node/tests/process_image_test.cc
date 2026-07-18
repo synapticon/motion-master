@@ -237,8 +237,9 @@ TEST(BuildProcessImage, RejectsMappingWiderThanItsWindow) {
 }
 
 TEST(BuildProcessImage, RejectsImageLargerThanCapacity) {
-  // A driver layout whose image exceeds the fixed ProcessBuffer capacity must be rejected at the
-  // shared chokepoint — not left to produce out-of-bounds spans in exchangeProcessData. The size
+  // A driver layout whose combined image exceeds the IOmap capacity must be rejected at the shared
+  // chokepoint — not left to produce out-of-bounds spans in exchangeProcessData. The cap is on the
+  // combined image ([all outputs | all inputs] share one IOmap), not each direction. The size
   // guard runs before any per-device work, so an empty device set is enough to exercise it.
   std::vector<Device> devices;
   PdoLayout layout;
@@ -251,9 +252,14 @@ TEST(BuildProcessImage, RejectsImageLargerThanCapacity) {
   layout.inputBytes = mm::comm::kMaxProcessImageBytes + 1;
   EXPECT_FALSE(buildProcessImage(layout, devices).has_value());
 
-  // Exactly at capacity is accepted (no devices/mappings here, so an empty image).
+  // Directions that each fit but together exceed capacity are rejected — the cap is on the sum.
   layout.outputBytes = mm::comm::kMaxProcessImageBytes;
   layout.inputBytes = mm::comm::kMaxProcessImageBytes;
+  EXPECT_FALSE(buildProcessImage(layout, devices).has_value());
+
+  // A combined image exactly at capacity is accepted (no devices/mappings here, so an empty image).
+  layout.outputBytes = mm::comm::kMaxProcessImageBytes / 2;
+  layout.inputBytes = mm::comm::kMaxProcessImageBytes / 2;
   EXPECT_TRUE(buildProcessImage(layout, devices).has_value());
 }
 

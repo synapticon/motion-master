@@ -32,7 +32,7 @@ export default function GameLoopExplainer() {
             The loop&apos;s <strong>lifetime average</strong> rate:{' '}
             <code>executedCycles ÷ uptime</code>, compared against the target (
             <code>1e6 ÷ periodUs</code>). Because it averages over the whole run, it is smooth and
-            slow to move — a brief stall barely dents it. It turns red when it falls below 99% of
+            slow to move — a brief stall barely dents it. It turns red when it falls below 95% of
             target, which means the host has not been able to keep up on average.
           </dd>
         </div>

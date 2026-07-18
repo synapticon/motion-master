@@ -773,9 +773,20 @@ class FieldbusDriver {
  protected:
   /// Serialises control-plane access to the underlying fieldbus context (mailbox
   /// pool, slave state, manual mailbox sequence counters) amongst non-RT callers.
+  ///
+  /// "Control plane" vs "data plane" is the networking split, and it maps exactly
+  /// onto this driver. The @b data @b plane is the high-rate PDO cycle
+  /// (@c exchangeProcessData, run every tick on the RT thread) that moves process
+  /// data — it runs @b lock-free and does @b not take this mutex. The @b control
+  /// @b plane is everything that configures or commands the bus occasionally and
+  /// off the RT path — SDO/mailbox, FoE, ESC registers, AL-state transitions, and
+  /// pure reads of the cached results (@c processDataLayout, @c busConfig) — all of
+  /// which share the one fieldbus context and are serialised here. So a slow SDO or
+  /// object-dictionary walk never blocks the RT cycle: the two planes touch disjoint
+  /// state (control-plane context vs. the process-data IOmap).
+  ///
   /// Held only for the duration of a single socket transaction — never across a
-  /// sleep, a blocking wait, or a user callback. The PDO path does not take this
-  /// lock (see the class-level note). @c mutable so the @c const accessors
+  /// sleep, a blocking wait, or a user callback. @c mutable so the @c const accessors
   /// (@c slaveInfo, @c slaveCount) can lock.
   mutable std::mutex controlPlaneMutex_;
 };

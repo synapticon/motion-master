@@ -19,6 +19,12 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.50] - 2026-07-18
+
+### Changed
+
+- Hardened the EtherCAT master's working-counter checks on per-slave register operations: process-image mapping now applies the exact success criterion for single-slave register access and logs a diagnostic when a device's FMMU reset does not take effect, instead of discarding that result silently.
+
 ## [6.0.0-alpha.49] - 2026-07-17
 
 ### Added
@@ -333,7 +339,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.49...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.50...HEAD
+[6.0.0-alpha.50]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.49...v6.0.0-alpha.50
 [6.0.0-alpha.49]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.48...v6.0.0-alpha.49
 [6.0.0-alpha.48]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.47...v6.0.0-alpha.48
 [6.0.0-alpha.47]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.46...v6.0.0-alpha.47

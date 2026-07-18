@@ -146,6 +146,7 @@ function SidebarGroup({
 function DeviceSection({
   deviceId,
   name,
+  productName,
   vendorId,
   productCode,
   revisionNumber,
@@ -154,6 +155,7 @@ function DeviceSection({
 }: {
   deviceId: string
   name?: string
+  productName?: string
   vendorId?: number
   productCode?: number
   revisionNumber?: number
@@ -228,6 +230,7 @@ function DeviceSection({
   // Full device identity, shown as a multi-line tooltip on the name — the immutable
   // EEPROM identity that the status line deliberately keeps off the chrome.
   const identityTitle = [
+    ...(productName && productName !== name ? ['Product', productName] : []),
     'Name',
     name ?? `Device ${deviceId}`,
     ...(vendorId !== undefined ? ['Vendor ID', formatHex(vendorId, 8)] : []),
@@ -254,7 +257,7 @@ function DeviceSection({
               className="truncate font-display text-sm tracking-wide text-white/90 cursor-help"
               title={identityTitle}
             >
-              {name ?? `Device ${deviceId}`}
+              {productName ?? name ?? `Device ${deviceId}`}
             </span>
           </div>
           <ChevronDown
@@ -537,6 +540,7 @@ export default function RootLayout() {
                     key={d.slavePosition}
                     deviceId={String(d.slavePosition)}
                     name={d.name}
+                    productName={d.productName}
                     vendorId={d.vendorId}
                     productCode={d.productCode}
                     revisionNumber={d.revisionNumber}

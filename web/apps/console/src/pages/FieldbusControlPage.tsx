@@ -451,7 +451,11 @@ export default function FieldbusControlPage() {
                                   </td>
                                   <td className="px-4 py-2">{d.name}</td>
                                   <td className="px-4 py-2 font-mono">0x{d.vendorId.toString(16).toUpperCase()}</td>
-                                  <td className="px-4 py-2 font-mono">0x{d.productCode.toString(16).toUpperCase()}</td>
+                                  <td className="px-4 py-2 font-mono">
+                                    <span className="cursor-help" title={d.productName}>
+                                      0x{d.productCode.toString(16).toUpperCase()}
+                                    </span>
+                                  </td>
                                   <td className="px-4 py-2 font-mono">0x{d.revisionNumber.toString(16).toUpperCase()}</td>
                                   <td className="px-4 py-2 font-mono">{d.serialNumber}</td>
                                   <td className="px-4 py-2">

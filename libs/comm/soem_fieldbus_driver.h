@@ -228,7 +228,8 @@ class SoemFieldbusDriver : public FieldbusDriver {
   // [all outputs | all inputs]. Sized to kMaxProcessImageBytes so it matches the cap
   // configureProcessData() enforces and the ProcessBuffer snapshots layered on top — the
   // three must agree, or a bus the rest of the stack accepts would overflow or be rejected
-  // here. At ~160 bytes per direction per SOMANET axis this holds ~100 fully-loaded axes.
+  // here. At ~100 bytes per axis across both directions this holds ~320 axes — far beyond the
+  // ~50 the stack targets.
   uint8_t map_[kMaxProcessImageBytes]{};
   // 1-based positions whose context currently holds BOOT-sized mailbox sync
   // managers (set when we drive a slave into BOOT). ecx_config_init programs the

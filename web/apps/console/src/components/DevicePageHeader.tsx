@@ -33,16 +33,19 @@ export default function DevicePageHeader({
         <p className="eyebrow">Device {slavePosition}</p>
         {device && (
           <dl className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
-            {[
-              { label: 'Name', value: device.name, mono: false },
-              { label: 'Vendor ID', value: hex32(device.vendorId), mono: true },
-              { label: 'Product Code', value: hex32(device.productCode), mono: true },
-              { label: 'Revision', value: hex32(device.revisionNumber), mono: true },
-              { label: 'Serial', value: String(device.serialNumber), mono: false },
-            ].map(({ label, value, mono }, i) => (
+            {(
+              [
+                { label: 'Name', value: device.name, mono: false },
+                { label: 'Vendor ID', value: hex32(device.vendorId), mono: true },
+                { label: 'Product Code', value: hex32(device.productCode), mono: true, title: device.productName },
+                { label: 'Revision', value: hex32(device.revisionNumber), mono: true },
+                { label: 'Serial', value: String(device.serialNumber), mono: false },
+              ] as { label: string; value: string; mono: boolean; title?: string }[]
+            ).map(({ label, value, mono, title }, i) => (
               <div
                 key={label}
-                className={`flex items-baseline gap-1.5 ${i > 0 ? 'border-l border-grey-200 pl-4' : ''}`}
+                title={title}
+                className={`flex items-baseline gap-1.5 ${i > 0 ? 'border-l border-grey-200 pl-4' : ''} ${title ? 'cursor-help' : ''}`}
               >
                 <dt className="text-[9px] text-grey-500 uppercase tracking-wide font-display">
                   {label}

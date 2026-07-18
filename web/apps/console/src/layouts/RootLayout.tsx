@@ -230,11 +230,11 @@ function DeviceSection({
   // Full device identity, shown as a multi-line tooltip on the name — the immutable
   // EEPROM identity that the status line deliberately keeps off the chrome.
   const identityTitle = [
-    ...(productName && productName !== name ? ['Product', productName] : []),
     'Name',
     name ?? `Device ${deviceId}`,
     ...(vendorId !== undefined ? ['Vendor ID', formatHex(vendorId, 8)] : []),
     ...(productCode !== undefined ? ['Product Code', formatHex(productCode, 8)] : []),
+    ...(productName && productName !== name ? ['Product name', productName] : []),
     ...(revisionNumber !== undefined ? ['Revision', formatHex(revisionNumber, 8)] : []),
     ...(serialNumber !== undefined ? ['Serial', String(serialNumber)] : []),
   ].join('\n')

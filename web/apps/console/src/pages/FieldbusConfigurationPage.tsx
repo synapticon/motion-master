@@ -182,7 +182,7 @@ function SlaveCard({ slave }: { slave: SlaveConfig }) {
       <header className="border-b border-grey-200 bg-grey-50 px-4 py-3 flex flex-wrap items-baseline gap-x-3 gap-y-1">
         <SlavePositionBadge position={slave.slavePosition} />
         <span className="text-sm text-grey-800 font-medium">
-          {slave.deviceName || <span className="text-grey-400">unknown device</span>}
+          {slave.productName || slave.deviceName || <span className="text-grey-400">unknown device</span>}
         </span>
         <span
           className="font-mono text-[11px] text-grey-500 cursor-help"

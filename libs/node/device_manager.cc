@@ -594,6 +594,7 @@ std::vector<SlaveConfigInfo> DeviceManager::busConfig() const {
     info.config = std::move(c);
     if (const Device* device = findDevice(info.config.slavePosition)) {
       info.deviceName = device->name();
+      info.productName = device->productName();
       info.vendorId = device->vendorId();
       info.productCode = device->productCode();
       info.revisionNumber = device->revisionNumber();
@@ -1239,6 +1240,7 @@ void to_json(nlohmann::json& j, const SlaveConfigInfo& info) {
                  });
   j = {{"slavePosition", c.slavePosition},
        {"deviceName", info.deviceName},
+       {"productName", info.productName},
        {"vendorId", info.vendorId},
        {"productCode", info.productCode},
        {"revisionNumber", info.revisionNumber},

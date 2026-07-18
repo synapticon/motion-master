@@ -2802,8 +2802,9 @@ components:
     SlaveConfig:
       type: object
       required:
-        [slavePosition, deviceName, vendorId, productCode, revisionNumber, serialNumber,
-         configuredAddress, aliasAddress, outputBits, inputBits, mailbox, dc, syncManagers, fmmus]
+        [slavePosition, deviceName, productName, vendorId, productCode, revisionNumber,
+         serialNumber, configuredAddress, aliasAddress, outputBits, inputBits, mailbox, dc,
+         syncManagers, fmmus]
       properties:
         slavePosition:
           type: integer
@@ -2811,7 +2812,16 @@ components:
           example: 1
         deviceName:
           type: string
-          description: Device name for this slave position, empty if unknown
+          description: >
+            SII device name for this slave position, empty if unknown. For SOMANET drives this is
+            the generic group name "SOMANET"; use productName to distinguish products.
+          example: "SOMANET"
+        productName:
+          type: string
+          description: >
+            Canonical product name, empty if unknown. For a recognised SOMANET product this
+            distinguishes the product (e.g. "SOMANET Circulo"); otherwise it falls back to
+            deviceName.
           example: "SOMANET Node"
         vendorId:
           type: integer

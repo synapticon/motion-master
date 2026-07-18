@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
+#include "node/synapticon.h"
 
 namespace {
 
@@ -34,6 +35,10 @@ class FakeDriver : public FieldbusDriver {
 
   /// Name returned by slaveInfo() for every position (drives Device::name()).
   std::string deviceName;
+
+  /// Vendor/product returned by slaveInfo() (drive Device::vendorId()/productCode()/productName()).
+  uint32_t vendorId = 0;
+  uint32_t productCode = 0;
 
   /// Returned verbatim by busConfig() — empty unless a test populates it.
   std::vector<mm::comm::SlaveConfig> busConfigData;
@@ -66,8 +71,8 @@ class FakeDriver : public FieldbusDriver {
 
   SlaveInfo slaveInfo(uint16_t) const override {
     return {.name = deviceName,
-            .vendorId = 0,
-            .productCode = 0,
+            .vendorId = vendorId,
+            .productCode = productCode,
             .revisionNumber = 0,
             .serialNumber = 0};
   }
@@ -392,6 +397,8 @@ TEST(DeviceManagerBusConfig, EnrichesDriverConfigWithDeviceName) {
   auto config = dm.busConfig();
   ASSERT_EQ(config.size(), 1u);
   EXPECT_EQ(config[0].deviceName, "Axis A");
+  // Foreign/zero vendor: productName falls back to the SII name.
+  EXPECT_EQ(config[0].productName, "Axis A");
   EXPECT_EQ(config[0].config.slavePosition, 1);
   ASSERT_EQ(config[0].config.syncManagers.size(), 1u);
   EXPECT_EQ(config[0].config.syncManagers[0].type, 3);
@@ -401,9 +408,29 @@ TEST(DeviceManagerBusConfig, EnrichesDriverConfigWithDeviceName) {
   // to_json exposes the resolved name and the nested SM/FMMU arrays.
   nlohmann::json j = config[0];
   EXPECT_EQ(j.at("deviceName"), "Axis A");
+  EXPECT_EQ(j.at("productName"), "Axis A");
   ASSERT_EQ(j.at("syncManagers").size(), 1u);
   EXPECT_EQ(j.at("syncManagers")[0].at("type"), 3);
   EXPECT_EQ(j.at("fmmus")[0].at("active"), true);
+}
+
+TEST(DeviceManagerBusConfig, ResolvesSomanetProductName) {
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->deviceName = "SOMANET";  // the generic SII name every SOMANET drive reports
+  driver->vendorId = mm::node::kSynapticonVendorId;
+  driver->productCode = 0x00000301;  // SOMANET Circulo
+  mm::comm::SlaveConfig cfg{};
+  cfg.slavePosition = 1;
+  driver->busConfigData = {cfg};
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  auto config = dm.busConfig();
+  ASSERT_EQ(config.size(), 1u);
+  EXPECT_EQ(config[0].deviceName, "SOMANET");
+  EXPECT_EQ(config[0].productName, "SOMANET Circulo");
 }
 
 TEST(DeviceManagerBusConfig, EmptyWithoutDriver) {

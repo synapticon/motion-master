@@ -114,7 +114,9 @@ void to_json(nlohmann::json& j, const OutputStageResult& result);
 /// @c DeviceManager::busConfig on the (non-RT) caller's thread.
 struct SlaveConfigInfo {
   mm::comm::SlaveConfig config;  ///< Raw ESC configuration as captured by the driver.
-  std::string deviceName;        ///< Device name for this slave position, empty if unknown.
+  std::string deviceName;        ///< SII device name for this slave position, empty if unknown.
+  std::string productName;       ///< Canonical product name (distinguishes SOMANET products where
+                                 ///< deviceName is the generic "SOMANET"); empty if unknown.
   // Immutable identity, denormalised from the Device for this slave position (like deviceName) so
   // the Configuration page can show it without a second endpoint. Zero when the slave is unknown.
   uint32_t vendorId = 0;        ///< Vendor ID from EEPROM.

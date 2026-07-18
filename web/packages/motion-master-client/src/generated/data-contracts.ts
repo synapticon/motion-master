@@ -408,10 +408,15 @@ export interface SlaveConfig {
    */
   slavePosition: number;
   /**
-   * Device name for this slave position, empty if unknown
-   * @example "SOMANET Node"
+   * SII device name for this slave position, empty if unknown. For SOMANET drives this is the generic group name "SOMANET"; use productName to distinguish products.
+   * @example "SOMANET"
    */
   deviceName: string;
+  /**
+   * Canonical product name, empty if unknown. For a recognised SOMANET product this distinguishes the product (e.g. "SOMANET Circulo"); otherwise it falls back to deviceName.
+   * @example "SOMANET Node"
+   */
+  productName: string;
   /**
    * Vendor ID from EEPROM (0 if the slave is unknown)
    * @format int64

@@ -1380,6 +1380,13 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
       }
     }
 
+    // Every resendInterval (default 2 s), re-issue the state request to the slaves still pending.
+    // The initial writestate can be lost, or a slave may fault mid-transition, so a one-shot request
+    // would just stall until the deadline; periodically re-driving it nudges stuck slaves onward.
+    // Per slave: if the error bit (0x10) is set, the slave latched an AL error and will ignore any
+    // new state request until it is acknowledged — so first write the current state with the ACK bit
+    // (bit 4 in AL Control means "acknowledge", the same bit that reads as "error" in AL Status) to
+    // clear the fault latch, then (re)write the target state.
     if (std::chrono::steady_clock::now() - lastResend > resendInterval) {
       for (uint16_t pos : pending) {
         uint16_t state = ctx_->slavelist[pos].state;

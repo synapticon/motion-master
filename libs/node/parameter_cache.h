@@ -10,17 +10,15 @@
 #include <vector>
 
 #include "node/device_parameter.h"
+#include "node/synapticon.h"  // kSynapticonVendorId
 
 namespace mm::node {
 
-/// @brief EtherCAT vendor ID of Synapticon (SOMANET drives).
-///
-/// For this vendor the CoE object dictionary is uniquely determined by @c (productCode,
-/// @c revisionNumber): Synapticon bumps the revision whenever the dictionary changes, so an
-/// on-disk cache keyed on identity alone can never serve definitions that do not match the device.
-/// That guarantee does not hold for arbitrary third-party vendors, which is why the cache is
-/// enabled by default only for this vendor (see @c ParameterCacheConfig::cacheAllVendors).
-inline constexpr uint32_t kSynapticonVendorId = 0x000022D2;
+// The cache is enabled by default only for @c kSynapticonVendorId: for this vendor the CoE object
+// dictionary is uniquely determined by @c (productCode, revisionNumber) — Synapticon bumps the
+// revision whenever the dictionary changes, so an on-disk cache keyed on identity alone can never
+// serve definitions that do not match the device. That guarantee does not hold for arbitrary
+// third-party vendors (see @c ParameterCacheConfig::cacheAllVendors).
 
 /// @brief Policy and location for the on-disk parameter cache.
 ///

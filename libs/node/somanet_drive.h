@@ -1,16 +1,12 @@
 #pragma once
 
-#include <cstdint>
 #include <expected>
 #include <string>
 
 #include "node/cia402_drive.h"
+#include "node/synapticon.h"
 
 namespace mm::node {
-
-/// @brief Synapticon's EtherCAT Vendor ID (object 0x1018:01), the discriminator for a SOMANET
-///        drive. Defined here as the single source of truth for the SOMANET check.
-constexpr uint32_t kSynapticonVendorId = 0x000022D2;
 
 /// @brief Borrowed view of a SOMANET drive — a CiA402 drive plus Synapticon-specific
 ///        object-dictionary access (encoder/motor configuration, commutation offset, etc.).

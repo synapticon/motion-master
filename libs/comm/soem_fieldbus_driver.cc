@@ -347,6 +347,8 @@ PdoLayout SoemFieldbusDriver::processDataLayout() {
     // pointers instead: the group's outputs pointer is the output image base and its inputs
     // pointer is the input image base (IOmap laid out as [all outputs | all inputs]). A
     // sub-byte-only direction reports 0 bytes; its pointer is never set, so it gets a 0 offset.
+    // outputs/inputs are uint8_t*, so each pointer difference is already the byte offset into its
+    // direction's image (the [all outputs | all inputs] IOmap) — no element scaling.
     layout.slaves.push_back(SlaveIo{
         .slavePosition = static_cast<uint16_t>(i),
         .outputOffset = s.Obytes ? static_cast<uint32_t>(s.outputs - grp.outputs) : 0,

@@ -64,6 +64,10 @@ std::expected<int, std::string> SoemFieldbusDriver::scan() {
   // ecx_config_init reprograms every slave's mailbox SMs to PRE-OP sizes and hands
   // EEPROM back to the PDI, so any prior BOOT-SM tracking is now stale.
   bootMailboxSlaves_.clear();
+  // Take full manual control of AL state transitions. With the default (0), SOEM's config/map
+  // helpers auto-request state changes (e.g. driving slaves toward PRE-OP) as a side effect. In
+  // Motion Master, AL state is the user's job (POST /api/state → DeviceManager::transitionToState),
+  // so we never want SOEM moving slaves on its own — every ecx_writestate is issued explicitly.
   ctx_->manualstatechange = 1;
   // ecx_config_init returns the broadcast-read working counter: > 0 is the slave count; a
   // non-positive value means no slaves answered. Negative values are SOEM transport codes

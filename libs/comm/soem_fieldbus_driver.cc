@@ -936,6 +936,12 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
     return std::unexpected("no driver — call init() first");
   }
   spdlog::debug("FOEread slave {} '{}'", slavePosition, filename);
+  // 10 MiB receive buffer: a conservative upper bound covering any file a SOMANET drive serves over
+  // FoE. FoE has no size-ahead handshake, so ecx_FOEread fills this buffer and reports the actual
+  // length back through `size` (in/out, like SDO's psize).
+  // No manual over-cap guard is needed — unlike ecx_SDOread, a file larger than the buffer makes
+  // ecx_FOEread return -EC_ERR_TYPE_FOE_BUF2SMALL, which the wkc <= 0 path below reports as
+  // "(buffer too small)" rather than truncating silently.
   constexpr int kMaxSize = 10 * 1024 * 1024;
   std::vector<uint8_t> data(kMaxSize);
   int size = kMaxSize;

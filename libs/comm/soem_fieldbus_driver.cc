@@ -127,6 +127,11 @@ std::chrono::microseconds recommendedCyclePeriod(uint32_t processBytes, int slav
   const double txUs = (wireBytes * 8.0) / 100.0;
   // Frame forwarding through the slave chain, both directions (~0.6 µs per slave).
   const double ringUs = slaveCount * 0.6;
+  // Divide the on-wire time by the 0.5 utilisation target: the frame should occupy at most half
+  // the cycle, leaving the other half free for jitter, master work, and interleaved SDO/mailbox
+  // traffic. Worked example — 30 drives × 83 process bytes = 2490 bytes: 2 frames → 2590 wire
+  // bytes → 207 µs tx + 18 µs ring = 225 µs on the wire; / 0.5 = 450 µs needed, which snaps up to
+  // the 500 µs step below. So such a bus wants a ≥ 0.5 ms cycle and runs at ~25% utilisation at 1 ms.
   const double neededUs = (txUs + ringUs) / 0.5;  // target ≤ 50% bus utilisation
   for (int64_t step : {125, 250, 500, 1000, 2000, 4000, 8000}) {
     if (neededUs <= static_cast<double>(step)) {

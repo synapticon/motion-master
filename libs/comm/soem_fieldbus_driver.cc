@@ -885,6 +885,10 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSii(
   for (uint16_t i = 0; i < kSiiBytes; ++i) {
     sii[i] = ecx_siigetbyte(ctx_.get(), slavePosition, i);
   }
+  // Hand EEPROM control back to the slave's PDI (writes ESC EEPROM-config register 0x0500).
+  // ecx_siigetbyte took control for the master (ecx_eeprom2master) to read the EEPROM; releasing it
+  // here keeps the slave's own logic from being locked out of its EEPROM — the ESC reloads SII on
+  // AL state changes.
   ecx_eeprom2pdi(ctx_.get(), slavePosition);
   spdlog::debug("readSii slave {} ({} bytes)", slavePosition, sii.size());
   return sii;

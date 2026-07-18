@@ -144,7 +144,7 @@ std::chrono::microseconds recommendedCyclePeriod(uint32_t processBytes, int slav
 
 // Pops the most recent SOEM error (if any) after a failed SDO transfer and renders it as a short
 // human-readable suffix (" (SDO abort 0x...)", " (mailbox error)", ...). Empty when no error was
-// queued. Must be called under socketMutex_ (it touches the SOEM context error stack).
+// queued. Called with socketMutex_ held (it touches the SOEM context error stack).
 std::string sdoErrorSuffix(ecx_contextt* ctx) {
   ec_errort err{};
   if (!ecx_poperror(ctx, &err)) {

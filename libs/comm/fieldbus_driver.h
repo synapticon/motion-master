@@ -15,14 +15,15 @@
 
 namespace mm::comm {
 
-/// @brief Maximum size in bytes of the combined process-data image (all outputs + all inputs).
+/// @brief Maximum size in bytes of the process-data image in one direction (all outputs, or all
+///        inputs) — the cap is applied to each direction independently.
 ///
-/// Sizes the driver's IOmap buffer and bounds the process-data snapshots layered on top
-/// of it.  At 32 fully-loaded SOMANET axes (~160 bytes per direction) the image is ~10 KB;
-/// 32 KB leaves ample headroom.  A bus whose mapped image exceeds this is rejected by
-/// @c configureProcessData().  This is not a practical limit: on 100 Mbit EtherCAT an image
-/// that large already forces a many-millisecond cycle, so the cap sits well clear of any
-/// realistic configuration.
+/// Sizes the driver's IOmap buffer and the per-direction RT ProcessBuffer scratch, and bounds the
+/// image assembled by @c buildProcessImage (a bus whose output or input image exceeds it is
+/// rejected).  A SOMANET drive maps ~100 bytes across both directions, so 50 drives total ~5 KB —
+/// under 15% of this cap even if the whole image fell in one direction.  This is not a practical
+/// limit: on 100 Mbit EtherCAT an image approaching 32 KB already forces a many-millisecond cycle,
+/// so the cap sits well clear of any realistic configuration.
 inline constexpr std::size_t kMaxProcessImageBytes = 32768;
 
 /// @brief EtherCAT Application Layer state values.

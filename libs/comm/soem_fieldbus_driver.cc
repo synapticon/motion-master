@@ -40,8 +40,7 @@ std::expected<void, std::string> SoemFieldbusDriver::init() {
   // SOEM has no auto-detect — an empty interface name would reach ecx_init and
   // fail with a cryptic "No such device". Reject it up front with a clear error.
   if (ifname_.empty()) {
-    return std::unexpected(
-        "no network adapter specified — SOEM requires a NIC name or MAC address");
+    return std::unexpected("no network adapter specified — SOEM requires a NIC name");
   }
   ctx_ = std::make_unique<ecx_contextt>();
   if (!ecx_init(ctx_.get(), ifname_.c_str())) {

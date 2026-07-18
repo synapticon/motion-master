@@ -42,6 +42,11 @@ std::expected<void, std::string> SoemFieldbusDriver::init() {
   if (ifname_.empty()) {
     return std::unexpected("no network adapter specified — SOEM requires a NIC name");
   }
+  // Allocate a fresh, value-initialized (zeroed) master context. Every ecx_* call takes this ctx
+  // pointer as its first argument — that is what makes SOEM's modern API reentrant/multi-instance
+  // instead of relying on one file-scope global. The zero-init matters: SOEM's mappers assume a
+  // clean context and count on fields like slavelist[].FMMUunused starting at 0. Held behind a
+  // unique_ptr for RAII cleanup (freed by ctx_.reset() below on failure, and by closeContext()).
   ctx_ = std::make_unique<ecx_contextt>();
   if (!ecx_init(ctx_.get(), ifname_.c_str())) {
     ctx_.reset();

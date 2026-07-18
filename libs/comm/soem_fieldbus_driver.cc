@@ -200,8 +200,15 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
     // reprograms the live ones during the map.
     std::memset(ctx_->slavelist[i].FMMU, 0, sizeof(ctx_->slavelist[i].FMMU));
     ctx_->slavelist[i].FMMUunused = 0;
-    ecx_FPWR(&ctx_->port, ctx_->slavelist[i].configadr, ECT_REG_FMMU0, sizeof(zeroFmmus), zeroFmmus,
-             EC_TIMEOUTRET3);
+    if (ecx_FPWR(&ctx_->port, ctx_->slavelist[i].configadr, ECT_REG_FMMU0, sizeof(zeroFmmus),
+                 zeroFmmus, EC_TIMEOUTRET3) != 1) {
+      // Best-effort: the in-memory memset above already fixes the map SOEM is about to build, and
+      // the live FMMU0/1/2 are reprogrammed during it. A failure here only means a slave carrying a
+      // stale duplicate FMMU (index >= 3) in its ESC will not self-heal this pass — log it rather
+      // than let the one deliberately-unchecked register write read as an oversight.
+      spdlog::debug("Slave {}: FMMU register clear (FPWR 0x0600) failed; stale FMMUs may persist",
+                    i);
+    }
   }
   // TI PRU-ICSS ESCs cannot process SOEM's combined read+write LRW process-data datagram; mark
   // them so the map aggregates split LRD/LWR instead. Must run before ecx_config_map_group, which
@@ -266,7 +273,7 @@ std::expected<void, std::string> SoemFieldbusDriver::deactivateMailboxStatusFmmu
       const uint16_t activateReg = static_cast<uint16_t>(ECT_REG_FMMU0 + sizeof(ec_fmmut) * j +
                                                          offsetof(ec_fmmut, FMMUactive));
       if (ecx_FPWR(&ctx_->port, s.configadr, activateReg, sizeof(inactive), &inactive,
-                   EC_TIMEOUTRET3) <= 0) {
+                   EC_TIMEOUTRET3) != 1) {
         return std::unexpected(
             std::format("failed to deactivate mailbox-status FMMU on slave {} (FMMU{})", i, j));
       }
@@ -293,7 +300,7 @@ std::expected<void, std::string> SoemFieldbusDriver::blockLrwOnPruIcssSlaves() {
     ec_slavet& s = ctx_->slavelist[i];
     uint16_t escType = 0;
     if (ecx_FPRD(&ctx_->port, s.configadr, ECT_REG_TYPE, sizeof(escType), &escType,
-                 EC_TIMEOUTRET3) <= 0) {
+                 EC_TIMEOUTRET3) != 1) {
       return std::unexpected(std::format("failed to read ESC type register of slave {}", i));
     }
     if ((escType & 0x00ffu) == 0x90u) {
@@ -768,8 +775,13 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
   // control-plane operation on its busMutex_, held for this call's entire duration, so no
   // scan/reset can interleave. An embedder driving SoemFieldbusDriver directly MUST provide the
   // same guarantee: do not call scan()/reset()/stop() while a readObjectDictionary() is in flight
-  // on another thread. The up-front ctx_ check below is only a pre-init guard, not protection
-  // against this race (which is why it is not re-checked inside the loop).
+  // on another thread. This is not a wart unique to this method — it is the driver's uniform
+  // lifetime contract: exchangeProcessData() carries the identical one on the RT path, reading ctx_
+  // lock-free (no socketMutex_) and so relying on the caller not tearing the context down mid-cycle
+  // (see closeContext's note on stopExchange ordering). "Do not destroy the context while an
+  // operation is in flight" holds for every operation, not just this enumeration. The up-front ctx_
+  // check below is only a pre-init guard, not protection against this race (which is why it is not
+  // re-checked inside the loop).
   {
     std::lock_guard<std::mutex> lock(socketMutex_);
     if (!ctx_) {
@@ -847,6 +859,9 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSii(
   // conservative window keeps the read bounded and always covers the real content; the parser
   // stops at END. ecx_siigetbyte caches a 128-byte EEPROM page internally, so this is ~64 EEPROM
   // transactions rather than one per byte. EEPROM control is handed back to the PDI afterwards.
+  // Caveat: ecx_siigetbyte has no error channel — a failed/NAK'd page read returns 0x00, so a
+  // mid-read fault surfaces as zero bytes (a premature END or a gap) under this success return, not
+  // as an error. Acceptable here because the content the parser needs sits in the first pages.
   constexpr uint16_t kSiiBytes = 0x2000;  // 8 KiB — conservative upper bound for SII content.
   std::vector<uint8_t> sii(kSiiBytes);
   for (uint16_t i = 0; i < kSiiBytes; ++i) {

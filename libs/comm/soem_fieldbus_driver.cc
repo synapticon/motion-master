@@ -996,8 +996,7 @@ std::expected<void, std::string> SoemFieldbusDriver::readRegister(uint16_t slave
   int wkc = ecx_FPRD(&ctx_->port, configAddr, address, static_cast<uint16_t>(data.size()),
                      data.data(), EC_TIMEOUTRET);
   if (wkc != 1) {
-    std::string msg =
-        "FPRD slave " + std::to_string(slavePosition) + ": wkc=" + std::to_string(wkc);
+    std::string msg = std::format("FPRD slave {} 0x{:04X}: wkc={}", slavePosition, address, wkc);
     spdlog::debug("{}", msg);
     return std::unexpected(msg);
   }
@@ -1017,8 +1016,7 @@ std::expected<void, std::string> SoemFieldbusDriver::writeRegister(uint16_t slav
   int wkc = ecx_FPWR(&ctx_->port, configAddr, address, static_cast<uint16_t>(data.size()),
                      const_cast<uint8_t*>(data.data()), EC_TIMEOUTRET);
   if (wkc != 1) {
-    std::string msg =
-        "FPWR slave " + std::to_string(slavePosition) + ": wkc=" + std::to_string(wkc);
+    std::string msg = std::format("FPWR slave {} 0x{:04X}: wkc={}", slavePosition, address, wkc);
     spdlog::debug("{}", msg);
     return std::unexpected(msg);
   }

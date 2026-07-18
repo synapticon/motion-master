@@ -53,7 +53,18 @@ class Device {
   uint16_t slavePosition() const;
 
   /// @brief Human-readable node name from SII EEPROM.
+  ///
+  /// For SOMANET drives this is the group name "SOMANET" (not product-specific) — use
+  /// @c productName() for a name that distinguishes products.
   const std::string& name() const;
+
+  /// @brief Canonical product name, independent of the SII EEPROM contents.
+  ///
+  /// For a recognised SOMANET product (vendor @c kSynapticonVendorId and a known product code)
+  /// this is the product-specific name — "SOMANET Node", "SOMANET Circulo", etc. — where @c name()
+  /// only reports the generic "SOMANET" group name. Falls back to @c name() for any other vendor or
+  /// an unrecognised product code.
+  std::string productName() const;
 
   /// @brief Vendor ID from EEPROM.
   uint32_t vendorId() const;
@@ -500,7 +511,7 @@ class Device {
 
 /// @brief Serialises a Device to JSON.
 ///
-/// Produces an object with keys `slavePosition`, `name`, `vendorId`,
+/// Produces an object with keys `slavePosition`, `name`, `productName`, `vendorId`,
 /// `productCode`, `revisionNumber`, and `serialNumber`.  Participates in
 /// nlohmann ADL so that `nlohmann::json(device)` and `std::vector<Device>`
 /// conversions work automatically.

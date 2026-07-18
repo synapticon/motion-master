@@ -19,6 +19,7 @@
 #include "node/parameter_cache.h"
 #include "node/process_data.h"
 #include "node/process_image.h"
+#include "node/synapticon.h"
 
 namespace mm::node {
 
@@ -39,6 +40,14 @@ Device::Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver, Process
 
 uint16_t Device::slavePosition() const { return slavePosition_; }
 const std::string& Device::name() const { return name_; }
+std::string Device::productName() const {
+  if (vendorId_ == kSynapticonVendorId) {
+    if (const std::string_view resolved = somanetProductName(productCode_); !resolved.empty()) {
+      return std::string(resolved);
+    }
+  }
+  return name_;
+}
 uint32_t Device::vendorId() const { return vendorId_; }
 uint32_t Device::productCode() const { return productCode_; }
 uint32_t Device::revisionNumber() const { return revisionNumber_; }
@@ -914,11 +923,9 @@ std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t 
 
 void to_json(nlohmann::json& j, const Device& d) {
   j = nlohmann::json{
-      {"slavePosition", d.slavePosition()},
-      {"name", d.name()},
-      {"vendorId", d.vendorId()},
-      {"productCode", d.productCode()},
-      {"revisionNumber", d.revisionNumber()},
+      {"slavePosition", d.slavePosition()}, {"name", d.name()},
+      {"productName", d.productName()},     {"vendorId", d.vendorId()},
+      {"productCode", d.productCode()},     {"revisionNumber", d.revisionNumber()},
       {"serialNumber", d.serialNumber()},
   };
 }

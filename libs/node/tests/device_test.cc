@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
+#include "node/synapticon.h"
 
 namespace {
 
@@ -123,7 +124,8 @@ class SdoFakeDriver : public FieldbusDriver {
   // --- unused stubs ---------------------------------------------------------
   std::expected<void, std::string> init() override { return {}; }
   std::expected<int, std::string> scan() override { return 0; }
-  SlaveInfo slaveInfo(uint16_t) const override { return {}; }
+  SlaveInfo info;  // identity returned to the Device at construction
+  SlaveInfo slaveInfo(uint16_t) const override { return info; }
   uint16_t slaveState(uint16_t) const override { return state; }
   std::expected<void, std::string> configureProcessData() override { return {}; }
   mm::comm::PdoLayout processDataLayout() override { return {}; }
@@ -1041,6 +1043,41 @@ TEST(DeviceCacheConcurrency, ConcurrentReadsAndCacheUpdatesAreSafe) {
   ASSERT_NE(p, nullptr);
   EXPECT_TRUE(p->value == DeviceParameterValue{uint32_t{16}} ||
               p->value == DeviceParameterValue{uint32_t{99}});
+}
+
+// --- productName -----------------------------------------------------------
+
+TEST(DeviceProductName, ResolvesKnownSomanetProduct) {
+  SdoFakeDriver driver;
+  driver.info.name = "SOMANET";  // the generic group name the SII reports for every SOMANET drive
+  driver.info.vendorId = mm::node::kSynapticonVendorId;
+  driver.info.productCode = 0x00000301;  // SOMANET Circulo
+  Device device(1, driver);
+
+  EXPECT_EQ(device.name(), "SOMANET");
+  EXPECT_EQ(device.productName(), "SOMANET Circulo");
+}
+
+TEST(DeviceProductName, FallsBackToSiiNameForUnknownProductCode) {
+  SdoFakeDriver driver;
+  driver.info.name = "SOMANET";
+  driver.info.vendorId = mm::node::kSynapticonVendorId;
+  driver.info.productCode = 0x00009999;  // Synapticon vendor, but not a code we recognise
+  Device device(1, driver);
+
+  EXPECT_EQ(device.productName(), "SOMANET");
+}
+
+TEST(DeviceProductName, FallsBackToSiiNameForForeignVendor) {
+  SdoFakeDriver driver;
+  driver.info.name = "Some Other Drive";
+  driver.info.vendorId = 0x00000539;     // not Synapticon
+  driver.info.productCode = 0x00000301;  // a code that happens to match a SOMANET product
+  Device device(1, driver);
+
+  // Product codes are only unique within a vendor, so a foreign vendor never resolves to a
+  // SOMANET name even if the code collides.
+  EXPECT_EQ(device.productName(), "Some Other Drive");
 }
 
 }  // namespace

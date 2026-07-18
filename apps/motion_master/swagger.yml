@@ -470,7 +470,9 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [slavePosition, name, vendorId, productCode, revisionNumber, serialNumber]
+                required:
+                  [slavePosition, name, productName, vendorId, productCode, revisionNumber,
+                   serialNumber]
                 properties:
                   slavePosition:
                     type: integer
@@ -478,7 +480,16 @@ paths:
                     example: 1
                   name:
                     type: string
-                    description: Human-readable device name from SII EEPROM
+                    description: >
+                      Human-readable device name from SII EEPROM. For SOMANET drives this is the
+                      generic group name "SOMANET"; use productName to distinguish products.
+                    example: "SOMANET"
+                  productName:
+                    type: string
+                    description: >
+                      Canonical product name, independent of the SII EEPROM. For a recognised
+                      SOMANET product this distinguishes the product (e.g. "SOMANET Circulo");
+                      otherwise it falls back to name.
                     example: "SOMANET Node"
                   vendorId:
                     type: integer
@@ -1871,7 +1882,9 @@ paths:
                 type: array
                 items:
                   type: object
-                  required: [slavePosition, name, vendorId, productCode, revisionNumber, serialNumber]
+                  required:
+                    [slavePosition, name, productName, vendorId, productCode, revisionNumber,
+                     serialNumber]
                   properties:
                     slavePosition:
                       type: integer
@@ -1879,7 +1892,16 @@ paths:
                       example: 1
                     name:
                       type: string
-                      description: Human-readable device name from SII EEPROM
+                      description: >
+                        Human-readable device name from SII EEPROM. For SOMANET drives this is the
+                        generic group name "SOMANET"; use productName to distinguish products.
+                      example: "SOMANET"
+                    productName:
+                      type: string
+                      description: >
+                        Canonical product name, independent of the SII EEPROM. For a recognised
+                        SOMANET product this distinguishes the product (e.g. "SOMANET Circulo");
+                        otherwise it falls back to name.
                       example: "SOMANET Node"
                     vendorId:
                       type: integer

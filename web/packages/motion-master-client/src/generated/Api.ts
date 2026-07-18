@@ -343,10 +343,15 @@ export class Api<
          */
         slavePosition: number;
         /**
-         * Human-readable device name from SII EEPROM
-         * @example "SOMANET Node"
+         * Human-readable device name from SII EEPROM. For SOMANET drives this is the generic group name "SOMANET"; use productName to distinguish products.
+         * @example "SOMANET"
          */
         name: string;
+        /**
+         * Canonical product name, independent of the SII EEPROM. For a recognised SOMANET product this distinguishes the product (e.g. "SOMANET Circulo"); otherwise it falls back to name.
+         * @example "SOMANET Node"
+         */
+        productName: string;
         /**
          * Vendor ID from EEPROM
          * @format int64
@@ -1337,10 +1342,15 @@ export class Api<
          */
         slavePosition: number;
         /**
-         * Human-readable device name from SII EEPROM
-         * @example "SOMANET Node"
+         * Human-readable device name from SII EEPROM. For SOMANET drives this is the generic group name "SOMANET"; use productName to distinguish products.
+         * @example "SOMANET"
          */
         name: string;
+        /**
+         * Canonical product name, independent of the SII EEPROM. For a recognised SOMANET product this distinguishes the product (e.g. "SOMANET Circulo"); otherwise it falls back to name.
+         * @example "SOMANET Node"
+         */
+        productName: string;
         /**
          * Vendor ID from EEPROM
          * @format int64

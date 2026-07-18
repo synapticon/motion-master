@@ -44,4 +44,22 @@ constexpr std::string_view toString(SomanetProduct product) {
   return "Unknown";
 }
 
+/// @brief Product name for a raw product code (object 0x1018:02), or empty if the code is not a
+///        recognised SOMANET product.
+///
+/// Convenience over @c SomanetProduct + @c toString for callers holding a raw code (e.g.
+/// @c Device::productCode()); the empty result lets a caller fall back to another name. The caller
+/// is responsible for checking the vendor is @c kSynapticonVendorId — product codes are only unique
+/// within a vendor.
+constexpr std::string_view somanetProductName(uint32_t productCode) {
+  switch (static_cast<SomanetProduct>(productCode)) {
+    case SomanetProduct::kNode:
+    case SomanetProduct::kCirculo:
+    case SomanetProduct::kCirculoSmm:
+    case SomanetProduct::kIntegro:
+      return toString(static_cast<SomanetProduct>(productCode));
+  }
+  return {};
+}
+
 }  // namespace mm::node

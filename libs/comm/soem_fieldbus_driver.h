@@ -226,7 +226,7 @@ class SoemFieldbusDriver : public FieldbusDriver {
   std::unique_ptr<ecx_context> ctx_;
   // EtherCAT IOmap: ecx_config_map_group lays the whole bus's process data out here as
   // [all outputs | all inputs]. Sized to kMaxProcessImageBytes so it matches the cap
-  // configureProcessData() enforces and the ProcessBuffer snapshots layered on top — the
+  // configureProcessData() enforces and the ProcessBuffer scratch layered on top — the
   // three must agree, or a bus the rest of the stack accepts would overflow or be rejected
   // here. At ~100 bytes per axis across both directions this holds ~320 axes — far beyond the
   // ~50 the stack targets.

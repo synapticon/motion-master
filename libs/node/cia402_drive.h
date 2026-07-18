@@ -71,7 +71,12 @@ class Cia402Drive : public ProfileDevice {
   /// @brief Quick stop: → QuickStopActive.
   std::expected<void, std::string> quickStop();
 
-  /// @brief Fault reset: pulses bit 7 (set then clear) to clear a latched fault.
+  /// @brief Fault reset: asserts the rising edge of controlword bit 7 to clear a latched fault.
+  ///
+  /// Sets bit 7 (preserving the other bits); the drive latches the reset on the 0→1 transition. It
+  /// does not clear bit 7 — the next state-machine command does that via @c kCommandMask, re-arming
+  /// the reset. (Clearing it here would be lost on the PDO path, where a set+clear issued in one
+  /// call collapses to the last staged value and the drive never sees the edge.)
   std::expected<void, std::string> faultReset();
 
   // --- Convenience walks ---------------------------------------------------------------------

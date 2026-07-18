@@ -269,6 +269,29 @@ TEST(Cia402Drive, FaultResetClearsFaultThenEnables) {
   EXPECT_EQ(driver.machineState, State::kOperationEnabled);
 }
 
+TEST(Cia402Drive, FaultResetAssertsRisingEdgeWithoutClearing) {
+  Cia402FakeDriver driver;
+  driver.machineState = State::kFault;
+  Device device = makeCia402Device(driver);
+  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] = u16le(statuswordFor(State::kFault));
+  Cia402Drive drive(device);
+
+  ASSERT_TRUE(drive.faultReset().has_value());
+
+  // faultReset() issues exactly one controlword write, setting bit 7 (the rising edge that latches
+  // the reset). It must NOT clear bit 7 in the same call: a set+clear pair collapses on the PDO
+  // staging path (both writes land in one output slot and the RT loop sends only the last), so the
+  // drive would never see the edge. Bit 7 is re-cleared by the next state-machine command instead.
+  std::vector<uint16_t> controlwords;
+  for (const auto& w : driver.writes) {
+    if (w.index == Object::kControlword && w.data.size() >= 2) {
+      controlwords.push_back(static_cast<uint16_t>(w.data[0] | (w.data[1] << 8)));
+    }
+  }
+  ASSERT_EQ(controlwords.size(), 1u);
+  EXPECT_TRUE(controlwords.back() & 0x0080);
+}
+
 TEST(Cia402Drive, EnableTimesOutWhenStuck) {
   Cia402FakeDriver driver;
   driver.machineState = State::kQuickStopActive;  // enable() deliberately will not override this

@@ -79,18 +79,20 @@ std::expected<void, std::string> Cia402Drive::quickStop() {
 }
 
 std::expected<void, std::string> Cia402Drive::faultReset() {
-  // Fault reset is the rising edge of bit 7: set it, then clear it so a later fault can be reset
-  // again. The clearing write leaves the other command bits as they were.
+  // Fault reset (CiA402 transition 15; ETG.6010 5.2, Table 3) is triggered by a *rising* edge of
+  // controlword bit 7 — the drive latches on the 0->1 transition. Assert the edge by setting bit 7,
+  // preserving every other bit, and do NOT clear it in the same call: on the PDO path each write
+  // only stages the value into the output slot, and the RT loop composes one frame per cycle, so a
+  // set+clear issued back to back collapses to last-writer-wins — the drive would see only the
+  // cleared value and never the edge. Bit 7 is driven low again by the next state-machine command
+  // (they all route through applyCommand, whose kCommandMask covers bit 7), which re-arms the reset
+  // for a later fault. This assumes bit 7 is currently low, which holds after any normal command (a
+  // drive faults from OperationEnabled with controlword 0x000F).
   auto current = controlword();
   if (!current) {
     return std::unexpected(current.error());
   }
-  const uint16_t pulsed = static_cast<uint16_t>(*current | Command::kCmdFaultReset);
-  if (auto r = setControlword(pulsed); !r) {
-    return r;
-  }
-  const uint16_t cleared = static_cast<uint16_t>(*current & ~Command::kCmdFaultReset);
-  return setControlword(cleared);
+  return setControlword(static_cast<uint16_t>(*current | Command::kCmdFaultReset));
 }
 
 std::expected<void, std::string> Cia402Drive::disable() { return disableVoltage(); }

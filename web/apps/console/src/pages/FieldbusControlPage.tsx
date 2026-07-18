@@ -425,7 +425,7 @@ export default function FieldbusControlPage() {
                       <table className="w-full text-xs border-collapse">
                         <thead>
                           <tr className="border-b border-grey-200 bg-grey-50">
-                            {['Slave', 'Device', 'Vendor ID', 'Product Code', 'Revision', 'Serial', 'AL State', 'Action'].map(h => (
+                            {['Position', 'Name', 'Vendor ID', 'Product Code', 'Revision', 'Serial', 'AL State', 'Action'].map(h => (
                               <th key={h} className={`${h === 'Action' ? 'text-right' : 'text-left'} px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium`}>
                                 {h}
                               </th>

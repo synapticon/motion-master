@@ -935,13 +935,23 @@ DeviceManager::setProcessDataWatchdog(uint16_t slavePosition, std::chrono::nanos
 
 std::expected<void, std::string> DeviceManager::initializeDeviceParameters(uint16_t slavePosition,
                                                                            bool readValues) {
-  auto it = std::find_if(devices_.begin(), devices_.end(), [slavePosition](const Device& d) {
-    return d.slavePosition() == slavePosition;
-  });
-  if (it == devices_.end()) {
+  // Shared lock, matching readAllDeviceParameters and the position-based-method contract (see
+  // findDevice's warning): a method that resolves a device by position and does not hand back a
+  // pointer looks the device up under busMutex_, so it stays safe against the exclusive mutators
+  // (scan/reset/transitionToState) that rebuild devices_/driver_ regardless of caller thread. Both
+  // callers today are on the HTTP loop thread (so serialised with those mutators anyway), but this
+  // triggers the multi-second readObjectDictionary enumeration — during which
+  // SoemFieldbusDriver::readObjectDictionary releases the driver's socketMutex_ between SDO-Info
+  // transactions on the promise that the bus lock keeps the context alive — so not relying on the
+  // single-thread invariant here is the robust choice. Held shared for the read's duration; the RT
+  // loop (lock-free PDO) and WebSocket (separate loop) are unaffected — only exclusive mutators
+  // wait.
+  std::shared_lock lock(busMutex_);
+  Device* device = findDevice(slavePosition);
+  if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
   }
-  return it->initializeParameters(readValues, config_.useCompleteAccess);
+  return device->initializeParameters(readValues, config_.useCompleteAccess);
 }
 
 std::expected<void, std::string> DeviceManager::readAllDeviceParameters(uint16_t slavePosition) {

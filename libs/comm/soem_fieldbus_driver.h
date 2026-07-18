@@ -41,6 +41,11 @@ struct SoemFieldbusDriverConfig {
 /// and index SOEM's fixed-size @c slavelist without bounds-checking — pass only valid, discovered
 /// positions (1..@c slaveCount). @c DeviceManager guarantees this; a direct caller must validate
 /// positions itself.
+///
+/// @note Calling any method before a successful @c init() (or after @c stop()) is safe: the
+/// value-returning accessors report empty/zero, and the @c std::expected ones fail with
+/// "no driver — call init() first" instead of dereferencing a null context. @c init() is the only
+/// method that establishes the context.
 class SoemFieldbusDriver : public FieldbusDriver {
  public:
   /// @brief Constructs the driver from its SOEM-specific configuration.

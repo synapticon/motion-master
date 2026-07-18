@@ -54,6 +54,9 @@ std::expected<void, std::string> SoemFieldbusDriver::init() {
 
 std::expected<int, std::string> SoemFieldbusDriver::scan() {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
   // ecx_config_init reprograms every slave's mailbox SMs to PRE-OP sizes and hands
   // EEPROM back to the PDI, so any prior BOOT-SM tracking is now stale.
   bootMailboxSlaves_.clear();
@@ -159,7 +162,7 @@ std::string sdoErrorSuffix(ecx_contextt* ctx) {
 std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
   std::lock_guard<std::mutex> lock(socketMutex_);
   if (!ctx_) {
-    return std::unexpected("configureProcessData: driver not initialised");
+    return std::unexpected("configureProcessData: no driver — call init() first");
   }
   // ecx_config_map_group only assigns each slave's outputs/inputs IOmap pointer when it is still
   // null (`if (!slavelist[slave].outputs)`); it recomputes Obits/Ibits/Obytes and the group
@@ -606,15 +609,19 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
                                                                              uint16_t index,
                                                                              uint8_t subindex) {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
   // The background ParameterRefresher polls SDOs continuously; demote its per-read traces to trace
   // so they don't flood the log, while a direct (user-initiated) read keeps its debug trace.
   const auto sdoLevel = sdoLogQuiet ? spdlog::level::trace : spdlog::level::debug;
   spdlog::log(sdoLevel, "SDOread slave {} 0x{:04X}:{:02X}", slavePosition, index, subindex);
-  // 4096-byte upload buffer: ample for every scalar/string parameter a SOMANET drive exposes. An
-  // object larger than this is silently truncated to 4096 bytes (ecx_SDOread fills the buffer and
-  // reports that size with a positive wkc — no overflow indication), so a genuinely oversized
-  // object would come back short. Grow this cap if such an object ever appears.
-  std::vector<uint8_t> data(4096, 0);
+  // 4096-byte upload buffer: ample for every scalar/string parameter a SOMANET drive exposes at a
+  // single subindex. ecx_SDOread clamps the transfer to the buffer and reports the bytes read with
+  // a positive wkc, giving no truncation flag — so rather than hand back silently-short data for an
+  // over-cap object, the read fails loudly below when the returned size fills the buffer.
+  constexpr int kSdoBufferBytes = 4096;
+  std::vector<uint8_t> data(kSdoBufferBytes, 0);
   int size = static_cast<int>(data.size());
   int wkc = ecx_SDOread(ctx_.get(), slavePosition, index, subindex, FALSE, &size, data.data(),
                         EC_TIMEOUTRXM);
@@ -624,6 +631,12 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
     msg += sdoErrorSuffix(ctx_.get());
     spdlog::log(sdoLevel, "{}", msg);
     return std::unexpected(msg);
+  }
+  if (size >= kSdoBufferBytes) {
+    return std::unexpected(std::format(
+        "SDOread slave {} 0x{:04X}:{:02X} filled the {}-byte read buffer — the object is larger "
+        "than the SDO read cap; raise kSdoBufferBytes",
+        slavePosition, index, subindex, kSdoBufferBytes));
   }
   data.resize(size);
   // Show the returned bytes (wire order, little-endian) so the value is visible. The driver has no
@@ -642,9 +655,19 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComplete(
     uint16_t slavePosition, uint16_t index) {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
   const auto sdoLevel = sdoLogQuiet ? spdlog::level::trace : spdlog::level::debug;
   spdlog::log(sdoLevel, "SDOread(CA) slave {} 0x{:04X}", slavePosition, index);
-  std::vector<uint8_t> data(4096, 0);
+  // 64 KiB upload buffer. Complete Access returns *every* subindex of an object in one (internally
+  // segmented) transfer, so unlike the single-subindex readSdo this must hold a whole ARRAY/RECORD
+  // — potentially hundreds of entries. 64 KiB covers every object a SOMANET drive exposes with wide
+  // margin while remaining a cheap transient allocation off the RT path. As in readSdo, ecx_SDOread
+  // clamps to the buffer and gives no truncation flag, so an over-cap object is caught below rather
+  // than returned as a silently-short blob (which the node layer would then mis-slice).
+  constexpr int kCompleteAccessBufferBytes = 64 * 1024;
+  std::vector<uint8_t> data(kCompleteAccessBufferBytes, 0);
   int size = static_cast<int>(data.size());
   // Complete access: start at subindex 0 with the CA flag TRUE, so SOEM sets the complete-access
   // bit and the slave returns every subindex in one transfer (segmented internally if it exceeds
@@ -658,6 +681,12 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComp
     spdlog::log(sdoLevel, "{}", msg);
     return std::unexpected(msg);
   }
+  if (size >= kCompleteAccessBufferBytes) {
+    return std::unexpected(std::format(
+        "SDOread(CA) slave {} 0x{:04X} filled the {}-byte read buffer — the object is larger than "
+        "the complete-access read cap; raise kCompleteAccessBufferBytes",
+        slavePosition, index, kCompleteAccessBufferBytes));
+  }
   data.resize(size);
   spdlog::log(sdoLevel, "SDOread(CA) slave {} 0x{:04X} ok ({} bytes)", slavePosition, index,
               data.size());
@@ -668,6 +697,9 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSdo(uint16_t slavePosi
                                                               uint16_t index, uint8_t subindex,
                                                               std::span<const uint8_t> data) {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
   spdlog::debug("SDOwrite slave {} 0x{:04X}:{:02X} ({} bytes)", slavePosition, index, subindex,
                 data.size());
   // ecx_SDOwrite takes void*, not const void*.
@@ -728,6 +760,22 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
   // transaction (and released during retrySdoInfo's back-off sleeps), so this
   // multi-second enumeration never blocks another control-plane caller for more
   // than a single transfer.
+  //
+  // Accepted caveat — this method does NOT hold ctx_ stable for its whole duration. Because
+  // socketMutex_ is dropped between transactions, a concurrent scan()/reset()/stop() landing in one
+  // of those gaps frees ctx_, and the next transaction then dereferences a dangling context: a
+  // use-after-free. Within Motion Master this cannot happen — DeviceManager serialises every
+  // control-plane operation on its busMutex_, held for this call's entire duration, so no
+  // scan/reset can interleave. An embedder driving SoemFieldbusDriver directly MUST provide the
+  // same guarantee: do not call scan()/reset()/stop() while a readObjectDictionary() is in flight
+  // on another thread. The up-front ctx_ check below is only a pre-init guard, not protection
+  // against this race (which is why it is not re-checked inside the loop).
+  {
+    std::lock_guard<std::mutex> lock(socketMutex_);
+    if (!ctx_) {
+      return std::unexpected("no driver — call init() first");
+    }
+  }
   spdlog::debug("readObjectDictionary slave {}", slavePosition);
   ec_ODlistt odList{};
   if (retrySdoInfo([&] {
@@ -788,7 +836,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSii(
     uint16_t slavePosition) {
   std::lock_guard<std::mutex> lock(socketMutex_);
   if (!ctx_) {
-    return std::unexpected("driver not initialised");
+    return std::unexpected("no driver — call init() first");
   }
   // No position bounds check: the node layer (DeviceManager) validates every slavePosition against
   // the live device set before any driver call and 404s an unknown one, so the driver trusts the
@@ -813,7 +861,7 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSii(uint16_t slavePosi
                                                               std::span<const uint8_t> data) {
   std::lock_guard<std::mutex> lock(socketMutex_);
   if (!ctx_) {
-    return std::unexpected("driver not initialised");
+    return std::unexpected("no driver — call init() first");
   }
   // No position bounds check: see readSii — the caller (DeviceManager) validates slavePosition
   // against the live device set first, and every slave-indexed accessor here trusts that.
@@ -847,6 +895,9 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSii(uint16_t slavePosi
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
     uint16_t slavePosition, const std::string& filename) {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
   spdlog::debug("FOEread slave {} '{}'", slavePosition, filename);
   constexpr int kMaxSize = 10 * 1024 * 1024;
   std::vector<uint8_t> data(kMaxSize);
@@ -872,6 +923,9 @@ std::expected<void, std::string> SoemFieldbusDriver::writeFile(uint16_t slavePos
                                                                const std::string& filename,
                                                                std::span<const uint8_t> data) {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
   spdlog::debug("FOEwrite slave {} '{}' ({} bytes)", slavePosition, filename, data.size());
   std::string name = filename;  // ecx_FOEwrite takes non-const char*
   int wkc = ecx_FOEwrite(ctx_.get(), slavePosition, name.data(), 0, static_cast<int>(data.size()),
@@ -891,6 +945,9 @@ std::expected<void, std::string> SoemFieldbusDriver::readRegister(uint16_t slave
                                                                   uint16_t address,
                                                                   std::span<uint8_t> data) {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
   spdlog::debug("FPRD slave {} 0x{:04X} ({} bytes)", slavePosition, address, data.size());
   uint16_t configAddr = ctx_->slavelist[slavePosition].configadr;
   int wkc = ecx_FPRD(&ctx_->port, configAddr, address, static_cast<uint16_t>(data.size()),
@@ -908,6 +965,9 @@ std::expected<void, std::string> SoemFieldbusDriver::writeRegister(uint16_t slav
                                                                    uint16_t address,
                                                                    std::span<const uint8_t> data) {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
   spdlog::debug("FPWR slave {} 0x{:04X} ({} bytes)", slavePosition, address, data.size());
   uint16_t configAddr = ctx_->slavelist[slavePosition].configadr;
   // ecx_FPWR takes void*, not const void*
@@ -948,6 +1008,9 @@ mm::comm::ProcessDataWatchdogConfig decodeWatchdog(uint16_t divider, uint16_t ti
 std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::processDataWatchdog(
     uint16_t slavePosition) {
   std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
   uint16_t configAddr = ctx_->slavelist[slavePosition].configadr;
   uint16_t divider = 0;
   uint16_t ticks = 0;
@@ -978,6 +1041,9 @@ std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::setPro
     return std::unexpected("watchdog timeout must not be negative");
   }
   std::lock_guard<std::mutex> lock(socketMutex_);
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
   uint16_t configAddr = ctx_->slavelist[slavePosition].configadr;
   // Read the existing divider and leave it untouched — it is shared with the PDI watchdog, so we
   // only scale the process-data time register against whatever time base the device already uses.
@@ -1128,6 +1194,13 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
                                            std::chrono::steady_clock::duration resendInterval,
                                            std::function<void()> tick,
                                            std::function<bool()> shouldAbort) {
+  {
+    std::lock_guard<std::mutex> lock(socketMutex_);
+    if (!ctx_) {
+      spdlog::error("transitionToState: no driver — call init() first");
+      return;
+    }
+  }
   const auto targetRaw = static_cast<uint16_t>(targetState);
 
   // socketMutex_ is taken only around the discrete socket transactions below and

@@ -661,6 +661,8 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
         "than the SDO read cap; raise kSdoBufferBytes",
         slavePosition, index, subindex, kSdoBufferBytes));
   }
+  // ecx_SDOread's psize is in/out: passed in as the 4096-byte capacity, it comes back set to the
+  // actual bytes read (SOEM overwrites *psize). Shrink the buffer from the capacity to those bytes.
   data.resize(size);
   // Show the returned bytes (wire order, little-endian) so the value is visible. The driver has no
   // data type to decode it — that happens in the node layer — so the raw bytes are the faithful

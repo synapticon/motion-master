@@ -61,11 +61,20 @@
       height: 128px;
       /* The logo PNG is a square tile — this radius is what rounds it. 18px on
          128px matches the console sidebar's rounded-lg (8px) on its 56px logo —
-         same ~14.3% corner ratio, so the icon reads identically in both. No glow
-         here: the console's teal glow is its API-online indicator, which has no
-         meaning on the landing page. */
+         same ~14.3% corner ratio, so the icon reads identically in both. The teal
+         glow mirrors the console sidebar's API-online halo, but here it only
+         appears on hover — a subtle bit of life, not a status indicator. Use
+         drop-shadow (a filter), not box-shadow, so the glow hugs the rounded
+         silhouette instead of tracing the square padding-box. */
       border-radius: 18px;
       object-fit: contain;
+      transition: filter 0.5s ease-out;
+    }
+
+    .logo-icon:hover {
+      filter: drop-shadow(0 0 20px rgb(0 132 155 / 1))
+              drop-shadow(0 0 50px rgb(0 132 155 / 0.95))
+              drop-shadow(0 0 96px rgb(0 132 155 / 0.7));
     }
 
     h1 {

@@ -4,7 +4,6 @@
 #include <string>
 
 #include "node/cia402_drive.h"
-#include "node/synapticon.h"
 
 namespace mm::node {
 

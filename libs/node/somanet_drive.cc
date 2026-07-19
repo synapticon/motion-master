@@ -3,6 +3,8 @@
 #include <format>
 #include <string>
 
+#include "node/synapticon.h"
+
 namespace mm::node {
 
 std::expected<SomanetDrive, std::string> createSomanetDrive(Device& device) {

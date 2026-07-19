@@ -1,12 +1,12 @@
 #pragma once
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <optional>
 #include <span>
 #include <string>
-#include <type_traits>
 #include <vector>
 
 #include "comm/fieldbus_driver.h"

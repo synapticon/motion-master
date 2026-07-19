@@ -1504,7 +1504,7 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [data]
+                required: [data, wireUs]
                 properties:
                   data:
                     type: array
@@ -1514,6 +1514,15 @@ paths:
                       maximum: 255
                     description: Object bytes as transferred by the SDO upload
                     example: [0, 0, 0, 0]
+                  wireUs:
+                    type: integer
+                    minimum: 0
+                    description: >
+                      Server-measured duration of the SDO transaction in microseconds
+                      (control-plane lock acquire + mailbox wire round-trip). This is the
+                      wire cost only — far smaller than the end-to-end HTTP round-trip a
+                      cross-origin browser client observes.
+                    example: 5000
         "400":
           description: slavePosition, index, or subindex is missing or not a valid integer
         "404":
@@ -1579,11 +1588,20 @@ paths:
             application/json:
               schema:
                 type: object
-                required: [ok]
+                required: [ok, wireUs]
                 properties:
                   ok:
                     type: boolean
                     example: true
+                  wireUs:
+                    type: integer
+                    minimum: 0
+                    description: >
+                      Server-measured duration of the SDO transaction in microseconds
+                      (control-plane lock acquire + mailbox wire round-trip). This is the
+                      wire cost only — far smaller than the end-to-end HTTP round-trip a
+                      cross-origin browser client observes.
+                    example: 5000
         "400":
           description: slavePosition, index, or subindex is invalid, or the request body is malformed
         "404":

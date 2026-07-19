@@ -1091,12 +1091,19 @@ void HttpServer::run() {
                sendStatus(res, "404 Not Found", config_.corsOrigin);
                return;
              }
+             // Time the SDO transaction itself so the client can distinguish the wire cost from
+             // the (much larger, browser-side) HTTP round-trip. Brackets lock acquire + wire; a
+             // warm request is dominated by the mailbox transaction, matching the driver's own log.
+             const auto t0 = std::chrono::steady_clock::now();
              auto r = device->readSdo(*index, *subindex);
+             const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                                     std::chrono::steady_clock::now() - t0)
+                                     .count();
              if (!r) {
                sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                return;
              }
-             sendJson(res, config_.corsOrigin, nlohmann::json{{"data", *r}});
+             sendJson(res, config_.corsOrigin, nlohmann::json{{"data", *r}, {"wireUs", wireUs}});
            })
       .put("/api/devices/:slavePosition/sdo/:index/:subindex",
            [this](auto* res, auto* req) {
@@ -1133,11 +1140,16 @@ void HttpServer::run() {
                  sendStatus(res, "404 Not Found", config_.corsOrigin);
                  return;
                }
-               if (auto r = device->writeSdo(*index, *subindex, data); !r) {
+               const auto t0 = std::chrono::steady_clock::now();
+               auto r = device->writeSdo(*index, *subindex, data);
+               const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                                       std::chrono::steady_clock::now() - t0)
+                                       .count();
+               if (!r) {
                  sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                  return;
                }
-               sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
+               sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}, {"wireUs", wireUs}});
              });
            })
       .get("/api/devices/:slavePosition/files/:filename",
@@ -1634,6 +1646,12 @@ void HttpServer::run() {
                 res->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                     ->writeHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
                     ->writeHeader("Access-Control-Allow-Headers", "Content-Type")
+                    // Let the browser cache this preflight so mutating requests (PUT/POST/DELETE
+                    // with a JSON body) don't pay an extra OPTIONS round-trip on every call. The
+                    // CORS policy here is static for the process lifetime, so a long max-age is
+                    // safe; 600 s is the effective ceiling browsers honour (Chromium caps at 600,
+                    // Firefox at 86400) — the min of the two keeps behaviour consistent.
+                    ->writeHeader("Access-Control-Max-Age", "600")
                     ->writeStatus("204 No Content")
                     ->end();
               })

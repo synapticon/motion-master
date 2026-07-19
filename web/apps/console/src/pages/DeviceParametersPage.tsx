@@ -109,12 +109,38 @@ function formatAccess(a: number): string {
 }
 
 function formatElapsed(ms: number): string {
+  // Sub-10 ms ops (a single fast SDO) keep one decimal so they don't round to "0 ms";
+  // larger ops (the list rebuilds) round to whole ms / two-decimal seconds.
+  if (ms < 10) return `${ms.toFixed(1)} ms`
   if (ms < 1000) return `${Math.round(ms)} ms`
   return `${(ms / 1000).toFixed(2)} s`
 }
 
 function paramKey(index: number, subindex: number): string {
   return `${index}-${subindex}`
+}
+
+// Timing readout for the raw SDO tools: the server-measured wire transaction (from the
+// response's `wireUs`) and the browser-observed HTTP round-trip. The gap between them is
+// cross-origin/transport overhead, not device time.
+function SdoTiming({ wireMs, roundTripMs }: { wireMs: number; roundTripMs: number }) {
+  return (
+    <span className="text-xs text-grey-500 font-mono whitespace-nowrap">
+      <span
+        className="cursor-help"
+        title="SDO — server-measured duration of the SDO transaction itself (control-plane lock acquire + CoE mailbox wire round-trip), reported by the backend. This is the true cost of talking to the device."
+      >
+        SDO {formatElapsed(wireMs)}
+      </span>
+      <span
+        className="text-grey-400 cursor-help"
+        title="Round-trip — total time this browser observed for the HTTP request, measured around the fetch call. It includes the SDO time plus cross-origin/TLS and transport overhead, so it is normally much larger than the SDO figure and is not device time."
+      >
+        {' · round-trip '}
+        {formatElapsed(roundTripMs)}
+      </span>
+    </span>
+  )
 }
 
 // Freshness of the cached value relative to the device, rendered as a labelled badge.
@@ -161,6 +187,11 @@ export default function DeviceParametersPage() {
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState<number[] | null>(null)
   const [error, setError] = useState<string | null>(null)
+  // Round-trip is what the browser observes (the full cross-origin HTTP fetch); wire is the
+  // server-measured SDO transaction (response `wireUs`). Showing both makes clear the SDO is
+  // fast and the rest is browser/transport overhead, not the device.
+  const [readSdoElapsedMs, setReadSdoElapsedMs] = useState<number | null>(null)
+  const [readSdoWireMs, setReadSdoWireMs] = useState<number | null>(null)
 
   const [dlIndex, setDlIndex] = useState('')
   const [dlSubindex, setDlSubindex] = useState('0')
@@ -169,6 +200,8 @@ export default function DeviceParametersPage() {
   const [downloading, setDownloading] = useState(false)
   const [dlOk, setDlOk] = useState<number[] | null>(null)
   const [dlError, setDlError] = useState<string | null>(null)
+  const [writeSdoElapsedMs, setWriteSdoElapsedMs] = useState<number | null>(null)
+  const [writeSdoWireMs, setWriteSdoWireMs] = useState<number | null>(null)
 
   const [readValues, setReadValues] = useState(false)
   const [filter, setFilter] = useState('')
@@ -356,25 +389,32 @@ export default function DeviceParametersPage() {
   const subindexValid = subindexNum !== null && subindexNum >= 0 && subindexNum <= 0xff
   const canUpload = indexValid && subindexValid && !uploading
 
-  function handleIndexChange(val: string) {
-    setIndex(val)
+  function clearReadStatus() {
     setResult(null)
     setError(null)
+    setReadSdoElapsedMs(null)
+    setReadSdoWireMs(null)
+  }
+
+  function handleIndexChange(val: string) {
+    setIndex(val)
+    clearReadStatus()
   }
 
   function handleSubindexChange(val: string) {
     setSubindex(val)
-    setResult(null)
-    setError(null)
+    clearReadStatus()
   }
 
   async function handleUpload() {
     if (!canUpload) return
     setUploading(true)
-    setResult(null)
-    setError(null)
+    clearReadStatus()
+    const start = performance.now()
     try {
       const res = await api.sdoUpload(slavePosition, indexNum!, subindexNum!)
+      setReadSdoElapsedMs(performance.now() - start)
+      setReadSdoWireMs(res.data.wireUs / 1000)
       setResult(res.data.data)
     } catch (err) {
       setError(apiError(err))
@@ -397,15 +437,21 @@ export default function DeviceParametersPage() {
   function clearDownloadStatus() {
     setDlOk(null)
     setDlError(null)
+    setWriteSdoElapsedMs(null)
+    setWriteSdoWireMs(null)
   }
 
   async function handleDownload() {
     if (!canDownload || !encodedBytes) return
     setDownloading(true)
-    setDlOk(null)
-    setDlError(null)
+    clearDownloadStatus()
+    const start = performance.now()
     try {
-      await api.sdoDownload(slavePosition, dlIndexNum!, dlSubindexNum!, { data: encodedBytes })
+      const res = await api.sdoDownload(slavePosition, dlIndexNum!, dlSubindexNum!, {
+        data: encodedBytes,
+      })
+      setWriteSdoElapsedMs(performance.now() - start)
+      setWriteSdoWireMs(res.data.wireUs / 1000)
       setDlOk(encodedBytes)
     } catch (err) {
       setDlError(apiError(err))
@@ -474,9 +520,14 @@ export default function DeviceParametersPage() {
               </div>
             </div>
 
-            <button onClick={handleUpload} disabled={!canUpload} className={btnCls}>
-              {uploading ? 'Reading…' : 'Read SDO'}
-            </button>
+            <div className="flex items-center gap-3">
+              <button onClick={handleUpload} disabled={!canUpload} className={btnCls}>
+                {uploading ? 'Reading…' : 'Read SDO'}
+              </button>
+              {readSdoElapsedMs !== null && readSdoWireMs !== null && (
+                <SdoTiming wireMs={readSdoWireMs} roundTripMs={readSdoElapsedMs} />
+              )}
+            </div>
 
             {error && (
               <p className="text-xs text-status-bad font-mono">{error}</p>
@@ -583,9 +634,14 @@ export default function DeviceParametersPage() {
               </div>
             </div>
 
-            <button onClick={handleDownload} disabled={!canDownload} className={btnCls}>
-              {downloading ? 'Writing…' : 'Write SDO'}
-            </button>
+            <div className="flex items-center gap-3">
+              <button onClick={handleDownload} disabled={!canDownload} className={btnCls}>
+                {downloading ? 'Writing…' : 'Write SDO'}
+              </button>
+              {writeSdoElapsedMs !== null && writeSdoWireMs !== null && (
+                <SdoTiming wireMs={writeSdoWireMs} roundTripMs={writeSdoElapsedMs} />
+              )}
+            </div>
 
             {dlError && (
               <p className="text-xs text-status-bad font-mono">{dlError}</p>

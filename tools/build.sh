@@ -17,7 +17,31 @@ for arg in "$@"; do
 done
 
 preset="${args[0]:-x64-linux-debug}"
-cmake --build --preset "$preset" "${args[@]:1}"
+
+# Cap build parallelism. Without a limit, ninja fans out to nproc+2 jobs; on a many-core
+# workstation that burst of heavy C++23 translation units (uWebSockets templates run 1-3 GB
+# each) thrashes the machine hard enough to crash the desktop compositor and take the
+# developer's terminal session down with it. Default to a third of the cores (min 1), and
+# de-prioritise the build (nice + idle I/O class) so the desktop always wins. Override the
+# job count with MM_BUILD_JOBS=N; MM_BUILD_JOBS=0 restores the unbounded default.
+jobs="${MM_BUILD_JOBS:-}"
+if [[ -z "$jobs" ]]; then
+    cores="$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)"
+    jobs=$(( cores / 3 ))
+    (( jobs < 1 )) && jobs=1
+fi
+
+parallel_args=()
+(( jobs > 0 )) && parallel_args=(--parallel "$jobs")
+
+# Prefer the desktop: run niced, and idle-class I/O where ionice exists (Linux; macOS has no
+# ionice, so fall back to nice alone).
+nice_prefix=(nice -n 19)
+if command -v ionice >/dev/null 2>&1; then
+    nice_prefix=(ionice -c3 nice -n 19)
+fi
+
+"${nice_prefix[@]}" cmake --build --preset "$preset" "${parallel_args[@]}" "${args[@]:1}"
 
 binary="build/${preset}/apps/motion_master/motion-master"
 if [[ -x "$binary" && "$setcap" -eq 1 ]]; then

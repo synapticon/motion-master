@@ -455,6 +455,40 @@ class Device {
         std::format("parameter 0x{:04X}:{:02X} holds a different type", index, subindex));
   }
 
+  /// @brief Read-once typed accessor for objects the caller knows are immutable.
+  ///
+  /// Serves the cached value as soon as it is @c SyncState::Synced (populated by a prior read, a
+  /// write, or @c initializeParameters' value pass) and only touches the bus on the first access
+  /// of a never-read object, delegating that one read to @c readValue. Use this — not
+  /// @c readValue — for object-dictionary entries that do not change while the @c Device exists
+  /// (device type 0x1000, identity, manufacturer name/version, ...): @c readValue re-issues an SDO
+  /// on every call when online, which is wasted work for a constant object. There is no reliable
+  /// object-dictionary flag for "constant" (0x1000 and the error register 0x1001 share the same
+  /// read-only, non-mappable access bits), so the caller asserts immutability by choosing this.
+  ///
+  /// @warning Only *this* accessor caches. For objects that change (statusword, actual values,
+  ///          error/status objects) call @c readValue, which re-reads live on every call — using
+  ///          @c readCachedValue would keep returning the first reading. This is a per-call method
+  ///          choice, not a state on the object: @c readValue stays live even after a prior
+  ///          @c readCachedValue marked the entry @c Synced.
+  ///
+  /// @tparam T        The expected variant alternative.
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @return The value as @p T, or an error string if the parameter is unknown, the (first) read
+  ///         fails, or the stored value is not a @p T.
+  template <typename T>
+  std::expected<T, std::string> readCachedValue(uint16_t index, uint8_t subindex) {
+    {
+      std::lock_guard<std::mutex> lock(*parametersMutex_);
+      if (const DeviceParameter* p = findParameter(index, subindex);
+          p && p->syncState == SyncState::Synced) {
+        return p->getValue<T>();
+      }
+    }
+    return readValue<T>(index, subindex);  // never read: fetch once — readValue marks it Synced.
+  }
+
  private:
   /// @brief Mutable parameter lookup by @c (index, subindex). O(1); @c nullptr if absent.
   DeviceParameter* findParameter(uint16_t index, uint8_t subindex);

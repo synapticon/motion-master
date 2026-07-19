@@ -9,6 +9,7 @@ add_library(
   parameter_cache.cc
   parameter_refresher.cc
   pdo_mapping.cc
+  profile_device.cc
   process_data_dump.cc
   process_data_ring.cc
   process_image.cc

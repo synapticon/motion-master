@@ -199,7 +199,10 @@ class Cia402FakeDriver : public FieldbusDriver {
 Device makeCia402Device(Cia402FakeDriver& driver) {
   driver.programCia402Objects();
   Device device(1, driver);
-  (void)device.initializeParameters();
+  // Enumerating the programmed objects is a precondition for every test built on this helper;
+  // assert it so a broken enumeration fails here with its message rather than downstream.
+  auto initialized = device.initializeParameters();
+  EXPECT_TRUE(initialized.has_value()) << initialized.error();
   return device;
 }
 

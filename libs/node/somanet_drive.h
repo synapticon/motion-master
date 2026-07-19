@@ -8,7 +8,7 @@
 namespace mm::node {
 
 /// @brief Borrowed view of a SOMANET drive — a CiA402 drive plus Synapticon-specific
-///        object-dictionary access (encoder/motor configuration, commutation offset, etc.).
+///        object-dictionary access (encoder/motor configuration, custom OS commands, etc.).
 ///
 /// SOMANET drives implement CiA402 in full, so this *is-a* @c Cia402Drive and inherits the whole
 /// state machine and setpoint surface; it adds only the vendor-specific objects in the

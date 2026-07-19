@@ -13,9 +13,12 @@ using cia402::Command;
 using cia402::Object;
 using cia402::State;
 
-// Poll cadence for enable()'s state-machine walk. Short enough that a healthy 1 ms bus advances
-// within a couple of polls, long enough not to busy-spin the control-plane thread. Not on the RT
-// path — enable() runs on the HTTP thread.
+// Poll cadence for enable()'s state-machine walk. Decoupled from the (configurable) RT period: it
+// only bounds the extra latency added on top of each transition's bus round-trip. Each observed
+// transition already costs ~2 RT cycles (stage output → RT sends → drive reacts → RT receives new
+// statusword), so polling faster just re-reads an unchanged statusword; 1 ms keeps the added
+// latency negligible on a fast bus and small on a slow one, without busy-spinning the control
+// plane. Not on the RT path — enable() runs on the HTTP thread.
 constexpr auto kPollStep = std::chrono::milliseconds(1);
 
 }  // namespace

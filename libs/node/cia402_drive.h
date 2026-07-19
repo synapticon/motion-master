@@ -17,10 +17,10 @@ namespace mm::node {
 ///        operation mode (display object 0x6061), and the setpoint currently commanded for that
 ///        mode. Read in one shot by @c Cia402Drive::readStatus.
 struct Cia402Status {
-  cia402::State state{};                              ///< Decoded from the statusword (0x6041).
-  uint16_t statusword = 0;                            ///< Raw statusword (0x6041).
-  uint16_t controlword = 0;                           ///< Last-commanded controlword (0x6040).
-  cia402::OperationMode modeOfOperationDisplay{};     ///< Active operation mode (0x6061).
+  cia402::State state{};                           ///< Decoded from the statusword (0x6041).
+  uint16_t statusword = 0;                         ///< Raw statusword (0x6041).
+  uint16_t controlword = 0;                        ///< Last-commanded controlword (0x6040).
+  cia402::OperationMode modeOfOperationDisplay{};  ///< Active operation mode (0x6061).
   /// The setpoint object for the active mode — target position 0x607A (PP/CSP), velocity 0x60FF
   /// (PV/CSV), or torque 0x6071 (PT/CST), widened to int32. 0 only when the active mode has no
   /// linear setpoint (NoMode / Homing). Lets a UI seed its target input from the drive.

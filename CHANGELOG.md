@@ -19,6 +19,20 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.53] - 2026-07-19
+
+### Added
+
+- Console Parameters page: the **Read SDO** and **Write SDO** tools now show how long each operation took — the server-measured SDO wire transaction next to the browser round-trip (e.g. `SDO 5.0 ms · round-trip 45 ms`), each with a tooltip explaining what it means. This makes clear that the SDO itself is fast and the larger figure is cross-origin/transport overhead, not device time. Backed by a new `wireUs` field on the CoE SDO read/write API responses.
+
+### Changed
+
+- Repeated writes from the web apps are faster: the CORS preflight (`OPTIONS /api/*`) now sends `Access-Control-Max-Age`, so the browser caches it and skips the extra preflight round-trip before each mutating request.
+
+### Fixed
+
+- Console Game Loop page: the cycle-period input is no longer cramped and now matches the height of its Apply button.
+
 ## [6.0.0-alpha.52] - 2026-07-19
 
 ### Fixed
@@ -351,7 +365,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.52...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.53...HEAD
+[6.0.0-alpha.53]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.52...v6.0.0-alpha.53
 [6.0.0-alpha.52]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.51...v6.0.0-alpha.52
 [6.0.0-alpha.51]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.50...v6.0.0-alpha.51
 [6.0.0-alpha.50]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.49...v6.0.0-alpha.50

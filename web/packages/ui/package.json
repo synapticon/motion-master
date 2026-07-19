@@ -1,6 +1,6 @@
 {
   "name": "@synapticon/ui",
-  "version": "6.0.0-alpha.52",
+  "version": "6.0.0-alpha.53",
   "private": true,
   "description": "Shared Synapticon design system (Tailwind theme) and React UI components for the apps under web/apps.",
   "type": "module",

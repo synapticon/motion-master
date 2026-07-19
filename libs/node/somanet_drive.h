@@ -18,9 +18,9 @@ namespace mm::node {
 /// Construct via @c createSomanetDrive, which checks the vendor ID before binding.
 ///
 /// **Multi-cycle procedures do not live here.** Commutation-offset detection, auto-tuning, and
-/// the like are @c CyclicTask implementations that take a @c DeviceManager& and re-resolve their
-/// @c Device every cycle (a long-lived view would dangle across a bus rescan). The handler that
-/// owns the scheduler constructs and schedules such a task; this view's job is the synchronous,
+/// the like are command-and-wait procedures that run off-RT on a background thread, taking a
+/// @c DeviceManager& and re-resolving their @c Device each step (a long-lived view would dangle
+/// across a bus rescan). Whoever owns that procedure runs it; this view's job is the synchronous,
 /// single-shot SOMANET object access that frames those procedures (reading/writing config,
 /// checking preconditions).
 class SomanetDrive : public Cia402Drive {

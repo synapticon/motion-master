@@ -21,9 +21,11 @@ namespace mm::node {
 /// profile before binding the view. The bare constructor is unchecked — for tests or
 /// already-validated paths.
 ///
-/// @note Single-shot, here-and-now operations only. Multi-cycle procedures (homing runs,
-///       calibration) belong in a @c CyclicTask that re-resolves its @c Device each cycle, not
-///       in a long-lived instance of this view.
+/// @note Single-shot, here-and-now operations only. A long-running procedure must re-resolve its
+///       @c Device per step rather than cache this view across a bus rescan: command-and-wait
+///       procedures (homing runs, calibration, auto-tuning) run off-RT on a background thread,
+///       while cycle-locked setpoint generation runs in an RT @c CyclicTask. Either way the view
+///       is rebound per step/cycle, never held in a long-lived instance.
 class Cia402Drive : public ProfileDevice {
  public:
   /// @brief Binds an (unchecked) CiA402 view to @p device. Prefer @c createCia402Drive.

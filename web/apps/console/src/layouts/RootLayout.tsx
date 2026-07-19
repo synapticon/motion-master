@@ -151,6 +151,7 @@ function DeviceSection({
   productCode,
   revisionNumber,
   serialNumber,
+  isCia402,
   state,
 }: {
   deviceId: string
@@ -160,6 +161,7 @@ function DeviceSection({
   productCode?: number
   revisionNumber?: number
   serialNumber?: number
+  isCia402?: boolean
   state?: DeviceState
 }) {
   const { api } = useConnection()
@@ -238,6 +240,15 @@ function DeviceSection({
     ...(revisionNumber !== undefined ? ['Revision', formatHex(revisionNumber, 8)] : []),
     ...(serialNumber !== undefined ? ['Serial', String(serialNumber)] : []),
   ].join('\n')
+
+  // Motion is CiA402-only AND requires OP: you can only drive the state machine and setpoints while
+  // the device is in the operational EtherCAT state (process data actually exchanging) — in any
+  // other AL state a motion command has no effect. All device links are sorted by name.
+  const isOp = state?.alState === 8
+  const links = [
+    ...(isCia402 && isOp ? [{ to: 'motion', label: 'Motion' }] : []),
+    ...deviceLinks,
+  ].sort((a, b) => a.label.localeCompare(b.label))
 
   return (
     <div className="mt-2">
@@ -323,7 +334,7 @@ function DeviceSection({
       </button>
       {open && (
         <div>
-          {deviceLinks.map(({ to, label }) => (
+          {links.map(({ to, label }) => (
             <NavItem key={to} to={`/devices/${deviceId}/${to}`} label={label} />
           ))}
         </div>
@@ -545,6 +556,7 @@ export default function RootLayout() {
                     productCode={d.productCode}
                     revisionNumber={d.revisionNumber}
                     serialNumber={d.serialNumber}
+                    isCia402={d.isCia402}
                     state={stateByPosition.get(d.slavePosition)}
                   />
                 ))

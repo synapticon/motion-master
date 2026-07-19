@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- New per-drive **Motion** page in the Console for any device that implements the CiA402 drive profile. From it you can step the device-control state machine (Enable walks every transition up to Operation Enabled, clearing a fault first if needed; Disable, Quick stop, Reset fault), select the operation mode (0x6060), command the cyclic setpoint for the active mode (target position, velocity, or torque), and watch target vs. actual stream live on a chart. The page appears in the sidebar only for CiA402 drives currently in the operational (OP) state, since a motion command has no effect otherwise. Backed by new HTTP endpoints under `/api/devices/{slavePosition}/cia402` (status, mode, command, target), and a new `isCia402` flag on the device listing so clients can gate the CiA402-only UI.
+
 ## [6.0.0-alpha.50] - 2026-07-18
 
 ### Changed

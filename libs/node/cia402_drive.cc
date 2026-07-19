@@ -2,10 +2,54 @@
 
 #include <chrono>
 #include <format>
+#include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 
 namespace mm::node {
+
+void to_json(nlohmann::json& j, const Cia402Status& s) {
+  j = nlohmann::json{
+      {"state", cia402::toString(s.state)},
+      {"statusword", s.statusword},
+      {"controlword", s.controlword},
+      {"modeOfOperation", static_cast<int>(s.modeOfOperationDisplay)},
+      {"modeName", cia402::toString(s.modeOfOperationDisplay)},
+      // 0 only when the active mode has no linear setpoint (NoMode / Homing).
+      {"target", s.target},
+  };
+}
+
+std::optional<Cia402Command> parseCia402Command(std::string_view token) {
+  if (token == "enable") {
+    return Cia402Command::kEnable;
+  }
+  if (token == "disable") {
+    return Cia402Command::kDisable;
+  }
+  if (token == "quickStop") {
+    return Cia402Command::kQuickStop;
+  }
+  if (token == "faultReset") {
+    return Cia402Command::kFaultReset;
+  }
+  return std::nullopt;
+}
+
+std::optional<Cia402TargetKind> parseCia402TargetKind(std::string_view token) {
+  if (token == "position") {
+    return Cia402TargetKind::kPosition;
+  }
+  if (token == "velocity") {
+    return Cia402TargetKind::kVelocity;
+  }
+  if (token == "torque") {
+    return Cia402TargetKind::kTorque;
+  }
+  return std::nullopt;
+}
 
 namespace {
 
@@ -49,6 +93,48 @@ std::expected<cia402::OperationMode, std::string> Cia402Drive::operationMode() c
 
 std::expected<void, std::string> Cia402Drive::setOperationMode(cia402::OperationMode mode) {
   return device_.writeValue(Object::kModeOfOperation, 0, static_cast<int8_t>(mode));
+}
+
+std::expected<Cia402Status, std::string> Cia402Drive::readStatus() const {
+  auto sw = statusword();
+  if (!sw) {
+    return std::unexpected(sw.error());
+  }
+  auto cw = controlword();
+  if (!cw) {
+    return std::unexpected(cw.error());
+  }
+  auto mode = operationMode();
+  if (!mode) {
+    return std::unexpected(mode.error());
+  }
+  // Read the setpoint the active mode actually acts on so a UI can seed its target input from the
+  // drive; 0 for modes with no linear setpoint. Torque is INTEGER16, the others INTEGER32.
+  int32_t target = 0;
+  switch (*mode) {
+    case cia402::OperationMode::kCyclicSyncPosition:
+    case cia402::OperationMode::kProfilePosition:
+      if (auto v = device_.readValue<int32_t>(cia402::Object::kTargetPosition, 0)) {
+        target = *v;
+      }
+      break;
+    case cia402::OperationMode::kCyclicSyncVelocity:
+    case cia402::OperationMode::kProfileVelocity:
+      if (auto v = device_.readValue<int32_t>(cia402::Object::kTargetVelocity, 0)) {
+        target = *v;
+      }
+      break;
+    case cia402::OperationMode::kCyclicSyncTorque:
+    case cia402::OperationMode::kProfileTorque:
+      if (auto v = device_.readValue<int16_t>(cia402::Object::kTargetTorque, 0)) {
+        target = *v;
+      }
+      break;
+    case cia402::OperationMode::kNoMode:
+    case cia402::OperationMode::kHoming:
+      break;
+  }
+  return Cia402Status{cia402::decodeState(*sw), *sw, *cw, *mode, target};
 }
 
 std::expected<void, std::string> Cia402Drive::applyCommand(uint16_t command) {
@@ -176,11 +262,10 @@ std::expected<int32_t, std::string> Cia402Drive::velocityActualValue() const {
 }
 
 std::expected<Cia402Drive, std::string> createCia402Drive(Device& device) {
-  // Offline-safe discriminator: a CiA402 drive exposes both the controlword and statusword in
-  // its object dictionary. Presence in the (already-enumerated) parameter map is enough — no bus
-  // I/O, so this works whether the device is online or not.
-  if (device.parameter(Object::kControlword, 0) == nullptr ||
-      device.parameter(Object::kStatusword, 0) == nullptr) {
+  // Offline-safe discriminator (Device::isCia402): a CiA402 drive exposes both the controlword
+  // and statusword in its object dictionary. Presence in the (already-enumerated) parameter map
+  // is enough — no bus I/O, so this works whether the device is online or not.
+  if (!device.isCia402()) {
     return std::unexpected(
         std::format("device {} is not a CiA402 drive (missing controlword/statusword; "
                     "initializeParameters first?)",

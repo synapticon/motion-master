@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <optional>
 #include <string_view>
 
 /// @file
@@ -42,6 +43,29 @@ enum class OperationMode : int8_t {
   kCyclicSyncVelocity = 9,  ///< CSV — interpolated cyclic velocity.
   kCyclicSyncTorque = 10,   ///< CST — interpolated cyclic torque.
 };
+
+/// @brief Maps a raw mode value (as written to 0x6060 / read from 0x6061) to a known operation
+///        mode. Rejects values outside the standard set so an API boundary can 400 an unknown mode.
+/// @return The mode, or @c std::nullopt if @p value is not a recognised operation mode.
+constexpr std::optional<OperationMode> toOperationMode(int value) {
+  // 0x6060 is an INTEGER8, so a value that does not fit int8_t is not a valid mode — reject it
+  // before the narrowing cast, or e.g. 264 would alias to 8 (CSP) and slip past validation.
+  if (value < INT8_MIN || value > INT8_MAX) {
+    return std::nullopt;
+  }
+  switch (static_cast<OperationMode>(static_cast<int8_t>(value))) {
+    case OperationMode::kNoMode:
+    case OperationMode::kProfilePosition:
+    case OperationMode::kProfileVelocity:
+    case OperationMode::kProfileTorque:
+    case OperationMode::kHoming:
+    case OperationMode::kCyclicSyncPosition:
+    case OperationMode::kCyclicSyncVelocity:
+    case OperationMode::kCyclicSyncTorque:
+      return static_cast<OperationMode>(static_cast<int8_t>(value));
+  }
+  return std::nullopt;
+}
 
 /// @brief States of the CiA402 device control state machine (decoded from the statusword).
 enum class State : uint8_t {

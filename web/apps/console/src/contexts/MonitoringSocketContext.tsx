@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { WebSocketConnection, type MonitoringBatch, type ReadyState } from '@synapticon/motion-master-client'
+import { useConnection } from './ConnectionContext'
 
 // One published batch for a topic: an array of sample rows, each [timestampUs, v0, v1, ...].
 // A value is null when its device was not exchanging at sample time.
@@ -58,4 +59,21 @@ export function useMonitoringSocket(): MonitoringSocketValue {
     throw new Error('useMonitoringSocket must be used within a MonitoringSocketProvider')
   }
   return ctx
+}
+
+/// App-level provider: derives the WebSocket URL from the active connection settings and holds ONE
+/// `WebSocketConnection` for the whole app session. Mount it once at the root (inside
+/// `ConnectionProvider`); every page then shares this socket via `useMonitoringSocket()`. The SDK
+/// connection multiplexes topics and ref-counts subscribe/unsubscribe, so subscriptions survive
+/// navigation with no reconnect churn — a live view starts streaming the moment it subscribes
+/// instead of waiting for a fresh socket to open. Keyed on the URL so changing the endpoint on the
+/// Connection page rebuilds the connection.
+export function AppMonitoringSocketProvider({ children }: { children: ReactNode }) {
+  const { host, wsPort } = useConnection()
+  const url = `wss://${host}:${wsPort}`
+  return (
+    <MonitoringSocketProvider key={url} url={url}>
+      {children}
+    </MonitoringSocketProvider>
+  )
 }

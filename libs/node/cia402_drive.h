@@ -2,12 +2,51 @@
 
 #include <chrono>
 #include <expected>
+#include <nlohmann/json_fwd.hpp>
+#include <optional>
 #include <string>
+#include <string_view>
 
 #include "node/cia402.h"
 #include "node/profile_device.h"
 
 namespace mm::node {
+
+/// @brief A snapshot of a CiA402 drive's control state — the values a control UI needs to show at a
+///        glance: the decoded state machine state, the raw status/control words, the active
+///        operation mode (display object 0x6061), and the setpoint currently commanded for that
+///        mode. Read in one shot by @c Cia402Drive::readStatus.
+struct Cia402Status {
+  cia402::State state{};                              ///< Decoded from the statusword (0x6041).
+  uint16_t statusword = 0;                            ///< Raw statusword (0x6041).
+  uint16_t controlword = 0;                           ///< Last-commanded controlword (0x6040).
+  cia402::OperationMode modeOfOperationDisplay{};     ///< Active operation mode (0x6061).
+  /// The setpoint object for the active mode — target position 0x607A (PP/CSP), velocity 0x60FF
+  /// (PV/CSV), or torque 0x6071 (PT/CST), widened to int32. 0 only when the active mode has no
+  /// linear setpoint (NoMode / Homing). Lets a UI seed its target input from the drive.
+  int32_t target = 0;
+};
+
+/// @brief Serialises a @c Cia402Status. Emits `state`/`modeName` as human-readable strings
+///        alongside the numeric `statusword`, `controlword`, and `modeOfOperation`.
+void to_json(nlohmann::json& j, const Cia402Status& s);
+
+/// @brief High-level state-machine actions a client can command (the named transitions a UI
+///        exposes as buttons). Distinct from @c cia402::Command (raw controlword bit patterns).
+enum class Cia402Command { kEnable, kDisable, kQuickStop, kFaultReset };
+
+/// @brief Parses a command token ("enable" / "disable" / "quickStop" / "faultReset").
+/// @return The command, or @c std::nullopt if the token is unrecognised.
+std::optional<Cia402Command> parseCia402Command(std::string_view token);
+
+/// @brief Which cyclic setpoint a target write addresses. Exactly one is active at a time — the
+///        one matching the drive's operation mode (position for PP/CSP, velocity for PV/CSV,
+///        torque for PT/CST) — so a target write names its kind rather than setting all three.
+enum class Cia402TargetKind { kPosition, kVelocity, kTorque };
+
+/// @brief Parses a target-kind token ("position" / "velocity" / "torque").
+/// @return The kind, or @c std::nullopt if the token is unrecognised.
+std::optional<Cia402TargetKind> parseCia402TargetKind(std::string_view token);
 
 /// @brief Borrowed view of a CiA402 drive — the device control state machine, operation modes,
 ///        and the standard cyclic setpoints, expressed over a @c Device's parameter access.
@@ -52,6 +91,9 @@ class Cia402Drive : public ProfileDevice {
 
   /// @brief Requests an operation mode (0x6060). The drive reflects it in 0x6061 once accepted.
   std::expected<void, std::string> setOperationMode(cia402::OperationMode mode);
+
+  /// @brief Reads state, statusword, controlword, and the active mode in one shot.
+  std::expected<Cia402Status, std::string> readStatus() const;
 
   // --- State-machine transitions ------------------------------------------------------------
   // Each issues exactly one controlword edge via a read-modify-write that touches only the

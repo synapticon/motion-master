@@ -10,6 +10,48 @@
  * ---------------------------------------------------------------
  */
 
+/** A CiA402 drive's control snapshot — its state machine, control words, and mode. */
+export interface Cia402Status {
+  /**
+   * Decoded CiA402 state-machine state (from the statusword, 0x6041).
+   * @example "OperationEnabled"
+   */
+  state:
+    | "NotReadyToSwitchOn"
+    | "SwitchOnDisabled"
+    | "ReadyToSwitchOn"
+    | "SwitchedOn"
+    | "OperationEnabled"
+    | "QuickStopActive"
+    | "FaultReactionActive"
+    | "Fault";
+  /**
+   * Raw statusword (0x6041), 0–65535.
+   * @example 4663
+   */
+  statusword: number;
+  /**
+   * Last-commanded controlword (0x6040), 0–65535.
+   * @example 15
+   */
+  controlword: number;
+  /**
+   * Active operation mode (display object 0x6061), as an INTEGER8 value.
+   * @example 9
+   */
+  modeOfOperation: number;
+  /**
+   * Human-readable name of the active operation mode.
+   * @example "CyclicSyncVelocity"
+   */
+  modeName: string;
+  /**
+   * The setpoint currently commanded for the active mode — target position 0x607A (PP/CSP), velocity 0x60FF (PV/CSV), or torque 0x6071 (PT/CST), widened to INTEGER32. 0 only when the active mode has no linear setpoint (NoMode / Homing).
+   * @example 100000
+   */
+  target: number;
+}
+
 /** Point-in-time health of the real-time game loop. Times are nanoseconds; rates are hertz. All fields are diagnostic (relaxed reads), not synchronised. */
 export interface GameLoopHealth {
   /**

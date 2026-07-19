@@ -12,6 +12,7 @@
 
 import {
   AlStatusCode,
+  Cia402Status,
   DcSyncStatus,
   DeviceDiagnostics,
   DeviceParameter,
@@ -376,6 +377,11 @@ export class Api<
          * @example 12345
          */
         serialNumber: number;
+        /**
+         * Whether the device implements the CiA402 drive profile (both controlword 0x6040 and statusword 0x6041 present in its object dictionary). Gates the CiA402 motion-control endpoints under /api/devices/{slavePosition}/cia402.
+         * @example true
+         */
+        isCia402: boolean;
       },
       void
     >({
@@ -921,6 +927,102 @@ export class Api<
       ...params,
     });
   /**
+   * @description Returns the drive's current control state — the decoded state-machine state, the raw status (0x6041) and control (0x6040) words, and the active operation mode (display object 0x6061). The values are read live (from the process image when the device is exchanging, else over SDO), so poll this to drive a motion UI. Only valid for a CiA402 device (see the isCia402 flag on GET /api/devices).
+   *
+   * @name GetCia402Status
+   * @summary Read a device's CiA402 control snapshot
+   * @request GET:/api/devices/{slavePosition}/cia402
+   */
+  getCia402Status = (slavePosition: number, params: RequestParams = {}) =>
+    this.request<Cia402Status, void>({
+      path: `/api/devices/${slavePosition}/cia402`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Writes the requested operation mode to 0x6060 and returns the resulting control snapshot. The drive reflects the accepted mode in 0x6061 (the modeOfOperation of the response) once it takes effect.
+   *
+   * @name SetCia402OperationMode
+   * @summary Set a device's CiA402 operation mode
+   * @request POST:/api/devices/{slavePosition}/cia402/mode
+   */
+  setCia402OperationMode = (
+    slavePosition: number,
+    data: {
+      /**
+       * CiA402 operation mode (0x6060 value): 0 NoMode, 1 Profile Position, 3 Profile Velocity, 4 Profile Torque, 6 Homing, 8 Cyclic Sync Position, 9 Cyclic Sync Velocity, 10 Cyclic Sync Torque.
+       * @example 9
+       */
+      mode: number;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<Cia402Status, void>({
+      path: `/api/devices/${slavePosition}/cia402/mode`,
+      method: "POST",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Drives the CiA402 device-control state machine. "enable" walks every intermediate transition to Operation Enabled (clearing a fault first if needed); "disable" goes to Switch On Disabled; "quickStop" triggers a quick stop; "faultReset" clears a latched fault. The device must be exchanging process data for "enable" to make progress. Returns the resulting control snapshot.
+   *
+   * @name RunCia402Command
+   * @summary Run a CiA402 state-machine command
+   * @request POST:/api/devices/{slavePosition}/cia402/command
+   */
+  runCia402Command = (
+    slavePosition: number,
+    data: {
+      /**
+       * The state-machine action to perform.
+       * @example "enable"
+       */
+      command: "enable" | "disable" | "quickStop" | "faultReset";
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<Cia402Status, void>({
+      path: `/api/devices/${slavePosition}/cia402/command`,
+      method: "POST",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Writes the one setpoint that matches the active operation mode — target position (0x607A, INTEGER32) in PP/CSP, target velocity (0x60FF, INTEGER32) in PV/CSV, or target torque (0x6071, INTEGER16, per-mille of rated) in PT/CST. All are signed: negative values command reverse motion or regenerative torque. Routes through the live process image when the object is PDO-mapped and the device is exchanging, else an SDO download.
+   *
+   * @name SetCia402Target
+   * @summary Set a CiA402 cyclic setpoint (target)
+   * @request POST:/api/devices/{slavePosition}/cia402/target
+   */
+  setCia402Target = (
+    slavePosition: number,
+    data: {
+      /**
+       * Which setpoint to write (pick the one matching the active mode).
+       * @example "velocity"
+       */
+      target: "position" | "velocity" | "torque";
+      /**
+       * The setpoint value in the object's own units (signed). For torque it is per-mille of rated and is narrowed to INTEGER16.
+       * @example 1000
+       */
+      value: number;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<void, void>({
+      path: `/api/devices/${slavePosition}/cia402/target`,
+      method: "POST",
+      body: data,
+      type: ContentType.Json,
+      ...params,
+    });
+  /**
    * @description Performs a CoE SDO upload — reads the value of object `index:subindex` from the device at `slavePosition` and returns the raw bytes as a JSON array. Both `index` and `subindex` accept decimal or hexadecimal notation; prefix with `0x` for hex (e.g. `0x6064` or `24676` for object 0x6064).
    *
    * @name SdoUpload
@@ -1375,6 +1477,11 @@ export class Api<
          * @example 12345
          */
         serialNumber: number;
+        /**
+         * Whether the device implements the CiA402 drive profile (both controlword 0x6040 and statusword 0x6041 present in its object dictionary). Gates the CiA402 motion-control endpoints under /api/devices/{slavePosition}/cia402.
+         * @example true
+         */
+        isCia402: boolean;
       }[],
       any
     >({

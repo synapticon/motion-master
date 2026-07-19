@@ -14,6 +14,8 @@
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
+#include "node/cia402.h"
+#include "node/cia402_drive.h"
 #include "node/device.h"
 #include "node/parameter_cache.h"
 #include "node/process_data_ring.h"
@@ -561,6 +563,64 @@ class DeviceManager {
   /// @param slavePosition  1-based bus position of the target device.
   /// @return The grouped mapping, or an error string if the device is unknown or a read fails.
   std::expected<PdoMapping, std::string> readDevicePdoMapping(uint16_t slavePosition);
+
+  // --- CiA402 motion control ---
+  //
+  // Each resolves the device by position, binds a validated Cia402Drive view (which fails if the
+  // device is not a CiA402 drive), and delegates one operation to it. Held under the shared bus
+  // lock for the call's duration — safe against the exclusive mutators that rebuild devices_,
+  // like the other position-based methods; the drive's per-transaction bus access takes the
+  // driver's control-plane lock only briefly, so a multi-second enable() walk does not block the
+  // RT loop (lock-free PDO) or the WebSocket. All require the device to be exchanging for the
+  // state machine to actually advance.
+
+  /// @brief Reads a device's CiA402 control snapshot (state, status/control words, active mode).
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @return The snapshot, or an error string if the device is unknown, not a CiA402 drive, or a
+  ///         read fails.
+  std::expected<Cia402Status, std::string> getCia402Status(uint16_t slavePosition);
+
+  /// @brief Requests a CiA402 operation mode (0x6060), then reads back the resulting snapshot.
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @param mode           Operation mode to request.
+  /// @return The post-write snapshot, or an error string if the device is unknown, not a CiA402
+  ///         drive, or the write/read-back fails.
+  std::expected<Cia402Status, std::string> setCia402OperationMode(uint16_t slavePosition,
+                                                                  cia402::OperationMode mode);
+
+  /// @brief Runs a CiA402 state-machine command (enable / disable / quick stop / fault reset),
+  ///        then reads back the resulting snapshot.
+  ///
+  /// @c kEnable walks every intermediate transition to OperationEnabled (up to @p timeout,
+  /// clearing a fault first if needed); the others issue a single controlword edge. The drive
+  /// must be exchanging for @c kEnable to make progress.
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @param command        The action to perform.
+  /// @param timeout        Maximum time to wait for @c kEnable to reach OperationEnabled.
+  /// @return The post-command snapshot, or an error string if the device is unknown, not a CiA402
+  ///         drive, or the command fails (including an enable timeout).
+  std::expected<Cia402Status, std::string> runCia402Command(
+      uint16_t slavePosition, Cia402Command command,
+      std::chrono::milliseconds timeout = std::chrono::milliseconds(2000));
+
+  /// @brief Writes the one CiA402 cyclic setpoint that matches the active operation mode.
+  ///
+  /// A drive follows a single setpoint at a time — position in PP/CSP, velocity in PV/CSV, torque
+  /// in PT/CST — so the caller names which @p kind it is setting (from the selected mode) rather
+  /// than writing all three. Routes through the live PDO image when the object is mapped and the
+  /// device is exchanging, else an SDO download (see @c Device::writeValue). @p value is the raw
+  /// setpoint; for @c kTorque it is per-mille of rated and is narrowed to INTEGER16.
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @param kind           Which setpoint to write (position / velocity / torque).
+  /// @param setpoint       The setpoint value in the object's units.
+  /// @return Void on success, or an error string if the device is unknown, not a CiA402 drive, or
+  ///         the write fails.
+  std::expected<void, std::string> setCia402Target(uint16_t slavePosition, Cia402TargetKind kind,
+                                                   int32_t setpoint);
 
   /// @brief Stages a batch of output objects into the process image in one call.
   ///

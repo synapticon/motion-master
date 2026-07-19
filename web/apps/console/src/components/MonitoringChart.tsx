@@ -35,25 +35,52 @@ function formatTicks(splits: number[]): string[] {
   })
 }
 
-/// Thin uPlot wrapper for a live time-series. Re-creates the plot when the series set changes
-/// (pass a stable, memoised @p labels), and pushes new data via setData otherwise — so streaming
-/// updates never tear down the canvas.
+/// Thin uPlot wrapper for a live time-series. Re-creates the plot when the series set changes and
+/// pushes new data via setData otherwise — so streaming updates never tear down the canvas.
+///
+/// The rebuild is keyed on the *content* of @p labels / @p titles, not their array identity, so a
+/// caller may pass a freshly-built array every render (the natural thing when projecting streamed
+/// data). Keying on reference instead would rebuild the canvas on every batch (~60×/s), collapsing
+/// the chart to zero height and yanking the page scroll back to the top.
 export default function MonitoringChart({
   data,
   labels,
   titles = [],
+  hidden = [],
+  colors = [],
 }: {
   data: uPlot.AlignedData
   labels: string[]
   /** Optional hover tooltip per series (e.g. the parameter name), aligned with `labels`. */
   titles?: string[]
+  /** Labels whose series start hidden. A default only — the user can toggle them on via the
+   *  legend, and those toggles survive data updates (applied once, at plot-create time). */
+  hidden?: string[]
+  /** Optional per-series stroke colour, aligned with `labels`; a blank/undefined entry falls back
+   *  to the built-in palette. Changing a colour rebuilds the plot (keyed on content). */
+  colors?: (string | undefined)[]
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const plotRef = useRef<uPlot | null>(null)
   const dataRef = useRef<uPlot.AlignedData>(data)
   dataRef.current = data
+  // Latest label/title arrays, read inside the effects that are keyed on their content below.
+  const labelsRef = useRef(labels)
+  labelsRef.current = labels
+  const titlesRef = useRef(titles)
+  titlesRef.current = titles
+  const hiddenRef = useRef(hidden)
+  hiddenRef.current = hidden
+  const colorsRef = useRef(colors)
+  colorsRef.current = colors
+  // Content keys — a stable string identity for a given set of labels/titles/colors. These, not the
+  // array references, drive the effects, so a caller passing a fresh array each render is harmless.
+  const labelsKey = JSON.stringify(labels)
+  const titlesKey = JSON.stringify(titles)
+  const colorsKey = JSON.stringify(colors)
 
-  // Create (and re-create when the series change). Reads the latest data via ref.
+  // Create (and re-create when the series set actually changes). Reads the latest data/labels via
+  // refs, so it fires only when labelsKey changes — never on a per-batch data update.
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
@@ -61,11 +88,12 @@ export default function MonitoringChart({
     const series: uPlot.Series[] = [
       // x is elapsed microseconds, not a timestamp — format the cursor/legend readout in µs.
       { label: 'Elapsed', value: (_u, v) => (v == null ? '—' : formatMicros(v)) },
-      ...labels.map((label, i) => ({
+      ...labelsRef.current.map((label, i) => ({
         label,
-        stroke: COLORS[i % COLORS.length],
+        stroke: colorsRef.current[i] || COLORS[i % COLORS.length],
         width: 1,
         spanGaps: false, // null samples (device not exchanging) leave gaps
+        show: !hiddenRef.current.includes(label), // initial visibility; legend can toggle it back on
       })),
     ]
     const opts: uPlot.Options = {
@@ -93,7 +121,7 @@ export default function MonitoringChart({
       plot.destroy()
       plotRef.current = null
     }
-  }, [labels])
+  }, [labelsKey, colorsKey])
 
   // Stream new data into the existing plot.
   useEffect(() => {
@@ -102,15 +130,15 @@ export default function MonitoringChart({
 
   // Set each legend row's hover title to the parameter name. uPlot renders the legend as an HTML
   // table; the first `.u-series` row is the x-axis ("Elapsed"), so series rows start at index 1.
-  // Re-applied when the plot is rebuilt (labels) or the names resolve later (titles).
+  // Re-applied whenever the plot is rebuilt (labelsKey / colorsKey) or the names resolve (titlesKey).
   useEffect(() => {
     const rows = containerRef.current?.querySelectorAll<HTMLElement>('.u-legend tr.u-series')
     if (!rows) return
-    titles.forEach((title, i) => {
+    titlesRef.current.forEach((title, i) => {
       const row = rows[i + 1]
       if (row) row.title = title
     })
-  }, [titles, labels])
+  }, [titlesKey, labelsKey, colorsKey])
 
   return <div ref={containerRef} className="w-full" />
 }

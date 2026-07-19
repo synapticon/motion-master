@@ -6,6 +6,7 @@ import './index.css'
 import App from './App.tsx'
 import { ConnectionProvider } from './contexts/ConnectionContext'
 import { RequestsProvider } from './contexts/RequestsContext'
+import { AppMonitoringSocketProvider } from './contexts/MonitoringSocketContext'
 import { ServerStateProbe } from './components/ServerStateProbe'
 
 const queryClient = new QueryClient()
@@ -16,9 +17,11 @@ createRoot(document.getElementById('root')!).render(
       <RequestsProvider>
         <ConnectionProvider>
           <ServerStateProbe>
-            <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
-              <App />
-            </BrowserRouter>
+            <AppMonitoringSocketProvider>
+              <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+                <App />
+              </BrowserRouter>
+            </AppMonitoringSocketProvider>
           </ServerStateProbe>
         </ConnectionProvider>
       </RequestsProvider>

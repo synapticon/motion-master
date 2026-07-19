@@ -10,11 +10,7 @@ import PageHeader from '../components/PageHeader'
 import ParameterPicker from '../components/ParameterPicker'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
-import {
-  MonitoringSocketProvider,
-  type SampleRows,
-  useMonitoringSocket,
-} from '../contexts/MonitoringSocketContext'
+import { type SampleRows, useMonitoringSocket } from '../contexts/MonitoringSocketContext'
 import { type CycleStats, cycleStats } from '../utils/cycleStats'
 import { downloadText } from '../utils/download'
 
@@ -93,8 +89,7 @@ interface ParamRowState {
 const emptyRow: ParamRowState = { devicePosition: '', index: '', subindex: '' }
 
 export default function DataMonitoringsPage() {
-  const { api, hasScanned, host, wsPort } = useConnection()
-  const wsUrl = `wss://${host}:${wsPort}`
+  const { api, hasScanned } = useConnection()
   const queryClient = useQueryClient()
 
   const devicesQuery = useQuery({
@@ -170,19 +165,17 @@ export default function DataMonitoringsPage() {
         {monitorings.length === 0 ? (
           <p className="text-sm text-grey-500">No monitorings yet. Create one above.</p>
         ) : (
-          <MonitoringSocketProvider key={wsUrl} url={wsUrl}>
-            <div className="space-y-4">
-              {monitorings.map((m) => (
-                <MonitoringCard
-                  key={m.topic}
-                  monitoring={m}
-                  nameByKey={nameByKey}
-                  onDelete={() => deleteMutation.mutate(m.topic)}
-                  deleting={deleteMutation.isPending && deleteMutation.variables === m.topic}
-                />
-              ))}
-            </div>
-          </MonitoringSocketProvider>
+          <div className="space-y-4">
+            {monitorings.map((m) => (
+              <MonitoringCard
+                key={m.topic}
+                monitoring={m}
+                nameByKey={nameByKey}
+                onDelete={() => deleteMutation.mutate(m.topic)}
+                deleting={deleteMutation.isPending && deleteMutation.variables === m.topic}
+              />
+            ))}
+          </div>
         )}
       </div>
     </div>

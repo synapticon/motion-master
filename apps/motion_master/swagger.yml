@@ -472,7 +472,7 @@ paths:
                 type: object
                 required:
                   [slavePosition, name, productName, vendorId, productCode, revisionNumber,
-                   serialNumber]
+                   serialNumber, isCia402]
                 properties:
                   slavePosition:
                     type: integer
@@ -511,6 +511,13 @@ paths:
                     format: int64
                     description: Serial number from EEPROM
                     example: 12345
+                  isCia402:
+                    type: boolean
+                    description: >
+                      Whether the device implements the CiA402 drive profile (both controlword
+                      0x6040 and statusword 0x6041 present in its object dictionary). Gates the
+                      CiA402 motion-control endpoints under /api/devices/{slavePosition}/cia402.
+                    example: true
         "400":
           description: slavePosition is not a valid integer
         "404":
@@ -1291,6 +1298,169 @@ paths:
             malformed mapping the device aborted, or a read-back that did not match the request
         "500":
           $ref: "#/components/responses/DriverError"
+  /api/devices/{slavePosition}/cia402:
+    get:
+      summary: Read a device's CiA402 control snapshot
+      description: >
+        Returns the drive's current control state — the decoded state-machine state, the raw
+        status (0x6041) and control (0x6040) words, and the active operation mode (display object
+        0x6061). The values are read live (from the process image when the device is exchanging,
+        else over SDO), so poll this to drive a motion UI. Only valid for a CiA402 device (see the
+        isCia402 flag on GET /api/devices).
+      operationId: getCia402Status
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The device's CiA402 control snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cia402Status"
+        "400":
+          description: slavePosition is not a valid integer
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: The device is not a CiA402 drive, or its object dictionary is not enumerated
+  /api/devices/{slavePosition}/cia402/mode:
+    post:
+      summary: Set a device's CiA402 operation mode
+      description: >
+        Writes the requested operation mode to 0x6060 and returns the resulting control snapshot.
+        The drive reflects the accepted mode in 0x6061 (the modeOfOperation of the response) once
+        it takes effect.
+      operationId: setCia402OperationMode
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [mode]
+              properties:
+                mode:
+                  type: integer
+                  description: >
+                    CiA402 operation mode (0x6060 value): 0 NoMode, 1 Profile Position, 3 Profile
+                    Velocity, 4 Profile Torque, 6 Homing, 8 Cyclic Sync Position, 9 Cyclic Sync
+                    Velocity, 10 Cyclic Sync Torque.
+                  example: 9
+      responses:
+        "200":
+          description: The post-write CiA402 control snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cia402Status"
+        "400":
+          description: slavePosition is invalid, the body is malformed, or the mode is unknown
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: The device is not a CiA402 drive, or the write failed
+  /api/devices/{slavePosition}/cia402/command:
+    post:
+      summary: Run a CiA402 state-machine command
+      description: >
+        Drives the CiA402 device-control state machine. "enable" walks every intermediate
+        transition to Operation Enabled (clearing a fault first if needed); "disable" goes to
+        Switch On Disabled; "quickStop" triggers a quick stop; "faultReset" clears a latched
+        fault. The device must be exchanging process data for "enable" to make progress. Returns
+        the resulting control snapshot.
+      operationId: runCia402Command
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [command]
+              properties:
+                command:
+                  type: string
+                  enum: [enable, disable, quickStop, faultReset]
+                  description: The state-machine action to perform.
+                  example: enable
+      responses:
+        "200":
+          description: The post-command CiA402 control snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cia402Status"
+        "400":
+          description: slavePosition is invalid, the body is malformed, or the command is unknown
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: >
+            The device is not a CiA402 drive, or the command failed (including an enable that did
+            not reach Operation Enabled before timing out)
+  /api/devices/{slavePosition}/cia402/target:
+    post:
+      summary: Set a CiA402 cyclic setpoint (target)
+      description: >
+        Writes the one setpoint that matches the active operation mode — target position (0x607A,
+        INTEGER32) in PP/CSP, target velocity (0x60FF, INTEGER32) in PV/CSV, or target torque
+        (0x6071, INTEGER16, per-mille of rated) in PT/CST. All are signed: negative values command
+        reverse motion or regenerative torque. Routes through the live process image when the
+        object is PDO-mapped and the device is exchanging, else an SDO download.
+      operationId: setCia402Target
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target, value]
+              properties:
+                target:
+                  type: string
+                  enum: [position, velocity, torque]
+                  description: Which setpoint to write (pick the one matching the active mode).
+                  example: velocity
+                value:
+                  type: integer
+                  description: >
+                    The setpoint value in the object's own units (signed). For torque it is
+                    per-mille of rated and is narrowed to INTEGER16.
+                  example: 1000
+      responses:
+        "204":
+          description: The setpoint was written
+        "400":
+          description: slavePosition is invalid, the body is malformed, or the target kind is unknown
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: The device is not a CiA402 drive, or the write failed
   /api/devices/{slavePosition}/sdo/{index}/{subindex}:
     get:
       summary: Upload an object dictionary entry from a device (CoE SDO upload)
@@ -1884,7 +2054,7 @@ paths:
                   type: object
                   required:
                     [slavePosition, name, productName, vendorId, productCode, revisionNumber,
-                     serialNumber]
+                     serialNumber, isCia402]
                   properties:
                     slavePosition:
                       type: integer
@@ -1923,6 +2093,14 @@ paths:
                       format: int64
                       description: Serial number from EEPROM
                       example: 12345
+                    isCia402:
+                      type: boolean
+                      description: >
+                        Whether the device implements the CiA402 drive profile (both controlword
+                        0x6040 and statusword 0x6041 present in its object dictionary). Gates the
+                        CiA402 motion-control endpoints under
+                        /api/devices/{slavePosition}/cia402.
+                      example: true
   /api/process-image:
     get:
       summary: Inspect the published EtherCAT process image
@@ -2388,6 +2566,41 @@ paths:
           description: No cache file with this id (or the id is malformed).
 components:
   schemas:
+    Cia402Status:
+      type: object
+      description: A CiA402 drive's control snapshot — its state machine, control words, and mode.
+      required: [state, statusword, controlword, modeOfOperation, modeName, target]
+      properties:
+        state:
+          type: string
+          description: Decoded CiA402 state-machine state (from the statusword, 0x6041).
+          enum:
+            [NotReadyToSwitchOn, SwitchOnDisabled, ReadyToSwitchOn, SwitchedOn, OperationEnabled,
+             QuickStopActive, FaultReactionActive, Fault]
+          example: OperationEnabled
+        statusword:
+          type: integer
+          description: Raw statusword (0x6041), 0–65535.
+          example: 4663
+        controlword:
+          type: integer
+          description: Last-commanded controlword (0x6040), 0–65535.
+          example: 15
+        modeOfOperation:
+          type: integer
+          description: Active operation mode (display object 0x6061), as an INTEGER8 value.
+          example: 9
+        modeName:
+          type: string
+          description: Human-readable name of the active operation mode.
+          example: CyclicSyncVelocity
+        target:
+          type: integer
+          description: >-
+            The setpoint currently commanded for the active mode — target position 0x607A (PP/CSP),
+            velocity 0x60FF (PV/CSV), or torque 0x6071 (PT/CST), widened to INTEGER32. 0 only when
+            the active mode has no linear setpoint (NoMode / Homing).
+          example: 100000
     GameLoopHealth:
       type: object
       description: >-

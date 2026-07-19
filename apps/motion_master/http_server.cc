@@ -31,6 +31,8 @@
 #include "core/system_info.h"
 #include "core/util.h"
 #include "monitoring_api.h"
+#include "node/cia402.h"
+#include "node/cia402_drive.h"
 #include "node/device_manager.h"
 #include "node/device_parameter.h"
 #include "node/monitoring_manager.h"
@@ -891,6 +893,179 @@ void HttpServer::run() {
                sendJson(res, config_.corsOrigin, nlohmann::json(*readBack));
              });
            })
+      .get("/api/devices/:slavePosition/cia402",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p1, ec1] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             if (ec1 != std::errc() || p1 != posParam.data() + posParam.size()) {
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
+               return;
+             }
+             if (!deviceManager_.findDevice(pos)) {
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
+               return;
+             }
+             // A non-CiA402 device (or one whose OD is not yet enumerated) is a 409 — the node
+             // layer's message says which; the client uses the device's isCia402 flag to avoid
+             // asking in the first place.
+             auto r = deviceManager_.getCia402Status(pos);
+             if (!r) {
+               sendError(res, "409 Conflict", config_.corsOrigin, r.error());
+               return;
+             }
+             sendJson(res, config_.corsOrigin, nlohmann::json(*r));
+           })
+      .post(
+          "/api/devices/:slavePosition/cia402/mode",
+          [this](auto* res, auto* req) {
+            uint16_t pos{};
+            auto posParam = req->getParameter("slavePosition");
+            auto [p1, ec1] =
+                std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+            bool posOk = (ec1 == std::errc() && p1 == posParam.data() + posParam.size());
+            auto aborted = std::make_shared<bool>(false);
+            auto body = std::make_shared<std::string>();
+            res->onAborted([aborted]() { *aborted = true; });
+            res->onData([this, res, body, aborted, pos, posOk](std::string_view chunk, bool last) {
+              body->append(chunk);
+              if (!last) {
+                return;
+              }
+              if (*aborted) {
+                return;
+              }
+              if (!posOk) {
+                sendStatus(res, "400 Bad Request", config_.corsOrigin);
+                return;
+              }
+              std::optional<mm::node::cia402::OperationMode> mode;
+              try {
+                nlohmann::json j = nlohmann::json::parse(*body);
+                mode = mm::node::cia402::toOperationMode(j.at("mode").get<int>());
+              } catch (const nlohmann::json::exception& e) {
+                sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
+                return;
+              }
+              if (!mode) {
+                sendError(res, "400 Bad Request", config_.corsOrigin,
+                          "invalid mode: use 1 (PP), 3 (PV), 4 (PT), 6 (HM), 8 (CSP), 9 (CSV), "
+                          "10 (CST), or 0 (NoMode)");
+                return;
+              }
+              if (!deviceManager_.findDevice(pos)) {
+                sendStatus(res, "404 Not Found", config_.corsOrigin);
+                return;
+              }
+              auto r = deviceManager_.setCia402OperationMode(pos, *mode);
+              if (!r) {
+                sendError(res, "409 Conflict", config_.corsOrigin, r.error());
+                return;
+              }
+              sendJson(res, config_.corsOrigin, nlohmann::json(*r));
+            });
+          })
+      .post(
+          "/api/devices/:slavePosition/cia402/command",
+          [this](auto* res, auto* req) {
+            uint16_t pos{};
+            auto posParam = req->getParameter("slavePosition");
+            auto [p1, ec1] =
+                std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+            bool posOk = (ec1 == std::errc() && p1 == posParam.data() + posParam.size());
+            auto aborted = std::make_shared<bool>(false);
+            auto body = std::make_shared<std::string>();
+            res->onAborted([aborted]() { *aborted = true; });
+            res->onData([this, res, body, aborted, pos, posOk](std::string_view chunk, bool last) {
+              body->append(chunk);
+              if (!last) {
+                return;
+              }
+              if (*aborted) {
+                return;
+              }
+              if (!posOk) {
+                sendStatus(res, "400 Bad Request", config_.corsOrigin);
+                return;
+              }
+              std::optional<mm::node::Cia402Command> command;
+              try {
+                nlohmann::json j = nlohmann::json::parse(*body);
+                command = mm::node::parseCia402Command(j.at("command").get<std::string>());
+              } catch (const nlohmann::json::exception& e) {
+                sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
+                return;
+              }
+              if (!command) {
+                sendError(res, "400 Bad Request", config_.corsOrigin,
+                          "invalid command: use enable, disable, quickStop, or faultReset");
+                return;
+              }
+              if (!deviceManager_.findDevice(pos)) {
+                sendStatus(res, "404 Not Found", config_.corsOrigin);
+                return;
+              }
+              auto r = deviceManager_.runCia402Command(pos, *command);
+              if (!r) {
+                sendError(res, "409 Conflict", config_.corsOrigin, r.error());
+                return;
+              }
+              sendJson(res, config_.corsOrigin, nlohmann::json(*r));
+            });
+          })
+      .post(
+          "/api/devices/:slavePosition/cia402/target",
+          [this](auto* res, auto* req) {
+            uint16_t pos{};
+            auto posParam = req->getParameter("slavePosition");
+            auto [p1, ec1] =
+                std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+            bool posOk = (ec1 == std::errc() && p1 == posParam.data() + posParam.size());
+            auto aborted = std::make_shared<bool>(false);
+            auto body = std::make_shared<std::string>();
+            res->onAborted([aborted]() { *aborted = true; });
+            res->onData([this, res, body, aborted, pos, posOk](std::string_view chunk, bool last) {
+              body->append(chunk);
+              if (!last) {
+                return;
+              }
+              if (*aborted) {
+                return;
+              }
+              if (!posOk) {
+                sendStatus(res, "400 Bad Request", config_.corsOrigin);
+                return;
+              }
+              std::optional<mm::node::Cia402TargetKind> kind;
+              int32_t value{};
+              try {
+                nlohmann::json j = nlohmann::json::parse(*body);
+                kind = mm::node::parseCia402TargetKind(j.at("target").get<std::string>());
+                // Signed: target position/velocity are INT32 and target torque INT16, all of
+                // which take negative setpoints (reverse motion / regenerative torque).
+                value = j.at("value").get<int32_t>();
+              } catch (const nlohmann::json::exception& e) {
+                sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
+                return;
+              }
+              if (!kind) {
+                sendError(res, "400 Bad Request", config_.corsOrigin,
+                          "invalid target: use position, velocity, or torque");
+                return;
+              }
+              if (!deviceManager_.findDevice(pos)) {
+                sendStatus(res, "404 Not Found", config_.corsOrigin);
+                return;
+              }
+              auto r = deviceManager_.setCia402Target(pos, *kind, value);
+              if (!r) {
+                sendError(res, "409 Conflict", config_.corsOrigin, r.error());
+                return;
+              }
+              sendStatus(res, "204 No Content", config_.corsOrigin);
+            });
+          })
       .get("/api/devices/:slavePosition/sdo/:index/:subindex",
            [this](auto* res, auto* req) {
              uint16_t pos{};

@@ -13,6 +13,7 @@
 #include "comm/object_data_types.h"
 #include "node/cia402.h"
 #include "node/device.h"
+#include "node/synapticon.h"
 
 namespace {
 

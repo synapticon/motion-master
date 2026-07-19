@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <expected>
 #include <map>
+#include <nlohmann/json.hpp>
 #include <span>
 #include <string>
 #include <utility>
@@ -104,7 +105,10 @@ class Cia402FakeDriver : public FieldbusDriver {
     programObject(Object::kModeOfOperation, 0, ObjectDataType::INTEGER8, {0});
     programObject(Object::kModeOfOperationDisplay, 0, ObjectDataType::INTEGER8, {0});
     programObject(Object::kTargetPosition, 0, ObjectDataType::INTEGER32, i32le(0));
+    programObject(Object::kTargetVelocity, 0, ObjectDataType::INTEGER32, i32le(0));
+    programObject(Object::kTargetTorque, 0, ObjectDataType::INTEGER16, u16le(0));
     programObject(Object::kPositionActualValue, 0, ObjectDataType::INTEGER32, i32le(0));
+    programObject(Object::kVelocityActualValue, 0, ObjectDataType::INTEGER32, i32le(0));
   }
 
   // Applies one controlword edge to the modelled state machine.
@@ -204,6 +208,15 @@ TEST(CreateCia402Drive, RejectsDeviceWithoutControlStatusObjects) {
   Device device(1, driver);  // no parameters enumerated
   auto drive = createCia402Drive(device);
   EXPECT_FALSE(drive.has_value());
+}
+
+TEST(DeviceIsCia402, TrueOnlyWithControlAndStatusObjects) {
+  Cia402FakeDriver driver;
+  Device bare(1, driver);  // no parameters enumerated
+  EXPECT_FALSE(bare.isCia402());
+
+  Device drive = makeCia402Device(driver);
+  EXPECT_TRUE(drive.isCia402());
 }
 
 TEST(CreateCia402Drive, AcceptsDriveAndReadsState) {
@@ -327,6 +340,99 @@ TEST(Cia402Drive, SetOperationModeAndSetpoints) {
   }
   EXPECT_TRUE(sawMode);
   EXPECT_TRUE(sawTarget);
+}
+
+TEST(Cia402Drive, SetTargetTorqueAcceptsNegative) {
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  // Target torque (0x6071) is a signed INTEGER16 — regenerative / reverse torque is negative.
+  ASSERT_TRUE(drive.setTargetTorque(-1000).has_value());
+  ASSERT_FALSE(driver.writes.empty());
+  const auto& w = driver.writes.back();
+  EXPECT_EQ(w.index, static_cast<uint16_t>(Object::kTargetTorque));
+  EXPECT_EQ(w.data, u16le(static_cast<uint16_t>(static_cast<int16_t>(-1000))));
+}
+
+TEST(Cia402Drive, ReadStatusReportsAllFields) {
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] =
+      u16le(statuswordFor(State::kOperationEnabled));
+  driver.store[Cia402FakeDriver::key(Object::kControlword, 0)] = u16le(0x000F);
+  driver.store[Cia402FakeDriver::key(Object::kModeOfOperationDisplay, 0)] = {9};  // CSV
+  // CSV reads its setpoint from target velocity (0x60FF, INTEGER32) into status.target.
+  driver.store[Cia402FakeDriver::key(Object::kTargetVelocity, 0)] = i32le(250000);
+  Cia402Drive drive(device);
+
+  auto status = drive.readStatus();
+  ASSERT_TRUE(status.has_value()) << status.error();
+  EXPECT_EQ(status->state, State::kOperationEnabled);
+  EXPECT_EQ(status->statusword, statuswordFor(State::kOperationEnabled));
+  EXPECT_EQ(status->controlword, 0x000F);
+  EXPECT_EQ(status->modeOfOperationDisplay, OperationMode::kCyclicSyncVelocity);
+  EXPECT_EQ(status->target, 250000);
+}
+
+TEST(Cia402Drive, ReadStatusTargetTracksActiveModeQuantity) {
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] =
+      u16le(statuswordFor(State::kOperationEnabled));
+  driver.store[Cia402FakeDriver::key(Object::kControlword, 0)] = u16le(0x000F);
+  // Setpoints for all three quantities are present; readStatus must pick the one the active mode
+  // acts on (profile modes read their setpoint too — only NoMode/Homing report 0).
+  driver.store[Cia402FakeDriver::key(Object::kTargetPosition, 0)] = i32le(111);
+  driver.store[Cia402FakeDriver::key(Object::kTargetVelocity, 0)] = i32le(222);
+  driver.store[Cia402FakeDriver::key(Object::kTargetTorque, 0)] = u16le(static_cast<uint16_t>(-33));
+  Cia402Drive drive(device);
+
+  auto targetInMode = [&](uint8_t mode) {
+    driver.store[Cia402FakeDriver::key(Object::kModeOfOperationDisplay, 0)] = {mode};
+    auto s = drive.readStatus();
+    return s.has_value() ? s->target : 0;
+  };
+  EXPECT_EQ(targetInMode(1), 111);   // Profile Position → target position
+  EXPECT_EQ(targetInMode(8), 111);   // CSP → target position
+  EXPECT_EQ(targetInMode(3), 222);   // Profile Velocity → target velocity
+  EXPECT_EQ(targetInMode(9), 222);   // CSV → target velocity
+  EXPECT_EQ(targetInMode(4), -33);   // Profile Torque → target torque (INT16, sign-extended)
+  EXPECT_EQ(targetInMode(10), -33);  // CST → target torque
+  EXPECT_EQ(targetInMode(0), 0);     // NoMode → no linear setpoint
+  EXPECT_EQ(targetInMode(6), 0);     // Homing → no linear setpoint
+}
+
+TEST(Cia402Status, JsonEmitsNamesAndNumbers) {
+  const mm::node::Cia402Status s{State::kOperationEnabled, 0x1237, 0x000F,
+                                 OperationMode::kCyclicSyncVelocity, 100000};
+  const nlohmann::json j = s;
+  EXPECT_EQ(j.at("state"), "OperationEnabled");
+  EXPECT_EQ(j.at("statusword"), 0x1237);
+  EXPECT_EQ(j.at("controlword"), 0x000F);
+  EXPECT_EQ(j.at("modeOfOperation"), 9);
+  EXPECT_EQ(j.at("modeName"), "CyclicSyncVelocity");
+  EXPECT_EQ(j.at("target"), 100000);
+}
+
+TEST(Cia402ParseCommand, KnownAndUnknownTokens) {
+  using mm::node::Cia402Command;
+  using mm::node::parseCia402Command;
+  EXPECT_EQ(parseCia402Command("enable"), Cia402Command::kEnable);
+  EXPECT_EQ(parseCia402Command("disable"), Cia402Command::kDisable);
+  EXPECT_EQ(parseCia402Command("quickStop"), Cia402Command::kQuickStop);
+  EXPECT_EQ(parseCia402Command("faultReset"), Cia402Command::kFaultReset);
+  EXPECT_FALSE(parseCia402Command("halt").has_value());
+  EXPECT_FALSE(parseCia402Command("").has_value());
+}
+
+TEST(Cia402ParseTargetKind, KnownAndUnknownTokens) {
+  using mm::node::Cia402TargetKind;
+  using mm::node::parseCia402TargetKind;
+  EXPECT_EQ(parseCia402TargetKind("position"), Cia402TargetKind::kPosition);
+  EXPECT_EQ(parseCia402TargetKind("velocity"), Cia402TargetKind::kVelocity);
+  EXPECT_EQ(parseCia402TargetKind("torque"), Cia402TargetKind::kTorque);
+  EXPECT_FALSE(parseCia402TargetKind("accel").has_value());
 }
 
 }  // namespace

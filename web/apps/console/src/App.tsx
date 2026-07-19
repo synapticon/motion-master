@@ -28,6 +28,7 @@ import DeviceRegistersPage from './pages/DeviceRegistersPage'
 import DeviceFoePage from './pages/DeviceFoePage'
 import DeviceParametersPage from './pages/DeviceParametersPage'
 import DevicePdoMappingPage from './pages/DevicePdoMappingPage'
+import DeviceMotionPage from './pages/DeviceMotionPage'
 
 export default function App() {
   return (
@@ -74,6 +75,7 @@ export default function App() {
           <Route path="foe" element={<DeviceFoePage />} />
           <Route path="parameters" element={<DeviceParametersPage />} />
           <Route path="pdo-mapping" element={<DevicePdoMappingPage />} />
+          <Route path="motion" element={<DeviceMotionPage />} />
         </Route>
       </Route>
     </Routes>

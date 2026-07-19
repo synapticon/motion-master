@@ -78,6 +78,14 @@ class Device {
   /// @brief Serial number from EEPROM.
   uint32_t serialNumber() const;
 
+  /// @brief Whether this device implements the CiA402 drive profile.
+  ///
+  /// True when both the controlword (0x6040) and statusword (0x6041) are present in the
+  /// enumerated parameter map — the same offline-safe discriminator @c createCia402Drive uses
+  /// (no bus I/O; requires @c initializeParameters to have run). Surfaced on the device JSON so
+  /// clients can gate CiA402-only UI without duplicating the object indices.
+  bool isCia402() const;
+
   /// @brief Whether the device's CoE/SDO mailbox is currently active (AL state PRE-OP,
   ///        SAFE-OP, or OP).
   ///
@@ -546,7 +554,7 @@ class Device {
 /// @brief Serialises a Device to JSON.
 ///
 /// Produces an object with keys `slavePosition`, `name`, `productName`, `vendorId`,
-/// `productCode`, `revisionNumber`, and `serialNumber`.  Participates in
+/// `productCode`, `revisionNumber`, `serialNumber`, and `isCia402`.  Participates in
 /// nlohmann ADL so that `nlohmann::json(device)` and `std::vector<Device>`
 /// conversions work automatically.
 ///

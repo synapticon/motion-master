@@ -10,11 +10,7 @@ import Callout from '../components/Callout'
 import PageHeader from '../components/PageHeader'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
-import {
-  MonitoringSocketProvider,
-  type SampleRows,
-  useMonitoringSocket,
-} from '../contexts/MonitoringSocketContext'
+import { type SampleRows, useMonitoringSocket } from '../contexts/MonitoringSocketContext'
 
 const inputCls = 'border border-grey-300 px-2 py-1 text-xs w-32 font-mono bg-white'
 const btnCls =
@@ -99,8 +95,7 @@ function formatLive(v: number | null): string {
 }
 
 export default function DataProcessDataPage() {
-  const { api, hasScanned, host, wsPort } = useConnection()
-  const wsUrl = `wss://${host}:${wsPort}`
+  const { api, hasScanned } = useConnection()
 
   const imageQuery = useQuery({
     queryKey: ['processImage'],
@@ -213,15 +208,13 @@ export default function DataProcessDataPage() {
               </span>
             </div>
 
-            <MonitoringSocketProvider key={wsUrl} url={wsUrl}>
-              <ProcessDataPanels
-                outputs={img.outputs}
-                inputs={img.inputs}
-                configured={img.configured}
-                deviceName={deviceName}
-                paramByKey={paramByKey}
-              />
-            </MonitoringSocketProvider>
+            <ProcessDataPanels
+              outputs={img.outputs}
+              inputs={img.inputs}
+              configured={img.configured}
+              deviceName={deviceName}
+              paramByKey={paramByKey}
+            />
           </>
         )}
       </div>

@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "core/util.h"
+#include "node/cia402.h"
 #include "node/device_parameter.h"
 #include "node/parameter_cache.h"
 #include "node/process_data.h"
@@ -52,6 +53,14 @@ uint32_t Device::vendorId() const { return vendorId_; }
 uint32_t Device::productCode() const { return productCode_; }
 uint32_t Device::revisionNumber() const { return revisionNumber_; }
 uint32_t Device::serialNumber() const { return serialNumber_; }
+
+bool Device::isCia402() const {
+  // Same offline-safe discriminator as createCia402Drive: a CiA402 drive exposes both the
+  // controlword and statusword in its object dictionary. Presence in the enumerated parameter
+  // map is enough — no bus I/O.
+  return parameter(cia402::kControlword, 0) != nullptr &&
+         parameter(cia402::kStatusword, 0) != nullptr;
+}
 
 bool Device::mailboxActive() const {
   using mm::comm::EtherCatState;
@@ -926,7 +935,7 @@ void to_json(nlohmann::json& j, const Device& d) {
       {"slavePosition", d.slavePosition()}, {"name", d.name()},
       {"productName", d.productName()},     {"vendorId", d.vendorId()},
       {"productCode", d.productCode()},     {"revisionNumber", d.revisionNumber()},
-      {"serialNumber", d.serialNumber()},
+      {"serialNumber", d.serialNumber()},   {"isCia402", d.isCia402()},
   };
 }
 

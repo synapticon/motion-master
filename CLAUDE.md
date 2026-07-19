@@ -183,7 +183,12 @@ main.cc  (composition root — the only place concrete types are instantiated; n
  [planned, not yet in code: NotificationBus (observer decoupling producers from servers; one off-RT poll
   thread + a registry of Source{revision, render} polled by version counter, holding a std::function
   publish callback — never a WebSocketServer reference; features self-register their Source),
-  FirmwareInstaller (off-RT std::jthread procedure, modelled on MonitoringManager's threads)]
+  ProcedureManager (off-RT command-and-wait procedures — offset detection, auto-tuning, firmware install;
+  owns the cancellable std::jthreads + a per-device single-run busy-set; each procedure is a function
+  runXxx(SomanetDrive&, ProgressReporter&, stop_token) emitting a ProgressStep[]+overall-status snapshot
+  published direct through a std::function seam — no RT poll; the snapshot is also queryable via
+  GET .../procedures/<name> and persists after the run, so a client can poll HTTP alone without the WebSocket;
+  supersedes the standalone FirmwareInstaller, now one of its bodies)]
 ```
 
 **Device profile views are borrowed, not owned by `Device`.** The CiA402 / SOMANET behaviour lives in a

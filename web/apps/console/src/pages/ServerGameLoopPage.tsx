@@ -7,9 +7,14 @@ import GameLoopExplainer from '../components/GameLoopExplainer'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
-const inputCls = 'border border-grey-300 px-2 py-1 text-xs w-28 font-mono bg-white'
+// One shared control height (h-[38px]) for the input and its Apply button so they line up — the
+// same explicit-px approach the Motion page uses (this theme's spacing scale is geometric, so a
+// numeric height utility like h-9 is NOT ~36px). The button is inline-flex + centred to keep its
+// label vertically centred at that fixed height.
+const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm w-32 font-mono bg-white'
 const btnCls =
-  'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
+  'inline-flex items-center justify-center bg-syn-red text-white px-4 h-[38px] text-xs ' +
+  'hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
 
 // Flatten the client's nested {error:{error}} / {status} shape into a single message.
 function apiError(err: unknown): string {

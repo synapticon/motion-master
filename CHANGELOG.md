@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.51] - 2026-07-19
+
 ### Added
 
 - New per-drive **Motion** page in the Console for any device that implements the CiA402 drive profile. From it you can step the device-control state machine (Enable walks every transition up to Operation Enabled, clearing a fault first if needed; Disable, Quick stop, Reset fault), select the operation mode (0x6060), command the cyclic setpoint for the active mode (target position, velocity, or torque), and watch target vs. actual stream live on a chart. The page appears in the sidebar only for CiA402 drives currently in the operational (OP) state, since a motion command has no effect otherwise. Backed by new HTTP endpoints under `/api/devices/{slavePosition}/cia402` (status, mode, command, target), and a new `isCia402` flag on the device listing so clients can gate the CiA402-only UI.
@@ -343,7 +345,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.50...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.51...HEAD
+[6.0.0-alpha.51]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.50...v6.0.0-alpha.51
 [6.0.0-alpha.50]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.49...v6.0.0-alpha.50
 [6.0.0-alpha.49]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.48...v6.0.0-alpha.49
 [6.0.0-alpha.48]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.47...v6.0.0-alpha.48

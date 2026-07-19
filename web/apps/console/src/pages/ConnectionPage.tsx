@@ -1,9 +1,10 @@
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { version as uiVersion } from 'virtual:swagger-spec'
 import Callout from '../components/Callout'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline } from '../utils/styles'
+import { btnOutline, btnPrimary } from '../utils/styles'
 
 const RELEASES_URL = 'https://github.com/synapticon/motion-master/releases'
 
@@ -103,6 +104,28 @@ function CertChain({ chain }: { chain: ChainLink[] }) {
 export default function ConnectionPage() {
   const { host, httpPort, wsPort, setHost, setHttpPort, setWsPort, resetEndpoint, api, online } = useConnection()
   const queryClient = useQueryClient()
+
+  // The context host/httpPort/wsPort are the *committed* endpoint: they drive the API client and
+  // the (app-wide, url-keyed) WebSocket connection. Editing them live would rebuild that socket on
+  // every keystroke — remounting the whole app (so this input loses focus after one letter) and
+  // constructing a WebSocket from half-typed values (e.g. `wss://…:622811`). So the fields edit a
+  // local draft and only commit on Apply; the drafts re-sync whenever the committed endpoint
+  // changes elsewhere (Load defaults).
+  const [draftHost, setDraftHost] = useState(host)
+  const [draftHttpPort, setDraftHttpPort] = useState(httpPort)
+  const [draftWsPort, setDraftWsPort] = useState(wsPort)
+  useEffect(() => {
+    setDraftHost(host)
+    setDraftHttpPort(httpPort)
+    setDraftWsPort(wsPort)
+  }, [host, httpPort, wsPort])
+
+  const endpointDirty = draftHost !== host || draftHttpPort !== httpPort || draftWsPort !== wsPort
+  const applyEndpoint = () => {
+    setHost(draftHost.trim())
+    setHttpPort(draftHttpPort.trim())
+    setWsPort(draftWsPort.trim())
+  }
 
   const certQuery = useQuery({
     queryKey: ['cert'],
@@ -223,24 +246,21 @@ export default function ConnectionPage() {
         </div>
 
         <section>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="eyebrow">Endpoint</h2>
-            <button
-              onClick={resetEndpoint}
-              className={btnOutline}
-              title="Reset the host and ports to their built-in defaults (local.motion-master.synapticon.com, 61447, 62281) and save them to this browser's local storage, so they persist across reloads."
-            >
-              Load defaults
-            </button>
-          </div>
-          <div className="border border-grey-200 p-5">
+          <h2 className="eyebrow mb-3">Endpoint</h2>
+          <form
+            className="border border-grey-200 p-5"
+            onSubmit={e => {
+              e.preventDefault()
+              applyEndpoint()
+            }}
+          >
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="sm:col-span-2">
                 <label className={labelCls}>Host</label>
                 <input
                   type="text"
-                  value={host}
-                  onChange={e => setHost(e.target.value)}
+                  value={draftHost}
+                  onChange={e => setDraftHost(e.target.value)}
                   placeholder="local.motion-master.synapticon.com"
                   className={inputCls}
                 />
@@ -265,8 +285,8 @@ export default function ConnectionPage() {
                 <label className={labelCls}>HTTP Port</label>
                 <input
                   type="text"
-                  value={httpPort}
-                  onChange={e => setHttpPort(e.target.value)}
+                  value={draftHttpPort}
+                  onChange={e => setDraftHttpPort(e.target.value)}
                   placeholder="61447"
                   className={inputCls}
                 />
@@ -275,14 +295,32 @@ export default function ConnectionPage() {
                 <label className={labelCls}>WebSocket Port</label>
                 <input
                   type="text"
-                  value={wsPort}
-                  onChange={e => setWsPort(e.target.value)}
+                  value={draftWsPort}
+                  onChange={e => setDraftWsPort(e.target.value)}
                   placeholder="62281"
                   className={inputCls}
                 />
               </div>
             </div>
-          </div>
+            <div className="flex items-center justify-end gap-2 mt-4">
+              <button
+                type="button"
+                onClick={resetEndpoint}
+                className={btnOutline}
+                title="Reset the host and ports to their built-in defaults (local.motion-master.synapticon.com, 61447, 62281) and save them to this browser's local storage, so they persist across reloads."
+              >
+                Load defaults
+              </button>
+              <button
+                type="submit"
+                disabled={!endpointDirty}
+                className={btnPrimary}
+                title="Apply the host and ports above. This rebuilds the API client and the monitoring WebSocket to point at the new endpoint, so it only takes effect once you click here — not while you type."
+              >
+                Apply
+              </button>
+            </div>
+          </form>
         </section>
 
         {online && (

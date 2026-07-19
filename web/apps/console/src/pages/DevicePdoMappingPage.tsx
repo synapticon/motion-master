@@ -13,7 +13,7 @@ import Callout from '../components/Callout'
 import DevicePageHeader from '../components/DevicePageHeader'
 import ParameterPicker from '../components/ParameterPicker'
 import { useConnection } from '../contexts/ConnectionContext'
-import { btnOutline } from '../utils/styles'
+import { btnOutline, btnPrimary } from '../utils/styles'
 
 const AL_PRE_OP = 2
 
@@ -22,9 +22,6 @@ const AL_PRE_OP = 2
 const RXPDO_MAPPABLE = 0x40 // master→slave (outputs / 0x1C12)
 const TXPDO_MAPPABLE = 0x80 // slave→master (inputs / 0x1C13)
 
-const btnPrimary =
-  'bg-syn-red text-white px-4 py-1.5 text-xs hover:bg-ocean disabled:opacity-50 ' +
-  'disabled:cursor-not-allowed cursor-pointer transition-colors'
 const inputCls = 'border border-grey-300 px-2 py-1 text-xs font-mono bg-white'
 const iconBtn =
   'p-1 text-grey-400 hover:text-grey-800 disabled:opacity-30 disabled:cursor-not-allowed ' +

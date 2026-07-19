@@ -137,8 +137,11 @@ std::expected<void, std::string> Cia402Drive::enable(std::chrono::milliseconds t
         }
         break;
       case State::kQuickStopActive:
-        // Quick stop must be released by the user (it is a deliberate safety state); re-issuing
-        // enable should not silently override it. Treat it as a soft wait — the user clears it.
+        // Deliberate safety state — do not auto-override it (CiA402 transition 16, enable-operation
+        // from quick stop, is "not recommended" per IEC 61800-7-201 Table 26). Just wait: with
+        // quick-stop option code 1-4 the drive auto-transitions to SwitchOnDisabled (transition 12)
+        // and the next poll continues the walk; with code 5-8 it holds here until the user releases
+        // it, and enable() times out.
         break;
       case State::kNotReadyToSwitchOn:
         // Still initialising; wait.

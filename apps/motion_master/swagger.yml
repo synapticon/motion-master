@@ -1500,11 +1500,14 @@ paths:
       responses:
         "200":
           description: Raw object bytes from the device
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
                 type: object
-                required: [data, wireUs]
+                required: [data]
                 properties:
                   data:
                     type: array
@@ -1514,15 +1517,6 @@ paths:
                       maximum: 255
                     description: Object bytes as transferred by the SDO upload
                     example: [0, 0, 0, 0]
-                  wireUs:
-                    type: integer
-                    minimum: 0
-                    description: >
-                      Server-measured duration of the SDO transaction in microseconds
-                      (control-plane lock acquire + mailbox wire round-trip). This is the
-                      wire cost only — far smaller than the end-to-end HTTP round-trip a
-                      cross-origin browser client observes.
-                    example: 5000
         "400":
           description: slavePosition, index, or subindex is missing or not a valid integer
         "404":
@@ -1584,24 +1578,18 @@ paths:
       responses:
         "200":
           description: Download completed successfully
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
                 type: object
-                required: [ok, wireUs]
+                required: [ok]
                 properties:
                   ok:
                     type: boolean
                     example: true
-                  wireUs:
-                    type: integer
-                    minimum: 0
-                    description: >
-                      Server-measured duration of the SDO transaction in microseconds
-                      (control-plane lock acquire + mailbox wire round-trip). This is the
-                      wire cost only — far smaller than the end-to-end HTTP round-trip a
-                      cross-origin browser client observes.
-                    example: 5000
         "400":
           description: slavePosition, index, or subindex is invalid, or the request body is malformed
         "404":
@@ -1637,6 +1625,9 @@ paths:
       responses:
         "200":
           description: Raw file bytes from the device
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/octet-stream:
               schema:
@@ -1682,6 +1673,9 @@ paths:
       responses:
         "200":
           description: File written successfully
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -3614,6 +3608,19 @@ components:
               dataType: { type: integer }
               bitLen: { type: integer }
               flags: { type: integer }
+  headers:
+    WireTime:
+      description: >
+        Server-measured duration of the on-device transaction in microseconds — the
+        control-plane lock acquire plus the mailbox/ESC wire round-trip. This is the wire
+        cost only, far smaller than the end-to-end HTTP round-trip a cross-origin browser
+        client observes (which additionally includes TLS and transport overhead). Present on
+        the success response of endpoints that perform a fieldbus transaction; CORS-exposed
+        (`Access-Control-Expose-Headers`) so a cross-origin client may read it.
+      schema:
+        type: integer
+        minimum: 0
+      example: 5000
   responses:
     DriverError:
       description: Fieldbus driver returned an error

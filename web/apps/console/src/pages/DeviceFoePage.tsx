@@ -5,7 +5,7 @@ import DevicePageHeader from '../components/DevicePageHeader'
 import HexViewer from '../components/HexViewer'
 import { useConnection } from '../contexts/ConnectionContext'
 import { downloadBytes } from '../utils/download'
-import { parseSomanetFileList, type SomanetFile } from '@synapticon/motion-master-client'
+import { parseSomanetFileList, wireTimeMs, type SomanetFile } from '@synapticon/motion-master-client'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
@@ -52,7 +52,32 @@ function encodeFilename(name: string): string {
 
 // Human-readable elapsed time for a FoE transfer — sub-second in ms, otherwise seconds.
 function formatDuration(ms: number): string {
+  // Sub-10 ms (a fast FoE wire transaction) keeps one decimal so it doesn't round to "0 ms".
+  if (ms < 10) return `${ms.toFixed(1)} ms`
   return ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(2)} s`
+}
+
+// Timing readout for a FoE transfer: the server-measured wire transaction (from the response's
+// `X-Wire-Us` header) and the browser-observed HTTP round-trip. The gap between them is
+// cross-origin/transport overhead, not device time — the same split shown on the Parameters page.
+function FoeTiming({ wireMs, roundTripMs }: { wireMs: number; roundTripMs: number }) {
+  return (
+    <>
+      <span
+        className="cursor-help"
+        title="FoE — server-measured duration of the FoE transfer itself (control-plane lock acquire + the FoE mailbox round-trip over EtherCAT), reported by the backend. This is the true cost of talking to the device."
+      >
+        FoE {formatDuration(wireMs)}
+      </span>
+      <span
+        className="text-grey-400 cursor-help"
+        title="Round-trip — total time this browser observed for the HTTP request, measured around the fetch call. It includes the FoE time plus cross-origin/TLS and transport overhead, so it is normally much larger than the FoE figure and is not device time."
+      >
+        {' · round-trip '}
+        {formatDuration(roundTripMs)}
+      </span>
+    </>
+  )
 }
 
 function decodeUtf8(bytes: Uint8Array): string | null {
@@ -119,7 +144,11 @@ export default function DeviceFoePage() {
 
   const [filename, setFilename] = useState('')
   const [reading, setReading] = useState(false)
+  // Round-trip is what the browser observes (the full cross-origin HTTP fetch); wire is the
+  // server-measured FoE transfer (`X-Wire-Us` header). Showing both attributes the wire cost to
+  // the device and the rest to browser/transport overhead.
   const [readMs, setReadMs] = useState<number | null>(null)
+  const [readWireMs, setReadWireMs] = useState<number | null>(null)
   const [result, setResult] = useState<Uint8Array | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'bytes' | 'text' | 'json'>('bytes')
@@ -133,6 +162,7 @@ export default function DeviceFoePage() {
   const [writeBytes, setWriteBytes] = useState<Uint8Array | null>(null)
   const [writing, setWriting] = useState(false)
   const [writeMs, setWriteMs] = useState<number | null>(null)
+  const [writeWireMs, setWriteWireMs] = useState<number | null>(null)
   const [writeOk, setWriteOk] = useState(false)
   const [writeError, setWriteError] = useState<string | null>(null)
 
@@ -140,15 +170,17 @@ export default function DeviceFoePage() {
   const [unlockOk, setUnlockOk] = useState(false)
   const [unlockError, setUnlockError] = useState<string | null>(null)
 
-  // Read raw bytes for an arbitrary FoE filename, throwing on a non-OK response.
-  async function readRaw(name: string): Promise<Uint8Array> {
+  // Read raw bytes for an arbitrary FoE filename, throwing on a non-OK response. `wireMs` is the
+  // server-measured FoE transfer time (from the `X-Wire-Us` header), null if the header is absent.
+  async function readRaw(name: string): Promise<{ bytes: Uint8Array; wireMs: number | null }> {
     const url = `${api.baseUrl}/api/devices/${slavePosition}/files/${encodeFilename(name)}`
     const response = await fetch(url)
     if (!response.ok) {
       const json = await response.json().catch(() => null)
       throw new Error(json?.error ?? `HTTP ${response.status}`)
     }
-    return new Uint8Array(await response.arrayBuffer())
+    const wireMs = wireTimeMs(response)
+    return { bytes: new Uint8Array(await response.arrayBuffer()), wireMs }
   }
 
   async function handleRead(name: string = filename) {
@@ -158,10 +190,12 @@ export default function DeviceFoePage() {
     setResult(null)
     setError(null)
     setReadMs(null)
+    setReadWireMs(null)
     const start = performance.now()
     try {
-      const bytes = await readRaw(name)
+      const { bytes, wireMs } = await readRaw(name)
       setReadMs(performance.now() - start)
+      setReadWireMs(wireMs)
       setResult(bytes)
       setView('bytes')
     } catch (err) {
@@ -182,7 +216,7 @@ export default function DeviceFoePage() {
     setListing(true)
     setListError(null)
     try {
-      const bytes = await readRaw('fs-getlist')
+      const { bytes } = await readRaw('fs-getlist')
       const text = new TextDecoder('utf-8').decode(bytes)
       setFiles(parseSomanetFileList(text))
     } catch (err) {
@@ -195,7 +229,7 @@ export default function DeviceFoePage() {
 
   async function handleDownload(name: string) {
     try {
-      const bytes = await readRaw(name)
+      const { bytes } = await readRaw(name)
       downloadBytes(bytes, name)
     } catch (err) {
       setListError(err instanceof Error ? err.message : 'Unknown error')
@@ -246,6 +280,7 @@ export default function DeviceFoePage() {
     setWriteOk(false)
     setWriteError(null)
     setWriteMs(null)
+    setWriteWireMs(null)
     const start = performance.now()
     try {
       const url = `${api.baseUrl}/api/devices/${slavePosition}/files/${encodeFilename(writeFilename)}`
@@ -258,6 +293,7 @@ export default function DeviceFoePage() {
         throw new Error(json?.error ?? `HTTP ${response.status}`)
       }
       setWriteMs(performance.now() - start)
+      setWriteWireMs(wireTimeMs(response))
       setWriteOk(true)
       if (isSynapticon && files) handleList()
     } catch (err) {
@@ -402,7 +438,13 @@ export default function DeviceFoePage() {
             {writeOk && (
               <p className="text-xs text-status-good font-mono">
                 Wrote {writeBytes?.length.toLocaleString() ?? 0} byte(s) to {writeFilename}
-                {writeMs !== null && ` in ${formatDuration(writeMs)}`}.
+                {writeMs !== null &&
+                  (writeWireMs !== null ? (
+                    <> — <FoeTiming wireMs={writeWireMs} roundTripMs={writeMs} /></>
+                  ) : (
+                    ` in ${formatDuration(writeMs)}`
+                  ))}
+                .
               </p>
             )}
           </div>
@@ -477,9 +519,14 @@ export default function DeviceFoePage() {
           <section>
             <div className="flex items-center gap-4 mb-4">
               <p className="eyebrow">Result</p>
-              <span className="text-xs text-grey-500 font-mono">
+              <span className="text-xs text-grey-500 font-mono whitespace-nowrap">
                 {result.length.toLocaleString()} bytes
-                {readMs !== null && ` · read in ${formatDuration(readMs)}`}
+                {readMs !== null &&
+                  (readWireMs !== null ? (
+                    <> · <FoeTiming wireMs={readWireMs} roundTripMs={readMs} /></>
+                  ) : (
+                    ` · read in ${formatDuration(readMs)}`
+                  ))}
               </span>
               <button onClick={() => downloadBytes(result, filename)} className={btnCls}>
                 Download

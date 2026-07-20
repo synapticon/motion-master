@@ -2,6 +2,7 @@
 
 #include <uwebsockets/App.h>
 
+#include <chrono>
 #include <functional>
 #include <nlohmann/json.hpp>
 #include <string>
@@ -56,6 +57,17 @@ struct RouteContext {
 /// Wire one up in the composition root with @c HttpServer::addRoutes (before @c start()).
 using RegisterRoutesFn = std::function<void(uWS::SSLApp& app, const RouteContext& ctx)>;
 
+/// @brief Writes the `Access-Control-Allow-Origin` header and returns @p res for chaining.
+///
+/// The single home for the origin-policy header. sendJson/sendError/sendStatus emit it for the
+/// common JSON paths; call this directly for a hand-rolled response that can't use them — a raw
+/// octet-stream body, a text/yaml dump, or a bespoke status line — so the header name and policy
+/// live in exactly one place. Order-independent among headers; call before end().
+template <typename Res>
+Res* setCorsOrigin(Res* res, std::string_view corsOrigin) {
+  return res->writeHeader("Access-Control-Allow-Origin", corsOrigin);
+}
+
 /// @brief Writes @p body as a 200 application/json response with the CORS header.
 ///
 /// Uses the `replace` error handler so a string-typed value carrying non-UTF-8 bytes (e.g. a
@@ -63,9 +75,23 @@ using RegisterRoutesFn = std::function<void(uWS::SSLApp& app, const RouteContext
 /// an uncaught throw on the uWS loop terminates the whole server.
 template <typename Res>
 void sendJson(Res* res, std::string_view corsOrigin, const nlohmann::json& body) {
-  res->writeHeader("Content-Type", "application/json")
-      ->writeHeader("Access-Control-Allow-Origin", corsOrigin)
+  setCorsOrigin(res, corsOrigin)
+      ->writeHeader("Content-Type", "application/json")
       ->end(body.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
+}
+
+/// @brief Writes @p body verbatim as a 200 response with the given @p contentType and the CORS
+/// header.
+///
+/// The raw-bytes analogue of sendJson: for a response whose body is already serialized (an
+/// octet-stream dump, a verbatim on-disk file, a text/yaml spec) rather than a @c nlohmann::json
+/// value — @p body is sent as-is. For anything richer — an extra header (e.g. Content-Disposition),
+/// a non-200 status, or backpressure-aware streaming via @c tryEnd — drop to setCorsOrigin +
+/// writeHeader directly instead.
+template <typename Res>
+void sendBytes(Res* res, std::string_view corsOrigin, std::string_view contentType,
+               std::string_view body) {
+  setCorsOrigin(res, corsOrigin)->writeHeader("Content-Type", contentType)->end(body);
 }
 
 /// @brief Writes a @p status response carrying a `{"error": message}` JSON body and the CORS
@@ -73,16 +99,32 @@ void sendJson(Res* res, std::string_view corsOrigin, const nlohmann::json& body)
 template <typename Res>
 void sendError(Res* res, std::string_view status, std::string_view corsOrigin,
                std::string_view message) {
-  res->writeStatus(status)
+  setCorsOrigin(res->writeStatus(status), corsOrigin)
       ->writeHeader("Content-Type", "application/json")
-      ->writeHeader("Access-Control-Allow-Origin", corsOrigin)
       ->end(nlohmann::json{{"error", std::string(message)}}.dump());
 }
 
 /// @brief Writes a bare @p status response (no body) with the CORS header.
 template <typename Res>
 void sendStatus(Res* res, std::string_view status, std::string_view corsOrigin) {
-  res->writeStatus(status)->writeHeader("Access-Control-Allow-Origin", corsOrigin)->end();
+  setCorsOrigin(res->writeStatus(status), corsOrigin)->end();
+}
+
+/// @brief Attaches the server-measured wire-time header (`X-Wire-Us`, microseconds) to a response.
+///
+/// @p wire is the time spent in the on-device transaction itself — control-plane lock acquire plus
+/// the mailbox/ESC wire round-trip — *not* the end-to-end HTTP round-trip, which a cross-origin
+/// browser client observes as much larger (TLS + transport overhead). Reporting it lets the client
+/// attribute the wire cost to the device and the remainder to the browser/transport. Because the
+/// value rides a header rather than the body, it is the one uniform timing channel that works for
+/// any response shape (JSON or raw octet-stream) without touching each endpoint's body schema. The
+/// header is CORS-exposed so the PWA can read it cross-origin. Call **before** sendJson()/end()
+/// (uWS requires all headers written before the body). Returns @p res for chaining, mirroring
+/// setCorsOrigin.
+template <typename Res>
+Res* setWireTime(Res* res, std::chrono::microseconds wire) {
+  return res->writeHeader("Access-Control-Expose-Headers", "X-Wire-Us")
+      ->writeHeader("X-Wire-Us", std::to_string(wire.count()));
 }
 
 }  // namespace mm::api

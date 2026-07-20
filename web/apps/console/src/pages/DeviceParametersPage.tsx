@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { memo, useState } from 'react'
 import { useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import DevicePageHeader from '../components/DevicePageHeader'
 import HexDecInput from '../components/HexDecInput'
 import { useConnection } from '../contexts/ConnectionContext'
 import {
+  type Api,
   type DeviceParameter,
   SDO_TYPES,
   SDO_TYPE_HINT,
@@ -14,6 +15,7 @@ import {
   interpretSdoBytes,
   sdoTypeForDataTypeName,
   isIntegerSdoType,
+  wireTimeMs,
 } from '@synapticon/motion-master-client'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
@@ -176,23 +178,156 @@ function SyncBadge({ state }: { state: DeviceParameter['syncState'] }) {
   )
 }
 
-export default function DeviceParametersPage() {
-  const { deviceId } = useParams()
-  const { api } = useConnection()
-  const slavePosition = Number(deviceId)
-  const queryClient = useQueryClient()
-
+// Raw byte-level SDO **read** tool. Its own component with local state so a Read SDO click only
+// re-renders this card — never the parent's large (non-virtualized) parameter table, whose render
+// would otherwise block the fetch's completion callback and inflate the measured round-trip.
+// `memo` also keeps parent re-renders (filter typing, row edits) from touching it.
+const ReadSdoCard = memo(function ReadSdoCard({
+  api,
+  slavePosition,
+}: {
+  api: Api
+  slavePosition: number
+}) {
   const [index, setIndex] = useState('')
   const [subindex, setSubindex] = useState('0')
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState<number[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   // Round-trip is what the browser observes (the full cross-origin HTTP fetch); wire is the
-  // server-measured SDO transaction (response `wireUs`). Showing both makes clear the SDO is
+  // server-measured SDO transaction (`X-Wire-Us` header). Showing both makes clear the SDO is
   // fast and the rest is browser/transport overhead, not the device.
   const [readSdoElapsedMs, setReadSdoElapsedMs] = useState<number | null>(null)
   const [readSdoWireMs, setReadSdoWireMs] = useState<number | null>(null)
 
+  const indexNum = parseHexOrDec(index)
+  const subindexNum = parseHexOrDec(subindex)
+  const indexValid = indexNum !== null && indexNum >= 0 && indexNum <= 0xffff
+  const subindexValid = subindexNum !== null && subindexNum >= 0 && subindexNum <= 0xff
+  const canUpload = indexValid && subindexValid && !uploading
+
+  function clearReadStatus() {
+    setResult(null)
+    setError(null)
+    setReadSdoElapsedMs(null)
+    setReadSdoWireMs(null)
+  }
+
+  function handleIndexChange(val: string) {
+    setIndex(val)
+    clearReadStatus()
+  }
+
+  function handleSubindexChange(val: string) {
+    setSubindex(val)
+    clearReadStatus()
+  }
+
+  async function handleUpload() {
+    if (!canUpload) return
+    setUploading(true)
+    clearReadStatus()
+    const start = performance.now()
+    try {
+      const res = await api.sdoUpload(slavePosition, indexNum!, subindexNum!)
+      setReadSdoElapsedMs(performance.now() - start)
+      setReadSdoWireMs(wireTimeMs(res))
+      setResult(res.data.data)
+    } catch (err) {
+      setError(apiError(err))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  return (
+    <section>
+      <p className="eyebrow mb-5">Read SDO</p>
+      <div className="border border-grey-200 p-5 space-y-4">
+
+        <p className="text-xs text-grey-500">
+          Raw, byte-level CoE SDO read (<span className="font-mono">readSdo</span>) of any
+          object by index/subindex — no PDO awareness, always over the mailbox. To read a
+          parameter by value (PDO-aware), use the <span className="font-mono">↻</span> in the
+          parameter list below instead.
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>Index (hex or dec)</label>
+            <input
+              type="text"
+              value={index}
+              onChange={e => handleIndexChange(e.target.value)}
+              placeholder="e.g. 0x6064 or 24676"
+              className={inputCls}
+            />
+            <p className="text-xs text-grey-500 mt-1 font-mono">
+              {indexValid ? toHex(indexNum!, 4) : '—'}
+            </p>
+          </div>
+          <div>
+            <label className={labelCls}>Subindex (hex or dec)</label>
+            <input
+              type="text"
+              value={subindex}
+              onChange={e => handleSubindexChange(e.target.value)}
+              placeholder="e.g. 0x00 or 0"
+              className={inputCls}
+            />
+            <p className="text-xs text-grey-500 mt-1 font-mono">
+              {subindexValid ? toHex(subindexNum!, 2) : '—'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button onClick={handleUpload} disabled={!canUpload} className={btnCls}>
+            {uploading ? 'Reading…' : 'Read SDO'}
+          </button>
+          {readSdoElapsedMs !== null && readSdoWireMs !== null && (
+            <SdoTiming wireMs={readSdoWireMs} roundTripMs={readSdoElapsedMs} />
+          )}
+        </div>
+
+        {error && (
+          <p className="text-xs text-status-bad font-mono">{error}</p>
+        )}
+
+        {result && (
+          <div className="border border-grey-200 p-3 space-y-1 bg-grey-50">
+            <p className="text-xs text-grey-600 uppercase tracking-wide mb-2">Result</p>
+            <p className="text-xs font-mono">
+              <span className="text-grey-600">Hex:&nbsp;</span>
+              {result.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}
+            </p>
+            <p className="text-xs font-mono">
+              <span className="text-grey-600">Dec:&nbsp;</span>
+              [{result.join(', ')}]
+            </p>
+            {interpretSdoBytes(result).map(({ label, value }) => (
+              <p key={label} className="text-xs font-mono">
+                <span className="text-grey-600">{label}:&nbsp;</span>
+                {value}
+              </p>
+            ))}
+          </div>
+        )}
+
+      </div>
+    </section>
+  )
+})
+
+// Raw byte-level SDO **write** tool. Own-state child, isolated from the parent table for the same
+// reason as ReadSdoCard.
+const WriteSdoCard = memo(function WriteSdoCard({
+  api,
+  slavePosition,
+}: {
+  api: Api
+  slavePosition: number
+}) {
   const [dlIndex, setDlIndex] = useState('')
   const [dlSubindex, setDlSubindex] = useState('0')
   const [dlType, setDlType] = useState<SdoType>('uint32')
@@ -202,6 +337,160 @@ export default function DeviceParametersPage() {
   const [dlError, setDlError] = useState<string | null>(null)
   const [writeSdoElapsedMs, setWriteSdoElapsedMs] = useState<number | null>(null)
   const [writeSdoWireMs, setWriteSdoWireMs] = useState<number | null>(null)
+
+  const dlIndexNum = parseHexOrDec(dlIndex)
+  const dlSubindexNum = parseHexOrDec(dlSubindex)
+  const dlIndexValid = dlIndexNum !== null && dlIndexNum >= 0 && dlIndexNum <= 0xffff
+  const dlSubindexValid = dlSubindexNum !== null && dlSubindexNum >= 0 && dlSubindexNum <= 0xff
+
+  const encoded = encodeSdoValue(dlType, dlValue)
+  const encodedBytes = 'bytes' in encoded ? encoded.bytes : null
+  // Only surface an encoding error once the user has typed something.
+  const encodeError = 'error' in encoded && dlValue.trim() !== '' ? encoded.error : null
+  const canDownload = dlIndexValid && dlSubindexValid && encodedBytes !== null && !downloading
+
+  function clearDownloadStatus() {
+    setDlOk(null)
+    setDlError(null)
+    setWriteSdoElapsedMs(null)
+    setWriteSdoWireMs(null)
+  }
+
+  async function handleDownload() {
+    if (!canDownload || !encodedBytes) return
+    setDownloading(true)
+    clearDownloadStatus()
+    const start = performance.now()
+    try {
+      const res = await api.sdoDownload(slavePosition, dlIndexNum!, dlSubindexNum!, {
+        data: encodedBytes,
+      })
+      setWriteSdoElapsedMs(performance.now() - start)
+      setWriteSdoWireMs(wireTimeMs(res))
+      setDlOk(encodedBytes)
+    } catch (err) {
+      setDlError(apiError(err))
+    } finally {
+      setDownloading(false)
+    }
+  }
+
+  return (
+    <section>
+      <p className="eyebrow mb-5">Write SDO</p>
+      <div className="border border-grey-200 p-5 space-y-4">
+
+        <p className="text-xs text-grey-500">
+          Raw, byte-level CoE SDO write (<span className="font-mono">writeSdo</span>) straight
+          to the device's object dictionary — no PDO awareness, always over the mailbox. The
+          cached value in the parameter list below is <strong>not</strong> updated — read it
+          back with the row's <span className="font-mono">↻</span> to confirm. To set a
+          parameter by value (PDO-aware), use the row's Set button instead.
+        </p>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>Index (hex or dec)</label>
+            <input
+              type="text"
+              value={dlIndex}
+              onChange={e => { setDlIndex(e.target.value); clearDownloadStatus() }}
+              placeholder="e.g. 0x6060 or 24672"
+              className={inputCls}
+            />
+            <p className="text-xs text-grey-500 mt-1 font-mono">
+              {dlIndexValid ? toHex(dlIndexNum!, 4) : '—'}
+            </p>
+          </div>
+          <div>
+            <label className={labelCls}>Subindex (hex or dec)</label>
+            <input
+              type="text"
+              value={dlSubindex}
+              onChange={e => { setDlSubindex(e.target.value); clearDownloadStatus() }}
+              placeholder="e.g. 0x00 or 0"
+              className={inputCls}
+            />
+            <p className="text-xs text-grey-500 mt-1 font-mono">
+              {dlSubindexValid ? toHex(dlSubindexNum!, 2) : '—'}
+            </p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={labelCls}>Type</label>
+            <select
+              value={dlType}
+              onChange={e => { setDlType(e.target.value as SdoType); clearDownloadStatus() }}
+              className={`${inputCls} cursor-pointer`}
+            >
+              {SDO_TYPES.map(t => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className={labelCls}>Value</label>
+            <HexDecInput
+              value={dlValue}
+              onChange={v => { setDlValue(v); clearDownloadStatus() }}
+              canHex={isIntegerSdoType(dlType)}
+              placeholder={SDO_TYPE_HINT[dlType]}
+              wrapperClassName="flex w-full"
+              inputClassName={inputCls}
+            />
+            <p className="text-xs mt-1 font-mono">
+              {encodeError ? (
+                <span className="text-status-bad">{encodeError}</span>
+              ) : (
+                <span className="text-grey-500">
+                  {encodedBytes
+                    ? `${encodedBytes.length} B · ${encodedBytes.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}`
+                    : '—'}
+                </span>
+              )}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button onClick={handleDownload} disabled={!canDownload} className={btnCls}>
+            {downloading ? 'Writing…' : 'Write SDO'}
+          </button>
+          {writeSdoElapsedMs !== null && writeSdoWireMs !== null && (
+            <SdoTiming wireMs={writeSdoWireMs} roundTripMs={writeSdoElapsedMs} />
+          )}
+        </div>
+
+        {dlError && (
+          <p className="text-xs text-status-bad font-mono">{dlError}</p>
+        )}
+
+        {dlOk && (
+          <div className="border border-grey-200 p-3 space-y-1 bg-grey-50">
+            <p className="text-xs text-status-good uppercase tracking-wide mb-2">Wrote {dlOk.length} byte{dlOk.length === 1 ? '' : 's'}</p>
+            <p className="text-xs font-mono">
+              <span className="text-grey-600">Hex:&nbsp;</span>
+              {dlOk.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}
+            </p>
+            <p className="text-xs font-mono">
+              <span className="text-grey-600">Dec:&nbsp;</span>
+              [{dlOk.join(', ')}]
+            </p>
+          </div>
+        )}
+
+      </div>
+    </section>
+  )
+})
+
+export default function DeviceParametersPage() {
+  const { deviceId } = useParams()
+  const { api } = useConnection()
+  const slavePosition = Number(deviceId)
+  const queryClient = useQueryClient()
 
   const [readValues, setReadValues] = useState(false)
   const [filter, setFilter] = useState('')
@@ -382,84 +671,6 @@ export default function DeviceParametersPage() {
       )
     : params
 
-  const indexNum = parseHexOrDec(index)
-  const subindexNum = parseHexOrDec(subindex)
-
-  const indexValid = indexNum !== null && indexNum >= 0 && indexNum <= 0xffff
-  const subindexValid = subindexNum !== null && subindexNum >= 0 && subindexNum <= 0xff
-  const canUpload = indexValid && subindexValid && !uploading
-
-  function clearReadStatus() {
-    setResult(null)
-    setError(null)
-    setReadSdoElapsedMs(null)
-    setReadSdoWireMs(null)
-  }
-
-  function handleIndexChange(val: string) {
-    setIndex(val)
-    clearReadStatus()
-  }
-
-  function handleSubindexChange(val: string) {
-    setSubindex(val)
-    clearReadStatus()
-  }
-
-  async function handleUpload() {
-    if (!canUpload) return
-    setUploading(true)
-    clearReadStatus()
-    const start = performance.now()
-    try {
-      const res = await api.sdoUpload(slavePosition, indexNum!, subindexNum!)
-      setReadSdoElapsedMs(performance.now() - start)
-      setReadSdoWireMs(res.data.wireUs / 1000)
-      setResult(res.data.data)
-    } catch (err) {
-      setError(apiError(err))
-    } finally {
-      setUploading(false)
-    }
-  }
-
-  const dlIndexNum = parseHexOrDec(dlIndex)
-  const dlSubindexNum = parseHexOrDec(dlSubindex)
-  const dlIndexValid = dlIndexNum !== null && dlIndexNum >= 0 && dlIndexNum <= 0xffff
-  const dlSubindexValid = dlSubindexNum !== null && dlSubindexNum >= 0 && dlSubindexNum <= 0xff
-
-  const encoded = encodeSdoValue(dlType, dlValue)
-  const encodedBytes = 'bytes' in encoded ? encoded.bytes : null
-  // Only surface an encoding error once the user has typed something.
-  const encodeError = 'error' in encoded && dlValue.trim() !== '' ? encoded.error : null
-  const canDownload = dlIndexValid && dlSubindexValid && encodedBytes !== null && !downloading
-
-  function clearDownloadStatus() {
-    setDlOk(null)
-    setDlError(null)
-    setWriteSdoElapsedMs(null)
-    setWriteSdoWireMs(null)
-  }
-
-  async function handleDownload() {
-    if (!canDownload || !encodedBytes) return
-    setDownloading(true)
-    clearDownloadStatus()
-    const start = performance.now()
-    try {
-      const res = await api.sdoDownload(slavePosition, dlIndexNum!, dlSubindexNum!, {
-        data: encodedBytes,
-      })
-      setWriteSdoElapsedMs(performance.now() - start)
-      setWriteSdoWireMs(res.data.wireUs / 1000)
-      setDlOk(encodedBytes)
-    } catch (err) {
-      setDlError(apiError(err))
-    } finally {
-      setDownloading(false)
-    }
-  }
-
   return (
     <div>
       <DevicePageHeader
@@ -480,189 +691,9 @@ export default function DeviceParametersPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
 
-        <section>
-          <p className="eyebrow mb-5">Read SDO</p>
-          <div className="border border-grey-200 p-5 space-y-4">
+        <ReadSdoCard api={api} slavePosition={slavePosition} />
 
-            <p className="text-xs text-grey-500">
-              Raw, byte-level CoE SDO read (<span className="font-mono">readSdo</span>) of any
-              object by index/subindex — no PDO awareness, always over the mailbox. To read a
-              parameter by value (PDO-aware), use the <span className="font-mono">↻</span> in the
-              parameter list below instead.
-            </p>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelCls}>Index (hex or dec)</label>
-                <input
-                  type="text"
-                  value={index}
-                  onChange={e => handleIndexChange(e.target.value)}
-                  placeholder="e.g. 0x6064 or 24676"
-                  className={inputCls}
-                />
-                <p className="text-xs text-grey-500 mt-1 font-mono">
-                  {indexValid ? toHex(indexNum!, 4) : '—'}
-                </p>
-              </div>
-              <div>
-                <label className={labelCls}>Subindex (hex or dec)</label>
-                <input
-                  type="text"
-                  value={subindex}
-                  onChange={e => handleSubindexChange(e.target.value)}
-                  placeholder="e.g. 0x00 or 0"
-                  className={inputCls}
-                />
-                <p className="text-xs text-grey-500 mt-1 font-mono">
-                  {subindexValid ? toHex(subindexNum!, 2) : '—'}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button onClick={handleUpload} disabled={!canUpload} className={btnCls}>
-                {uploading ? 'Reading…' : 'Read SDO'}
-              </button>
-              {readSdoElapsedMs !== null && readSdoWireMs !== null && (
-                <SdoTiming wireMs={readSdoWireMs} roundTripMs={readSdoElapsedMs} />
-              )}
-            </div>
-
-            {error && (
-              <p className="text-xs text-status-bad font-mono">{error}</p>
-            )}
-
-            {result && (
-              <div className="border border-grey-200 p-3 space-y-1 bg-grey-50">
-                <p className="text-xs text-grey-600 uppercase tracking-wide mb-2">Result</p>
-                <p className="text-xs font-mono">
-                  <span className="text-grey-600">Hex:&nbsp;</span>
-                  {result.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}
-                </p>
-                <p className="text-xs font-mono">
-                  <span className="text-grey-600">Dec:&nbsp;</span>
-                  [{result.join(', ')}]
-                </p>
-                {interpretSdoBytes(result).map(({ label, value }) => (
-                  <p key={label} className="text-xs font-mono">
-                    <span className="text-grey-600">{label}:&nbsp;</span>
-                    {value}
-                  </p>
-                ))}
-              </div>
-            )}
-
-          </div>
-        </section>
-
-        <section>
-          <p className="eyebrow mb-5">Write SDO</p>
-          <div className="border border-grey-200 p-5 space-y-4">
-
-            <p className="text-xs text-grey-500">
-              Raw, byte-level CoE SDO write (<span className="font-mono">writeSdo</span>) straight
-              to the device's object dictionary — no PDO awareness, always over the mailbox. The
-              cached value in the parameter list below is <strong>not</strong> updated — read it
-              back with the row's <span className="font-mono">↻</span> to confirm. To set a
-              parameter by value (PDO-aware), use the row's Set button instead.
-            </p>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelCls}>Index (hex or dec)</label>
-                <input
-                  type="text"
-                  value={dlIndex}
-                  onChange={e => { setDlIndex(e.target.value); clearDownloadStatus() }}
-                  placeholder="e.g. 0x6060 or 24672"
-                  className={inputCls}
-                />
-                <p className="text-xs text-grey-500 mt-1 font-mono">
-                  {dlIndexValid ? toHex(dlIndexNum!, 4) : '—'}
-                </p>
-              </div>
-              <div>
-                <label className={labelCls}>Subindex (hex or dec)</label>
-                <input
-                  type="text"
-                  value={dlSubindex}
-                  onChange={e => { setDlSubindex(e.target.value); clearDownloadStatus() }}
-                  placeholder="e.g. 0x00 or 0"
-                  className={inputCls}
-                />
-                <p className="text-xs text-grey-500 mt-1 font-mono">
-                  {dlSubindexValid ? toHex(dlSubindexNum!, 2) : '—'}
-                </p>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className={labelCls}>Type</label>
-                <select
-                  value={dlType}
-                  onChange={e => { setDlType(e.target.value as SdoType); clearDownloadStatus() }}
-                  className={`${inputCls} cursor-pointer`}
-                >
-                  {SDO_TYPES.map(t => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className={labelCls}>Value</label>
-                <HexDecInput
-                  value={dlValue}
-                  onChange={v => { setDlValue(v); clearDownloadStatus() }}
-                  canHex={isIntegerSdoType(dlType)}
-                  placeholder={SDO_TYPE_HINT[dlType]}
-                  wrapperClassName="flex w-full"
-                  inputClassName={inputCls}
-                />
-                <p className="text-xs mt-1 font-mono">
-                  {encodeError ? (
-                    <span className="text-status-bad">{encodeError}</span>
-                  ) : (
-                    <span className="text-grey-500">
-                      {encodedBytes
-                        ? `${encodedBytes.length} B · ${encodedBytes.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}`
-                        : '—'}
-                    </span>
-                  )}
-                </p>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button onClick={handleDownload} disabled={!canDownload} className={btnCls}>
-                {downloading ? 'Writing…' : 'Write SDO'}
-              </button>
-              {writeSdoElapsedMs !== null && writeSdoWireMs !== null && (
-                <SdoTiming wireMs={writeSdoWireMs} roundTripMs={writeSdoElapsedMs} />
-              )}
-            </div>
-
-            {dlError && (
-              <p className="text-xs text-status-bad font-mono">{dlError}</p>
-            )}
-
-            {dlOk && (
-              <div className="border border-grey-200 p-3 space-y-1 bg-grey-50">
-                <p className="text-xs text-status-good uppercase tracking-wide mb-2">Wrote {dlOk.length} byte{dlOk.length === 1 ? '' : 's'}</p>
-                <p className="text-xs font-mono">
-                  <span className="text-grey-600">Hex:&nbsp;</span>
-                  {dlOk.map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')}
-                </p>
-                <p className="text-xs font-mono">
-                  <span className="text-grey-600">Dec:&nbsp;</span>
-                  [{dlOk.join(', ')}]
-                </p>
-              </div>
-            )}
-
-          </div>
-        </section>
+        <WriteSdoCard api={api} slavePosition={slavePosition} />
 
         </div>
 

@@ -60,9 +60,7 @@ std::optional<std::vector<uint16_t>> parsePositions(Res* res, Req* req,
     uint16_t pos{};
     auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), pos);
     if (ec != std::errc() || ptr != token.data() + token.size()) {
-      res->writeStatus("400 Bad Request")
-          ->writeHeader("Access-Control-Allow-Origin", corsOrigin)
-          ->end();
+      mm::api::sendStatus(res, "400 Bad Request", corsOrigin);
       return std::nullopt;
     }
     positions.push_back(pos);
@@ -73,9 +71,12 @@ std::optional<std::vector<uint16_t>> parsePositions(Res* res, Req* req,
 // The JSON/error/status response helpers live in api/web_api.h so route plug-ins can share the
 // exact same response shape (content type + CORS) as the built-in routes. Pull them in unqualified
 // so the call sites below read the same as before.
+using mm::api::sendBytes;
 using mm::api::sendError;
 using mm::api::sendJson;
 using mm::api::sendStatus;
+using mm::api::setCorsOrigin;
+using mm::api::setWireTime;
 
 // Parses the "value" field of a smart parameter-write body into a DeviceParameterValue. The exact
 // numeric width does not matter here — DeviceManager::writeDeviceParameter coerces the value to the
@@ -360,9 +361,9 @@ void HttpServer::run() {
            [this](auto* res, auto* /*req*/) {
              // Embedded at build time (swagger_spec.h). text/yaml renders inline in a browser;
              // a client fetches it to resolve the running server's exact API contract.
-             res->writeHeader("Content-Type", "text/yaml; charset=utf-8")
+             setCorsOrigin(res, config_.corsOrigin)
+                 ->writeHeader("Content-Type", "text/yaml; charset=utf-8")
                  ->writeHeader("Content-Disposition", "inline")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                  ->end(mm::kSwaggerYml);
            })
       .get("/api/adapters",
@@ -426,9 +427,7 @@ void HttpServer::run() {
                body += line;
                body += '\n';
              }
-             res->writeHeader("Content-Type", "text/plain; charset=utf-8")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(body);
+             sendBytes(res, config_.corsOrigin, "text/plain; charset=utf-8", body);
            })
       .get("/api/meta/esc-registers",
            [this](auto* res, auto* /*req*/) {
@@ -623,9 +622,8 @@ void HttpServer::run() {
                return;
              }
              if (wantRaw) {
-               res->writeHeader("Content-Type", "application/octet-stream")
-                   ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                   ->end(std::string_view{reinterpret_cast<const char*>(raw->data()), raw->size()});
+               sendBytes(res, config_.corsOrigin, "application/octet-stream",
+                         std::string_view{reinterpret_cast<const char*>(raw->data()), raw->size()});
                return;
              }
              auto parsed = mm::comm::parseSii(*raw);
@@ -1094,16 +1092,17 @@ void HttpServer::run() {
              // Time the SDO transaction itself so the client can distinguish the wire cost from
              // the (much larger, browser-side) HTTP round-trip. Brackets lock acquire + wire; a
              // warm request is dominated by the mailbox transaction, matching the driver's own log.
+             // Reported via the uniform `X-Wire-Us` header (setWireTime), not the JSON body.
              const auto t0 = std::chrono::steady_clock::now();
              auto r = device->readSdo(*index, *subindex);
              const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                                     std::chrono::steady_clock::now() - t0)
-                                     .count();
+                 std::chrono::steady_clock::now() - t0);
              if (!r) {
                sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                return;
              }
-             sendJson(res, config_.corsOrigin, nlohmann::json{{"data", *r}, {"wireUs", wireUs}});
+             setWireTime(res, wireUs);
+             sendJson(res, config_.corsOrigin, nlohmann::json{{"data", *r}});
            })
       .put("/api/devices/:slavePosition/sdo/:index/:subindex",
            [this](auto* res, auto* req) {
@@ -1143,13 +1142,13 @@ void HttpServer::run() {
                const auto t0 = std::chrono::steady_clock::now();
                auto r = device->writeSdo(*index, *subindex, data);
                const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                                       std::chrono::steady_clock::now() - t0)
-                                       .count();
+                   std::chrono::steady_clock::now() - t0);
                if (!r) {
                  sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                  return;
                }
-               sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}, {"wireUs", wireUs}});
+               setWireTime(res, wireUs);
+               sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
              });
            })
       .get("/api/devices/:slavePosition/files/:filename",
@@ -1168,14 +1167,21 @@ void HttpServer::run() {
                sendStatus(res, "404 Not Found", config_.corsOrigin);
                return;
              }
+             // Time the FoE transfer itself so the client can attribute the wire cost to the
+             // device and the rest to the (much larger, browser-side) HTTP round-trip. The body is
+             // raw octet-stream, so the figure rides the `X-Wire-Us` header (setWireTime) rather
+             // than the JSON body — the uniform timing channel across endpoints.
+             const auto t0 = std::chrono::steady_clock::now();
              auto r = device->readFile(filename);
+             const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                 std::chrono::steady_clock::now() - t0);
              if (!r) {
                sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                return;
              }
-             res->writeHeader("Content-Type", "application/octet-stream")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(std::string_view{reinterpret_cast<const char*>(r->data()), r->size()});
+             setWireTime(res, wireUs);
+             sendBytes(res, config_.corsOrigin, "application/octet-stream",
+                       std::string_view{reinterpret_cast<const char*>(r->data()), r->size()});
            })
       .put("/api/devices/:slavePosition/files/:filename",
            [this](auto* res, auto* req) {
@@ -1205,10 +1211,15 @@ void HttpServer::run() {
                }
                std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(body->data()),
                                              body->size()};
-               if (auto r = device->writeFile(filename, data); !r) {
+               const auto t0 = std::chrono::steady_clock::now();
+               auto r = device->writeFile(filename, data);
+               const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                   std::chrono::steady_clock::now() - t0);
+               if (!r) {
                  sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                  return;
                }
+               setWireTime(res, wireUs);
                sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
              });
            })
@@ -1443,8 +1454,8 @@ void HttpServer::run() {
                return;
              }
              auto body = std::make_shared<std::string>(std::move(*r));
-             res->writeHeader("Content-Type", "application/octet-stream")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+             setCorsOrigin(res, config_.corsOrigin)
+                 ->writeHeader("Content-Type", "application/octet-stream")
                  ->writeHeader("Content-Disposition",
                                "attachment; filename=\"motion-master-recorder.mmpd\"");
              // Backpressure-aware send: tryEnd what the socket accepts now, resume from the
@@ -1583,9 +1594,8 @@ void HttpServer::run() {
                   return;
                 }
                 auto resource = monitoringManager_.get(config->topic);
-                res->writeStatus("201 Created")
+                setCorsOrigin(res->writeStatus("201 Created"), config_.corsOrigin)
                     ->writeHeader("Content-Type", "application/json")
-                    ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
                     ->end(resource->dump());
               });
             })
@@ -1622,9 +1632,8 @@ void HttpServer::run() {
                return;
              }
              // The file is JSON; serve it verbatim so the client can save it as-is.
-             res->writeHeader("Content-Type", "application/json")
-                 ->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
-                 ->end(std::string_view{reinterpret_cast<const char*>(raw->data()), raw->size()});
+             sendBytes(res, config_.corsOrigin, "application/json",
+                       std::string_view{reinterpret_cast<const char*>(raw->data()), raw->size()});
            })
       .del("/api/parameter-caches/:id", [this](auto* res, auto* req) {
         if (deviceManager_.parameterCache().remove(req->getParameter("id"))) {
@@ -1643,7 +1652,7 @@ void HttpServer::run() {
 
   app.options("/api/*",
               [this](auto* res, auto* /*req*/) {
-                res->writeHeader("Access-Control-Allow-Origin", config_.corsOrigin)
+                setCorsOrigin(res, config_.corsOrigin)
                     ->writeHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
                     ->writeHeader("Access-Control-Allow-Headers", "Content-Type")
                     // Let the browser cache this preflight so mutating requests (PUT/POST/DELETE

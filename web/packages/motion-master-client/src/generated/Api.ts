@@ -1042,12 +1042,6 @@ export class Api<
          * @example [0,0,0,0]
          */
         data: number[];
-        /**
-         * Server-measured duration of the SDO transaction in microseconds (control-plane lock acquire + mailbox wire round-trip). This is the wire cost only — far smaller than the end-to-end HTTP round-trip a cross-origin browser client observes.
-         * @min 0
-         * @example 5000
-         */
-        wireUs: number;
       },
       void | {
         /**
@@ -1086,12 +1080,6 @@ export class Api<
       {
         /** @example true */
         ok: boolean;
-        /**
-         * Server-measured duration of the SDO transaction in microseconds (control-plane lock acquire + mailbox wire round-trip). This is the wire cost only — far smaller than the end-to-end HTTP round-trip a cross-origin browser client observes.
-         * @min 0
-         * @example 5000
-         */
-        wireUs: number;
       },
       void | {
         /**

@@ -187,8 +187,12 @@ export default function ReferenceApiDocsPage() {
           theme: 'none',
           forceDarkModeState: 'light',
           hideDarkModeToggle: true,
-          // Default the code samples to Python with the requests library.
-          defaultHttpClient: { targetKey: 'python', clientKey: 'requests' },
+          // Default the code samples to Shell with curl.
+          defaultHttpClient: { targetKey: 'shell', clientKey: 'curl' },
+          // Trim the client-library menu to the languages we care about, dropping
+          // targets we won't document. Each entry is a snippetz target key; the
+          // whole group (every client under it) is hidden.
+          hiddenClients: ['ruby', 'php', 'clojure', 'dart', 'fsharp', 'objc', 'ocaml', 'r'],
           showOperationId: true,
           // Keep the first tag collapsed on load instead of auto-expanding it.
           defaultOpenFirstTag: false,

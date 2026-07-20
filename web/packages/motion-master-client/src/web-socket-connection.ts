@@ -127,7 +127,18 @@ export class WebSocketConnection {
     }
     this.closedByUser = false
     this.setState('connecting')
-    const socket = new Impl(this.url, this.protocolsOrOptions)
+    let socket: WebSocketLike
+    try {
+      socket = new Impl(this.url, this.protocolsOrOptions)
+    } catch (err) {
+      // A malformed URL (e.g. a bad host/port from stale saved settings) makes the WebSocket
+      // constructor throw synchronously. Report it as a failed connection and stay closed rather
+      // than letting it propagate and crash the caller; a bad URL won't fix itself, so there is no
+      // point scheduling a reconnect. The consumer observes 'closed' and can correct the endpoint.
+      this.setState('closed')
+      console.error(`WebSocketConnection: failed to open ${this.url}`, err)
+      return
+    }
     this.socket = socket
 
     socket.onopen = () => {

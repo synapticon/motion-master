@@ -11,6 +11,14 @@ const RELEASES_URL = 'https://github.com/synapticon/motion-master/releases'
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
 
+// A valid TCP port is an integer in 1..65535. Guards the endpoint form so a typo (e.g. an extra
+// digit → 622811) can't be persisted and then crash the app on the next load when the monitoring
+// WebSocket URL is constructed from it.
+function isValidPort(s: string): boolean {
+  const n = Number(s.trim())
+  return Number.isInteger(n) && n >= 1 && n <= 65535
+}
+
 function apiError(err: unknown): string {
   if (err && typeof err === 'object' && 'error' in err) {
     const inner = (err as { error: unknown }).error
@@ -121,7 +129,11 @@ export default function ConnectionPage() {
   }, [host, httpPort, wsPort])
 
   const endpointDirty = draftHost !== host || draftHttpPort !== httpPort || draftWsPort !== wsPort
+  const httpPortValid = isValidPort(draftHttpPort)
+  const wsPortValid = isValidPort(draftWsPort)
+  const endpointValid = draftHost.trim() !== '' && httpPortValid && wsPortValid
   const applyEndpoint = () => {
+    if (!endpointValid) return
     setHost(draftHost.trim())
     setHttpPort(draftHttpPort.trim())
     setWsPort(draftWsPort.trim())
@@ -289,7 +301,11 @@ export default function ConnectionPage() {
                   onChange={e => setDraftHttpPort(e.target.value)}
                   placeholder="61447"
                   className={inputCls}
+                  aria-invalid={!httpPortValid}
                 />
+                {!httpPortValid && (
+                  <p className="text-xs text-status-bad mt-1">Must be a port number in 1–65535.</p>
+                )}
               </div>
               <div>
                 <label className={labelCls}>WebSocket Port</label>
@@ -299,7 +315,11 @@ export default function ConnectionPage() {
                   onChange={e => setDraftWsPort(e.target.value)}
                   placeholder="62281"
                   className={inputCls}
+                  aria-invalid={!wsPortValid}
                 />
+                {!wsPortValid && (
+                  <p className="text-xs text-status-bad mt-1">Must be a port number in 1–65535.</p>
+                )}
               </div>
             </div>
             <div className="flex items-center justify-end gap-2 mt-4">
@@ -313,7 +333,7 @@ export default function ConnectionPage() {
               </button>
               <button
                 type="submit"
-                disabled={!endpointDirty}
+                disabled={!endpointDirty || !endpointValid}
                 className={btnPrimary}
                 title="Apply the host and ports above. This rebuilds the API client and the monitoring WebSocket to point at the new endpoint, so it only takes effect once you click here — not while you type."
               >

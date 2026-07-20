@@ -19,6 +19,12 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.55] - 2026-07-20
+
+### Fixed
+
+- The Console no longer crashes to a blank screen when a previously saved connection endpoint has an invalid port (e.g. a mistyped `622811`). The monitoring WebSocket now fails to open gracefully instead of throwing, and the Connection page rejects an out-of-range port (must be 1–65535) before it can be applied — so a bad value can neither be entered nor brick the app on the next load. To recover an already-broken tab, click **Load defaults** on the Connection page (now reachable again) or clear the site's storage.
+
 ## [6.0.0-alpha.54] - 2026-07-20
 
 ### Added
@@ -379,7 +385,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.54...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.55...HEAD
+[6.0.0-alpha.55]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.54...v6.0.0-alpha.55
 [6.0.0-alpha.54]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.53...v6.0.0-alpha.54
 [6.0.0-alpha.53]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.52...v6.0.0-alpha.53
 [6.0.0-alpha.52]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.51...v6.0.0-alpha.52

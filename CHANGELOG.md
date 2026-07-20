@@ -19,6 +19,20 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.54] - 2026-07-20
+
+### Added
+
+- Console FoE page: reading or writing a file now shows how long the transfer took — the server-measured FoE wire time next to the browser round-trip (e.g. `FoE 5.4 ms · round-trip 37 ms`), each with a tooltip — matching the Read/Write SDO readout on the Parameters page.
+
+### Changed
+
+- The server-measured device wire time is now reported through a common `X-Wire-Us` response header (microseconds) on the CoE SDO **and** FoE read/write endpoints, so it works uniformly whether the response body is JSON or a raw file. The previous `wireUs` body field on the SDO read/write responses has been removed (use the header instead).
+
+### Fixed
+
+- Console Parameters page: clicking **Read SDO** or **Write SDO** is now instant, and its round-trip figure is accurate. The click previously re-rendered the entire parameter list, which blocked the browser and inflated the reported round-trip (~60 ms) far above the true wire time (~10 ms); the SDO tools are now isolated so a click re-renders only them.
+
 ## [6.0.0-alpha.53] - 2026-07-19
 
 ### Added
@@ -365,7 +379,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.53...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.54...HEAD
+[6.0.0-alpha.54]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.53...v6.0.0-alpha.54
 [6.0.0-alpha.53]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.52...v6.0.0-alpha.53
 [6.0.0-alpha.52]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.51...v6.0.0-alpha.52
 [6.0.0-alpha.51]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.50...v6.0.0-alpha.51

@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.57] - 2026-07-21
+
 ### Added
 
 - Simple EtherCAT slaves that have no CoE mailbox now work — EtherCAT couplers (e.g. Beckhoff EK1100) and I/O terminals (e.g. Beckhoff EL2008). When a device has no object dictionary to query over CoE, its PDO mapping is read from the SII/EEPROM instead, so a mailbox-less digital-output terminal's channels now appear on the Process Image and Process Data pages and can be driven by writing their RxPDO outputs. A coupler with no process data of its own contributes nothing, as expected.
@@ -404,7 +406,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.56...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.57...HEAD
+[6.0.0-alpha.57]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.56...v6.0.0-alpha.57
 [6.0.0-alpha.56]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.55...v6.0.0-alpha.56
 [6.0.0-alpha.55]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.54...v6.0.0-alpha.55
 [6.0.0-alpha.54]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.53...v6.0.0-alpha.54

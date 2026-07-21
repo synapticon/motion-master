@@ -25,7 +25,7 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Changed
 
-- The `X-Wire-Us` timing header is now also sent on the error (500) response of the SDO and FoE read/write endpoints, not only on success — a failed transaction still consumed wire time, and clients can attribute it the same way.
+- The `X-Wire-Us` server-measured timing header is now sent by **every** endpoint that performs a fieldbus operation, not just SDO/FoE — reading the object dictionary (`parameters/init`, `parameters/read`, single `parameters/:index/:subindex` read/write), ESC registers, the SII/EEPROM, ESC diagnostics, DC-sync status, the process-data watchdog, the PDO mapping (read/write), and the CiA402 snapshot. It is emitted on both the success and the failure response. Its meaning is broadened accordingly: for a single-transaction endpoint it is the pure wire round-trip; for a multi-transaction one (e.g. object-dictionary enumeration, which is hundreds of reads over several seconds) it is the total on-device time of the operation.
 
 ### Fixed
 

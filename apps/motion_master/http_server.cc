@@ -75,6 +75,7 @@ using mm::api::sendBytes;
 using mm::api::sendError;
 using mm::api::sendJson;
 using mm::api::sendStatus;
+using mm::api::sendTimedJson;
 using mm::api::setCorsOrigin;
 using mm::api::setWireTime;
 
@@ -468,12 +469,8 @@ void HttpServer::run() {
              if (!positions) {
                return;  // parsePositions already wrote the 400 response
              }
-             auto r = deviceManager_.getDeviceDiagnostics(*positions);
-             if (!r) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-               return;
-             }
-             sendJson(res, config_.corsOrigin, nlohmann::json(*r));
+             sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
+                           [&] { return deviceManager_.getDeviceDiagnostics(*positions); });
            })
       .get("/api/dc-sync",
            [this](auto* res, auto* req) {
@@ -481,12 +478,8 @@ void HttpServer::run() {
              if (!positions) {
                return;  // parsePositions already wrote the 400 response
              }
-             auto r = deviceManager_.getDcSync(*positions);
-             if (!r) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-               return;
-             }
-             sendJson(res, config_.corsOrigin, nlohmann::json(*r));
+             sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
+                           [&] { return deviceManager_.getDcSync(*positions); });
            })
       .get("/api/devices",
            [this](auto* res, auto* /*req*/) {
@@ -589,11 +582,13 @@ void HttpServer::run() {
                return;
              }
              std::vector<uint8_t> buf(length);
-             if (auto r = device->readRegister(address, buf); !r) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-               return;
-             }
-             sendJson(res, config_.corsOrigin, nlohmann::json{{"data", buf}});
+             sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
+                           [&]() -> std::expected<nlohmann::json, std::string> {
+                             if (auto r = device->readRegister(address, buf); !r) {
+                               return std::unexpected(r.error());
+                             }
+                             return nlohmann::json{{"data", buf}};
+                           });
            })
       .get("/api/devices/:slavePosition/sii",
            [this](auto* res, auto* req) {
@@ -616,21 +611,29 @@ void HttpServer::run() {
                sendStatus(res, "404 Not Found", config_.corsOrigin);
                return;
              }
+             // Only the EEPROM read touches the wire; parseSii() is local CPU. Time the read and
+             // carry X-Wire-Us on every outcome (raw bytes, parsed JSON, or error).
+             const auto t0 = std::chrono::steady_clock::now();
              auto raw = device->readSii();
+             const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                 std::chrono::steady_clock::now() - t0);
              if (!raw) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, raw.error());
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, raw.error(), wireUs);
                return;
              }
              if (wantRaw) {
+               setWireTime(res, wireUs);
                sendBytes(res, config_.corsOrigin, "application/octet-stream",
                          std::string_view{reinterpret_cast<const char*>(raw->data()), raw->size()});
                return;
              }
              auto parsed = mm::comm::parseSii(*raw);
              if (!parsed) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, parsed.error());
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, parsed.error(),
+                         wireUs);
                return;
              }
+             setWireTime(res, wireUs);
              sendJson(res, config_.corsOrigin, nlohmann::json(*parsed));
            })
       .put("/api/devices/:slavePosition/sii",
@@ -669,11 +672,13 @@ void HttpServer::run() {
                  sendStatus(res, "404 Not Found", config_.corsOrigin);
                  return;
                }
-               if (auto r = device->writeSii(data); !r) {
-                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-                 return;
-               }
-               sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
+               sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
+                             [&]() -> std::expected<nlohmann::json, std::string> {
+                               if (auto r = device->writeSii(data); !r) {
+                                 return std::unexpected(r.error());
+                               }
+                               return nlohmann::json{{"ok", true}};
+                             });
              });
            })
       .post("/api/sii/parse",
@@ -740,11 +745,13 @@ void HttpServer::run() {
                   sendStatus(res, "404 Not Found", config_.corsOrigin);
                   return;
                 }
-                if (auto r = device->writeRegister(address, data); !r) {
-                  sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-                  return;
-                }
-                sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
+                sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
+                              [&]() -> std::expected<nlohmann::json, std::string> {
+                                if (auto r = device->writeRegister(address, data); !r) {
+                                  return std::unexpected(r.error());
+                                }
+                                return nlohmann::json{{"ok", true}};
+                              });
               });
             })
       .get("/api/devices/:slavePosition/watchdog",
@@ -761,12 +768,14 @@ void HttpServer::run() {
                sendStatus(res, "404 Not Found", config_.corsOrigin);
                return;
              }
-             auto r = deviceManager_.getProcessDataWatchdog(pos);
-             if (!r) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-               return;
-             }
-             sendJson(res, config_.corsOrigin, watchdogJson(pos, *r));
+             sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
+                           [&]() -> std::expected<nlohmann::json, std::string> {
+                             auto r = deviceManager_.getProcessDataWatchdog(pos);
+                             if (!r) {
+                               return std::unexpected(r.error());
+                             }
+                             return watchdogJson(pos, *r);
+                           });
            })
       .put("/api/devices/:slavePosition/watchdog",
            [this](auto* res, auto* req) {
@@ -804,12 +813,14 @@ void HttpServer::run() {
                  return;
                }
                auto ns = std::chrono::nanoseconds(static_cast<int64_t>(timeoutMs * 1e6 + 0.5));
-               auto r = deviceManager_.setProcessDataWatchdog(pos, ns);
-               if (!r) {
-                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-                 return;
-               }
-               sendJson(res, config_.corsOrigin, watchdogJson(pos, *r));
+               sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
+                             [&]() -> std::expected<nlohmann::json, std::string> {
+                               auto r = deviceManager_.setProcessDataWatchdog(pos, ns);
+                               if (!r) {
+                                 return std::unexpected(r.error());
+                               }
+                               return watchdogJson(pos, *r);
+                             });
              });
            })
       .get("/api/devices/:slavePosition/pdo-mapping",
@@ -828,12 +839,8 @@ void HttpServer::run() {
              }
              // Reads fresh over SDO, grouped by mapping object; requires the device's mailbox to be
              // active (PRE-OP/SAFE-OP/OP), so a device in INIT/BOOT is a 409.
-             auto mapping = deviceManager_.readDevicePdoMapping(pos);
-             if (!mapping) {
-               sendError(res, "409 Conflict", config_.corsOrigin, mapping.error());
-               return;
-             }
-             sendJson(res, config_.corsOrigin, nlohmann::json(*mapping));
+             sendTimedJson(res, config_.corsOrigin, "409 Conflict",
+                           [&] { return deviceManager_.readDevicePdoMapping(pos); });
            })
       .put("/api/devices/:slavePosition/pdo-mapping",
            [this](auto* res, auto* req) {
@@ -873,21 +880,30 @@ void HttpServer::run() {
                  sendStatus(res, "404 Not Found", config_.corsOrigin);
                  return;
                }
+               // Time the whole operation (write + verify read-back), both over the wire, and carry
+               // X-Wire-Us on every outcome via elapsed().
+               const auto t0 = std::chrono::steady_clock::now();
+               auto elapsed = [&] {
+                 return std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::steady_clock::now() - t0);
+               };
                // A failed write is most often a device-state precondition (not in PRE-OP) or a
                // rejected/verify-mismatched mapping — a conflict with the device's current state,
                // not a server fault; report it as 409 with the node layer's detail.
                auto r = deviceManager_.writeDevicePdoMapping(pos, mapping);
                if (!r) {
-                 sendError(res, "409 Conflict", config_.corsOrigin, r.error());
+                 sendError(res, "409 Conflict", config_.corsOrigin, r.error(), elapsed());
                  return;
                }
                // Echo the device's grouped read-back mapping (verified equal to the request), whose
                // entries carry the derived bitOffsets the request did not specify.
                auto readBack = deviceManager_.readDevicePdoMapping(pos);
                if (!readBack) {
-                 sendError(res, "500 Internal Server Error", config_.corsOrigin, readBack.error());
+                 sendError(res, "500 Internal Server Error", config_.corsOrigin, readBack.error(),
+                           elapsed());
                  return;
                }
+               setWireTime(res, elapsed());
                sendJson(res, config_.corsOrigin, nlohmann::json(*readBack));
              });
            })
@@ -908,12 +924,8 @@ void HttpServer::run() {
              // A non-CiA402 device (or one whose OD is not yet enumerated) is a 409 — the node
              // layer's message says which; the client uses the device's isCia402 flag to avoid
              // asking in the first place.
-             auto r = deviceManager_.getCia402Status(pos);
-             if (!r) {
-               sendError(res, "409 Conflict", config_.corsOrigin, r.error());
-               return;
-             }
-             sendJson(res, config_.corsOrigin, nlohmann::json(*r));
+             sendTimedJson(res, config_.corsOrigin, "409 Conflict",
+                           [&] { return deviceManager_.getCia402Status(pos); });
            })
       .post(
           "/api/devices/:slavePosition/cia402/mode",
@@ -1235,12 +1247,14 @@ void HttpServer::run() {
               }
               auto rv = req->getQuery("readValues");
               bool readValues = rv == "true" || rv == "1";
-              if (auto r = deviceManager_.initializeDeviceParameters(pos, readValues); !r) {
-                sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-                return;
-              }
-              const auto* device = deviceManager_.findDevice(pos);
-              sendJson(res, config_.corsOrigin, nlohmann::json(device->parametersOrdered()));
+              sendTimedJson(
+                  res, config_.corsOrigin, "500 Internal Server Error",
+                  [&]() -> std::expected<nlohmann::json, std::string> {
+                    if (auto r = deviceManager_.initializeDeviceParameters(pos, readValues); !r) {
+                      return std::unexpected(r.error());
+                    }
+                    return nlohmann::json(deviceManager_.findDevice(pos)->parametersOrdered());
+                  });
             })
       .post("/api/devices/:slavePosition/parameters/read",
             [this](auto* res, auto* req) {
@@ -1252,12 +1266,14 @@ void HttpServer::run() {
                 sendStatus(res, "400 Bad Request", config_.corsOrigin);
                 return;
               }
-              if (auto r = deviceManager_.readAllDeviceParameters(pos); !r) {
-                sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-                return;
-              }
-              const auto* device = deviceManager_.findDevice(pos);
-              sendJson(res, config_.corsOrigin, nlohmann::json(device->parametersOrdered()));
+              sendTimedJson(
+                  res, config_.corsOrigin, "500 Internal Server Error",
+                  [&]() -> std::expected<nlohmann::json, std::string> {
+                    if (auto r = deviceManager_.readAllDeviceParameters(pos); !r) {
+                      return std::unexpected(r.error());
+                    }
+                    return nlohmann::json(deviceManager_.findDevice(pos)->parametersOrdered());
+                  });
             })
       .get("/api/devices/:slavePosition/parameters",
            [this](auto* res, auto* req) {
@@ -1296,12 +1312,9 @@ void HttpServer::run() {
              // an absent source) is the smart "auto" read that refreshes from the live PDO
              // image or an SDO upload. Routing lives in the node layer (Device::readParameter).
              bool refreshFromBus = req->getQuery("source") != "cache";
-             auto r = deviceManager_.deviceParameterView(pos, *index, *subindex, refreshFromBus);
-             if (!r) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-               return;
-             }
-             sendJson(res, config_.corsOrigin, nlohmann::json(*r));
+             sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error", [&] {
+               return deviceManager_.deviceParameterView(pos, *index, *subindex, refreshFromBus);
+             });
            })
       .put("/api/devices/:slavePosition/parameters/:index/:subindex",
            [this](auto* res, auto* req) {
@@ -1340,21 +1353,25 @@ void HttpServer::run() {
                }
                // Smart write: PDO-staged when the object is output-mapped + exchanging, else
                // SDO, else held in the cache (offline). Coercion to the declared type is done
-               // in the node layer (DeviceParameter::setValue).
-               if (auto w = deviceManager_.writeDeviceParameter(pos, *index, *subindex,
-                                                                std::move(value));
-                   !w) {
-                 sendError(res, "500 Internal Server Error", config_.corsOrigin, w.error());
-                 return;
-               }
-               // Echo the updated parameter from the cache (no extra bus I/O) so the client
-               // gets the coerced value and resulting syncState in the same round-trip.
-               auto r = deviceManager_.deviceParameterView(pos, *index, *subindex, false);
-               if (!r) {
-                 sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
-                 return;
-               }
-               sendJson(res, config_.corsOrigin, nlohmann::json(*r));
+               // in the node layer (DeviceParameter::setValue). The cache echo below is memory-only
+               // (no bus I/O), so timing the whole lambda still reports the write's wire cost.
+               sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
+                             [&]() -> std::expected<nlohmann::json, std::string> {
+                               if (auto w = deviceManager_.writeDeviceParameter(
+                                       pos, *index, *subindex, std::move(value));
+                                   !w) {
+                                 return std::unexpected(w.error());
+                               }
+                               // Echo the updated parameter from the cache (no extra bus I/O) so
+                               // the client gets the coerced value and resulting syncState in the
+                               // same round-trip.
+                               auto r = deviceManager_.deviceParameterView(pos, *index, *subindex,
+                                                                           false);
+                               if (!r) {
+                                 return nlohmann::json{{"ok", true}};
+                               }
+                               return nlohmann::json(*r);
+                             });
              });
            })
       .get("/api/meta/object-data-types",

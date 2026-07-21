@@ -789,6 +789,9 @@ paths:
       responses:
         "200":
           description: Parameter list ordered by (index, subindex)
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -798,7 +801,7 @@ paths:
         "400":
           description: slavePosition is not a valid integer
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/parameters/read:
     post:
       summary: Refresh the cached value of every parameter without re-enumerating the dictionary
@@ -825,6 +828,9 @@ paths:
       responses:
         "200":
           description: Refreshed parameter list ordered by (index, subindex)
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -834,7 +840,7 @@ paths:
         "400":
           description: slavePosition is not a valid integer
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/parameters:
     get:
       summary: Read the previously initialised parameter list for a device
@@ -921,6 +927,9 @@ paths:
       responses:
         "200":
           description: The parameter (value plus metadata)
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -928,7 +937,7 @@ paths:
         "400":
           description: slavePosition, index, or subindex is missing or not a valid integer
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
     put:
       summary: Write a single parameter value (PDO-aware)
       operationId: writeParameter
@@ -998,6 +1007,9 @@ paths:
       responses:
         "200":
           description: The updated parameter (value plus metadata)
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -1005,7 +1017,7 @@ paths:
         "400":
           description: slavePosition, index, or subindex is invalid, or the body is malformed
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/registers/{address}:
     get:
       summary: Read bytes from an ESC register
@@ -1043,6 +1055,9 @@ paths:
       responses:
         "200":
           description: Raw register bytes
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -1062,7 +1077,7 @@ paths:
         "404":
           description: No device at the given bus position
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
     post:
       summary: Write bytes to an ESC register
       operationId: writeRegister
@@ -1107,6 +1122,9 @@ paths:
       responses:
         "200":
           description: Write completed successfully
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -1121,7 +1139,7 @@ paths:
         "404":
           description: No device at the given bus position
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/watchdog:
     get:
       summary: Read the process-data (sync-manager) watchdog configuration
@@ -1145,6 +1163,9 @@ paths:
       responses:
         "200":
           description: Decoded watchdog configuration
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -1154,7 +1175,7 @@ paths:
         "404":
           description: No device at the given bus position
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
     put:
       summary: Set the process-data (sync-manager) watchdog timeout
       operationId: setProcessDataWatchdog
@@ -1190,6 +1211,9 @@ paths:
       responses:
         "200":
           description: Watchdog configuration actually programmed (timeout rounded to the tick base)
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -1201,7 +1225,7 @@ paths:
         "404":
           description: No device at the given bus position
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/pdo-mapping:
     get:
       summary: Read a device's PDO mapping grouped by object (CoE)
@@ -1229,6 +1253,9 @@ paths:
       responses:
         "200":
           description: The device's grouped PDO mapping
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -1239,6 +1266,9 @@ paths:
           description: No device at the given bus position
         "409":
           description: The device's mailbox is not active (it is in INIT or BOOT)
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
         "500":
           $ref: "#/components/responses/DriverError"
     put:
@@ -1284,6 +1314,9 @@ paths:
       responses:
         "200":
           description: The device's grouped read-back mapping, verified equal to the request
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -1296,8 +1329,11 @@ paths:
           description: >
             The write was rejected — most often because the device is not in PRE-OP, but also a
             malformed mapping the device aborted, or a read-back that did not match the request
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/cia402:
     get:
       summary: Read a device's CiA402 control snapshot
@@ -1318,6 +1354,9 @@ paths:
       responses:
         "200":
           description: The device's CiA402 control snapshot
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -1328,6 +1367,9 @@ paths:
           description: No device at that slavePosition
         "409":
           description: The device is not a CiA402 drive, or its object dictionary is not enumerated
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
   /api/devices/{slavePosition}/cia402/mode:
     post:
       summary: Set a device's CiA402 operation mode
@@ -1732,6 +1774,9 @@ paths:
       responses:
         "200":
           description: Parsed SII structure, or the raw EEPROM image
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -1745,7 +1790,7 @@ paths:
         "404":
           description: No device at the given bus position
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
     put:
       summary: Write a raw SII (EEPROM) image to a device
       operationId: writeSii
@@ -1776,6 +1821,9 @@ paths:
       responses:
         "200":
           description: SII image written successfully
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -1789,7 +1837,7 @@ paths:
         "404":
           description: No device at the given bus position
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
   /api/sii/parse:
     post:
       summary: Parse a raw SII (EEPROM) image
@@ -1841,6 +1889,9 @@ paths:
       responses:
         "200":
           description: Decoded ESC diagnostics for each queried device
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -1850,7 +1901,7 @@ paths:
         "400":
           description: A `positions` value is not a valid integer
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
   /api/dc-sync:
     get:
       summary: Read live distributed-clock synchronisation status for devices
@@ -1879,6 +1930,9 @@ paths:
       responses:
         "200":
           description: Decoded DC sync status for each queried device
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
           content:
             application/json:
               schema:
@@ -1888,7 +1942,7 @@ paths:
         "400":
           description: A `positions` value is not a valid integer
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/state:
     get:
       summary: Read current AL state for devices
@@ -3611,15 +3665,18 @@ components:
   headers:
     WireTime:
       description: >
-        Server-measured duration of the on-device transaction in microseconds — the
-        control-plane lock acquire plus the mailbox/ESC wire round-trip. This is the wire
-        cost only, far smaller than the end-to-end HTTP round-trip a cross-origin browser
-        client observes (which additionally includes TLS and transport overhead). Present on
-        both the success **and** the driver-error (500) response of endpoints that perform a
-        fieldbus transaction — a failed transaction still consumed wire time (e.g. an SDO read
-        that waits out the mailbox timeout) — so a client can attribute the cost the same way
-        either way. CORS-exposed (`Access-Control-Expose-Headers`) so a cross-origin client may
-        read it.
+        Server-measured duration of the on-device operation in microseconds — the control-plane
+        lock acquire plus the mailbox/ESC wire transaction(s). For a single-transaction endpoint
+        (one SDO/FoE/register/EEPROM access) this is essentially the pure wire round-trip; for a
+        multi-transaction one (object-dictionary enumeration, bulk value read, PDO-mapping
+        read/write) it is the total across all of the operation's transactions. Either way it is
+        far smaller than the end-to-end HTTP round-trip a cross-origin browser client observes
+        (which additionally includes TLS and transport overhead), letting the client attribute the
+        device cost to the device and the remainder to the browser/transport. Present on **both**
+        the success and the failure response (driver-error 500, or 409 where applicable) of every
+        endpoint that performs a fieldbus operation — a failed operation still consumed device time
+        (e.g. an SDO read that waits out the mailbox timeout). CORS-exposed
+        (`Access-Control-Expose-Headers`) so a cross-origin client may read it.
       schema:
         type: integer
         minimum: 0

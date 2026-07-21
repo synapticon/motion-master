@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace mm::node {
 class DeviceManager;
@@ -71,19 +72,21 @@ Res* setCorsOrigin(Res* res, std::string_view corsOrigin) {
 
 /// @brief Attaches the server-measured wire-time header (`X-Wire-Us`, microseconds) to a response.
 ///
-/// @p wireUs is the time spent in the on-device transaction itself — control-plane lock acquire
-/// plus the mailbox/ESC wire round-trip — *not* the end-to-end HTTP round-trip, which a
-/// cross-origin browser client observes as much larger (TLS + transport overhead). Reporting it
-/// lets the client attribute the wire cost to the device and the remainder to the
-/// browser/transport. Because the value rides a header rather than the body, it is the one uniform
-/// timing channel that works for any response shape (JSON or raw octet-stream) without touching
-/// each endpoint's body schema. The header is CORS-exposed so the PWA can read it cross-origin.
-/// Emitted on **both** success and failure — a failed transaction still consumed wire time (e.g. an
-/// SDO read that waits out the mailbox timeout), and the client shows it the same way; failures
-/// route through sendError()'s
-/// @c wireUs parameter so the header lands after writeStatus(). Call **before** the body/end() (uWS
-/// requires all headers written before the body). Returns @p res for chaining, mirroring
-/// setCorsOrigin.
+/// @p wireUs is the server-measured time spent on the device-side operation itself — control-plane
+/// lock acquire plus the mailbox/ESC wire transaction(s) — *not* the end-to-end HTTP round-trip,
+/// which a cross-origin browser client observes as much larger (TLS + transport overhead).
+/// Reporting it lets the client attribute the device cost to the device and the remainder to the
+/// browser/transport. For a single-transaction endpoint (one SDO/FoE/register access) it is
+/// essentially the pure wire round-trip; for a multi-transaction one (object-dictionary
+/// enumeration, PDO-mapping read/write) it is the total across all of the operation's transactions.
+/// Because the value rides a header rather than the body, it is the one uniform timing channel that
+/// works for any response shape (JSON or raw octet-stream) without touching each endpoint's body
+/// schema. The header is CORS-exposed so the PWA can read it cross-origin. Emitted on **both**
+/// success and failure — a failed operation still consumed device time (e.g. an SDO read that waits
+/// out the mailbox timeout), and the client shows it the same way; failures route through
+/// sendError()'s @c wireUs parameter so the header lands after writeStatus(). Call **before** the
+/// body/end() (uWS requires all headers written before the body). Returns @p res for chaining,
+/// mirroring setCorsOrigin.
 template <typename Res>
 Res* setWireTime(Res* res, std::chrono::microseconds wireUs) {
   return res->writeHeader("Access-Control-Expose-Headers", "X-Wire-Us")
@@ -140,6 +143,30 @@ void sendError(Res* res, std::string_view status, std::string_view corsOrigin,
 template <typename Res>
 void sendStatus(Res* res, std::string_view status, std::string_view corsOrigin) {
   setCorsOrigin(res->writeStatus(status), corsOrigin)->end();
+}
+
+/// @brief Runs a fieldbus operation @p op, times it, and sends the timed JSON response.
+///
+/// The shared shape of every endpoint that performs a device transaction: bracket the call with a
+/// steady_clock read, then on success emit the JSON body with the `X-Wire-Us` header (setWireTime),
+/// or on failure a `errorStatus` error carrying the same header (sendError's @c wireUs). @p op is
+/// any callable returning a `std::expected<T, E>`; on success @c *result is sent as JSON (any @c T
+/// convertible to @c nlohmann::json — return @c nlohmann::json directly for a custom body such as a
+/// fixed `{"ok": true}` or a multi-step read-back), on failure @c result.error() is the message.
+/// Only @p op is timed, so body parsing and JSON serialization stay out of the reported figure.
+/// @p errorStatus is the failure status line (e.g. "500 Internal Server Error", "409 Conflict").
+template <typename Res, typename Op>
+void sendTimedJson(Res* res, std::string_view corsOrigin, std::string_view errorStatus, Op&& op) {
+  const auto t0 = std::chrono::steady_clock::now();
+  auto result = std::forward<Op>(op)();
+  const auto wireUs =
+      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0);
+  if (!result) {
+    sendError(res, errorStatus, corsOrigin, result.error(), wireUs);
+    return;
+  }
+  setWireTime(res, wireUs);
+  sendJson(res, corsOrigin, *result);
 }
 
 }  // namespace mm::api

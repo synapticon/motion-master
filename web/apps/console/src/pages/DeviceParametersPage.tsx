@@ -744,7 +744,7 @@ export default function DeviceParametersPage() {
                     onChange={e => setReadValues(e.target.checked)}
                     className="cursor-pointer"
                   />
-                  <span>Read values during re-initialize (SDO upload per entry — slower)</span>
+                  <span>Read values during re-initialize</span>
                 </label>
                 <button
                   className={btnCls}

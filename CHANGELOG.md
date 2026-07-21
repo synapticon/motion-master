@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.56] - 2026-07-21
+
 ### Added
 
 - Failed device transactions now show their wire time too: a Read/Write SDO or FoE read/write that fails displays the server-measured device wire time next to the browser round-trip, exactly as a successful one does. So a slow failure — e.g. a CoE read that waits out a ~700 ms mailbox timeout — is now visible as `SDO 700 ms · round-trip …` rather than an error with no timing.
@@ -398,7 +400,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.55...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.56...HEAD
+[6.0.0-alpha.56]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.55...v6.0.0-alpha.56
 [6.0.0-alpha.55]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.54...v6.0.0-alpha.55
 [6.0.0-alpha.54]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.53...v6.0.0-alpha.54
 [6.0.0-alpha.53]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.52...v6.0.0-alpha.53

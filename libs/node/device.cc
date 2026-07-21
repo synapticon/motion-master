@@ -127,6 +127,27 @@ std::expected<void, std::string> Device::writeSii(std::span<const uint8_t> data)
 
 std::expected<void, std::string> Device::initializeParameters(bool readValues,
                                                               bool useCompleteAccess) {
+  // A slave with no CoE mailbox has no object dictionary to enumerate over SDO-Info. Its only
+  // objects are the process-data entries described in its SII EEPROM — build the definitions from
+  // there so PDO monitoring can resolve each object's data type (and the Parameters page can list
+  // them). There is nothing to read over SDO, so the value pass and the OD cache are both skipped
+  // regardless of `readValues` / `useCompleteAccess` — the live value lives only in the process
+  // image.
+  if (!supportsCoe()) {
+    auto defs = buildSiiParameterDefinitions();
+    if (!defs) {
+      return std::unexpected(defs.error());
+    }
+    std::unordered_map<uint32_t, DeviceParameter> built;
+    built.reserve(defs->size());
+    for (auto& p : *defs) {
+      built.emplace(p.key(), std::move(p));
+    }
+    std::lock_guard<std::mutex> lock(*parametersMutex_);
+    parameters_ = std::move(built);
+    return {};
+  }
+
   // 1. Obtain the parameter *definitions*: a cache hit (no bus I/O), or a live SDO-Info
   //    enumeration. The cache holds the static schema only — never live values — so on a hit each
   //    definition's value is the type default and is filled in by the value-read pass below.
@@ -522,6 +543,54 @@ std::expected<FlatPdoMapping, std::string> Device::readSiiPdoMapping() {
   flatten(sii->category.rxPdos, flat.outputs, flat.outputBits);  // RxPDO (master→slave) = outputs
   flatten(sii->category.txPdos, flat.inputs, flat.inputBits);    // TxPDO (slave→master) = inputs
   return flat;
+}
+
+std::expected<std::vector<DeviceParameter>, std::string> Device::buildSiiParameterDefinitions() {
+  auto raw = readSii();
+  if (!raw) {
+    return std::unexpected(std::format("SII read failed: {}", raw.error()));
+  }
+  auto sii = mm::comm::parseSii(*raw);
+  if (!sii) {
+    return std::unexpected(std::format("SII parse failed: {}", sii.error()));
+  }
+  const auto& strings = sii->category.strings;
+  std::vector<DeviceParameter> defs;
+  // One definition per SII PDO entry. RxPDO (category 51) objects are outputs (read + write);
+  // TxPDO (category 50) objects are inputs (read-only). Access is the ETG.1000.6 ObjAccess bitfield
+  // (bits 0-2 read per AL state, 3-5 write): 0x3F = read+write all states, 0x07 = read-only.
+  const auto append = [&](const std::vector<mm::comm::SiiCategoryPdoElement>& pdos,
+                          uint16_t access) {
+    for (const auto& pdo : pdos) {
+      for (const auto& e : pdo.entries) {
+        if (e.entryIndex == 0) {
+          continue;  // alignment gap — binds to no object
+        }
+        std::string name;
+        if (e.entryNameIdx > 0 && e.entryNameIdx <= strings.size()) {
+          name = strings[e.entryNameIdx - 1];  // STRINGS index is 1-based (ETG.2010)
+        }
+        defs.push_back(DeviceParameter{
+            .index = e.entryIndex,
+            .subindex = e.subindex,
+            .name = std::move(name),
+            .objectCode = 0x0007,  // OTYPE_VAR — a single value (ETG.1000.6 §5)
+            .dataType = e.dataType,
+            .bitLength = e.bitLen,
+            .access = access,
+            .origin = ParameterOrigin::Sii,
+            .value = defaultValueForDataType(e.dataType),
+            .unit = std::nullopt,
+            .defaultValue = std::nullopt,
+            .minValue = std::nullopt,
+            .maxValue = std::nullopt,
+        });
+      }
+    }
+  };
+  append(sii->category.rxPdos, 0x3F);  // outputs (RxPDO): read + write
+  append(sii->category.txPdos, 0x07);  // inputs (TxPDO): read-only
+  return defs;
 }
 
 std::expected<void, std::string> Device::readFlatPdoMapping() {

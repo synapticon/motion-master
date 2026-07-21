@@ -19,6 +19,14 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- Live process-data monitoring no longer fails when a mailbox-less slave (e.g. Beckhoff EL2008) is on the bus. Its PDO objects lacked a data type (there is no CoE object dictionary to supply one), which made the Process Data page's monitoring request fail with `400 Bad Request` and silently blank the live values for **every** device on that page. Such a slave's objects now take their data type from the SII EEPROM, so monitoring resolves them and streams values for the whole bus again.
+
+### Added
+
+- Parameters that were read from a slave's SII EEPROM rather than its CoE object dictionary (the case for mailbox-less couplers / I/O terminals) are now flagged with an `origin` of `sii`, shown as an **SII** badge on the Parameters page. These objects have no live SDO access — their value comes only from the process image.
+
 ## [6.0.0-alpha.57] - 2026-07-21
 
 ### Added

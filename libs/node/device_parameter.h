@@ -57,6 +57,21 @@ enum class SyncState : uint8_t {
 /// @brief Returns the lowercase string form of @p state (@c "unknown" etc.).
 std::string_view syncStateName(SyncState state);
 
+/// @brief Where a parameter's definition (schema/metadata) came from.
+///
+/// A CoE slave enumerates its object dictionary over SDO-Info (@c ObjectDictionary). A
+/// mailbox-less slave (an EtherCAT coupler / simple I/O terminal) has no object dictionary; its
+/// process-data objects are instead described by its SII EEPROM (@c Sii), which supplies
+/// index/subindex/data type and bit length but carries no live SDO access — such a parameter's
+/// value is only ever the process-image value, never an SDO upload.
+enum class ParameterOrigin : uint8_t {
+  ObjectDictionary,  ///< Enumerated over the CoE object dictionary (SDO-Info).
+  Sii,               ///< Derived from the SII EEPROM PDO categories (no CoE mailbox).
+};
+
+/// @brief Returns the string form of @p origin (@c "objectDictionary" / @c "sii").
+std::string_view parameterOriginName(ParameterOrigin origin);
+
 /// @brief A single object dictionary entry held by a @c Device.
 ///
 /// Combines immutable schema (index, subindex, name, data type, bit length,
@@ -64,13 +79,14 @@ std::string_view syncStateName(SyncState state);
 /// or PDO exchange. @c value is initialised to the type-appropriate zero so
 /// callers can @c std::visit it directly without checking for a read.
 struct DeviceParameter {
-  uint16_t index{};            ///< CoE object index.
-  uint8_t subindex{};          ///< CoE object subindex.
-  std::string name;            ///< Textual description from @c ecx_readOE.
-  uint16_t objectCode{};       ///< OTYPE_VAR / OTYPE_ARRAY / OTYPE_RECORD (ETG.1000.6 §5).
-  uint16_t dataType{};         ///< ETG.1020 data type code (e.g. 0x0007 = UNSIGNED32).
-  uint16_t bitLength{};        ///< Bit length of the value.
-  uint16_t access{};           ///< ObjAccess bitfield (read/write per-state flags).
+  uint16_t index{};       ///< CoE object index.
+  uint8_t subindex{};     ///< CoE object subindex.
+  std::string name;       ///< Textual description from @c ecx_readOE.
+  uint16_t objectCode{};  ///< OTYPE_VAR / OTYPE_ARRAY / OTYPE_RECORD (ETG.1000.6 §5).
+  uint16_t dataType{};    ///< ETG.1020 data type code (e.g. 0x0007 = UNSIGNED32).
+  uint16_t bitLength{};   ///< Bit length of the value.
+  uint16_t access{};      ///< ObjAccess bitfield (read/write per-state flags).
+  ParameterOrigin origin{ParameterOrigin::ObjectDictionary};  ///< Where this definition came from.
   DeviceParameterValue value;  ///< Last-known value; type-appropriate zero before first read.
   SyncState syncState{SyncState::Unknown};  ///< Freshness of @c value relative to the device.
   std::optional<uint32_t> unit;             ///< ETG.1004 unit code, when reported.

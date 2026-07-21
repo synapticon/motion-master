@@ -543,6 +543,18 @@ class Device {
   /// @c supportsCoe() is @c false.
   std::expected<FlatPdoMapping, std::string> readSiiPdoMapping();
 
+  /// @brief Builds parameter definitions from the slave's SII EEPROM — the object-dictionary
+  ///        fallback for slaves with no CoE mailbox (couplers / simple I/O terminals).
+  ///
+  /// A mailbox-less slave cannot be enumerated over SDO-Info, so its only objects are the
+  /// process-data entries in its SII PDO categories. One @c DeviceParameter per SII PDO entry:
+  /// index/subindex/data type/bit length from the entry, name resolved from the SII STRINGS table,
+  /// object code VAR, and access marked read-write for RxPDO outputs / read-only for TxPDO inputs.
+  /// Each carries @c ParameterOrigin::Sii. Padding entries (index 0) are skipped. No values are
+  /// read (there is no SDO to read them from — the value lives only in the process image). Used by
+  /// @c initializeParameters when @c supportsCoe() is @c false.
+  std::expected<std::vector<DeviceParameter>, std::string> buildSiiParameterDefinitions();
+
   uint16_t slavePosition_;
   mm::comm::FieldbusDriver& driver_;
   // Live process-data runtime, or nullptr for SDO-only operation. Injected by DeviceManager so

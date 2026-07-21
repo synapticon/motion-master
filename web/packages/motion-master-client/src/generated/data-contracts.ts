@@ -844,6 +844,11 @@ export interface DeviceParameter {
    */
   access: number;
   /**
+   * Where this parameter's definition came from. `objectDictionary` — enumerated over the CoE object dictionary (SDO-Info). `sii` — derived from the SII EEPROM PDO categories, for a mailbox-less slave (an EtherCAT coupler / simple I/O terminal) that has no CoE object dictionary; such a parameter has no live SDO access, so its value comes only from the process image.
+   * @example "objectDictionary"
+   */
+  origin: "objectDictionary" | "sii";
+  /**
    * Last-known value, decoded according to `dataType`.  Initialised to a type-appropriate zero (0 for numbers, "" for strings, [] for raw bytes) before the first read.  After a successful SDO upload, holds the decoded value; the JSON encoding follows the variant alternative — number, string, or array of byte values.
    * @example 12345
    */

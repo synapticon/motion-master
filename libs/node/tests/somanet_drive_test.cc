@@ -58,6 +58,10 @@ class IdentityFakeDriver : public FieldbusDriver {
     return ods;
   }
   uint16_t slaveState(uint16_t) const override { return kPreOp; }
+  // CoE-capable stand-in: parameters are enumerated over the object dictionary, not SII.
+  uint16_t mailboxProtocols(uint16_t) const override {
+    return mm::comm::MailboxConfig::kProtocolCoe;
+  }
 
   // --- unused stubs ---------------------------------------------------------
   std::expected<void, std::string> init() override { return {}; }

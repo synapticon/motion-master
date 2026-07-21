@@ -168,6 +168,10 @@ class Cia402FakeDriver : public FieldbusDriver {
     return info;
   }
   uint16_t slaveState(uint16_t) const override { return alStatus; }
+  // CoE-capable stand-in: parameters are enumerated over the object dictionary, not SII.
+  uint16_t mailboxProtocols(uint16_t) const override {
+    return mm::comm::MailboxConfig::kProtocolCoe;
+  }
   std::expected<void, std::string> configureProcessData() override { return {}; }
   mm::comm::PdoLayout processDataLayout() override { return {}; }
   int exchangeProcessData(std::span<const uint8_t>, std::span<uint8_t>) override { return 0; }

@@ -209,6 +209,16 @@ std::string_view syncStateName(SyncState state) {
   return "unknown";
 }
 
+std::string_view parameterOriginName(ParameterOrigin origin) {
+  switch (origin) {
+    case ParameterOrigin::ObjectDictionary:
+      return "objectDictionary";
+    case ParameterOrigin::Sii:
+      return "sii";
+  }
+  return "objectDictionary";
+}
+
 std::expected<double, std::string> DeviceParameter::numeric() const {
   auto n = numericValue(value);
   if (n) {
@@ -317,6 +327,7 @@ void to_json(nlohmann::json& j, const DeviceParameter& p) {
       {"dataTypeName", mm::comm::objectDataTypeName(p.dataType)},
       {"bitLength", p.bitLength},
       {"access", p.access},
+      {"origin", parameterOriginName(p.origin)},
       {"syncState", syncStateName(p.syncState)},
   };
   std::visit([&j](const auto& v) { j["value"] = v; }, p.value);

@@ -26,8 +26,10 @@ using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
 using mm::comm::SlaveInfo;
 using mm::node::Device;
+using mm::node::DeviceParameter;
 using mm::node::DeviceParameterValue;
 using mm::node::packMappingEntry;
+using mm::node::ParameterOrigin;
 using mm::node::PdoMapping;
 using mm::node::PdoMappingEntry;
 using mm::node::PdoMappingObject;
@@ -706,8 +708,8 @@ void programCia402Mapping(SdoFakeDriver& driver) {
 // A single-entry SII PDO record: the 8-byte PDO header (index, nEntry, syncM, sync, nameIdx,
 // flags) followed by one 8-byte entry (index, subindex, entryNameIdx, dataType, bitLen, flags).
 // This is the shape a simple I/O terminal uses — an EL2008 gives each channel its own 1-bit PDO.
-std::vector<uint8_t> siiPdo1(uint16_t pdoIndex, uint16_t entryIndex, uint8_t subindex,
-                             uint8_t bits) {
+std::vector<uint8_t> siiPdo1(uint16_t pdoIndex, uint16_t entryIndex, uint8_t subindex, uint8_t bits,
+                             uint8_t dataType = 0) {
   std::vector<uint8_t> b;
   const auto push16 = [&](uint16_t v) {
     b.push_back(static_cast<uint8_t>(v));
@@ -721,10 +723,10 @@ std::vector<uint8_t> siiPdo1(uint16_t pdoIndex, uint16_t entryIndex, uint8_t sub
   push16(0);       // flags
   push16(entryIndex);
   b.push_back(subindex);
-  b.push_back(0);     // entryNameIdx
-  b.push_back(0);     // dataType
-  b.push_back(bits);  // bitLen
-  push16(0);          // flags
+  b.push_back(0);         // entryNameIdx
+  b.push_back(dataType);  // dataType (ETG.1020 code)
+  b.push_back(bits);      // bitLen
+  push16(0);              // flags
   return b;
 }
 
@@ -913,6 +915,48 @@ TEST(DeviceReadFlatPdoMapping, CoeSlaveWithEmptyAssignmentDoesNotFallBackToSii) 
   ASSERT_TRUE(device.readFlatPdoMapping().has_value());
   EXPECT_TRUE(device.flatPdoMapping().outputs.empty());
   EXPECT_TRUE(device.flatPdoMapping().inputs.empty());
+}
+
+// --- initializeParameters: SII fallback for mailbox-less slaves --------------
+
+TEST(DeviceInitParameters, NoCoeDeviceBuildsParametersFromSii) {
+  // A mailbox-less slave has no object dictionary to enumerate; its objects come from the SII PDO
+  // categories instead — an RxPDO output (BOOLEAN, 0x01) and a TxPDO input (UNSIGNED16, 0x06).
+  // Each parameter is flagged ParameterOrigin::Sii, and access reflects direction: RxPDO
+  // read-write (0x3F), TxPDO read-only (0x07).
+  SdoFakeDriver driver;
+  driver.protocols = 0;  // no CoE mailbox
+  driver.sii = buildSii({{51, siiPdo1(0x1600, 0x7000, 0x01, 1, /*dataType=*/0x01)},
+                         {50, siiPdo1(0x1A00, 0x6000, 0x01, 16, /*dataType=*/0x06)}});
+  Device device(1, driver);
+
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+
+  const DeviceParameter* out = device.parameter(0x7000, 0x01);
+  ASSERT_NE(out, nullptr);
+  EXPECT_EQ(out->dataType, 0x01);  // BOOLEAN
+  EXPECT_EQ(out->bitLength, 1u);
+  EXPECT_EQ(out->access, 0x3F);  // read + write
+  EXPECT_EQ(out->origin, ParameterOrigin::Sii);
+
+  const DeviceParameter* in = device.parameter(0x6000, 0x01);
+  ASSERT_NE(in, nullptr);
+  EXPECT_EQ(in->dataType, 0x06);  // UNSIGNED16
+  EXPECT_EQ(in->access, 0x07);    // read-only
+  EXPECT_EQ(in->origin, ParameterOrigin::Sii);
+}
+
+TEST(DeviceInitParameters, CoeDeviceParametersHaveObjectDictionaryOrigin) {
+  // A CoE device's parameters are enumerated over the object dictionary, so they carry the default
+  // ParameterOrigin::ObjectDictionary — never the SII flag.
+  SdoFakeDriver driver;  // protocols defaults to CoE
+  driver.programOd(0x6040, 0x00, kU32);
+  Device device(1, driver);
+
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  const DeviceParameter* p = device.parameter(0x6040, 0x00);
+  ASSERT_NE(p, nullptr);
+  EXPECT_EQ(p->origin, ParameterOrigin::ObjectDictionary);
 }
 
 // --- pack / unpack mapping entry --------------------------------------------

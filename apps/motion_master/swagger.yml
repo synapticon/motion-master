@@ -3435,7 +3435,7 @@ components:
           example: 32
     DeviceParameter:
       type: object
-      required: [index, subindex, name, objectCode, dataType, dataTypeName, bitLength, access, value, syncState]
+      required: [index, subindex, name, objectCode, dataType, dataTypeName, bitLength, access, origin, value, syncState]
       properties:
         index:
           type: integer
@@ -3469,6 +3469,17 @@ components:
           type: integer
           description: ObjAccess bitfield (read/write per AL state)
           example: 7
+        origin:
+          type: string
+          enum: [objectDictionary, sii]
+          description: >-
+            Where this parameter's definition came from. `objectDictionary` —
+            enumerated over the CoE object dictionary (SDO-Info). `sii` — derived
+            from the SII EEPROM PDO categories, for a mailbox-less slave (an
+            EtherCAT coupler / simple I/O terminal) that has no CoE object
+            dictionary; such a parameter has no live SDO access, so its value
+            comes only from the process image.
+          example: "objectDictionary"
         value:
           description: >-
             Last-known value, decoded according to `dataType`.  Initialised to

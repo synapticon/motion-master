@@ -80,6 +80,10 @@ class FakeDriver : public FieldbusDriver {
     return ods;
   }
   uint16_t slaveState(uint16_t) const override { return state; }
+  // CoE-capable stand-in: parameters are enumerated over the object dictionary, not SII.
+  uint16_t mailboxProtocols(uint16_t) const override {
+    return mm::comm::MailboxConfig::kProtocolCoe;
+  }
   std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& positions) override {
     return std::vector<SlaveStateRaw>(positions.size(),

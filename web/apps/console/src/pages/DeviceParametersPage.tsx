@@ -828,7 +828,19 @@ export default function DeviceParametersPage() {
                             <td className="px-3 py-1.5 font-mono whitespace-nowrap">
                               {toHex(p.index, 4)}:{p.subindex.toString(16).toUpperCase().padStart(2, '0')}
                             </td>
-                            <td className="px-3 py-1.5 text-grey-800">{p.name || <span className="text-grey-400">—</span>}</td>
+                            <td className="px-3 py-1.5 text-grey-800">
+                              <span className="inline-flex items-center gap-1.5">
+                                {p.name || <span className="text-grey-400">—</span>}
+                                {p.origin === 'sii' && (
+                                  <span
+                                    title="Definition read from this slave's SII/EEPROM, not a CoE object dictionary — the slave has no CoE mailbox (e.g. an EtherCAT coupler or simple I/O terminal), so this object cannot be read or written over SDO; its value comes only from the process image."
+                                    className="inline-block px-1.5 py-0.5 rounded-sm text-[10px] uppercase tracking-wide font-display cursor-help bg-ocean/10 text-ocean"
+                                  >
+                                    SII
+                                  </span>
+                                )}
+                              </span>
+                            </td>
                             <td className="px-3 py-1.5 font-mono text-grey-700">{p.dataTypeName}</td>
                             <td className="px-3 py-1.5 font-mono text-grey-700">{p.bitLength}</td>
                             <td className="px-3 py-1.5 font-mono text-grey-700">{formatAccess(p.access)}</td>

@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.58] - 2026-07-21
+
 ### Fixed
 
 - Live process-data monitoring no longer fails when a mailbox-less slave (e.g. Beckhoff EL2008) is on the bus. Its PDO objects lacked a data type (there is no CoE object dictionary to supply one), which made the Process Data page's monitoring request fail with `400 Bad Request` and silently blank the live values for **every** device on that page. Such a slave's objects now take their data type from the SII EEPROM, so monitoring resolves them and streams values for the whole bus again.
@@ -414,7 +416,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.57...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.58...HEAD
+[6.0.0-alpha.58]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.57...v6.0.0-alpha.58
 [6.0.0-alpha.57]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.56...v6.0.0-alpha.57
 [6.0.0-alpha.56]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.55...v6.0.0-alpha.56
 [6.0.0-alpha.55]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.54...v6.0.0-alpha.55

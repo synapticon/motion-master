@@ -143,31 +143,53 @@ std::chrono::microseconds recommendedCyclePeriod(uint32_t processBytes, int slav
   return std::chrono::microseconds(static_cast<int64_t>((neededUs + 999.0) / 1000.0) * 1000);
 }
 
-// Pops the most recent SOEM error (if any) after a failed SDO transfer and renders it as a short
-// human-readable suffix (" (SDO abort 0x...)", " (mailbox error)", ...). Empty when no error was
-// queued. Called with controlPlaneMutex_ held (it touches the SOEM context error stack).
-std::string sdoErrorSuffix(ecx_contextt* ctx) {
+// Explains a failed SDO transfer (wkc <= 0) as a short human-readable suffix. Prefers the specific
+// reason SOEM enqueues — SDO abort code, mailbox error — popped via ecx_poperror (" (SDO abort
+// 0x...)", " (mailbox error)", ...). When the queue is empty it falls back to the wkc return value,
+// which for CoE is a negative EC_* sentinel (e.g. EC_TIMEOUT when the slave never answers) rather
+// than a working counter, so a "no response" timeout reads differently from a bare failure. Empty
+// only for wkc == 0 with nothing queued (a mailbox-send failure SOEM leaves undescribed). Called
+// with controlPlaneMutex_ held (it touches the SOEM context error stack).
+std::string sdoErrorSuffix(ecx_contextt* ctx, int wkc) {
   ec_errort err{};
-  if (!ecx_poperror(ctx, &err)) {
-    return {};
+  if (ecx_poperror(ctx, &err)) {
+    switch (err.Etype) {
+      case EC_ERR_TYPE_SDO_ERROR: {
+        const auto code = static_cast<uint32_t>(err.AbortCode);
+        const std::string_view reason = sdoAbortCodeDescription(code);
+        return reason.empty() ? std::format(" (SDO abort 0x{:08X})", code)
+                              : std::format(" (SDO abort 0x{:08X}: {})", code, reason);
+      }
+      case EC_ERR_TYPE_MBX_ERROR: {
+        const auto code = static_cast<uint16_t>(err.ErrorCode);
+        const std::string_view reason = mailboxErrorCodeDescription(code);
+        return reason.empty() ? std::format(" (mailbox error 0x{:04X})", code)
+                              : std::format(" (mailbox error 0x{:04X}: {})", code, reason);
+      }
+      case EC_ERR_TYPE_PACKET_ERROR:
+        return " (packet/timeout error)";
+      default:
+        return std::format(" (etype {})", static_cast<int>(err.Etype));
+    }
   }
-  switch (err.Etype) {
-    case EC_ERR_TYPE_SDO_ERROR: {
-      const auto code = static_cast<uint32_t>(err.AbortCode);
-      const std::string_view reason = sdoAbortCodeDescription(code);
-      return reason.empty() ? std::format(" (SDO abort 0x{:08X})", code)
-                            : std::format(" (SDO abort 0x{:08X}: {})", code, reason);
-    }
-    case EC_ERR_TYPE_MBX_ERROR: {
-      const auto code = static_cast<uint16_t>(err.ErrorCode);
-      const std::string_view reason = mailboxErrorCodeDescription(code);
-      return reason.empty() ? std::format(" (mailbox error 0x{:04X})", code)
-                            : std::format(" (mailbox error 0x{:04X}: {})", code, reason);
-    }
-    case EC_ERR_TYPE_PACKET_ERROR:
-      return " (packet/timeout error)";
+  // Empty error queue: SOEM enqueued no reason, so classify from the wkc return itself. For CoE,
+  // ecx_SDOread/ecx_SDOwrite return the working counter on success but propagate a negative EC_*
+  // sentinel (ec_type.h) when the mailbox transaction fails without a slave abort — most often
+  // EC_TIMEOUT (-5) when the slave never answers (the request just waits out EC_TIMEOUTRXM). A
+  // wkc of 0 with an empty queue is a mailbox-send failure, which SOEM leaves undescribed.
+  switch (wkc) {
+    case EC_TIMEOUT:
+      return " (no response — mailbox timeout)";
+    case EC_NOFRAME:
+      return " (no frame returned)";
+    case EC_OTHERFRAME:
+      return " (unexpected frame returned)";
+    case EC_ERROR:
+      return " (general error)";
+    case EC_SLAVECOUNTEXCEEDED:
+      return " (slave count exceeded)";
     default:
-      return std::format(" (etype {})", static_cast<int>(err.Etype));
+      return {};
   }
 }
 
@@ -651,7 +673,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
   if (wkc <= 0) {
     std::string msg =
         std::format("SDOread slave {} 0x{:04X}:{:02X} failed", slavePosition, index, subindex);
-    msg += sdoErrorSuffix(ctx_.get());
+    msg += sdoErrorSuffix(ctx_.get(), wkc);
     spdlog::log(sdoLevel, "{}", msg);
     return std::unexpected(msg);
   }
@@ -702,7 +724,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComp
       ecx_SDOread(ctx_.get(), slavePosition, index, 0x00, TRUE, &size, data.data(), EC_TIMEOUTRXM);
   if (wkc <= 0) {
     std::string msg = std::format("SDOread(CA) slave {} 0x{:04X} failed", slavePosition, index);
-    msg += sdoErrorSuffix(ctx_.get());
+    msg += sdoErrorSuffix(ctx_.get(), wkc);
     spdlog::log(sdoLevel, "{}", msg);
     return std::unexpected(msg);
   }
@@ -734,7 +756,7 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSdo(uint16_t slavePosi
   if (wkc <= 0) {
     std::string msg =
         std::format("SDOwrite slave {} 0x{:04X}:{:02X} failed", slavePosition, index, subindex);
-    msg += sdoErrorSuffix(ctx_.get());
+    msg += sdoErrorSuffix(ctx_.get(), wkc);
     spdlog::debug("{}", msg);
     return std::unexpected(msg);
   }

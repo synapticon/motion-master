@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- A CoE SDO read or write that the device never answers (a mailbox-receive timeout) now reports `… failed (no response — mailbox timeout)` instead of a bare `… failed`. This distinguishes "the device didn't respond at all" from "the device refused the request" (which still shows the specific SDO abort code, e.g. `SDO abort 0x08000000: General error`) — so, for example, reading an undefined object subindex no longer looks like an unexplained failure.
+
 ## [6.0.0-alpha.55] - 2026-07-20
 
 ### Fixed

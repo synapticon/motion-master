@@ -513,21 +513,25 @@ export default function DevicePdoMappingPage() {
           )}
         </div>
 
-        <div className="flex items-center gap-3">
-          <button className={btnOutline} onClick={() => query.refetch()} disabled={query.isFetching}>
-            {query.isFetching ? 'Loading…' : 'Reload from device'}
-          </button>
-          <WireTiming label="Read" timing={readTiming.timing} />
-          <button
-            className={btnPrimary}
-            onClick={() => writeMutation.mutate()}
-            disabled={!dirty || !built.body || writeMutation.isPending}
-          >
-            {writeMutation.isPending ? 'Writing…' : 'Write mapping'}
-          </button>
-          {dirty && <span className="text-xs text-status-warn">Unsaved changes</span>}
-          {!dirty && saved && <span className="text-xs text-status-good">Mapping written ✓</span>}
-          <WireTiming label="Write" timing={writeTiming.timing} />
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button className={btnOutline} onClick={() => query.refetch()} disabled={query.isFetching}>
+              {query.isFetching ? 'Loading…' : 'Reload from device'}
+            </button>
+            <WireTiming label="Read" timing={readTiming.timing} />
+          </div>
+          <div className="flex items-center gap-3">
+            {dirty && <span className="text-xs text-status-warn">Unsaved changes</span>}
+            {!dirty && saved && <span className="text-xs text-status-good">Mapping written ✓</span>}
+            <WireTiming label="Write" timing={writeTiming.timing} />
+            <button
+              className={btnPrimary}
+              onClick={() => writeMutation.mutate()}
+              disabled={!dirty || !built.body || writeMutation.isPending}
+            >
+              {writeMutation.isPending ? 'Writing…' : 'Write mapping'}
+            </button>
+          </div>
         </div>
 
         {built.error && <Callout variant="error">{built.error}</Callout>}

@@ -517,6 +517,7 @@ export default function DevicePdoMappingPage() {
           <button className={btnOutline} onClick={() => query.refetch()} disabled={query.isFetching}>
             {query.isFetching ? 'Loading…' : 'Reload from device'}
           </button>
+          <WireTiming label="Read" timing={readTiming.timing} />
           <button
             className={btnPrimary}
             onClick={() => writeMutation.mutate()}
@@ -526,7 +527,7 @@ export default function DevicePdoMappingPage() {
           </button>
           {dirty && <span className="text-xs text-status-warn">Unsaved changes</span>}
           {!dirty && saved && <span className="text-xs text-status-good">Mapping written ✓</span>}
-          <WireTiming label="PDO mapping" timing={writeTiming.timing ?? readTiming.timing} />
+          <WireTiming label="Write" timing={writeTiming.timing} />
         </div>
 
         {built.error && <Callout variant="error">{built.error}</Callout>}

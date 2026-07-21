@@ -3,6 +3,7 @@ import { useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import DevicePageHeader from '../components/DevicePageHeader'
 import HexDecInput from '../components/HexDecInput'
+import { WireTiming, useWireTiming } from '../components/WireTiming'
 import { useConnection } from '../contexts/ConnectionContext'
 import {
   type Api,
@@ -501,8 +502,10 @@ export default function DeviceParametersPage() {
 
   const [readValues, setReadValues] = useState(false)
   const [filter, setFilter] = useState('')
-  const [initElapsedMs, setInitElapsedMs] = useState<number | null>(null)
-  const [readAllElapsedMs, setReadAllElapsedMs] = useState<number | null>(null)
+  // init + read-all both hit the wire (SDO Info enumeration / value reads), so they carry X-Wire-Us
+  // and get the wire-vs-round-trip readout. Reload is a cached server re-fetch (no bus traffic), so
+  // it only has a round-trip figure.
+  const bulkTiming = useWireTiming()
   const [reloadElapsedMs, setReloadElapsedMs] = useState<number | null>(null)
   const [refreshingKeys, setRefreshingKeys] = useState<Set<string>>(new Set())
   const [settingKeys, setSettingKeys] = useState<Set<string>>(new Set())
@@ -529,15 +532,10 @@ export default function DeviceParametersPage() {
   })
 
   const initMutation = useMutation({
-    mutationFn: async () => {
-      const start = performance.now()
-      const res = await api.initializeDeviceParameters(slavePosition, { readValues })
-      setInitElapsedMs(performance.now() - start)
-      return res
-    },
+    mutationFn: () =>
+      bulkTiming.measure(() => api.initializeDeviceParameters(slavePosition, { readValues })),
     onMutate: () => {
-      setInitElapsedMs(null)
-      setReadAllElapsedMs(null)
+      bulkTiming.reset()
       setReloadElapsedMs(null)
     },
     onSuccess: (res) => {
@@ -546,15 +544,9 @@ export default function DeviceParametersPage() {
   })
 
   const readAllMutation = useMutation({
-    mutationFn: async () => {
-      const start = performance.now()
-      const res = await api.readAllDeviceParameters(slavePosition)
-      setReadAllElapsedMs(performance.now() - start)
-      return res
-    },
+    mutationFn: () => bulkTiming.measure(() => api.readAllDeviceParameters(slavePosition)),
     onMutate: () => {
-      setInitElapsedMs(null)
-      setReadAllElapsedMs(null)
+      bulkTiming.reset()
       setReloadElapsedMs(null)
     },
     onSuccess: (res) => {
@@ -563,9 +555,8 @@ export default function DeviceParametersPage() {
   })
 
   async function handleReload() {
+    bulkTiming.reset()
     setReloadElapsedMs(null)
-    setReadAllElapsedMs(null)
-    setInitElapsedMs(null)
     const start = performance.now()
     await paramsQuery.refetch()
     setReloadElapsedMs(performance.now() - start)
@@ -779,10 +770,17 @@ export default function DeviceParametersPage() {
                 >
                   {paramsQuery.isFetching ? 'Reloading…' : 'Reload list'}
                 </button>
-                {(initElapsedMs ?? readAllElapsedMs ?? reloadElapsedMs) !== null && (
-                  <span className="text-xs text-grey-500 font-mono whitespace-nowrap">
-                    took {formatElapsed((initElapsedMs ?? readAllElapsedMs ?? reloadElapsedMs)!)}
-                  </span>
+                {bulkTiming.timing ? (
+                  <WireTiming label="Object dictionary" timing={bulkTiming.timing} />
+                ) : (
+                  reloadElapsedMs !== null && (
+                    <span
+                      className="text-xs text-grey-500 font-mono whitespace-nowrap cursor-help"
+                      title="Round-trip for the cached list re-fetch — no bus traffic, so there is no device wire time to report."
+                    >
+                      took {formatElapsed(reloadElapsedMs)}
+                    </span>
+                  )
                 )}
               </div>
             </div>

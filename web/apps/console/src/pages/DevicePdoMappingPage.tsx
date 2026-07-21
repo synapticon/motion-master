@@ -12,6 +12,7 @@ import {
 import Callout from '../components/Callout'
 import DevicePageHeader from '../components/DevicePageHeader'
 import ParameterPicker from '../components/ParameterPicker'
+import { WireTiming, useWireTiming } from '../components/WireTiming'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline, btnPrimary } from '../utils/styles'
 
@@ -390,10 +391,13 @@ export default function DevicePdoMappingPage() {
   const queryClient = useQueryClient()
   const slavePosition = Number(deviceId)
 
+  const readTiming = useWireTiming()
+  const writeTiming = useWireTiming()
+
   const mappingKey = ['pdoMapping', slavePosition]
   const query = useQuery({
     queryKey: mappingKey,
-    queryFn: () => api.getDevicePdoMapping(slavePosition),
+    queryFn: () => readTiming.measure(() => api.getDevicePdoMapping(slavePosition)),
   })
   const loaded = query.data?.data
 
@@ -449,7 +453,10 @@ export default function DevicePdoMappingPage() {
   }, [draft])
 
   const writeMutation = useMutation({
-    mutationFn: () => api.writeDevicePdoMapping(slavePosition, built.body as PdoMappingRequest),
+    mutationFn: () =>
+      writeTiming.measure(() =>
+        api.writeDevicePdoMapping(slavePosition, built.body as PdoMappingRequest),
+      ),
     onSuccess: res => {
       queryClient.setQueryData(mappingKey, res)
       setWriteError(null)
@@ -519,6 +526,7 @@ export default function DevicePdoMappingPage() {
           </button>
           {dirty && <span className="text-xs text-status-warn">Unsaved changes</span>}
           {!dirty && saved && <span className="text-xs text-status-good">Mapping written ✓</span>}
+          <WireTiming label="PDO mapping" timing={writeTiming.timing ?? readTiming.timing} />
         </div>
 
         {built.error && <Callout variant="error">{built.error}</Callout>}

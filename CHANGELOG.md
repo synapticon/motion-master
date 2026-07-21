@@ -22,6 +22,7 @@ the HTTP/WebSocket API may break between any two alphas.
 ### Added
 
 - Failed device transactions now show their wire time too: a Read/Write SDO or FoE read/write that fails displays the server-measured device wire time next to the browser round-trip, exactly as a successful one does. So a slow failure — e.g. a CoE read that waits out a ~700 ms mailbox timeout — is now visible as `SDO 700 ms · round-trip …` rather than an error with no timing.
+- The Console now shows the device-wire-time-vs-browser-round-trip readout on every page that performs a fieldbus operation, not just SDO/FoE: ESC Registers (read/write), SII/EEPROM read, Diagnostics, DC Sync, the process-data Watchdog (write), PDO Mapping (read/write), and the Object Dictionary enumerate / read-all-values actions on the Parameters page. Each reads the `X-Wire-Us` response header and displays e.g. `Diagnostics 1.8 ms · round-trip 12 ms`, with tooltips explaining the split.
 
 ### Changed
 

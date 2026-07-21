@@ -4,6 +4,7 @@ import type { DeviceDiagnostics, PortDiagnostics } from '@synapticon/motion-mast
 import PageHeader from '../components/PageHeader'
 import DiagnosticsExplainer from '../components/DiagnosticsExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
+import { WireTiming, useWireTiming } from '../components/WireTiming'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
@@ -155,6 +156,7 @@ function Stat({ label, value, hint, cls }: { label: string; value: string; hint?
 function WatchdogControl({ slavePosition, expirations }: { slavePosition: number; expirations: number }) {
   const { api } = useConnection()
   const queryClient = useQueryClient()
+  const setTiming = useWireTiming()
   // null = follow the fetched value; a string = the user is editing.
   const [draft, setDraft] = useState<string | null>(null)
 
@@ -166,7 +168,7 @@ function WatchdogControl({ slavePosition, expirations }: { slavePosition: number
 
   const mutation = useMutation({
     mutationFn: (timeoutMs: number) =>
-      api.setProcessDataWatchdog(slavePosition, { timeoutMs }).then(r => r.data),
+      setTiming.measure(() => api.setProcessDataWatchdog(slavePosition, { timeoutMs })).then(r => r.data),
     onSuccess: data => {
       queryClient.setQueryData(['watchdog', slavePosition], data)
       setDraft(null)
@@ -242,6 +244,7 @@ function WatchdogControl({ slavePosition, expirations }: { slavePosition: number
             <button onClick={() => mutation.mutate(value)} disabled={!canSet} className={btnOutline}>
               {mutation.isPending ? 'Setting…' : 'Set'}
             </button>
+            <WireTiming label="Watchdog" timing={setTiming.timing} className="text-xs text-grey-500 font-mono whitespace-nowrap pb-2" />
           </div>
 
           {mutation.isError && (
@@ -313,10 +316,11 @@ function DeviceCard({ device }: { device: DeviceDiagnostics }) {
 
 export default function FieldbusDiagnosticsPage() {
   const { api } = useConnection()
+  const { timing, measure } = useWireTiming()
 
   const query = useQuery({
     queryKey: ['deviceDiagnostics'],
-    queryFn: () => api.getDeviceDiagnostics(),
+    queryFn: () => measure(() => api.getDeviceDiagnostics()),
     refetchInterval: 2000,
   })
 
@@ -341,7 +345,8 @@ export default function FieldbusDiagnosticsPage() {
       <div className="p-4 sm:px-8 sm:py-7 space-y-6">
         <DiagnosticsExplainer />
 
-        <div className="flex justify-end">
+        <div className="flex items-center justify-end gap-3">
+          <WireTiming label="Diagnostics" timing={timing} />
           <button
             onClick={() => query.refetch()}
             disabled={query.isFetching}

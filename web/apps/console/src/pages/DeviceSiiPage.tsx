@@ -6,13 +6,10 @@ import FilePickerButton from '../components/FilePickerButton'
 import SiiExplainer from '../components/SiiExplainer'
 import SiiView from '../components/SiiView'
 import SiiRawView from '../components/SiiRawView'
+import { WireTiming, useWireTiming } from '../components/WireTiming'
 import { useConnection } from '../contexts/ConnectionContext'
 import { downloadBytes } from '../utils/download'
 import { btnOutline } from '../utils/styles'
-
-// Human-readable fetch duration: sub-second as whole milliseconds, otherwise seconds with one
-// decimal (a full EEPROM read is many small transactions and can take a noticeable moment).
-const formatDuration = (ms: number) => (ms < 1000 ? `${Math.round(ms)} ms` : `${(ms / 1000).toFixed(1)} s`)
 
 export default function DeviceSiiPage() {
   const { deviceId } = useParams()
@@ -20,19 +17,14 @@ export default function DeviceSiiPage() {
   const { api } = useConnection()
   const queryClient = useQueryClient()
   const [showRaw, setShowRaw] = useState(false)
-  const [fetchMs, setFetchMs] = useState<number | null>(null)
+  const { timing, measure } = useWireTiming()
   const [downloading, setDownloading] = useState(false)
   const [writing, setWriting] = useState(false)
   const [writeStatus, setWriteStatus] = useState<{ ok: boolean; msg: string } | null>(null)
 
   const query = useQuery({
     queryKey: ['sii', slavePosition],
-    queryFn: async () => {
-      const start = performance.now()
-      const res = await api.readSii(slavePosition)
-      setFetchMs(performance.now() - start)
-      return res
-    },
+    queryFn: () => measure(() => api.readSii(slavePosition)),
   })
 
   async function fetchRaw(): Promise<Uint8Array> {
@@ -137,11 +129,7 @@ export default function DeviceSiiPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            {!query.isFetching && fetchMs !== null && (
-              <span className="text-xs text-grey-500" title="Time to read and parse the EEPROM">
-                Loaded in {formatDuration(fetchMs)}
-              </span>
-            )}
+            {!query.isFetching && <WireTiming label="SII" timing={timing} />}
             <button
               onClick={() => query.refetch()}
               disabled={query.isFetching}

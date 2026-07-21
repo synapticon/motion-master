@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import DevicePageHeader from '../components/DevicePageHeader'
+import { WireTiming, useWireTiming } from '../components/WireTiming'
 import { useConnection } from '../contexts/ConnectionContext'
 import { parseHexBytes } from '@synapticon/motion-master-client'
 
@@ -46,12 +47,14 @@ export default function DeviceRegistersPage() {
   const [reading, setReading] = useState(false)
   const [readResult, setReadResult] = useState<number[] | null>(null)
   const [readError, setReadError] = useState<string | null>(null)
+  const readTiming = useWireTiming()
 
   const [writeAddress, setWriteAddress] = useState('')
   const [writeValue, setWriteValue] = useState('')
   const [writing, setWriting] = useState(false)
   const [writeOk, setWriteOk] = useState(false)
   const [writeError, setWriteError] = useState<string | null>(null)
+  const writeTiming = useWireTiming()
 
   const addrNum = parseInt(address, 10)
   const addrHex = isNaN(addrNum) ? '—' : `0x${addrNum.toString(16).toUpperCase().padStart(4, '0')}`
@@ -92,7 +95,9 @@ export default function DeviceRegistersPage() {
     setReadResult(null)
     setReadError(null)
     try {
-      const res = await api.readRegister(slavePosition, addrNum, { length: lenNum })
+      const res = await readTiming.measure(() =>
+        api.readRegister(slavePosition, addrNum, { length: lenNum }),
+      )
       setReadResult(res.data.data)
     } catch (err) {
       setReadError(apiError(err))
@@ -124,7 +129,9 @@ export default function DeviceRegistersPage() {
     setWriteOk(false)
     setWriteError(null)
     try {
-      await api.writeRegister(slavePosition, writeAddrNum, { data: writeBytes })
+      await writeTiming.measure(() =>
+        api.writeRegister(slavePosition, writeAddrNum, { data: writeBytes }),
+      )
       setWriteOk(true)
     } catch (err) {
       setWriteError(apiError(err))
@@ -204,9 +211,12 @@ export default function DeviceRegistersPage() {
               </div>
             </div>
 
-            <button onClick={handleRead} disabled={!canRead} className={btnCls}>
-              {reading ? 'Reading…' : 'Read'}
-            </button>
+            <div className="flex items-center gap-3">
+              <button onClick={handleRead} disabled={!canRead} className={btnCls}>
+                {reading ? 'Reading…' : 'Read'}
+              </button>
+              <WireTiming label="Registers" timing={readTiming.timing} />
+            </div>
 
             {readError && (
               <p className="text-xs text-status-bad font-mono">{readError}</p>
@@ -286,9 +296,12 @@ export default function DeviceRegistersPage() {
               </p>
             </div>
 
-            <button onClick={handleWrite} disabled={!canWrite} className={btnCls}>
-              {writing ? 'Writing…' : 'Write'}
-            </button>
+            <div className="flex items-center gap-3">
+              <button onClick={handleWrite} disabled={!canWrite} className={btnCls}>
+                {writing ? 'Writing…' : 'Write'}
+              </button>
+              <WireTiming label="Registers" timing={writeTiming.timing} />
+            </div>
 
             {writeError && (
               <p className="text-xs text-status-bad font-mono">{writeError}</p>

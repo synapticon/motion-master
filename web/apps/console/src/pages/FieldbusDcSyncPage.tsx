@@ -3,6 +3,7 @@ import type { DcSyncStatus } from '@synapticon/motion-master-client'
 import PageHeader from '../components/PageHeader'
 import DcSyncExplainer from '../components/DcSyncExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
+import { WireTiming, useWireTiming } from '../components/WireTiming'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
@@ -55,10 +56,11 @@ function RoleBadge({ device }: { device: DcSyncStatus }) {
 
 export default function FieldbusDcSyncPage() {
   const { api } = useConnection()
+  const { timing, measure } = useWireTiming()
 
   const query = useQuery({
     queryKey: ['dcSync'],
-    queryFn: () => api.getDcSync(),
+    queryFn: () => measure(() => api.getDcSync()),
     refetchInterval: 2000,
   })
 
@@ -105,13 +107,16 @@ export default function FieldbusDcSyncPage() {
           ) : (
             <span />
           )}
-          <button
-            onClick={() => query.refetch()}
-            disabled={query.isFetching}
-            className={btnOutline}
-          >
-            {query.isFetching ? 'Loading…' : 'Refresh'}
-          </button>
+          <div className="flex items-center gap-3">
+            <WireTiming label="DC sync" timing={timing} />
+            <button
+              onClick={() => query.refetch()}
+              disabled={query.isFetching}
+              className={btnOutline}
+            >
+              {query.isFetching ? 'Loading…' : 'Refresh'}
+            </button>
+          </div>
         </div>
 
         {query.isError && (

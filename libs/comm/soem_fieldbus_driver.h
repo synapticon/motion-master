@@ -82,6 +82,9 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// @copydoc FieldbusDriver::slaveState
   uint16_t slaveState(uint16_t position) const override;
 
+  /// @copydoc FieldbusDriver::mailboxProtocols
+  uint16_t mailboxProtocols(uint16_t position) const override;
+
   /// @copydoc FieldbusDriver::configureProcessData
   std::expected<void, std::string> configureProcessData() override;
 

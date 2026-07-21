@@ -88,6 +88,10 @@ class FakeBus : public FieldbusDriver {
     auto it = slaveStates.find(position);
     return it != slaveStates.end() ? it->second : state;
   }
+  // CoE-capable stand-in: PDO mapping is read over the mailbox, not from SII.
+  uint16_t mailboxProtocols(uint16_t) const override {
+    return mm::comm::MailboxConfig::kProtocolCoe;
+  }
   std::expected<void, std::string> configureProcessData() override { return {}; }
   PdoLayout processDataLayout() override { return layout; }
 

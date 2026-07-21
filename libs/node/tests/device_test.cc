@@ -71,6 +71,11 @@ class SdoFakeDriver : public FieldbusDriver {
   int perSubReads = 0;
   /// Cached AL status returned by slaveState() (what mailboxActive()/exchangesProcessData read).
   uint16_t state = 0;
+  /// Mailbox-protocol bits returned by mailboxProtocols() (drives supportsCoe()). Defaults to CoE
+  /// so the CoE-path tests need no setup; a no-CoE slave test clears it to exercise the SII path.
+  uint16_t protocols = mm::comm::MailboxConfig::kProtocolCoe;
+  /// Raw SII image returned by readSii() (empty → error, as for a slave with no readable SII).
+  std::vector<uint8_t> sii;
 
   static uint32_t key(uint16_t index, uint8_t subindex) {
     return (static_cast<uint32_t>(index) << 8) | subindex;
@@ -127,6 +132,13 @@ class SdoFakeDriver : public FieldbusDriver {
   SlaveInfo info;  // identity returned to the Device at construction
   SlaveInfo slaveInfo(uint16_t) const override { return info; }
   uint16_t slaveState(uint16_t) const override { return state; }
+  uint16_t mailboxProtocols(uint16_t) const override { return protocols; }
+  std::expected<std::vector<uint8_t>, std::string> readSii(uint16_t) override {
+    if (sii.empty()) {
+      return std::unexpected("no SII programmed");
+    }
+    return sii;
+  }
   std::expected<void, std::string> configureProcessData() override { return {}; }
   mm::comm::PdoLayout processDataLayout() override { return {}; }
   int exchangeProcessData(std::span<const uint8_t>, std::span<uint8_t>) override { return 0; }
@@ -691,6 +703,50 @@ void programCia402Mapping(SdoFakeDriver& driver) {
   driver.programRead(0x1A00, 0x03, pdoEntry(0x0000, 0x00, 8));   // alignment gap
 }
 
+// A single-entry SII PDO record: the 8-byte PDO header (index, nEntry, syncM, sync, nameIdx,
+// flags) followed by one 8-byte entry (index, subindex, entryNameIdx, dataType, bitLen, flags).
+// This is the shape a simple I/O terminal uses — an EL2008 gives each channel its own 1-bit PDO.
+std::vector<uint8_t> siiPdo1(uint16_t pdoIndex, uint16_t entryIndex, uint8_t subindex,
+                             uint8_t bits) {
+  std::vector<uint8_t> b;
+  const auto push16 = [&](uint16_t v) {
+    b.push_back(static_cast<uint8_t>(v));
+    b.push_back(static_cast<uint8_t>(v >> 8));
+  };
+  push16(pdoIndex);
+  b.push_back(1);  // nEntry
+  b.push_back(0);  // syncM — irrelevant here: direction is split by category, not SM index
+  b.push_back(0);  // synchronization
+  b.push_back(0);  // nameIdx
+  push16(0);       // flags
+  push16(entryIndex);
+  b.push_back(subindex);
+  b.push_back(0);     // entryNameIdx
+  b.push_back(0);     // dataType
+  b.push_back(bits);  // bitLen
+  push16(0);          // flags
+  return b;
+}
+
+// Assembles a raw SII image: a zeroed 128-byte fixed header (content irrelevant to PDO decode),
+// then each (categoryType, payload) record as [type:u16][wordSize:u16][payload], then the End
+// (0xFFFF) marker. Category 51 = RxPDO (outputs), 50 = TxPDO (inputs).
+std::vector<uint8_t> buildSii(
+    const std::vector<std::pair<uint16_t, std::vector<uint8_t>>>& categories) {
+  std::vector<uint8_t> img(128, 0);
+  const auto push16 = [&](uint16_t v) {
+    img.push_back(static_cast<uint8_t>(v));
+    img.push_back(static_cast<uint8_t>(v >> 8));
+  };
+  for (const auto& [type, payload] : categories) {
+    push16(type);
+    push16(static_cast<uint16_t>(payload.size() / 2));  // size in words
+    img.insert(img.end(), payload.begin(), payload.end());
+  }
+  push16(0xFFFF);
+  return img;
+}
+
 TEST(DeviceReadFlatPdoMapping, BuildsEntriesWithAccumulatedBitOffsets) {
   SdoFakeDriver driver;
   programCia402Mapping(driver);
@@ -781,6 +837,82 @@ TEST(DeviceReadFlatPdoMapping, MaxAssignmentCountTerminates) {
   auto result = device.readFlatPdoMapping();
   ASSERT_TRUE(result.has_value());
   EXPECT_TRUE(device.flatPdoMapping().outputs.empty());
+}
+
+// --- readFlatPdoMapping: SII fallback for mailbox-less slaves ----------------
+
+TEST(DeviceReadFlatPdoMapping, NoCoeSlaveReadsOutputsFromSii) {
+  // An EL2008-style digital-output terminal: no CoE mailbox, eight 1-bit RxPDOs (0x1600..0x1607
+  // → 0x7000:01..0x7070:01) fixed in SII. supportsCoe() is false, so the whole mapping is read
+  // from the SII EEPROM, and the eight concatenated single-entry PDOs flatten to eight 1-bit
+  // outputs at consecutive offsets — 8 bits = the 1 output byte the driver's window reserves.
+  SdoFakeDriver driver;
+  driver.protocols = 0;  // no mailbox → no CoE
+  std::vector<uint8_t> rxCat;
+  for (uint16_t ch = 0; ch < 8; ++ch) {
+    const auto pdo = siiPdo1(static_cast<uint16_t>(0x1600 + ch),
+                             static_cast<uint16_t>(0x7000 + ch * 0x10), 0x01, 1);
+    rxCat.insert(rxCat.end(), pdo.begin(), pdo.end());
+  }
+  driver.sii = buildSii({{51, rxCat}});  // category 51 = RxPDO (outputs)
+  Device device(1, driver);
+
+  ASSERT_TRUE(device.readFlatPdoMapping().has_value());
+  const auto& m = device.flatPdoMapping();
+  ASSERT_EQ(m.outputs.size(), 8u);
+  EXPECT_EQ(m.outputs[0].index, 0x7000);
+  EXPECT_EQ(m.outputs[0].subindex, 0x01);
+  EXPECT_EQ(m.outputs[0].bitLength, 1u);
+  EXPECT_EQ(m.outputs[0].bitOffset, 0u);
+  EXPECT_EQ(m.outputs[7].index, 0x7070);
+  EXPECT_EQ(m.outputs[7].bitOffset, 7u);
+  EXPECT_EQ(m.outputBits, 8u);
+  EXPECT_TRUE(m.inputs.empty());
+}
+
+TEST(DeviceReadFlatPdoMapping, SiiTxPdoCategoryMapsToInputs) {
+  // Direction is split by category, independent of the SM index: category 51 → outputs,
+  // category 50 → inputs, each accumulating its own bit offsets.
+  SdoFakeDriver driver;
+  driver.protocols = 0;
+  driver.sii = buildSii({{51, siiPdo1(0x1600, 0x7000, 0x01, 8)},    // 8-bit output
+                         {50, siiPdo1(0x1A00, 0x6000, 0x01, 8)}});  // 8-bit input
+  Device device(1, driver);
+
+  ASSERT_TRUE(device.readFlatPdoMapping().has_value());
+  const auto& m = device.flatPdoMapping();
+  ASSERT_EQ(m.outputs.size(), 1u);
+  EXPECT_EQ(m.outputs[0].index, 0x7000);
+  EXPECT_EQ(m.outputBits, 8u);
+  ASSERT_EQ(m.inputs.size(), 1u);
+  EXPECT_EQ(m.inputs[0].index, 0x6000);
+  EXPECT_EQ(m.inputs[0].bitOffset, 0u);
+  EXPECT_EQ(m.inputBits, 8u);
+}
+
+TEST(DeviceReadFlatPdoMapping, NoCoeSlaveWithoutPdoCategoriesYieldsEmptyMapping) {
+  // An EK1100-style coupler: no CoE mailbox and no PDO categories in SII at all → no process data.
+  // The SII path succeeds with an empty mapping, so buildProcessImage skips the device.
+  SdoFakeDriver driver;
+  driver.protocols = 0;
+  driver.sii = buildSii({});  // fixed header + End marker only
+  Device device(1, driver);
+
+  ASSERT_TRUE(device.readFlatPdoMapping().has_value());
+  EXPECT_TRUE(device.flatPdoMapping().outputs.empty());
+  EXPECT_TRUE(device.flatPdoMapping().inputs.empty());
+}
+
+TEST(DeviceReadFlatPdoMapping, CoeSlaveWithEmptyAssignmentDoesNotFallBackToSii) {
+  // A CoE drive that assigns no PDOs must report an empty mapping — never silently adopt its SII
+  // defaults. The SII here *would* yield an output, but supportsCoe() being true must ignore it.
+  SdoFakeDriver driver;  // protocols defaults to CoE
+  driver.sii = buildSii({{51, siiPdo1(0x1600, 0x7000, 0x01, 8)}});
+  Device device(1, driver);  // 0x1C12/0x1C13 unprogrammed → empty CoE assignment
+
+  ASSERT_TRUE(device.readFlatPdoMapping().has_value());
+  EXPECT_TRUE(device.flatPdoMapping().outputs.empty());
+  EXPECT_TRUE(device.flatPdoMapping().inputs.empty());
 }
 
 // --- pack / unpack mapping entry --------------------------------------------

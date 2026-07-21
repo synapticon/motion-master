@@ -14,6 +14,7 @@
 #include <utility>
 #include <vector>
 
+#include "comm/sii.h"
 #include "core/util.h"
 #include "node/cia402.h"
 #include "node/device_parameter.h"
@@ -72,6 +73,10 @@ bool Device::mailboxActive() const {
   // and BOOT's mailbox is FoE-only, so neither counts here.
   return state == EtherCatState::PreOp || state == EtherCatState::SafeOp ||
          state == EtherCatState::Op;
+}
+
+bool Device::supportsCoe() const {
+  return (driver_.mailboxProtocols(slavePosition_) & mm::comm::MailboxConfig::kProtocolCoe) != 0;
 }
 
 bool Device::exchangesProcessData() const {
@@ -481,7 +486,64 @@ std::expected<PdoMapping, std::string> Device::readPdoMapping() {
   return mapping;
 }
 
+std::expected<FlatPdoMapping, std::string> Device::readSiiPdoMapping() {
+  auto raw = readSii();
+  if (!raw) {
+    return std::unexpected(std::format("SII read failed: {}", raw.error()));
+  }
+  auto sii = mm::comm::parseSii(*raw);
+  if (!sii) {
+    return std::unexpected(std::format("SII parse failed: {}", sii.error()));
+  }
+  // Flatten one direction's default PDOs into window-ordered entries, deriving each entry's
+  // bitOffset from the running offset — identical to readPdoAssignment's CoE path. A SOMANET-free
+  // simple slave packs all its PDOs (e.g. an EL2008's eight 1-bit 0x160x objects) into one SII
+  // category record; parseSii already unpacks the concatenated PDO structs, so this just chains
+  // their entries. An entryIndex of 0 is an alignment gap (same convention as an unpacked CoE
+  // mapping word) and is preserved so later offsets stay aligned.
+  const auto flatten = [](const std::vector<mm::comm::SiiCategoryPdoElement>& pdos,
+                          std::vector<PdoMappingEntry>& out, uint32_t& totalBits) {
+    for (const auto& pdo : pdos) {
+      if (pdo.pdoIndex == 0) {
+        continue;  // trailing zero padding within the category payload — not a real PDO
+      }
+      for (const auto& e : pdo.entries) {
+        out.push_back(PdoMappingEntry{
+            .index = e.entryIndex,
+            .subindex = e.subindex,
+            .bitLength = e.bitLen,
+            .bitOffset = totalBits,
+        });
+        totalBits += e.bitLen;
+      }
+    }
+  };
+  FlatPdoMapping flat;
+  flatten(sii->category.rxPdos, flat.outputs, flat.outputBits);  // RxPDO (master→slave) = outputs
+  flatten(sii->category.txPdos, flat.inputs, flat.inputBits);    // TxPDO (slave→master) = inputs
+  return flat;
+}
+
 std::expected<void, std::string> Device::readFlatPdoMapping() {
+  // A slave with no CoE mailbox (an EtherCAT coupler / simple I/O terminal) cannot answer the
+  // 0x1C12/0x1C13 SDO reads — its PDO layout is fixed in the SII EEPROM. Read from SII and skip
+  // the CoE attempt entirely (which would only time out). Gated on the fixed capability, not on
+  // "CoE came back empty", so a real CoE drive with a deliberately-cleared mapping is never
+  // silently overwritten from its SII defaults.
+  if (!supportsCoe()) {
+    auto siiFlat = readSiiPdoMapping();
+    if (!siiFlat) {
+      return std::unexpected(siiFlat.error());
+    }
+    flatPdoMapping_ = std::move(*siiFlat);
+    spdlog::debug(
+        "Device {}: no CoE mailbox - PDO mapping from SII: {} output entries ({} bits), {} input "
+        "entries ({} bits)",
+        slavePosition_, flatPdoMapping_.outputs.size(), flatPdoMapping_.outputBits,
+        flatPdoMapping_.inputs.size(), flatPdoMapping_.inputBits);
+    return {};
+  }
+
   // The flat view is the grouped mapping with object boundaries dropped: entries keep their
   // (already derived) bitOffset, and each direction's total is the sum of its entry widths.
   auto grouped = readPdoMapping();

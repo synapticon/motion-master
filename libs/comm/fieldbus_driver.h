@@ -190,6 +190,9 @@ struct FmmuConfig {
 
 /// @brief Mailbox configuration for a slave (the CoE/FoE/EoE/SoE transport windows).
 struct MailboxConfig {
+  /// Supported-protocol bit for CoE within @c protocols (matches SOEM's @c ECT_MBXPROT_COE).
+  static constexpr uint16_t kProtocolCoe = 0x04;
+
   uint16_t writeLength = 0;  ///< Write (master→slave) mailbox length in bytes; 0 if no mailbox.
   uint16_t writeOffset = 0;  ///< Write mailbox physical ESC offset.
   uint16_t readLength = 0;   ///< Read (slave→master) mailbox length in bytes.
@@ -371,6 +374,17 @@ class FieldbusDriver {
   /// state is known. Call @c readStates() to refresh the cache from the hardware. Lets callers
   /// (e.g. @c Device) derive online / exchanging status without a redundant cached copy.
   virtual uint16_t slaveState(uint16_t position) const = 0;
+
+  /// @brief Returns the slave's advertised mailbox-protocol bits without any bus I/O.
+  ///
+  /// The same EEPROM-derived value @c busConfig() reports in @c MailboxConfig::protocols (SOEM's
+  /// cached @c mbx_proto): 0x01 AoE, 0x02 EoE, 0x04 CoE (@c MailboxConfig::kProtocolCoe), 0x08 FoE,
+  /// 0x10 SoE, 0x20 VoE. @c 0 when the slave has no mailbox at all. Lets a caller (e.g. @c Device)
+  /// decide whether CoE is even possible before attempting an SDO — a mailbox-less slave (an
+  /// EtherCAT coupler / simple I/O terminal) returns 0, so its PDO mapping must be read from SII
+  /// rather than the CoE @c 0x1C12 / @c 0x1C13 objects. Unlike a live-state check, this is a fixed
+  /// capability. The base returns 0 (no mailbox); real mailbox transports override.
+  virtual uint16_t mailboxProtocols(uint16_t /*position*/) const { return 0; }
 
   /// @brief Maps the process data and lays out the IOmap (one-time, control-plane).
   ///

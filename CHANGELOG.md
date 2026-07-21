@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- Simple EtherCAT slaves that have no CoE mailbox now work — EtherCAT couplers (e.g. Beckhoff EK1100) and I/O terminals (e.g. Beckhoff EL2008). When a device has no object dictionary to query over CoE, its PDO mapping is read from the SII/EEPROM instead, so a mailbox-less digital-output terminal's channels now appear on the Process Image and Process Data pages and can be driven by writing their RxPDO outputs. A coupler with no process data of its own contributes nothing, as expected.
+
 ## [6.0.0-alpha.56] - 2026-07-21
 
 ### Added

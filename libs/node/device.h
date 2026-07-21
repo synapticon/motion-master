@@ -98,6 +98,15 @@ class Device {
   /// @c DeviceManager::getDeviceStates to refresh from the hardware.
   bool mailboxActive() const;
 
+  /// @brief Whether the slave advertises a CoE mailbox — a fixed capability, not a live check.
+  ///
+  /// Derived from the driver's cached EEPROM capability bits (@c FieldbusDriver::mailboxProtocols),
+  /// independent of AL state — unlike @c mailboxActive(), which asks whether the mailbox is
+  /// reachable @e now. @c false means CoE is impossible on this slave (an EtherCAT coupler / simple
+  /// I/O terminal), so its PDO mapping is read from the SII EEPROM rather than the @c 0x1C12 /
+  /// @c 0x1C13 CoE objects. No bus I/O.
+  bool supportsCoe() const;
+
   /// @brief Whether the device is in a process-data-exchanging state (SAFE-OP or OP, error
   ///        bit clear).
   ///
@@ -521,6 +530,18 @@ class Device {
   ///         an error string if a referenced mapping object fails to read.
   std::expected<std::vector<PdoMappingObject>, std::string> readPdoAssignment(
       uint16_t assignmentIndex);
+
+  /// @brief Builds the flat PDO mapping from the slave's SII EEPROM — the fallback for slaves with
+  ///        no CoE mailbox (couplers / simple I/O terminals) whose mapping is fixed in EEPROM.
+  ///
+  /// Reads the raw SII (@c readSii), decodes it (@c mm::comm::parseSii), and flattens the default
+  /// PDO categories: RxPDOs (category 51, master→slave) → outputs, TxPDOs (category 50,
+  /// slave→master) → inputs. The direction split is by category, never by Sync-Manager index — a
+  /// mailbox-less slave's process-data SM is SM0, so an SM2/SM3 assumption would misclassify it.
+  /// Each entry's @c bitOffset is derived from the running per-direction offset, exactly as
+  /// @c readPdoAssignment does for the CoE path. Used by @c readFlatPdoMapping when
+  /// @c supportsCoe() is @c false.
+  std::expected<FlatPdoMapping, std::string> readSiiPdoMapping();
 
   uint16_t slavePosition_;
   mm::comm::FieldbusDriver& driver_;

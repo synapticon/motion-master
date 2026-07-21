@@ -91,6 +91,11 @@ class FakeDriver : public FieldbusDriver {
   }
 
   uint16_t slaveState(uint16_t) const override { return cachedState_; }
+  // Emulated SOMANET drives all speak CoE, so their PDO mapping is read over the mailbox
+  // (not from SII) — the CoE-mapping reads these tests program are what drive readFlatPdoMapping.
+  uint16_t mailboxProtocols(uint16_t) const override {
+    return mm::comm::MailboxConfig::kProtocolCoe;
+  }
 
   std::expected<std::vector<SlaveDiagnostics>, std::string> readDiagnostics(
       const std::vector<uint16_t>&) override {

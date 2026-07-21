@@ -516,6 +516,13 @@ uint16_t SoemFieldbusDriver::slaveState(uint16_t position) const {
   return ctx_ ? ctx_->slavelist[position].state : 0;
 }
 
+uint16_t SoemFieldbusDriver::mailboxProtocols(uint16_t position) const {
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  // SII-derived mailbox-protocol bits, cached by ecx_config_init — no bus I/O. The same
+  // mbx_proto busConfig() reports in MailboxConfig::protocols; 0 when the slave has no mailbox.
+  return ctx_ ? ctx_->slavelist[position].mbx_proto : 0;
+}
+
 std::expected<std::vector<FieldbusDriver::SlaveStateRaw>, std::string>
 SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
   std::lock_guard<std::mutex> lock(controlPlaneMutex_);

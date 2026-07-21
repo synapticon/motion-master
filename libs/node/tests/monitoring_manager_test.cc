@@ -77,6 +77,10 @@ class FakeBus : public FieldbusDriver {
 
   std::expected<int, std::string> scan() override { return 1; }
   uint16_t slaveState(uint16_t) const override { return state; }
+  // CoE-capable stand-in: PDO mapping is read over the mailbox, not from SII.
+  uint16_t mailboxProtocols(uint16_t) const override {
+    return mm::comm::MailboxConfig::kProtocolCoe;
+  }
   std::expected<void, std::string> configureProcessData() override { return {}; }
   PdoLayout processDataLayout() override { return layout; }
   int exchangeProcessData(std::span<const uint8_t>, std::span<uint8_t> inputs) override {

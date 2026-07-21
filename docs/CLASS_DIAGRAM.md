@@ -13,11 +13,12 @@ subsystem on the stack and wires references between them. There is no `App` clas
 ```mermaid
 classDiagram
     class CyclicTask {
-        <<interface>>
-        +execute()*
+        <<interface — mm::core>>
+        +execute(CycleContext)*
     }
-    class ProcessDataTask {
-        +execute()
+    class ProcessDataCyclicTask {
+        <<mm::node>>
+        +execute(CycleContext)
         -DeviceManager& deviceManager_
     }
     class GameLoop {
@@ -92,7 +93,7 @@ classDiagram
         -FieldbusDriver& driver_
         -uint16 slavePosition_
         -map~uint32,DeviceParameter~ parameters_
-        -PdoMappings pdoMappings_
+        -FlatPdoMapping flatPdoMapping_
         -const ParameterCache* parameterCache_
     }
     class ParameterCache {
@@ -117,7 +118,7 @@ classDiagram
         +DeviceParameterValue value
         +uint16 index, subindex
     }
-    class PdoMappings
+    class FlatPdoMapping
     class ProcessData {
         +readPdo() / writePdo() «lock-free»
         +healthy()
@@ -150,14 +151,14 @@ classDiagram
         +vendor-specific OD access
     }
 
-    CyclicTask <|.. ProcessDataTask
+    CyclicTask <|.. ProcessDataCyclicTask
     FieldbusDriver <|.. SoemFieldbusDriver
     ProfileDevice <|-- Cia402Drive
     Cia402Drive <|-- SomanetDrive
 
     GameLoop o-- "0..*" CyclicTask : non-owning
     GameLoop *-- CyclicTimer
-    ProcessDataTask ..> DeviceManager : ref
+    ProcessDataCyclicTask ..> DeviceManager : ref
     HttpServer ..> DeviceManager : ref
     HttpServer ..> MonitoringManager : ref
     HttpServer o-- "0..*" RoutePlugin : addRoutes (RegisterRoutesFn)
@@ -179,7 +180,7 @@ classDiagram
     Device ..> ProcessData : ref (live IO image)
     Device ..> ParameterCache : ref (OD-definition cache)
     Device *-- "0..*" DeviceParameter
-    Device *-- PdoMappings
+    Device *-- FlatPdoMapping
     ProfileDevice ..> Device : borrows (non-owning)
 ```
 
@@ -192,7 +193,7 @@ classDiagram
 |---|---|---|---|---|
 | `GameLoop` | `tasks_` | `vector<CyclicTask*>` | No — caller owns | `apps/motion_master/game_loop.h` |
 | `GameLoop` | `timer_` | `CyclicTimer` | Yes | `apps/motion_master/game_loop.h` |
-| `ProcessDataTask` | `deviceManager_` | `DeviceManager&` | No | `apps/motion_master/process_data_task.h` |
+| `ProcessDataCyclicTask` | `deviceManager_` | `DeviceManager&` | No | `libs/node/process_data_cyclic_task.h` |
 | `HttpServer` | `deviceManager_`, `monitoringManager_` | `&` | No | `apps/motion_master/http_server.h` |
 | `HttpServer` | `routeModules_` | `vector<mm::api::RegisterRoutesFn>` | **Yes** — queued plug-ins, run once at `start()` | `apps/motion_master/http_server.h` |
 | `WebSocketServer` | — (publish target for `MonitoringManager::setPublish`) | — | No | `apps/motion_master/ws_server.h` |
@@ -209,7 +210,7 @@ classDiagram
 | `Device` | `driver_` | `FieldbusDriver&` | No — same instance `DeviceManager` owns | `libs/node/device.h` |
 | `Device` | `processData_` | `ProcessData*` | No — points at `DeviceManager::pd_` | `libs/node/device.h` |
 | `Device` | `parameters_` | `unordered_map<uint32_t, DeviceParameter>` | **Yes** | `libs/node/device.h` |
-| `Device` | `pdoMappings_` | `PdoMappings` | **Yes** | `libs/node/device.h` |
+| `Device` | `flatPdoMapping_` | `FlatPdoMapping` | **Yes** | `libs/node/device.h` |
 | `Device` | `parameterCache_` | `const ParameterCache*` | No — points at `DeviceManager::parameterCache_` | `libs/node/device.h` |
 
 ## Inheritance
@@ -219,12 +220,12 @@ points; the third is a stateless view chain:
 
 | Derived | Base | File |
 |---|---|---|
-| `ProcessDataTask` | `CyclicTask` | `apps/motion_master/process_data_task.h` |
+| `ProcessDataCyclicTask` | `CyclicTask` (`libs/core/cyclic_task.h`) | `libs/node/process_data_cyclic_task.h` |
 | `SoemFieldbusDriver` | `FieldbusDriver` | `libs/comm/soem_fieldbus_driver.h` |
 | `Cia402Drive` | `ProfileDevice` | `libs/node/cia402_drive.h` |
 | `SomanetDrive` | `Cia402Drive` | `libs/node/somanet_drive.h` |
 
-`SpoeDriver` (SPoE) is a further `FieldbusDriver` implementation noted in the design docs.
+`SpoeFieldbusDriver` (SPoE) is a further `FieldbusDriver` implementation noted in the design docs.
 
 **The drive-profile chain is *not* `Device` inheritance.** `ProfileDevice` and its subclasses
 do **not** derive from `Device` and are not owned by `DeviceManager`; each *borrows* a `Device&`

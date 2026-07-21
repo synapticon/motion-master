@@ -234,6 +234,10 @@ const ReadSdoCard = memo(function ReadSdoCard({
       setReadSdoWireMs(wireTimeMs(res))
       setResult(res.data.data)
     } catch (err) {
+      // A failed transaction still consumed wire time (an SDO read waits out the mailbox timeout);
+      // the backend attaches X-Wire-Us to the error too, so show the same timing as on success.
+      setReadSdoElapsedMs(performance.now() - start)
+      if (err instanceof Response) setReadSdoWireMs(wireTimeMs(err))
       setError(apiError(err))
     } finally {
       setUploading(false)
@@ -369,6 +373,9 @@ const WriteSdoCard = memo(function WriteSdoCard({
       setWriteSdoWireMs(wireTimeMs(res))
       setDlOk(encodedBytes)
     } catch (err) {
+      // Show the wire time on failure too — the backend attaches X-Wire-Us to the error.
+      setWriteSdoElapsedMs(performance.now() - start)
+      if (err instanceof Response) setWriteSdoWireMs(wireTimeMs(err))
       setDlError(apiError(err))
     } finally {
       setDownloading(false)

@@ -5,6 +5,7 @@
 #include <chrono>
 #include <functional>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -68,6 +69,27 @@ Res* setCorsOrigin(Res* res, std::string_view corsOrigin) {
   return res->writeHeader("Access-Control-Allow-Origin", corsOrigin);
 }
 
+/// @brief Attaches the server-measured wire-time header (`X-Wire-Us`, microseconds) to a response.
+///
+/// @p wireUs is the time spent in the on-device transaction itself — control-plane lock acquire
+/// plus the mailbox/ESC wire round-trip — *not* the end-to-end HTTP round-trip, which a
+/// cross-origin browser client observes as much larger (TLS + transport overhead). Reporting it
+/// lets the client attribute the wire cost to the device and the remainder to the
+/// browser/transport. Because the value rides a header rather than the body, it is the one uniform
+/// timing channel that works for any response shape (JSON or raw octet-stream) without touching
+/// each endpoint's body schema. The header is CORS-exposed so the PWA can read it cross-origin.
+/// Emitted on **both** success and failure — a failed transaction still consumed wire time (e.g. an
+/// SDO read that waits out the mailbox timeout), and the client shows it the same way; failures
+/// route through sendError()'s
+/// @c wireUs parameter so the header lands after writeStatus(). Call **before** the body/end() (uWS
+/// requires all headers written before the body). Returns @p res for chaining, mirroring
+/// setCorsOrigin.
+template <typename Res>
+Res* setWireTime(Res* res, std::chrono::microseconds wireUs) {
+  return res->writeHeader("Access-Control-Expose-Headers", "X-Wire-Us")
+      ->writeHeader("X-Wire-Us", std::to_string(wireUs.count()));
+}
+
 /// @brief Writes @p body as a 200 application/json response with the CORS header.
 ///
 /// Uses the `replace` error handler so a string-typed value carrying non-UTF-8 bytes (e.g. a
@@ -96,11 +118,21 @@ void sendBytes(Res* res, std::string_view corsOrigin, std::string_view contentTy
 
 /// @brief Writes a @p status response carrying a `{"error": message}` JSON body and the CORS
 /// header.
+///
+/// Pass @p wireUs to attach the `X-Wire-Us` timing header to the failure the same way a success
+/// carries it — a failed device transaction still consumed wire time (an SDO read that waits out
+/// the mailbox timeout, a partial FoE transfer), and the client renders it identically. The header
+/// is written after writeStatus() so uWS keeps the non-200 status (headers-before-status would
+/// force a default 200).
 template <typename Res>
 void sendError(Res* res, std::string_view status, std::string_view corsOrigin,
-               std::string_view message) {
-  setCorsOrigin(res->writeStatus(status), corsOrigin)
-      ->writeHeader("Content-Type", "application/json")
+               std::string_view message,
+               std::optional<std::chrono::microseconds> wireUs = std::nullopt) {
+  auto* r = setCorsOrigin(res->writeStatus(status), corsOrigin);
+  if (wireUs) {
+    r = setWireTime(r, *wireUs);
+  }
+  r->writeHeader("Content-Type", "application/json")
       ->end(nlohmann::json{{"error", std::string(message)}}.dump());
 }
 
@@ -108,23 +140,6 @@ void sendError(Res* res, std::string_view status, std::string_view corsOrigin,
 template <typename Res>
 void sendStatus(Res* res, std::string_view status, std::string_view corsOrigin) {
   setCorsOrigin(res->writeStatus(status), corsOrigin)->end();
-}
-
-/// @brief Attaches the server-measured wire-time header (`X-Wire-Us`, microseconds) to a response.
-///
-/// @p wire is the time spent in the on-device transaction itself — control-plane lock acquire plus
-/// the mailbox/ESC wire round-trip — *not* the end-to-end HTTP round-trip, which a cross-origin
-/// browser client observes as much larger (TLS + transport overhead). Reporting it lets the client
-/// attribute the wire cost to the device and the remainder to the browser/transport. Because the
-/// value rides a header rather than the body, it is the one uniform timing channel that works for
-/// any response shape (JSON or raw octet-stream) without touching each endpoint's body schema. The
-/// header is CORS-exposed so the PWA can read it cross-origin. Call **before** sendJson()/end()
-/// (uWS requires all headers written before the body). Returns @p res for chaining, mirroring
-/// setCorsOrigin.
-template <typename Res>
-Res* setWireTime(Res* res, std::chrono::microseconds wire) {
-  return res->writeHeader("Access-Control-Expose-Headers", "X-Wire-Us")
-      ->writeHeader("X-Wire-Us", std::to_string(wire.count()));
 }
 
 }  // namespace mm::api

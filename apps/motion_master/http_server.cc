@@ -1098,7 +1098,7 @@ void HttpServer::run() {
              const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
                  std::chrono::steady_clock::now() - t0);
              if (!r) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error(), wireUs);
                return;
              }
              setWireTime(res, wireUs);
@@ -1144,7 +1144,7 @@ void HttpServer::run() {
                const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
                    std::chrono::steady_clock::now() - t0);
                if (!r) {
-                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
+                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error(), wireUs);
                  return;
                }
                setWireTime(res, wireUs);
@@ -1176,7 +1176,7 @@ void HttpServer::run() {
              const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
                  std::chrono::steady_clock::now() - t0);
              if (!r) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error(), wireUs);
                return;
              }
              setWireTime(res, wireUs);
@@ -1216,7 +1216,7 @@ void HttpServer::run() {
                const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
                    std::chrono::steady_clock::now() - t0);
                if (!r) {
-                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
+                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error(), wireUs);
                  return;
                }
                setWireTime(res, wireUs);

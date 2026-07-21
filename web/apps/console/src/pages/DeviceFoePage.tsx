@@ -172,14 +172,20 @@ export default function DeviceFoePage() {
 
   // Read raw bytes for an arbitrary FoE filename, throwing on a non-OK response. `wireMs` is the
   // server-measured FoE transfer time (from the `X-Wire-Us` header), null if the header is absent.
+  // A failed transfer still consumed wire time and the backend attaches the header to the error, so
+  // the thrown Error carries `wireMs` for the caller to surface the same timing as on success.
   async function readRaw(name: string): Promise<{ bytes: Uint8Array; wireMs: number | null }> {
     const url = `${api.baseUrl}/api/devices/${slavePosition}/files/${encodeFilename(name)}`
     const response = await fetch(url)
+    const wireMs = wireTimeMs(response)
     if (!response.ok) {
       const json = await response.json().catch(() => null)
-      throw new Error(json?.error ?? `HTTP ${response.status}`)
+      const e = new Error(json?.error ?? `HTTP ${response.status}`) as Error & {
+        wireMs: number | null
+      }
+      e.wireMs = wireMs
+      throw e
     }
-    const wireMs = wireTimeMs(response)
     return { bytes: new Uint8Array(await response.arrayBuffer()), wireMs }
   }
 
@@ -199,6 +205,11 @@ export default function DeviceFoePage() {
       setResult(bytes)
       setView('bytes')
     } catch (err) {
+      // Surface the wire time on failure too — readRaw attaches it to the thrown Error.
+      setReadMs(performance.now() - start)
+      if (err && typeof err === 'object' && 'wireMs' in err) {
+        setReadWireMs((err as { wireMs: number | null }).wireMs)
+      }
       setError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
       setReading(false)
@@ -288,12 +299,14 @@ export default function DeviceFoePage() {
         method: 'PUT',
         body: new Blob([writeBytes as BlobPart]),
       })
+      // Record timing as soon as the fetch resolves, before the ok-check, so a failed write shows
+      // the same wire time as a successful one (the backend attaches X-Wire-Us to the error too).
+      setWriteMs(performance.now() - start)
+      setWriteWireMs(wireTimeMs(response))
       if (!response.ok) {
         const json = await response.json().catch(() => null)
         throw new Error(json?.error ?? `HTTP ${response.status}`)
       }
-      setWriteMs(performance.now() - start)
-      setWriteWireMs(wireTimeMs(response))
       setWriteOk(true)
       if (isSynapticon && files) handleList()
     } catch (err) {
@@ -368,6 +381,11 @@ export default function DeviceFoePage() {
             {error && (
               <p className="text-xs text-status-bad font-mono">{error}</p>
             )}
+            {error && readMs !== null && readWireMs !== null && (
+              <p className="text-xs text-grey-500 font-mono">
+                <FoeTiming wireMs={readWireMs} roundTripMs={readMs} />
+              </p>
+            )}
           </div>
         </section>
 
@@ -434,6 +452,11 @@ export default function DeviceFoePage() {
             </button>
             {writeError && (
               <p className="text-xs text-status-bad font-mono">{writeError}</p>
+            )}
+            {writeError && writeMs !== null && writeWireMs !== null && (
+              <p className="text-xs text-grey-500 font-mono">
+                <FoeTiming wireMs={writeWireMs} roundTripMs={writeMs} />
+              </p>
             )}
             {writeOk && (
               <p className="text-xs text-status-good font-mono">

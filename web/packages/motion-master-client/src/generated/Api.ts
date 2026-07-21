@@ -1046,7 +1046,7 @@ export class Api<
       void | {
         /**
          * Human-readable error message from the driver
-         * @example "FPRD slave 1: wkc=0"
+         * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
          */
         error: string;
       }
@@ -1084,7 +1084,7 @@ export class Api<
       void | {
         /**
          * Human-readable error message from the driver
-         * @example "FPRD slave 1: wkc=0"
+         * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
          */
         error: string;
       }
@@ -1113,7 +1113,7 @@ export class Api<
       void | {
         /**
          * Human-readable error message from the driver
-         * @example "FPRD slave 1: wkc=0"
+         * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
          */
         error: string;
       }
@@ -1143,7 +1143,7 @@ export class Api<
       void | {
         /**
          * Human-readable error message from the driver
-         * @example "FPRD slave 1: wkc=0"
+         * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
          */
         error: string;
       }

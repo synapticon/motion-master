@@ -19,6 +19,14 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- Failed device transactions now show their wire time too: a Read/Write SDO or FoE read/write that fails displays the server-measured device wire time next to the browser round-trip, exactly as a successful one does. So a slow failure — e.g. a CoE read that waits out a ~700 ms mailbox timeout — is now visible as `SDO 700 ms · round-trip …` rather than an error with no timing.
+
+### Changed
+
+- The `X-Wire-Us` timing header is now also sent on the error (500) response of the SDO and FoE read/write endpoints, not only on success — a failed transaction still consumed wire time, and clients can attribute it the same way.
+
 ### Fixed
 
 - A CoE SDO read or write that the device never answers (a mailbox-receive timeout) now reports `… failed (no response — mailbox timeout)` instead of a bare `… failed`. This distinguishes "the device didn't respond at all" from "the device refused the request" (which still shows the specific SDO abort code, e.g. `SDO abort 0x08000000: General error`) — so, for example, reading an undefined object subindex no longer looks like an unexplained failure.

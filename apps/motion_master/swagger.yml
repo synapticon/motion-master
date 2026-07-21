@@ -1522,7 +1522,7 @@ paths:
         "404":
           description: No device at the given bus position
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
     put:
       summary: Download an object dictionary entry to a device (CoE SDO download)
       operationId: sdoDownload
@@ -1595,7 +1595,7 @@ paths:
         "404":
           description: No device at the given bus position
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/files/{filename}:
     get:
       summary: Read a file from a device via FoE (File over EtherCAT)
@@ -1638,7 +1638,7 @@ paths:
         "404":
           description: No device at the given bus position
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
     put:
       summary: Write a file to a device via FoE (File over EtherCAT)
       operationId: foeWriteFile
@@ -1689,7 +1689,7 @@ paths:
         "404":
           description: No device at the given bus position
         "500":
-          $ref: "#/components/responses/DriverError"
+          $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/sii:
     get:
       summary: Read a device's SII (Slave Information Interface / EEPROM)
@@ -3615,8 +3615,11 @@ components:
         control-plane lock acquire plus the mailbox/ESC wire round-trip. This is the wire
         cost only, far smaller than the end-to-end HTTP round-trip a cross-origin browser
         client observes (which additionally includes TLS and transport overhead). Present on
-        the success response of endpoints that perform a fieldbus transaction; CORS-exposed
-        (`Access-Control-Expose-Headers`) so a cross-origin client may read it.
+        both the success **and** the driver-error (500) response of endpoints that perform a
+        fieldbus transaction — a failed transaction still consumed wire time (e.g. an SDO read
+        that waits out the mailbox timeout) — so a client can attribute the cost the same way
+        either way. CORS-exposed (`Access-Control-Expose-Headers`) so a cross-origin client may
+        read it.
       schema:
         type: integer
         minimum: 0
@@ -3634,3 +3637,21 @@ components:
                 type: string
                 description: Human-readable error message from the driver
                 example: "FPRD slave 1: wkc=0"
+    DriverErrorTimed:
+      description: >
+        Fieldbus driver returned an error. Same body as `DriverError`, but carries the
+        `X-Wire-Us` timing header because the failing endpoint performed (or attempted) a
+        fieldbus transaction — the failure still consumed wire time.
+      headers:
+        X-Wire-Us:
+          $ref: "#/components/headers/WireTime"
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [error]
+            properties:
+              error:
+                type: string
+                description: Human-readable error message from the driver
+                example: "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"

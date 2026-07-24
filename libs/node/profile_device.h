@@ -3,18 +3,32 @@
 #include <cstdint>
 #include <expected>
 #include <string>
+#include <vector>
 
 #include "node/device.h"
 
 namespace mm::node {
 
 /// @brief Generic CANopen device-profile (CiA301) object indices — present on **any** CoE device,
-///        independent of the CiA402 drive profile. Subindex is 0 for these simple objects.
+///        independent of the CiA402 drive profile. Simple VAR objects are addressed at subindex 0;
+///        RECORD objects (0x1010, 0x1011, 0x1016, 0x1018, 0x1023) at their documented sub-entries.
 enum GenericObject : uint16_t {
-  kDeviceType = 0x1000,                   ///< UNSIGNED32 — mandatory; the device profile it speaks.
-  kManufacturerDeviceName = 0x1008,       ///< VISIBLE_STRING — human-readable device name.
-  kManufacturerSoftwareVersion = 0x100A,  ///< VISIBLE_STRING — firmware/software version string.
-  kIdentity = 0x1018,                     ///< IDENTITY record — vendor/product/revision/serial.
+  kDeviceType = 0x1000,     ///< UNSIGNED32, ro — mandatory; the device profile it speaks.
+  kErrorRegister = 0x1001,  ///< UNSIGNED8, ro (volatile) — active error class bit field.
+  kCobIdSync = 0x1005,      ///< INTEGER32, rw — COB-ID of the SYNC message.
+  kCommunicationCyclePeriod = 0x1006,     ///< INTEGER32, rw — communication cycle period in µs.
+  kManufacturerDeviceName = 0x1008,       ///< VISIBLE_STRING, ro — human-readable device name.
+  kManufacturerSoftwareVersion = 0x100A,  ///< VISIBLE_STRING, ro — firmware/software version.
+  kGuardTime = 0x100C,                    ///< UNSIGNED16, rw — node guarding guard time in ms.
+  kLifeTimeFactor = 0x100D,               ///< UNSIGNED8, rw — node guarding life time factor.
+  kStoreParameters = 0x1010,              ///< RECORD, rw — save parameters to non-volatile storage.
+  kRestoreDefaultParameters = 0x1011,     ///< RECORD, rw — restore default parameters.
+  kConsumerHeartbeatTime = 0x1016,        ///< RECORD, rw — consumer heartbeat time in ms.
+  kProducerHeartbeatTime = 0x1017,        ///< UNSIGNED16, rw — producer heartbeat time in ms.
+  kIdentity = 0x1018,                     ///< IDENTITY record, ro — vendor/product/revision/serial.
+  kSynchronousCounterOverflowValue = 0x1019,  ///< UNSIGNED8, rw — SYNC counter overflow value.
+  kOsCommand = 0x1023,      ///< RECORD — command (rw) / status + response (ro, volatile).
+  kOsCommandMode = 0x1024,  ///< UNSIGNED8, wo — write-only, not readable; setter only.
 };
 
 /// @brief The CANopen identity object (0x1018) — the four UNSIGNED32 sub-entries that uniquely
@@ -24,6 +38,16 @@ struct Identity {
   uint32_t productCode{};     ///< 0x1018:02 — vendor-assigned product code.
   uint32_t revisionNumber{};  ///< 0x1018:03 — revision number.
   uint32_t serialNumber{};    ///< 0x1018:04 — device serial number.
+};
+
+/// @brief The restore-default-parameters object (0x1011) — one UNSIGNED32 per restorable group.
+///        Reading a sub-entry reports the restore capability (bit 0 = device restores on command);
+///        writing the "load" signature to it triggers the restore.
+struct RestoreDefaultParameters {
+  uint32_t all{};            ///< 0x1011:01 — restore all default parameters.
+  uint32_t communication{};  ///< 0x1011:02 — restore communication default parameters.
+  uint32_t application{};    ///< 0x1011:03 — restore application default parameters.
+  uint32_t manufacturer{};   ///< 0x1011:04 — restore manufacturer-defined default parameters.
 };
 
 /// @brief Root of the drive-profile view hierarchy — a concrete, instantiable, borrowed view over
@@ -71,6 +95,24 @@ class ProfileDevice {
   ///        implements (low word = profile number, e.g. 402; high word = profile-specific info).
   std::expected<uint32_t, std::string> deviceType() const;
 
+  /// @brief Reads the error register (0x1001, UNSIGNED8) — the active error class bit field
+  ///        (bit 0 = generic error). Read-only but volatile, so every call re-reads the device.
+  std::expected<uint8_t, std::string> errorRegister() const;
+
+  /// @brief Reads the COB-ID of the SYNC message (0x1005, INTEGER32). Writable, so every call
+  ///        re-reads the device.
+  std::expected<int32_t, std::string> cobIdSync() const;
+
+  /// @brief Writes the COB-ID of the SYNC message (0x1005, INTEGER32).
+  std::expected<void, std::string> setCobIdSync(int32_t value);
+
+  /// @brief Reads the communication cycle period (0x1006, INTEGER32, µs). Writable, so every call
+  ///        re-reads the device.
+  std::expected<int32_t, std::string> communicationCyclePeriod() const;
+
+  /// @brief Writes the communication cycle period (0x1006, INTEGER32, µs).
+  std::expected<void, std::string> setCommunicationCyclePeriod(int32_t value);
+
   /// @brief Reads the manufacturer device name (0x1008, VISIBLE_STRING).
   ///
   /// A live re-read over the wire, distinct from @c Device::name() (the EtherCAT slave name cached
@@ -81,11 +123,98 @@ class ProfileDevice {
   /// version.
   std::expected<std::string, std::string> manufacturerSoftwareVersion() const;
 
+  /// @brief Reads the node guarding guard time (0x100C, UNSIGNED16, ms). Writable, so every call
+  ///        re-reads the device.
+  std::expected<uint16_t, std::string> guardTime() const;
+
+  /// @brief Writes the node guarding guard time (0x100C, UNSIGNED16, ms).
+  std::expected<void, std::string> setGuardTime(uint16_t value);
+
+  /// @brief Reads the node guarding life time factor (0x100D, UNSIGNED8). Writable, so every call
+  ///        re-reads the device.
+  std::expected<uint8_t, std::string> lifeTimeFactor() const;
+
+  /// @brief Writes the node guarding life time factor (0x100D, UNSIGNED8).
+  std::expected<void, std::string> setLifeTimeFactor(uint8_t value);
+
+  /// @brief Reads "save all parameters" (0x1010:01, UNSIGNED32) — the save capability (bit 0 =
+  ///        device saves on command); writing the "save" signature to it triggers the store.
+  ///        Writable, so every call re-reads the device.
+  std::expected<uint32_t, std::string> storeParameters() const;
+
+  /// @brief Writes "save all parameters" (0x1010:01, UNSIGNED32). Writing the ASCII "save"
+  ///        signature (0x65766173) commands the device to store its parameters to non-volatile
+  ///        memory; the device aborts any other value.
+  std::expected<void, std::string> setStoreParameters(uint32_t signature);
+
+  /// @brief Reads the restore-default-parameters object (0x1011) — the restore capability of all
+  ///        four groups. Writable (the "load" signature triggers a restore), so every call
+  ///        re-reads the device. Fails if any sub-entry read fails.
+  std::expected<RestoreDefaultParameters, std::string> restoreDefaultParameters() const;
+
+  /// @brief Writes "restore all default parameters" (0x1011:01, UNSIGNED32). Writing the ASCII
+  ///        "load" signature (0x64616F6C) commands the restore; the device aborts any other value.
+  std::expected<void, std::string> setRestoreAllDefaultParameters(uint32_t signature);
+
+  /// @brief Writes "restore communication default parameters" (0x1011:02, UNSIGNED32) — the
+  ///        ASCII "load" signature (0x64616F6C) commands the restore.
+  std::expected<void, std::string> setRestoreCommunicationDefaultParameters(uint32_t signature);
+
+  /// @brief Writes "restore application default parameters" (0x1011:03, UNSIGNED32) — the ASCII
+  ///        "load" signature (0x64616F6C) commands the restore.
+  std::expected<void, std::string> setRestoreApplicationDefaultParameters(uint32_t signature);
+
+  /// @brief Writes "restore manufacturer-defined default parameters" (0x1011:04, UNSIGNED32) —
+  ///        the ASCII "load" signature (0x64616F6C) commands the restore.
+  std::expected<void, std::string> setRestoreManufacturerDefaultParameters(uint32_t signature);
+
+  /// @brief Reads the consumer heartbeat time (0x1016:01, UNSIGNED32, ms — node ID in bits 16-23).
+  ///        Writable, so every call re-reads the device.
+  std::expected<uint32_t, std::string> consumerHeartbeatTime() const;
+
+  /// @brief Writes the consumer heartbeat time (0x1016:01, UNSIGNED32, ms — node ID in bits
+  ///        16-23).
+  std::expected<void, std::string> setConsumerHeartbeatTime(uint32_t value);
+
+  /// @brief Reads the producer heartbeat time (0x1017, UNSIGNED16, ms). Writable, so every call
+  ///        re-reads the device.
+  std::expected<uint16_t, std::string> producerHeartbeatTime() const;
+
+  /// @brief Writes the producer heartbeat time (0x1017, UNSIGNED16, ms).
+  std::expected<void, std::string> setProducerHeartbeatTime(uint16_t value);
+
   /// @brief Reads the identity object (0x1018) — vendor ID, product code, revision, serial.
   ///
   /// A live re-read over the wire of all four sub-entries, distinct from the same values cached on
   /// @c Device at scan (@c Device::vendorId() etc.). Fails if any sub-entry read fails.
   std::expected<Identity, std::string> identity() const;
+
+  /// @brief Reads the synchronous counter overflow value (0x1019, UNSIGNED8). Writable, so every
+  ///        call re-reads the device.
+  std::expected<uint8_t, std::string> synchronousCounterOverflowValue() const;
+
+  /// @brief Writes the synchronous counter overflow value (0x1019, UNSIGNED8).
+  std::expected<void, std::string> setSynchronousCounterOverflowValue(uint8_t value);
+
+  /// @brief Reads back the OS command bytes (0x1023:01, 8 bytes). Writable (this is the command
+  ///        the caller last issued), so every call re-reads the device.
+  std::expected<std::vector<uint8_t>, std::string> osCommand() const;
+
+  /// @brief Writes the OS command bytes (0x1023:01, 8 bytes) — issues an OS command; poll
+  ///        @c osCommandStatus / @c osCommandResponse for the result.
+  std::expected<void, std::string> setOsCommand(const std::vector<uint8_t>& command);
+
+  /// @brief Reads the OS command status (0x1023:02, UNSIGNED8). Read-only but volatile (it tracks
+  ///        the last issued command), so every call re-reads the device.
+  std::expected<uint8_t, std::string> osCommandStatus() const;
+
+  /// @brief Reads the OS command response bytes (0x1023:03, 8 bytes). Read-only but volatile (it
+  ///        tracks the last issued command), so every call re-reads the device.
+  std::expected<std::vector<uint8_t>, std::string> osCommandResponse() const;
+
+  /// @brief Writes the OS command mode (0x1024, UNSIGNED8). Write-only on the device — there is
+  ///        no matching getter.
+  std::expected<void, std::string> setOsCommandMode(uint8_t mode);
 
  protected:
   /// @brief The borrowed device — the only data member permitted in the whole view chain.

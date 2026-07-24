@@ -239,12 +239,12 @@ class ProfileDevice {
   /// that does not yet confirm (a value mismatch or a transient mailbox read error) up to
   /// @c config.retries more times, @c config.interval apart.
   ///
-  /// **Destructive:** this overwrites the selected group's parameter values in the device's volatile
-  /// memory with the device's defaults, replacing the current live values (not the persisted store).
-  /// Which values it touches, and whether the change takes effect immediately or after the next
-  /// reset, is device-specific. Blocks the calling thread and takes the driver's control-plane lock
-  /// only per transaction, exactly like @c runStoreParameters; requires the mailbox to be active
-  /// (PRE-OP/SAFE-OP/OP).
+  /// **Destructive:** this overwrites the selected group's parameter values in the device's
+  /// volatile memory with the device's defaults, replacing the current live values (not the
+  /// persisted store). Which values it touches, and whether the change takes effect immediately or
+  /// after the next reset, is device-specific. Blocks the calling thread and takes the driver's
+  /// control-plane lock only per transaction, exactly like @c runStoreParameters; requires the
+  /// mailbox to be active (PRE-OP/SAFE-OP/OP).
   ///
   /// @param group   Which group of defaults to restore (maps to the 0x1011 sub-entry).
   /// @param config  Retry/timing configuration (see @c RestoreDefaultParametersConfig).

@@ -1158,6 +1158,17 @@ std::expected<Cia402Drive, std::string> resolveCia402Drive(DeviceManager& dm,
   return createCia402Drive(*device);
 }
 
+// The generic-profile counterpart of resolveCia402Drive: resolves the device and binds a validated
+// ProfileDevice view (any enumerated CoE device), under a lock the caller already holds.
+std::expected<ProfileDevice, std::string> resolveProfileDevice(DeviceManager& dm,
+                                                               uint16_t slavePosition) {
+  Device* device = dm.findDevice(slavePosition);
+  if (!device) {
+    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
+  }
+  return createProfileDevice(*device);
+}
+
 }  // namespace
 
 std::expected<Cia402Status, std::string> DeviceManager::getCia402Status(uint16_t slavePosition) {
@@ -1233,6 +1244,20 @@ std::expected<void, std::string> DeviceManager::setCia402Target(uint16_t slavePo
       return drive->setTargetTorque(static_cast<int16_t>(setpoint));
   }
   return std::unexpected("invalid target kind");
+}
+
+std::expected<void, std::string> DeviceManager::runStoreParameters(
+    uint16_t slavePosition, const StoreParametersConfig& config) {
+  // Shared lock held across the whole (multi-second) store: keeps the device pointer valid against
+  // the exclusive rebuilders while runStoreParameters sleeps between polls, each of which takes the
+  // driver's control-plane lock only per transaction — never blocking the RT loop or the WebSocket
+  // (matching runCia402Command's enable() walk).
+  std::shared_lock lock(busMutex_);
+  auto profile = resolveProfileDevice(*this, slavePosition);
+  if (!profile) {
+    return std::unexpected(profile.error());
+  }
+  return profile->runStoreParameters(config);
 }
 
 std::vector<OutputStageResult> DeviceManager::stageProcessDataOutputs(

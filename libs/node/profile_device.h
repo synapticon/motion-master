@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <expected>
 #include <string>
@@ -48,6 +49,18 @@ struct RestoreDefaultParameters {
   uint32_t communication{};  ///< 0x1011:02 — restore communication default parameters.
   uint32_t application{};    ///< 0x1011:03 — restore application default parameters.
   uint32_t manufacturer{};   ///< 0x1011:04 — restore manufacturer-defined default parameters.
+};
+
+/// @brief Timing for the store-parameters confirmation walk (@c ProfileDevice::runStoreParameters).
+///
+/// After the "save" signature is written, the procedure waits @c settle for the device to begin the
+/// flash write, then polls 0x1010:01 up to @c retries more times, @c interval apart, until it reads
+/// back 1. The defaults match the reference client; @c settle tracks device flash-write behaviour
+/// and rarely needs overriding (tests pass zero delays to run instantly).
+struct StoreParametersConfig {
+  uint32_t retries = 10;                    ///< Maximum confirmation polls after the first.
+  std::chrono::milliseconds interval{500};  ///< Delay between confirmation polls.
+  std::chrono::milliseconds settle{2000};   ///< Wait after the write before the first poll.
 };
 
 /// @brief Root of the drive-profile view hierarchy — a concrete, instantiable, borrowed view over
@@ -146,6 +159,28 @@ class ProfileDevice {
   ///        signature (0x65766173) commands the device to store its parameters to non-volatile
   ///        memory; the device aborts any other value.
   std::expected<void, std::string> setStoreParameters(uint32_t signature);
+
+  /// @brief Commands a parameter store (0x1010) and waits for the device to confirm it completed.
+  ///
+  /// The command-and-wait procedure built on the two raw accessors above: writes the ASCII "save"
+  /// signature (@c setStoreParameters), waits @c config.settle for the device to begin the
+  /// non-volatile write, then polls @c storeParameters (0x1010:01) until it reads back 1 — the
+  /// CiA301 "save completed" value. A store can take a second or more (the drive persists its
+  /// config to flash), and while it is in progress the mailbox may briefly refuse the read, so each
+  /// poll that does not yet confirm — a value mismatch or a read error alike — is retried up to
+  /// @c config.retries more times, @c config.interval apart, before the call gives up.
+  ///
+  /// Blocks the calling thread for up to @c settle plus @c retries × @c interval. Intended to run
+  /// on the control-plane (HTTP) thread: it sleeps between polls but each poll's bus access takes
+  /// the driver's control-plane lock only per transaction, so it never blocks the RT loop or the
+  /// WebSocket. Requires the device's mailbox to be active (PRE-OP/SAFE-OP/OP).
+  ///
+  /// @param config  Retry/timing configuration (see @c StoreParametersConfig); the defaults suit a
+  ///                normal store.
+  /// @return Void once 0x1010:01 reads 1, or an error string if the store command write fails or
+  /// the
+  ///         device does not confirm within the retry budget.
+  std::expected<void, std::string> runStoreParameters(const StoreParametersConfig& config = {});
 
   /// @brief Reads the restore-default-parameters object (0x1011) — the restore capability of all
   ///        four groups. Writable (the "load" signature triggers a restore), so every call

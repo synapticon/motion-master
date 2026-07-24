@@ -622,6 +622,24 @@ class DeviceManager {
   std::expected<void, std::string> setCia402Target(uint16_t slavePosition, Cia402TargetKind kind,
                                                    int32_t setpoint);
 
+  // --- Generic device profile (CiA301) ---
+
+  /// @brief Commands a parameter store (0x1010) and waits for the device to confirm completion.
+  ///
+  /// Resolves the device, binds a validated @c ProfileDevice view, and runs its
+  /// @c runStoreParameters procedure: writes the "save" signature and polls 0x1010:01 until it
+  /// reads back 1. Held under the shared bus lock for the call's (multi-second) duration — safe
+  /// against the exclusive rebuilders, and each poll's bus access takes the driver's control-plane
+  /// lock only briefly, so the RT loop (lock-free PDO) and the WebSocket are never blocked.
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @param config         Retry/timing configuration (see @c StoreParametersConfig).
+  /// @return Void once the store is confirmed, or an error string if the device is unknown, has no
+  ///         generic device area, the command write fails, or it is not confirmed within the
+  ///         budget.
+  std::expected<void, std::string> runStoreParameters(uint16_t slavePosition,
+                                                      const StoreParametersConfig& config = {});
+
   /// @brief Stages a batch of output objects into the process image in one call.
   ///
   /// Backs @c POST @c /api/process-data/outputs, the "send all" action of the Process Data page:

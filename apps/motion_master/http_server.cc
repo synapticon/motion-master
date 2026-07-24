@@ -1076,6 +1076,49 @@ void HttpServer::run() {
               sendStatus(res, "204 No Content", config_.corsOrigin);
             });
           })
+      .post(
+          "/api/devices/:slavePosition/store-parameters",
+          [this](auto* res, auto* req) {
+            uint16_t pos{};
+            auto posParam = req->getParameter("slavePosition");
+            auto [p, ec] = std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+            if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+              sendStatus(res, "400 Bad Request", config_.corsOrigin);
+              return;
+            }
+            // Optional retry tuning; absent → the node-layer defaults (see StoreParametersConfig:
+            // 10 polls, 500 ms apart). The initial settle keeps its default (not exposed here).
+            mm::node::StoreParametersConfig storeConfig;
+            if (auto q = req->getQuery("retries"); !q.empty()) {
+              auto [qp, qec] = std::from_chars(q.data(), q.data() + q.size(), storeConfig.retries);
+              if (qec != std::errc() || qp != q.data() + q.size()) {
+                sendStatus(res, "400 Bad Request", config_.corsOrigin);
+                return;
+              }
+            }
+            if (auto q = req->getQuery("interval"); !q.empty()) {
+              uint32_t intervalMs = 0;
+              auto [qp, qec] = std::from_chars(q.data(), q.data() + q.size(), intervalMs);
+              if (qec != std::errc() || qp != q.data() + q.size()) {
+                sendStatus(res, "400 Bad Request", config_.corsOrigin);
+                return;
+              }
+              storeConfig.interval = std::chrono::milliseconds(intervalMs);
+            }
+            if (!deviceManager_.findDevice(pos)) {
+              sendStatus(res, "404 Not Found", config_.corsOrigin);
+              return;
+            }
+            // Synchronous, like the CiA402 command / FoE handlers: blocks this HTTP thread for
+            // the store's few seconds while the WebSocket (separate port/loop) and RT loop run
+            // on.
+            auto r = deviceManager_.runStoreParameters(pos, storeConfig);
+            if (!r) {
+              sendError(res, "409 Conflict", config_.corsOrigin, r.error());
+              return;
+            }
+            sendStatus(res, "204 No Content", config_.corsOrigin);
+          })
       .get("/api/devices/:slavePosition/sdo/:index/:subindex",
            [this](auto* res, auto* req) {
              uint16_t pos{};

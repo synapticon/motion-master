@@ -2,9 +2,22 @@
 
 #include <format>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace mm::node {
+
+namespace {
+
+// ASCII "save" (little-endian byte order 73 61 76 65) — the one value 0x1010:01 accepts to trigger
+// a store; the device aborts any other write.
+constexpr uint32_t kStoreParametersSignature = 0x65766173;
+
+// 0x1010:01 reads back 1 once the store has completed (CiA301: bit 0 clears while saving, the
+// sub-entry reading 1 signals "device has saved").
+constexpr uint32_t kStoreParametersComplete = 1;
+
+}  // namespace
 
 std::expected<uint32_t, std::string> ProfileDevice::deviceType() const {
   return device_.readCachedValue<uint32_t>(kDeviceType, 0);
@@ -60,6 +73,35 @@ std::expected<uint32_t, std::string> ProfileDevice::storeParameters() const {
 
 std::expected<void, std::string> ProfileDevice::setStoreParameters(uint32_t signature) {
   return device_.writeValue(kStoreParameters, 1, signature);
+}
+
+std::expected<void, std::string> ProfileDevice::runStoreParameters(
+    const StoreParametersConfig& config) {
+  if (auto r = setStoreParameters(kStoreParametersSignature); !r) {
+    return r;
+  }
+  // Give the drive time to begin the flash write before the first read; 0x1010:01 reads back the
+  // pre-store value until the save actually completes.
+  std::this_thread::sleep_for(config.settle);
+  // Poll for confirmation. A store in progress can leave the mailbox momentarily unresponsive, so a
+  // read error is treated like a not-yet-1 value — both retry until the budget is spent, then the
+  // last one is reported.
+  std::string lastError;
+  for (uint32_t attempt = 0;; ++attempt) {
+    if (auto value = storeParameters()) {
+      if (*value == kStoreParametersComplete) {
+        return {};
+      }
+      lastError = std::format("0x1010:01 read back 0x{:08X}, expected 1", *value);
+    } else {
+      lastError = value.error();
+    }
+    if (attempt >= config.retries) {
+      return std::unexpected(std::format("store parameters not confirmed after {} attempt(s): {}",
+                                         config.retries + 1, lastError));
+    }
+    std::this_thread::sleep_for(config.interval);
+  }
 }
 
 std::expected<RestoreDefaultParameters, std::string> ProfileDevice::restoreDefaultParameters()

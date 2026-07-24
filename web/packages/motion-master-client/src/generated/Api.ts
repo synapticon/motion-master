@@ -1023,6 +1023,39 @@ export class Api<
       ...params,
     });
   /**
+   * @description Commands the device to persist its current parameters (the generic CANopen "store parameters" object 0x1010:01) and waits for confirmation. The server writes the ASCII "save" signature, waits a fixed settle (~2 s) for the drive to begin the flash write, then polls 0x1010:01 until it reads back 1 ("save completed"). Because a store in progress can leave the mailbox briefly unresponsive, a poll that does not yet confirm — a value mismatch or a transient read error alike — is retried up to `retries` more times, `interval` apart. The call blocks until the store is confirmed or the retry budget is exhausted (up to a few seconds); the device's mailbox must be active (PRE-OP/SAFE-OP/OP).
+   *
+   * @name StoreParameters
+   * @summary Store a device's parameters to non-volatile memory
+   * @request POST:/api/devices/{slavePosition}/store-parameters
+   */
+  storeParameters = (
+    slavePosition: number,
+    query?: {
+      /**
+       * Maximum number of extra confirmation polls after the first.
+       * @min 0
+       * @default 10
+       * @example 5
+       */
+      retries?: number;
+      /**
+       * Delay between confirmation polls, in milliseconds.
+       * @min 0
+       * @default 500
+       * @example 500
+       */
+      interval?: number;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<void, void>({
+      path: `/api/devices/${slavePosition}/store-parameters`,
+      method: "POST",
+      query: query,
+      ...params,
+    });
+  /**
    * @description Performs a CoE SDO upload — reads the value of object `index:subindex` from the device at `slavePosition` and returns the raw bytes as a JSON array. Both `index` and `subindex` accept decimal or hexadecimal notation; prefix with `0x` for hex (e.g. `0x6064` or `24676` for object 0x6064).
    *
    * @name SdoUpload

@@ -14,6 +14,7 @@ add_executable(
   process_data_dump_test.cc
   process_data_ring_test.cc
   process_image_test.cc
+  profile_device_test.cc
   somanet_drive_test.cc)
 
 target_link_libraries(mm_node_tests PRIVATE mm::node GTest::gtest GTest::gtest_main)

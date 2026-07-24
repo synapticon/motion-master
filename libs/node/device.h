@@ -95,7 +95,7 @@ class Device {
   /// live from the fieldbus driver's cached AL status (@c FieldbusDriver::slaveState) — no
   /// copy is stored here. When @c false, @c readParameter / @c writeParameter operate on the
   /// cached value only and never touch the bus. Reflects the last state the driver read; call
-  /// @c DeviceManager::getDeviceStates to refresh from the hardware.
+  /// @c DeviceManager::deviceStates to refresh from the hardware.
   bool mailboxActive() const;
 
   /// @brief Whether the slave advertises a CoE mailbox — a fixed capability, not a live check.

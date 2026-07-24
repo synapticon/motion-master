@@ -456,7 +456,7 @@ void HttpServer::run() {
              if (!positions) {
                return;  // parsePositions already wrote the 400 response
              }
-             auto r = deviceManager_.getDeviceStates(*positions);
+             auto r = deviceManager_.deviceStates(*positions);
              if (!r) {
                sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
                return;
@@ -470,7 +470,7 @@ void HttpServer::run() {
                return;  // parsePositions already wrote the 400 response
              }
              sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
-                           [&] { return deviceManager_.getDeviceDiagnostics(*positions); });
+                           [&] { return deviceManager_.deviceDiagnostics(*positions); });
            })
       .get("/api/dc-sync",
            [this](auto* res, auto* req) {
@@ -479,7 +479,7 @@ void HttpServer::run() {
                return;  // parsePositions already wrote the 400 response
              }
              sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
-                           [&] { return deviceManager_.getDcSync(*positions); });
+                           [&] { return deviceManager_.dcSync(*positions); });
            })
       .get("/api/devices",
            [this](auto* res, auto* /*req*/) {
@@ -770,7 +770,7 @@ void HttpServer::run() {
              }
              sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
                            [&]() -> std::expected<nlohmann::json, std::string> {
-                             auto r = deviceManager_.getProcessDataWatchdog(pos);
+                             auto r = deviceManager_.processDataWatchdog(pos);
                              if (!r) {
                                return std::unexpected(r.error());
                              }

@@ -230,12 +230,12 @@ TEST(DeviceManagerMailbox, PreOpStateMarksMailboxActive) {
   ASSERT_NE(dm.findDevice(1), nullptr);
   EXPECT_FALSE(dm.findDevice(1)->mailboxActive());
 
-  ASSERT_TRUE(dm.getDeviceStates({}).has_value());
+  ASSERT_TRUE(dm.deviceStates({}).has_value());
   EXPECT_TRUE(dm.findDevice(1)->mailboxActive());
 
   // Dropping back to INIT must flip the mailbox inactive again.
   raw->reportState = static_cast<uint16_t>(EtherCatState::Init);
-  ASSERT_TRUE(dm.getDeviceStates({}).has_value());
+  ASSERT_TRUE(dm.deviceStates({}).has_value());
   EXPECT_FALSE(dm.findDevice(1)->mailboxActive());
 }
 
@@ -249,7 +249,7 @@ TEST(DeviceManagerMailbox, ErrorIndicatorDoesNotDisableMailbox) {
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::move(driver)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
-  ASSERT_TRUE(dm.getDeviceStates({}).has_value());
+  ASSERT_TRUE(dm.deviceStates({}).has_value());
 
   ASSERT_NE(dm.findDevice(1), nullptr);
   EXPECT_TRUE(dm.findDevice(1)->mailboxActive());
@@ -320,7 +320,7 @@ TEST(DeviceManagerWatchdog, GetReturnsDriverConfig) {
   ASSERT_TRUE(dm.init(std::move(driver)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
-  auto wd = dm.getProcessDataWatchdog(1);
+  auto wd = dm.processDataWatchdog(1);
   ASSERT_TRUE(wd.has_value());
   EXPECT_TRUE(wd->enabled);
   EXPECT_EQ(wd->timeout, std::chrono::milliseconds(200));
@@ -350,13 +350,13 @@ TEST(DeviceManagerWatchdog, SetForwardsPositionAndTimeout) {
 TEST(DeviceManagerWatchdog, UnknownDeviceAndNoDriverError) {
   DeviceManager dm;
   // Before init there is no driver — both accessors must report it, not crash.
-  EXPECT_FALSE(dm.getProcessDataWatchdog(1).has_value());
+  EXPECT_FALSE(dm.processDataWatchdog(1).has_value());
   EXPECT_FALSE(dm.setProcessDataWatchdog(1, std::chrono::milliseconds(100)).has_value());
 
   ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true, 1)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
   // Position 99 does not exist.
-  EXPECT_FALSE(dm.getProcessDataWatchdog(99).has_value());
+  EXPECT_FALSE(dm.processDataWatchdog(99).has_value());
   EXPECT_FALSE(dm.setProcessDataWatchdog(99, std::chrono::milliseconds(100)).has_value());
 }
 
@@ -367,7 +367,7 @@ TEST(DeviceManagerMailbox, InitStateKeepsMailboxInactive) {
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::move(driver)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
-  ASSERT_TRUE(dm.getDeviceStates({}).has_value());
+  ASSERT_TRUE(dm.deviceStates({}).has_value());
 
   ASSERT_NE(dm.findDevice(1), nullptr);
   EXPECT_FALSE(dm.findDevice(1)->mailboxActive());
@@ -463,8 +463,8 @@ TEST(DeviceManagerDiagnostics, EnrichesDriverDiagnosticsWithDeviceName) {
   ASSERT_TRUE(dm.init(std::move(driver)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
-  // getDeviceDiagnostics() passes the driver's per-slave counters through and attaches the name.
-  auto result = dm.getDeviceDiagnostics({});
+  // deviceDiagnostics() passes the driver's per-slave counters through and attaches the name.
+  auto result = dm.deviceDiagnostics({});
   ASSERT_TRUE(result.has_value());
   ASSERT_EQ(result->size(), 1u);
   EXPECT_EQ((*result)[0].deviceName, "Axis A");
@@ -484,7 +484,7 @@ TEST(DeviceManagerDiagnostics, EnrichesDriverDiagnosticsWithDeviceName) {
 
 TEST(DeviceManagerDiagnostics, ErrorsWithoutDriver) {
   DeviceManager dm;
-  EXPECT_FALSE(dm.getDeviceDiagnostics({}).has_value());
+  EXPECT_FALSE(dm.deviceDiagnostics({}).has_value());
 }
 
 TEST(DeviceManagerDcSync, EnrichesDriverDcSyncWithDeviceName) {
@@ -500,8 +500,8 @@ TEST(DeviceManagerDcSync, EnrichesDriverDcSyncWithDeviceName) {
   ASSERT_TRUE(dm.init(std::move(driver)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
-  // getDcSync() passes the driver's per-slave DC status through and attaches the resolved name.
-  auto result = dm.getDcSync({});
+  // dcSync() passes the driver's per-slave DC status through and attaches the resolved name.
+  auto result = dm.dcSync({});
   ASSERT_TRUE(result.has_value());
   ASSERT_EQ(result->size(), 1u);
   EXPECT_EQ((*result)[0].deviceName, "Axis A");
@@ -520,7 +520,7 @@ TEST(DeviceManagerDcSync, EnrichesDriverDcSyncWithDeviceName) {
 
 TEST(DeviceManagerDcSync, ErrorsWithoutDriver) {
   DeviceManager dm;
-  EXPECT_FALSE(dm.getDcSync({}).has_value());
+  EXPECT_FALSE(dm.dcSync({}).has_value());
 }
 
 TEST(DeviceManagerPositions, BulkMethodsRejectUnknownPosition) {
@@ -531,19 +531,19 @@ TEST(DeviceManagerPositions, BulkMethodsRejectUnknownPosition) {
   // Only position 1 was discovered. A caller-supplied position outside the device set must be
   // rejected up front (mirroring the single-device 404) — never forwarded to the driver, where
   // it would index a fixed-size slave array out of bounds. Regression for the unvalidated
-  // positions path through getDeviceStates / getDeviceDiagnostics / getDcSync / transitionToState.
-  EXPECT_FALSE(dm.getDeviceStates({99}).has_value());
-  EXPECT_FALSE(dm.getDeviceDiagnostics({99}).has_value());
-  EXPECT_FALSE(dm.getDcSync({99}).has_value());
+  // positions path through deviceStates / deviceDiagnostics / dcSync / transitionToState.
+  EXPECT_FALSE(dm.deviceStates({99}).has_value());
+  EXPECT_FALSE(dm.deviceDiagnostics({99}).has_value());
+  EXPECT_FALSE(dm.dcSync({99}).has_value());
   EXPECT_FALSE(
       dm.transitionToState({99}, EtherCatState::PreOp, std::chrono::milliseconds(0)).has_value());
 
   // A mix of valid and invalid is still rejected — the whole request fails on the unknown one.
-  EXPECT_FALSE(dm.getDeviceStates({1, 99}).has_value());
+  EXPECT_FALSE(dm.deviceStates({1, 99}).has_value());
 
   // The empty list (all devices) and the known position still succeed.
-  EXPECT_TRUE(dm.getDeviceStates({}).has_value());
-  EXPECT_TRUE(dm.getDeviceStates({1}).has_value());
+  EXPECT_TRUE(dm.deviceStates({}).has_value());
+  EXPECT_TRUE(dm.deviceStates({1}).has_value());
 }
 
 }  // namespace

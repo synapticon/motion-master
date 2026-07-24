@@ -836,7 +836,7 @@ void to_json(nlohmann::json& j, const DeviceStateInfo& info) {
        {"alStatusCode", info.alStatusCode}};
 }
 
-std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::getDeviceStates(
+std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::deviceStates(
     const std::vector<uint16_t>& positions) {
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
@@ -858,7 +858,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::getDevic
   return result;
 }
 
-std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> DeviceManager::getDeviceDiagnostics(
+std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> DeviceManager::deviceDiagnostics(
     const std::vector<uint16_t>& positions) {
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
@@ -884,7 +884,7 @@ std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> DeviceManager::ge
   return result;
 }
 
-std::expected<std::vector<DcSyncInfo>, std::string> DeviceManager::getDcSync(
+std::expected<std::vector<DcSyncInfo>, std::string> DeviceManager::dcSync(
     const std::vector<uint16_t>& positions) {
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
@@ -910,8 +910,8 @@ std::expected<std::vector<DcSyncInfo>, std::string> DeviceManager::getDcSync(
   return result;
 }
 
-std::expected<mm::comm::ProcessDataWatchdogConfig, std::string>
-DeviceManager::getProcessDataWatchdog(uint16_t slavePosition) {
+std::expected<mm::comm::ProcessDataWatchdogConfig, std::string> DeviceManager::processDataWatchdog(
+    uint16_t slavePosition) {
   std::shared_lock lock(busMutex_);
   if (!driver_) {
     return std::unexpected("no driver — call init() first");

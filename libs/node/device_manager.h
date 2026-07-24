@@ -134,7 +134,7 @@ void to_json(nlohmann::json& j, const SlaveConfigInfo& info);
 ///
 /// API-facing wrapper around @c mm::comm::SlaveDiagnostics that adds the human-readable device
 /// name (from the device set, empty when no matching device is known), built by
-/// @c DeviceManager::getDeviceDiagnostics on the (non-RT) caller's thread.
+/// @c DeviceManager::deviceDiagnostics on the (non-RT) caller's thread.
 struct DeviceDiagnosticsInfo {
   mm::comm::SlaveDiagnostics diagnostics;  ///< Decoded ESC counters as read by the driver.
   std::string deviceName;  ///< Device name for this slave position, empty if unknown.
@@ -147,7 +147,7 @@ void to_json(nlohmann::json& j, const DeviceDiagnosticsInfo& info);
 ///
 /// API-facing wrapper around @c mm::comm::DcSyncDiagnostics that adds the human-readable device
 /// name (from the device set, empty when no matching device is known), built by
-/// @c DeviceManager::getDcSync on the (non-RT) caller's thread.
+/// @c DeviceManager::dcSync on the (non-RT) caller's thread.
 struct DcSyncInfo {
   mm::comm::DcSyncDiagnostics dcSync;  ///< Decoded DC sync status as read by the driver.
   std::string deviceName;              ///< Device name for this slave position, empty if unknown.
@@ -404,7 +404,7 @@ class DeviceManager {
   /// @param positions  1-based slave positions to query; empty = all devices.
   /// @return AL state snapshot per device, or an error string if the driver is
   ///         not initialised or the hardware read fails.
-  std::expected<std::vector<DeviceStateInfo>, std::string> getDeviceStates(
+  std::expected<std::vector<DeviceStateInfo>, std::string> deviceStates(
       const std::vector<uint16_t>& positions);
 
   /// @brief Reads live ESC health diagnostics (link quality, error counters, watchdogs) for a set
@@ -420,7 +420,7 @@ class DeviceManager {
   /// @param positions  1-based slave positions to query; empty = all devices.
   /// @return Per-device diagnostics in the order targeted, or an error string if no driver is
   ///         initialised, the transport has no ESC, or a register read fails.
-  std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> getDeviceDiagnostics(
+  std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> deviceDiagnostics(
       const std::vector<uint16_t>& positions);
 
   /// @brief Reads live distributed-clock synchronisation status for a set of devices, resolving
@@ -437,19 +437,19 @@ class DeviceManager {
   /// @param positions  1-based slave positions to query; empty = all devices.
   /// @return Per-device DC sync status in the order targeted, or an error string if no driver is
   ///         initialised, the transport has no ESC, or a register read fails.
-  std::expected<std::vector<DcSyncInfo>, std::string> getDcSync(
+  std::expected<std::vector<DcSyncInfo>, std::string> dcSync(
       const std::vector<uint16_t>& positions);
 
   /// @brief Reads the process-data (sync-manager) watchdog configuration of one device.
   ///
   /// Forwards to @c FieldbusDriver::processDataWatchdog after resolving the device. Returns the
   /// configured timeout itself (the divider/time registers), not the expiration counter that
-  /// @c getDeviceDiagnostics surfaces.
+  /// @c deviceDiagnostics surfaces.
   ///
   /// @param slavePosition  1-based bus position of the target device.
   /// @return The decoded watchdog configuration, or an error string if no driver is initialised,
   ///         the device is unknown, the transport has no ESC, or a register read fails.
-  std::expected<mm::comm::ProcessDataWatchdogConfig, std::string> getProcessDataWatchdog(
+  std::expected<mm::comm::ProcessDataWatchdogConfig, std::string> processDataWatchdog(
       uint16_t slavePosition);
 
   /// @brief Sets the process-data (sync-manager) watchdog timeout of one device.

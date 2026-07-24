@@ -1,7 +1,10 @@
 #include "node/profile_device.h"
 
+#include <chrono>
 #include <format>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -9,13 +12,52 @@ namespace mm::node {
 
 namespace {
 
-// ASCII "save" (little-endian byte order 73 61 76 65) — the one value 0x1010:01 accepts to trigger
-// a store; the device aborts any other write.
+// ASCII "save" (little-endian byte order 73 61 76 65) — the value 0x1010:01 accepts to trigger a
+// store; the device aborts any other write.
 constexpr uint32_t kStoreParametersSignature = 0x65766173;
 
-// 0x1010:01 reads back 1 once the store has completed (CiA301: bit 0 clears while saving, the
-// sub-entry reading 1 signals "device has saved").
-constexpr uint32_t kStoreParametersComplete = 1;
+// ASCII "load" (little-endian byte order 6C 6F 61 64) — the value 0x1011:0x accepts to trigger a
+// restore of that group's defaults; the device aborts any other write.
+constexpr uint32_t kRestoreParametersSignature = 0x64616F6C;
+
+// The save/restore command objects (0x1010:0x / 0x1011:0x) read back 1 once the command has
+// completed (CiA301: bit 0 clears while the device is busy, the sub-entry reading 1 signals
+// "done").
+constexpr uint32_t kCommandComplete = 1;
+
+// Runs a CANopen "write a signature, then poll until it reads back 1" command — the shared shape of
+// store parameters (0x1010) and restore default parameters (0x1011). Writes @p signature to
+// @p index : @p subindex, waits @p settle for the device to begin, then polls that same sub-entry
+// until it reads back @c kCommandComplete, retrying a poll that isn't done yet — a value mismatch
+// or a transient mailbox read error while the device is busy, both handled alike — up to @p retries
+// times, @p interval apart. @p label names the operation for the failure message.
+std::expected<void, std::string> runSignatureConfirmCommand(
+    Device& device, uint16_t index, uint8_t subindex, uint32_t signature, uint32_t retries,
+    std::chrono::milliseconds interval, std::chrono::milliseconds settle, std::string_view label) {
+  if (auto r = device.writeValue(index, subindex, signature); !r) {
+    return r;
+  }
+  // Give the device time to begin before the first read; the sub-entry reads back its pre-command
+  // value until the command actually completes.
+  std::this_thread::sleep_for(settle);
+  std::string lastError;
+  for (uint32_t attempt = 0;; ++attempt) {
+    if (auto value = device.readValue<uint32_t>(index, subindex)) {
+      if (*value == kCommandComplete) {
+        return {};
+      }
+      lastError =
+          std::format("0x{:04X}:{:02X} read back 0x{:08X}, expected 1", index, subindex, *value);
+    } else {
+      lastError = value.error();
+    }
+    if (attempt >= retries) {
+      return std::unexpected(
+          std::format("{} not confirmed after {} attempt(s): {}", label, retries + 1, lastError));
+    }
+    std::this_thread::sleep_for(interval);
+  }
+}
 
 }  // namespace
 
@@ -77,31 +119,9 @@ std::expected<void, std::string> ProfileDevice::setStoreParameters(uint32_t sign
 
 std::expected<void, std::string> ProfileDevice::runStoreParameters(
     const StoreParametersConfig& config) {
-  if (auto r = setStoreParameters(kStoreParametersSignature); !r) {
-    return r;
-  }
-  // Give the drive time to begin the flash write before the first read; 0x1010:01 reads back the
-  // pre-store value until the save actually completes.
-  std::this_thread::sleep_for(config.settle);
-  // Poll for confirmation. A store in progress can leave the mailbox momentarily unresponsive, so a
-  // read error is treated like a not-yet-1 value — both retry until the budget is spent, then the
-  // last one is reported.
-  std::string lastError;
-  for (uint32_t attempt = 0;; ++attempt) {
-    if (auto value = storeParameters()) {
-      if (*value == kStoreParametersComplete) {
-        return {};
-      }
-      lastError = std::format("0x1010:01 read back 0x{:08X}, expected 1", *value);
-    } else {
-      lastError = value.error();
-    }
-    if (attempt >= config.retries) {
-      return std::unexpected(std::format("store parameters not confirmed after {} attempt(s): {}",
-                                         config.retries + 1, lastError));
-    }
-    std::this_thread::sleep_for(config.interval);
-  }
+  return runSignatureConfirmCommand(device_, kStoreParameters, 1, kStoreParametersSignature,
+                                    config.retries, config.interval, config.settle,
+                                    "store parameters");
 }
 
 std::expected<RestoreDefaultParameters, std::string> ProfileDevice::restoreDefaultParameters()
@@ -146,6 +166,30 @@ std::expected<void, std::string> ProfileDevice::setRestoreApplicationDefaultPara
 std::expected<void, std::string> ProfileDevice::setRestoreManufacturerDefaultParameters(
     uint32_t signature) {
   return device_.writeValue(kRestoreDefaultParameters, 4, signature);
+}
+
+std::expected<void, std::string> ProfileDevice::runRestoreDefaultParameters(
+    RestoreGroup group, const RestoreDefaultParametersConfig& config) {
+  // The group enum value *is* the 0x1011 sub-entry (kAll=1 … kManufacturer=4).
+  return runSignatureConfirmCommand(device_, kRestoreDefaultParameters, static_cast<uint8_t>(group),
+                                    kRestoreParametersSignature, config.retries, config.interval,
+                                    config.settle, "restore default parameters");
+}
+
+std::optional<RestoreGroup> parseRestoreGroup(std::string_view token) {
+  if (token == "all") {
+    return RestoreGroup::kAll;
+  }
+  if (token == "communication") {
+    return RestoreGroup::kCommunication;
+  }
+  if (token == "application") {
+    return RestoreGroup::kApplication;
+  }
+  if (token == "manufacturer") {
+    return RestoreGroup::kManufacturer;
+  }
+  return std::nullopt;
 }
 
 std::expected<uint32_t, std::string> ProfileDevice::consumerHeartbeatTime() const {

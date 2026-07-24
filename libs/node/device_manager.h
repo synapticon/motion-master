@@ -640,6 +640,26 @@ class DeviceManager {
   std::expected<void, std::string> runStoreParameters(uint16_t slavePosition,
                                                       const StoreParametersConfig& config = {});
 
+  /// @brief Commands a restore of default parameters (0x1011) and waits for the device to confirm.
+  ///
+  /// The restore counterpart of @c runStoreParameters: resolves the device, binds a validated
+  /// @c ProfileDevice view, and runs its @c runRestoreDefaultParameters for the selected @p group.
+  /// Held under the shared bus lock for the call's duration, and each poll's bus access takes the
+  /// driver's control-plane lock only briefly, so the RT loop and the WebSocket are never blocked.
+  ///
+  /// **Destructive:** resets the selected group's parameters to the device's defaults.
+  ///
+  /// @param slavePosition  1-based bus position of the target device.
+  /// @param group          Which group of defaults to restore.
+  /// @param config         Retry/timing configuration (see @c RestoreDefaultParametersConfig).
+  /// @return Void once the restore is confirmed, or an error string if the device is unknown, has
+  /// no
+  ///         generic device area, the command write fails, or it is not confirmed within the
+  ///         budget.
+  std::expected<void, std::string> runRestoreDefaultParameters(
+      uint16_t slavePosition, RestoreGroup group,
+      const RestoreDefaultParametersConfig& config = {});
+
   /// @brief Stages a batch of output objects into the process image in one call.
   ///
   /// Backs @c POST @c /api/process-data/outputs, the "send all" action of the Process Data page:

@@ -1056,6 +1056,45 @@ export class Api<
       ...params,
     });
   /**
+   * @description Commands the device to restore its default parameters (the generic CANopen "restore default parameters" object 0x1011) for the selected `group`, and waits for confirmation. The server writes the ASCII "load" signature to the matching 0x1011 sub-entry, waits a fixed settle (~1 s) for the device to begin, then polls that sub-entry until it reads back 1 ("restore completed"), retrying a poll that does not yet confirm — a value mismatch or a transient read error alike — up to `retries` more times, `interval` apart. The call blocks until the restore is confirmed or the retry budget is exhausted (up to a few seconds); the device's mailbox must be active (PRE-OP/SAFE-OP/OP). **Destructive:** this resets the selected group's parameters to the device's defaults, discarding the current configuration for that group. Which values it touches, and whether it takes effect immediately or after the next reset, is device-specific.
+   *
+   * @name RestoreDefaultParameters
+   * @summary Restore a device's default parameters
+   * @request POST:/api/devices/{slavePosition}/restore-default-parameters
+   */
+  restoreDefaultParameters = (
+    slavePosition: number,
+    query?: {
+      /**
+       * Which group of defaults to restore — all (0x1011:01), communication (0x1011:02), application (0x1011:03), or manufacturer (0x1011:04).
+       * @default "all"
+       * @example "all"
+       */
+      group?: "all" | "communication" | "application" | "manufacturer";
+      /**
+       * Maximum number of extra confirmation polls after the first.
+       * @min 0
+       * @default 10
+       * @example 5
+       */
+      retries?: number;
+      /**
+       * Delay between confirmation polls, in milliseconds.
+       * @min 0
+       * @default 500
+       * @example 500
+       */
+      interval?: number;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<void, void>({
+      path: `/api/devices/${slavePosition}/restore-default-parameters`,
+      method: "POST",
+      query: query,
+      ...params,
+    });
+  /**
    * @description Performs a CoE SDO upload — reads the value of object `index:subindex` from the device at `slavePosition` and returns the raw bytes as a JSON array. Both `index` and `subindex` accept decimal or hexadecimal notation; prefix with `0x` for hex (e.g. `0x6064` or `24676` for object 0x6064).
    *
    * @name SdoUpload

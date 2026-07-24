@@ -1127,6 +1127,66 @@ void HttpServer::run() {
                 wireUs)
                 ->end();
           })
+      .post("/api/devices/:slavePosition/restore-default-parameters",
+            [this](auto* res, auto* req) {
+              uint16_t pos{};
+              auto posParam = req->getParameter("slavePosition");
+              auto [p, ec] =
+                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+              if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+                sendStatus(res, "400 Bad Request", config_.corsOrigin);
+                return;
+              }
+              // Which group of defaults to restore; absent → "all" (0x1011:01).
+              auto group = mm::node::RestoreGroup::kAll;
+              if (auto q = req->getQuery("group"); !q.empty()) {
+                auto parsed = mm::node::parseRestoreGroup(q);
+                if (!parsed) {
+                  sendError(res, "400 Bad Request", config_.corsOrigin,
+                            "invalid group: use all, communication, application, or manufacturer");
+                  return;
+                }
+                group = *parsed;
+              }
+              // Optional retry tuning; absent → the node-layer defaults
+              // (RestoreDefaultParametersConfig: 10 polls, 500 ms apart). The initial settle keeps
+              // its default (not exposed here).
+              mm::node::RestoreDefaultParametersConfig restoreConfig;
+              if (auto q = req->getQuery("retries"); !q.empty()) {
+                auto [qp, qec] =
+                    std::from_chars(q.data(), q.data() + q.size(), restoreConfig.retries);
+                if (qec != std::errc() || qp != q.data() + q.size()) {
+                  sendStatus(res, "400 Bad Request", config_.corsOrigin);
+                  return;
+                }
+              }
+              if (auto q = req->getQuery("interval"); !q.empty()) {
+                uint32_t intervalMs = 0;
+                auto [qp, qec] = std::from_chars(q.data(), q.data() + q.size(), intervalMs);
+                if (qec != std::errc() || qp != q.data() + q.size()) {
+                  sendStatus(res, "400 Bad Request", config_.corsOrigin);
+                  return;
+                }
+                restoreConfig.interval = std::chrono::milliseconds(intervalMs);
+              }
+              if (!deviceManager_.findDevice(pos)) {
+                sendStatus(res, "404 Not Found", config_.corsOrigin);
+                return;
+              }
+              // Synchronous + timed, exactly like store-parameters above.
+              const auto t0 = std::chrono::steady_clock::now();
+              auto r = deviceManager_.runRestoreDefaultParameters(pos, group, restoreConfig);
+              const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                  std::chrono::steady_clock::now() - t0);
+              if (!r) {
+                sendError(res, "409 Conflict", config_.corsOrigin, r.error(), wireUs);
+                return;
+              }
+              mm::api::setWireTime(
+                  mm::api::setCorsOrigin(res->writeStatus("204 No Content"), config_.corsOrigin),
+                  wireUs)
+                  ->end();
+            })
       .get("/api/devices/:slavePosition/sdo/:index/:subindex",
            [this](auto* res, auto* req) {
              uint16_t pos{};

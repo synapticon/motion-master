@@ -3,7 +3,9 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 #include "node/device.h"
@@ -51,6 +53,19 @@ struct RestoreDefaultParameters {
   uint32_t manufacturer{};   ///< 0x1011:04 — restore manufacturer-defined default parameters.
 };
 
+/// @brief Which group of default parameters to restore (which 0x1011 sub-entry to command). The
+///        enum value @b is the sub-entry number, so it maps straight to the object subindex.
+enum class RestoreGroup : uint8_t {
+  kAll = 1,            ///< 0x1011:01 — all default parameters.
+  kCommunication = 2,  ///< 0x1011:02 — communication default parameters.
+  kApplication = 3,    ///< 0x1011:03 — application default parameters.
+  kManufacturer = 4,   ///< 0x1011:04 — manufacturer-defined default parameters.
+};
+
+/// @brief Parses a restore-group token ("all" / "communication" / "application" / "manufacturer")
+///        into a @c RestoreGroup. Returns @c std::nullopt for any other token.
+std::optional<RestoreGroup> parseRestoreGroup(std::string_view token);
+
 /// @brief Timing for the store-parameters confirmation walk (@c ProfileDevice::runStoreParameters).
 ///
 /// After the "save" signature is written, the procedure waits @c settle for the device to begin the
@@ -59,6 +74,18 @@ struct RestoreDefaultParameters {
 /// device flash-write behaviour and rarely needs overriding (tests pass zero delays to run
 /// instantly).
 struct StoreParametersConfig {
+  uint32_t retries = 10;                    ///< Maximum confirmation polls after the first.
+  std::chrono::milliseconds interval{500};  ///< Delay between confirmation polls.
+  std::chrono::milliseconds settle{1000};   ///< Wait after the write before the first poll.
+};
+
+/// @brief Retry/timing for the restore-default-parameters confirmation walk
+///        (@c ProfileDevice::runRestoreDefaultParameters).
+///
+/// The restore counterpart of @c StoreParametersConfig, with the same fields and defaults: after
+/// the "load" signature is written, wait @c settle for the device to begin, then poll the 0x1011
+/// sub-entry up to @c retries more times, @c interval apart, until it reads back 1.
+struct RestoreDefaultParametersConfig {
   uint32_t retries = 10;                    ///< Maximum confirmation polls after the first.
   std::chrono::milliseconds interval{500};  ///< Delay between confirmation polls.
   std::chrono::milliseconds settle{1000};   ///< Wait after the write before the first poll.
@@ -203,6 +230,27 @@ class ProfileDevice {
   /// @brief Writes "restore manufacturer-defined default parameters" (0x1011:04, UNSIGNED32) —
   ///        the ASCII "load" signature (0x64616F6C) commands the restore.
   std::expected<void, std::string> setRestoreManufacturerDefaultParameters(uint32_t signature);
+
+  /// @brief Commands a restore of default parameters (0x1011) and waits for the device to confirm.
+  ///
+  /// The restore counterpart of @c runStoreParameters: writes the ASCII "load" signature
+  /// (0x64616F6C) to the 0x1011 sub-entry selected by @p group, waits @c config.settle, then polls
+  /// that sub-entry until it reads back 1 — the CiA301 "restore completed" value — retrying a poll
+  /// that does not yet confirm (a value mismatch or a transient mailbox read error) up to
+  /// @c config.retries more times, @c config.interval apart.
+  ///
+  /// **Destructive:** this resets the selected group's parameters to the device's defaults,
+  /// discarding the current configuration for that group. Which values it touches, and whether the
+  /// change takes effect immediately or after the next reset, is device-specific. Blocks the
+  /// calling thread and takes the driver's control-plane lock only per transaction, exactly like @c
+  /// runStoreParameters; requires the mailbox to be active (PRE-OP/SAFE-OP/OP).
+  ///
+  /// @param group   Which group of defaults to restore (maps to the 0x1011 sub-entry).
+  /// @param config  Retry/timing configuration (see @c RestoreDefaultParametersConfig).
+  /// @return Void once the sub-entry reads 1, or an error string if the restore command write fails
+  ///         (e.g. the device does not support @p group) or it is not confirmed within the budget.
+  std::expected<void, std::string> runRestoreDefaultParameters(
+      RestoreGroup group, const RestoreDefaultParametersConfig& config = {});
 
   /// @brief Reads the consumer heartbeat time (0x1016:01, UNSIGNED32, ms — node ID in bits 16-23).
   ///        Writable, so every call re-reads the device.

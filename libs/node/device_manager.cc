@@ -1260,6 +1260,17 @@ std::expected<void, std::string> DeviceManager::runStoreParameters(
   return profile->runStoreParameters(config);
 }
 
+std::expected<void, std::string> DeviceManager::runRestoreDefaultParameters(
+    uint16_t slavePosition, RestoreGroup group, const RestoreDefaultParametersConfig& config) {
+  // Shared lock across the whole (multi-second) restore — same reasoning as runStoreParameters.
+  std::shared_lock lock(busMutex_);
+  auto profile = resolveProfileDevice(*this, slavePosition);
+  if (!profile) {
+    return std::unexpected(profile.error());
+  }
+  return profile->runRestoreDefaultParameters(group, config);
+}
+
 std::vector<OutputStageResult> DeviceManager::stageProcessDataOutputs(
     std::span<const OutputStageRequest> requests) {
   // One shared lock for the whole batch (per-item writeParameter takes each device's own

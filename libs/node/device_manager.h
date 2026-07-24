@@ -647,7 +647,8 @@ class DeviceManager {
   /// Held under the shared bus lock for the call's duration, and each poll's bus access takes the
   /// driver's control-plane lock only briefly, so the RT loop and the WebSocket are never blocked.
   ///
-  /// **Destructive:** resets the selected group's parameters to the device's defaults.
+  /// **Destructive:** overwrites the selected group's live (volatile) parameter values with the
+  /// device's defaults.
   ///
   /// @param slavePosition  1-based bus position of the target device.
   /// @param group          Which group of defaults to restore.

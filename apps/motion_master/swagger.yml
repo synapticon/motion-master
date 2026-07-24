@@ -1566,9 +1566,10 @@ paths:
         mailbox must be active (PRE-OP/SAFE-OP/OP).
 
 
-        **Destructive:** this resets the selected group's parameters to the device's defaults,
-        discarding the current configuration for that group. Which values it touches, and whether it
-        takes effect immediately or after the next reset, is device-specific.
+        **Destructive:** this overwrites the selected group's parameter values in the device's
+        volatile memory with the device's defaults, replacing the current live values (not the
+        persisted store). Which values it touches, and whether it takes effect immediately or after
+        the next reset, is device-specific.
       operationId: restoreDefaultParameters
       parameters:
         - name: slavePosition

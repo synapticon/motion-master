@@ -638,9 +638,9 @@ const NonVolatileStorageCard = memo(function NonVolatileStorageCard({
               Destructive
             </p>
             <p className="text-xs text-grey-700 mt-0.5">
-              Resets the selected group's parameters to the device's defaults, discarding the current
-              configuration for that group. Store parameters first if you want to keep the current
-              values.
+              Overwrites the selected group's parameter values in the device's volatile memory with
+              the device's defaults — the current live values are replaced. Store parameters first if
+              you want to keep them.
             </p>
           </div>
           <div className="flex items-center gap-3">

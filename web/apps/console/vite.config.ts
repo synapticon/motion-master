@@ -39,6 +39,17 @@ function swaggerSpec(): Plugin {
     configureServer(server) {
       server.watcher.add(specPath)
     },
+    // swagger.yml lives outside this app's tree, so it is not in the module graph; a plain edit
+    // would leave the cached virtual module (and the rendered API docs) stale until a dev-server
+    // restart. On a change to the spec, invalidate the virtual module and trigger a full reload so
+    // the docs pick up new endpoints live.
+    handleHotUpdate(ctx) {
+      if (ctx.file !== specPath) return
+      const mod = ctx.server.moduleGraph.getModuleById(resolvedId)
+      if (mod) ctx.server.moduleGraph.invalidateModule(mod)
+      ctx.server.ws.send({ type: 'full-reload' })
+      return []
+    },
   }
 }
 

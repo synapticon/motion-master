@@ -36,11 +36,11 @@ constexpr uint16_t kPreOp = static_cast<uint16_t>(EtherCatState::PreOp);
 std::vector<uint8_t> u16le(uint16_t v) {
   return {static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8)};
 }
-std::vector<uint8_t> i32le(int32_t v) {
-  const auto u = static_cast<uint32_t>(v);
-  return {static_cast<uint8_t>(u), static_cast<uint8_t>(u >> 8), static_cast<uint8_t>(u >> 16),
-          static_cast<uint8_t>(u >> 24)};
+std::vector<uint8_t> u32le(uint32_t v) {
+  return {static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v >> 16),
+          static_cast<uint8_t>(v >> 24)};
 }
+std::vector<uint8_t> i32le(int32_t v) { return u32le(static_cast<uint32_t>(v)); }
 
 // The statusword a drive reports for each state (canonical bit patterns).
 uint16_t statuswordFor(State s) {
@@ -408,6 +408,113 @@ TEST(Cia402Drive, ReadStatusTargetTracksActiveModeQuantity) {
   EXPECT_EQ(targetInMode(10), -33);  // CST → target torque
   EXPECT_EQ(targetInMode(0), 0);     // NoMode → no linear setpoint
   EXPECT_EQ(targetInMode(6), 0);     // Homing → no linear setpoint
+}
+
+TEST(Cia402Drive, ProfileObjectRoundTrip) {
+  // Representative rw profile objects of each width: the setter writes the exact wire bytes and
+  // the (live) getter reads them back.
+  Cia402FakeDriver driver;
+  driver.programObject(Object::kMaxTorque, 0, ObjectDataType::UNSIGNED16, u16le(0));
+  driver.programObject(Object::kProfileVelocity, 0, ObjectDataType::UNSIGNED32, u32le(0));
+  driver.programObject(Object::kHomingMethod, 0, ObjectDataType::INTEGER8, {0});
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  ASSERT_TRUE(drive.setMaxTorque(500).has_value());
+  ASSERT_TRUE(drive.setProfileVelocity(200000).has_value());
+  ASSERT_TRUE(drive.setHomingMethod(-3).has_value());  // INTEGER8 is signed — e.g. method -3
+
+  EXPECT_EQ(drive.maxTorque().value_or(0), 500);
+  EXPECT_EQ(drive.profileVelocity().value_or(0), 200000u);
+  EXPECT_EQ(drive.homingMethod().value_or(0), -3);
+}
+
+TEST(Cia402Drive, VolatileGetterRereadsTheDevice) {
+  // Error code (0x603F) is read-only but volatile: every call must reach the device, never serve
+  // a cached first reading.
+  Cia402FakeDriver driver;
+  driver.programObject(Object::kErrorCode, 0, ObjectDataType::UNSIGNED16, u16le(0));
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  EXPECT_EQ(drive.errorCode().value_or(1), 0);
+  driver.store[Cia402FakeDriver::key(Object::kErrorCode, 0)] = u16le(0x7500);  // fault appears
+  EXPECT_EQ(drive.errorCode().value_or(0), 0x7500);
+}
+
+TEST(Cia402Drive, SupportedDriveModesIsCached) {
+  // Supported drive modes (0x6502) is a constant capability field: the first read is served from
+  // the device, subsequent reads from the cache — a store change must not show through.
+  Cia402FakeDriver driver;
+  driver.programObject(Object::kSupportedDriveModes, 0, ObjectDataType::UNSIGNED32, u32le(0x03ED));
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  EXPECT_EQ(drive.supportedDriveModes().value_or(0), 0x03EDu);
+  driver.store[Cia402FakeDriver::key(Object::kSupportedDriveModes, 0)] = u32le(0);
+  EXPECT_EQ(drive.supportedDriveModes().value_or(0), 0x03EDu);
+}
+
+TEST(Cia402Drive, StructGetterReadsBothSubEntries) {
+  Cia402FakeDriver driver;
+  driver.programObject(Object::kSoftwarePositionLimit, 1, ObjectDataType::INTEGER32, i32le(-1000));
+  driver.programObject(Object::kSoftwarePositionLimit, 2, ObjectDataType::INTEGER32, i32le(5000));
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  auto limit = drive.softwarePositionLimit();
+  ASSERT_TRUE(limit.has_value()) << limit.error();
+  EXPECT_EQ(limit->min, -1000);
+  EXPECT_EQ(limit->max, 5000);
+}
+
+TEST(Cia402Drive, StructSetterWritesSubOneThenSubTwo) {
+  Cia402FakeDriver driver;
+  driver.programObject(Object::kGearRatio, 1, ObjectDataType::UNSIGNED32, u32le(1));
+  driver.programObject(Object::kGearRatio, 2, ObjectDataType::UNSIGNED32, u32le(1));
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  ASSERT_TRUE(drive.setGearRatio({30, 1}).has_value());
+
+  ASSERT_EQ(driver.writes.size(), 2u);
+  EXPECT_EQ(driver.writes[0].index, static_cast<uint16_t>(Object::kGearRatio));
+  EXPECT_EQ(driver.writes[0].subindex, 1);
+  EXPECT_EQ(driver.writes[0].data, u32le(30));
+  EXPECT_EQ(driver.writes[1].subindex, 2);
+  EXPECT_EQ(driver.writes[1].data, u32le(1));
+}
+
+TEST(Cia402Drive, SetDigitalOutputsWritesLevelsBeforeMask) {
+  Cia402FakeDriver driver;
+  driver.programObject(Object::kDigitalOutputs, 1, ObjectDataType::UNSIGNED32, u32le(0));
+  driver.programObject(Object::kDigitalOutputs, 2, ObjectDataType::UNSIGNED32, u32le(0));
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  ASSERT_TRUE(drive.setDigitalOutputs({0x5, 0x7}).has_value());
+
+  // Levels (sub 1) must land before the enable mask (sub 2): while masked off they are inert, so
+  // a newly enabled output comes up with its commanded level instead of briefly driving a stale
+  // one. Mask-first would glitch the output.
+  ASSERT_EQ(driver.writes.size(), 2u);
+  EXPECT_EQ(driver.writes[0].index, static_cast<uint16_t>(Object::kDigitalOutputs));
+  EXPECT_EQ(driver.writes[0].subindex, 1);
+  EXPECT_EQ(driver.writes[0].data, u32le(0x5));
+  EXPECT_EQ(driver.writes[1].subindex, 2);
+  EXPECT_EQ(driver.writes[1].data, u32le(0x7));
+}
+
+TEST(Cia402Drive, StructSetterAbortsOnFirstFailure) {
+  // Only sub 2 of the position range limit exists — the sub-1 write fails (unknown parameter)
+  // and the setter must not go on to write sub 2.
+  Cia402FakeDriver driver;
+  driver.programObject(Object::kPositionRangeLimit, 2, ObjectDataType::INTEGER32, i32le(0));
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  EXPECT_FALSE(drive.setPositionRangeLimit({-100, 100}).has_value());
+  EXPECT_TRUE(driver.writes.empty());
 }
 
 TEST(Cia402Status, JsonEmitsNamesAndNumbers) {

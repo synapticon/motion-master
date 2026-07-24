@@ -31,6 +31,42 @@ struct Cia402Status {
 ///        alongside the numeric `statusword`, `controlword`, and `modeOfOperation`.
 void to_json(nlohmann::json& j, const Cia402Status& s);
 
+/// @brief Position range limit (0x607B) — the range position values wrap around in.
+struct PositionRangeLimit {
+  int32_t min{};  ///< 0x607B:01 — min position range limit.
+  int32_t max{};  ///< 0x607B:02 — max position range limit.
+};
+
+/// @brief Software position limit (0x607D) — the absolute end stops enforced in software.
+struct SoftwarePositionLimit {
+  int32_t min{};  ///< 0x607D:01 — min position limit.
+  int32_t max{};  ///< 0x607D:02 — max position limit.
+};
+
+/// @brief Gear ratio (0x6091) — motor revolutions per driving shaft revolutions.
+struct GearRatio {
+  uint32_t motorRevolutions{};  ///< 0x6091:01 — numerator.
+  uint32_t shaftRevolutions{};  ///< 0x6091:02 — denominator.
+};
+
+/// @brief Feed constant (0x6092) — feed (position units) per driving shaft revolutions.
+struct FeedConstant {
+  uint32_t feed{};              ///< 0x6092:01 — numerator.
+  uint32_t shaftRevolutions{};  ///< 0x6092:02 — denominator.
+};
+
+/// @brief Homing speeds (0x6099) — the two velocities of a homing run.
+struct HomingSpeeds {
+  uint32_t switchSearch{};  ///< 0x6099:01 — speed during search for the reference switch.
+  uint32_t zeroSearch{};    ///< 0x6099:02 — speed during search for the zero position.
+};
+
+/// @brief Digital outputs (0x60FE) — commanded output levels gated by an enable mask.
+struct DigitalOutputs {
+  uint32_t physicalOutputs{};  ///< 0x60FE:01 — commanded output bit levels.
+  uint32_t bitMask{};          ///< 0x60FE:02 — 1 = the corresponding output bit is driven.
+};
+
 /// @brief High-level state-machine actions a client can command (the named transitions a UI
 ///        exposes as buttons). Distinct from @c cia402::Command (raw controlword bit patterns).
 enum class Cia402Command { kEnable, kDisable, kQuickStop, kFaultReset };
@@ -144,11 +180,20 @@ class Cia402Drive : public ProfileDevice {
 
   // --- Cyclic setpoints (typed convenience over the standard objects) ------------------------
 
+  /// @brief Reads the last-commanded target position (0x607A, INTEGER32).
+  std::expected<int32_t, std::string> targetPosition() const;
+
   /// @brief Writes target position (0x607A, INTEGER32) — CSP / PP.
   std::expected<void, std::string> setTargetPosition(int32_t counts);
 
+  /// @brief Reads the last-commanded target velocity (0x60FF, INTEGER32).
+  std::expected<int32_t, std::string> targetVelocity() const;
+
   /// @brief Writes target velocity (0x60FF, INTEGER32) — CSV / PV.
   std::expected<void, std::string> setTargetVelocity(int32_t value);
+
+  /// @brief Reads the last-commanded target torque (0x6071, INTEGER16, per-mille of rated).
+  std::expected<int16_t, std::string> targetTorque() const;
 
   /// @brief Writes target torque (0x6071, INTEGER16, per-mille of rated) — CST / PT.
   std::expected<void, std::string> setTargetTorque(int16_t perMille);
@@ -158,6 +203,281 @@ class Cia402Drive : public ProfileDevice {
 
   /// @brief Reads actual velocity (0x606C, INTEGER32).
   std::expected<int32_t, std::string> velocityActualValue() const;
+
+  /// @brief Reads actual torque (0x6077, INTEGER16, per-mille of rated).
+  std::expected<int16_t, std::string> torqueActualValue() const;
+
+  // --- Profile objects (0x603F..0x6502) --------------------------------------------------------
+  // Flag-aware accessors over the remaining standard drive-profile objects, ordered by
+  // index/subindex. Every getter re-reads the device on each call (these objects are writable or
+  // volatile) except supportedDriveModes(), a constant capability field cached after the first
+  // read.
+
+  /// @brief Reads the error code (0x603F, UNSIGNED16) — the code of the last drive fault.
+  std::expected<uint16_t, std::string> errorCode() const;
+
+  /// @brief Reads the quick stop option code (0x605A, INTEGER16).
+  std::expected<int16_t, std::string> quickStopOptionCode() const;
+
+  /// @brief Writes the quick stop option code (0x605A, INTEGER16) — the quick-stop reaction.
+  std::expected<void, std::string> setQuickStopOptionCode(int16_t value);
+
+  /// @brief Reads the position demand value (0x6062, INTEGER32) — trajectory generator output.
+  std::expected<int32_t, std::string> positionDemandValue() const;
+
+  /// @brief Reads the following error window (0x6065, UNSIGNED32).
+  std::expected<uint32_t, std::string> followingErrorWindow() const;
+
+  /// @brief Writes the following error window (0x6065, UNSIGNED32).
+  std::expected<void, std::string> setFollowingErrorWindow(uint32_t value);
+
+  /// @brief Reads the following error time out (0x6066, UNSIGNED16, ms).
+  std::expected<uint16_t, std::string> followingErrorTimeout() const;
+
+  /// @brief Writes the following error time out (0x6066, UNSIGNED16, ms).
+  std::expected<void, std::string> setFollowingErrorTimeout(uint16_t value);
+
+  /// @brief Reads the position window (0x6067, UNSIGNED32) — the target-reached tolerance.
+  std::expected<uint32_t, std::string> positionWindow() const;
+
+  /// @brief Writes the position window (0x6067, UNSIGNED32).
+  std::expected<void, std::string> setPositionWindow(uint32_t value);
+
+  /// @brief Reads the position window time (0x6068, UNSIGNED16, ms).
+  std::expected<uint16_t, std::string> positionWindowTime() const;
+
+  /// @brief Writes the position window time (0x6068, UNSIGNED16, ms).
+  std::expected<void, std::string> setPositionWindowTime(uint16_t value);
+
+  /// @brief Reads the velocity demand value (0x606B, INTEGER32) — ramp generator output.
+  std::expected<int32_t, std::string> velocityDemandValue() const;
+
+  /// @brief Reads the velocity window (0x606D, UNSIGNED16) — the target-reached tolerance.
+  std::expected<uint16_t, std::string> velocityWindow() const;
+
+  /// @brief Writes the velocity window (0x606D, UNSIGNED16).
+  std::expected<void, std::string> setVelocityWindow(uint16_t value);
+
+  /// @brief Reads the velocity window time (0x606E, UNSIGNED16, ms).
+  std::expected<uint16_t, std::string> velocityWindowTime() const;
+
+  /// @brief Writes the velocity window time (0x606E, UNSIGNED16, ms).
+  std::expected<void, std::string> setVelocityWindowTime(uint16_t value);
+
+  /// @brief Reads the velocity threshold (0x606F, UNSIGNED16) — the standstill threshold.
+  std::expected<uint16_t, std::string> velocityThreshold() const;
+
+  /// @brief Writes the velocity threshold (0x606F, UNSIGNED16).
+  std::expected<void, std::string> setVelocityThreshold(uint16_t value);
+
+  /// @brief Reads the velocity threshold time (0x6070, UNSIGNED16, ms).
+  std::expected<uint16_t, std::string> velocityThresholdTime() const;
+
+  /// @brief Writes the velocity threshold time (0x6070, UNSIGNED16, ms).
+  std::expected<void, std::string> setVelocityThresholdTime(uint16_t value);
+
+  /// @brief Reads max torque (0x6072, UNSIGNED16, per-mille of rated).
+  std::expected<uint16_t, std::string> maxTorque() const;
+
+  /// @brief Writes max torque (0x6072, UNSIGNED16, per-mille of rated).
+  std::expected<void, std::string> setMaxTorque(uint16_t perMille);
+
+  /// @brief Reads max current (0x6073, UNSIGNED16, per-mille of rated).
+  std::expected<uint16_t, std::string> maxCurrent() const;
+
+  /// @brief Writes max current (0x6073, UNSIGNED16, per-mille of rated).
+  std::expected<void, std::string> setMaxCurrent(uint16_t perMille);
+
+  /// @brief Reads the torque demand (0x6074, INTEGER16) — control loop output.
+  std::expected<int16_t, std::string> torqueDemand() const;
+
+  /// @brief Reads the motor rated current (0x6075, UNSIGNED32, mA).
+  std::expected<uint32_t, std::string> motorRatedCurrent() const;
+
+  /// @brief Writes the motor rated current (0x6075, UNSIGNED32, mA).
+  std::expected<void, std::string> setMotorRatedCurrent(uint32_t milliamps);
+
+  /// @brief Reads the motor rated torque (0x6076, UNSIGNED32, mNm).
+  std::expected<uint32_t, std::string> motorRatedTorque() const;
+
+  /// @brief Writes the motor rated torque (0x6076, UNSIGNED32, mNm).
+  std::expected<void, std::string> setMotorRatedTorque(uint32_t millinewtonMetres);
+
+  /// @brief Reads the DC link circuit voltage (0x6079, UNSIGNED32, mV).
+  std::expected<uint32_t, std::string> dcLinkCircuitVoltage() const;
+
+  /// @brief Reads the position range limit (0x607B) — both sub-entries.
+  std::expected<PositionRangeLimit, std::string> positionRangeLimit() const;
+
+  /// @brief Writes the position range limit (0x607B) — min then max; aborts on first failure.
+  std::expected<void, std::string> setPositionRangeLimit(const PositionRangeLimit& limit);
+
+  /// @brief Reads the home offset (0x607C, INTEGER32).
+  std::expected<int32_t, std::string> homeOffset() const;
+
+  /// @brief Writes the home offset (0x607C, INTEGER32).
+  std::expected<void, std::string> setHomeOffset(int32_t value);
+
+  /// @brief Reads the software position limit (0x607D) — both sub-entries.
+  std::expected<SoftwarePositionLimit, std::string> softwarePositionLimit() const;
+
+  /// @brief Writes the software position limit (0x607D) — min then max; aborts on first failure.
+  std::expected<void, std::string> setSoftwarePositionLimit(const SoftwarePositionLimit& limit);
+
+  /// @brief Reads the polarity (0x607E, UNSIGNED8) — position/velocity inversion bits.
+  std::expected<uint8_t, std::string> polarity() const;
+
+  /// @brief Writes the polarity (0x607E, UNSIGNED8).
+  std::expected<void, std::string> setPolarity(uint8_t value);
+
+  /// @brief Reads the max motor speed (0x6080, UNSIGNED32).
+  std::expected<uint32_t, std::string> maxMotorSpeed() const;
+
+  /// @brief Writes the max motor speed (0x6080, UNSIGNED32).
+  std::expected<void, std::string> setMaxMotorSpeed(uint32_t value);
+
+  /// @brief Reads the profile velocity (0x6081, UNSIGNED32) — PP cruise velocity.
+  std::expected<uint32_t, std::string> profileVelocity() const;
+
+  /// @brief Writes the profile velocity (0x6081, UNSIGNED32).
+  std::expected<void, std::string> setProfileVelocity(uint32_t value);
+
+  /// @brief Reads the profile acceleration (0x6083, UNSIGNED32).
+  std::expected<uint32_t, std::string> profileAcceleration() const;
+
+  /// @brief Writes the profile acceleration (0x6083, UNSIGNED32).
+  std::expected<void, std::string> setProfileAcceleration(uint32_t value);
+
+  /// @brief Reads the profile deceleration (0x6084, UNSIGNED32).
+  std::expected<uint32_t, std::string> profileDeceleration() const;
+
+  /// @brief Writes the profile deceleration (0x6084, UNSIGNED32).
+  std::expected<void, std::string> setProfileDeceleration(uint32_t value);
+
+  /// @brief Reads the quick stop deceleration (0x6085, UNSIGNED32).
+  std::expected<uint32_t, std::string> quickStopDeceleration() const;
+
+  /// @brief Writes the quick stop deceleration (0x6085, UNSIGNED32).
+  std::expected<void, std::string> setQuickStopDeceleration(uint32_t value);
+
+  /// @brief Reads the motion profile type (0x6086, INTEGER16).
+  std::expected<int16_t, std::string> motionProfileType() const;
+
+  /// @brief Writes the motion profile type (0x6086, INTEGER16).
+  std::expected<void, std::string> setMotionProfileType(int16_t value);
+
+  /// @brief Reads the torque slope (0x6087, UNSIGNED32) — PT torque ramp rate.
+  std::expected<uint32_t, std::string> torqueSlope() const;
+
+  /// @brief Writes the torque slope (0x6087, UNSIGNED32).
+  std::expected<void, std::string> setTorqueSlope(uint32_t value);
+
+  /// @brief Reads the torque profile type (0x6088, INTEGER16).
+  std::expected<int16_t, std::string> torqueProfileType() const;
+
+  /// @brief Writes the torque profile type (0x6088, INTEGER16).
+  std::expected<void, std::string> setTorqueProfileType(int16_t value);
+
+  /// @brief Reads the gear ratio (0x6091) — both sub-entries.
+  std::expected<GearRatio, std::string> gearRatio() const;
+
+  /// @brief Writes the gear ratio (0x6091) — motor then shaft revolutions; aborts on first
+  ///        failure.
+  std::expected<void, std::string> setGearRatio(const GearRatio& ratio);
+
+  /// @brief Reads the feed constant (0x6092) — both sub-entries.
+  std::expected<FeedConstant, std::string> feedConstant() const;
+
+  /// @brief Writes the feed constant (0x6092) — feed then shaft revolutions; aborts on first
+  ///        failure.
+  std::expected<void, std::string> setFeedConstant(const FeedConstant& constant);
+
+  /// @brief Reads the homing method (0x6098, INTEGER8).
+  std::expected<int8_t, std::string> homingMethod() const;
+
+  /// @brief Writes the homing method (0x6098, INTEGER8).
+  std::expected<void, std::string> setHomingMethod(int8_t method);
+
+  /// @brief Reads the homing speeds (0x6099) — both sub-entries.
+  std::expected<HomingSpeeds, std::string> homingSpeeds() const;
+
+  /// @brief Writes the homing speeds (0x6099) — switch then zero search; aborts on first failure.
+  std::expected<void, std::string> setHomingSpeeds(const HomingSpeeds& speeds);
+
+  /// @brief Reads the homing acceleration (0x609A, UNSIGNED32).
+  std::expected<uint32_t, std::string> homingAcceleration() const;
+
+  /// @brief Writes the homing acceleration (0x609A, UNSIGNED32).
+  std::expected<void, std::string> setHomingAcceleration(uint32_t value);
+
+  /// @brief Reads the SI unit velocity (0x60A9, UNSIGNED32) — the unit code of velocity objects.
+  std::expected<uint32_t, std::string> siUnitVelocity() const;
+
+  /// @brief Writes the SI unit velocity (0x60A9, UNSIGNED32).
+  std::expected<void, std::string> setSiUnitVelocity(uint32_t value);
+
+  /// @brief Reads the velocity offset (0x60B1, INTEGER32) — CSP/CSV velocity feed-forward.
+  std::expected<int32_t, std::string> velocityOffset() const;
+
+  /// @brief Writes the velocity offset (0x60B1, INTEGER32).
+  std::expected<void, std::string> setVelocityOffset(int32_t value);
+
+  /// @brief Reads the torque offset (0x60B2, INTEGER16) — torque feed-forward.
+  std::expected<int16_t, std::string> torqueOffset() const;
+
+  /// @brief Writes the torque offset (0x60B2, INTEGER16).
+  std::expected<void, std::string> setTorqueOffset(int16_t value);
+
+  /// @brief Reads the touch probe function (0x60B8, UNSIGNED16) — arm/config bits.
+  std::expected<uint16_t, std::string> touchProbeFunction() const;
+
+  /// @brief Writes the touch probe function (0x60B8, UNSIGNED16).
+  std::expected<void, std::string> setTouchProbeFunction(uint16_t value);
+
+  /// @brief Reads the touch probe status (0x60B9, UNSIGNED16) — latch status bits.
+  std::expected<uint16_t, std::string> touchProbeStatus() const;
+
+  /// @brief Reads the position latched at touch probe 1's rising edge (0x60BA, INTEGER32).
+  std::expected<int32_t, std::string> touchProbe1PositiveEdge() const;
+
+  /// @brief Reads the position latched at touch probe 1's falling edge (0x60BB, INTEGER32).
+  std::expected<int32_t, std::string> touchProbe1NegativeEdge() const;
+
+  /// @brief Reads the time stamp of touch probe 1's rising edge (0x60D1, UNSIGNED32).
+  std::expected<uint32_t, std::string> touchProbeTimeStamp1PositiveValue() const;
+
+  /// @brief Reads the time stamp of touch probe 1's falling edge (0x60D2, UNSIGNED32).
+  std::expected<uint32_t, std::string> touchProbeTimeStamp1NegativeValue() const;
+
+  /// @brief Reads the positioning option code (0x60F2, UNSIGNED16) — PP behaviour options.
+  std::expected<uint16_t, std::string> positioningOptionCode() const;
+
+  /// @brief Writes the positioning option code (0x60F2, UNSIGNED16).
+  std::expected<void, std::string> setPositioningOptionCode(uint16_t value);
+
+  /// @brief Reads the following error actual value (0x60F4, INTEGER32).
+  std::expected<int32_t, std::string> followingErrorActualValue() const;
+
+  /// @brief Reads the control effort (0x60FA, INTEGER32) — position loop output.
+  std::expected<int32_t, std::string> controlEffort() const;
+
+  /// @brief Reads the position demand internal value (0x60FC, INTEGER32).
+  std::expected<int32_t, std::string> positionDemandInternalValue() const;
+
+  /// @brief Reads the digital inputs (0x60FD, UNSIGNED32) — input bit field.
+  std::expected<uint32_t, std::string> digitalInputs() const;
+
+  /// @brief Reads the digital outputs (0x60FE) — both sub-entries.
+  std::expected<DigitalOutputs, std::string> digitalOutputs() const;
+
+  /// @brief Writes the digital outputs (0x60FE) — levels first (inert while masked off), then the
+  ///        enable mask, so a newly enabled output comes up with its commanded level; aborts on
+  ///        first failure.
+  std::expected<void, std::string> setDigitalOutputs(const DigitalOutputs& outputs);
+
+  /// @brief Reads the supported drive modes (0x6502, UNSIGNED32) — the capability bit field.
+  ///        Constant, so it is cached after the first read.
+  std::expected<uint32_t, std::string> supportedDriveModes() const;
 
  private:
   /// @brief Read-modify-write of the controlword that sets only the @c kCommandMask bits to

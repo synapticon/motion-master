@@ -16,20 +16,76 @@
 
 namespace mm::node::cia402 {
 
-/// @brief Standard CiA402 object dictionary indices used by the drive profile.
+/// @brief Standard CiA402 object dictionary indices used by the drive profile, ordered by index.
 ///
-/// Subindex is always 0 for these (they are simple objects), so callers pass @c 0.
+/// Simple VAR objects are addressed at subindex 0; the two-element ARRAY objects (0x607B,
+/// 0x607D, 0x6091, 0x6092, 0x6099, 0x60FE) at sub-entries 1..2.
 enum Object : uint16_t {
-  kControlword = 0x6040,             ///< UNSIGNED16, RxPDO — commands the state machine.
-  kStatusword = 0x6041,              ///< UNSIGNED16, TxPDO — reports the state machine.
-  kModeOfOperation = 0x6060,         ///< INTEGER8, RxPDO — requested operation mode.
-  kModeOfOperationDisplay = 0x6061,  ///< INTEGER8, TxPDO — active operation mode.
-  kTargetPosition = 0x607A,          ///< INTEGER32, RxPDO — CSP/PP setpoint.
-  kTargetVelocity = 0x60FF,          ///< INTEGER32, RxPDO — CSV/PV setpoint.
-  kTargetTorque = 0x6071,            ///< INTEGER16, RxPDO — CST/PT setpoint (per-mille of rated).
-  kPositionActualValue = 0x6064,     ///< INTEGER32, TxPDO — actual position.
-  kVelocityActualValue = 0x606C,     ///< INTEGER32, TxPDO — actual velocity.
-  kTorqueActualValue = 0x6077,       ///< INTEGER16, TxPDO — actual torque.
+  kErrorCode = 0x603F,                ///< UNSIGNED16, ro, TxPDO — code of the last drive fault.
+  kControlword = 0x6040,              ///< UNSIGNED16, rw, RxPDO — commands the state machine.
+  kStatusword = 0x6041,               ///< UNSIGNED16, ro, TxPDO — reports the state machine.
+  kQuickStopOptionCode = 0x605A,      ///< INTEGER16, rw — reaction to a quick stop.
+  kModeOfOperation = 0x6060,          ///< INTEGER8, rw, RxPDO — requested operation mode.
+  kModeOfOperationDisplay = 0x6061,   ///< INTEGER8, ro, TxPDO — active operation mode.
+  kPositionDemandValue = 0x6062,      ///< INTEGER32, ro, TxPDO — trajectory generator demand.
+  kPositionActualValue = 0x6064,      ///< INTEGER32, ro, TxPDO — actual position.
+  kFollowingErrorWindow = 0x6065,     ///< UNSIGNED32, rw, RxPDO — max tolerated following error.
+  kFollowingErrorTimeout = 0x6066,    ///< UNSIGNED16, rw, RxPDO — ms outside window before fault.
+  kPositionWindow = 0x6067,           ///< UNSIGNED32, rw, RxPDO — target-reached position window.
+  kPositionWindowTime = 0x6068,       ///< UNSIGNED16, rw, RxPDO — ms in window for target reached.
+  kVelocityDemandValue = 0x606B,      ///< INTEGER32, ro, TxPDO — ramp generator demand.
+  kVelocityActualValue = 0x606C,      ///< INTEGER32, ro, TxPDO — actual velocity.
+  kVelocityWindow = 0x606D,           ///< UNSIGNED16, rw, RxPDO — target-reached velocity window.
+  kVelocityWindowTime = 0x606E,       ///< UNSIGNED16, rw, RxPDO — ms in window for target reached.
+  kVelocityThreshold = 0x606F,        ///< UNSIGNED16, rw, RxPDO — standstill velocity threshold.
+  kVelocityThresholdTime = 0x6070,    ///< UNSIGNED16, rw, RxPDO — ms below threshold = standstill.
+  kTargetTorque = 0x6071,             ///< INTEGER16, rw, RxPDO — CST/PT setpoint (per-mille).
+  kMaxTorque = 0x6072,                ///< UNSIGNED16, rw, RxPDO — torque limit (per-mille).
+  kMaxCurrent = 0x6073,               ///< UNSIGNED16, rw, RxPDO — current limit (per-mille).
+  kTorqueDemand = 0x6074,             ///< INTEGER16, ro, TxPDO — control loop torque demand.
+  kMotorRatedCurrent = 0x6075,        ///< UNSIGNED32, rw — motor rated current (mA).
+  kMotorRatedTorque = 0x6076,         ///< UNSIGNED32, rw — motor rated torque (mNm).
+  kTorqueActualValue = 0x6077,        ///< INTEGER16, ro, TxPDO — actual torque.
+  kDcLinkCircuitVoltage = 0x6079,     ///< UNSIGNED32, ro, TxPDO — DC bus voltage (mV).
+  kTargetPosition = 0x607A,           ///< INTEGER32, rw, RxPDO — CSP/PP setpoint.
+  kPositionRangeLimit = 0x607B,       ///< 2×INTEGER32, rw — position wrap range (min/max).
+  kHomeOffset = 0x607C,               ///< INTEGER32, rw, RxPDO — home offset from machine zero.
+  kSoftwarePositionLimit = 0x607D,    ///< 2×INTEGER32, rw — software end stops (min/max).
+  kPolarity = 0x607E,                 ///< UNSIGNED8, rw, RxPDO — position/velocity polarity bits.
+  kMaxMotorSpeed = 0x6080,            ///< UNSIGNED32, rw, RxPDO — motor speed limit.
+  kProfileVelocity = 0x6081,          ///< UNSIGNED32, rw, RxPDO — PP cruise velocity.
+  kProfileAcceleration = 0x6083,      ///< UNSIGNED32, rw, RxPDO — profile acceleration.
+  kProfileDeceleration = 0x6084,      ///< UNSIGNED32, rw, RxPDO — profile deceleration.
+  kQuickStopDeceleration = 0x6085,    ///< UNSIGNED32, rw, RxPDO — deceleration on quick stop.
+  kMotionProfileType = 0x6086,        ///< INTEGER16, rw, RxPDO — trajectory shape.
+  kTorqueSlope = 0x6087,              ///< UNSIGNED32, rw, RxPDO — PT torque ramp rate.
+  kTorqueProfileType = 0x6088,        ///< INTEGER16, rw, RxPDO — torque trajectory shape.
+  kGearRatio = 0x6091,                ///< 2×UNSIGNED32, rw — motor/shaft revolutions.
+  kFeedConstant = 0x6092,             ///< 2×UNSIGNED32, rw — feed per shaft revolutions.
+  kHomingMethod = 0x6098,             ///< INTEGER8, rw, RxPDO — homing method number.
+  kHomingSpeeds = 0x6099,             ///< 2×UNSIGNED32, rw — switch/zero search speeds.
+  kHomingAcceleration = 0x609A,       ///< UNSIGNED32, rw, RxPDO — homing acceleration.
+  kSiUnitVelocity = 0x60A9,           ///< UNSIGNED32, rw — SI unit code of velocity objects.
+  kVelocityOffset = 0x60B1,           ///< INTEGER32, rw, RxPDO — CSP/CSV velocity feed-forward.
+  kTorqueOffset = 0x60B2,             ///< INTEGER16, rw, RxPDO — torque feed-forward.
+  kTouchProbeFunction = 0x60B8,       ///< UNSIGNED16, rw, RxPDO — touch probe arm/config bits.
+  kTouchProbeStatus = 0x60B9,         ///< UNSIGNED16, ro, TxPDO — touch probe latch status.
+  kTouchProbe1PositiveEdge = 0x60BA,  ///< INTEGER32, ro, TxPDO — position at probe 1 rising edge.
+  kTouchProbe1NegativeEdge = 0x60BB,  ///< INTEGER32, ro, TxPDO — position at probe 1 falling
+                                      ///< edge.
+  kTouchProbeTimeStamp1PositiveValue = 0x60D1,  ///< UNSIGNED32, ro, TxPDO — time stamp at probe 1
+                                                ///< rising edge.
+  kTouchProbeTimeStamp1NegativeValue = 0x60D2,  ///< UNSIGNED32, ro, TxPDO — time stamp at probe 1
+                                                ///< falling edge.
+  kPositioningOptionCode = 0x60F2,              ///< UNSIGNED16, rw, PDO — PP positioning options.
+  kFollowingErrorActualValue = 0x60F4,          ///< INTEGER32, ro, TxPDO — live following error.
+  kControlEffort = 0x60FA,                      ///< INTEGER32, ro, TxPDO — position loop output.
+  kPositionDemandInternalValue = 0x60FC,        ///< INTEGER32, ro, TxPDO — demand in internal
+                                                ///< increments.
+  kDigitalInputs = 0x60FD,        ///< UNSIGNED32, ro, TxPDO — digital input bit field.
+  kDigitalOutputs = 0x60FE,       ///< 2×UNSIGNED32, rw — physical outputs + enable mask.
+  kTargetVelocity = 0x60FF,       ///< INTEGER32, rw, RxPDO — CSV/PV setpoint.
+  kSupportedDriveModes = 0x6502,  ///< UNSIGNED32, ro — capability bit field of supported modes.
 };
 
 /// @brief CiA402 operation modes (object 0x6060 / 0x6061 values).

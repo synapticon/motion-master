@@ -241,12 +241,24 @@ std::expected<void, std::string> Cia402Drive::enable(std::chrono::milliseconds t
   }
 }
 
+std::expected<int32_t, std::string> Cia402Drive::targetPosition() const {
+  return device_.readValue<int32_t>(Object::kTargetPosition, 0);
+}
+
 std::expected<void, std::string> Cia402Drive::setTargetPosition(int32_t counts) {
   return device_.writeValue(Object::kTargetPosition, 0, counts);
 }
 
+std::expected<int32_t, std::string> Cia402Drive::targetVelocity() const {
+  return device_.readValue<int32_t>(Object::kTargetVelocity, 0);
+}
+
 std::expected<void, std::string> Cia402Drive::setTargetVelocity(int32_t value) {
   return device_.writeValue(Object::kTargetVelocity, 0, value);
+}
+
+std::expected<int16_t, std::string> Cia402Drive::targetTorque() const {
+  return device_.readValue<int16_t>(Object::kTargetTorque, 0);
 }
 
 std::expected<void, std::string> Cia402Drive::setTargetTorque(int16_t perMille) {
@@ -259,6 +271,428 @@ std::expected<int32_t, std::string> Cia402Drive::positionActualValue() const {
 
 std::expected<int32_t, std::string> Cia402Drive::velocityActualValue() const {
   return device_.readValue<int32_t>(Object::kVelocityActualValue, 0);
+}
+
+std::expected<int16_t, std::string> Cia402Drive::torqueActualValue() const {
+  return device_.readValue<int16_t>(Object::kTorqueActualValue, 0);
+}
+
+std::expected<uint16_t, std::string> Cia402Drive::errorCode() const {
+  return device_.readValue<uint16_t>(Object::kErrorCode, 0);
+}
+
+std::expected<int16_t, std::string> Cia402Drive::quickStopOptionCode() const {
+  return device_.readValue<int16_t>(Object::kQuickStopOptionCode, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setQuickStopOptionCode(int16_t value) {
+  return device_.writeValue(Object::kQuickStopOptionCode, 0, value);
+}
+
+std::expected<int32_t, std::string> Cia402Drive::positionDemandValue() const {
+  return device_.readValue<int32_t>(Object::kPositionDemandValue, 0);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::followingErrorWindow() const {
+  return device_.readValue<uint32_t>(Object::kFollowingErrorWindow, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setFollowingErrorWindow(uint32_t value) {
+  return device_.writeValue(Object::kFollowingErrorWindow, 0, value);
+}
+
+std::expected<uint16_t, std::string> Cia402Drive::followingErrorTimeout() const {
+  return device_.readValue<uint16_t>(Object::kFollowingErrorTimeout, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setFollowingErrorTimeout(uint16_t value) {
+  return device_.writeValue(Object::kFollowingErrorTimeout, 0, value);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::positionWindow() const {
+  return device_.readValue<uint32_t>(Object::kPositionWindow, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setPositionWindow(uint32_t value) {
+  return device_.writeValue(Object::kPositionWindow, 0, value);
+}
+
+std::expected<uint16_t, std::string> Cia402Drive::positionWindowTime() const {
+  return device_.readValue<uint16_t>(Object::kPositionWindowTime, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setPositionWindowTime(uint16_t value) {
+  return device_.writeValue(Object::kPositionWindowTime, 0, value);
+}
+
+std::expected<int32_t, std::string> Cia402Drive::velocityDemandValue() const {
+  return device_.readValue<int32_t>(Object::kVelocityDemandValue, 0);
+}
+
+std::expected<uint16_t, std::string> Cia402Drive::velocityWindow() const {
+  return device_.readValue<uint16_t>(Object::kVelocityWindow, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setVelocityWindow(uint16_t value) {
+  return device_.writeValue(Object::kVelocityWindow, 0, value);
+}
+
+std::expected<uint16_t, std::string> Cia402Drive::velocityWindowTime() const {
+  return device_.readValue<uint16_t>(Object::kVelocityWindowTime, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setVelocityWindowTime(uint16_t value) {
+  return device_.writeValue(Object::kVelocityWindowTime, 0, value);
+}
+
+std::expected<uint16_t, std::string> Cia402Drive::velocityThreshold() const {
+  return device_.readValue<uint16_t>(Object::kVelocityThreshold, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setVelocityThreshold(uint16_t value) {
+  return device_.writeValue(Object::kVelocityThreshold, 0, value);
+}
+
+std::expected<uint16_t, std::string> Cia402Drive::velocityThresholdTime() const {
+  return device_.readValue<uint16_t>(Object::kVelocityThresholdTime, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setVelocityThresholdTime(uint16_t value) {
+  return device_.writeValue(Object::kVelocityThresholdTime, 0, value);
+}
+
+std::expected<uint16_t, std::string> Cia402Drive::maxTorque() const {
+  return device_.readValue<uint16_t>(Object::kMaxTorque, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setMaxTorque(uint16_t perMille) {
+  return device_.writeValue(Object::kMaxTorque, 0, perMille);
+}
+
+std::expected<uint16_t, std::string> Cia402Drive::maxCurrent() const {
+  return device_.readValue<uint16_t>(Object::kMaxCurrent, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setMaxCurrent(uint16_t perMille) {
+  return device_.writeValue(Object::kMaxCurrent, 0, perMille);
+}
+
+std::expected<int16_t, std::string> Cia402Drive::torqueDemand() const {
+  return device_.readValue<int16_t>(Object::kTorqueDemand, 0);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::motorRatedCurrent() const {
+  return device_.readValue<uint32_t>(Object::kMotorRatedCurrent, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setMotorRatedCurrent(uint32_t milliamps) {
+  return device_.writeValue(Object::kMotorRatedCurrent, 0, milliamps);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::motorRatedTorque() const {
+  return device_.readValue<uint32_t>(Object::kMotorRatedTorque, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setMotorRatedTorque(uint32_t millinewtonMetres) {
+  return device_.writeValue(Object::kMotorRatedTorque, 0, millinewtonMetres);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::dcLinkCircuitVoltage() const {
+  return device_.readValue<uint32_t>(Object::kDcLinkCircuitVoltage, 0);
+}
+
+std::expected<PositionRangeLimit, std::string> Cia402Drive::positionRangeLimit() const {
+  auto min = device_.readValue<int32_t>(Object::kPositionRangeLimit, 1);
+  if (!min) {
+    return std::unexpected(min.error());
+  }
+  auto max = device_.readValue<int32_t>(Object::kPositionRangeLimit, 2);
+  if (!max) {
+    return std::unexpected(max.error());
+  }
+  return PositionRangeLimit{*min, *max};
+}
+
+std::expected<void, std::string> Cia402Drive::setPositionRangeLimit(
+    const PositionRangeLimit& limit) {
+  if (auto r = device_.writeValue(Object::kPositionRangeLimit, 1, limit.min); !r) {
+    return r;
+  }
+  return device_.writeValue(Object::kPositionRangeLimit, 2, limit.max);
+}
+
+std::expected<int32_t, std::string> Cia402Drive::homeOffset() const {
+  return device_.readValue<int32_t>(Object::kHomeOffset, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setHomeOffset(int32_t value) {
+  return device_.writeValue(Object::kHomeOffset, 0, value);
+}
+
+std::expected<SoftwarePositionLimit, std::string> Cia402Drive::softwarePositionLimit() const {
+  auto min = device_.readValue<int32_t>(Object::kSoftwarePositionLimit, 1);
+  if (!min) {
+    return std::unexpected(min.error());
+  }
+  auto max = device_.readValue<int32_t>(Object::kSoftwarePositionLimit, 2);
+  if (!max) {
+    return std::unexpected(max.error());
+  }
+  return SoftwarePositionLimit{*min, *max};
+}
+
+std::expected<void, std::string> Cia402Drive::setSoftwarePositionLimit(
+    const SoftwarePositionLimit& limit) {
+  if (auto r = device_.writeValue(Object::kSoftwarePositionLimit, 1, limit.min); !r) {
+    return r;
+  }
+  return device_.writeValue(Object::kSoftwarePositionLimit, 2, limit.max);
+}
+
+std::expected<uint8_t, std::string> Cia402Drive::polarity() const {
+  return device_.readValue<uint8_t>(Object::kPolarity, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setPolarity(uint8_t value) {
+  return device_.writeValue(Object::kPolarity, 0, value);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::maxMotorSpeed() const {
+  return device_.readValue<uint32_t>(Object::kMaxMotorSpeed, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setMaxMotorSpeed(uint32_t value) {
+  return device_.writeValue(Object::kMaxMotorSpeed, 0, value);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::profileVelocity() const {
+  return device_.readValue<uint32_t>(Object::kProfileVelocity, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setProfileVelocity(uint32_t value) {
+  return device_.writeValue(Object::kProfileVelocity, 0, value);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::profileAcceleration() const {
+  return device_.readValue<uint32_t>(Object::kProfileAcceleration, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setProfileAcceleration(uint32_t value) {
+  return device_.writeValue(Object::kProfileAcceleration, 0, value);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::profileDeceleration() const {
+  return device_.readValue<uint32_t>(Object::kProfileDeceleration, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setProfileDeceleration(uint32_t value) {
+  return device_.writeValue(Object::kProfileDeceleration, 0, value);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::quickStopDeceleration() const {
+  return device_.readValue<uint32_t>(Object::kQuickStopDeceleration, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setQuickStopDeceleration(uint32_t value) {
+  return device_.writeValue(Object::kQuickStopDeceleration, 0, value);
+}
+
+std::expected<int16_t, std::string> Cia402Drive::motionProfileType() const {
+  return device_.readValue<int16_t>(Object::kMotionProfileType, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setMotionProfileType(int16_t value) {
+  return device_.writeValue(Object::kMotionProfileType, 0, value);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::torqueSlope() const {
+  return device_.readValue<uint32_t>(Object::kTorqueSlope, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setTorqueSlope(uint32_t value) {
+  return device_.writeValue(Object::kTorqueSlope, 0, value);
+}
+
+std::expected<int16_t, std::string> Cia402Drive::torqueProfileType() const {
+  return device_.readValue<int16_t>(Object::kTorqueProfileType, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setTorqueProfileType(int16_t value) {
+  return device_.writeValue(Object::kTorqueProfileType, 0, value);
+}
+
+std::expected<GearRatio, std::string> Cia402Drive::gearRatio() const {
+  auto motorRevolutions = device_.readValue<uint32_t>(Object::kGearRatio, 1);
+  if (!motorRevolutions) {
+    return std::unexpected(motorRevolutions.error());
+  }
+  auto shaftRevolutions = device_.readValue<uint32_t>(Object::kGearRatio, 2);
+  if (!shaftRevolutions) {
+    return std::unexpected(shaftRevolutions.error());
+  }
+  return GearRatio{*motorRevolutions, *shaftRevolutions};
+}
+
+std::expected<void, std::string> Cia402Drive::setGearRatio(const GearRatio& ratio) {
+  if (auto r = device_.writeValue(Object::kGearRatio, 1, ratio.motorRevolutions); !r) {
+    return r;
+  }
+  return device_.writeValue(Object::kGearRatio, 2, ratio.shaftRevolutions);
+}
+
+std::expected<FeedConstant, std::string> Cia402Drive::feedConstant() const {
+  auto feed = device_.readValue<uint32_t>(Object::kFeedConstant, 1);
+  if (!feed) {
+    return std::unexpected(feed.error());
+  }
+  auto shaftRevolutions = device_.readValue<uint32_t>(Object::kFeedConstant, 2);
+  if (!shaftRevolutions) {
+    return std::unexpected(shaftRevolutions.error());
+  }
+  return FeedConstant{*feed, *shaftRevolutions};
+}
+
+std::expected<void, std::string> Cia402Drive::setFeedConstant(const FeedConstant& constant) {
+  if (auto r = device_.writeValue(Object::kFeedConstant, 1, constant.feed); !r) {
+    return r;
+  }
+  return device_.writeValue(Object::kFeedConstant, 2, constant.shaftRevolutions);
+}
+
+std::expected<int8_t, std::string> Cia402Drive::homingMethod() const {
+  return device_.readValue<int8_t>(Object::kHomingMethod, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setHomingMethod(int8_t method) {
+  return device_.writeValue(Object::kHomingMethod, 0, method);
+}
+
+std::expected<HomingSpeeds, std::string> Cia402Drive::homingSpeeds() const {
+  auto switchSearch = device_.readValue<uint32_t>(Object::kHomingSpeeds, 1);
+  if (!switchSearch) {
+    return std::unexpected(switchSearch.error());
+  }
+  auto zeroSearch = device_.readValue<uint32_t>(Object::kHomingSpeeds, 2);
+  if (!zeroSearch) {
+    return std::unexpected(zeroSearch.error());
+  }
+  return HomingSpeeds{*switchSearch, *zeroSearch};
+}
+
+std::expected<void, std::string> Cia402Drive::setHomingSpeeds(const HomingSpeeds& speeds) {
+  if (auto r = device_.writeValue(Object::kHomingSpeeds, 1, speeds.switchSearch); !r) {
+    return r;
+  }
+  return device_.writeValue(Object::kHomingSpeeds, 2, speeds.zeroSearch);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::homingAcceleration() const {
+  return device_.readValue<uint32_t>(Object::kHomingAcceleration, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setHomingAcceleration(uint32_t value) {
+  return device_.writeValue(Object::kHomingAcceleration, 0, value);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::siUnitVelocity() const {
+  return device_.readValue<uint32_t>(Object::kSiUnitVelocity, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setSiUnitVelocity(uint32_t value) {
+  return device_.writeValue(Object::kSiUnitVelocity, 0, value);
+}
+
+std::expected<int32_t, std::string> Cia402Drive::velocityOffset() const {
+  return device_.readValue<int32_t>(Object::kVelocityOffset, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setVelocityOffset(int32_t value) {
+  return device_.writeValue(Object::kVelocityOffset, 0, value);
+}
+
+std::expected<int16_t, std::string> Cia402Drive::torqueOffset() const {
+  return device_.readValue<int16_t>(Object::kTorqueOffset, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setTorqueOffset(int16_t value) {
+  return device_.writeValue(Object::kTorqueOffset, 0, value);
+}
+
+std::expected<uint16_t, std::string> Cia402Drive::touchProbeFunction() const {
+  return device_.readValue<uint16_t>(Object::kTouchProbeFunction, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setTouchProbeFunction(uint16_t value) {
+  return device_.writeValue(Object::kTouchProbeFunction, 0, value);
+}
+
+std::expected<uint16_t, std::string> Cia402Drive::touchProbeStatus() const {
+  return device_.readValue<uint16_t>(Object::kTouchProbeStatus, 0);
+}
+
+std::expected<int32_t, std::string> Cia402Drive::touchProbe1PositiveEdge() const {
+  return device_.readValue<int32_t>(Object::kTouchProbe1PositiveEdge, 0);
+}
+
+std::expected<int32_t, std::string> Cia402Drive::touchProbe1NegativeEdge() const {
+  return device_.readValue<int32_t>(Object::kTouchProbe1NegativeEdge, 0);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::touchProbeTimeStamp1PositiveValue() const {
+  return device_.readValue<uint32_t>(Object::kTouchProbeTimeStamp1PositiveValue, 0);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::touchProbeTimeStamp1NegativeValue() const {
+  return device_.readValue<uint32_t>(Object::kTouchProbeTimeStamp1NegativeValue, 0);
+}
+
+std::expected<uint16_t, std::string> Cia402Drive::positioningOptionCode() const {
+  return device_.readValue<uint16_t>(Object::kPositioningOptionCode, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setPositioningOptionCode(uint16_t value) {
+  return device_.writeValue(Object::kPositioningOptionCode, 0, value);
+}
+
+std::expected<int32_t, std::string> Cia402Drive::followingErrorActualValue() const {
+  return device_.readValue<int32_t>(Object::kFollowingErrorActualValue, 0);
+}
+
+std::expected<int32_t, std::string> Cia402Drive::controlEffort() const {
+  return device_.readValue<int32_t>(Object::kControlEffort, 0);
+}
+
+std::expected<int32_t, std::string> Cia402Drive::positionDemandInternalValue() const {
+  return device_.readValue<int32_t>(Object::kPositionDemandInternalValue, 0);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::digitalInputs() const {
+  return device_.readValue<uint32_t>(Object::kDigitalInputs, 0);
+}
+
+std::expected<DigitalOutputs, std::string> Cia402Drive::digitalOutputs() const {
+  auto physicalOutputs = device_.readValue<uint32_t>(Object::kDigitalOutputs, 1);
+  if (!physicalOutputs) {
+    return std::unexpected(physicalOutputs.error());
+  }
+  auto bitMask = device_.readValue<uint32_t>(Object::kDigitalOutputs, 2);
+  if (!bitMask) {
+    return std::unexpected(bitMask.error());
+  }
+  return DigitalOutputs{*physicalOutputs, *bitMask};
+}
+
+std::expected<void, std::string> Cia402Drive::setDigitalOutputs(const DigitalOutputs& outputs) {
+  // Levels first (inert while masked off), mask second — so a newly enabled output comes up with
+  // its commanded level instead of briefly driving a stale one.
+  if (auto r = device_.writeValue(Object::kDigitalOutputs, 1, outputs.physicalOutputs); !r) {
+    return r;
+  }
+  return device_.writeValue(Object::kDigitalOutputs, 2, outputs.bitMask);
+}
+
+std::expected<uint32_t, std::string> Cia402Drive::supportedDriveModes() const {
+  return device_.readCachedValue<uint32_t>(Object::kSupportedDriveModes, 0);
 }
 
 std::expected<Cia402Drive, std::string> createCia402Drive(Device& device) {

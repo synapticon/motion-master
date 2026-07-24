@@ -17,11 +17,10 @@ namespace mm::node {
 ///
 /// The variant alternatives cover the standard ETG.1020 data types that can be
 /// transferred via SDO upload. Use @c std::visit to dispatch on the active type.
-using DeviceParameterValue =
-    std::variant<int8_t, int16_t, int32_t, int64_t,      // NOLINT(whitespace/indent_namespace)
-                 uint8_t, uint16_t, uint32_t, uint64_t,  // NOLINT(whitespace/indent_namespace)
-                 float, double,                          // NOLINT(whitespace/indent_namespace)
-                 std::string, std::vector<uint8_t>>;     // NOLINT(whitespace/indent_namespace)
+using DeviceParameterValue = std::variant<int8_t, int16_t, int32_t, int64_t,      //
+                                          uint8_t, uint16_t, uint32_t, uint64_t,  //
+                                          float, double,                          //
+                                          std::string, std::vector<uint8_t>>;
 
 /// @brief Packs an object dictionary @p index and @p subindex into a single 32-bit key.
 ///

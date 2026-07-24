@@ -82,19 +82,39 @@ class Cia402FakeDriver : public FieldbusDriver {
   uint16_t alStatus = kPreOp;
   uint32_t vendorId = 0;
   State machineState = State::kSwitchOnDisabled;
+  bool completeAccessSupported = false;  ///< Whether readSdoComplete answers or aborts.
+  int completeAccessAttempts = 0;        ///< readSdoComplete calls, successful or not.
+  int sdoReads = 0;                      ///< Per-subindex readSdo calls.
 
   static uint32_t key(uint16_t index, uint8_t subindex) {
     return (static_cast<uint32_t>(index) << 8) | subindex;
   }
 
+  // OTYPE_VAR (0x0007): a single value. CA-eligible objects are programmed with OTYPE_ARRAY /
+  // OTYPE_RECORD via the objectCode parameter.
   void programObject(uint16_t index, uint8_t subindex, ObjectDataType type,
-                     std::vector<uint8_t> initial) {
+                     std::vector<uint8_t> initial, uint16_t objectCode = 0x0007) {
     OdEntry e{};
     e.index = index;
     e.subindex = subindex;
+    e.objectCode = objectCode;
     e.dataType = static_cast<uint16_t>(type);
+    e.bitLength = static_cast<uint16_t>(initial.size() * 8);
+    e.access = 0x003F;  // readable + writable in every AL state
     ods.push_back(e);
     store[key(index, subindex)] = std::move(initial);
+  }
+
+  // Programs a CA-eligible ARRAY object: subindex 0 (the USINT entry count) plus the given
+  // sub-entries at 1..N.
+  void programArrayObject(uint16_t index, ObjectDataType type,
+                          std::vector<std::vector<uint8_t>> subValues) {
+    constexpr uint16_t kOtypeArray = 0x0008;
+    programObject(index, 0, ObjectDataType::UNSIGNED8, {static_cast<uint8_t>(subValues.size())},
+                  kOtypeArray);
+    for (size_t i = 0; i < subValues.size(); ++i) {
+      programObject(index, static_cast<uint8_t>(i + 1), type, std::move(subValues[i]), kOtypeArray);
+    }
   }
 
   // Seeds the standard CiA402 objects and parks the machine at SwitchOnDisabled.
@@ -137,11 +157,35 @@ class Cia402FakeDriver : public FieldbusDriver {
 
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t index,
                                                            uint8_t subindex) override {
+    ++sdoReads;
     auto it = store.find(key(index, subindex));
     if (it == store.end()) {
       return std::unexpected("no such object");
     }
     return it->second;
+  }
+
+  std::expected<std::vector<uint8_t>, std::string> readSdoComplete(uint16_t,
+                                                                   uint16_t index) override {
+    ++completeAccessAttempts;
+    if (!completeAccessSupported) {
+      return std::unexpected("SDO abort 0x06010000: Unsupported access to an object");
+    }
+    auto count = store.find(key(index, 0));
+    if (count == store.end() || count->second.empty()) {
+      return std::unexpected("no such object");
+    }
+    // The ETG complete-access blob: subindex 0 as a 16-bit value (1 data byte + 1 alignment pad),
+    // then subindices 1..N concatenated at their native widths.
+    std::vector<uint8_t> blob = {count->second.front(), 0x00};
+    for (uint8_t si = 1; si <= count->second.front(); ++si) {
+      auto it = store.find(key(index, si));
+      if (it == store.end()) {
+        return std::unexpected("no such object");
+      }
+      blob.insert(blob.end(), it->second.begin(), it->second.end());
+    }
+    return blob;
   }
 
   std::expected<void, std::string> writeSdo(uint16_t, uint16_t index, uint8_t subindex,
@@ -466,6 +510,67 @@ TEST(Cia402Drive, StructGetterReadsBothSubEntries) {
   ASSERT_TRUE(limit.has_value()) << limit.error();
   EXPECT_EQ(limit->min, -1000);
   EXPECT_EQ(limit->max, 5000);
+  // Subs 1..2 without a subindex 0 are not a Complete-Access-decodable layout — the grouped read
+  // must go straight to per-subindex uploads without even probing CA.
+  EXPECT_EQ(driver.completeAccessAttempts, 0);
+}
+
+TEST(Cia402Drive, StructGetterUsesCompleteAccess) {
+  Cia402FakeDriver driver;
+  driver.completeAccessSupported = true;
+  driver.programArrayObject(Object::kGearRatio, ObjectDataType::UNSIGNED32, {u32le(30), u32le(1)});
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  const int sdoReadsBefore = driver.sdoReads;
+  auto ratio = drive.gearRatio();
+  ASSERT_TRUE(ratio.has_value()) << ratio.error();
+  EXPECT_EQ(ratio->motorRevolutions, 30u);
+  EXPECT_EQ(ratio->shaftRevolutions, 1u);
+
+  // The whole object came back in one Complete Access upload — no per-subindex reads at all.
+  EXPECT_EQ(driver.completeAccessAttempts, 1);
+  EXPECT_EQ(driver.sdoReads, sdoReadsBefore);
+}
+
+TEST(Cia402Drive, CompleteAccessUnsupportedFallsBackAndIsRemembered) {
+  Cia402FakeDriver driver;
+  driver.completeAccessSupported = false;
+  driver.programArrayObject(Object::kGearRatio, ObjectDataType::UNSIGNED32, {u32le(30), u32le(1)});
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  // First read probes CA, gets the abort, and falls back to per-subindex uploads.
+  auto ratio = drive.gearRatio();
+  ASSERT_TRUE(ratio.has_value()) << ratio.error();
+  EXPECT_EQ(ratio->motorRevolutions, 30u);
+  EXPECT_EQ(driver.completeAccessAttempts, 1);
+
+  // The probe outcome persists on the Device: a later grouped read never retries CA.
+  ASSERT_TRUE(drive.gearRatio().has_value());
+  EXPECT_EQ(driver.completeAccessAttempts, 1);
+}
+
+TEST(Cia402Drive, CompleteAccessSupportSharedAcrossObjects) {
+  Cia402FakeDriver driver;
+  driver.completeAccessSupported = true;
+  driver.programArrayObject(Object::kGearRatio, ObjectDataType::UNSIGNED32, {u32le(30), u32le(1)});
+  driver.programArrayObject(Object::kHomingSpeeds, ObjectDataType::UNSIGNED32,
+                            {u32le(500), u32le(50)});
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  ASSERT_TRUE(drive.gearRatio().has_value());
+  const int sdoReadsBefore = driver.sdoReads;
+  auto speeds = drive.homingSpeeds();
+  ASSERT_TRUE(speeds.has_value()) << speeds.error();
+  EXPECT_EQ(speeds->switchSearch, 500u);
+  EXPECT_EQ(speeds->zeroSearch, 50u);
+
+  // Support discovered by the first object's probe carries over: the second object is one CA
+  // upload, no per-subindex reads.
+  EXPECT_EQ(driver.completeAccessAttempts, 2);
+  EXPECT_EQ(driver.sdoReads, sdoReadsBefore);
 }
 
 TEST(Cia402Drive, StructSetterWritesSubOneThenSubTwo) {

@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <nlohmann/json_fwd.hpp>
@@ -28,6 +29,36 @@ struct ProcessData;
 ///        and held by pointer; the definition (node/parameter_cache.h) is pulled in only by
 ///        device.cc, which consults it from @c initializeParameters. Owned by @c DeviceManager.
 class ParameterCache;
+
+/// @brief Runtime discovery state of CoE Complete Access support. CA is optional in CoE and the
+///        EEPROM capability hint is unreliable (SOMANET advertises @c completeAccess=false while
+///        CA in fact works), so support is probed: the first grouped read attempts CA and the
+///        outcome is remembered — the runtime probe, not the hint, is authoritative.
+enum class CompleteAccessSupport : uint8_t { kUnknown, kSupported, kUnsupported };
+
+/// @brief Decoded values of one object's readable sub-entries, as returned by @c
+///        Device::readObject.
+struct ObjectValues {
+  uint16_t index = 0;                              ///< CoE object index the values belong to.
+  std::map<uint8_t, DeviceParameterValue> values;  ///< Decoded value per readable subindex.
+
+  /// @brief Returns the value of @p subindex as @p T — type-exact, like
+  ///        @c DeviceParameter::getValue.
+  /// @return The value, or an error string if the subindex is absent or holds a different type.
+  template <typename T>
+  std::expected<T, std::string> get(uint8_t subindex) const {
+    auto it = values.find(subindex);
+    if (it == values.end()) {
+      return std::unexpected(
+          std::format("object 0x{:04X} has no readable subindex {:02X}", index, subindex));
+    }
+    if (const auto* p = std::get_if<T>(&it->second)) {
+      return *p;
+    }
+    return std::unexpected(
+        std::format("parameter 0x{:04X}:{:02X} holds a different type", index, subindex));
+  }
+};
 
 /// @brief Represents a single node on the fieldbus.
 ///
@@ -408,6 +439,29 @@ class Device {
   ///         device has no parameters loaded yet (call @c initializeParameters first).
   std::expected<void, std::string> readAllParameters(bool useCompleteAccess = true);
 
+  /// @brief Reads every readable sub-entry of one object and returns the decoded values.
+  ///
+  /// The grouped analogue of @c readParameter, for the multi-subindex ARRAY/RECORD objects a
+  /// profile view reads as one unit (software position limit, gear ratio, restore parameters,
+  /// ...). When the object is Complete-Access-decodable, it is fetched with a single CoE Complete
+  /// Access upload instead of one mailbox round-trip per subindex — support is probed on the
+  /// first grouped read and remembered for the device's lifetime (the EEPROM capability hint is
+  /// not consulted; see @c CompleteAccessSupport). Any CA fallthrough — unsupported slave,
+  /// ineligible layout, single-subindex object, @p useCompleteAccess off — reads
+  /// subindex-by-subindex via @c readParameter. Like @c readAllParameters, a CA upload is skipped
+  /// while any sub-entry is served by the live process image, so the per-subindex path can read
+  /// it from the image instead of the mailbox.
+  ///
+  /// Unlike the best-effort bulk sweep, this is all-or-nothing: the first sub-entry that cannot
+  /// be read fails the whole call.
+  ///
+  /// @param index              CoE object index.
+  /// @param useCompleteAccess  When @c true, attempt Complete Access for eligible objects.
+  /// @return The decoded values per readable subindex, or an error string if the object is
+  ///         unknown (or has no readable sub-entries) or a read fails.
+  std::expected<ObjectValues, std::string> readObject(uint16_t index,
+                                                      bool useCompleteAccess = true);
+
   /// @brief Writes a parameter value, always updating the cache first.
   ///
   /// @p value is coerced into the parameter's declared data type and stored in the cache
@@ -582,6 +636,9 @@ class Device {
   std::unique_ptr<std::mutex> parametersMutex_;
   std::unordered_map<uint32_t, DeviceParameter> parameters_;
   FlatPdoMapping flatPdoMapping_;
+  // Discovered Complete Access support (the probe outcome), shared by every grouped read for the
+  // device's lifetime. Read and written only under parametersMutex_.
+  CompleteAccessSupport caSupport_ = CompleteAccessSupport::kUnknown;
 };
 
 /// @brief Serialises a Device to JSON.

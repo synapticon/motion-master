@@ -287,31 +287,35 @@ bool decodeCompleteAccess(std::span<DeviceParameter* const> subs,
   return true;
 }
 
-// Tracks Complete Access support across one read pass: probe once, then per-object fallback. CA is
-// optional in CoE, so the first eligible object is a probe — if the slave rejects it, CA is
-// disabled for the whole pass. After a CA read has succeeded, a later per-object failure falls back
-// for that object only (support can vary per object).
+// Tracks Complete Access support across grouped reads: probe once, then per-object fallback. CA
+// is optional in CoE, so the first eligible object is a probe — if the slave rejects it, CA is
+// disabled for every later read sharing the same state. After a CA read has succeeded, a later
+// per-object failure falls back for that object only (support can vary per object). The state is
+// external so it can be a per-pass local (initializeParameters' value pass) or the per-device
+// Device::caSupport_ that persists the outcome across point reads.
 class CompleteAccessProbe {
  public:
-  explicit CompleteAccessProbe(bool useCompleteAccess)
-      : state_(useCompleteAccess ? State::Unknown : State::Unsupported) {}
+  CompleteAccessProbe(bool useCompleteAccess, CompleteAccessSupport& state)
+      : useCompleteAccess_(useCompleteAccess), state_(state) {}
   // Whether to attempt CA for the next object (false once a probe proved it unsupported).
-  bool enabled() const { return state_ != State::Unsupported; }
-  void recordSuccess() { state_ = State::Supported; }
-  // Records a failed CA read. Returns true when this failure disabled CA pass-wide (the probe),
+  bool enabled() const {
+    return useCompleteAccess_ && state_ != CompleteAccessSupport::kUnsupported;
+  }
+  void recordSuccess() { state_ = CompleteAccessSupport::kSupported; }
+  // Records a failed CA read. Returns true when this failure disabled CA state-wide (the probe),
   // false when it is a per-object failure after CA had already worked — the caller logs
   // accordingly.
   bool recordFailure() {
-    if (state_ == State::Unknown) {
-      state_ = State::Unsupported;
+    if (state_ == CompleteAccessSupport::kUnknown) {
+      state_ = CompleteAccessSupport::kUnsupported;
       return true;
     }
     return false;
   }
 
  private:
-  enum class State { Unknown, Supported, Unsupported };
-  State state_;
+  bool useCompleteAccess_;
+  CompleteAccessSupport& state_;
 };
 
 // Reads one object via a single Complete Access upload and decodes it into @p subs (subindex
@@ -364,11 +368,14 @@ void Device::readParameterValues(std::vector<DeviceParameter>& defs, bool useCom
     p.syncState = SyncState::Synced;
   };
 
-  // Complete Access support is discovered once per device (the "probe"): the first eligible object
-  // is read with CA; if the slave rejects it (SDO abort), CA is disabled for the rest of this pass
-  // and everything falls back to per-subindex reads. Once a CA read has succeeded we keep using it,
-  // but a per-object failure only falls back for that object (support can vary per object).
-  CompleteAccessProbe ca(useCompleteAccess);
+  // Complete Access support is discovered by a probe: the first eligible object is read with CA;
+  // if the slave rejects it (SDO abort), CA is disabled for the rest of this pass and everything
+  // falls back to per-subindex reads. Once a CA read has succeeded we keep using it, but a
+  // per-object failure only falls back for that object (support can vary per object). The state
+  // is a pass-local, not caSupport_: this runs off parametersMutex_ (on a local defs vector,
+  // before the map is published), so it must not touch the lock-guarded member.
+  CompleteAccessSupport passState = CompleteAccessSupport::kUnknown;
+  CompleteAccessProbe ca(useCompleteAccess, passState);
 
   for (size_t start = 0; start < defs.size();) {
     // Group the contiguous run of entries sharing this object index.
@@ -969,10 +976,15 @@ std::expected<void, std::string> Device::readAllParameters(bool useCompleteAcces
 
   // Fills one object via a single Complete Access upload, returning true on success. Runs the CA
   // read + decode under parametersMutex_ — one mailbox round-trip, matching readParameter's own
-  // lock contract — so the re-found parameter pointers stay valid across the transfer.
-  CompleteAccessProbe ca(useCompleteAccess);
+  // lock contract — so the re-found parameter pointers stay valid across the transfer. The probe
+  // binds the persistent caSupport_ (guarded by parametersMutex_, hence checked inside the lock),
+  // so support discovered here carries over to readObject's point reads and vice versa.
   auto tryComplete = [&](uint16_t index, const std::vector<uint8_t>& subindices) -> bool {
     std::lock_guard<std::mutex> lock(*parametersMutex_);
+    CompleteAccessProbe ca(useCompleteAccess, caSupport_);
+    if (!ca.enabled()) {
+      return false;
+    }
     std::vector<DeviceParameter*> subs;
     subs.reserve(subindices.size());
     for (uint8_t si : subindices) {
@@ -1003,7 +1015,7 @@ std::expected<void, std::string> Device::readAllParameters(bool useCompleteAcces
   // rest. Multi-subindex objects try Complete Access first; single-subindex objects and any CA
   // fallthrough go through the PDO-aware per-subindex readParameter.
   for (const auto& [index, subindices] : objects) {
-    if (subindices.size() >= 2 && ca.enabled() && tryComplete(index, subindices)) {
+    if (subindices.size() >= 2 && tryComplete(index, subindices)) {
       continue;
     }
     for (uint8_t si : subindices) {
@@ -1014,6 +1026,87 @@ std::expected<void, std::string> Device::readAllParameters(bool useCompleteAcces
     }
   }
   return {};
+}
+
+std::expected<ObjectValues, std::string> Device::readObject(uint16_t index,
+                                                            bool useCompleteAccess) {
+  // Snapshot the object's readable subindices under the lock (write-only entries are excluded —
+  // an SDO upload of one would abort).
+  std::vector<uint8_t> subindices;
+  {
+    std::lock_guard<std::mutex> lock(*parametersMutex_);
+    for (const auto& [key, p] : parameters_) {
+      if (p.index == index && p.isReadable()) {
+        subindices.push_back(p.subindex);
+      }
+    }
+  }
+  if (subindices.empty()) {
+    return std::unexpected(
+        std::format("device {}: object 0x{:04X} not found (or has no readable sub-entries)",
+                    slavePosition_, index));
+  }
+  std::ranges::sort(subindices);  // completeAccessEligible needs subindex order
+
+  // One Complete Access upload when possible — the same preconditions as readAllParameters'
+  // grouped path, evaluated and executed under parametersMutex_ (one mailbox round-trip, matching
+  // readParameter's own lock contract). Returns the decoded values on success, nullopt to take
+  // the per-subindex path.
+  auto tryComplete = [&]() -> std::optional<ObjectValues> {
+    std::lock_guard<std::mutex> lock(*parametersMutex_);
+    CompleteAccessProbe ca(useCompleteAccess, caSupport_);
+    if (!ca.enabled() || !mailboxActive()) {
+      return std::nullopt;
+    }
+    std::vector<DeviceParameter*> subs;
+    subs.reserve(subindices.size());
+    for (uint8_t si : subindices) {
+      DeviceParameter* p = findParameter(index, si);
+      if (!p) {
+        return std::nullopt;  // map re-enumerated under us — take the per-subindex path
+      }
+      subs.push_back(p);
+    }
+    if (!completeAccessEligible(subs)) {
+      return std::nullopt;
+    }
+    // Prefer the live process image while exchanging: if any subindex is PDO-served, let the
+    // per-subindex path (readParameter) read it from the image rather than issuing an SDO here.
+    if (processData_ && exchangesProcessData()) {
+      const bool anyImageServed = std::ranges::any_of(subs, [&](const DeviceParameter* p) {
+        return processData_->readPdo(slavePosition_, index, p->subindex).has_value();
+      });
+      if (anyImageServed) {
+        return std::nullopt;
+      }
+    }
+    if (!readCompleteInto(driver_, slavePosition_, subs, ca)) {
+      return std::nullopt;
+    }
+    ObjectValues object{index, {}};
+    for (const DeviceParameter* p : subs) {
+      object.values.emplace(p->subindex, p->value);
+    }
+    return object;
+  };
+  if (subindices.size() >= 2) {
+    if (auto object = tryComplete()) {
+      return std::move(*object);
+    }
+  }
+
+  // Per-subindex fallback through the PDO-aware readParameter. All-or-nothing: the grouped
+  // callers (profile-view struct getters) need every sub-entry, so the first failure fails the
+  // call.
+  ObjectValues object{index, {}};
+  for (uint8_t si : subindices) {
+    auto subValue = readParameter(index, si);
+    if (!subValue) {
+      return std::unexpected(subValue.error());
+    }
+    object.values.emplace(si, std::move(*subValue));
+  }
+  return object;
 }
 
 std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t subindex,

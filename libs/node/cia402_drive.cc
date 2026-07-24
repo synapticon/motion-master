@@ -402,11 +402,15 @@ std::expected<uint32_t, std::string> Cia402Drive::dcLinkCircuitVoltage() const {
 }
 
 std::expected<PositionRangeLimit, std::string> Cia402Drive::positionRangeLimit() const {
-  auto min = device_.readValue<int32_t>(Object::kPositionRangeLimit, 1);
+  auto object = device_.readObject(Object::kPositionRangeLimit);
+  if (!object) {
+    return std::unexpected(object.error());
+  }
+  auto min = object->get<int32_t>(1);
   if (!min) {
     return std::unexpected(min.error());
   }
-  auto max = device_.readValue<int32_t>(Object::kPositionRangeLimit, 2);
+  auto max = object->get<int32_t>(2);
   if (!max) {
     return std::unexpected(max.error());
   }
@@ -430,11 +434,15 @@ std::expected<void, std::string> Cia402Drive::setHomeOffset(int32_t value) {
 }
 
 std::expected<SoftwarePositionLimit, std::string> Cia402Drive::softwarePositionLimit() const {
-  auto min = device_.readValue<int32_t>(Object::kSoftwarePositionLimit, 1);
+  auto object = device_.readObject(Object::kSoftwarePositionLimit);
+  if (!object) {
+    return std::unexpected(object.error());
+  }
+  auto min = object->get<int32_t>(1);
   if (!min) {
     return std::unexpected(min.error());
   }
-  auto max = device_.readValue<int32_t>(Object::kSoftwarePositionLimit, 2);
+  auto max = object->get<int32_t>(2);
   if (!max) {
     return std::unexpected(max.error());
   }
@@ -522,11 +530,15 @@ std::expected<void, std::string> Cia402Drive::setTorqueProfileType(int16_t value
 }
 
 std::expected<GearRatio, std::string> Cia402Drive::gearRatio() const {
-  auto motorRevolutions = device_.readValue<uint32_t>(Object::kGearRatio, 1);
+  auto object = device_.readObject(Object::kGearRatio);
+  if (!object) {
+    return std::unexpected(object.error());
+  }
+  auto motorRevolutions = object->get<uint32_t>(1);
   if (!motorRevolutions) {
     return std::unexpected(motorRevolutions.error());
   }
-  auto shaftRevolutions = device_.readValue<uint32_t>(Object::kGearRatio, 2);
+  auto shaftRevolutions = object->get<uint32_t>(2);
   if (!shaftRevolutions) {
     return std::unexpected(shaftRevolutions.error());
   }
@@ -541,11 +553,15 @@ std::expected<void, std::string> Cia402Drive::setGearRatio(const GearRatio& rati
 }
 
 std::expected<FeedConstant, std::string> Cia402Drive::feedConstant() const {
-  auto feed = device_.readValue<uint32_t>(Object::kFeedConstant, 1);
+  auto object = device_.readObject(Object::kFeedConstant);
+  if (!object) {
+    return std::unexpected(object.error());
+  }
+  auto feed = object->get<uint32_t>(1);
   if (!feed) {
     return std::unexpected(feed.error());
   }
-  auto shaftRevolutions = device_.readValue<uint32_t>(Object::kFeedConstant, 2);
+  auto shaftRevolutions = object->get<uint32_t>(2);
   if (!shaftRevolutions) {
     return std::unexpected(shaftRevolutions.error());
   }
@@ -568,11 +584,15 @@ std::expected<void, std::string> Cia402Drive::setHomingMethod(int8_t method) {
 }
 
 std::expected<HomingSpeeds, std::string> Cia402Drive::homingSpeeds() const {
-  auto switchSearch = device_.readValue<uint32_t>(Object::kHomingSpeeds, 1);
+  auto object = device_.readObject(Object::kHomingSpeeds);
+  if (!object) {
+    return std::unexpected(object.error());
+  }
+  auto switchSearch = object->get<uint32_t>(1);
   if (!switchSearch) {
     return std::unexpected(switchSearch.error());
   }
-  auto zeroSearch = device_.readValue<uint32_t>(Object::kHomingSpeeds, 2);
+  auto zeroSearch = object->get<uint32_t>(2);
   if (!zeroSearch) {
     return std::unexpected(zeroSearch.error());
   }
@@ -671,11 +691,15 @@ std::expected<uint32_t, std::string> Cia402Drive::digitalInputs() const {
 }
 
 std::expected<DigitalOutputs, std::string> Cia402Drive::digitalOutputs() const {
-  auto physicalOutputs = device_.readValue<uint32_t>(Object::kDigitalOutputs, 1);
+  auto object = device_.readObject(Object::kDigitalOutputs);
+  if (!object) {
+    return std::unexpected(object.error());
+  }
+  auto physicalOutputs = object->get<uint32_t>(1);
   if (!physicalOutputs) {
     return std::unexpected(physicalOutputs.error());
   }
-  auto bitMask = device_.readValue<uint32_t>(Object::kDigitalOutputs, 2);
+  auto bitMask = object->get<uint32_t>(2);
   if (!bitMask) {
     return std::unexpected(bitMask.error());
   }

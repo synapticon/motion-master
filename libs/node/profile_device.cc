@@ -64,19 +64,23 @@ std::expected<void, std::string> ProfileDevice::setStoreParameters(uint32_t sign
 
 std::expected<RestoreDefaultParameters, std::string> ProfileDevice::restoreDefaultParameters()
     const {
-  auto all = device_.readValue<uint32_t>(kRestoreDefaultParameters, 1);
+  auto object = device_.readObject(kRestoreDefaultParameters);
+  if (!object) {
+    return std::unexpected(object.error());
+  }
+  auto all = object->get<uint32_t>(1);
   if (!all) {
     return std::unexpected(all.error());
   }
-  auto communication = device_.readValue<uint32_t>(kRestoreDefaultParameters, 2);
+  auto communication = object->get<uint32_t>(2);
   if (!communication) {
     return std::unexpected(communication.error());
   }
-  auto application = device_.readValue<uint32_t>(kRestoreDefaultParameters, 3);
+  auto application = object->get<uint32_t>(3);
   if (!application) {
     return std::unexpected(application.error());
   }
-  auto manufacturer = device_.readValue<uint32_t>(kRestoreDefaultParameters, 4);
+  auto manufacturer = object->get<uint32_t>(4);
   if (!manufacturer) {
     return std::unexpected(manufacturer.error());
   }

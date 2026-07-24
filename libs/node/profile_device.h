@@ -55,12 +55,13 @@ struct RestoreDefaultParameters {
 ///
 /// After the "save" signature is written, the procedure waits @c settle for the device to begin the
 /// flash write, then polls 0x1010:01 up to @c retries more times, @c interval apart, until it reads
-/// back 1. The defaults match the reference client; @c settle tracks device flash-write behaviour
-/// and rarely needs overriding (tests pass zero delays to run instantly).
+/// back 1. The retry defaults (10 polls, 500 ms) match the reference client; @c settle (1 s) tracks
+/// device flash-write behaviour and rarely needs overriding (tests pass zero delays to run
+/// instantly).
 struct StoreParametersConfig {
   uint32_t retries = 10;                    ///< Maximum confirmation polls after the first.
   std::chrono::milliseconds interval{500};  ///< Delay between confirmation polls.
-  std::chrono::milliseconds settle{2000};   ///< Wait after the write before the first poll.
+  std::chrono::milliseconds settle{1000};   ///< Wait after the write before the first poll.
 };
 
 /// @brief Root of the drive-profile view hierarchy — a concrete, instantiable, borrowed view over

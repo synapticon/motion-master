@@ -1023,7 +1023,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Commands the device to persist its current parameters (the generic CANopen "store parameters" object 0x1010:01) and waits for confirmation. The server writes the ASCII "save" signature, waits a fixed settle (~2 s) for the drive to begin the flash write, then polls 0x1010:01 until it reads back 1 ("save completed"). Because a store in progress can leave the mailbox briefly unresponsive, a poll that does not yet confirm — a value mismatch or a transient read error alike — is retried up to `retries` more times, `interval` apart. The call blocks until the store is confirmed or the retry budget is exhausted (up to a few seconds); the device's mailbox must be active (PRE-OP/SAFE-OP/OP).
+   * @description Commands the device to persist its current parameters (the generic CANopen "store parameters" object 0x1010:01) and waits for confirmation. The server writes the ASCII "save" signature, waits a fixed settle (~1 s) for the drive to begin the flash write, then polls 0x1010:01 until it reads back 1 ("save completed"). Because a store in progress can leave the mailbox briefly unresponsive, a poll that does not yet confirm — a value mismatch or a transient read error alike — is retried up to `retries` more times, `interval` apart. The call blocks until the store is confirmed or the retry budget is exhausted (up to a few seconds); the device's mailbox must be active (PRE-OP/SAFE-OP/OP).
    *
    * @name StoreParameters
    * @summary Store a device's parameters to non-volatile memory

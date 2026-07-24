@@ -1509,7 +1509,7 @@ paths:
       description: >
         Commands the device to persist its current parameters (the generic CANopen "store
         parameters" object 0x1010:01) and waits for confirmation. The server writes the ASCII
-        "save" signature, waits a fixed settle (~2 s) for the drive to begin the flash write, then
+        "save" signature, waits a fixed settle (~1 s) for the drive to begin the flash write, then
         polls 0x1010:01 until it reads back 1 ("save completed"). Because a store in progress can
         leave the mailbox briefly unresponsive, a poll that does not yet confirm — a value mismatch
         or a transient read error alike — is retried up to `retries` more times, `interval` apart.
@@ -1538,14 +1538,20 @@ paths:
       responses:
         "204":
           description: The store completed and was confirmed
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
         "400":
-          description: slavePosition, retryCount, or retryDelay is invalid
+          description: slavePosition, retries, or interval is invalid
         "404":
           description: No device at that slavePosition
         "409":
           description: >
             The device has no generic device area, the store command write failed, or the device
             did not confirm the store within the retry budget
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
   /api/devices/{slavePosition}/sdo/{index}/{subindex}:
     get:
       summary: Upload an object dictionary entry from a device (CoE SDO upload)

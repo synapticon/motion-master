@@ -494,6 +494,102 @@ const WriteSdoCard = memo(function WriteSdoCard({
   )
 })
 
+// Store parameters to non-volatile memory (CoE 0x1010). Own-state child so the multi-second store
+// (the server blocks until the drive confirms the save) never re-renders the parent's large,
+// non-virtualized parameter table. This card will also host "Restore default parameters" (0x1011)
+// as a sibling action later.
+const StoreParametersCard = memo(function StoreParametersCard({
+  api,
+  slavePosition,
+}: {
+  api: Api
+  slavePosition: number
+}) {
+  const [storing, setStoring] = useState(false)
+  const [stored, setStored] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  // Round-trip is what the browser observes (the full cross-origin HTTP request); wire is the
+  // server-measured store duration (X-Wire-Us) — for the store these are close, since the server
+  // blocks on the settle + confirm-poll budget, so the gap is just transport/TLS overhead.
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null)
+  const [wireMs, setWireMs] = useState<number | null>(null)
+
+  async function handleStore() {
+    setStoring(true)
+    setStored(false)
+    setError(null)
+    setElapsedMs(null)
+    setWireMs(null)
+    const start = performance.now()
+    try {
+      const res = await api.storeParameters(slavePosition)
+      setElapsedMs(performance.now() - start)
+      setWireMs(wireTimeMs(res))
+      setStored(true)
+    } catch (err) {
+      // A failed store still consumed wall time (the server waits out its retry budget); show the
+      // elapsed figure alongside the error so a timeout reads as "it tried for a while", not
+      // instant. The backend attaches X-Wire-Us to the error too, so show the same split.
+      setElapsedMs(performance.now() - start)
+      if (err instanceof Response) setWireMs(wireTimeMs(err))
+      setError(apiError(err))
+    } finally {
+      setStoring(false)
+    }
+  }
+
+  return (
+    <section>
+      <p className="eyebrow mb-5">Non-volatile storage</p>
+      <div className="border border-grey-200 p-5 space-y-4">
+
+        <p className="text-xs text-grey-500">
+          Persist the device's current parameter values to non-volatile memory — the CoE{' '}
+          <span className="font-mono">0x1010</span> “store parameters” object — so the changes you
+          make here survive a power cycle. The server writes the “save” signature and waits for the
+          drive to confirm the save completed, which usually takes about a second. The device's
+          mailbox must be active (PRE-OP or higher).
+        </p>
+
+        <div className="flex items-center gap-3">
+          <button onClick={handleStore} disabled={storing} className={btnCls}>
+            {storing ? 'Storing…' : 'Store parameters'}
+          </button>
+          {stored && !storing && (
+            <span className="text-xs text-status-good">Stored</span>
+          )}
+          {elapsedMs !== null && (
+            <span className="text-xs text-grey-500 font-mono whitespace-nowrap">
+              {wireMs !== null && (
+                <span
+                  className="cursor-help"
+                  title="Server — the backend-measured duration of the store itself: the control-plane lock plus the save-and-confirm poll loop it runs against the device (the settle wait and confirmation reads). This is the true on-device cost."
+                >
+                  server {formatElapsed(wireMs)}
+                </span>
+              )}
+              <span
+                className="text-grey-400 cursor-help"
+                title="Round-trip — total time this browser observed for the HTTP request, measured around the fetch. It is the server store time plus cross-origin/TLS and transport overhead, so it is normally a little larger and is not device time."
+              >
+                {wireMs !== null ? ' · round-trip ' : 'round-trip '}
+                {formatElapsed(elapsedMs)}
+              </span>
+            </span>
+          )}
+        </div>
+
+        {error && (
+          <p className="text-xs text-status-bad font-mono">{error}</p>
+        )}
+
+        {/* Restore default parameters (0x1011) will be added here as a sibling action. */}
+
+      </div>
+    </section>
+  )
+})
+
 export default function DeviceParametersPage() {
   const { deviceId } = useParams()
   const { api } = useConnection()
@@ -686,6 +782,8 @@ export default function DeviceParametersPage() {
         }
       />
       <div className="p-4 sm:px-8 sm:py-7 space-y-6">
+
+        <StoreParametersCard api={api} slavePosition={slavePosition} />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
 

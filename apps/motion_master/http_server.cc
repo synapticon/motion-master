@@ -1111,13 +1111,21 @@ void HttpServer::run() {
             }
             // Synchronous, like the CiA402 command / FoE handlers: blocks this HTTP thread for
             // the store's few seconds while the WebSocket (separate port/loop) and RT loop run
-            // on.
+            // on. Time the store itself and report it via X-Wire-Us — the store waits out its
+            // whole settle + confirm-poll budget, so the server-measured duration is most of the
+            // client's round-trip; the readout lets the UI separate device time from transport.
+            const auto t0 = std::chrono::steady_clock::now();
             auto r = deviceManager_.runStoreParameters(pos, storeConfig);
+            const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - t0);
             if (!r) {
-              sendError(res, "409 Conflict", config_.corsOrigin, r.error());
+              sendError(res, "409 Conflict", config_.corsOrigin, r.error(), wireUs);
               return;
             }
-            sendStatus(res, "204 No Content", config_.corsOrigin);
+            mm::api::setWireTime(
+                mm::api::setCorsOrigin(res->writeStatus("204 No Content"), config_.corsOrigin),
+                wireUs)
+                ->end();
           })
       .get("/api/devices/:slavePosition/sdo/:index/:subindex",
            [this](auto* res, auto* req) {

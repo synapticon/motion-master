@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.60] - 2026-07-28
+
 ### Added
 
 - Every release now ships **Linux aarch64 (arm64)** packages alongside the existing x86-64 ones: `motion-master-<version>-linux-arm64.tar.gz`, `-arm64.deb`, and `-aarch64.rpm`. They are built on Debian 13 (trixie) — so they install and run on Debian 13 and Raspberry Pi OS trixie, and require glibc 2.41 or newer (Debian 12 and arm64 Ubuntu 24.04 still need a source build).
@@ -420,7 +422,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.58...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.60...HEAD
+[6.0.0-alpha.60]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.59...v6.0.0-alpha.60
 [6.0.0-alpha.58]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.57...v6.0.0-alpha.58
 [6.0.0-alpha.57]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.56...v6.0.0-alpha.57
 [6.0.0-alpha.56]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.55...v6.0.0-alpha.56

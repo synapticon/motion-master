@@ -33,9 +33,9 @@ The Linux `.deb`/`.rpm` packages install to `/opt/motion-master/` with a `/usr/l
 ### Debian / Ubuntu
 
 ```bash
-sudo apt install ./motion-master-<version>-amd64.deb    # install or upgrade (aarch64: -arm64.deb)
-sudo apt remove motion-master                            # remove (leaves cert.pem / key.pem)
-sudo apt purge motion-master                             # full removal including certs
+sudo apt install ./motion-master-<version>-amd64.deb  # install or upgrade (aarch64: -arm64.deb)
+sudo apt remove motion-master                         # remove (leaves cert.pem / key.pem)
+sudo apt purge motion-master                          # full removal including certs
 ```
 
 The `postinst` script automatically sets the required capabilities (`cap_sys_nice`, `cap_net_admin`, `cap_net_raw`) on the binary. On upgrade the capabilities are re-applied to the new binary automatically.
@@ -45,9 +45,9 @@ The `postinst` script automatically sets the required capabilities (`cap_sys_nic
 ### Fedora / RHEL / openSUSE
 
 ```bash
-sudo dnf install ./motion-master-<version>-x86_64.rpm   # Fedora / RHEL (install or upgrade)
-sudo zypper install ./motion-master-<version>-x86_64.rpm # openSUSE (install or upgrade)
-sudo dnf remove motion-master                            # full removal
+sudo dnf install ./motion-master-<version>-x86_64.rpm     # Fedora / RHEL (install or upgrade)
+sudo zypper install ./motion-master-<version>-x86_64.rpm  # openSUSE (install or upgrade)
+sudo dnf remove motion-master                             # full removal
 ```
 
 On aarch64 use `motion-master-<version>-aarch64.rpm` instead.
@@ -57,9 +57,9 @@ On uninstall, unmodified `cert.pem` and `key.pem` are removed automatically. If 
 ### Tarball
 
 ```bash
-tar -xzf motion-master-<version>-linux-x64.tar.gz    # aarch64: -linux-arm64.tar.gz
+tar -xzf motion-master-<version>-linux-x64.tar.gz  # aarch64: -linux-arm64.tar.gz
 cd motion-master-<version>-linux-x64
-sudo ./setup.sh    # sets capabilities once; re-run after any OS update that resets them
+sudo ./setup.sh  # sets capabilities once; re-run after any OS update that resets them
 ./motion-master --help
 ```
 
@@ -438,7 +438,7 @@ CMake does the propagation into native code at configure time — `version.h` is
 
    ```cpp
    constexpr std::string_view kVersion = "6.0.0-alpha.31";
-   static_assert(semver::valid(kVersion));   // build fails on a malformed version
+   static_assert(semver::valid(kVersion));  // build fails on a malformed version
    ```
 
 The `static_assert` is a compile-time guard: a malformed version in `VERSION` breaks the build rather than shipping a bad string. The `Doxyfile` version is propagated the same way.

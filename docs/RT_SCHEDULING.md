@@ -22,7 +22,7 @@ Linux exposes real-time scheduling policies that sit **above** the normal fair s
 
 ```c
 struct sched_param param = { .sched_priority = 80 };
-sched_setscheduler(0, SCHED_FIFO, &param);   // or pthread_setschedparam()
+sched_setscheduler(0, SCHED_FIFO, &param);  // or pthread_setschedparam()
 ```
 
 `SCHED_FIFO` ("first in, first out"):
@@ -72,7 +72,7 @@ low enough to stay under the essential kernel threads.
 
 ```c
 #include <sys/mman.h>
-int mlockall(int flags);        // typically MCL_CURRENT | MCL_FUTURE
+int mlockall(int flags);  // typically MCL_CURRENT | MCL_FUTURE
 ```
 
 Locks the process's virtual memory pages into physical RAM so the kernel can never page

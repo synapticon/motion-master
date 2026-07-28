@@ -23,7 +23,7 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Added
 
-- Every release now ships **Linux aarch64 (arm64)** packages alongside the existing x86-64 ones: `motion-master-<version>-linux-arm64.tar.gz`, `-arm64.deb`, and `-aarch64.rpm`. They are built on Debian 13 (trixie) — so they install and run on Debian 13 and Raspberry Pi OS trixie, and require glibc 2.41 or newer (Debian 12 and arm64 Ubuntu 24.04 still need a source build).
+- Every release now ships **Linux aarch64 (arm64)** packages alongside the existing x86-64 ones: `motion-master-<version>-linux-arm64.tar.gz`, `-arm64.deb`, and `-aarch64.rpm`. They are built on Debian 13 (trixie) and need glibc 2.38 or newer — the same requirement as the x86-64 binaries — so they install and run on Debian 13 and Raspberry Pi OS trixie. Debian 12 (bookworm, glibc 2.36) still needs a source build.
 
 ## [6.0.0-alpha.58] - 2026-07-21
 

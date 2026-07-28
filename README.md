@@ -20,15 +20,15 @@ Release packages are available on the [Releases](../../releases) page. Every rel
 | `motion-master-<version>-linux-x64.tar.gz` | Tarball | Any Linux x86-64 |
 | `motion-master-<version>-amd64.deb` | Debian package | Ubuntu / Debian (x86-64) |
 | `motion-master-<version>-x86_64.rpm` | RPM package | Fedora / RHEL / openSUSE (x86-64) |
-| `motion-master-<version>-linux-arm64.tar.gz` | Tarball | Debian 13 aarch64 and newer |
+| `motion-master-<version>-linux-arm64.tar.gz` | Tarball | Any Linux aarch64 |
 | `motion-master-<version>-arm64.deb` | Debian package | Debian 13 / Raspberry Pi OS trixie (aarch64) |
-| `motion-master-<version>-aarch64.rpm` | RPM package | Fedora 42 / openSUSE Tumbleweed (aarch64) |
+| `motion-master-<version>-aarch64.rpm` | RPM package | Fedora / openSUSE (aarch64) |
 | `motion-master-<version>-windows-x64.zip` | Zip archive | Windows x64 |
 | `motion-master-<version>-macos-arm64.tar.gz` | Tarball | macOS (Apple Silicon) |
 
 The Linux `.deb`/`.rpm` packages install to `/opt/motion-master/` with a `/usr/local/bin/motion-master` symlink.
 
-> **aarch64 note:** the arm64 artefacts are built on **Debian 13 (trixie)**, so they need glibc 2.41 or newer. They run on Debian 13 and Raspberry Pi OS trixie; they do **not** run on Debian 12 (bookworm, glibc 2.36) or arm64 Ubuntu 24.04 (glibc 2.39) — [build from source](#building-from-source) there.
+> **aarch64 note:** the arm64 artefacts are built on **Debian 13 (trixie)** and need glibc 2.38 or newer, so they run on Debian 13 and Raspberry Pi OS trixie. Debian 12 (bookworm, glibc 2.36) is too old — [build from source](#building-from-source) there.
 
 ### Debian / Ubuntu
 
@@ -175,8 +175,8 @@ docker run --rm --network host \
 
 Requirements for running a release binary (building from source has its own — see [Development](#development)):
 
-- **Linux x86-64:** glibc 2.39 or newer. The x64 release binaries are built on Ubuntu 24.04 and dynamically link glibc 2.39, so they do **not** run on older distributions — e.g. Ubuntu 22.04 (glibc 2.35) fails at load with a `version 'GLIBC_2.3x' not found` error. Use Ubuntu 24.04 / Debian 13 or newer, or [build from source](#building-from-source) against your platform's glibc.
-- **Linux aarch64:** glibc 2.41 or newer. The arm64 release binaries are built on Debian 13 (trixie) — the Debian aarch64 target, Raspberry Pi included — so Debian 12 (bookworm, glibc 2.36) and arm64 Ubuntu 24.04 (glibc 2.39) need a source build instead.
+- **Linux (both architectures):** glibc **2.38** or newer and libstdc++ from GCC 13.2 or newer (`GLIBCXX_3.4.32`) — the only dynamic dependencies are `libc`, `libm`, `libstdc++` and `libgcc_s`. The floor comes from the symbols the binary references, not from the distro it was built on: the x64 artefacts are built on Ubuntu 24.04 and the arm64 ones on Debian 13 (trixie), and both land on the same 2.38 requirement. So Ubuntu 24.04+, Debian 13+ and Raspberry Pi OS trixie all work, while Ubuntu 22.04 (glibc 2.35) and Debian 12 (bookworm, 2.36) fail at load with a `version 'GLIBC_2.3x' not found` error — [build from source](#building-from-source) there.
+  Verify a binary's own requirement with `readelf -V ./motion-master | grep GLIBC_` (highest version wins).
 - **Windows:** two runtime dependencies for the packaged binary:
   - [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) (x64) — the MSVC runtime the binary is linked against
   - [Npcap](https://npcap.com) in WinPcap-compatible mode — raw EtherCAT packet capture (install with "Install Npcap in WinPcap API-compatible Mode" checked)
@@ -186,7 +186,7 @@ Requirements for running a release binary (building from source has its own — 
 | Platform | Status |
 | --- | --- |
 | Linux x86-64 | Primary target — `.tar.gz`, `.deb`, `.rpm` |
-| Linux aarch64 (Debian 13+) | Supported — `.tar.gz`, `.deb`, `.rpm` |
+| Linux aarch64 | Supported — `.tar.gz`, `.deb`, `.rpm` (built on Debian 13) |
 | Windows x64 | Supported — `.zip` |
 | macOS (Apple Silicon) | Supported — `.tar.gz` |
 

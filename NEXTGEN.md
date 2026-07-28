@@ -1777,3 +1777,22 @@ Shipped the generic CANopen **store-parameters** feature: `ProfileDevice::runSto
 **Rejected / escape hatch (from 2026-06-12, still the fallback):** self-signed + click-through is dead (cross-origin `fetch()`); a private CA users import is a per-customer support burden; `.local` + public cert is impossible (reserved TLD). If the DNS machinery ever feels too heavy, **serve the PWA from the server itself (same-origin)** — same-origin navigation *does* allow a one-time self-signed exception, dropping all wildcard/DNS plumbing. Not chosen (the hosted+acme path is already built and the wildcard is cheap given dnsBOX access), but it remains the clean bail-out.
 
 **Status:** plan only; no code yet. Prereqs owned outside the repo (DNS records, acme-dns subdomain) are now self-serve via dnsBOX.
+
+## Session 2026-07-28 — aarch64 Linux joins the release: build *on* Debian 13, not on the arm64 runner's Ubuntu (as-built)
+
+Closes item #4 of *Session 2026-07-24* (the arm64 packaging leg) except for the flashable image. `build-linux-arm64.yml` already proved the arm64 *build*; what was missing was a release leg that ships it. The release now has four build legs, and the aarch64 one produces the same three Linux artefacts the x64 leg does — `-linux-arm64.tar.gz`, `-arm64.deb`, `-aarch64.rpm`.
+
+**The one real decision: which libc the artefact links, i.e. which machine builds it.** GitHub's `ubuntu-24.04-arm` runner is Ubuntu (glibc 2.39); the deployment target is *Debian* aarch64 (Raspberry Pi OS). Three candidates:
+
+- **Build on the runner (Ubuntu 24.04, glibc 2.39).** Widest of the three — 2.39 runs on Debian 13 (2.41) *and* arm64 Ubuntu 24.04 — but the binary is then built against a distro we don't ship for, and nothing pins that alignment as the Ubuntu runner image moves.
+- **Build in a `debian:12` (bookworm, glibc 2.36) container.** Best coverage — bookworm is still the majority of Raspberry Pi OS installs — but bookworm's default gcc-12 has no `std::expected`, so it needs a backported or hand-built toolchain in the container. Rejected for now as build plumbing with real risk; revisit if bookworm devices actually need packages.
+- **Build in a `debian:13` (trixie) container — chosen.** Trixie ships gcc-14 natively, so the container is a plain `apt-get install` and the artefact links exactly the libc/libstdc++ of the distro it targets.
+
+**The trade is explicit and documented, not hidden:** trixie's glibc 2.41 becomes the floor, so these artefacts do **not** run on Debian 12 (2.36) or arm64 Ubuntu 24.04 (2.39) — a *narrower* range than building on the runner would have given. That is the price of building against the shipped target, and README's *Prerequisites* + the install table both state it so nobody diagnoses a `GLIBC_2.41 not found` from scratch.
+
+**Two smaller things worth not re-deriving.**
+
+1. **`tools/package.sh` is arch-aware by preset, not by host.** A `case` maps the preset to the pair of names deb and rpm use for the same machine (`x64-linux-*` → `amd64`/`x86_64`, `arm64-linux-*` → `arm64`/`aarch64`); `Architecture:`/`BuildArch:` and both output filenames come from it, and `rpmbuild --target` names the arch explicitly so an `arm64-linux-cross-*` preset can package an aarch64 rpm from an x86_64 machine. An earlier draft added a `[format]` argument so the arm leg could build the deb alone — deleted once the leg shipped all three formats: an rpm is the same binary with different metadata, so the flag was speculative machinery.
+2. **The aarch64 leg's vcpkg cache key carries a `debian13` token.** Keying it like `build-linux-arm64.yml` (`vcpkg-<arch>-<os>-<hash>`) would *look* like cache sharing but produce the opposite: those archives were built with Ubuntu's toolchain, whose ABI hash this container's compiler never matches, and — worse — the key already existing means `actions/cache` skips the save, so the Debian archives would never persist and every tag would rebuild every dependency from source.
+
+**Status:** as-built and merged; unverified until the next `v*` tag runs the leg (nothing in it can be exercised locally). Still open for the Pi appliance: the flashable image leg.

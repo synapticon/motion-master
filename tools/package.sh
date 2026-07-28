@@ -3,7 +3,7 @@
 #
 # Requirements (all available via apt): dpkg-dev, rpm
 # cert.pem and key.pem must already exist in build/<preset>/apps/motion_master/
-# (injected from secrets in CI; copy manually for local testing).
+# (fetched from the rolling tls-cert release in CI; copy manually for local testing).
 #
 # Usage: ./tools/package.sh [preset]
 set -euo pipefail
@@ -12,6 +12,13 @@ PRESET="${1:-x64-linux-release}"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$REPO_DIR/build/$PRESET/apps/motion_master"
 VERSION=$(cat "$REPO_DIR/VERSION")
+
+# deb and rpm spell the same machine differently, so each preset maps to a pair.
+case "$PRESET" in
+    x64-linux-*)   DEB_ARCH=amd64; RPM_ARCH=x86_64 ;;
+    arm64-linux-*) DEB_ARCH=arm64; RPM_ARCH=aarch64 ;;
+    *) echo "Not a Linux packaging preset: $PRESET" >&2; exit 1 ;;
+esac
 
 for f in motion-master cert.pem key.pem; do
     [[ -f "$BUILD_DIR/$f" ]] || { echo "Missing: $BUILD_DIR/$f" >&2; exit 1; }
@@ -42,7 +49,7 @@ ln -sf /opt/motion-master/motion-master "$deb_root/usr/local/bin/motion-master"
 cat > "$deb_root/DEBIAN/control" <<EOF
 Package: motion-master
 Version: ${VERSION}
-Architecture: amd64
+Architecture: ${DEB_ARCH}
 Maintainer: Marko Sanković <msankovic@synapticon.com>
 Depends: libcap2-bin
 Description: Motion control software for SOMANET servo drives
@@ -55,7 +62,7 @@ chmod 755 "$deb_root/DEBIAN/postinst"
 printf '/opt/motion-master/cert.pem\n/opt/motion-master/key.pem\n' \
     > "$deb_root/DEBIAN/conffiles"
 
-DEB="$REPO_DIR/motion-master-${VERSION}-amd64.deb"
+DEB="$REPO_DIR/motion-master-${VERSION}-${DEB_ARCH}.deb"
 dpkg-deb --root-owner-group --build "$deb_root" "$DEB"
 echo "Created: $DEB"
 
@@ -80,7 +87,7 @@ Release:        ${RPM_RELEASE}%{?dist}
 Summary:        Motion control software for SOMANET servo drives
 License:        GPL-3.0
 URL:            https://motion-master.synapticon.com
-BuildArch:      x86_64
+BuildArch:      ${RPM_ARCH}
 Requires:       libcap
 AutoReq:        no
 
@@ -113,7 +120,9 @@ setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip /opt/motion-maste
 %changelog
 SPEC
 
-rpmbuild --define "_topdir $rpm_root" -bb "$rpm_root/SPECS/motion-master.spec"
-RPM="$REPO_DIR/motion-master-${VERSION}-x86_64.rpm"
+# --target names the package arch explicitly instead of inheriting the build host's, so
+# an arm64-linux-cross-* preset packages an aarch64 rpm from an x86_64 machine.
+rpmbuild --target "$RPM_ARCH" --define "_topdir $rpm_root" -bb "$rpm_root/SPECS/motion-master.spec"
+RPM="$REPO_DIR/motion-master-${VERSION}-${RPM_ARCH}.rpm"
 find "$rpm_root/RPMS" -name "*.rpm" -exec cp {} "$RPM" \;
 echo "Created: $RPM"

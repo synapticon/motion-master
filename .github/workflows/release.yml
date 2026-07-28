@@ -7,7 +7,7 @@ on:
 
 jobs:
   # ── Linux x64: .tar.gz + .deb + .rpm ───────────────────────────────────────
-  linux:
+  linux-x64:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v6
@@ -63,11 +63,92 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: linux
+          name: linux-x64
           path: |
             motion-master-*-linux-x64.tar.gz
             motion-master-*-amd64.deb
             motion-master-*-x86_64.rpm
+
+  # ── Linux arm64: .tar.gz + .deb + .rpm ─────────────────────────────────────
+  # Built inside a debian:13 (trixie) container on the arm64 runner, so the binary links
+  # trixie's glibc (2.41) and libstdc++ — Debian aarch64 is the target for the Raspberry Pi
+  # appliance. The runner image is Ubuntu, but only the container's libc decides what the
+  # artifact runs on: Debian 13 / Raspberry Pi OS trixie and newer, not glibc 2.39 hosts
+  # such as arm64 Ubuntu 24.04. Building on the runner directly would lower that floor to
+  # 2.39 — the deliberate trade is building against the distro we ship for.
+  linux-arm64:
+    runs-on: ubuntu-24.04-arm
+    container: debian:13
+    steps:
+      # Runs before checkout on purpose: without git in the container, actions/checkout
+      # falls back to the REST tarball and cannot fetch the vcpkg submodule.
+      - name: Install system dependencies
+        run: |
+          apt-get update -q
+          apt-get install -y --no-install-recommends \
+            ninja-build gcc-14 g++-14 \
+            curl ca-certificates git \
+            zip unzip tar zstd pkg-config \
+            make perl \
+            dpkg-dev rpm
+
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Cache vcpkg packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/vcpkg/archives
+          # Deliberately distinct from build-linux-arm64.yml's key: that cache holds
+          # archives built with Ubuntu's toolchain, whose ABI hash this container's
+          # compiler never matches — sharing the key would make this leg's cache saves
+          # no-ops (the key already exists) and rebuild every dependency on each tag.
+          key: vcpkg-debian13-${{ runner.arch }}-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-debian13-${{ runner.arch }}-${{ runner.os }}-
+
+      - name: Install CMake 4.x
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: "~4.0.0"
+
+      - name: Configure
+        run: cmake --preset arm64-linux-release
+        env:
+          CC: gcc-14
+          CXX: g++-14
+
+      - name: Build
+        run: cmake --build --preset arm64-linux-release
+
+      - name: Bundle TLS certificate and key
+        run: |
+          dir=build/arm64-linux-release/apps/motion_master
+          base=https://github.com/synapticon/motion-master/releases/download/tls-cert
+          curl -fsSL "$base/cert.pem" -o "$dir/cert.pem"
+          curl -fsSL "$base/key.pem"  -o "$dir/key.pem"
+
+      - name: Package tarball
+        run: |
+          dir=build/arm64-linux-release/apps/motion_master
+          cp setup.sh "$dir/setup.sh"
+          cp SETUP-linux.md "$dir/SETUP.md"
+          cp apps/motion_master/motion-master.example.jsonc "$dir/motion-master.example.jsonc"
+          tar -czf "motion-master-${GITHUB_REF_NAME#v}-linux-arm64.tar.gz" \
+            -C "$dir" motion-master cert.pem key.pem setup.sh SETUP.md motion-master.example.jsonc
+
+      - name: Create deb and rpm
+        run: ./tools/package.sh arm64-linux-release
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v5
+        with:
+          name: linux-arm64
+          path: |
+            motion-master-*-linux-arm64.tar.gz
+            motion-master-*-arm64.deb
+            motion-master-*-aarch64.rpm
 
   # ── Windows x64: .zip (exe + vcpkg runtime DLLs) ───────────────────────────
   windows:
@@ -226,7 +307,7 @@ jobs:
 
   # ── Publish the GitHub Release with all platform artifacts ─────────────────
   release:
-    needs: [linux, windows, macos]
+    needs: [linux-x64, linux-arm64, windows, macos]
     runs-on: ubuntu-24.04
     steps:
       - name: Download all artifacts

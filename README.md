@@ -13,22 +13,27 @@ Design documents with Mermaid diagrams (rendered natively on GitHub):
 
 ## Installation
 
-Release packages are available on the [Releases](../../releases) page. Every release ships binaries for Linux, Windows, and macOS:
+Release packages are available on the [Releases](../../releases) page. Every release ships binaries for Linux (x86-64 and aarch64), Windows, and macOS:
 
 | Artefact | Format | Install on |
 | --- | --- | --- |
 | `motion-master-<version>-linux-x64.tar.gz` | Tarball | Any Linux x86-64 |
-| `motion-master-<version>-amd64.deb` | Debian package | Ubuntu / Debian |
-| `motion-master-<version>-x86_64.rpm` | RPM package | Fedora / RHEL / openSUSE |
+| `motion-master-<version>-amd64.deb` | Debian package | Ubuntu / Debian (x86-64) |
+| `motion-master-<version>-x86_64.rpm` | RPM package | Fedora / RHEL / openSUSE (x86-64) |
+| `motion-master-<version>-linux-arm64.tar.gz` | Tarball | Debian 13 aarch64 and newer |
+| `motion-master-<version>-arm64.deb` | Debian package | Debian 13 / Raspberry Pi OS trixie (aarch64) |
+| `motion-master-<version>-aarch64.rpm` | RPM package | Fedora 42 / openSUSE Tumbleweed (aarch64) |
 | `motion-master-<version>-windows-x64.zip` | Zip archive | Windows x64 |
 | `motion-master-<version>-macos-arm64.tar.gz` | Tarball | macOS (Apple Silicon) |
 
 The Linux `.deb`/`.rpm` packages install to `/opt/motion-master/` with a `/usr/local/bin/motion-master` symlink.
 
+> **aarch64 note:** the arm64 artefacts are built on **Debian 13 (trixie)**, so they need glibc 2.41 or newer. They run on Debian 13 and Raspberry Pi OS trixie; they do **not** run on Debian 12 (bookworm, glibc 2.36) or arm64 Ubuntu 24.04 (glibc 2.39) — [build from source](#building-from-source) there.
+
 ### Debian / Ubuntu
 
 ```bash
-sudo apt install ./motion-master-<version>-amd64.deb    # install or upgrade
+sudo apt install ./motion-master-<version>-amd64.deb    # install or upgrade (aarch64: -arm64.deb)
 sudo apt remove motion-master                            # remove (leaves cert.pem / key.pem)
 sudo apt purge motion-master                             # full removal including certs
 ```
@@ -45,12 +50,14 @@ sudo zypper install ./motion-master-<version>-x86_64.rpm # openSUSE (install or 
 sudo dnf remove motion-master                            # full removal
 ```
 
+On aarch64 use `motion-master-<version>-aarch64.rpm` instead.
+
 On uninstall, unmodified `cert.pem` and `key.pem` are removed automatically. If you replaced them with your own, they are saved as `cert.pem.rpmsave` / `key.pem.rpmsave`.
 
 ### Tarball
 
 ```bash
-tar -xzf motion-master-<version>-linux-x64.tar.gz
+tar -xzf motion-master-<version>-linux-x64.tar.gz    # aarch64: -linux-arm64.tar.gz
 cd motion-master-<version>-linux-x64
 sudo ./setup.sh    # sets capabilities once; re-run after any OS update that resets them
 ./motion-master --help
@@ -168,7 +175,8 @@ docker run --rm --network host \
 
 Requirements for running a release binary (building from source has its own — see [Development](#development)):
 
-- **Linux:** glibc 2.39 or newer. The release binaries are built on Ubuntu 24.04 and dynamically link glibc 2.39, so they do **not** run on older distributions — e.g. Ubuntu 22.04 (glibc 2.35) fails at load with a `version 'GLIBC_2.3x' not found` error. Use Ubuntu 24.04 / Debian 13 or newer, or [build from source](#building-from-source) against your platform's glibc.
+- **Linux x86-64:** glibc 2.39 or newer. The x64 release binaries are built on Ubuntu 24.04 and dynamically link glibc 2.39, so they do **not** run on older distributions — e.g. Ubuntu 22.04 (glibc 2.35) fails at load with a `version 'GLIBC_2.3x' not found` error. Use Ubuntu 24.04 / Debian 13 or newer, or [build from source](#building-from-source) against your platform's glibc.
+- **Linux aarch64:** glibc 2.41 or newer. The arm64 release binaries are built on Debian 13 (trixie) — the Debian aarch64 target, Raspberry Pi included — so Debian 12 (bookworm, glibc 2.36) and arm64 Ubuntu 24.04 (glibc 2.39) need a source build instead.
 - **Windows:** two runtime dependencies for the packaged binary:
   - [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) (x64) — the MSVC runtime the binary is linked against
   - [Npcap](https://npcap.com) in WinPcap-compatible mode — raw EtherCAT packet capture (install with "Install Npcap in WinPcap API-compatible Mode" checked)
@@ -178,9 +186,9 @@ Requirements for running a release binary (building from source has its own — 
 | Platform | Status |
 | --- | --- |
 | Linux x86-64 | Primary target — `.tar.gz`, `.deb`, `.rpm` |
+| Linux aarch64 (Debian 13+) | Supported — `.tar.gz`, `.deb`, `.rpm` |
 | Windows x64 | Supported — `.zip` |
 | macOS (Apple Silicon) | Supported — `.tar.gz` |
-| Linux ARM64 | Built & tested in CI; no release package yet |
 
 ### Command-line options
 
@@ -458,6 +466,6 @@ The `v*` tag builds the platform binaries **and** publishes `@synapticon/motion-
 | `build-windows-x64.yml` | push / PR to `main` | Build & test (Windows x64) |
 | `lint.yml` | push / PR to `main` | clang-format + cpplint checks |
 | `cert-renewal.yml` | 1st of every month | Renew Let's Encrypt cert via acme-dns; publish it to the rolling `tls-cert` release |
-| `release.yml` | `v*` tag push | Build all platforms, bundle cert + key from the rolling `tls-cert` release, publish GitHub Release with `.tar.gz`, `.deb`, `.rpm` (Linux), `.zip` (Windows), and `.tar.gz` (macOS arm64) |
+| `release.yml` | `v*` tag push | Build all platforms, bundle cert + key from the rolling `tls-cert` release, publish GitHub Release with `.tar.gz`, `.deb`, `.rpm` (Linux x64 and aarch64), `.zip` (Windows), and `.tar.gz` (macOS arm64) |
 
-The vcpkg cache key is OS + `vcpkg.json` hash. The first run after a dependency change rebuilds from source; subsequent runs restore from cache.
+The vcpkg cache key is OS + `vcpkg.json` hash, extended with the architecture where two legs share an OS (`build-linux-arm64.yml`) and with the build container where the toolchain differs too (the release workflow's Debian 13 aarch64 leg). The first run after a dependency change rebuilds from source; subsequent runs restore from cache.

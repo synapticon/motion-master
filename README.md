@@ -38,7 +38,7 @@ sudo apt remove motion-master                         # remove (leaves cert.pem 
 sudo apt purge motion-master                          # full removal including certs
 ```
 
-The `postinst` script automatically sets the required capabilities (`cap_sys_nice`, `cap_net_admin`, `cap_net_raw`) on the binary. On upgrade the capabilities are re-applied to the new binary automatically.
+The `postinst` script automatically sets the four required capabilities (`cap_sys_nice`, `cap_net_admin`, `cap_net_raw`, `cap_ipc_lock`) on the binary — see [Linux capabilities](#linux-capabilities) for what each one does. On upgrade the capabilities are re-applied to the new binary automatically.
 
 > **Note:** `apt remove` leaves `cert.pem` and `key.pem` behind as conffiles. Use `apt purge` for a complete uninstall.
 
@@ -62,6 +62,30 @@ cd motion-master-<version>-linux-x64
 sudo ./setup.sh  # sets capabilities once; re-run after any OS update that resets them
 ./motion-master --help
 ```
+
+### Linux capabilities
+
+On Linux the binary needs four capabilities. All three Linux install paths apply the same set — the deb `postinst`, the rpm `%post` scriptlet, and the tarball's `setup.sh` all run:
+
+```bash
+setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip <install-dir>/motion-master
+```
+
+| Capability | What the binary does with it | Missing it |
+| --- | --- | --- |
+| `cap_net_raw` | Opens an `AF_PACKET` raw socket. EtherCAT is a bare Ethernet protocol (EtherType `0x88A4`) with no IP layer, so SOEM writes and reads frames directly on the wire instead of going through a normal socket. | `POST /api/init` fails when a SOEM driver is requested — no fieldbus |
+| `cap_net_admin` | Puts the NIC into promiscuous mode. EtherCAT frames come back addressed to the slaves, not to the host MAC, so without promiscuous mode the kernel drops every reply. | Slave discovery/scan finds nothing, or `init` fails |
+| `cap_sys_nice` | Raises the game-loop thread to `SCHED_FIFO` priority 80, so the real-time cycle is not preempted by ordinary `SCHED_OTHER` work. | Warning at startup; the loop runs at normal priority with no timing guarantees |
+| `cap_ipc_lock` | Calls `mlockall(MCL_CURRENT \| MCL_FUTURE)` to pin all process pages in RAM, so a mid-cycle page fault cannot inject an unbounded latency spike. | Warning at startup; shows as `mlockall: no` on the console's Game Loop page |
+
+The first two are the EtherCAT pair, the last two the real-time pair. The real-time pair is best-effort — the binary logs a warning and keeps running without either — so a plain `./motion-master` on a machine with no capabilities set still serves the HTTP API and the WebSocket; it just cannot talk to a fieldbus or hold a deterministic cycle.
+
+The `=eip` suffix puts each capability in the file's **e**ffective, **i**nheritable and **p**ermitted sets, which is what lets an unprivileged user run the binary and still get them — no `sudo` and no root-owned process. Two consequences worth knowing:
+
+- Capabilities live in an extended attribute on the *file*, so they are lost whenever the file is replaced — a rebuild, a `cp`, or a manual binary swap. Re-run `setup.sh` (or `./tools/build.sh --setcap`) afterwards. Package upgrades handle this themselves.
+- They require a filesystem with extended-attribute support, mounted without `nosuid`. On a `nosuid` mount, or over NFS without xattrs, `setcap` succeeds but the kernel ignores the capabilities at exec time — run the binary from local storage instead.
+
+Inside a container file capabilities are ignored entirely; see [Docker → Capabilities](#capabilities) for the `--cap-add` equivalents.
 
 ### Windows
 
@@ -121,16 +145,16 @@ docker run --rm --network host \
 
 Docker drops most Linux capabilities by default. On a bare-metal install `postinst`/`setup.sh` stamps the binary with `setcap` so any user can run it and it receives the required capabilities automatically. Inside a container, file capabilities are ignored — you grant the equivalent capabilities to the container process with `--cap-add` at `docker run` time instead.
 
-| Capability | What it unlocks | Required for |
+| Capability | `docker run` flag | Required for |
 | --- | --- | --- |
-| `CAP_NET_RAW` | Open raw/packet sockets | SOEM sending/receiving raw EtherCAT frames |
-| `CAP_NET_ADMIN` | Configure network interfaces | SOEM putting the NIC into promiscuous mode |
-| `CAP_SYS_NICE` | Set `SCHED_FIFO` scheduling policy and RT priority | Real-time game loop |
-| `CAP_IPC_LOCK` | Call `mlockall()` to pin process memory | Preventing page faults during RT cycles |
+| `CAP_NET_RAW` | `--cap-add NET_RAW` | SOEM sending/receiving raw EtherCAT frames |
+| `CAP_NET_ADMIN` | `--cap-add NET_ADMIN` | SOEM putting the NIC into promiscuous mode |
+| `CAP_SYS_NICE` | `--cap-add SYS_NICE` | `SCHED_FIFO` priority on the real-time game loop |
+| `CAP_IPC_LOCK` | `--cap-add IPC_LOCK` | `mlockall()` pinning process memory for RT |
+
+See [Linux capabilities](#linux-capabilities) for what each one actually does and how the binary behaves without it: missing RT caps produce a warning and the loop runs without RT guarantees; missing EtherCAT caps cause `POST /api/init` to fail when a SOEM driver is requested.
 
 `--ulimit memlock=-1` is also required alongside `CAP_IPC_LOCK` — without it the kernel rejects `mlockall()` even when the capability is present.
-
-The binary degrades gracefully: missing RT caps produce a warning and the loop runs without RT guarantees; missing EtherCAT caps cause `POST /api/init` to fail when a SOEM driver is requested.
 
 To auto-initialise the fieldbus in a container, mount a JSONC config with a `fieldbus` block (`{ "driver": "soem", "adapter": "eth0" }`) and pass `--config` — there are no `--driver`/`--adapter` flags. Omit it to defer initialisation to `POST /api/init` at runtime.
 
@@ -214,7 +238,7 @@ OPTIONS:
                           [default: .../releases/download/tls-cert/key.pem]
 ```
 
-On Linux, `motion-master` requires raw socket and RT scheduling capabilities. Release packages set these automatically (deb/rpm `postinst`, tarball `setup.sh`). Without these capabilities the binary still runs but EtherCAT initialisation will fail.
+On Linux, `motion-master` requires raw socket and RT scheduling capabilities. Release packages set all four automatically (deb `postinst`, rpm `%post`, tarball `setup.sh`) — see [Linux capabilities](#linux-capabilities). Without them the binary still runs and serves the API, but EtherCAT initialisation fails and the game loop cannot go real-time.
 
 ## Development
 
@@ -240,7 +264,7 @@ git submodule update --init --recursive
 
 The `motion-master` binary lands in `build/x64-linux-debug/apps/motion_master/`.
 
-On Linux, `./tools/build.sh --setcap` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip` on the binary after linking — you will be prompted for your password. Without `cap_net_raw`/`cap_net_admin` EtherCAT initialisation fails; without `cap_sys_nice`/`cap_ipc_lock` the binary still runs but the RT game loop cannot raise its priority or pin its memory (visible as `mlockall: no` on the Game Loop page).
+On Linux, `./tools/build.sh --setcap` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip` on the binary after linking — you will be prompted for your password. This is the same set the release packages apply, and it has to be re-run after every relink because the capabilities are attached to the file; see [Linux capabilities](#linux-capabilities) for what each one grants.
 
 ### Running locally
 

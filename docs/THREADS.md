@@ -21,7 +21,7 @@ access through `FieldbusDriver::controlPlaneMutex_` and never touch the RT path.
 
 ```mermaid
 flowchart TB
-    subgraph RT["Thread 1 — RT loop (main, SCHED_FIFO 80, 1 ms)"]
+    subgraph RT["Thread 1 — RT loop (main, SCHED_FIFO 80, 1 ms default)"]
         GL[GameLoop.run] --> PDT[ProcessDataCyclicTask.execute]
         PDT --> EPD[DeviceManager.exchangeProcessData]
     end
@@ -39,6 +39,7 @@ flowchart TB
     end
 
     HTTP -.->|stage setpoints<br/>lock-free| SLOTS[(atomic outputSlots)]
+    HTTP -.->|retime the live loop<br/>atomic period_| GL
     EPD -->|read every slot,<br/>compose wire image| SLOTS
     EPD -->|append one record<br/>per cycle, wait-free| RING[(ProcessDataRing<br/>recorder)]
     MS -->|read every cycle<br/>via read cursor| RING
@@ -55,7 +56,7 @@ flowchart TB
 
 | # | Thread | Created at | Purpose | Scheduling | Synchronization |
 |---|--------|-----------|---------|-----------|-----------------|
-| 1 | **RT game loop** | main thread becomes it — `apps/motion_master/main.cc:281` (`gameLoop.run()`) | Runs `ProcessDataCyclicTask::execute()` → `DeviceManager::exchangeProcessData()` once per cycle; the EtherCAT PDO send/receive | `SCHED_FIFO` prio 80 + `mlockall`, `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME)` at **1 ms** (`game_loop.cc:29–30,39`, `cyclic_timer_linux.cc:45`) | **Lock-free.** Wait-free append of one record/cycle to the `ProcessDataRing` recorder; `std::atomic` `running_` / `tick_` |
+| 1 | **RT game loop** | main thread becomes it — `apps/motion_master/main.cc:281` (`gameLoop.run()`) | Runs `ProcessDataCyclicTask::execute()` → `DeviceManager::exchangeProcessData()` once per cycle; the EtherCAT PDO send/receive | `SCHED_FIFO` prio 80 + `mlockall`, `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME)` at **1 ms by default** — the period is retimed live by reloading the relaxed atomic `period_` at the top of each iteration (`game_loop.cc:29–30,39`, `cyclic_timer_linux.cc:45`, `game_loop.h:145`) | **Lock-free.** Wait-free append of one record/cycle to the `ProcessDataRing` recorder; `std::atomic` `running_`, and the RT-written diagnostic counters `executedCycles_` / `skippedCycles_` (relaxed — for logging, not synchronization) |
 | 2 | **HTTP server** | `std::thread` — `apps/motion_master/http_server.cc:302` | uWebSockets HTTPS event loop on **port 61447**; all REST routes. **One loop, not a thread pool** | Normal | `uWS::Loop::defer()` (atomic job queue) for cross-thread work; `std::atomic` `loop_` / `app_` pointers |
 | 3 | **WebSocket server** | `std::thread` — `apps/motion_master/ws_server.cc:26` | Separate uWebSockets WSS event loop on **port 62281**; the WebSocket connection — monitoring batches, notifications, procedure progress out; subscribe in. Isolated from HTTP so a blocking handler can't stall the 1 ms-critical stream | Normal | `uWS::Loop::defer()` for cross-thread `broadcast()` / `publish()`; `std::atomic` `loop_` / `app_` pointers |
 | 4 | **Monitoring sampler** | `std::thread` — `libs/node/monitoring_manager.cc:170` | **Lossless.** Each flush ships *every* recorded cycle since each monitoring's read cursor (`[cursor, head)` of the recorder ring) as one batch, then advances the cursor; hands each batch to the `setPublish` callback (wired to `WebSocketServer::publish`). `interval` is the flush **cadence** (5–2000 ms), not a sample rate | Normal; `cv_.wait_until(nearest deadline)` | `mutex_` + `cv_`; decodes PDO values from the lock-free recorder ring (never touches the bus); SDO-only params from the refresher cache |
@@ -84,6 +85,17 @@ process-image IOmap, the atomic `outputSlots`, and the recorder ring (a wait-fre
   access, and AL-state transition serializes through `FieldbusDriver::controlPlaneMutex_`, held
   for a single socket transaction only — never across a sleep, a blocking wait, or a user
   callback. A slow SDO read therefore never stalls the 1 ms cycle.
+- **Command-and-wait procedures (thread 2), the one long hold:** the per-transaction rule above is
+  about `controlPlaneMutex_` and does **not** generalize to `busMutex_`. A multi-second procedure —
+  `runStoreParameters` (`device_manager.cc:1249`), `runRestoreDefaultParameters` (`:1263`), the
+  `runCia402Command` `enable()` walk — holds `busMutex_` in **shared** mode for its whole duration,
+  *including the sleeps between polls* (`profile_device.cc:42,58`), because that is what keeps the
+  borrowed `Device&` valid against the exclusive rebuilders. It still takes `controlPlaneMutex_` only
+  per SDO transaction, so the RT loop is untouched — but two things follow: an exclusive mutator
+  (`scan` / `reset` / `configureProcessData`) blocks behind it for seconds, and because these
+  procedures run synchronously on the single HTTP event loop, that loop is occupied for the whole
+  run. Isolating the WebSocket on its own thread (thread 3) is what keeps the 1 ms-critical
+  monitoring stream flowing across such a hold.
 
 The boundary between control-plane mutation (`init` / `reset` / `configureProcessData`,
 on the HTTP thread) and `exchangeProcessData` (on the RT loop) is guarded by an
@@ -112,7 +124,8 @@ Startup and shutdown order (`apps/motion_master/main.cc`):
 | **`ProcessDataRing`** (recorder) | `libs/node/process_data_ring.h` | Lossless per-cycle history of the raw IOmap (inputs + outputs + timestamp + WKC); source for the live stream and point reads | RT loop (single writer, wait-free append) → sampler + HTTP readers (lock-free via per-slot sequence re-check) |
 | **`ProcessData::outputSlots`** (atomic `uint64_t[]`) | `libs/node/process_data.h` | Per-output-object setpoint staging — one lock-free slot per output object | Any thread stages its own object lock-free (last-writer-wins); RT loop composes all slots into the wire image (Design B) |
 | **`FieldbusDriver::controlPlaneMutex_`** | `libs/comm/fieldbus_driver.h` | Control-plane socket access (SDO, FoE, registers, state) | HTTP thread + refresher thread — one transaction at a time |
-| **`DeviceManager::busMutex_`** (`shared_mutex`) | `libs/node/device_manager.h` | The non-RT mutable state — `driver_`, `devices_`, and the retained image `generations`; exclusive for the mutators (`init`/`reset`/`scan`/`configureProcessData`/`transitionToState`), shared for position-based value reads. The RT `exchangeProcessData()` never takes it (gated by the atomic image pointer instead) | HTTP/scan threads; lock ordering: `busMutex_` before any `Device::parametersMutex_` |
+| **`DeviceManager::busMutex_`** (`shared_mutex`) | `libs/node/device_manager.h` | The non-RT mutable state — `driver_`, `devices_`, and the retained image `generations`; exclusive for the mutators (`init`/`reset`/`scan`/`configureProcessData`/`transitionToState`), shared for position-based value reads **and for the whole duration of a multi-second command-and-wait procedure** (see below). The RT `exchangeProcessData()` never takes it (gated by the atomic image pointer instead) | HTTP/scan threads; lock ordering: `busMutex_` before any `Device::parametersMutex_` |
+| **`GameLoop::period_`** (`atomic<microseconds>`) | `apps/motion_master/game_loop.h` | The live cycle period — the one cross-thread *write into* the RT loop. `setPeriod()` stores it (relaxed) and the RT loop reloads it each iteration, so no lock is needed: many writers, a single reader | Any thread → RT loop; reached from `PUT /api/game-loop` via the `setGameLoopPeriod` composition-root callback |
 | **`Device::parametersMutex_`** | `libs/node/device.h` | The per-device `parameters_` map (data-type lookup + decode + store) against the off-RT monitoring threads racing the control plane | HTTP thread + refresher/sampler threads |
 | **`MonitoringManager::mutex_` + `cv_`** | `libs/node/monitoring_manager.h` | Monitoring registry + sampling schedule | Sampler thread, woken on add/remove/stop |
 | **`ParameterRefresher::mutex_` + `cv_`** | `libs/node/parameter_refresher.h` | Tracked-object set + poll schedule | Refresher thread (lock released during the actual poll) |

@@ -6,10 +6,11 @@ See [FEATURES.md](FEATURES.md) for a full catalog of capabilities.
 
 ## Architecture
 
-Design documents with Mermaid diagrams (rendered natively on GitHub):
+Design documents (the Mermaid diagrams render natively on GitHub):
 
-- [Threading model](https://github.com/synapticon/motion-master/blob/main/docs/THREADS.md) — the five threads, RT cycle, and control-plane vs PDO-path locking.
 - [Class diagram](https://github.com/synapticon/motion-master/blob/main/docs/CLASS_DIAGRAM.md) — class structure, ownership, and inheritance.
+- [RT scheduling primer](https://github.com/synapticon/motion-master/blob/main/docs/RT_SCHEDULING.md) — `SCHED_FIFO`, `mlockall`, and absolute-deadline sleeping: the three primitives the cycle depends on.
+- [Threading model](https://github.com/synapticon/motion-master/blob/main/docs/THREADS.md) — the built-in threads, the RT cycle, and why the RT loop never takes a lock.
 
 ## Installation
 

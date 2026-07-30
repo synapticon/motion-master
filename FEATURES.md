@@ -4,7 +4,9 @@ Motion Master v6 is motion-control software for SOMANET servo drives over EtherC
 It runs as a local daemon exposing an HTTP API (`127.0.0.1:61447`) and a WebSocket
 (`127.0.0.1:62281`), driven by a companion Progressive Web App console. This document
 catalogs the features it provides today. The stable, built-in HTTP API is specified in
-`apps/motion_master/swagger.yml`; architecture and design rationale live in `NEXTGEN.md`.
+`apps/motion_master/swagger.yml` — and served by the running binary itself at
+`GET /api/swagger.yml`. Installation, configuration, and client usage are covered in
+[`README.md`](README.md); architecture and design rationale live in `NEXTGEN.md`.
 
 ## Fieldbus / EtherCAT Bus Control
 
@@ -33,8 +35,11 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
 
 ## Process Data (PDO) Exchange
 
-- **Real-time cyclic exchange** — an RT game loop (`SCHED_FIFO`, 1 ms default,
-  `mlockall`) exchanges process data every cycle, lock-free on the PDO path.
+- **Real-time cyclic exchange** — an RT game loop (`SCHED_FIFO`, `mlockall`) exchanges
+  process data every cycle, lock-free on the PDO path. The default period is 1 ms on Linux
+  and macOS; the Windows release ships 4 ms, which stock Windows timers can actually sustain.
+  A missed deadline skips to the next grid point rather than replaying stale frames, so the
+  loop degrades predictably instead of drifting.
 - **Game-loop health & runtime retiming** — inspect a live snapshot of the RT loop
   (configured/achieved rate, executed/skipped-cycle counters, per-cycle task timing,
   whether RT scheduling was acquired) via `GET /api/game-loop`, and retime the running
@@ -82,7 +87,13 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
 - **File over EtherCAT (FoE)** — read and write files on a device (firmware, config)
   via FoE (`GET`/`PUT /api/devices/{slavePosition}/files/{filename}`).
 - **ESC register access** — read and write raw bytes from/to an ESC register
-  (`GET`/`PUT /api/devices/{slavePosition}/registers/{address}`).
+  (`GET`/`POST /api/devices/{slavePosition}/registers/{address}`).
+- **Parameter persistence** — command a device to save its current parameters to
+  non-volatile memory (`POST /api/devices/{slavePosition}/store-parameters`, the CANopen
+  "store parameters" object `0x1010:01`) or to restore a selected group of defaults
+  (`POST /api/devices/{slavePosition}/restore-default-parameters`, object `0x1011`). Both
+  write the CANopen signature, then poll the object until the device confirms completion, so
+  the call returns only once the drive reports the write finished.
 - **SII / EEPROM** — read a device's SII image, write a raw SII image
   (`GET`/`PUT /api/devices/{slavePosition}/sii`), and parse a raw SII image offline
   (`POST /api/sii/parse`).
@@ -91,14 +102,33 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
 
 ## CiA402 / SOMANET Motion Profiles
 
-- **Profile views** — a borrowed-view chain `ProfileDevice ← Cia402Drive ← SomanetDrive`
-  binds a `Device` for one operation via validated factories, providing CiA402 state
-  machine and SOMANET-specific object-dictionary access.
-- **Trajectory playback** *(planned)* — an RT cyclic task plays back a precomputed
-  setpoint buffer one point per cycle (sine/chirp/ramp/step are userspace-generated
-  buffers plus a `repeat` flag, not separate tasks). Launched from the profile view for
-  one device (`Cia402Drive::startTrajectory(...)`) or a node-layer coordinator for a
-  coordinated multi-axis move, gated active/idle by a depth-1 latest-wins control block.
+- **Drive control snapshot** — read a drive's decoded CiA402 state machine state together
+  with the raw statusword (`0x6041`), controlword (`0x6040`), and the active operation mode
+  (`0x6061`) via `GET /api/devices/{slavePosition}/cia402`. Values are read live — from the
+  process image while the device is exchanging, over SDO otherwise — so polling this drives
+  a live UI.
+- **State machine commands** — `POST /api/devices/{slavePosition}/cia402/command` runs
+  `enable` (walking every intermediate transition to Operation Enabled, clearing a latched
+  fault first if needed), `disable` (to Switch On Disabled), `quickStop`, or `faultReset`.
+- **Operation mode** — set the mode of operation (`0x6060`) with
+  `POST /api/devices/{slavePosition}/cia402/mode`; the drive reflects the accepted mode in
+  `0x6061` once it takes effect.
+- **Cyclic setpoints** — `POST /api/devices/{slavePosition}/cia402/target` writes the one
+  setpoint matching the active mode: target position (`0x607A`) in PP/CSP, target velocity
+  (`0x60FF`) in PV/CSV, or target torque (`0x6071`, per-mille of rated) in PT/CST. All are
+  signed, so negative values command reverse motion or regenerative torque.
+- **Profile views** — internally, a borrowed-view chain `ProfileDevice ← Cia402Drive ←
+  SomanetDrive` binds a `Device` for one operation via validated factories, providing the
+  CiA402 state machine and SOMANET-specific object-dictionary access behind the endpoints
+  above.
+- **Trajectory playback** *(planned)* — an RT cyclic task plays back a precomputed setpoint
+  buffer one point per cycle (sine/chirp/ramp/step are userspace-generated buffers plus a
+  `repeat` flag, not separate tasks). Launched off the RT thread by a node-layer function
+  that validates the request, does the op-mode and enable handshake through a `Cia402Drive`
+  view, and arms an immutable run into a depth-1 latest-wins mailbox slot the task reads —
+  one slot per axis, so a single-axis move and a coordinated multi-axis program share one
+  mechanism. Skips are absorbed by a per-trajectory policy (preserve shape, or preserve
+  wall-clock timing).
 
 ## Monitoring (Live Telemetry)
 
@@ -107,17 +137,23 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
   SDO-sourced parameters.
 - **Lossless WebSocket stream** — every recorded cycle is shipped as positional cycle
   rows over the WebSocket (`{"type":"monitoring", ...}`); `interval` is the flush cadence
-  (5–2000 ms), not a sample rate, so no cycle is dropped. Up to 5 simultaneous clients.
+  (5–2000 ms), not a sample rate, so no cycle is dropped. Throughput is sized for roughly 5
+  simultaneous clients — a capacity budget, not an enforced limit; there is no connection cap.
 - **Notifications** — bus/state change events pushed over the WebSocket
   (`{"type":"notification", ...}`).
 
 ## Diagnostics & Reference Metadata
 
 - **Log access** — retrieve recent server log output (`GET /api/log`).
-- **Reference tables** — AL status codes, ESC registers, FoE error codes, and CoE data
-  types (`GET /api/meta/*`).
+- **Reference tables** — AL status codes, ESC registers, FoE error codes, mailbox error
+  codes, SDO abort codes, and CoE object data types (`GET /api/meta/*`), each with a
+  matching console page.
 - **System & version info** — Motion Master version (`GET /api/version`), startup
   configuration (`GET /api/config`), and host OS/hardware info (`GET /api/system-info`).
+- **Self-describing API** — the server serves its own OpenAPI spec at
+  `GET /api/swagger.yml`, so a client can resolve the contract from the very instance it is
+  talking to instead of pinning a copy. The console renders it as browsable API Docs, and
+  the reference Python client resolves every call against it at startup.
 
 ## Web Console (PWA)
 
@@ -126,12 +162,16 @@ A React PWA at `https://motion-master.synapticon.com` provides UI for the above:
 - **Connection** — driver init, adapter selection, TLS certificate status.
 - **Fieldbus** — overview, EtherCAT State control, Bus Configuration, Process Image,
   Bus Diagnostics, DC Sync.
-- **Per-device** — Parameters, Object Dictionary, PDO Mapping, Registers, SII, FoE.
+- **Per-device** — Motion (drive the CiA402 state machine, operation mode, and cyclic
+  setpoints, watching target vs. actual live — shown only for a CiA402 device in OP, since
+  both are required to command motion), EtherCAT State, Parameters, Object Dictionary,
+  PDO Mapping, Registers, SII, FoE.
 - **Process Data / Recorder** — live process-data view and recorder page.
 - **Game Loop** — RT loop health and runtime cycle-period control.
 - **Monitorings** — configure and plot live telemetry.
 - **Tools & reference** — SII parser, AL Status Codes, ESC Registers, FoE Error Codes,
-  Data Types, HTTP request inspector, Log, Parameter Caches, and bundled API Docs.
+  Mailbox Error Codes, SDO Abort Codes, Data Types, HTTP request inspector, Log, Parameter
+  Caches, and bundled API Docs.
 
 ## Security & Deployment
 
@@ -139,15 +179,33 @@ A React PWA at `https://motion-master.synapticon.com` provides UI for the above:
   `local.motion-master.synapticon.com` (pins to `127.0.0.1`); CORS locked to the PWA
   origin.
 - **Certificate self-heal** — the binary fetches, validates, and atomically installs a
-  fresh certificate at startup when the current one is missing/expired
-  (`--update-cert`, `--no-cert-update`); `GET /api/cert` and `POST /api/cert/refresh`
-  expose status and on-demand refresh.
+  fresh certificate at startup when the current one is missing, expired, or expiring within
+  7 days. `--update-cert` does it on demand from the terminal and exits, `--cert-url` /
+  `--key-url` override the source, and `tls.autoUpdate: false` in the config opts out
+  entirely for air-gapped installs. `GET /api/cert` and `POST /api/cert/refresh` expose
+  status and on-demand refresh to the UI.
 - **Packaging** — ships as Linux `.deb`/`.rpm`/`.tar.gz`, Windows `.zip`, and macOS
-  arm64 `.tar.gz`, plus a Docker image; all install to `/opt/motion-master/`.
+  arm64 `.tar.gz`, plus a Docker image. The packages and the image install to
+  `/opt/motion-master/` (the deb/rpm also symlink `/usr/local/bin/motion-master`); the zip
+  and tarballs are self-contained and run from wherever they are extracted. The Windows
+  executable is Authenticode code-signed.
 - **Extensibility** — C++ route plug-ins extend the HTTP API under `/api/<yourapp>/...`
   without touching the core server (`libs/example` is the starter template).
 
 ## Configuration
 
-- Settings are supplied via an optional JSONC config file (comments allowed); all
-  settings have code defaults, and the `Config` struct mirrors the file one-to-one.
+- **Config file only, always optional** — every setting lives in a JSONC file (comments
+  allowed); there are no CLI flags for settings, and each key falls back to a built-in
+  default, so the binary runs with no config at all. The `Config` struct mirrors the file
+  one-to-one.
+- **Two load locations** — an explicit `--config <path>` always wins; absent that, a
+  `motion-master.jsonc` sitting next to the executable is auto-discovered. There is no
+  system-wide search path. This is what lets the Windows release ship a config presetting a
+  4 ms cycle out of the box.
+- **What is configurable** — HTTP and WebSocket ports plus the CORS origin (`server`), the
+  fieldbus driver and adapter to bring up at startup (`fieldbus`), log verbosity
+  (`logLevel`), the RT cycle period (`gameLoop`), recorder ring depth and dump directory
+  (`recorder`), the on-disk parameter-definition cache (`parameterCache`), object-dictionary
+  read behaviour (`parameters`), and TLS paths plus cert auto-update (`tls`). See
+  [`README.md`](README.md#configuration) for the annotated block reference, and
+  `apps/motion_master/motion-master.example.jsonc` for every key with its default.

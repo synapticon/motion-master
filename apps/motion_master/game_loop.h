@@ -70,10 +70,11 @@ class GameLoop {
   /// @brief Blocks the calling thread, running one cycle per period until
   ///        stop() is called.
   ///
-  /// On Linux, raises the calling thread to SCHED_FIFO priority and locks all
-  /// memory pages before entering the loop.  Both steps fail gracefully with a
-  /// warning when the process lacks the required privileges (e.g. not run as
-  /// root and no CAP_SYS_NICE / CAP_IPC_LOCK).
+  /// Calls mm::core::setRealtimePriority() before entering the loop, which
+  /// raises the calling thread to SCHED_FIFO (POSIX) and locks all memory pages
+  /// (Linux).  Both steps fail gracefully with a warning when the process lacks
+  /// the required privileges (e.g. not run as root and no CAP_SYS_NICE /
+  /// CAP_IPC_LOCK); health() reports which of them took.
   ///
   /// @note Call this on the main thread and start all other subsystem threads
   ///       beforehand — it does not return until the loop stops.

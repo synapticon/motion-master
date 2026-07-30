@@ -6,44 +6,9 @@
 #include <nlohmann/json.hpp>
 
 #include "core/cyclic_timer.h"
-
-#ifndef _WIN32
-#include <pthread.h>
-#include <sched.h>
-#endif
-#ifdef __linux__
-#include <sys/mman.h>
-#endif
+#include "core/realtime.h"
 
 namespace {
-
-struct RtSetupResult {
-  bool schedFifo = false;  // SCHED_FIFO priority acquired
-  bool memLocked = false;  // mlockall succeeded
-};
-
-RtSetupResult setRealtimePriority() {
-  RtSetupResult result;
-#ifndef _WIN32
-  struct sched_param param = {};
-  param.sched_priority = 80;
-  if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &param) != 0) {
-    spdlog::warn("GameLoop: failed to set SCHED_FIFO — running without RT scheduling");
-  } else {
-    result.schedFifo = true;
-  }
-#endif
-#ifdef __linux__
-  // Prevents the kernel from faulting in pages mid-cycle, which would
-  // introduce unbounded latency spikes.  macOS has no mlockall().
-  if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
-    spdlog::warn("GameLoop: failed to lock memory pages — page faults may cause jitter");
-  } else {
-    result.memLocked = true;
-  }
-#endif
-  return result;
-}
 
 // Monotonic clock in ns — used for uptime (achievedHz) and per-cycle work timing.
 uint64_t nowMonoNs() {
@@ -66,7 +31,18 @@ GameLoop::GameLoop(std::chrono::microseconds period) : period_(period) {}
 void GameLoop::addTask(CyclicTask* task) { tasks_.push_back(task); }
 
 void GameLoop::run() {
-  const RtSetupResult rt = setRealtimePriority();
+  const mm::core::RtSetupResult rt = mm::core::setRealtimePriority();
+  // Warn only where the step exists at all, so Windows (neither) stays quiet.
+#ifndef _WIN32
+  if (!rt.schedFifo) {
+    spdlog::warn("GameLoop: failed to set SCHED_FIFO — running without RT scheduling");
+  }
+#endif
+#ifdef __linux__
+  if (!rt.memLocked) {
+    spdlog::warn("GameLoop: failed to lock memory pages — page faults may cause jitter");
+  }
+#endif
   schedFifo_.store(rt.schedFifo, std::memory_order_relaxed);
   memLocked_.store(rt.memLocked, std::memory_order_relaxed);
   running_.store(true, std::memory_order_relaxed);

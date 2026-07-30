@@ -1,6 +1,3 @@
-#include <pthread.h>
-#include <sched.h>
-#include <sys/mman.h>
 #include <time.h>
 
 #include <algorithm>
@@ -13,18 +10,22 @@
 #include <vector>
 
 #include "core/cyclic_timer.h"
+#include "core/realtime.h"
 
 namespace {
 
+// Applies the same RT setup the production GameLoop uses, so the measurement
+// characterises the configuration that actually ships.
 void setRealtimePriority() {
-  struct sched_param param = {};
-  param.sched_priority = 80;
-  if (pthread_setschedparam(pthread_self(), SCHED_FIFO, &param) != 0) {
+  const mm::core::RtSetupResult rt = mm::core::setRealtimePriority();
+  if (!rt.schedFifo) {
     std::cerr << "warning: SCHED_FIFO failed — run as root or grant CAP_SYS_NICE for valid results\n";
   }
-  if (mlockall(MCL_CURRENT | MCL_FUTURE) != 0) {
+#ifdef __linux__
+  if (!rt.memLocked) {
     std::cerr << "warning: mlockall failed — page faults may inflate jitter\n";
   }
+#endif
 }
 
 // Spin-waits for duration_ns nanoseconds to simulate task workload without yielding the CPU.

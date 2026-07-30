@@ -204,7 +204,7 @@ Requirements for running a release binary (building from source has its own — 
   Verify a binary's own requirement with `readelf -V ./motion-master | grep GLIBC_` (highest version wins).
 - **Windows:** two runtime dependencies for the packaged binary:
   - [Microsoft Visual C++ Redistributable](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist?view=msvc-170) (x64) — the MSVC runtime the binary is linked against
-  - [Npcap](https://npcap.com) in WinPcap-compatible mode — raw EtherCAT packet capture (install with "Install Npcap in WinPcap API-compatible Mode" checked)
+  - [Npcap](https://npcap.com) — raw EtherCAT packet capture. **⚠️ You must tick "Install Npcap in WinPcap API-compatible Mode" in the installer — this is not optional.** Motion Master links `wpcap.dll` at load time, and only compatibility mode places it where the loader looks (`C:\Windows\System32`); a default install hides it under `System32\Npcap\`, so `motion-master.exe` refuses to start with *"The code execution cannot proceed because wpcap.dll was not found"*. If you already installed Npcap without the box checked, simply re-run the installer and tick it.
 
 ### Platform Support
 

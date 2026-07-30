@@ -263,7 +263,16 @@ git submodule update --init --recursive
 ./tools/build.sh
 ```
 
-The `motion-master` binary lands in `build/x64-linux-debug/apps/motion_master/`.
+Every script defaults to the **`x64-linux-debug`** preset (`CMAKE_BUILD_TYPE=Debug`), so the binary lands in `build/x64-linux-debug/apps/motion_master/`. Pass a preset name as the first argument to build optimised instead:
+
+```bash
+./tools/configure.sh x64-linux-release
+./tools/build.sh x64-linux-release   # → build/x64-linux-release/apps/motion_master/
+```
+
+Use the release preset for anything timing-sensitive — a debug build is unoptimised, so its per-cycle task times are not representative of what the real-time loop achieves.
+
+For the inner development loop, `./tools/build-dev.sh` builds *and* runs the test suite, stamping capabilities as it goes (`--no-setcap` skips the `sudo`), and `./tools/run-dev.sh` starts the result with CORS opened to the Vite dev server and debug-level logging — see [Running locally](#running-locally).
 
 On Linux, `./tools/build.sh --setcap` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip` on the binary after linking — you will be prompted for your password. This is the same set the release packages apply, and it has to be re-run after every relink because the capabilities are attached to the file; see [Linux capabilities](#linux-capabilities) for what each one grants.
 
@@ -306,6 +315,8 @@ CORS_ORIGIN=http://localhost:5173 ./tools/run.sh
 # Allow any origin (development only — do not use in production)
 CORS_ORIGIN='*' ./tools/run.sh
 ```
+
+`./tools/run-dev.sh` is a shortcut for the first of those — it calls `run.sh` with `CORS_ORIGIN=http://localhost:5173` and `LOG_LEVEL=debug` already set.
 
 Calling the binary directly, set it in your config file instead:
 
@@ -376,14 +387,20 @@ All scripts default to the `x64-linux-debug` preset. Pass a preset name as the f
 | Script | Description |
 | --- | --- |
 | `./tools/configure.sh` | Run CMake configure |
-| `./tools/build.sh` | Build all targets |
+| `./tools/build.sh` | Build all targets (`--setcap` also stamps Linux capabilities, needs `sudo`) |
+| `./tools/build-dev.sh` | Build **and** test — the inner development loop; stamps capabilities by default (`--no-setcap` to skip the `sudo`) |
 | `./tools/run.sh` | Run the binary with the best available TLS cert (real cert if acme.sh is set up, self-signed otherwise) |
+| `./tools/run-dev.sh` | Run for UI development — CORS opened to the Vite dev server (`http://localhost:5173`) and debug-level logging |
 | `./tools/test.sh` | Run tests |
 | `./tools/format.sh` | Auto-format all sources with clang-format |
 | `./tools/lint.sh` | Run cpplint (`pip install cpplint` if missing) |
 | `./tools/cppcheck.sh` | Run cppcheck static analysis |
-| `./tools/check.sh` | Run format, cppcheck, and lint in sequence |
+| `./tools/format-cmake.sh` | Auto-format all CMake files with cmake-format (`--check` reports without editing; `pip install cmakelang`) |
+| `./tools/lint-cmake.sh` | Run cmake-lint over all CMake files (`pip install cmakelang`) |
+| `./tools/check.sh` | Run format, cppcheck, lint, and cmake-lint in sequence |
 | `./tools/clean.sh` | Remove the build directory |
+| `./tools/docs.sh` | Build the Doxygen documentation (`docs` target) |
+| `./tools/code-stats.sh` | Report per-file / per-directory C++ line counts (code, comment, blank) |
 | `./tools/bump-version.sh <version>` | Bump the project semver everywhere (see [Versioning](#versioning)) |
 | `./tools/package.sh [preset]` | Build `.deb` and `.rpm` packages (requires `cert.pem`/`key.pem` in the build dir) |
 | `./tools/docker-build.sh [image]` | Build + tag the Docker image from the current `VERSION` (version tag + `latest`/`next`) |

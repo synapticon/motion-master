@@ -70,12 +70,20 @@ jobs:
             motion-master-*-x86_64.rpm
 
   # ── Linux arm64: .tar.gz + .deb + .rpm ─────────────────────────────────────
-  # Built inside a debian:13 (trixie) container on the arm64 runner, so the binary links
-  # trixie's glibc (2.41) and libstdc++ — Debian aarch64 is the target for the Raspberry Pi
-  # appliance. The runner image is Ubuntu, but only the container's libc decides what the
-  # artifact runs on: Debian 13 / Raspberry Pi OS trixie and newer, not glibc 2.39 hosts
-  # such as arm64 Ubuntu 24.04. Building on the runner directly would lower that floor to
-  # 2.39 — the deliberate trade is building against the distro we ship for.
+  # Built inside a debian:13 (trixie) container on the arm64 runner: Debian aarch64 (Raspberry
+  # Pi OS trixie included) is the target for the Pi appliance, so we build against the distro
+  # we ship for.
+  #
+  # That costs no compatibility. The container's glibc does not set the floor — the symbols the
+  # binary references do, and the build host only caps them. Measured with `readelf -V`, this
+  # leg's artifact tops out at GLIBC_2.38 / GLIBCXX_3.4.32, the same as the Ubuntu-24.04-built
+  # x64 leg, despite trixie shipping glibc 2.41. So it runs on any aarch64 host at 2.38 or
+  # newer, arm64 Ubuntu 24.04 (2.39) included. Never quote the container's distro version as
+  # the requirement — measure it.
+  #
+  # Building on the runner directly (as build-linux-arm64.yml does) would cap the floor at
+  # 2.39, leaving Debian 13 / Pi OS trixie (2.41) covered either way. The container is about
+  # building against the shipped distro, not about reach.
   linux-arm64:
     runs-on: ubuntu-24.04-arm
     container: debian:13
@@ -340,11 +348,12 @@ jobs:
   # job runs in the SAME workflow run (needs: release), so the release with the
   # unsigned zip already exists; we download that zip, sign motion-master.exe
   # with signtool, re-zip, and replace the asset on the release with --clobber.
-  # No PAT/dispatch is needed (unlike the v5 split): a job in the same run only
-  # updates a release asset with the built-in GITHUB_TOKEN, it does not trigger
-  # a new workflow. Prerequisite: the USB token must be plugged in and unlocked
-  # on the runner, and signtool + gh must be on PATH (they are in the standard
-  # Belgrade CI image).
+  # Keeping it in this run is also what avoids needing a PAT: a job in the same
+  # run only updates a release asset with the built-in GITHUB_TOKEN, it does not
+  # trigger a new workflow — whereas signing from a separate, dispatch-triggered
+  # workflow would need a PAT to start it. Prerequisite: the USB token must be
+  # plugged in and unlocked on the runner, and signtool + gh must be on PATH
+  # (they are in the standard Belgrade CI image).
   sign-windows:
     needs: release
     runs-on: ci-belgrade-windows

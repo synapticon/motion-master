@@ -64,6 +64,8 @@ sudo ./setup.sh  # sets capabilities once; re-run after any OS update that reset
 ./motion-master --help
 ```
 
+Alongside the binary the tarball carries `setup.sh`, a `SETUP.md` with the same first-run notes, the bundled `cert.pem`/`key.pem`, and the annotated `motion-master.example.jsonc`.
+
 ### Linux capabilities
 
 On Linux the binary needs four capabilities. All three Linux install paths apply the same set — the deb `postinst`, the rpm `%post` scriptlet, and the tarball's `setup.sh` all run:
@@ -92,14 +94,21 @@ Inside a container file capabilities are ignored entirely; see [Docker → Capab
 
 Unzip `motion-master-<version>-windows-x64.zip` — it contains `motion-master.exe`, the bundled `cert.pem`/`key.pem`, an auto-loaded `motion-master.jsonc` (preset to a 4 ms real-time cycle, robust on stock Windows timers), the annotated `motion-master.example.jsonc`, and the required vcpkg runtime DLLs. Install the two runtime dependencies listed under [Usage → Prerequisites](#prerequisites) (Visual C++ Redistributable and Npcap), then run `motion-master.exe` from the extracted directory — it picks up the neighbouring `motion-master.jsonc` automatically (edit it to change the cycle period or any other setting).
 
+`motion-master.exe` is **Authenticode code-signed** (with an RFC 3161 timestamp), so Windows shows Synapticon as the verified publisher instead of an "unknown publisher" SmartScreen block. Signing happens on a self-hosted runner holding the certificate token, as a final step of the release workflow — it replaces the zip asset in place, so the published archive is always the signed one.
+
 ### macOS (Apple Silicon)
 
 ```bash
 tar -xzf motion-master-<version>-macos-arm64.tar.gz
 cd motion-master-<version>-macos-arm64
-# See the bundled SETUP.md for granting the binary the entitlements it needs
-./motion-master --help
+xattr -dr com.apple.quarantine motion-master  # required once — see below
+sudo ./motion-master
 ```
+
+Two macOS specifics, both covered by the bundled `SETUP.md`:
+
+- **The build is not notarized**, so Gatekeeper quarantines it on download and refuses to launch it. Clear the quarantine attribute as shown above (or right-click → **Open** once in Finder and confirm the dialog, which whitelists that exact binary).
+- **`sudo` is needed** for the same two reasons capabilities are needed on Linux: the fieldbus opens the NIC through the root-only BPF devices (`/dev/bpf*`), so `POST /api/init` with `driver: soem` fails without it, and raising the game-loop thread to `SCHED_FIFO` is privileged. Without `sudo` the server still runs and serves the API — it just cannot reach a fieldbus and logs a warning as the RT loop drops to normal priority. `SETUP.md` also shows how to grant BPF access to your user instead, if you would rather not use `sudo`.
 
 ### Docker
 
@@ -196,6 +205,47 @@ docker run --rm --network host \
 
 ## Usage
 
+### First run
+
+Start the server (on Linux from a package install, `motion-master` is already on `PATH`):
+
+```bash
+motion-master           # macOS: sudo ./motion-master   Windows: motion-master.exe
+```
+
+It serves two ports, both bound to `127.0.0.1` and each on its own event loop and thread, so a slow HTTP request can never stall the live data stream:
+
+| Port | Purpose | Config key |
+| --- | --- | --- |
+| `61447` | HTTPS API — everything request/response (init, scan, SDO, FoE, state, parameters) | `server.httpPort` |
+| `62281` | Secure WebSocket (`wss://`) — monitoring batches and notifications out, topic subscriptions in | `server.wsPort` |
+
+Then open the console and point it at your machine:
+
+```bash
+motion-master --open    # opens https://motion-master.synapticon.com/apps/console/
+```
+
+The console is a PWA hosted by Synapticon; it talks to the server running on your machine over `https://local.motion-master.synapticon.com:61447` (a DNS name that resolves to `127.0.0.1`, which is why the bundled certificate is valid for it). Nothing is uploaded — the page is the only thing that comes from the network.
+
+The fieldbus does **not** come up on its own unless you configure it to. Either bring it up from the console, or do it over the API:
+
+```bash
+motion-master --list-adapters   # find your NIC
+
+base=https://local.motion-master.synapticon.com:61447
+curl "$base/api/version"
+curl -X POST "$base/api/init" \
+  -H 'Content-Type: application/json' \
+  -d '{"driver":"soem","adapter":"eth0"}'   # then POST /api/scan to discover drives
+```
+
+Use the `local.motion-master.synapticon.com` name rather than `localhost` — it resolves to `127.0.0.1` all the same, but it is the name the bundled certificate is issued for, so TLS verification passes. Against `https://localhost` the same request fails on a hostname mismatch unless you add `-k`.
+
+To skip that step on every start, put a `fieldbus` block in a [config file](#configuration) and the driver initialises at startup instead.
+
+The server also serves its own OpenAPI spec at `GET /api/swagger.yml` — the contract for everything above, and what the [reference clients](#clients) read at startup so they never hold a hardcoded URL. The same spec is rendered as browsable API Docs inside the console.
+
 ### Prerequisites
 
 Requirements for running a release binary (building from source has its own — see [Development](#development)):
@@ -241,16 +291,60 @@ OPTIONS:
 
 On Linux, `motion-master` requires raw socket and RT scheduling capabilities. Release packages set all four automatically (deb `postinst`, rpm `%post`, tarball `setup.sh`) — see [Linux capabilities](#linux-capabilities). Without them the binary still runs and serves the API, but EtherCAT initialisation fails and the game loop cannot go real-time.
 
+### Configuration
+
+Every setting lives in a JSONC config file — comments are allowed, all keys are optional, and each one falls back to a built-in default. [`motion-master.example.jsonc`](apps/motion_master/motion-master.example.jsonc) documents every key inline with its default; copy it to `motion-master.jsonc` next to the binary (auto-discovered) or pass it with `--config`. The top-level blocks:
+
+| Block | What it covers |
+| --- | --- |
+| `server` | `httpPort` (61447), `wsPort` (62281), `corsOrigin` |
+| `fieldbus` | `driver` + `adapter` to initialise at startup — omit the block to wait for `POST /api/init` instead. Also `mailboxStatusFmmu`, which must stay `false` on TI PRU-ICSS ESCs |
+| `logLevel` | `trace` … `critical` \| `off` (default `info`) |
+| `gameLoop` | `periodUs` — the real-time cycle period (1000 = 1 ms; the Windows release ships 4000) |
+| `recorder` | `capacity` of the lossless process-data ring in cycles (default 300000 ≈ 5 min at 1 ms for one drive, ≈ 38 MB) and `dumpDir` for `.mmpd` dumps |
+| `parameterCache` | On-disk cache of CoE object-dictionary *definitions* (never values) keyed by vendor/product/revision — `enabled`, `cacheAllVendors`, `directory` |
+| `parameters` | `readObjectDictionaryOnPreop` (enumerate on the first PRE-OP) and `useCompleteAccess` (one CoE Complete Access upload per ARRAY/RECORD instead of per-subindex reads) |
+| `tls` | `certPath`, `keyPath` (empty = auto-discover), and `autoUpdate` — set `false` for air-gapped installs |
+
+If a raised `skippedCycles` count shows up right after start (visible on the console's Game Loop page), the configured `gameLoop.periodUs` is too aggressive for that machine's timer resolution — raise it. A 1 ms cycle is realistic on a `PREEMPT_RT` Linux host; stock Windows often cannot sustain better than ~1.5 ms, which is why the Windows release defaults to 4 ms.
+
+### Clients
+
+The API is plain HTTPS + JSON, so any language works. Two reference clients ship in the repo:
+
+- **[`clients/python`](clients/python)** — a standalone reference client (`requests` + `websockets`). Each example runs on its own, and the numbered set reads in order as a walkthrough of the whole fieldbus lifecycle: bring up a driver, scan, climb the AL states, read SDOs and files, dump parameters, stream live process data, and tear back down. It resolves every call by `operationId` against the spec it fetches from `GET /api/swagger.yml` at startup, so it holds no hardcoded URLs and adapts to whichever server version it is pointed at. Copy the two client files anywhere — no checkout needed.
+
+  ```bash
+  cd clients/python
+  source setup.sh                      # venv + pip install -r requirements.txt
+  cp config.example.toml config.toml   # point it at your server
+  python examples/01_init.py
+  ```
+
+- **[`@synapticon/motion-master-client`](web/packages/motion-master-client)** — the published, isomorphic TypeScript SDK (browser and Node): the generated HTTP client plus the WebSocket connection, and a parser for `.mmpd` recorder dumps. It ships on npm at the same version as the server binary, so `client@X` is known-good against `binary@X`. This is what the console and the integration tests use.
+
+  ```bash
+  npm install @synapticon/motion-master-client
+  ```
+
 ## Development
 
 ### Prerequisites
 
-Build toolchain:
+Build toolchain for the C++ server:
 
 - CMake 4.0+
 - Ninja
 - GCC / Clang with C++23 support (or MSVC on Windows)
 - Git
+
+Only needed for the parts you actually touch:
+
+| For | Needs |
+| --- | --- |
+| The web apps, the TS SDK, and the API integration tests | Node.js 22+ and pnpm 10+ (plus Docker for the [API tests](#api-integration-tests)) |
+| The [Python reference client](#clients) and the `jitter_bench` plot script | Python 3.11+ (`matplotlib` for plotting) |
+| Static analysis and formatting | `pip install cpplint cmakelang`, plus `clang-format` and `cppcheck` from your package manager |
 
 ### Building from source
 
@@ -298,9 +392,13 @@ If the cert is missing, expired, or expiring soon at startup, the binary fetches
 https://github.com/synapticon/motion-master/releases/download/tls-cert/{cert,key}.pem
 ```
 
-Test the API (add `-k` only when using the self-signed fallback):
+Test the API:
 
 ```bash
+# Real cert (bundled or acme.sh) — verification passes on the name the cert is issued for
+curl https://local.motion-master.synapticon.com:61447/api/version
+
+# Self-signed fallback, or any request to https://localhost, needs -k
 curl -k https://localhost:61447/api/version
 ```
 
@@ -323,6 +421,23 @@ Calling the binary directly, set it in your config file instead:
 ```jsonc
 { "server": { "corsOrigin": "http://localhost:5173" } }
 ```
+
+### Web UI development
+
+All browser and Node TypeScript lives under [`web/`](web) — the console PWA, a copy-me starter app, the published SDK, and the shared design system. They are members of one pnpm workspace **rooted at the repository root** (together with `hil/api`), so pnpm commands run from the root, not from `web/`:
+
+```bash
+pnpm install            # once, from the repo root
+pnpm dev                # console dev server on http://localhost:5173
+pnpm build              # regenerate the API client, then build the console
+pnpm generate-api       # regenerate the client from swagger.yml on its own
+```
+
+Run the server alongside it with `./tools/run-dev.sh`, which sets the CORS origin to the Vite dev server for you. See [`web/README.md`](web/README.md) for the package layout and the GitHub Pages deployment scheme.
+
+The generated HTTP client (`web/packages/motion-master-client/src/generated/`) is **committed**, so regenerate and commit it whenever `swagger.yml` changes — the `api-client-drift` CI job fails on any diff.
+
+Note that the hosted apps are pinned to the latest `v*` tag rather than to `main`, so the deployed console always matches a released binary. A web-only fix therefore still needs a version bump and a tag to go live; see [Versioning](#versioning).
 
 ### Docker image
 
@@ -417,12 +532,17 @@ Managed via [vcpkg](https://vcpkg.io). No manual installation needed — vcpkg d
 
 | Package | Purpose |
 | --- | --- |
+| SOEM | EtherCAT master stack — raw frames, mailbox/CoE, FoE, ESC registers, process-data mapping |
 | CLI11 | Command-line argument parsing |
 | spdlog | Structured logging |
 | nlohmann-json | JSONC config file parsing (comments enabled) and HTTP response serialization |
 | neargye-semver | Semantic versioning |
 | uwebsockets | HTTP and WebSocket server (TLS via OpenSSL) |
+| OpenSSL | TLS termination for both servers, and certificate/key validation in the self-heal path |
+| curl | Fetching a fresh TLS certificate from the rolling `tls-cert` release |
 | GTest | Unit testing |
+
+On Windows, SOEM's NIC driver additionally builds against the [Npcap SDK](https://npcap.com/#sdk), vendored in-repo under `extern/` so it survives vcpkg binary-cache restores. The Npcap *driver* is a runtime dependency — see [Prerequisites](#prerequisites).
 
 ### Real-Time Linux
 
@@ -430,7 +550,9 @@ Motion Master targets `CONFIG_PREEMPT_RT` kernels for hard real-time operation. 
 
 ### Hardware-in-the-Loop Tests
 
-The `hil/` directory contains standalone binaries for validating RT behaviour on a pre-configured Linux machine. They are built automatically with the rest of the project but require root (or `CAP_SYS_NICE` + `CAP_IPC_LOCK`) to produce valid results.
+The `hil/` directory holds tests that need something a unit test cannot provide — real OS scheduling, or a real running server. They are not part of the CTest suite.
+
+`jitter_bench` is built with the rest of the project on Linux and macOS (it is skipped on Windows) and needs root, or `CAP_SYS_NICE` + `CAP_IPC_LOCK`, to produce valid results.
 
 #### jitter_bench
 
@@ -454,7 +576,18 @@ python3 hil/jitter_bench/plot_jitter.py jitter.csv -o report.png
 ./build/x64-linux-debug/hil/jitter_bench/jitter_bench --help
 ```
 
-The plot shows a time-series with P99/P99.9 reference lines and a jitter histogram. The terminal output prints min/max/mean/stddev/P50/P95/P99/P99.9 and an overrun count. Compare a standard kernel against `PREEMPT_RT` by running with `--workload 300` (a realistic 1 ms cycle budget) on each.
+The plot shows a time-series with P99/P99.9 reference lines and a jitter histogram. The terminal output prints min/max/mean/stddev/P50/P95/P99/P99.9 and an overrun count. Compare a standard kernel against `PREEMPT_RT` by running with `--workload 300` (a realistic 1 ms cycle budget) on each. The `Jitter Bench` workflow runs the same benchmark on demand on a `PREEMPT_RT` CI machine, with duration, period, and workload as dispatch inputs.
+
+#### api integration tests
+
+[`hil/api`](hil/api) drives the published TypeScript SDK against a real server with Vitest, so one run exercises the binary, the HTTP/WebSocket contract, and the client library together. The Docker lifecycle is fully managed by the test setup — no manual server startup:
+
+```bash
+pnpm install                # from the repo root — first time only
+pnpm test:api               # build image → start container → run tests → stop & remove
+```
+
+The image runs with `--network host` because the server binds to `127.0.0.1`. Set `MM_SKIP_DOCKER=1` to skip Docker entirely and test against an already-running instance, e.g. one started by `./tools/run.sh`.
 
 ### Versioning
 
@@ -506,8 +639,11 @@ The `v*` tag builds the platform binaries **and** publishes `@synapticon/motion-
 | `build-linux-arm64.yml` | push / PR to `main` | Build & test (Linux ARM64) |
 | `build-macos-arm64.yml` | push / PR to `main` | Build & test (macOS Apple Silicon) |
 | `build-windows-x64.yml` | push / PR to `main` | Build & test (Windows x64) |
-| `lint.yml` | push / PR to `main` | clang-format + cpplint checks |
+| `lint.yml` | push / PR to `main` | Five gates: clang-format, cpplint, cppcheck, `api-client-drift` (the committed TS client must match `swagger.yml`), and `python-client-example` (every `operationId` the Python examples call must still resolve against the spec) |
+| `api-tests.yml` | push to `main` | Run the [`hil/api`](#api-integration-tests) HTTP + WebSocket integration tests against a containerised server |
 | `cert-renewal.yml` | 1st of every month | Renew Let's Encrypt cert via acme-dns; publish it to the rolling `tls-cert` release |
-| `release.yml` | `v*` tag push | Build all platforms, bundle cert + key from the rolling `tls-cert` release, publish GitHub Release with `.tar.gz`, `.deb`, `.rpm` (Linux x64 and aarch64), `.zip` (Windows), and `.tar.gz` (macOS arm64) |
+| `deploy-pages.yml` | push to `main`, `v*` tag | Publish `motion-master.synapticon.com` — landing page, `/docs` Doxygen, the `swagger.yml` spec, and each PWA under `/apps/<name>/`. Docs and landing track `main`; the **apps are pinned to the latest `v*` tag** so the hosted console always matches a released binary |
+| `jitter.yml` | manual dispatch | Run `jitter_bench` on a `PREEMPT_RT` CI machine (duration / period / workload as inputs) |
+| `release.yml` | `v*` tag push | Build all platforms, bundle cert + key from the rolling `tls-cert` release, publish GitHub Release with `.tar.gz`, `.deb`, `.rpm` (Linux x64 and aarch64), `.zip` (Windows), and `.tar.gz` (macOS arm64); then code-sign the Windows exe on a self-hosted runner and replace the zip asset |
 
 The vcpkg cache key is OS + `vcpkg.json` hash, extended with the architecture where two legs share an OS (`build-linux-arm64.yml`) and with the build container where the toolchain differs too (the release workflow's Debian 13 aarch64 leg). The first run after a dependency change rebuilds from source; subsequent runs restore from cache.

@@ -118,8 +118,9 @@ This is the quiet feature that will save you the most hours.
   refused reports `SDO abort 0x08000000: General error`. A CoE read the device never answered
   reports `no response — mailbox timeout`. Those are *different faults* and v6 says so.
 - **Server-measured wire time on every fieldbus operation** (`X-Wire-Us`). The Console shows
-  `SDO 700 ms · round-trip 712 ms`, so you can see instantly whether a slow operation is the
-  device, the network, or your browser.
+  `SDO 1.1 ms · round-trip 15 ms`, splitting the time the device actually took from everything
+  else, so when an operation is slow you know immediately whether to blame the drive, the
+  network, or the browser.
 - **Built-in reference tables** for AL status codes, SDO abort codes, FoE error codes, mailbox
   error codes, ESC registers, and CoE data types — served by the API and browsable in the UI.
   No more looking up hex codes in a PDF.

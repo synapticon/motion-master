@@ -353,4 +353,4 @@ decade. The beta is where it freezes; `6.0.0` is where we stand behind it.
 
 Questions, ideas, and complaints all welcome.
 
-— The Motion Master team
+— The OBLAC team

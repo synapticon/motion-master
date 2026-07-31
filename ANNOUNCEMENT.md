@@ -50,11 +50,26 @@ move one of these, it doesn't go in.
 
 ## Why a rewrite, and not another increment
 
-The previous generation carried a decade of accumulated design decisions that no longer
-matched what we need: a service layer that hid the fieldbus instead of exposing it,
-transport coupling that made a browser client awkward, hidden automatic state changes that
-made failures hard to explain, and features (PDO remapping, Complete Access) that did not
-actually work.
+The previous generation carried a decade of accumulated design decisions that no longer match
+what we need:
+
+- **A service layer that hid the fieldbus** instead of exposing it. You could ask it to do
+  things; you could not see or control what it was doing.
+- **Automatic by default, and therefore rigid.** The software decided the sequence for you and
+  changed device state behind your back. That is convenient in exactly the one workflow it was
+  written for, and an obstacle in every other — and when something failed mid-sequence, the
+  hidden steps were precisely the ones you needed to see. v6 is explicit and flexible instead:
+  you drive the states, and nothing moves unless you ask for it.
+- **No clear separation between the real-time and non-real-time context.** Without that
+  boundary you cannot reason about determinism, test it, or make any honest claim about it —
+  which rules out using the software as a real master in production.
+- **A data flow far more complicated than the problem required**, with no compensating benefit
+  to show for the complexity.
+- **Protobuf over ZeroMQ, for no reason that survives scrutiny.** A request channel plus
+  pub/sub channels carrying Protobuf messages bought us serialization we did not need, and cost
+  us a browser client, a human-readable API, and every off-the-shelf HTTP tool. v6 speaks JSON
+  over HTTP and a WebSocket — the entire API is inspectable with `curl`.
+- **Features that did not actually work** — PDO remapping and CoE Complete Access among them.
 
 A decade of accumulated design, quite literally: the first commit on that lineage was
 `e703512e` — *"Add README.rst file"* by Andrija Feher on **19 October 2016** at 08:04 UTC,

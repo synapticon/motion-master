@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.61] - 2026-07-31
+
 ### Added
 
 - **Motion Master can now be run on one machine and driven from the browser of another** — a Raspberry Pi or industrial PC wired to the drives, with the Console open on a laptop across the network. Set `server.bindAddress` to `0.0.0.0` in the config file (it defaults to `127.0.0.1`, so nothing changes for an ordinary desktop install), then enter that machine's IP address in the Console's **Connection** page. Because no certificate can be issued for a bare IP address, the page offers the equivalent hostname that the bundled certificate *does* cover, behind a **Use hostname** button — take it and the connection is ordinary trusted HTTPS with nothing to install, at the cost of one hosts-file line on the client (which the page spells out, with a button to copy it, and which `add-host.sh` / `add-host.ps1` in the repository will write for you); or keep the plain IP address and grant the browser a certificate exception instead. See `docs/LAN_DEPLOYMENT.md`. **Motion Master has no authentication — anything that can reach these ports can command motion — so only bind off loopback on a network you trust.**
@@ -432,7 +434,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.60...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.61...HEAD
+[6.0.0-alpha.61]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.60...v6.0.0-alpha.61
 [6.0.0-alpha.60]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.59...v6.0.0-alpha.60
 [6.0.0-alpha.58]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.57...v6.0.0-alpha.58
 [6.0.0-alpha.57]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.56...v6.0.0-alpha.57

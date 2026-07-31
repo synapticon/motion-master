@@ -56,6 +56,12 @@ transport coupling that made a browser client awkward, hidden automatic state ch
 made failures hard to explain, and features (PDO remapping, Complete Access) that did not
 actually work.
 
+A decade of accumulated design, quite literally: the first commit on that lineage was
+`e703512e` — *"Add README.rst file"* by Andrija Feher on **19 October 2016** at 08:04 UTC,
+three minutes after the repository was created at 08:01 — and it grew to 4,776 commits over
+the following nine years. What accumulated was a codebase we could no longer test with
+confidence, extend without fear, or reason about as a whole.
+
 Those are not bugs you fix one at a time — they are consequences of the architecture. So we
 started from an empty repository, kept the hard-won domain knowledge, and rebuilt the
 structure around three principles:

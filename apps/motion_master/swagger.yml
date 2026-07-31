@@ -93,6 +93,14 @@ info:
     release. CORS allows the single origin
     `https://motion-master.synapticon.com`, the hosted progressive web app.
 
+    A server that should be reachable from another machine sets `server.bindAddress`
+    to `0.0.0.0` in its config file and is then addressed as
+    `https://<dashed-ip>.ip.motion-master.synapticon.com:61447` — those names resolve
+    to the encoded address (`192-168-1-50.ip.…` → `192.168.1.50`) and the same bundled
+    certificate covers them via its `*.ip.motion-master.synapticon.com` wildcard, so no
+    per-device certificate or registration is involved. Note that the API is
+    **unauthenticated**: binding off loopback exposes full drive control to the network.
+
     ## Conventions
 
     - **Errors** — failures return the matching HTTP status with a JSON body of
@@ -183,7 +191,7 @@ paths:
                 type: object
                 additionalProperties: true
                 example:
-                  server: { httpPort: 61447, wsPort: 62281, corsOrigin: "https://motion-master.synapticon.com" }
+                  server: { bindAddress: "127.0.0.1", httpPort: 61447, wsPort: 62281, corsOrigin: "https://motion-master.synapticon.com" }
                   fieldbus: { driver: "", adapter: "", mailboxStatusFmmu: false }
                   logLevel: "info"
                   tls: { certPath: "", keyPath: "", autoUpdate: true }
@@ -310,6 +318,21 @@ paths:
                     type: string
                     description: Subject common name (CN).
                     example: "local.motion-master.synapticon.com"
+                  dnsNames:
+                    type: array
+                    description: >
+                      The certificate's subjectAltName DNS entries — the hostnames it is valid for,
+                      and what a browser actually checks (the CN is legacy and ignored). The bundled
+                      certificate covers both the loopback name and the `*.ip.…` wildcard used by
+                      off-loopback deployments, so one file serves either. Empty for a certificate
+                      with no SAN extension.
+                    items:
+                      type: string
+                    example:
+                      [
+                        "local.motion-master.synapticon.com",
+                        "*.ip.motion-master.synapticon.com",
+                      ]
                   issuer:
                     type: string
                     description: Issuer common name (CN).

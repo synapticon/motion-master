@@ -72,6 +72,8 @@ class HttpServer {
 
   /// @brief Server configuration.
   struct Config {
+    /// Local address to bind. Loopback serves only this machine; "0.0.0.0" serves the network.
+    std::string bindAddress{"127.0.0.1"};
     uint16_t port = 61447;  ///< TCP port to listen on (TLS).
     std::string certFile;   ///< Path to the TLS certificate (PEM).
     std::string keyFile;    ///< Path to the TLS private key (PEM).

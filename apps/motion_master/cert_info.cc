@@ -4,11 +4,14 @@
 #include <openssl/err.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 
+#include <cstddef>
 #include <ctime>
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace mm {
 
@@ -59,6 +62,33 @@ std::string commonName(X509_NAME* name) { return nameEntry(name, NID_commonName)
 // (e.g. "Let's Encrypt") that the short CN ("R10", "YE2") does not carry.
 std::string organizationName(X509_NAME* name) { return nameEntry(name, NID_organizationName); }
 
+// Extracts the subjectAltName dNSName entries — the hostnames the certificate is valid for. Only
+// DNS entries are reported; an IP-address SAN (GEN_IPADD, which the dev self-signed cert carries)
+// is skipped, since these names exist to be matched against a hostname. Returns empty when the
+// certificate has no SAN extension at all.
+std::vector<std::string> dnsNames(X509* cert) {
+  std::vector<std::string> names;
+  auto* san =
+      static_cast<GENERAL_NAMES*>(X509_get_ext_d2i(cert, NID_subject_alt_name, nullptr, nullptr));
+  if (san == nullptr) {
+    return names;
+  }
+  const int count = sk_GENERAL_NAME_num(san);
+  for (int i = 0; i < count; ++i) {
+    const GENERAL_NAME* entry = sk_GENERAL_NAME_value(san, i);
+    if (entry == nullptr || entry->type != GEN_DNS) {
+      continue;
+    }
+    const unsigned char* data = ASN1_STRING_get0_data(entry->d.dNSName);
+    const int len = ASN1_STRING_length(entry->d.dNSName);
+    if (data != nullptr && len > 0) {
+      names.emplace_back(reinterpret_cast<const char*>(data), static_cast<std::size_t>(len));
+    }
+  }
+  GENERAL_NAMES_free(san);
+  return names;
+}
+
 }  // namespace
 
 std::expected<CertInfo, std::string> readCertInfo(const std::string& certPath) {
@@ -83,6 +113,7 @@ std::expected<CertInfo, std::string> readCertInfo(const std::string& certPath) {
   CertInfo result{
       .subject = commonName(X509_get_subject_name(leaf.get())),
       .issuer = commonName(X509_get_issuer_name(leaf.get())),
+      .dnsNames = dnsNames(leaf.get()),
       .notBefore = *notBefore,
       .notAfter = *notAfter,
       .chain = {},

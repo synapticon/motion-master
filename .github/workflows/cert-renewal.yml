@@ -42,8 +42,22 @@ jobs:
             echo "::error::acme-dns parse failed (subdomain='$ACMEDNS_SUBDOMAIN', expected '$expected')"
             exit 1
           fi
+          # ONE certificate carries both names Motion Master is reached by, so every host serves
+          # the same file whether it is bound to loopback or to the LAN:
+          #   local.motion-master.synapticon.com  — A record pinned to 127.0.0.1; the browser and
+          #     the server share a machine. Stays a plain static record in the parent zone, so an
+          #     outage of the ip.… responder cannot break the ordinary desktop install.
+          #   *.ip.motion-master.synapticon.com   — off-loopback: <dashed-ip>.ip.… resolves to that
+          #     LAN address, so an appliance is reachable from another machine's browser under a
+          #     publicly-trusted name. Wildcards are DNS-01 only, which is what we already run.
+          # Both challenge names CNAME to the SAME acme-dns account, which is fine because acme-dns
+          # keeps two rolling TXT records per account and this issuance needs exactly two. That is
+          # also the ceiling: a THIRD name on this cert would silently evict one of the two, so it
+          # would need a second acme-dns account and its own CNAME. local.… stays first — acme.sh
+          # names its output directory after the first -d, which the publish step below depends on.
           ~/.acme.sh/acme.sh --issue --force \
             -d local.motion-master.synapticon.com \
+            -d '*.ip.motion-master.synapticon.com' \
             --dns dns_acmedns \
             --server letsencrypt
 
@@ -53,16 +67,25 @@ jobs:
       # releases (which may be months apart, by which point their bundled cert would have expired):
       #   https://github.com/synapticon/motion-master/releases/download/tls-cert/cert.pem
       #   https://github.com/synapticon/motion-master/releases/download/tls-cert/key.pem
-      # The keypair only authenticates local.motion-master.synapticon.com, which resolves to
-      # 127.0.0.1, so publishing it is no wider an exposure than the cert already bundled in every
-      # public release artifact.
+      # The keypair only authenticates names that resolve to loopback or to a LAN address, so
+      # publishing it is no wider an exposure than the cert already bundled in every public release
+      # artifact: impersonating either name requires already being on-path inside that network.
       - name: Publish cert to rolling release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           cp ~/.acme.sh/local.motion-master.synapticon.com_ecc/fullchain.cer cert.pem
           cp ~/.acme.sh/local.motion-master.synapticon.com_ecc/local.motion-master.synapticon.com.key key.pem
-          notes="Latest Let's Encrypt certificate for local.motion-master.synapticon.com (resolves to 127.0.0.1). Rotated monthly by cert-renewal.yml. Updated $(date -u +%Y-%m-%dT%H:%M:%SZ)."
+          # Every running host self-heals from this release, and the binary rejects a cert that
+          # does not cover both names (cert_updater.cc) — so a cert missing a SAN would be pushed
+          # to every host and refused by all of them. Catch that here instead.
+          for name in local.motion-master.synapticon.com '*.ip.motion-master.synapticon.com'; do
+            if ! openssl x509 -in cert.pem -noout -ext subjectAltName | grep -qF "DNS:$name"; then
+              echo "::error::issued certificate does not cover $name"
+              exit 1
+            fi
+          done
+          notes="Latest Let's Encrypt certificate for local.motion-master.synapticon.com (resolves to 127.0.0.1) and *.ip.motion-master.synapticon.com (LAN deployments: <dashed-ip>.ip.… resolves to that address). Rotated monthly by cert-renewal.yml. Updated $(date -u +%Y-%m-%dT%H:%M:%SZ)."
           if gh release view tls-cert --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit tls-cert --repo "$GITHUB_REPOSITORY" --notes "$notes"
             gh release upload tls-cert cert.pem key.pem --repo "$GITHUB_REPOSITORY" --clobber

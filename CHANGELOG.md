@@ -19,6 +19,15 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **Motion Master can now be run on one machine and driven from the browser of another** — a Raspberry Pi or industrial PC wired to the drives, with the Console open on a laptop across the network. Set `server.bindAddress` to `0.0.0.0` in the config file (it defaults to `127.0.0.1`, so nothing changes for an ordinary desktop install), then enter that machine's IP address in the Console's **Connection** page. The Console converts the address into a hostname the bundled certificate already covers, so there is no certificate to install, no browser warning to click through, and nothing to register per device. **Motion Master has no authentication — anything that can reach these ports can command motion — so only bind off loopback on a network you trust.**
+- The **Connection** page now lists the names the served certificate is valid for, and `GET /api/cert` reports them as `dnsNames`. This is what a browser actually checks the host against, so it answers directly whether the address you are connecting to is covered.
+
+### Changed
+
+- The bundled TLS certificate now covers `*.ip.motion-master.synapticon.com` in addition to `local.motion-master.synapticon.com`, and the monthly renewal issues both names as one certificate. Existing localhost installs are unaffected — same file, same name, same automatic refresh.
+
 ## [6.0.0-alpha.60] - 2026-07-28
 
 ### Added

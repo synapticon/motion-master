@@ -12,7 +12,9 @@ export * from './web-socket-connection'
 export * from './client'
 
 // Pure, framework-agnostic helpers (no DOM/React): hex formatting, CoE SDO value
-// encode/decode, and SOMANET file-list parsing.
+// encode/decode, SOMANET file-list parsing, and the LAN hostname mapping that lets a browser
+// reach a server on another machine under a name the bundled certificate covers.
+export * from './lan';
 export * from './hex'
 export * from './sdo'
 export * from './somanet'

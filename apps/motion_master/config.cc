@@ -17,6 +17,15 @@ std::expected<Config, std::string> parseConfig(const nlohmann::json& doc) {
     return std::unexpected(e.what());
   }
 
+  // uWebSockets reads an empty host as "every interface", so an omitted-but-present bindAddress
+  // would silently expose an unauthenticated server to the network. Refuse it: "0.0.0.0" is how you
+  // ask for that, explicitly.
+  if (config.server.bindAddress.empty()) {
+    return std::unexpected(
+        "server.bindAddress must not be empty (use \"0.0.0.0\" to bind all "
+        "interfaces)");
+  }
+
   static constexpr std::array kLevels{"trace", "debug",    "info", "warning",
                                       "error", "critical", "off"};
   if (std::find(kLevels.begin(), kLevels.end(), config.logLevel) == kLevels.end()) {

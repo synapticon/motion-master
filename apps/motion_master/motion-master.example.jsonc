@@ -13,6 +13,20 @@
 {
   // HTTP API and WebSocket servers (each on its own port / loop / thread).
   "server": {
+    // Address both listeners bind to.
+    //   "127.0.0.1" (default) — reachable only from this machine, over the bundled
+    //                           local.motion-master.synapticon.com name (an A record for 127.0.0.1).
+    //   "0.0.0.0"             — reachable from the network. Browsers on other machines then use
+    //                           https://<dashed-ip>.ip.motion-master.synapticon.com:61447, e.g.
+    //                           192-168-1-50.ip.… for 192.168.1.50; those names resolve to that
+    //                           address and the SAME bundled certificate covers them (it carries a
+    //                           *.ip.motion-master.synapticon.com wildcard), so there is nothing
+    //                           extra to install. The console's Connection page does the IP →
+    //                           hostname conversion for you.
+    //
+    // WARNING: Motion Master has no authentication. Anything that can reach these ports can enable
+    // drives and command motion. Bind off loopback only on a network you trust.
+    "bindAddress": "127.0.0.1",
     "httpPort": 61447,
     "wsPort": 62281,
     "corsOrigin": "https://motion-master.synapticon.com"

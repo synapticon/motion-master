@@ -197,6 +197,7 @@ int main(int argc, char** argv) {
 
   HttpServer httpServer{
       HttpServer::Config{
+          .bindAddress = opts.config.server.bindAddress,
           .port = opts.config.server.httpPort,
           .certFile = opts.config.tls.certPath,
           .keyFile = opts.config.tls.keyPath,
@@ -228,19 +229,20 @@ int main(int argc, char** argv) {
   // the only place that knows the concrete plug-in. Copy libs/example to add your own.
   httpServer.addRoutes(mm::example::registerRoutes);
   if (!httpServer.start()) {
-    spdlog::error("HTTP server could not bind port {} — is another process using it?",
-                  opts.config.server.httpPort);
+    spdlog::error("HTTP server could not bind {}:{} — is another process using it?",
+                  opts.config.server.bindAddress, opts.config.server.httpPort);
     return 1;
   }
 
   WebSocketServer wsServer{WebSocketServer::Config{
+      .bindAddress = opts.config.server.bindAddress,
       .port = opts.config.server.wsPort,
       .certFile = opts.config.tls.certPath,
       .keyFile = opts.config.tls.keyPath,
   }};
   if (!wsServer.start()) {
-    spdlog::error("WebSocket server could not bind port {} — is another process using it?",
-                  opts.config.server.wsPort);
+    spdlog::error("WebSocket server could not bind {}:{} — is another process using it?",
+                  opts.config.server.bindAddress, opts.config.server.wsPort);
     return 1;
   }
 

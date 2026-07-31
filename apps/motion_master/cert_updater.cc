@@ -5,6 +5,7 @@
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -24,8 +25,19 @@ namespace mm {
 
 namespace {
 
-// Common name the fetched certificate must carry to be accepted.
-constexpr char kCertCommonName[] = "local.motion-master.synapticon.com";
+// Names the fetched certificate must cover to be accepted. One certificate carries both, so a
+// host serves the same cert whether it is reached over loopback or across the LAN — there is
+// nothing per-deployment to configure.
+//
+// The second entry is a *probe*, not a name anyone types: the certificate carries the wildcard SAN
+// `*.ip.motion-master.synapticon.com`, and X509_check_host applies RFC 6125 wildcard matching, so
+// checking one concrete name below that wildcard passes if and only if the wildcard is present.
+// 127-0-0-1 is used because the DNS responder maps it back to loopback, making the probe a name
+// that genuinely resolves.
+constexpr const char* kCertRequiredNames[] = {
+    "local.motion-master.synapticon.com",
+    "127-0-0-1.ip.motion-master.synapticon.com",
+};
 
 size_t appendToString(char* ptr, size_t size, size_t nmemb, void* userdata) {
   auto* out = static_cast<std::string*>(userdata);
@@ -83,7 +95,8 @@ std::string subjectCommonName(X509* cert) {
 }
 
 // Validates the downloaded pair before it is allowed anywhere near the live files: the cert parses
-// and carries the expected CN, it is not already expired, and the key parses and matches the cert.
+// and covers every name we serve, it is not already expired, and the key parses and matches the
+// cert.
 std::expected<void, std::string> validatePair(const std::string& certPem,
                                               const std::string& keyPem) {
   const std::unique_ptr<BIO, decltype(&BIO_free)> certBio{
@@ -94,10 +107,14 @@ std::expected<void, std::string> validatePair(const std::string& certPem,
     return std::unexpected("downloaded certificate is not valid PEM");
   }
 
-  const std::string cn = subjectCommonName(cert.get());
-  if (cn != kCertCommonName) {
-    return std::unexpected("downloaded certificate CN '" + cn + "' != expected '" +
-                           std::string(kCertCommonName) + "'");
+  // X509_check_host matches against the subjectAltName list (falling back to the CN only when a
+  // cert carries no SANs), exactly as a browser does — so this accepts the same certificate the
+  // client will accept, rather than second-guessing it with a string compare.
+  for (const char* name : kCertRequiredNames) {
+    if (X509_check_host(cert.get(), name, 0, 0, nullptr) != 1) {
+      return std::unexpected("downloaded certificate does not cover '" + std::string(name) +
+                             "' (its CN is '" + subjectCommonName(cert.get()) + "')");
+    }
   }
 
   // X509_cmp_current_time returns > 0 when notAfter is in the future, i.e. not yet expired.

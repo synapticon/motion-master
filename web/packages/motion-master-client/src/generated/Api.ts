@@ -214,6 +214,11 @@ export class Api<
          */
         subject: string;
         /**
+         * The certificate's subjectAltName DNS entries — the hostnames it is valid for, and what a browser actually checks (the CN is legacy and ignored). The bundled certificate covers both the loopback name and the `*.ip.…` wildcard used by off-loopback deployments, so one file serves either. Empty for a certificate with no SAN extension.
+         * @example ["local.motion-master.synapticon.com","*.ip.motion-master.synapticon.com"]
+         */
+        dnsNames?: string[];
+        /**
          * Issuer common name (CN).
          * @example "R10"
          */

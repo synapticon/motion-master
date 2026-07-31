@@ -262,6 +262,7 @@ nlohmann::json certInfoJson(const mm::CertInfo& info, const std::string& path) {
   return {{"path", path},
           {"subject", info.subject},
           {"issuer", info.issuer},
+          {"dnsNames", info.dnsNames},
           {"notBefore", toIso8601Utc(info.notBefore)},
           {"notAfter", toIso8601Utc(info.notAfter)},
           {"daysRemaining", daysRemaining},
@@ -1792,14 +1793,14 @@ void HttpServer::run() {
                     ->writeStatus("204 No Content")
                     ->end();
               })
-      .listen("127.0.0.1", config_.port, LIBUS_LISTEN_EXCLUSIVE_PORT,
+      .listen(config_.bindAddress, config_.port, LIBUS_LISTEN_EXCLUSIVE_PORT,
               [this](auto* token) {
                 if (token) {
-                  spdlog::info("HTTP server listening on port {}", config_.port);
+                  spdlog::info("HTTP server listening on {}:{}", config_.bindAddress, config_.port);
                   listenResult_.set_value(true);
                 } else {
-                  spdlog::error("HTTP server failed to listen on port {} (already in use?)",
-                                config_.port);
+                  spdlog::error("HTTP server failed to listen on {}:{} (already in use?)",
+                                config_.bindAddress, config_.port);
                   running_ = false;
                   listenResult_.set_value(false);
                 }

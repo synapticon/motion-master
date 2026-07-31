@@ -28,6 +28,11 @@ struct CertChainLink {
 struct CertInfo {
   std::string subject;  ///< Leaf subject common name (CN), e.g. "local.motion-master...".
   std::string issuer;   ///< Leaf issuer common name (CN) — the immediate (intermediate) CA.
+  /// The leaf's subjectAltName dNSName entries — the hostnames the certificate is actually valid
+  /// for, and what a browser checks (the CN is legacy and ignored). The bundled certificate lists
+  /// both the loopback name and the LAN wildcard, so this is what tells a user whether the host
+  /// they are typing is covered.
+  std::vector<std::string> dnsNames;
   std::chrono::system_clock::time_point notBefore;  ///< Start of the leaf's validity window.
   std::chrono::system_clock::time_point notAfter;   ///< End of the leaf's validity window (expiry).
   /// Every certificate present in the PEM file, leaf first, in chain order (leaf →

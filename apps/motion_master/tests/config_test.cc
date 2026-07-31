@@ -9,6 +9,7 @@ using nlohmann::json;
 TEST(ConfigTest, EmptyObjectYieldsDefaults) {
   auto r = parseConfig(json::object());
   ASSERT_TRUE(r.has_value()) << r.error();
+  EXPECT_EQ(r->server.bindAddress, "127.0.0.1");
   EXPECT_EQ(r->server.httpPort, 61447);
   EXPECT_EQ(r->server.wsPort, 62281);
   EXPECT_EQ(r->server.corsOrigin, "https://motion-master.synapticon.com");
@@ -65,6 +66,18 @@ TEST(ConfigTest, EmptyDriverMeansNoAutoInit) {
   auto r = parseConfig(json::parse(R"({"fieldbus": {"driver": ""}})"));
   ASSERT_TRUE(r.has_value()) << r.error();
   EXPECT_TRUE(r->fieldbus.driver.empty());
+}
+
+TEST(ConfigTest, BindAddressOverride) {
+  auto r = parseConfig(json::parse(R"({"server": {"bindAddress": "0.0.0.0"}})"));
+  ASSERT_TRUE(r.has_value()) << r.error();
+  EXPECT_EQ(r->server.bindAddress, "0.0.0.0");
+}
+
+TEST(ConfigTest, EmptyBindAddressRejected) {
+  // uWebSockets would read "" as every interface — binding an unauthenticated server to the whole
+  // network must be spelled "0.0.0.0", never fallen into.
+  EXPECT_FALSE(parseConfig(json::parse(R"({"server": {"bindAddress": ""}})")).has_value());
 }
 
 TEST(ConfigTest, InvalidLogLevelRejected) {

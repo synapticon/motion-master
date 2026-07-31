@@ -16,6 +16,16 @@
 
 /// @brief @c "server" block — the HTTP API and WebSocket listeners.
 struct ServerConfig {
+  /// Local address both listeners bind to. The default keeps Motion Master reachable only from the
+  /// machine it runs on, which is what @c local.motion-master.synapticon.com (an @c A record pinned
+  /// to @c 127.0.0.1) is for. Set @c "0.0.0.0" to serve the whole network — the appliance
+  /// deployment, where a browser elsewhere on the LAN drives the bus and reaches this host as
+  /// @c <dashed-ip>.ip.motion-master.synapticon.com. The bundled certificate covers both names, so
+  /// TLS needs no further configuration either way.
+  ///
+  /// Motion Master has no authentication: anything that can reach the port can enable drives. Bind
+  /// off loopback only on a network you trust.
+  std::string bindAddress = "127.0.0.1";
   uint16_t httpPort = 61447;
   uint16_t wsPort = 62281;
   std::string corsOrigin = "https://motion-master.synapticon.com";
@@ -108,7 +118,8 @@ struct Config {
   ParametersConfig parameters;
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ServerConfig, httpPort, wsPort, corsOrigin)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ServerConfig, bindAddress, httpPort, wsPort,
+                                                corsOrigin)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FieldbusConfig, driver, adapter, mailboxStatusFmmu)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TlsConfig, certPath, keyPath, autoUpdate)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(GameLoopConfig, periodUs)

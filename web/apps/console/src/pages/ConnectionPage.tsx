@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { lanHostname } from '@synapticon/motion-master-client';
 import { version as uiVersion } from 'virtual:swagger-spec'
 import Callout from '../components/Callout'
 import PageHeader from '../components/PageHeader'
@@ -128,13 +129,19 @@ export default function ConnectionPage() {
     setDraftWsPort(wsPort)
   }, [host, httpPort, wsPort])
 
-  const endpointDirty = draftHost !== host || draftHttpPort !== httpPort || draftWsPort !== wsPort
+  // An IP address is not a name any certificate can be issued for, so a typed address is committed
+  // as its equivalent under the ip.… subdomain, which resolves back to that same address and is
+  // covered by the wildcard the server serves. Anything already a hostname passes through.
+  const resolvedHost = lanHostname(draftHost);
+  const hostWasMapped = resolvedHost !== draftHost.trim();
+
+  const endpointDirty = resolvedHost !== host || draftHttpPort !== httpPort || draftWsPort !== wsPort
   const httpPortValid = isValidPort(draftHttpPort)
   const wsPortValid = isValidPort(draftWsPort)
   const endpointValid = draftHost.trim() !== '' && httpPortValid && wsPortValid
   const applyEndpoint = () => {
     if (!endpointValid) return
-    setHost(draftHost.trim())
+    setHost(resolvedHost);
     setHttpPort(draftHttpPort.trim())
     setWsPort(draftWsPort.trim())
   }
@@ -273,15 +280,33 @@ export default function ConnectionPage() {
                   type="text"
                   value={draftHost}
                   onChange={e => setDraftHost(e.target.value)}
-                  placeholder="local.motion-master.synapticon.com"
+                  placeholder="local.motion-master.synapticon.com or 192.168.1.50"
                   className={inputCls}
                 />
+                {hostWasMapped && (
+                  <p className="text-xs text-grey-600 mt-1 max-w-prose">
+                    Will connect to <code>{resolvedHost}</code> — the same address written as a
+                    hostname the certificate covers.
+                  </p>
+                )}
                 <p className="text-xs text-grey-600 mt-1 max-w-prose">
                   <code>local.motion-master.synapticon.com</code> is a public DNS A record that
                   resolves to <code>127.0.0.1</code> — your own machine, where Motion Master runs.
                   Traffic never leaves the loopback interface, yet the address is a real, globally
                   registered hostname, so Synapticon can obtain a genuine CA-issued TLS certificate
                   for it that Motion Master serves locally.
+                </p>
+                <p className="text-xs text-grey-600 mt-1 max-w-prose">
+                  To reach Motion Master on <em>another</em> machine — an appliance on your network —
+                  enter its IP address instead. Names under{' '}
+                  <code>ip.motion-master.synapticon.com</code> encode the address in their first
+                  label, so <code>192.168.1.50</code> is reached as{' '}
+                  <code>192-168-1-50.ip.motion-master.synapticon.com</code>, which resolves straight
+                  back to that address on your network. The same certificate covers every such name,
+                  so nothing has to be registered per device. That machine must be running Motion
+                  Master with <code>server.bindAddress</code> set to <code>0.0.0.0</code> in its
+                  config file — the default binds to loopback and accepts no connections from the
+                  network.
                 </p>
                 <p className="text-xs text-grey-600 mt-1 max-w-prose">
                   This is what makes the connection work. This PWA is served from{' '}
@@ -368,6 +393,24 @@ export default function ConnectionPage() {
                         <Field label="Subject" value={cert.subject} />
                         <Field label="Issuer" value={cert.issuer} />
                         <Field label="File" value={cert.path} />
+                        {/* What the browser actually checks the host against — the Subject is
+                            legacy and ignored. One certificate lists both the loopback name and
+                            the wildcard covering LAN addresses, so this answers "is the host I
+                            typed covered?" directly. */}
+                        {cert.dnsNames && cert.dnsNames.length > 0 && (
+                          <Field
+                            label="Valid for"
+                            value={
+                              <span className="space-y-0.5 block">
+                                {cert.dnsNames.map((name) => (
+                                  <span key={name} className="block">
+                                    {name}
+                                  </span>
+                                ))}
+                              </span>
+                            }
+                          />
+                        )}
                       </div>
                       <div className="space-y-4 self-start">
                         <Field label="Valid from" value={formatDate(cert.notBefore)} />

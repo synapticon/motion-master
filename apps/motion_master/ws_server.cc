@@ -108,14 +108,15 @@ void WebSocketServer::run() {
   // the bare `wss://host:<port>`). `/*` still accepts a legacy `/ws` path.
   std::move(app)
       .ws<WsData>("/*", std::move(wsBehavior))
-      .listen("127.0.0.1", config_.port, LIBUS_LISTEN_EXCLUSIVE_PORT,
+      .listen(config_.bindAddress, config_.port, LIBUS_LISTEN_EXCLUSIVE_PORT,
               [this](auto* token) {
                 if (token) {
-                  spdlog::info("WebSocket server listening on port {}", config_.port);
+                  spdlog::info("WebSocket server listening on {}:{}", config_.bindAddress,
+                               config_.port);
                   listenResult_.set_value(true);
                 } else {
-                  spdlog::error("WebSocket server failed to listen on port {} (already in use?)",
-                                config_.port);
+                  spdlog::error("WebSocket server failed to listen on {}:{} (already in use?)",
+                                config_.bindAddress, config_.port);
                   running_ = false;
                   listenResult_.set_value(false);
                 }

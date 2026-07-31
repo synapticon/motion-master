@@ -280,7 +280,7 @@ Working today, on real hardware:
 | Bus configuration, ESC diagnostics, DC sync status, process image | ✅ |
 | Object dictionary / SDO, Complete Access, parameter cache | ✅ |
 | PDO mapping read **and write** | ✅ |
-| FoE firmware install, including one device at a time on a live bus | ✅ |
+| File over EtherCAT (FoE) — read and write files on a device | ✅ |
 | ESC registers, SII/EEPROM read + write, offline SII parser | ✅ |
 | CiA402 control — state machine, operation mode, cyclic setpoints | ✅ |
 | RT game loop, health, runtime retiming, lossless recorder, `.mmpd` dump | ✅ |

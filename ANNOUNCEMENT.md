@@ -1,7 +1,7 @@
 # Announcing Motion Master v6 — Next Generation
 
 **To:** everyone at Synapticon
-**Status:** in active development (`6.0.0-alpha.60`) · **Official release: end of 2026**
+**Status:** in active development (`6.0.0-alpha.60`) · **Beta: end of 2026**
 **Try it now:** <https://motion-master.synapticon.com>
 
 ---
@@ -290,7 +290,7 @@ Working today, on real hardware:
 
 **All of our existing firmware and devices are supported, Jasper included.**
 
-Still ahead before the official release:
+Still ahead before beta:
 
 - **Trajectory playback in the RT context** — a cyclic task playing back a precomputed
   setpoint buffer (sine, chirp, ramp, step as generated buffers), single-axis and coordinated
@@ -314,13 +314,13 @@ We report these openly on purpose: the roadmap is in the repository, not in some
 
 | When | What |
 | --- | --- |
-| Now → autumn 2026 | Alpha releases continue; the remaining features above land. Effort on the current tools is reduced. |
-| Autumn 2026 | Beta — feature-complete, API frozen. |
-| **End of 2026** | **Official v6.0.0 release.** |
+| Now → end of 2026 | Alpha releases continue; the remaining features above land. Effort on the current tools is reduced. |
+| **End of 2026** | **Beta — feature-complete, API frozen.** |
+| Q1 2027 | Official v6.0.0 release. |
 
-Until `6.0.0`, the HTTP and WebSocket API may break between any two alphas — that is the
+Until the beta, the HTTP and WebSocket API may break between any two alphas — that is the
 point of a pre-release line, and it is why we would rather break it now than carry it for a
-decade.
+decade. The beta is where it freezes; `6.0.0` is where we stand behind it.
 
 ---
 

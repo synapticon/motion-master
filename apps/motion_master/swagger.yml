@@ -95,10 +95,11 @@ info:
 
     A server that should be reachable from another machine sets `server.bindAddress`
     to `0.0.0.0` in its config file and is then addressed as
-    `https://<dashed-ip>.ip.motion-master.synapticon.com:61447` — those names resolve
-    to the encoded address (`192-168-1-50.ip.…` → `192.168.1.50`) and the same bundled
-    certificate covers them via its `*.ip.motion-master.synapticon.com` wildcard, so no
-    per-device certificate or registration is involved. Note that the API is
+    `https://<dashed-ip>.ip.motion-master.synapticon.com:61447` (`192-168-1-50.ip.…`
+    for `192.168.1.50`). The same bundled certificate covers those names via its
+    `*.ip.motion-master.synapticon.com` wildcard, so no per-device certificate is
+    involved; they are not published in DNS, so the client machine resolves them with
+    one hosts-file entry (see `docs/LAN_DEPLOYMENT.md`). Note that the API is
     **unauthenticated**: binding off loopback exposes full drive control to the network.
 
     ## Conventions

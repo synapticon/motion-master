@@ -29,11 +29,12 @@ namespace {
 // host serves the same cert whether it is reached over loopback or across the LAN — there is
 // nothing per-deployment to configure.
 //
-// The second entry is a *probe*, not a name anyone types: the certificate carries the wildcard SAN
-// `*.ip.motion-master.synapticon.com`, and X509_check_host applies RFC 6125 wildcard matching, so
-// checking one concrete name below that wildcard passes if and only if the wildcard is present.
-// 127-0-0-1 is used because the DNS responder maps it back to loopback, making the probe a name
-// that genuinely resolves.
+// The second entry is a *probe*, not a name anyone connects to: the certificate carries the
+// wildcard SAN `*.ip.motion-master.synapticon.com`, and X509_check_host applies RFC 6125 wildcard
+// matching, so checking any one concrete name below that wildcard passes if and only if the
+// wildcard is present. The `ip.…` names are resolved by a hosts-file entry on the client rather
+// than by public DNS, so no particular choice of address is more "real" than another; 127-0-0-1 is
+// used because it reads unambiguously as an example.
 constexpr const char* kCertRequiredNames[] = {
     "local.motion-master.synapticon.com",
     "127-0-0-1.ip.motion-master.synapticon.com",

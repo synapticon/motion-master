@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { lanHostname } from '@synapticon/motion-master-client';
+import { isIpv4, lanAddress, lanHostname } from '@synapticon/motion-master-client';
 import { version as uiVersion } from 'virtual:swagger-spec'
 import Callout from '../components/Callout'
+import ConnectionExplainer from '../components/ConnectionExplainer';
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline, btnPrimary } from '../utils/styles'
@@ -129,22 +130,36 @@ export default function ConnectionPage() {
     setDraftWsPort(wsPort)
   }, [host, httpPort, wsPort])
 
-  // An IP address is not a name any certificate can be issued for, so a typed address is committed
-  // as its equivalent under the ip.… subdomain, which resolves back to that same address and is
-  // covered by the wildcard the server serves. Anything already a hostname passes through.
-  const resolvedHost = lanHostname(draftHost);
-  const hostWasMapped = resolvedHost !== draftHost.trim();
+  // No certificate can be issued for a bare IP address, so an address typed here has an equivalent
+  // hostname the bundled certificate does cover. It is *offered*, never substituted: connecting
+  // straight to the IP is a legitimate choice (it works once the user has visited that origin in a
+  // tab and accepted the warning), and silently rewriting what someone typed would take that away
+  // and hide where the odd-looking hostname came from.
+  const lanSuggestion = isIpv4(draftHost) ? lanHostname(draftHost) : null;
 
-  const endpointDirty = resolvedHost !== host || draftHttpPort !== httpPort || draftWsPort !== wsPort
+  const endpointDirty =
+    draftHost.trim() !== host || draftHttpPort !== httpPort || draftWsPort !== wsPort
   const httpPortValid = isValidPort(draftHttpPort)
   const wsPortValid = isValidPort(draftWsPort)
   const endpointValid = draftHost.trim() !== '' && httpPortValid && wsPortValid
   const applyEndpoint = () => {
     if (!endpointValid) return
-    setHost(resolvedHost);
+    setHost(draftHost.trim())
     setHttpPort(draftHttpPort.trim())
     setWsPort(draftWsPort.trim())
   }
+
+  // When a LAN endpoint is unreachable, the most common cause is name resolution rather than the
+  // server being down — so offer the hosts-file entry that settles it. Derived from the committed
+  // host, not the draft, since that is the endpoint actually failing.
+  const unreachableLanAddress = !online ? lanAddress(host) : null;
+  const [hostsLineCopied, setHostsLineCopied] = useState(false);
+  const hostsLine = unreachableLanAddress ? `${unreachableLanAddress}\t${host}` : '';
+  const copyHostsLine = async () => {
+    await navigator.clipboard.writeText(hostsLine);
+    setHostsLineCopied(true);
+    setTimeout(() => setHostsLineCopied(false), 2000);
+  };
 
   const certQuery = useQuery({
     queryKey: ['cert'],
@@ -197,6 +212,8 @@ export default function ConnectionPage() {
         description="Configure the host and ports used to reach the Motion Master backend, check the TLS certificate status and refresh it, review the configuration the backend started with, and inspect the OS and hardware it is running on."
       />
       <div className="p-4 sm:px-8 sm:py-7 space-y-6">
+        <ConnectionExplainer />
+
         <div className="space-y-4">
           <Callout variant={versionMismatch ? 'warning' : 'info'}>
             <p>
@@ -283,39 +300,34 @@ export default function ConnectionPage() {
                   placeholder="local.motion-master.synapticon.com or 192.168.1.50"
                   className={inputCls}
                 />
-                {hostWasMapped && (
-                  <p className="text-xs text-grey-600 mt-1 max-w-prose">
-                    Will connect to <code>{resolvedHost}</code> — the same address written as a
-                    hostname the certificate covers.
-                  </p>
+                {lanSuggestion && (
+                  <div className="mt-2 border border-grey-200 bg-grey-50 p-3">
+                    <p className="text-xs text-grey-700">
+                      <code className="break-all">{lanSuggestion}</code> — the same address written
+                      as a hostname the certificate covers.
+                    </p>
+                    {/* Directly under the name it produces, so the button reads as acting on the
+                        line above it. Smaller than a primary action: this is an optional
+                        convenience, not the way to submit the form. */}
+                    <button
+                      type="button"
+                      onClick={() => setDraftHost(lanSuggestion)}
+                      className={`${btnOutline} mt-2 px-2 py-1 text-[11px]`}
+                      title="Only fills the Host field — press Apply to connect."
+                    >
+                      Replace IP with hostname
+                    </button>
+                    <p className="text-xs text-grey-600 mt-2 max-w-prose">
+                      The hostname connects without warnings but needs a hosts-file entry on{' '}
+                      <em>this</em> computer. The plain address needs none, but you must accept its
+                      certificate warning yourself first. See the explainer above.
+                    </p>
+                  </div>
                 )}
                 <p className="text-xs text-grey-600 mt-1 max-w-prose">
-                  <code>local.motion-master.synapticon.com</code> is a public DNS A record that
-                  resolves to <code>127.0.0.1</code> — your own machine, where Motion Master runs.
-                  Traffic never leaves the loopback interface, yet the address is a real, globally
-                  registered hostname, so Synapticon can obtain a genuine CA-issued TLS certificate
-                  for it that Motion Master serves locally.
-                </p>
-                <p className="text-xs text-grey-600 mt-1 max-w-prose">
-                  To reach Motion Master on <em>another</em> machine — an appliance on your network —
-                  enter its IP address instead. Names under{' '}
-                  <code>ip.motion-master.synapticon.com</code> encode the address in their first
-                  label, so <code>192.168.1.50</code> is reached as{' '}
-                  <code>192-168-1-50.ip.motion-master.synapticon.com</code>, which resolves straight
-                  back to that address on your network. The same certificate covers every such name,
-                  so nothing has to be registered per device. That machine must be running Motion
-                  Master with <code>server.bindAddress</code> set to <code>0.0.0.0</code> in its
-                  config file — the default binds to loopback and accepts no connections from the
-                  network.
-                </p>
-                <p className="text-xs text-grey-600 mt-1 max-w-prose">
-                  This is what makes the connection work. This PWA is served from{' '}
-                  <code>https://motion-master.synapticon.com</code>, a secure origin, so the browser
-                  reaches the backend only over HTTPS and WSS (mixed-content blocking) and every
-                  cross-origin request must pass certificate validation. A self-signed or{' '}
-                  <code>localhost</code> certificate would be rejected outright, with no click-through
-                  — only a publicly trusted certificate for a real hostname is accepted, which is
-                  exactly what this DNS trick provides.
+                  Motion Master on this machine: leave the default. On another machine: enter its IP
+                  address — it must be running with <code>server.bindAddress</code> set to{' '}
+                  <code>0.0.0.0</code>.
                 </p>
               </div>
               <div>
@@ -366,6 +378,47 @@ export default function ConnectionPage() {
               </button>
             </div>
           </form>
+
+          {unreachableLanAddress && (
+            <Callout variant="warning" className="mt-4">
+              <p>
+                <span className="font-display font-medium">Cannot reach {host}.</span> This name is
+                not published in DNS, so <em>this</em> computer — the one running the browser, not{' '}
+                {unreachableLanAddress} — needs one hosts-file line pointing the name at that
+                address. That is not a workaround: it is how this connection is meant to work, and it
+                costs nothing in security, because the certificate is checked against the name and
+                never against how the name was resolved. You still get a genuine, publicly-trusted
+                HTTPS connection with no warning.
+              </p>
+              <p className="mt-2">
+                Also confirm that Motion Master on {unreachableLanAddress} has{' '}
+                <code>server.bindAddress</code> set to <code>0.0.0.0</code> in its config file. It
+                defaults to <code>127.0.0.1</code>, which accepts connections only from the machine
+                Motion Master itself runs on — a server left at that default is unreachable from
+                here however correct everything else is.
+              </p>
+              <div className="mt-2 flex items-center gap-2">
+                <code className="bg-white/60 px-2 py-1 text-xs break-all">{hostsLine}</code>
+                <button
+                  type="button"
+                  onClick={copyHostsLine}
+                  className={btnOutline}
+                  title="Copy the hosts-file line to the clipboard."
+                >
+                  {hostsLineCopied ? 'Copied' : 'Copy'}
+                </button>
+              </div>
+              <p className="mt-2 text-xs">
+                Add that line to <code>/etc/hosts</code> (Linux, macOS) or{' '}
+                <code>C:\Windows\System32\drivers\etc\hosts</code> (Windows) — the{' '}
+                <code>add-host.sh</code> and <code>add-host.ps1</code> scripts in the Motion Master
+                repository will do it for you. Both need administrator rights. A phone or tablet
+                cannot edit a hosts file at all; there, connect to{' '}
+                <code>{unreachableLanAddress}</code> directly instead and accept the certificate
+                warning.
+              </p>
+            </Callout>
+          )}
         </section>
 
         {online && (
@@ -431,21 +484,10 @@ export default function ConnectionPage() {
                   {refreshMutation.isPending ? 'Refreshing…' : 'Refresh certificate'}
                 </button>
                 <p className="text-xs text-grey-600 mt-2 max-w-prose">
-                  Downloads the latest certificate from Synapticon's rolling release, verifies it,
-                  and installs it next to the binary. It does not interrupt the running server — the
-                  new certificate takes effect the next time you restart Motion Master.
-                </p>
-                <p className="text-xs text-grey-600 mt-2 max-w-prose">
-                  Motion Master also self-heals on startup: if the certificate is missing or expired
-                  it fetches a fresh one automatically (unless started with{' '}
-                  <code>--no-cert-update</code>), so a restart normally suffices.
-                </p>
-                <p className="text-xs text-grey-600 mt-2 max-w-prose">
-                  Once the certificate has already expired this button can no longer help — the PWA
-                  itself can no longer reach the backend over a trusted connection. A plain restart
-                  heals it via the startup fetch above; if Motion Master runs with{' '}
-                  <code>--no-cert-update</code>, refresh explicitly first with{' '}
-                  <code>motion-master --update-cert</code>, then restart.
+                  Downloads the latest certificate, verifies it, and installs it next to the binary.
+                  The running server is not interrupted — the new certificate takes effect on the
+                  next restart. A restart alone usually suffices anyway, since Motion Master
+                  refreshes an expiring certificate at startup. See the explainer above.
                 </p>
 
                 {refreshMutation.isSuccess && (
@@ -468,16 +510,8 @@ export default function ConnectionPage() {
               <h2 className="eyebrow mb-3">Started Configuration</h2>
               <div className="border border-grey-200 p-5 space-y-3">
                 <p className="text-xs text-grey-600 max-w-prose">
-                  The fully-resolved configuration Motion Master booted with. A JSONC config file
-                  (passed with <code>-c</code>/<code>--config</code>) is the single source for ports,
-                  the fieldbus driver and adapter, log level, the recorder, and TLS paths — there are
-                  no command-line flags for these. Any key the file omits keeps its built-in default,
-                  so what you see here is the file overlaid on those defaults; with no config file at
-                  all it is the pure defaults.
-                </p>
-                <p className="text-xs text-grey-600 max-w-prose">
-                  Read-only and captured at startup: it is not re-read while running. To change a
-                  value, edit the JSONC file and restart Motion Master. The annotated{' '}
+                  The configuration Motion Master booted with — the JSONC config file overlaid on the
+                  built-in defaults. Read-only: to change a value, edit the file and restart.{' '}
                   <a
                     href="https://github.com/synapticon/motion-master/blob/main/apps/motion_master/motion-master.example.jsonc"
                     target="_blank"
@@ -486,8 +520,7 @@ export default function ConnectionPage() {
                   >
                     motion-master.example.jsonc
                   </a>{' '}
-                  documents every property with inline comments — unlike the resolved values shown
-                  below, which carry no descriptions.
+                  documents every property.
                 </p>
 
                 {configQuery.isLoading && <p className="text-sm text-grey-600">Loading…</p>}
@@ -511,10 +544,8 @@ export default function ConnectionPage() {
               <h2 className="eyebrow mb-3">System</h2>
               <div className="border border-grey-200 p-5 space-y-3">
                 <p className="text-xs text-grey-600 max-w-prose">
-                  The operating system and hardware the Motion Master backend is running on — useful
-                  when the server is on a separate machine (e.g. a Raspberry Pi appliance). A
-                  snapshot read live from the host each time this page loads; fields that cannot be
-                  determined on the host's platform are shown as <code>—</code>.
+                  The OS and hardware the backend is running on, read live each time this page
+                  loads. Fields the platform cannot report show as <code>—</code>.
                 </p>
 
                 {systemQuery.isLoading && <p className="text-sm text-grey-600">Loading…</p>}

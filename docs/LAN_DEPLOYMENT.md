@@ -1,100 +1,50 @@
 # Running Motion Master on another machine
 
 Motion Master normally runs on the same machine as the browser. This document covers the other
-arrangement: the server on a dedicated machine wired to the drives — a Raspberry Pi, an industrial
-PC — driven from the Console on a laptop across the network.
+arrangement: the server on a machine wired to the drives — a Raspberry Pi, an industrial PC — driven
+from the Console on a laptop across the network.
 
-## Why an IP address is not enough
+Two things are needed: the server has to listen on the network, and the browser has to reach it over
+HTTPS with a certificate it trusts. The first is one config key. The second is the interesting part.
 
-The Console is served from `https://motion-master.synapticon.com`, a secure origin, so every request
-it makes to the backend must pass TLS validation. `https://192.168.1.50:61447` cannot: no public CA
-will issue a certificate for a private address, and a cross-origin `fetch()` offers no
-click-through for a self-signed one — the request simply fails, with no way for the user to accept
-a warning.
+**Running on a remote machine costs two manual steps**, deliberately, in exchange for needing no DNS
+infrastructure and no certificate of your own:
 
-The way out is a real, publicly-trusted hostname that happens to resolve to the private address.
-That is already how the localhost case works (`local.motion-master.synapticon.com` is a public `A`
-record for `127.0.0.1`), and it generalises: names under `ip.motion-master.synapticon.com` encode
-the address in their leftmost label.
-
-```
-192-168-1-50.ip.motion-master.synapticon.com   →   A   192.168.1.50
-```
-
-The certificate every server ships carries `*.ip.motion-master.synapticon.com`, so all such names
-validate with nothing to install or register per device.
+1. **One line in the hosts file of each client machine** that will open the Console (Part 2).
+2. **Keeping `cert.pem` / `key.pem` current on the server** — automatic wherever it has internet
+   access, a periodic file copy where it does not (Certificates, below).
 
 > **Motion Master has no authentication.** Anything that can reach these ports can enable drives and
 > command motion. Only bind off loopback on a network you trust, and never expose these ports to the
 > internet.
 
-## Part 1 — DNS (one-time, for the whole fleet)
+## Why the browser needs more than an IP address
 
-This is infrastructure work in the `synapticon.com` zone, not something the server does. It is
-required once; every device afterwards needs nothing.
+The Console is served from `https://motion-master.synapticon.com`, a secure origin, so every request
+it makes to the backend must pass TLS validation. `https://192.168.1.50:61447` cannot: no public CA
+will issue a certificate for a private address, and a cross-origin `fetch()` gives the user no
+chance to click through a self-signed warning — the request just fails.
 
-### 1.1 Make `ip.motion-master.synapticon.com` resolve
-
-Two ways, in order of preference.
-
-**Option A — a scripted zone in dnsBOX (preferred).** If the appliance runs PowerDNS with Lua
-records (or the pipe backend), it can synthesize the answer itself from the queried label. Nothing
-is delegated, no host has to be run, and `_acme-challenge.ip.…` below stays an ordinary record in
-the same zone. **Check the appliance's backend before building anything else.**
-
-**Option B — delegate to CoreDNS.** Add `NS` records for `ip.motion-master.synapticon.com` pointing
-at a host you run (ideally two, for redundancy), serving:
+The fix is a real, publicly-trusted *name* that points at the private address. Motion Master's
+bundled certificate covers `*.ip.motion-master.synapticon.com`, and by convention the address is
+written into the leftmost label with dashes:
 
 ```
-ip.motion-master.synapticon.com {
-    # Synthesize A answers from the dashed address in the leftmost label.
-    template IN A {
-        match "^(?P<a>[0-9]{1,3})-(?P<b>[0-9]{1,3})-(?P<c>[0-9]{1,3})-(?P<d>[0-9]{1,3})\.ip\.motion-master\.synapticon\.com\.$"
-        answer "{{ .Name }} 60 IN A {{ .Group.a }}.{{ .Group.b }}.{{ .Group.c }}.{{ .Group.d }}"
-        fallthrough
-    }
-    # The DNS-01 challenge for the wildcard. Once the zone is delegated, the parent can no longer
-    # answer for anything below it, so this record has to live here.
-    file /etc/coredns/ip.zone
-}
+192.168.1.50   ->   192-168-1-50.ip.motion-master.synapticon.com
 ```
 
-Stock **sslip.io is not sufficient** for Option B: it answers only A/AAAA/NS/SOA/MX, so a zone
-delegated to it has nowhere to serve the ACME challenge from.
+**That name is not resolved by public DNS — it is resolved on the client machine, by a hosts-file
+entry.** This is the whole mechanism, and it is worth understanding why it is enough: TLS validates
+a certificate against the *name* — chain of trust, SAN match, expiry — and never against how that
+name was resolved. A locally-resolved name therefore yields exactly the same genuine,
+publicly-trusted HTTPS connection as a globally-resolved one. No warning, nothing to click through,
+nothing to install.
 
-### 1.2 Add the ACME challenge CNAME
-
-The wildcard is issued over DNS-01, which needs a TXT record under the delegated name. Reuse the
-existing acme-dns account:
-
-```
-_acme-challenge.ip.motion-master.synapticon.com.  CNAME  4723b93a-99f5-43d7-93f1-195dbb4168ea.auth.acme-dns.io.
-```
-
-With Option A this is a record in the parent zone; with Option B it belongs in the delegated zone
-file. No new secret is needed — `cert-renewal.yml` already holds these credentials.
-
-> acme-dns keeps **two** rolling TXT records per account. This certificate has two names and
-> therefore needs exactly two — the ceiling. Adding a third SAN later requires a second acme-dns
-> account and its own CNAME.
-
-### 1.3 Issue the certificate
-
-Run the **Renew TLS Certificate** workflow (`workflow_dispatch`). It issues both names as one
-certificate, verifies the SANs, and publishes to the rolling `tls-cert` release. Confirm with:
-
-```bash
-curl -sL https://github.com/synapticon/motion-master/releases/download/tls-cert/cert.pem \
-  | openssl x509 -noout -ext subjectAltName
-```
-
-Both `local.motion-master.synapticon.com` and `*.ip.motion-master.synapticon.com` must appear.
-
-## Part 2 — the server machine
+## Part 1 — the server machine
 
 Install as usual (see `SETUP-linux.md`; on a Raspberry Pi use the `-arm64.deb`, which needs
-Raspberry Pi OS **trixie** — the binaries require glibc 2.38). Then place a
-`motion-master.jsonc` next to the binary — it is auto-discovered, no flag needed:
+Raspberry Pi OS **trixie** — the binaries require glibc 2.38). Then put a `motion-master.jsonc`
+next to the binary — it is auto-discovered, no flag needed:
 
 ```jsonc
 {
@@ -105,43 +55,203 @@ Raspberry Pi OS **trixie** — the binaries require glibc 2.38). Then place a
 }
 ```
 
-Restart and confirm the log shows the new address:
+Restart. The log confirms the bind and what it means:
 
 ```
-HTTP server listening on 0.0.0.0:61447
-WebSocket server listening on 0.0.0.0:62281
+[info] HTTP server listening on 0.0.0.0:61447
+[info] WebSocket server listening on 0.0.0.0:62281
+[warning] Bound off loopback — reachable from the network, and the API has NO authentication. Use only on a trusted network.
+[info] Browsers reach this server as https://<dashed-ip>.ip.motion-master.synapticon.com:61447 (192-168-1-50.ip.… for 192.168.1.50) and need a matching hosts-file entry — see docs/LAN_DEPLOYMENT.md
 ```
 
-Give the machine a **fixed address** — a DHCP reservation is enough — so the hostname a user
-bookmarks keeps working.
+Note the address itself is not printed. A machine usually has several (wired, wireless, a container
+bridge) and only one of them is the one you want, so the log would be guessing; `hostname -I` or
+`ip -4 addr` tells you, and the Console builds the name for you once you enter it.
 
-Nothing else is needed on the device. The certificate it already has (bundled with the release, or
-fetched by the startup self-heal) covers its LAN name.
+Give the machine a **fixed address** — a DHCP reservation is enough — so the name stays valid.
+Nothing else is needed on the device: the certificate it already ships with covers the name.
 
 ### Making it findable
 
-The user still has to know the address. Configure mDNS on the device (Raspberry Pi OS ships Avahi)
-so it answers to something like `motion-master.local`; a `ping motion-master.local` then reveals the
-address to type into the Console. Note that the `.local` name itself cannot be used to connect — no
-CA will issue for a reserved TLD — it is only a way to discover the address.
+The user still has to learn the address. Configure mDNS on the device (Raspberry Pi OS ships Avahi)
+so it answers to something like `motion-master.local`; `ping motion-master.local` then reveals the
+address. Note the `.local` name cannot be used to *connect* — no CA will issue for a reserved TLD —
+it is only a way to discover the address.
 
-## Part 3 — connecting
+## Part 2 — the client machine
 
-In the Console, open **Connection** and enter the server's IP address in the **Host** field. The
-page converts it to the certificate-covered hostname and shows what it will connect to before you
-apply:
+Open the Console, go to **Connection**, and type the server's IP address in the **Host** field.
+From there you have two ways to connect, and the page offers both rather than choosing for you.
+Ports are unchanged (61447 / 62281), and the committed endpoint persists in that browser.
+
+### Option A — use the hostname (no warnings)
+
+The page shows the equivalent hostname under the entered address with a **Use hostname** button:
 
 ```
-192.168.1.50  →  192-168-1-50.ip.motion-master.synapticon.com
+192.168.1.50   →   192-168-1-50.ip.motion-master.synapticon.com
 ```
 
-Click **Apply**. Ports are unchanged (61447 / 62281). The endpoint persists in that browser.
+Press it, then **Apply**. For that name to resolve, add one line to the hosts file **of the computer
+running the browser** — your laptop, not the server:
+
+> Name resolution happens on the machine that makes the request. Your browser has to turn the
+> hostname into an address before it can open a connection, and that lookup runs locally. The
+> server never resolves its own name — it only listens on a socket and answers whatever arrives —
+> so a hosts entry on the Raspberry Pi would achieve nothing. The practical consequence: three
+> laptops connecting to one server need the line three times, once each, and it cannot be baked
+> into a device image.
+
+A script in this repository does it for you. It is not shipped with the release, because it belongs
+on the client rather than the server — download it onto the computer you browse from:
+
+**Linux, macOS**
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/synapticon/motion-master/main/add-host.sh
+sudo bash add-host.sh 192.168.1.50
+```
+
+**Windows** — in PowerShell started with *Run as administrator*:
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/synapticon/motion-master/main/add-host.ps1 -OutFile add-host.ps1
+.\add-host.ps1 192.168.1.50
+```
+
+Both take the server's IP address, write the matching line, back up the previous file, and print the
+URL to open. Re-running is harmless, and `--remove` / `-Remove` takes the entry out again.
+
+Doing it by hand is one line, if you prefer:
+
+```
+192.168.1.50    192-168-1-50.ip.motion-master.synapticon.com
+```
+
+| OS | Path |
+|---|---|
+| Linux, macOS | `/etc/hosts` |
+| Windows | `C:\Windows\System32\drivers\etc\hosts` |
+
+Either way it needs administrator rights, and editing a hosts file sometimes trips
+endpoint-protection software. A phone or tablet **viewing** the Console cannot do it at all — use
+Option B there. In exchange the connection is ordinary trusted HTTPS, with nothing to accept and
+nothing to re-do later.
+
+If the endpoint is unreachable, the Connection page shows the exact line for that address with a
+copy button.
+
+### Option B — use the IP address directly (one browser warning)
+
+Leave the address as you typed it and press **Apply**. Nothing needs to be installed or edited, but
+the certificate cannot match a bare IP, so the browser rejects it — and because the Console requests
+the API *cross-origin*, it cannot show you a warning to click through. It simply fails.
+
+The way through is to grant the exception yourself, once per browser and device:
+
+1. Open `https://192.168.1.50:61447` in a new tab.
+2. Accept the certificate warning (**Advanced → Proceed**).
+3. Return to the Console. Its requests to that origin now succeed.
+
+Then repeat for `https://192.168.1.50:62281`. The WebSocket runs on its own port, and browsers key
+these exceptions by host **and** port, so without it the Console loads and then sits with no live
+data — the most confusing possible half-working state. That page will show an error or a blank
+response once you accept, because the port speaks WebSocket rather than HTTP; that is expected, and
+the exception is recorded regardless.
+
+**Which to choose.** Option A on a computer you will use regularly: nothing to re-accept, no
+warnings. Option B for a quick look, where you lack administrator rights on the client, or when the
+Console is being viewed from a phone or tablet — there it is the only possibility, since those
+cannot edit a hosts file, though how long a browser keeps an accepted exception varies, so expect
+to grant it again.
+
+## Certificates
+
+Nothing per-device: **one** certificate covers both deployments, and every install serves the same
+file.
+
+| Name | Used when |
+|---|---|
+| `local.motion-master.synapticon.com` | server and browser on the same machine (a public A record for `127.0.0.1`) |
+| `*.ip.motion-master.synapticon.com` | server on another machine, resolved by a hosts entry |
+
+They are issued together as two SANs by `cert-renewal.yml` and published to the rolling `tls-cert`
+release.
+
+**Keeping them current is the second manual step for an offline machine.** Let's Encrypt
+certificates last 90 days, and once one expires the browser refuses the connection outright — there
+is no click-through for a cross-origin request.
+
+| The server can reach the internet | It cannot |
+|---|---|
+| Nothing to do. The startup self-heal fetches a fresh certificate when the current one is missing, expired, or within 7 days of expiring, and **Refresh certificate** on the Connection page does it on demand. | Copy `cert.pem` and `key.pem` next to the binary before the current one lapses, from `https://github.com/synapticon/motion-master/releases/download/tls-cert/`, and restart. |
+
+There is no way around the periodic copy for an air-gapped machine, and it is not worth trying:
+**no certificate authority can issue a long-lived certificate.** Public maximums are 398 days today
+and fall to 200 days in March 2026, 100 in 2027 and 47 in 2029. Even a private CA or a self-signed
+certificate is capped, because Apple rejects *any* TLS server certificate valid for more than 825
+days regardless of who signed it. Two years is the ceiling anywhere, and only if every client
+machine has your root installed.
+
+### None of this applies if you only use the API
+
+Everything above — the hostname, the hosts-file entry, the certificate and its expiry — exists for
+one reason: **so that a browser connects without a warning.** A program does not care. `curl -k`,
+Python's `requests(verify=False)` and Node's `rejectUnauthorized: false` all connect happily to any
+certificate, whatever name it carries and whether or not it has expired:
+
+```bash
+curl -k https://192.168.1.50:61447/api/version
+```
+
+So a server driven only by scripts, a test rig, or CI needs **no** DNS name, no hosts entry, and no
+valid certificate — just `bindAddress` set to `0.0.0.0` and the address. The certificate it happens
+to be serving is irrelevant, and letting it expire breaks nothing.
+
+The one thing still required is that *some* certificate file exists, because both listeners are
+TLS-only and the server will not start without one. Our own certificate is the easiest way to
+satisfy that — download it once and copy it next to the binary:
+
+```bash
+curl -LO https://github.com/synapticon/motion-master/releases/download/tls-cert/cert.pem
+curl -LO https://github.com/synapticon/motion-master/releases/download/tls-cert/key.pem
+```
+
+Then **let it expire**. For an API-only server that is not a problem to manage: no client is
+checking it, so nothing breaks when it lapses. Set `tls.autoUpdate` to `false` if the machine has no
+internet, so startup does not spend time on a fetch that cannot succeed.
+
+### The one-time DNS requirement
+
+Issuing a wildcard requires proving control of `ip.motion-master.synapticon.com` over DNS-01, so one
+static record is needed in the `synapticon.com` zone — **once, ever**, not per device:
+
+| Name | RR Type | Value |
+|---|---|---|
+| `_acme-challenge.ip.motion-master` | `CNAME` | `4723b93a-99f5-43d7-93f1-195dbb4168ea.auth.acme-dns.io.` |
+
+That is the same acme-dns account the existing `local.…` name uses, so no new secret is involved.
+acme-dns keeps two rolling TXT records per account and this certificate needs exactly two — which is
+also the ceiling: a third name on the certificate would need a second acme-dns account.
+
+Then run the **Renew TLS Certificate** workflow and confirm both names landed:
+
+```bash
+curl -sL https://github.com/synapticon/motion-master/releases/download/tls-cert/cert.pem \
+  | openssl x509 -noout -ext subjectAltName
+```
+
+No `A` records, no delegation, and no nameserver to operate — the `ip.…` names deliberately do not
+resolve in public DNS. A pleasant side effect: because they resolve nowhere, nobody can point one at
+a host of their own and serve trusted HTTPS under a `synapticon.com` name, even though the
+certificate's private key is published with every release.
 
 ## Troubleshooting
 
 | Symptom | Cause |
 |---|---|
-| Connection refused / no response | Server still bound to loopback — check the startup log for `0.0.0.0`, and check a firewall on the device. |
-| DNS does not resolve the dashed name | Part 1 incomplete, or a resolver with **DNS rebinding protection** dropping the private address from a public answer (common on consumer routers, `dnsmasq --stop-dns-rebind`). Test with `dig` against `8.8.8.8` to tell the two apart. |
-| Certificate error in the browser | The served certificate predates the wildcard. Check **Connection → Valid for** in the Console (or `GET /api/cert`); press **Refresh certificate**, or restart the server so its startup self-heal fetches the current one. |
-| Console reaches the API but no live data | The WebSocket port (62281) is blocked while the HTTP port is not — both must be reachable. |
+| Connection refused / no response | Server still bound to loopback — check the startup log for `0.0.0.0` — or a firewall on the device. |
+| Name does not resolve | The hosts entry is missing, has a typo, or the address is not the one the server logged. Check with `getent hosts <name>` (Linux), `dscacheutil -q host -a name <name>` (macOS), or `ping <name>` (Windows). |
+| Certificate error in the browser | The served certificate predates the wildcard SAN. Check **Connection → Valid for** in the Console (or `GET /api/cert`); press **Refresh certificate**, or restart so the startup self-heal fetches the current one. |
+| Console reaches the API but shows no live data | The WebSocket port (62281) is blocked while the HTTP port is not — both must be reachable. |
+| Worked, then stopped | The device's DHCP lease changed its address, so the name now points at the wrong host. Give it a reservation and update the hosts entry. |

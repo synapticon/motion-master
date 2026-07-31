@@ -246,6 +246,24 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // Bound off loopback, this server is reachable from the network — so say the two things the
+  // listen lines above do not. The machine's own addresses are deliberately NOT enumerated and
+  // printed: a host with several interfaces (wired, wireless, a container bridge) would yield
+  // several plausible-looking URLs of which only one works, and inside a bridge-networked container
+  // it would confidently print an address nobody can reach. The client already derives the exact
+  // hostname and hosts-file line from the address the user enters, which is where that belongs.
+  if (opts.config.server.bindAddress != "127.0.0.1" &&
+      opts.config.server.bindAddress != "localhost") {
+    spdlog::warn(
+        "Bound off loopback — reachable from the network, and the API has NO authentication. Use "
+        "only on a trusted network.");
+    spdlog::info(
+        "Browsers reach this server as https://<dashed-ip>.ip.motion-master.synapticon.com:{} "
+        "(192-168-1-50.ip.… for 192.168.1.50) and need a matching hosts-file entry — see "
+        "docs/LAN_DEPLOYMENT.md",
+        opts.config.server.httpPort);
+  }
+
   // Publish each sampled batch to the WebSocket topic named after its monitoring, then start the
   // sampler + refresher threads. (Not added to the RT GameLoop — sampling runs off the RT thread.)
   monitoringManager.setPublish([&wsServer](std::string topic, std::string json) {

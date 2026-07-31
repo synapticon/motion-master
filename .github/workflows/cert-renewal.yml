@@ -45,11 +45,15 @@ jobs:
           # ONE certificate carries both names Motion Master is reached by, so every host serves
           # the same file whether it is bound to loopback or to the LAN:
           #   local.motion-master.synapticon.com  — A record pinned to 127.0.0.1; the browser and
-          #     the server share a machine. Stays a plain static record in the parent zone, so an
-          #     outage of the ip.… responder cannot break the ordinary desktop install.
-          #   *.ip.motion-master.synapticon.com   — off-loopback: <dashed-ip>.ip.… resolves to that
-          #     LAN address, so an appliance is reachable from another machine's browser under a
-          #     publicly-trusted name. Wildcards are DNS-01 only, which is what we already run.
+          #     the server share a machine. Resolves from public DNS, so nothing to set up.
+          #   *.ip.motion-master.synapticon.com   — off-loopback: an appliance is reached as
+          #     <dashed-ip>.ip.… (192-168-1-50.ip.… for 192.168.1.50) under a publicly-trusted
+          #     name. These names are deliberately NOT in public DNS — the client machine resolves
+          #     them with a hosts-file entry, which is enough because TLS validates the name, not
+          #     how the name was resolved. Wildcards are DNS-01 only, which is what we already run.
+          #     Issuing one needs a single static CNAME in the parent zone:
+          #       _acme-challenge.ip.motion-master  CNAME  <the acme-dns subdomain below>
+          #     There are no A records and no delegation, so nothing has to be operated for this.
           # Both challenge names CNAME to the SAME acme-dns account, which is fine because acme-dns
           # keeps two rolling TXT records per account and this issuance needs exactly two. That is
           # also the ceiling: a THIRD name on this cert would silently evict one of the two, so it
@@ -85,7 +89,7 @@ jobs:
               exit 1
             fi
           done
-          notes="Latest Let's Encrypt certificate for local.motion-master.synapticon.com (resolves to 127.0.0.1) and *.ip.motion-master.synapticon.com (LAN deployments: <dashed-ip>.ip.… resolves to that address). Rotated monthly by cert-renewal.yml. Updated $(date -u +%Y-%m-%dT%H:%M:%SZ)."
+          notes="Latest Let's Encrypt certificate for local.motion-master.synapticon.com (resolves to 127.0.0.1) and *.ip.motion-master.synapticon.com (LAN deployments: <dashed-ip>.ip.… resolved by a hosts entry on the client). Rotated monthly by cert-renewal.yml. Updated $(date -u +%Y-%m-%dT%H:%M:%SZ)."
           if gh release view tls-cert --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             gh release edit tls-cert --repo "$GITHUB_REPOSITORY" --notes "$notes"
             gh release upload tls-cert cert.pem key.pem --repo "$GITHUB_REPOSITORY" --clobber

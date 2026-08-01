@@ -2,12 +2,12 @@
 # Release to install. The .deb is published per tag with both amd64 and arm64
 # assets, so the same version string serves the AAeon board and the Pi.
 #
-# NOTE: gameLoop.cpuAffinity landed after 6.0.0-alpha.61. Until this points at a
-# release that contains it, the key below is written into the config and simply
-# ignored by the older binary (unknown keys are not an error), so the RT thread
-# stays unpinned and the isolated core stays idle. GET /api/game-loop reporting
-# no cpuAffinity field at all is the symptom. Bump this after the next tag.
-motion_master_version: 6.0.0-alpha.61
+# 6.0.0-alpha.62 is the first release carrying gameLoop.cpuAffinity. On anything
+# older the key is still written to the config and simply ignored (an unknown key
+# is not an error), so the RT thread stays unpinned and the isolated core stays
+# idle — with GET /api/game-loop reporting no cpuAffinity field at all as the
+# only symptom. Keep this at or above alpha.62.
+motion_master_version: 6.0.0-alpha.62
 motion_master_release_url: >-
   https://github.com/synapticon/motion-master/releases/download/v{{ motion_master_version }}
 

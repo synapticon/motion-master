@@ -28,6 +28,6 @@ rt_targets:
     # Install Motion Master as a systemd daemon. Off by default, so the RT roles
     # alone still give you a bare real-time host.
     motion_master_install: true
-    motion_master_version: 6.0.0-alpha.61
+    motion_master_version: 6.0.0-alpha.62
     motion_master_fieldbus_driver: soem
     motion_master_fieldbus_adapter: enp2s0

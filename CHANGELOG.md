@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.62] - 2026-08-01
+
 ### Added
 
 - **The real-time thread can now be pinned to a dedicated CPU core**, via the new `gameLoop.cpuAffinity` setting (Linux only; `-1`, unpinned, is the default and nothing changes for an ordinary install). Point it at a core the kernel booted with `isolcpus` and the cycle gets that core to itself. This is what makes core isolation worth doing: `isolcpus` removes a core from the scheduler entirely, so nothing runs there unless a thread asks for it by name — until now an isolated core simply sat idle. Only the real-time thread moves; the HTTP, WebSocket and monitoring threads stay on the remaining cores, which is the difference between this and pinning the whole process with `taskset` or systemd's `CPUAffinity=` (both of which crowd every thread onto the isolated core, and stop `nohz_full` from taking effect). `GET /api/game-loop` reports `cpuAffinity` and `cpuPinned` alongside the existing real-time flags, and the Console's **Game Loop** page shows them.
@@ -444,7 +446,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.61...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.62...HEAD
+[6.0.0-alpha.62]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.61...v6.0.0-alpha.62
 [6.0.0-alpha.61]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.60...v6.0.0-alpha.61
 [6.0.0-alpha.60]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.59...v6.0.0-alpha.60
 [6.0.0-alpha.58]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.57...v6.0.0-alpha.58

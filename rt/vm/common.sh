@@ -17,16 +17,12 @@ CACHE_DIR="${RT_VM_CACHE_DIR:-$VM_DIR/.cache}"
 
 # Debian 14 (forky) generic cloud image.
 #
-# Forky rather than stable because that is what the boards will run: Debian 13
-# cannot boot a Raspberry Pi 5 at all, and 14 carries the PREEMPT_RT kernel
-# (7.1.3) in main on both architectures, so no backports pinning is needed. It
-# is still testing today, which is the trade — a daily image moves under you,
-# and that is fine for a machine whose whole purpose is to be thrown away.
-#
-# Set RT_VM_BASE_URL / RT_VM_BASE_NAME to go back to a stable base:
-#   RT_VM_BASE_URL=https://cloud.debian.org/images/cloud/trixie/latest \
-#   RT_VM_BASE_NAME=debian-13-genericcloud-amd64.qcow2 ./fetch-base.sh
-# (then set rt_kernel_suite: trixie-backports in the inventory).
+# Forky because that is what the boards run: stable cannot boot a Raspberry Pi 5
+# at all, and Forky carries the PREEMPT_RT kernel (7.1.3) in main on both
+# architectures. It is still testing today, which is the trade — a daily image
+# moves under you, and that is fine for a machine whose whole purpose is to be
+# thrown away. Override with RT_VM_BASE_URL / RT_VM_BASE_NAME if you need a
+# different base.
 #
 # The checksum is fetched alongside the image, so an upstream refresh is
 # detected rather than silently accepted.

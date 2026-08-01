@@ -44,8 +44,8 @@
 #     debian-14-raspi-arm64-daily.tar.xz    (vendor: raspi, arch: arm64)
 #
 # Forky specifically — raspi.debian.net's front page states "RPi 5 only works
-# with Debian 14 Forky (testing) or Sid", which matches Debian 13 shipping a
-# 6.12 kernel that predates usable RP1 support.
+# with Debian 14 Forky (testing) or Sid", which matches stable shipping a 6.12
+# kernel that predates usable RP1 support.
 #
 # The tarball contains a single member, disk.raw.
 

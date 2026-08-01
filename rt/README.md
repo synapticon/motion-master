@@ -20,16 +20,12 @@ Nothing here is machine-specific except the inventory.
 Same distro, same kernel version, same PREEMPT_RT, same roles. The VM is sized to match the boards
 so an isolated-core split means the same thing in all three.
 
-**Why Debian 14 (Forky) rather than stable.** Debian 13 cannot boot a Raspberry Pi 5 — RP1, the
-southbridge carrying the Pi's Ethernet and USB, only became usable upstream around kernel 6.18,
-and trixie ships 6.12. Debian's own position is that "RPi 5 only works with Debian 14 'Forky' or
+**Why Forky rather than stable.** Stable cannot boot a Raspberry Pi 5 — RP1, the southbridge
+carrying the Pi's Ethernet and USB, only became usable upstream around kernel 6.18, and stable is
+still on 6.12. Debian's own position is that "RPi 5 only works with Debian 14 'Forky' (testing) or
 Sid". Forky also carries `linux-image-rt-{amd64,arm64}` **7.1.3 in main**, the same version on both
-architectures, so the two boards run an identical kernel with no backports pinning at all. Forky is
-testing today; the boards ship in 2027, by which time it is the obvious target.
-
-Debian 13 still works — set `rt_kernel_suite: trixie-backports` in the inventory (backports carries
-the same 7.1.3) and point `RT_VM_BASE_URL`/`RT_VM_BASE_NAME` at a trixie cloud image. That path is
-x86-only in practice, for the reason above.
+architectures, so the two boards run an identical kernel with nothing to pin. Forky is testing
+today; the boards ship in 2027, by which time it is the obvious target.
 
 ### Comparing the two boards
 
@@ -148,6 +144,65 @@ rt/
 Inventory groups are what keep the two concerns apart: a play whose group has no hosts in the
 chosen inventory is simply skipped, so `site.yml` is safe to run against either.
 
+## What PREEMPT_RT Actually Does
+
+A stock kernel is fast *on average*; PREEMPT_RT is bounded in the *worst case*. That is the whole
+trade, and it is why everything else in this directory exists.
+
+On a normal kernel there are long stretches where the kernel cannot be preempted — a spinlock held,
+an interrupt handler running, a softirq processing packets. When the real-time thread becomes
+runnable it waits for those to finish, however high its priority. That wait is scheduling latency,
+and its **maximum** is what decides whether a 1 ms deadline is met. Averages are irrelevant here:
+one 3 ms stall a minute is a skipped cycle.
+
+Four things change:
+
+1. **Spinlocks become sleeping locks.** In mainline, holding a `spinlock_t` disables preemption.
+   PREEMPT_RT converts most of them to rt-mutex-backed sleeping locks, so a task holding one can be
+   preempted. Only `raw_spinlock_t` — scheduler core, low-level architecture code — stays truly
+   non-preemptible.
+2. **Interrupt handlers become threads.** Normally a hardware interrupt preempts everything at any
+   priority. Under PREEMPT_RT most handlers run in kernel threads with real priorities (~50 by
+   default), so a `SCHED_FIFO` 80 loop outranks the NIC. This is what makes
+   `kRtThreadPriority = 80` meaningful at all — on a stock kernel the number cannot starve the NIC
+   path, because hardirqs sit above every priority.
+3. **Softirqs are threaded too** — NAPI network processing, timers, tasklets — so packet handling
+   cannot silently preempt the cycle.
+4. **Priority inheritance on kernel locks**, bounding priority inversion: a low-priority task
+   holding a lock the RT thread needs temporarily inherits its priority, so it finishes and
+   releases quickly.
+
+Order of magnitude: worst-case wakeup latency drops from milliseconds to tens of microseconds. The
+cost is throughput — more context switches, more lock overhead — and a slightly worse *average*.
+
+### What it does not fix
+
+Each of these is a separate latency source that PREEMPT_RT leaves untouched, which is exactly what
+the rest of the roles are for:
+
+| Problem | Addressed by |
+| --- | --- |
+| Page fault mid-cycle | `mlockall` (`rt-limits` grants `memlock`) |
+| Deep C-state wakeup, tens of µs | `intel_idle.max_cstate=1` (`rt-boot`) |
+| Other tasks stealing the core | `isolcpus` + `gameLoop.cpuAffinity` |
+| Periodic tick on the real-time core | `nohz_full` (`rt-boot`) |
+| Interrupts landing on the real-time core | `irqaffinity`, masking `irqbalance` (`rt-tuning`) |
+| Frequency transitions | `performance` governor (`rt-tuning`) |
+| SMIs — firmware interrupts invisible to the OS | nothing; a hardware/BIOS problem |
+
+It also does nothing at all if the process never asks for real-time scheduling: a PREEMPT_RT kernel
+running only `SCHED_OTHER` threads behaves like a slightly slower normal kernel.
+
+**Why this matters for an EtherCAT master specifically.** The cycle is a blocking frame round-trip,
+and in free-run distributed clocks the drives act on frame *arrival*. So jitter in when the loop
+wakes becomes jitter in when the drive moves — there is no hardware pulse absorbing it. (Activating
+DC SYNC0 would decouple the two; see NEXTGEN.md.)
+
+One piece of history worth knowing, because it changes how you test for it: **since 6.12 PREEMPT_RT
+is merged into mainline**, no longer an out-of-tree patch. That is why the RT kernel comes from the
+ordinary archive, and why `/sys/kernel/realtime` — an artifact of the patch era — no longer exists.
+`rt-verify` reads `PREEMPT_RT` out of `uname -v` instead.
+
 ## What the Playbook Does
 
 Each role is one of the requirements for a deterministic cycle, and each is tagged with its own
@@ -158,11 +213,6 @@ name so it can be run alone.
 Installs `linux-image-rt-<arch>` and the matching headers. Debian ships PREEMPT_RT in the archive,
 so there is nothing to build or patch. The architecture comes from `dpkg --print-architecture`, so
 the same role is correct on both boards.
-
-`rt_kernel_suite` is empty by default, meaning "take it from whatever the host's sources offer" —
-correct on Forky, where 7.1.3 is in main. Set it to `trixie-backports` on a Debian 13 host and the
-role adds the suite (unless the image already lists it) and pins *only* these packages to it with
-`APT::Default-Release`, leaving the rest of the system on stable.
 
 The reboot is deferred to the end of the play, so a kernel install and a boot-parameter change cost
 one restart between them rather than one each.
@@ -395,7 +445,7 @@ build (`vendor: raspi`, `arch: arm64`), containing a single 3 GB `disk.raw`.
 that stop at Pi 4 and whose files now 404, and an FAQ still claiming Pi 5 is unsupported. Its front
 page says the project "has been superseded by the images generated by the Debian Cloud Images" —
 only that page was updated. The same front page is where the Pi-5-needs-Forky requirement comes
-from, which is consistent with Debian 13 shipping a 6.12 kernel that predates usable RP1 support
+from, which is consistent with stable shipping a 6.12 kernel that predates usable RP1 support
 (RP1 carries the Pi 5's Ethernet and USB).
 
 The Pi still cannot be provisioned the way the x86 board is: it has no cloud-init seed and no

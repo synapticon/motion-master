@@ -1,5 +1,5 @@
 ---
-# The throwaway Debian 13 VM in rt/vm. Used to develop the RT roles and to prove
+# The throwaway Debian VM in rt/vm. Used to develop the RT roles and to prove
 # they converge from a clean machine — not to measure latency.
 #
 # Start it with rt/vm/start.sh; the key and port come from rt/vm/common.sh, so

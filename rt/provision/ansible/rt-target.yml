@@ -1,5 +1,5 @@
 ---
-# Base Debian 13 -> real-time host. Idempotent: a second run must report no
+# Base Debian install -> real-time host. Idempotent: a second run must report no
 # changes, which is the property the QEMU VM in rt/vm exists to prove.
 - name: Provision a real-time Linux target
   hosts: rt_targets

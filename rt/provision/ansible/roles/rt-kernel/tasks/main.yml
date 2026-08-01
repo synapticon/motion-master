@@ -8,43 +8,8 @@
   changed_when: false
   check_mode: false
 
-# Some images (Debian's cloud image among them) already list backports in their
-# stock sources. Adding a second entry for the same suite works but makes apt
-# warn about a duplicate on every run, so look before writing. Grepping the
-# config rather than apt-cache means the answer does not depend on whether the
-# package lists have been fetched yet.
-- name: Check whether the kernel suite is already configured
-  ansible.builtin.command:
-    argv:
-      - grep
-      - -rqE
-      - "(^|[[:space:]]){{ rt_kernel_suite }}([[:space:]]|$)"
-      - /etc/apt/sources.list
-      - /etc/apt/sources.list.d/
-  register: rt_suite_configured
-  changed_when: false
-  failed_when: false
-  check_mode: false
-  when: "'-backports' in rt_kernel_suite"
-
-- name: Enable backports
-  when:
-    - "'-backports' in rt_kernel_suite"
-    - rt_suite_configured.rc != 0
-  ansible.builtin.deb822_repository:
-    name: "{{ rt_kernel_suite }}"
-    types: [deb]
-    uris: http://deb.debian.org/debian
-    suites: "{{ rt_kernel_suite }}"
-    components: [main, contrib, non-free-firmware]
-    signed_by: /usr/share/keyrings/debian-archive-keyring.gpg
-    state: present
-    enabled: true
-
-# Must be its own task, before the install. A fresh image ships with no package
-# lists at all, and APT::Default-Release is rejected outright for a release apt
-# has never seen — so fetching the lists as part of the install task below is too
-# late, and fails with "as such a release is not available in the sources".
+# Its own task, before the install. A fresh image ships with no package lists at
+# all, and apt cannot resolve a metapackage it has never seen.
 - name: Update the package lists
   ansible.builtin.apt:
     update_cache: true
@@ -54,12 +19,6 @@
   ansible.builtin.apt:
     name: "{{ rt_kernel_packages }}"
     state: present
-    # Equivalent to apt-get -t: takes these packages from the named suite while
-    # everything else still resolves from stable. (The apt-get "pkg/suite" form
-    # is CLI-only — the module does not parse it.)
-    # omit, not "", when no suite is pinned: an empty APT::Default-Release is
-    # rejected the same way an unknown one is.
-    default_release: "{{ rt_kernel_suite if rt_kernel_suite | length > 0 else omit }}"
   register: rt_kernel_install
   vars:
     rt_kernel_packages: >-

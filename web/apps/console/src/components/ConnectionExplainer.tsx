@@ -111,6 +111,34 @@ export default function ConnectionExplainer() {
         </div>
 
         <div>
+          <dt className="font-medium text-grey-900">
+            Chrome will ask permission to reach your local network
+          </dt>
+          <dd>
+            <p>
+              On the first connection to a server on your network, Chrome shows a{' '}
+              <strong>local network access</strong> prompt. Allow it. This is unrelated to the
+              certificate: since Chrome 142, a page served from a public address — which this
+              Console is — must ask before it may reach a private one, which is what stops an
+              arbitrary website from probing the devices on your network.
+            </p>
+            <p className="mt-2">
+              The check is on the <em>address</em> the name resolves to, not the name itself, so a
+              genuine certificate and a real hostname do not exempt it. Granting it once covers this
+              Console from then on. <strong>Denying it makes requests fail silently</strong>, which
+              looks exactly like a server that is not running — so if the connection fails and
+              everything else checks out, look at the permission (the icon at the left of Chrome&apos;s
+              address bar).
+            </p>
+            <p className="mt-2">
+              On managed browsers an administrator can grant it centrally with the{' '}
+              <code>LocalNetworkAccessAllowedForUrls</code> policy for{' '}
+              <code>https://motion-master.synapticon.com</code>, so nobody is prompted at all.
+            </p>
+          </dd>
+        </div>
+
+        <div>
           <dt className="font-medium text-grey-900">The certificate</dt>
           <dd>
             <p>

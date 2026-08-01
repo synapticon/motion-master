@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Changed
+
+- The Console now explains Chrome's **local network access** prompt, which appears on the first connection to a server on your network and must be allowed. It is unrelated to the certificate — since Chrome 142 a page served from a public address must ask before reaching a private one — and denying it makes requests fail silently, looking exactly like a server that is not running. The unreachable-endpoint message now names it as a possible cause.
+
 ## [6.0.0-alpha.61] - 2026-07-31
 
 ### Added

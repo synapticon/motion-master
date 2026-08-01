@@ -141,6 +141,23 @@ nothing to re-do later.
 If the endpoint is unreachable, the Connection page shows the exact line for that address with a
 copy button.
 
+### Chrome asks for local network access — allow it
+
+On the first connection to a server on your network, Chrome shows a **local network access**
+prompt. Allow it.
+
+This is separate from everything above and cannot be avoided by getting the certificate or the
+hostname right. Since Chrome 142 a page served from a public address — which the Console is — has
+to ask permission before it may reach a private one, which is what prevents an arbitrary website
+from probing the devices on your network. The check is on the **address the name resolves to**, not
+the name, so a genuine certificate does not exempt it.
+
+Granting it once covers the Console from then on. **Denying it makes requests fail silently**,
+indistinguishable from a server that is not running — so if the connection fails with everything
+else correct, check the permission via the icon at the left of Chrome's address bar. On managed
+browsers an administrator can grant it fleet-wide with the `LocalNetworkAccessAllowedForUrls`
+policy for `https://motion-master.synapticon.com`, and nobody is prompted.
+
 ### Option B — use the IP address directly (one browser warning)
 
 Leave the address as you typed it and press **Apply**. Nothing needs to be installed or edited, but
@@ -251,6 +268,7 @@ certificate's private key is published with every release.
 | Symptom | Cause |
 |---|---|
 | Connection refused / no response | Server still bound to loopback — check the startup log for `0.0.0.0` — or a firewall on the device. |
+| Everything looks correct but nothing connects | Chrome's **local network access** permission was denied for `https://motion-master.synapticon.com`; denied requests fail silently. Check the icon at the left of the address bar. |
 | Name does not resolve | The hosts entry is missing, has a typo, or the address is not the one the server logged. Check with `getent hosts <name>` (Linux), `dscacheutil -q host -a name <name>` (macOS), or `ping <name>` (Windows). |
 | Certificate error in the browser | The served certificate predates the wildcard SAN. Check **Connection → Valid for** in the Console (or `GET /api/cert`); press **Refresh certificate**, or restart so the startup self-heal fetches the current one. |
 | Console reaches the API but shows no live data | The WebSocket port (62281) is blocked while the HTTP port is not — both must be reachable. |

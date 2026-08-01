@@ -397,6 +397,12 @@ export default function ConnectionPage() {
                 Motion Master itself runs on — a server left at that default is unreachable from
                 here however correct everything else is.
               </p>
+              <p className="mt-2">
+                And in Chrome, check that this site is allowed to reach your local network — the
+                icon at the left of the address bar. Chrome asks before a public site may contact a
+                private address; if that was denied, requests fail silently and look exactly like a
+                server that is not running.
+              </p>
               <div className="mt-2 flex items-center gap-2">
                 <code className="bg-white/60 px-2 py-1 text-xs break-all">{hostsLine}</code>
                 <button

@@ -136,7 +136,11 @@ function DeviceDictionary({ device, moduleNames }: DeviceDictionaryProps) {
           <span className="font-display uppercase tracking-wide text-sm text-grey-800">
             {device.type}
           </span>
-          <span className="ml-3 text-xs text-grey-500 font-mono">
+          {/* normal-case opts out of the design system's global uppercase for buttons
+              (theme.css). That rule is right for a button's label — the device type beside this
+              keeps it — but this span is data: uppercased it renders 0X00000201 and "506 ENTRIES",
+              contradicting the same values shown as 0x00000201 in the tables below. */}
+          <span className="ml-3 text-xs text-grey-500 font-mono normal-case">
             {device.productCode !== undefined && toHex(device.productCode, 8)}
             {device.revisionNo !== undefined && ` rev ${toHex(device.revisionNo, 8)}`}
             {` · ${entries.length} entries`}

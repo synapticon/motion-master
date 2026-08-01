@@ -1,0 +1,36 @@
+---
+# The Raspberry Pi image while it is being built, running under QEMU emulation.
+# Used only by rt/image/build-rpi-image.sh — the finished card is a normal
+# rt_targets host and uses lab.yml like any other board.
+rt_targets:
+  hosts:
+    rpi-image:
+      ansible_host: 127.0.0.1
+      ansible_port: 2223
+      ansible_user: root
+      ansible_ssh_private_key_file: "{{ playbook_dir }}/../../image/.cache/id_ed25519"
+      ansible_ssh_common_args: >-
+        -o StrictHostKeyChecking=no
+        -o UserKnownHostsFile=/dev/null
+        -o LogLevel=ERROR
+  vars:
+    # Already root; nothing to escalate.
+    ansible_become: false
+
+    # The account Motion Master runs as on the finished board.
+    rt_user: root
+
+    # Emulation is slow and every step is remote — be patient before giving up.
+    ansible_timeout: 120
+
+    # This is an image, not a machine. Nothing here is the thing that will run:
+    # the guest booted a kernel handed to it on the QEMU command line, and has
+    # none of the Pi's hardware. So do not restart it (it would come back on the
+    # same borrowed kernel), do not start the daemon, and install the CPU
+    # governor unit even though this guest has no cpufreq — the board does.
+    rt_skip_reboot: true
+    rt_force_cpu_governor: true
+    motion_master_start: false
+
+    motion_master_install: true
+    motion_master_fieldbus_driver: soem

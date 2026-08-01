@@ -1,12 +1,12 @@
 ---
 - name: Install and configure system packages
-  hosts: local
+  hosts: ci_machines
   become: true
   roles:
-    - { role: rt-machine, tags: rt-machine }
+    - { role: dev-toolchain, tags: dev-toolchain }
 
 - name: Set up GitHub Actions runner
-  hosts: local
+  hosts: ci_machines
   become: false
   roles:
     - { role: actions-runner, tags: actions-runner }

@@ -1,0 +1,3 @@
+# Real-hardware inventories carry site-specific addresses and account names.
+# Start from lab.yml.example.
+lab.yml

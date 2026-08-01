@@ -1,0 +1,12 @@
+# Managed by Ansible (rt-tuning role) — do not edit.
+[Unit]
+Description=Pin the CPU frequency governor for real-time operation
+After=multi-user.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/bin/cpupower frequency-set --governor {{ rt_cpu_governor }}
+
+[Install]
+WantedBy=multi-user.target

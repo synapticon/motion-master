@@ -1,0 +1,10 @@
+---
+- name: Update GRUB configuration
+  ansible.builtin.command: update-grub
+  changed_when: true
+
+# Rebuilds /boot/firmware/cmdline.txt and config.txt from the files in
+# /etc/default — the command raspi-firmware's own documentation names.
+- name: Regenerate Raspberry Pi boot files
+  ansible.builtin.command: update-initramfs -u -k all
+  changed_when: true

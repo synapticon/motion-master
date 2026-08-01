@@ -16,14 +16,18 @@ namespace {
 
 // Applies the same RT setup the production GameLoop uses, so the measurement
 // characterises the configuration that actually ships.
-void setRealtimePriority() {
-  const mm::core::RtSetupResult rt = mm::core::setRealtimePriority();
+void setRealtimePriority(int cpuAffinity) {
+  const mm::core::RtSetupResult rt = mm::core::setRealtimePriority(cpuAffinity);
   if (!rt.schedFifo) {
     std::cerr << "warning: SCHED_FIFO failed — run as root or grant CAP_SYS_NICE for valid results\n";
   }
 #ifdef __linux__
   if (!rt.memLocked) {
     std::cerr << "warning: mlockall failed — page faults may inflate jitter\n";
+  }
+  if (cpuAffinity >= 0 && !rt.cpuPinned) {
+    std::cerr << "warning: could not pin to CPU " << cpuAffinity
+              << " — measuring an unpinned thread\n";
   }
 #endif
 }
@@ -87,6 +91,7 @@ int main(int argc, char* argv[]) {
   int duration_s = 30;
   int period_us = 1000;
   int workload_us = 0;
+  int cpu = -1;
   std::string output = "jitter.csv";
 
   for (int i = 1; i < argc; i++) {
@@ -97,6 +102,8 @@ int main(int argc, char* argv[]) {
                 << "  --duration <s>     Run duration in seconds        (default: 30)\n"
                 << "  --period <µs>      Cycle period in microseconds   (default: 1000)\n"
                 << "  --workload <µs>    Per-cycle busy-wait to simulate task load  (default: 0)\n"
+                << "  --cpu <n>          Pin to this core, as gameLoop.cpuAffinity does  "
+                   "(default: unpinned)\n"
                 << "  --output <file>    CSV output path                (default: jitter.csv)\n\n"
                 << "Run as root or with CAP_SYS_NICE + CAP_IPC_LOCK for valid RT results.\n"
                 << "Plot results with: python3 plot_jitter.py jitter.csv\n";
@@ -107,6 +114,8 @@ int main(int argc, char* argv[]) {
       period_us = std::atoi(argv[++i]);
     } else if (arg == "--workload" && i + 1 < argc) {
       workload_us = std::atoi(argv[++i]);
+    } else if (arg == "--cpu" && i + 1 < argc) {
+      cpu = std::atoi(argv[++i]);
     } else if (arg == "--output" && i + 1 < argc) {
       output = argv[++i];
     }
@@ -119,13 +128,14 @@ int main(int argc, char* argv[]) {
             << "  Period:   " << period_us << " µs\n"
             << "  Duration: " << duration_s << " s  (" << num_cycles << " cycles)\n"
             << "  Workload: " << workload_us << " µs/cycle\n"
+            << "  CPU:      " << (cpu >= 0 ? std::to_string(cpu) : "unpinned") << "\n"
             << "  Output:   " << output << "\n\n"
             << "Running..." << std::endl;
 
   std::vector<int64_t> timestamps;
   timestamps.reserve(num_cycles);
 
-  setRealtimePriority();
+  setRealtimePriority(cpu);
 
   mm::core::CyclicTimer timer{std::chrono::microseconds(period_us)};
   for (uint64_t i = 0; i < num_cycles; i++) {

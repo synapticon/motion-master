@@ -246,6 +246,15 @@ export default function ServerGameLoopPage() {
               </Callout>
             )}
 
+            {health.cpuAffinity >= 0 && !health.cpuPinned && (
+              <Callout variant="error">
+                The loop was configured to run on CPU {health.cpuAffinity} (
+                <code className="font-mono">gameLoop.cpuAffinity</code>) but could not be pinned
+                there, so it is sharing cores with everything else. Check that the core exists and
+                that nothing is restricting the process&apos;s affinity.
+              </Callout>
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               <Metric
                 label="Achieved rate"
@@ -293,9 +302,16 @@ export default function ServerGameLoopPage() {
                   <span className="text-lg space-y-1 flex flex-col">
                     <RtFlag ok={health.schedFifo}>SCHED_FIFO</RtFlag>
                     <RtFlag ok={health.memLocked}>mlockall</RtFlag>
+                    {health.cpuAffinity >= 0 ? (
+                      <RtFlag ok={health.cpuPinned}>CPU {health.cpuAffinity}</RtFlag>
+                    ) : (
+                      <span className="font-mono text-grey-500">
+                        — <span className="text-grey-500">unpinned</span>
+                      </span>
+                    )}
                   </span>
                 }
-                title="Whether the loop acquired real-time priority and pinned its memory"
+                title="Whether the loop acquired real-time priority, pinned its memory, and pinned its thread to a dedicated core"
               />
             </div>
 

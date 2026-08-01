@@ -1,0 +1,85 @@
+---
+# irqbalance periodically redistributes interrupts across all cores, which would
+# undo irqaffinity= from the kernel command line within seconds.
+- name: Check whether irqbalance is installed
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/system/irqbalance.service
+  register: rt_irqbalance_unit
+
+- name: Mask irqbalance
+  ansible.builtin.systemd_service:
+    name: irqbalance
+    state: stopped
+    enabled: false
+    masked: true
+  when: rt_irqbalance_unit.stat.exists
+
+- name: Check for CPU frequency scaling
+  ansible.builtin.stat:
+    path: /sys/devices/system/cpu/cpu0/cpufreq
+  register: rt_cpufreq
+
+# Frequency transitions and their governors add latency; pinning to performance
+# keeps the clock where it is. Virtual machines and fixed-frequency boards
+# expose no cpufreq at all, and there is nothing to set there.
+- name: Pin the CPU frequency governor
+  # rt_force_cpu_governor covers the disk-image case: the emulated guest has no
+  # cpufreq, but the board the image is written to does, so the unit has to go
+  # in anyway or the finished card would silently run on-demand.
+  when: rt_cpufreq.stat.exists or (rt_force_cpu_governor | default(false))
+  block:
+    - name: Install cpupower
+      ansible.builtin.apt:
+        name: linux-cpupower
+        state: present
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Install the CPU governor unit
+      ansible.builtin.template:
+        src: rt-cpu-governor.service.j2
+        dest: /etc/systemd/system/rt-cpu-governor.service
+        owner: root
+        group: root
+        mode: "0644"
+      register: rt_governor_unit
+
+    - name: Enable the CPU governor unit
+      ansible.builtin.systemd_service:
+        name: rt-cpu-governor.service
+        # Only started where there is a governor to set; in an image build it is
+        # enabled for next boot and would fail if started now.
+        state: >-
+          {{ omit if not rt_cpufreq.stat.exists
+             else ('restarted' if rt_governor_unit.changed else 'started') }}
+        enabled: true
+        daemon_reload: true
+
+- name: Note the absence of frequency scaling
+  ansible.builtin.debug:
+    msg: >-
+      No cpufreq on this host (virtual machine or fixed-frequency CPU) —
+      skipping the {{ rt_cpu_governor }} governor.
+  when: not rt_cpufreq.stat.exists
+
+- name: Disable offload on the EtherCAT interface
+  when: rt_ethercat_interface | length > 0
+  block:
+    # A .link file is applied by udev when the device appears, whatever manages
+    # the network afterwards — unlike an ethtool command in rc.local, which is
+    # lost on the next interface reset.
+    - name: Install the EtherCAT link configuration
+      ansible.builtin.template:
+        src: 90-ethercat.link.j2
+        dest: "{{ rt_ethercat_link_path }}"
+        owner: root
+        group: root
+        mode: "0644"
+      register: rt_ethercat_link
+
+    - name: Apply the link configuration
+      ansible.builtin.command: >-
+        udevadm trigger --settle --subsystem-match=net
+        --action=add /sys/class/net/{{ rt_ethercat_interface }}
+      when: rt_ethercat_link.changed
+      changed_when: true

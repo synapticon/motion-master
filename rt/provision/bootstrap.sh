@@ -57,7 +57,7 @@ run_playbook() {
     echo "[bootstrap] Running Ansible playbook ..."
     echo "You will be prompted for your sudo password."
     echo ""
-    "$CLONE_DIR/rt/provision/play.sh"
+    "$CLONE_DIR/rt/provision/play-ci.sh"
 }
 
 install_deps

@@ -19,6 +19,12 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **The real-time thread can now be pinned to a dedicated CPU core**, via the new `gameLoop.cpuAffinity` setting (Linux only; `-1`, unpinned, is the default and nothing changes for an ordinary install). Point it at a core the kernel booted with `isolcpus` and the cycle gets that core to itself. This is what makes core isolation worth doing: `isolcpus` removes a core from the scheduler entirely, so nothing runs there unless a thread asks for it by name — until now an isolated core simply sat idle. Only the real-time thread moves; the HTTP, WebSocket and monitoring threads stay on the remaining cores, which is the difference between this and pinning the whole process with `taskset` or systemd's `CPUAffinity=` (both of which crowd every thread onto the isolated core, and stop `nohz_full` from taking effect). `GET /api/game-loop` reports `cpuAffinity` and `cpuPinned` alongside the existing real-time flags, and the Console's **Game Loop** page shows them.
+- `hil/jitter_bench` takes a matching `--cpu <n>`, so a latency measurement can be made under the same pinning the server will run with.
+- **Ansible provisioning for real-time Linux hosts**, under `rt/`: a throwaway Debian 14 QEMU virtual machine to develop against, and roles that take a stock Debian install to a configured real-time host — PREEMPT_RT kernel, isolated cores, `rtprio`/`memlock` limits, interrupt affinity, and Motion Master itself as a systemd service. One playbook covers both an x86 industrial PC and a Raspberry Pi 5. See `rt/README.md`.
+
 ### Changed
 
 - The Console now explains Chrome's **local network access** prompt, which appears on the first connection to a server on your network and must be allowed. It is unrelated to the certificate — since Chrome 142 a page served from a public address must ask before reaching a private one — and denying it makes requests fail silently, looking exactly like a server that is not running. The unreachable-endpoint message now names it as a possible cause.

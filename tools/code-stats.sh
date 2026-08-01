@@ -44,7 +44,9 @@ stats="$(
       if (prev != "")
         printf "%d\t%d\t%d\t%d\t%s\n", code, comment, blank, code + comment + blank, prev
     }
-    # New file: emit the previous file’s tally, then reset counters.
+    # New file: emit the tally for the previous file, then reset counters.
+    # (No apostrophe here on purpose — this comment is inside a single-quoted
+    #  awk program, where one would terminate the string.)
     FNR == 1 { flush(); code = comment = blank = inblock = 0; prev = FILENAME }
     {
       line = $0

@@ -1,0 +1,72 @@
+---
+- name: Detect the bootloader
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: rt_bootloader_probe
+  loop:
+    - /etc/default/grub
+    - /boot/firmware/cmdline.txt
+
+# cmdline.txt wins when both are present: it is the more specific signal (only a
+# Pi has one, whereas /etc/default/grub appears merely from grub-common being
+# installed) and on a Pi it is the file the firmware actually reads.
+- name: Name the bootloader
+  ansible.builtin.set_fact:
+    rt_bootloader: >-
+      {{ 'firmware-cmdline' if rt_bootloader_probe.results[1].stat.exists
+         else ('grub' if rt_bootloader_probe.results[0].stat.exists
+         else 'unknown') }}
+
+- name: Require a supported bootloader
+  ansible.builtin.fail:
+    msg: >-
+      Found neither /etc/default/grub nor /boot/firmware/cmdline.txt; cannot set
+      kernel boot parameters on this host.
+  when: rt_bootloader == 'unknown'
+
+- name: Require enough CPUs to isolate and still have housekeeping cores
+  ansible.builtin.assert:
+    that:
+      - rt_isolated_cpu_count | int >= 1
+      - ansible_facts['processor_vcpus'] | int > rt_isolated_cpu_count | int
+    fail_msg: >-
+      Cannot isolate {{ rt_isolated_cpu_count }} of
+      {{ ansible_facts['processor_vcpus'] }} CPUs — at least one must be left
+      for the OS. Lower rt_isolated_cpu_count or set rt_isolated_cpus directly.
+  when: rt_isolated_cpus | length == 0
+
+- name: Default to the topmost CPUs
+  ansible.builtin.set_fact:
+    rt_isolated_cpus: >-
+      {{ range(ansible_facts['processor_vcpus'] | int - rt_isolated_cpu_count | int,
+               ansible_facts['processor_vcpus'] | int) | join(',') }}
+  when: rt_isolated_cpus | length == 0
+
+# difference() is a set operation and loses ordering, so sort numerically —
+# "irqaffinity=1,0" is valid but reads as a bug in /proc/cmdline.
+- name: Derive the housekeeping cores
+  ansible.builtin.set_fact:
+    rt_housekeeping_cpus: >-
+      {{ range(0, ansible_facts['processor_vcpus'] | int)
+         | map('string') | difference(rt_isolated_cpus.split(','))
+         | map('int') | sort | join(',') }}
+
+- name: Require housekeeping cores to remain
+  ansible.builtin.assert:
+    that: rt_housekeeping_cpus | length > 0
+    fail_msg: >-
+      rt_isolated_cpus ({{ rt_isolated_cpus }}) claims every CPU on this host.
+      The OS, the network stack and Ansible itself need at least one core left.
+
+- name: Apply the boot parameters
+  ansible.builtin.include_tasks: "{{ rt_bootloader }}.yml"
+
+- name: Request a reboot when the boot parameters changed
+  ansible.builtin.set_fact:
+    rt_reboot_required: true
+  when: rt_boot_config.changed
+
+# The reboot at the end of the play must see the regenerated bootloader config,
+# and handlers would otherwise not have run yet.
+- name: Apply the bootloader configuration now
+  ansible.builtin.meta: flush_handlers

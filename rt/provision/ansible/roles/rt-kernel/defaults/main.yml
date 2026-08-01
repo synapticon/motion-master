@@ -1,0 +1,20 @@
+---
+# Debian ships PREEMPT_RT in the archive; there is nothing to build or patch.
+#
+# Empty means "install from whatever the host's sources already offer", which is
+# right on Debian 14 (forky): linux-image-rt-{amd64,arm64} 7.1.3 is in main, the
+# same version on both architectures, so the AAeon board and the Raspberry Pi 5
+# run an identical kernel with no pinning at all.
+#
+# On Debian 13 the stable kernel is 6.12, which is too old for a Pi 5 — RP1,
+# which carries the Pi's Ethernet and USB, only became usable upstream around
+# 6.18. There, set:
+#
+#   rt_kernel_suite: trixie-backports
+#
+# and the role adds the suite (if the image does not already list it) and pins
+# these packages to it with APT::Default-Release, leaving everything else on
+# stable. Backports carries the same 7.1.3, so either route lands on one kernel.
+rt_kernel_suite: ""
+
+rt_kernel_install_headers: true

@@ -1,0 +1,19 @@
+#
+# Real-time kernel command line. Managed by Ansible (rt-boot role) — do not edit
+# by hand; change the role or set rt_boot_parameters in the inventory.
+#
+# grub-mkconfig sources this after /etc/default/grub, so the append below keeps
+# whatever the base file and Debian's own drop-ins already set.
+#
+# Isolated cores:     {{ rt_isolated_cpus }}
+# Housekeeping cores: {{ rt_housekeeping_cpus }}
+#
+GRUB_CMDLINE_LINUX="$GRUB_CMDLINE_LINUX {{ rt_boot_parameters | join(' ') }}"
+{% if rt_top_level_kernel %}
+
+# Pin the real-time kernel to the top of the boot menu. Without this the default
+# is whichever kernel sorts highest, so an ordinary non-RT kernel upgrade would
+# quietly take the machine off PREEMPT_RT. Re-run the playbook after upgrading
+# the RT kernel so this points at the new version.
+GRUB_TOP_LEVEL="{{ rt_top_level_kernel }}"
+{% endif %}

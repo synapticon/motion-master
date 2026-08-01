@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <string>
+#include <thread>
 
 std::expected<Config, std::string> parseConfig(const nlohmann::json& doc) {
   if (!doc.is_object()) {
@@ -42,6 +43,17 @@ std::expected<Config, std::string> parseConfig(const nlohmann::json& doc) {
 
   if (config.gameLoop.periodUs == 0) {
     return std::unexpected("gameLoop.periodUs must be greater than 0");
+  }
+
+  // Naming a core that does not exist would otherwise fail silently at startup (sched_setaffinity
+  // returns EINVAL and the thread simply stays unpinned), which is exactly the kind of typo that
+  // costs an afternoon on a board you cannot see. hardware_concurrency() counts online CPUs, so
+  // isolated cores are included; 0 means "unknown", in which case there is nothing to check
+  // against.
+  if (const unsigned int cpus = std::thread::hardware_concurrency();
+      cpus > 0 && config.gameLoop.cpuAffinity >= static_cast<int>(cpus)) {
+    return std::unexpected("gameLoop.cpuAffinity must be less than the CPU count (" +
+                           std::to_string(cpus) + "); use -1 to leave the thread unpinned");
   }
 
   if (config.recorder.capacity == 0) {

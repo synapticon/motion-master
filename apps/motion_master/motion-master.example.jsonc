@@ -54,7 +54,21 @@
 
   // Real-time cyclic loop.
   "gameLoop": {
-    "periodUs": 1000  // cyclic timer period in microseconds (1000 = 1 ms); must be > 0
+    "periodUs": 1000,  // cyclic timer period in microseconds (1000 = 1 ms); must be > 0
+
+    // Core to pin the real-time thread to; -1 leaves it unpinned. Linux only.
+    //
+    // Point this at a core the kernel booted with "isolcpus". Such a core is taken out of the
+    // scheduler and runs nothing unless a thread asks for it by name — so an isolated core is
+    // wasted until this is set. Only the RT thread moves; the HTTP, WebSocket, monitoring and
+    // parameter-refresher threads stay on the remaining cores. That is the difference between this
+    // and pinning the whole process with taskset or systemd's CPUAffinity=, which would drag every
+    // thread onto the isolated core to contend with the RT one (and, by leaving more than one
+    // runnable task there, stop nohz_full from taking effect).
+    //
+    // Fixed at startup, unlike periodUs — it describes the deployment. Must name a core that
+    // exists. rt/README.md covers the kernel side.
+    "cpuAffinity": -1
   },
 
   // Lossless process-data recorder (the flight-data ring every RT cycle is appended to).

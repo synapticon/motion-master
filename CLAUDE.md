@@ -34,6 +34,7 @@ git submodule update --init --recursive
 All common tasks have wrapper scripts in `tools/`. They default to the `x64-linux-debug` preset; pass a preset name as the first argument to override.
 
 ```bash
+./tools/install-deps.sh           # install all OS packages (Debian/Ubuntu + Fedora); --dry-run to preview
 ./tools/configure.sh              # cmake --preset
 ./tools/build.sh                  # cmake --build --preset (no setcap by default — needs no sudo)
 ./tools/build.sh --setcap         # build, then sudo setcap for raw socket + RT access
@@ -44,7 +45,8 @@ All common tasks have wrapper scripts in `tools/`. They default to the `x64-linu
 ./tools/format-cmake.sh           # cmake-format all CMake files (--check to verify; requires: pip install cmakelang)
 ./tools/lint.sh                   # cpplint (requires: pip install cpplint)
 ./tools/cppcheck.sh               # cppcheck static analysis
-./tools/check.sh                  # format + cppcheck + lint in sequence
+./tools/shellcheck.sh             # shellcheck every tracked shell script (git-driven file list)
+./tools/check.sh                  # format + cppcheck + lint + cmake-lint + shellcheck in sequence
 ./tools/clean.sh                  # remove build/<preset>
 ./tools/package.sh [preset]       # build .deb and .rpm packages (cert.pem/key.pem must be in build dir)
 
@@ -398,3 +400,5 @@ Headers use `.h`, sources use `.cc`. Repo/folder names use hyphens (`motion-mast
 ```
 
 cpplint is configured via `CPPLINT.cfg` (`-legal/copyright`, `-build/c++11` suppressed; 100-column limit; `.h` treated as headers). cppcheck runs with `warning,style,performance,portability`, `--std=c++23`, exits non-zero on findings.
+
+Shell scripts are covered by `./tools/shellcheck.sh` (part of `check.sh`), which is **not** a CMake target — it needs no build directory. Its file list comes from `git ls-files`, so a new script is covered as soon as it is tracked and nothing under `build/` or `extern/` is ever picked up; `packaging/postinst` is added explicitly because dpkg requires that extensionless name. It runs with `-x` so the `rt/vm` scripts are checked against the `common.sh` they source. Two suppressions are deliberate and should stay: `# shellcheck disable=SC2034` in `rt/vm/common.sh` (a sourced config file — every variable is used by its consumers, which shellcheck cannot see) and `# shellcheck source=/dev/null` in `clients/python/setup.sh` (it sources a venv activator that the same line creates). Note that `tools/code-stats.sh` embeds a single-quoted `awk` program, so an apostrophe inside those comments would terminate the string — SC1112 there is a real trap, not a nit to "fix".

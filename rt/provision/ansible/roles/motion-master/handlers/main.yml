@@ -1,0 +1,7 @@
+---
+- name: Restart Motion Master
+  ansible.builtin.systemd_service:
+    name: "{{ motion_master_service }}"
+    state: restarted
+    daemon_reload: true
+  when: motion_master_start

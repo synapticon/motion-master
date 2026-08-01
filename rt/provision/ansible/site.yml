@@ -1,2 +1,5 @@
 ---
-- import_playbook: rt-machine.yml
+# Both playbooks, selected by inventory: a play whose group has no hosts in the
+# chosen inventory is skipped, so this is safe to run against either.
+- import_playbook: ci-machine.yml
+- import_playbook: rt-target.yml

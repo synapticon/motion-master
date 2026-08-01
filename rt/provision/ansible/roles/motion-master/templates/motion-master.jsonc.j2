@@ -1,0 +1,36 @@
+// Motion Master configuration. Managed by Ansible (motion-master role) — do not edit by hand;
+// change the role's variables and re-run the playbook.
+//
+// Auto-discovered because it sits next to the binary, so the service needs no --config flag.
+// motion-master.example.jsonc in this directory documents every available key.
+{
+  "server": {
+    // An appliance is reached from another machine, so it binds every interface rather than
+    // loopback. Motion Master has NO authentication: anything that can reach these ports can
+    // enable drives and command motion. Only on a trusted network.
+    "bindAddress": "{{ motion_master_bind_address }}",
+    "httpPort": {{ motion_master_http_port }},
+    "wsPort": {{ motion_master_ws_port }}
+  },
+
+{% if motion_master_fieldbus_driver | length > 0 %}
+  "fieldbus": {
+    "driver": "{{ motion_master_fieldbus_driver }}"{% if motion_master_fieldbus_adapter | length > 0 %},
+    "adapter": "{{ motion_master_fieldbus_adapter }}"{% endif %}
+
+  },
+
+{% endif %}
+  "gameLoop": {
+    "periodUs": {{ motion_master_period_us }},
+
+    // The core rt-boot isolated. isolcpus takes that core out of the scheduler, so it runs
+    // nothing until a thread asks for it by name — this line is what puts the RT thread there.
+    // Only that thread moves; the HTTP, WebSocket and monitoring threads stay on the
+    // housekeeping cores. The systemd unit deliberately sets no CPUAffinity=, which would
+    // instead drag all of them onto the isolated core.
+    "cpuAffinity": {{ motion_master_cpu_affinity }}
+  },
+
+  "logLevel": "{{ motion_master_log_level }}"
+}

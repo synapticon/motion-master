@@ -32,6 +32,24 @@ TEST(ConfigTest, ZeroGameLoopPeriodRejected) {
   EXPECT_FALSE(parseConfig(json::parse(R"({"gameLoop": {"periodUs": 0}})")).has_value());
 }
 
+TEST(ConfigTest, CpuAffinityDefaultsToUnpinned) {
+  auto r = parseConfig(json::object());
+  ASSERT_TRUE(r.has_value()) << r.error();
+  EXPECT_EQ(r->gameLoop.cpuAffinity, -1);
+}
+
+TEST(ConfigTest, CpuAffinityOverride) {
+  auto r = parseConfig(json::parse(R"({"gameLoop": {"cpuAffinity": 0}})"));
+  ASSERT_TRUE(r.has_value()) << r.error();
+  EXPECT_EQ(r->gameLoop.cpuAffinity, 0);
+}
+
+TEST(ConfigTest, CpuAffinityBeyondCpuCountRejected) {
+  // Caught here rather than failing silently at startup, where sched_setaffinity
+  // would just return EINVAL and leave the thread unpinned.
+  EXPECT_FALSE(parseConfig(json::parse(R"({"gameLoop": {"cpuAffinity": 1048576}})")).has_value());
+}
+
 TEST(ConfigTest, PartialOverrideKeepsOtherDefaults) {
   auto r = parseConfig(json::parse(R"({"server": {"httpPort": 8080}})"));
   ASSERT_TRUE(r.has_value()) << r.error();

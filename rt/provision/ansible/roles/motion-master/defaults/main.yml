@@ -1,0 +1,43 @@
+---
+# Release to install. The .deb is published per tag with both amd64 and arm64
+# assets, so the same version string serves the AAeon board and the Pi.
+#
+# NOTE: gameLoop.cpuAffinity landed after 6.0.0-alpha.61. Until this points at a
+# release that contains it, the key below is written into the config and simply
+# ignored by the older binary (unknown keys are not an error), so the RT thread
+# stays unpinned and the isolated core stays idle. GET /api/game-loop reporting
+# no cpuAffinity field at all is the symptom. Bump this after the next tag.
+motion_master_version: 6.0.0-alpha.61
+motion_master_release_url: >-
+  https://github.com/synapticon/motion-master/releases/download/v{{ motion_master_version }}
+
+# Where the .deb puts everything (see tools/package.sh). The binary auto-discovers
+# motion-master.jsonc next to itself, which is why no --config flag is needed.
+motion_master_dir: /opt/motion-master
+motion_master_service: motion-master.service
+
+# Start the service now, as well as enabling it. Set false when provisioning a
+# disk image rather than a running machine — see rt/image/build-rpi-image.sh.
+motion_master_start: true
+
+# --- contents of motion-master.jsonc -----------------------------------------
+# These are the appliance's own settings, not the shipped defaults: an appliance
+# is reached over the network, so it binds every interface rather than loopback.
+# The API has no authentication — only do this on a network you trust. See
+# docs/LAN_DEPLOYMENT.md for the certificate/hostname side.
+motion_master_bind_address: "0.0.0.0"
+motion_master_http_port: 61447
+motion_master_ws_port: 62281
+motion_master_log_level: info
+
+# Fieldbus to bring up at startup. Empty waits for POST /api/init instead.
+motion_master_fieldbus_driver: soem
+motion_master_fieldbus_adapter: ""
+
+motion_master_period_us: 1000
+
+# Core for the RT thread. Defaults to the last core rt-boot isolated, which is
+# the whole point of isolating one: a core removed by isolcpus runs nothing
+# unless a thread asks for it by name. Set to -1 to leave the thread unpinned.
+motion_master_cpu_affinity: >-
+  {{ (rt_isolated_cpus.split(',') | last) if (rt_isolated_cpus | default('') | length > 0) else -1 }}

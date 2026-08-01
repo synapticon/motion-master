@@ -1,0 +1,54 @@
+---
+# Base Debian 13 -> real-time host. Idempotent: a second run must report no
+# changes, which is the property the QEMU VM in rt/vm exists to prove.
+- name: Provision a real-time Linux target
+  hosts: rt_targets
+  become: true
+
+  roles:
+    - { role: rt-kernel, tags: rt-kernel }
+    - { role: rt-boot, tags: rt-boot }
+    - { role: rt-limits, tags: rt-limits }
+    - { role: rt-tuning, tags: rt-tuning }
+
+  post_tasks:
+    # Deferred to here so the kernel install and the boot parameters land in a
+    # single restart rather than one each.
+    # Skipped when building a disk image: that guest was booted from a kernel
+    # supplied on the QEMU command line, so restarting it would come back on the
+    # same one rather than the kernel just installed. The image carries the new
+    # kernel regardless — the Pi's own firmware boots it for real.
+    - name: Reboot into the real-time kernel
+      ansible.builtin.reboot:
+        reboot_timeout: 600
+      when:
+        - rt_reboot_required | default(false)
+        - not (rt_skip_reboot | default(false))
+      tags: [rt-kernel, rt-boot]
+
+    # Facts were gathered under the old kernel; without this, rt-verify would
+    # report the kernel that was running before the reboot.
+    - name: Re-read facts after the reboot
+      ansible.builtin.setup:
+      when:
+        - rt_reboot_required | default(false)
+        - not (rt_skip_reboot | default(false))
+      tags: [rt-kernel, rt-boot]
+
+    - name: Verify the real-time configuration
+      ansible.builtin.include_role:
+        name: rt-verify
+        apply:
+          tags: rt-verify
+      tags: [rt-verify, benchmark]
+
+    # After the reboot, so the daemon starts on the RT kernel with the isolated
+    # core already present — gameLoop.cpuAffinity would otherwise name a core
+    # that the running kernel has not reserved.
+    - name: Install Motion Master
+      ansible.builtin.include_role:
+        name: motion-master
+        apply:
+          tags: motion-master
+      when: motion_master_install | default(false)
+      tags: motion-master

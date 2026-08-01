@@ -26,13 +26,14 @@ uint64_t nowEpochUs() {
 
 }  // namespace
 
-GameLoop::GameLoop(std::chrono::microseconds period) : period_(period) {}
+GameLoop::GameLoop(std::chrono::microseconds period, int cpuAffinity)
+    : period_(period), cpuAffinity_(cpuAffinity) {}
 
 void GameLoop::addTask(CyclicTask* task) { tasks_.push_back(task); }
 
 void GameLoop::run() {
-  const mm::core::RtSetupResult rt = mm::core::setRealtimePriority();
-  // Warn only where the step exists at all, so Windows (neither) stays quiet.
+  const mm::core::RtSetupResult rt = mm::core::setRealtimePriority(cpuAffinity_);
+  // Warn only where the step exists at all, so Windows (none of them) stays quiet.
 #ifndef _WIN32
   if (!rt.schedFifo) {
     spdlog::warn("GameLoop: failed to set SCHED_FIFO — running without RT scheduling");
@@ -42,9 +43,19 @@ void GameLoop::run() {
   if (!rt.memLocked) {
     spdlog::warn("GameLoop: failed to lock memory pages — page faults may cause jitter");
   }
+  // Silent when no core was asked for: unpinned is the default, not a fault.
+  if (cpuAffinity_ >= 0 && !rt.cpuPinned) {
+    spdlog::warn(
+        "GameLoop: failed to pin the RT thread to CPU {} — it will run on any "
+        "non-isolated core",
+        cpuAffinity_);
+  } else if (rt.cpuPinned) {
+    spdlog::info("GameLoop: RT thread pinned to CPU {}", cpuAffinity_);
+  }
 #endif
   schedFifo_.store(rt.schedFifo, std::memory_order_relaxed);
   memLocked_.store(rt.memLocked, std::memory_order_relaxed);
+  cpuPinned_.store(rt.cpuPinned, std::memory_order_relaxed);
   running_.store(true, std::memory_order_relaxed);
   startMonoNs_.store(nowMonoNs(), std::memory_order_relaxed);
 
@@ -139,6 +150,8 @@ GameLoopHealth GameLoop::health() const {
   }
   h.schedFifo = schedFifo_.load(std::memory_order_relaxed);
   h.memLocked = memLocked_.load(std::memory_order_relaxed);
+  h.cpuAffinity = cpuAffinity_;
+  h.cpuPinned = cpuPinned_.load(std::memory_order_relaxed);
   h.timestampUs = nowEpochUs();
   return h;
 }
@@ -149,5 +162,6 @@ void to_json(nlohmann::json& j, const GameLoopHealth& h) {
                      {"skippedCycles", h.skippedCycles}, {"lastExecNs", h.lastExecNs},
                      {"maxExecNs", h.maxExecNs},         {"avgExecNs", h.avgExecNs},
                      {"schedFifo", h.schedFifo},         {"memLocked", h.memLocked},
+                     {"cpuAffinity", h.cpuAffinity},     {"cpuPinned", h.cpuPinned},
                      {"timestampUs", h.timestampUs}};
 }

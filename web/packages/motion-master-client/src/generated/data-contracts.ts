@@ -111,6 +111,16 @@ export interface GameLoopHealth {
    */
   memLocked: boolean;
   /**
+   * Core the real-time thread was configured to pin to (gameLoop.cpuAffinity), or -1 when unpinned. Pointing this at an isolcpus core is what gives the RT thread a core to itself; only that thread is pinned, so the HTTP, WebSocket and monitoring threads stay on the remaining cores.
+   * @example -1
+   */
+  cpuAffinity: number;
+  /**
+   * Whether the pin took. Always false when cpuAffinity is -1 (nothing was asked for); false while cpuAffinity is >= 0 means the request failed and the thread is running unpinned.
+   * @example false
+   */
+  cpuPinned: boolean;
+  /**
    * Server wall-clock timestamp (epoch microseconds) when sampled
    * @format int64
    * @example 1783968687738680

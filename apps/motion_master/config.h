@@ -57,6 +57,14 @@ struct TlsConfig {
 /// @brief @c "gameLoop" block — the real-time cyclic loop.
 struct GameLoopConfig {
   uint32_t periodUs = 1000;  ///< Cyclic timer period in microseconds (must be > 0). 1000 = 1 ms.
+  /// Core to pin the real-time thread to; -1 (the default) leaves it unpinned. Linux only. Set this
+  /// to a core the kernel booted with @c isolcpus: such a core is removed from the scheduler and
+  /// runs nothing unless a thread asks for it by name, so an isolated core is wasted until this is
+  /// set. Only the RT thread moves — the HTTP, WebSocket, monitoring and refresher threads stay on
+  /// the housekeeping cores, which is the difference between this and pinning the whole process
+  /// with @c taskset or systemd's @c CPUAffinity=. Unlike @c periodUs this is fixed at startup: it
+  /// describes the deployment, not something to retune live. Must name a core that exists.
+  int cpuAffinity = -1;
 };
 
 /// @brief @c "recorder" block — the lossless process-data recorder ring.
@@ -122,7 +130,7 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ServerConfig, bindAddress, httpP
                                                 corsOrigin)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FieldbusConfig, driver, adapter, mailboxStatusFmmu)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TlsConfig, certPath, keyPath, autoUpdate)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(GameLoopConfig, periodUs)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(GameLoopConfig, periodUs, cpuAffinity)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RecorderConfig, capacity, dumpDir)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParameterCacheConfig, enabled, cacheAllVendors,
                                                 directory)

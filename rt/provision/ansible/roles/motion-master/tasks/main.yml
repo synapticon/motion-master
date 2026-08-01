@@ -1,0 +1,79 @@
+---
+- name: Determine Debian architecture
+  ansible.builtin.command: dpkg --print-architecture
+  register: mm_dpkg_architecture
+  changed_when: false
+  check_mode: false
+
+- name: Check the installed version
+  ansible.builtin.command: dpkg-query -W -f='${Version}' motion-master
+  register: mm_installed_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install Motion Master
+  when: mm_installed_version.stdout != motion_master_version
+  block:
+    - name: Download the release package
+      ansible.builtin.get_url:
+        url: "{{ motion_master_release_url }}/motion-master-{{ motion_master_version }}-{{ mm_dpkg_architecture.stdout }}.deb"
+        dest: "/tmp/motion-master-{{ motion_master_version }}-{{ mm_dpkg_architecture.stdout }}.deb"
+        mode: "0644"
+      register: mm_package
+
+    # apt rather than dpkg so dependencies resolve. The package's postinst runs
+    # setcap for the raw socket and RT capabilities.
+    - name: Install the package
+      ansible.builtin.apt:
+        deb: "{{ mm_package.dest }}"
+        state: present
+
+    - name: Remove the downloaded package
+      ansible.builtin.file:
+        path: "{{ mm_package.dest }}"
+        state: absent
+
+# motion_master_cpu_affinity derives from rt_isolated_cpus, which rt-boot sets.
+# Running this role alone (--tags motion-master) leaves that undefined, so the
+# default quietly becomes -1 and the rendered config unpins the real-time thread
+# — undoing the isolation with no error and no obvious symptom beyond latency.
+# Only fires when an unpinned config is about to be written, so deliberately
+# choosing -1 on a full run is still allowed.
+- name: Refuse to silently unpin the real-time thread
+  ansible.builtin.assert:
+    that: rt_isolated_cpus is defined
+    fail_msg: >-
+      rt-boot has not run in this play, so the isolated core is unknown and
+      gameLoop.cpuAffinity would be written as -1. Run the whole playbook rather
+      than --tags motion-master, or set motion_master_cpu_affinity explicitly.
+  when: motion_master_cpu_affinity | int < 0
+
+- name: Configure Motion Master
+  ansible.builtin.template:
+    src: motion-master.jsonc.j2
+    dest: "{{ motion_master_dir }}/motion-master.jsonc"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Motion Master
+
+- name: Install the systemd unit
+  ansible.builtin.template:
+    src: motion-master.service.j2
+    dest: "/etc/systemd/system/{{ motion_master_service }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Motion Master
+
+- name: Enable and start Motion Master
+  ansible.builtin.systemd_service:
+    name: "{{ motion_master_service }}"
+    # Enabled always, started only where starting means something. In a disk
+    # image the daemon must not run: it would bind ports and reach for a
+    # certificate inside a throwaway build guest, and the board it is written to
+    # starts it at boot anyway.
+    state: "{{ 'started' if motion_master_start else omit }}"
+    enabled: true
+    daemon_reload: true

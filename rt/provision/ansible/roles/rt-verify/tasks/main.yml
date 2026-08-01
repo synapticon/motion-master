@@ -1,0 +1,79 @@
+---
+- name: Install rt-tests
+  ansible.builtin.apt:
+    name: rt-tests
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+# The build string (uname -v) is the probe that works across kernel generations.
+# /sys/kernel/realtime, which this used to read, came from the out-of-tree RT
+# patch and does not exist now that PREEMPT_RT is merged upstream — on Debian's
+# 7.1.3-rt it is absent while CONFIG_PREEMPT_RT=y. Catches both a failed install
+# and a bootloader default that quietly picked a non-RT kernel.
+- name: Assert the running kernel is PREEMPT_RT
+  ansible.builtin.assert:
+    that: "'PREEMPT_RT' in ansible_facts['kernel_version']"
+    fail_msg: >-
+      Running {{ ansible_facts['kernel'] }} ({{ ansible_facts['kernel_version'] }}),
+      which is not a PREEMPT_RT kernel. Check that the bootloader picked the -rt
+      kernel (GRUB_TOP_LEVEL in /etc/default/grub.d/99-realtime.cfg) and that the
+      host has rebooted.
+
+- name: Read the kernel command line
+  ansible.builtin.slurp:
+    src: /proc/cmdline
+  register: rt_proc_cmdline
+
+- name: Read the effective limits for {{ rt_user }}
+  ansible.builtin.command: runuser -l {{ rt_user }} -c 'ulimit -Hr; ulimit -Hl'
+  register: rt_effective_limits
+  changed_when: false
+  check_mode: false
+
+- name: Read the CPU frequency governor
+  ansible.builtin.slurp:
+    src: /sys/devices/system/cpu/cpu0/cpufreq/scaling_governor
+  register: rt_governor
+  failed_when: false
+
+- name: Read the default IRQ affinity
+  ansible.builtin.slurp:
+    src: /proc/irq/default_smp_affinity
+  register: rt_default_irq_affinity
+
+- name: Report the real-time configuration
+  ansible.builtin.debug:
+    msg: |-
+      kernel            {{ ansible_facts['kernel'] }}  (PREEMPT_RT confirmed)
+      cmdline           {{ rt_proc_cmdline.content | b64decode | trim }}
+      isolated cores    {{ rt_isolated_cpus | default('(rt-boot did not run)') }}
+      housekeeping      {{ rt_housekeeping_cpus | default('(rt-boot did not run)') }}
+      default irq mask  {{ rt_default_irq_affinity.content | b64decode | trim }}
+      governor          {{ (rt_governor.content | b64decode | trim)
+                           if rt_governor.content is defined else 'no cpufreq' }}
+      rtprio            {{ rt_effective_limits.stdout_lines[0] | default('?') }}  ({{ rt_user }})
+      memlock           {{ rt_effective_limits.stdout_lines[1] | default('?') }}  ({{ rt_user }})
+
+- name: Measure scheduling latency
+  # 'never' keeps this out of ordinary runs: it takes a minute, and inside a
+  # virtual machine the numbers describe the host's jitter, not the guest's.
+  tags: [benchmark, never]
+  block:
+    - name: Run cyclictest
+      ansible.builtin.command: >-
+        cyclictest --mlockall --smp
+        --priority={{ rt_cyclictest_priority }}
+        --interval={{ rt_cyclictest_interval_us }}
+        --distance=0
+        --duration={{ rt_cyclictest_duration }}
+        --quiet
+      register: rt_cyclictest
+      changed_when: false
+
+    - name: Report cyclictest results
+      ansible.builtin.debug:
+        msg: >-
+          {{ rt_cyclictest.stdout_lines }}
+          (target: max under {{ rt_cyclictest_max_latency_us }} us; spikes above
+          500 us point at C-states or interrupt affinity)

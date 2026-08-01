@@ -1,0 +1,8 @@
+---
+# cyclictest run, when explicitly asked for with --tags benchmark.
+rt_cyclictest_priority: 80
+rt_cyclictest_interval_us: 1000
+rt_cyclictest_duration: 60s
+
+# rt/README.md targets a max under 200 us for a 1 ms cycle.
+rt_cyclictest_max_latency_us: 200

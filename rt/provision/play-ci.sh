@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# Provision THIS machine as a development / CI machine: C++ toolchain, Docker,
+# GitHub Actions runner. For real-time targets use play-rt.sh instead.
 set -euo pipefail
 cd "$(dirname "$0")/ansible" || exit 1
 
@@ -18,4 +20,4 @@ printf '%s\n' "$BECOME_PASS"
 EOF
 export SUDO_ASKPASS="$ASKPASS"
 
-ANSIBLE_BECOME_FLAGS='-H -A' ansible-playbook site.yml "$@"
+ANSIBLE_BECOME_FLAGS='-H -A' ansible-playbook -i inventory/ci.yml ci-machine.yml "$@"

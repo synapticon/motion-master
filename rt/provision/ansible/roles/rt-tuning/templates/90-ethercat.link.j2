@@ -1,0 +1,12 @@
+# EtherCAT interface. Managed by Ansible (rt-tuning role) — do not edit.
+#
+# SOEM takes exclusive raw-socket control of this NIC and expects frames on the
+# wire exactly as it wrote them. Segmentation and receive offload batch and
+# reshape packets in the driver, which breaks that assumption and adds latency.
+[Match]
+OriginalName={{ rt_ethercat_interface }}
+
+[Link]
+GenericSegmentationOffload=no
+GenericReceiveOffload=no
+TCPSegmentationOffload=no

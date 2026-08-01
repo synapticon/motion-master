@@ -1,0 +1,10 @@
+---
+# Account Motion Master runs as — the one that needs to raise SCHED_FIFO
+# priority and mlockall(). Set per host in the inventory.
+rt_user: "{{ ansible_user | default(ansible_facts['user_id']) }}"
+
+rt_group: realtime
+rt_rtprio: 99
+rt_memlock: unlimited
+
+rt_limits_path: /etc/security/limits.d/99-realtime.conf

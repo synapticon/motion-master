@@ -1,0 +1,30 @@
+# Managed by Ansible (motion-master role) — do not edit.
+[Unit]
+Description=Motion Master EtherCAT servo drive server
+Documentation=https://motion-master.synapticon.com/docs
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart={{ motion_master_dir }}/motion-master
+WorkingDirectory={{ motion_master_dir }}
+
+# pam_limits never runs for a service, so /etc/security/limits.d/99-realtime.conf
+# (the rt-limits role) does not apply here — these two lines are its equivalent.
+# Without them GameLoop cannot reach SCHED_FIFO 80 or mlockall, and the loop
+# silently degrades to non-deterministic timing.
+LimitRTPRIO=99
+LimitMEMLOCK=infinity
+
+# No CPUAffinity= on purpose. It applies to the whole process, which would put
+# the HTTP, WebSocket, monitoring and refresher threads on the isolated core to
+# contend with the RT thread — and, by leaving more than one runnable task
+# there, stop nohz_full from taking effect. The RT thread pins itself instead,
+# via gameLoop.cpuAffinity in motion-master.jsonc.
+
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,49 @@
+---
+# Raspberry Pi. There is no GRUB: the firmware reads /boot/firmware/cmdline.txt
+# and config.txt.
+#
+# Neither of those is edited here, because neither is a source file. config.txt
+# opens with "Do not modify this file! It is automatically generated upon
+# install or update of either the firmware or the Linux kernel", and cmdline.txt
+# is regenerated the same way — so an edit there survives exactly until the next
+# kernel upgrade and then vanishes, taking the real-time configuration with it.
+#
+# raspi-firmware provides the seams instead, and this role writes those:
+#
+#   /etc/default/raspi-extra-cmdline   extra kernel parameters, one line
+#   /etc/default/raspi-firmware        KERNEL= pins which kernel boots
+#
+# then regenerates the derived files. Same shape as the GRUB path: edit the
+# source, run the generator, never touch the output.
+
+- name: Install the real-time kernel parameters
+  ansible.builtin.copy:
+    # Single line, no comments — raspi-firmware parses this file strictly.
+    # Only our parameters go here; root=, console= and friends are generated.
+    content: "{{ rt_boot_parameters | join(' ') }}\n"
+    dest: "{{ rt_firmware_extra_cmdline_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: rt_boot_config
+  notify: Regenerate Raspberry Pi boot files
+
+# There is deliberately no KERNEL= pin here, unlike GRUB_TOP_LEVEL on x86.
+#
+# Setting KERNEL= in /etc/default/raspi-firmware produces an UNBOOTABLE card.
+# In raspi-firmware's /etc/kernel/postinst.d/z50-raspi-firmware, the variable
+# holding the initrd filename is assigned only inside the `if [ "$KERNEL" =
+# "auto" ]` branch, yet it is used unconditionally when writing the initramfs
+# line of config.txt — so any explicit KERNEL= emits a bare "initramfs " with no
+# filename. Debian's arm64 kernel is modular, so booting without an initrd
+# panics on mounting root. That same branch is also what copies the kernel,
+# initrd and DTBs into /boot/firmware, so pinning stops future kernel updates
+# reaching the firmware partition at all.
+#
+# It is also unnecessary. "auto" selects `ls /boot/vmlinuz-* | sort -V -r |
+# head -1`, and at equal upstream versions version-sort ranks "rt-arm64" above
+# plain "arm64" — so the RT kernel already wins, along with its matching initrd.
+#
+# The residual risk is a *newer* non-RT kernel overtaking the RT one on version.
+# That is caught at build time instead: rt/image/build-rpi-image.sh asserts that
+# the generated config.txt names an -rt kernel and a non-empty initramfs.

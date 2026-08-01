@@ -1,0 +1,7 @@
+---
+# The machine you are sitting at: C++ build toolchain, Docker, GitHub Actions
+# runner. Nothing real-time — see rt-target.yml for that.
+ci_machines:
+  hosts:
+    localhost:
+      ansible_connection: local

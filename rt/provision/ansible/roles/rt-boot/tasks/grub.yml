@@ -1,0 +1,31 @@
+---
+# x86 boards (the AAeon E3940 and the QEMU dev VM).
+
+# Only GRUB needs to name a kernel: the Pi deliberately leaves the choice to
+# raspi-firmware's "auto" (see firmware-cmdline.yml for why pinning it breaks the
+# boot). linux-version is Debian's own tool and sorts kernel versions properly;
+# a plain string sort would rank 6.12.96 above 6.12.100.
+- name: Find installed real-time kernels, newest first
+  ansible.builtin.shell:
+    cmd: linux-version list | grep -- '-rt-' | linux-version sort --reverse
+    executable: /bin/bash
+  register: rt_installed_kernels
+  changed_when: false
+  check_mode: false
+  failed_when: false
+
+- name: Choose the kernel to boot
+  ansible.builtin.set_fact:
+    rt_top_level_kernel: >-
+      {{ ('/boot/vmlinuz-' ~ rt_installed_kernels.stdout_lines[0])
+         if rt_installed_kernels.stdout_lines | length > 0 else '' }}
+
+- name: Install the real-time boot parameters
+  ansible.builtin.template:
+    src: 99-realtime.cfg.j2
+    dest: "{{ rt_grub_dropin_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  register: rt_boot_config
+  notify: Update GRUB configuration

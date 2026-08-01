@@ -22,6 +22,8 @@ struct GameLoopHealth {
   uint64_t avgExecNs = 0;       ///< Mean task-exec time since run() (ns).
   bool schedFifo = false;       ///< SCHED_FIFO acquired (false on Windows / failure).
   bool memLocked = false;       ///< mlockall ok (Linux only; false elsewhere).
+  int cpuAffinity = -1;         ///< Core the RT thread was asked to pin to; -1 = not requested.
+  bool cpuPinned = false;       ///< Pin took. With cpuAffinity >= 0 and this false, it failed.
   uint64_t timestampUs = 0;     ///< Server stamp (epoch µs) for exact client Δt.
 };
 
@@ -45,7 +47,13 @@ class GameLoop {
  public:
   /// @brief Constructs the loop with the given cycle period.
   /// @param period  Time between cycle starts.  Typical value: 1000 µs (1 ms).
-  explicit GameLoop(std::chrono::microseconds period);
+  /// @param cpuAffinity  Core to pin the RT thread to once run() is called, or a
+  ///                     negative value (the default) to leave it unpinned.  Set
+  ///                     this to an `isolcpus` core to get that core to itself;
+  ///                     see mm::core::setRealtimePriority().  Fixed for the
+  ///                     lifetime of the loop — unlike the period, it is a
+  ///                     deployment property, not something to retune live.
+  explicit GameLoop(std::chrono::microseconds period, int cpuAffinity = -1);
 
   /// @brief Destructor.  Does not call stop() — the caller is responsible for
   ///        stopping the loop before destroying it.
@@ -71,9 +79,10 @@ class GameLoop {
   ///        stop() is called.
   ///
   /// Calls mm::core::setRealtimePriority() before entering the loop, which
-  /// raises the calling thread to SCHED_FIFO (POSIX) and locks all memory pages
-  /// (Linux).  Both steps fail gracefully with a warning when the process lacks
-  /// the required privileges (e.g. not run as root and no CAP_SYS_NICE /
+  /// raises the calling thread to SCHED_FIFO (POSIX), locks all memory pages
+  /// (Linux), and pins it to the constructor's cpuAffinity core when one was
+  /// given (Linux).  Every step fails gracefully with a warning when the process
+  /// lacks the required privileges (e.g. not run as root and no CAP_SYS_NICE /
   /// CAP_IPC_LOCK); health() reports which of them took.
   ///
   /// @note Call this on the main thread and start all other subsystem threads
@@ -153,5 +162,7 @@ class GameLoop {
   std::atomic<uint64_t> startMonoNs_{0};  // steady_clock ns at run() start; 0 until then
   std::atomic<bool> schedFifo_{false};    // SCHED_FIFO acquired in run()
   std::atomic<bool> memLocked_{false};    // mlockall succeeded in run()
+  std::atomic<bool> cpuPinned_{false};    // affinity applied in run()
+  const int cpuAffinity_;                 // core to pin to; < 0 = leave unpinned
   std::vector<CyclicTask*> tasks_;
 };

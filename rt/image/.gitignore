@@ -1,0 +1,2 @@
+# Base image, working image, extracted kernel/initrd, build keypair, QEMU state.
+.cache/

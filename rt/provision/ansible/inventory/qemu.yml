@@ -1,0 +1,25 @@
+---
+# The throwaway Debian 13 VM in rt/vm. Used to develop the RT roles and to prove
+# they converge from a clean machine — not to measure latency.
+#
+# Start it with rt/vm/start.sh; the key and port come from rt/vm/common.sh, so
+# override RT_VM_SSH_PORT there and here together if 2222 is taken.
+rt_targets:
+  hosts:
+    rt-vm:
+      ansible_host: 127.0.0.1
+      ansible_port: 2222
+      ansible_user: debian
+      ansible_ssh_private_key_file: "{{ playbook_dir }}/../../vm/.cache/id_ed25519"
+      # The VM gets a new host key on every reset, so recording it is pointless.
+      ansible_ssh_common_args: >-
+        -o StrictHostKeyChecking=no
+        -o UserKnownHostsFile=/dev/null
+        -o LogLevel=ERROR
+  vars:
+    ansible_become: true
+    rt_user: debian
+    # The VM has no EtherCAT NIC, so the fieldbus is left uninitialised; the
+    # daemon still starts and serves the API, which is what is worth testing here.
+    motion_master_install: true
+    motion_master_fieldbus_driver: ""

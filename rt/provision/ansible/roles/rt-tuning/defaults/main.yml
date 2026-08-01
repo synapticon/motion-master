@@ -1,0 +1,10 @@
+---
+# EtherCAT NIC. Set it to disable the offload features that reorder or coalesce
+# frames SOEM expects to see raw and in order. Left empty, no interface is
+# touched — which is the right default, since guessing wrong would reconfigure
+# the management NIC.
+rt_ethercat_interface: ""
+
+rt_cpu_governor: performance
+
+rt_ethercat_link_path: /etc/systemd/network/90-ethercat.link

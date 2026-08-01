@@ -354,9 +354,19 @@ git clone git@github.com:synapticon/motion-master.git
 cd motion-master
 git submodule update --init --recursive
 
+./tools/install-deps.sh          # Debian/Ubuntu or Fedora — see below
 ./tools/configure.sh
 ./tools/build.sh
 ```
+
+`./tools/install-deps.sh` installs everything the repository needs from the distro: the C++23
+toolchain, the tools vcpkg uses to build the dependencies from source, the lint and format set
+(`clang-format`, `clang-tidy`, `cppcheck`, `shellcheck`, plus `cpplint` and `cmake-format` via
+pipx), `dpkg-dev`/`rpm` for packaging, Node for the `web/` workspace, Ansible and QEMU for `rt/`,
+and Docker for the `hil/api` tests. It supports **Debian/Ubuntu (apt)** and **Fedora (dnf)**, and
+takes `--dry-run` to list the packages without installing, plus `--no-qemu` / `--no-docker` to skip
+the heavier groups. Everything else is built by the build itself — the script deliberately installs
+no vcpkg dependencies, only the tools that compile them.
 
 Every script defaults to the **`x64-linux-debug`** preset (`CMAKE_BUILD_TYPE=Debug`), so the binary lands in `build/x64-linux-debug/apps/motion_master/`. Pass a preset name as the first argument to build optimised instead:
 

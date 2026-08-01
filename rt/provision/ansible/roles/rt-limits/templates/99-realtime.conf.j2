@@ -1,0 +1,15 @@
+# Real-time privileges. Managed by Ansible (rt-limits role) — do not edit.
+#
+# rtprio  — highest SCHED_FIFO priority the group may request. GameLoop asks for
+#           80 (kRtThreadPriority in libs/core/realtime.h); without this it falls
+#           back to SCHED_OTHER and warns.
+# memlock — mlockall(MCL_CURRENT | MCL_FUTURE) pins every page so a mid-cycle
+#           page fault cannot inject an unbounded latency spike.
+#
+# pam_limits applies these at login only. A systemd service ignores this file
+# entirely and needs LimitRTPRIO=/LimitMEMLOCK= in its unit instead.
+
+@{{ rt_group }}  soft  rtprio   {{ rt_rtprio }}
+@{{ rt_group }}  hard  rtprio   {{ rt_rtprio }}
+@{{ rt_group }}  soft  memlock  {{ rt_memlock }}
+@{{ rt_group }}  hard  memlock  {{ rt_memlock }}

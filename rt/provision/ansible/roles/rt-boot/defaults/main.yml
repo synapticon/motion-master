@@ -1,0 +1,52 @@
+---
+# Motion Master runs exactly one real-time thread: GameLoop::run() blocks the
+# main thread and is the RT thread (the only setRealtimePriority() call site is
+# apps/motion_master/game_loop.cc). The HTTP server, WebSocket server,
+# monitoring sampler and parameter refresher are all ordinary threads. So one
+# isolated core is what the process actually needs, and on a 4-core board —
+# both the E3940 and the Raspberry Pi 5 — a second one would sit empty while
+# the OS, the desktop and the blocking SDO/FoE work crowd onto the rest.
+rt_isolated_cpu_count: 1
+
+# Exact cores to isolate. Set this to override the count above with a specific
+# list, e.g. "2,3" to also hand a core to the NIC interrupt thread.
+rt_isolated_cpus: ""
+
+# Parameters appended to the kernel command line. Override this list to take
+# full control; override the pieces below to adjust one part.
+rt_boot_parameters: "{{ rt_boot_parameters_common + rt_boot_parameters_arch }}"
+
+rt_boot_parameters_common:
+  # Take the isolated cores out of the scheduler's load balancer, and keep
+  # managed (multi-queue NIC) interrupts off them — the part a manual
+  # /proc/irq/*/smp_affinity write cannot express and does not survive a reboot.
+  - "isolcpus=managed_irq,domain,{{ rt_isolated_cpus }}"
+  # Run their RCU callbacks on the housekeeping cores instead.
+  - "rcu_nocbs={{ rt_isolated_cpus }}"
+  # Stop the periodic scheduler tick on them (tickless).
+  - "nohz_full={{ rt_isolated_cpus }}"
+  # Default affinity for every interrupt that is not explicitly pinned.
+  - "irqaffinity={{ rt_housekeeping_cpus }}"
+
+rt_boot_parameters_arch: >-
+  {{ rt_boot_parameters_x86 if ansible_facts['architecture'] == 'x86_64' else [] }}
+
+rt_boot_parameters_x86:
+  # Waking from a deep C-state costs tens of microseconds — more than the jitter
+  # budget of a 1 ms cycle.
+  - "intel_idle.max_cstate=1"
+  - "processor.max_cstate=1"
+
+# Drop-in rather than an edit of /etc/default/grub: grub-mkconfig sources
+# /etc/default/grub.d/*.cfg after the base file, so this composes with Debian's
+# own settings, is idempotent by construction, and is removed by deleting it.
+rt_grub_dropin_path: /etc/default/grub.d/99-realtime.cfg
+
+# Raspberry Pi equivalents. Note these are raspi-firmware's *source* files, not
+# /boot/firmware/cmdline.txt and config.txt — those are generated on every kernel
+# or firmware upgrade and must not be edited. See tasks/firmware-cmdline.yml.
+rt_firmware_extra_cmdline_path: /etc/default/raspi-extra-cmdline
+rt_firmware_defaults_path: /etc/default/raspi-firmware
+
+# Detection only: its presence is what identifies a Pi-style boot.
+rt_firmware_cmdline_path: /boot/firmware/cmdline.txt

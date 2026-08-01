@@ -1,0 +1,27 @@
+---
+- name: Create the realtime group
+  ansible.builtin.group:
+    name: "{{ rt_group }}"
+    state: present
+
+- name: Add {{ rt_user }} to the realtime group
+  ansible.builtin.user:
+    name: "{{ rt_user }}"
+    groups: "{{ rt_group }}"
+    append: true
+
+- name: Grant the realtime group rtprio and memlock
+  ansible.builtin.template:
+    src: 99-realtime.conf.j2
+    dest: "{{ rt_limits_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# Group membership is read at login, so the session Ansible is running in still
+# has the old limits. Nothing to do but say so.
+- name: Note that the new limits need a fresh login
+  ansible.builtin.debug:
+    msg: >-
+      {{ rt_user }} is in the {{ rt_group }} group. Log out and back in (or
+      reboot) before `ulimit -r` reports {{ rt_rtprio }}.

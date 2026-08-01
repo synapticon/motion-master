@@ -1,0 +1,33 @@
+---
+# Real hardware. Copy to lab.yml (gitignored) and edit, then:
+#
+#   rt/provision/play-rt.sh inventory/lab.yml
+#
+# Requires SSH key access and sudo on the target. Sudo asks for a password
+# unless the account is NOPASSWD, so add --ask-become-pass if it does.
+rt_targets:
+  hosts:
+    aaeon-e3940:
+      ansible_host: 192.168.1.60
+      ansible_user: mm
+  vars:
+    ansible_become: true
+
+    # Account that gets rtprio/memlock privileges — the one Motion Master runs as.
+    rt_user: mm
+
+    # Motion Master has one RT thread, so one isolated core is the default (the
+    # topmost — core 3 on a 4-core board).
+    # rt_isolated_cpu_count: 2
+    # rt_isolated_cpus: "2,3"
+
+    # EtherCAT NIC. Set to disable segmentation/receive offload on it; leave
+    # unset to touch no interface at all.
+    rt_ethercat_interface: enp2s0
+
+    # Install Motion Master as a systemd daemon. Off by default, so the RT roles
+    # alone still give you a bare real-time host.
+    motion_master_install: true
+    motion_master_version: 6.0.0-alpha.61
+    motion_master_fieldbus_driver: soem
+    motion_master_fieldbus_adapter: enp2s0

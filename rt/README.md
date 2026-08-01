@@ -86,8 +86,8 @@ cd ..
 ```
 
 `lab.yml` is gitignored. The target needs SSH key access and sudo; add `--ask-become-pass` if sudo
-is not passwordless there. Motion Master is installed as a systemd daemon by default, since that is
-what a real-time target is for; set `motion_master_install: false` for a bare real-time host.
+is not passwordless there. The example sets `motion_master_install: true`, so the daemon is
+installed along with the real-time OS; set it to `false` for a bare real-time host.
 
 This is also the path for a Raspberry Pi **once it has been flashed** — a provisioned card is an
 ordinary `rt_targets` host. Getting to that card is the one thing that differs; see
@@ -341,8 +341,9 @@ memlock           unlimited  (debian)
 
 ### motion-master — the daemon
 
-On by default — a real-time target exists to run Motion Master, and `motion_master_install: false`
-gives a bare real-time host instead. Downloads the release `.deb` for `motion_master_version` and
+Requires `motion_master_install: true`, which every inventory here sets — the default is off so
+that pointing the playbook at a host you have not written an inventory for cannot install a daemon
+on it by accident. Downloads the release `.deb` for `motion_master_version` and
 the host's architecture — published for both `amd64` and `arm64`, so one version string serves both
 boards — and installs it with apt, which lands everything in `/opt/motion-master/` and runs the
 package's `setcap` for the raw-socket and real-time capabilities.

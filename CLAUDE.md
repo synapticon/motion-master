@@ -7,6 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **Motion Master v6.0.0** — next-generation motion control software for SOMANET servo drives. This project is a clean-sheet rewrite of the previous `motion_master` codebase; the design rationale and session notes live in `NEXTGEN.md`. Read that file for architectural decisions, class diagrams, and design rationale before making structural changes.
 
 Key design mandates from NEXTGEN.md:
+
 - No exceptions — use `std::expected<T, std::string>` (C++23 stdlib, no `tl::expected`). `std::string` is the default error type: use it everywhere a caller only logs, forwards, or shows the error. **Promote to a structured `Error` (`struct Error { ErrorKind kind; std::string message; }` — a POD enum + message, never a class hierarchy) only on the specific API surface where a caller demonstrably needs to *branch* on the failure reason** (retry-on-timeout-but-abort-on-not-found, re-auth-on-401, fall-back-on-a-particular-kind). String-matching an error message to decide control flow is the smell that says that surface has earned an `Error`. Keep the two interchangeable at call sites: give `Error` an `operator<<` and a `.message`/`.what()` so `ASSERT_TRUE(r) << r.error()` and `sendError(r.error())` keep working — so promoting one function does not ripple through its callers. Do **not** do a global sweep to a shared `Error` type; a per-surface enum earns its keep exactly where branching is real, and uniform `std::string` keeps `.and_then()` chains composing across layers everywhere else. `libs/comm/foe_error.h` is the canonical worked example of a promotion — a structured `FoeError` (kind + `Retry` tag + string-face `operator<<`/`.message`/`.what()`) that is **deliberately unused**: the FoE surface still returns `std::string` because no caller branches yet, and the header stands ready for the day one does (a firmware flasher retrying transient failures) without rippling through its forwarders. See NEXTGEN.md, Session 2026-07-17.
 - HTTP API (port 61447) + a single WebSocket on its own port (62281) and event loop — `HttpServer` and `WebSocketServer` are distinct, each with its own uWS app/loop/thread, so a slow or blocking HTTP handler (FoE, SDO, cert fetch) can never stall the WebSocket. The WebSocket is the bidirectional connection: server→client monitoring batches, notifications, and procedure progress; client→server topic subscribe/unsubscribe and (planned) process-data output staging. No Protobuf. (The two-port split supersedes the original single-port mandate, which was a reaction to the old `motion_master`'s ZeroMQ request + pub/sub channels; a second TLS port for the same WebSocket is a far milder thing, and the isolation is worth it.)
 - Single `Device` abstraction (replaces `VirtualDevice` + `comm::base::Device` overlap from the old codebase)
@@ -100,7 +101,7 @@ The `Dockerfile` is a two-stage build (build on `ubuntu:24.04`, minimal runtime 
 **Capabilities** — Docker drops most Linux capabilities by default. On bare-metal `setcap` stamps the binary so file capabilities are granted automatically; inside a container file capabilities are ignored and `--cap-add` is used instead:
 
 | Capability | Purpose |
-|---|---|
+| --- | --- |
 | `CAP_NET_RAW` + `CAP_NET_ADMIN` | SOEM EtherCAT raw sockets and NIC promiscuous mode |
 | `CAP_SYS_NICE` | `SCHED_FIFO` RT scheduling on the game loop thread |
 | `CAP_IPC_LOCK` + `--ulimit memlock=-1` | `mlockall()` to pin process memory for RT |
@@ -113,7 +114,7 @@ Missing RT caps produce a warning and the loop runs non-RT. Missing EtherCAT cap
 
 ### Directory Layout
 
-```
+```text
 motion-master/
   apps/
     motion_master/     ← main executable (flat file layout); swagger.yml here is the OpenAPI spec — source for the PWA's bundled API Docs + generated API clients, not shipped with the binary
@@ -140,7 +141,7 @@ Flat layout within each lib/app is intentional — navigate by filename and grep
 
 ### Class Structure (from NEXTGEN.md)
 
-```
+```text
 main.cc  (composition root — the only place concrete types are instantiated; no `App` class yet)
  ├── Config (CLI options)
  ├── mm::node::DeviceManager      (owns FieldbusDriver + Device[] + ProcessData + ParameterCache; drives scanning)
@@ -235,6 +236,7 @@ An atomically-published `image` pointer (with retained `generations`) gates the 
 **Monitoring runs off the RT loop and is lossless.** It is *not* a `CyclicTask`. `MonitoringManager` owns a background sampler thread; each monitoring holds a **read cursor** into the recorder ring, and on each flush ships **every** cycle recorded in `[cursor, head)` as one batch, then advances the cursor — so no cycle is dropped (`interval` is the flush *cadence*, not a sample rate; bounded 5–2000 ms). A cursor lapped by more than a whole ring is logged (not notified) and resynced to the oldest record. PDO-mapped parameters are decoded from each cycle's ring record; SDO-only parameters are polled in the background by the owned `ParameterRefresher` and read from its cache (one cached value per flush). Row timestamps on the wire are **epoch microseconds** (JS-exact, distinct per sub-ms cycle). `Device::parametersMutex_` guards the parameter map against these off-RT threads racing the control plane.
 
 **`CyclicTask` membership is fixed.** All tasks are registered before `run()`; `GameLoop` never adds or removes tasks at runtime (the design rationale is in NEXTGEN.md, session 2026-06-05 — *RT tasks are fixed-membership*). Today only `ProcessDataCyclicTask` is registered (`main.cc`). This fixed-membership rule splits runtime procedures into two kinds:
+
 - **RT cyclic procedures** *(planned — not yet in code)*: a single `TrajectoryCyclicTask` that plays back a precomputed setpoint buffer one point per cycle — anything that must write a target into the output region every cycle. Sine/chirp/ramp/step are **userspace-generated buffers** (one testable function) fed to that one task, with a **`repeat` flag** looping a single stored period; there is **no separate `SineWaveTask`**, `SineWaveParams`, or `SeqLock<SineWaveParams>` transport (superseded — see NEXTGEN.md Session 2026-07-13). It is a `CyclicTask` (a `mm::node` object, now that the interface lives in `libs/core`) registered up front and *idle until activated* via a control block, exactly like `ProcessDataCyclicTask` is a no-op until an image is published. The control block is a **depth-1 latest-wins mailbox** (newest intent supersedes, never a FIFO — a chained/queued move, if ever needed, is a command queue added *beside* the slot, not a redesign of it), one per axis in a fixed `RtMailboxPool<TrajectoryRun>`; a program holds a single-axis buffer or a cross-device coordinated program (one immutable program, a column per axis, one shared cursor; an axis in at most one active program). **The mailbox is a decoupled channel, owned by neither end:** the `RtMailboxPool<TrajectoryRun>` is a **composition-root-owned** object (a `main.cc` local, like `gameLoop`), injected by reference into `TrajectoryCyclicTask` (the sole RT reader) and into the launch path (the writer) — the producer and the RT task never reference each other, and **nothing but `main.cc` names the concrete `TrajectoryCyclicTask`**. (This supersedes both the per-`Device`/on-`DeviceManager` split *and* the interim "task owns its inbox" idea — see NEXTGEN.md Session 2026-07-14 "Hoist `CyclicTask` into `libs/core`".) **The launch lives off the scheduler, not the HTTP handler, and names no task:** it is a node free function `startTrajectory(DeviceManager&, RtMailboxPool<TrajectoryRun>&, slavePos, TrajectoryRequest)` (with a coordinated multi-axis analogue) that resolves the device, uses a `Cia402Drive` view for the op-mode/enable handshake only (`Cia402Drive::prepareForTrajectory(request)` — the view never names the task), and validates the client `TrajectoryRequest` (the input DTO — matching the existing `OutputStageRequest`, the repo's `*Request` = client command / `*Spec` = internal descriptor convention) into the immutable `TrajectoryRun` it arms into a claimed slot. `HttpServer` reaches it through a `startTrajectory` composition-root callback (a `std::function` capturing the pool, mirroring `setGameLoopPeriod`), so the server references neither the task nor the pool. A coordinated program spans devices only in that the task re-resolves each axis via `findDevice` per cycle. The single task (holds `DeviceManager&` + the injected `RtMailboxPool&`) iterates the pool each cycle, runs after `ProcessDataCyclicTask`, and writes the output slots directly (on-RT); RT-only scratch (the playback cursor) stays off the published block. **Skips are normal here** (Windows/macOS userspace is the common deployment, not PREEMPT_RT) and are absorbed by a **user-chosen policy** per trajectory — *Sequential* (default: advance cursor by 1, preserve shape/smoothness, needs nothing from `GameLoop`) vs *Real-time* (advance by 1+skipped via a `CycleContext { elapsed, skipped }` passed to `execute()`, preserve timing, may jump; clamp as a safety net). Both directions generalize to two task-specific functions over shared plumbing — inbound `RtMailboxPool<T>` + `launchRtTask(validate, build)`, outbound the `NotificationBus` + `Source{revision, render}` (a version-counter poll; the task self-registers via `publishTo(bus)`); the RT thread never touches the WebSocket (the seam is a `std::function` publish callback wired in `main.cc`, like `MonitoringManager` — `node` never names `WebSocketServer`). See NEXTGEN.md Sessions 2026-07-09 ("Multi-axis coordinated trajectory … depth-1 latest-wins") and 2026-07-13 (SineWave folded into TrajectoryCyclicTask; skip policy).
 - **Off-RT procedures** (commutation/offset detection, auto-tuning, firmware — call a command and wait, not cycle-time-sensitive) are **not** `CyclicTask`s. They run on a cancellable background `std::jthread` calling `DeviceManager`/`Device` methods (serialized on the fieldbus mutex). The built precedent for an off-RT background thread is `MonitoringManager`'s sampler/refresher; a dedicated `FirmwareInstaller` of this shape is planned.
 
@@ -280,7 +282,7 @@ Two message types are sent over the WebSocket:
 
 `data` is an array of **cycle rows** (the stream is lossless — one row per recorded cycle since the monitoring's last flush). Each row is `[timestampUs, v0, v1, ...]`: epoch **microseconds** (JS-exact, distinct per sub-ms cycle) followed by one value per parameter, positionally ordered — no keys in the high-frequency path. A value is `null` while its device is not exchanging. Clients fetch the order (and how each value is sourced) once and cache it:
 
-```
+```text
 GET /api/monitorings/{topic} → { ..., "parameters": [{"devicePosition":1,"index":24676,"subindex":0,"source":"pdo"}, ...] }
 ```
 
@@ -303,7 +305,7 @@ Profiles are **borrowed views**, not subtypes of `Device`: the inheritance chain
 Managed via vcpkg (`extern/vcpkg` submodule, pinned in `vcpkg.json`). To add a dependency: add it to `vcpkg.json`, then `find_package` + `target_link_libraries` in the relevant `CMakeLists.txt`.
 
 | Package | Version | Used in | CMake target |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `cli11` | 2.6.2 | `motion_master` | `CLI11::CLI11` |
 | `gtest` | 1.17.0 | test targets | `GTest::gtest`, `GTest::gtest_main` |
 | `neargye-semver` | 1.0.0-rc | `mm_core` | `semver::semver` |
@@ -371,7 +373,7 @@ ninja -C build/x64-linux-debug format
 ### Naming Conventions
 
 | Category | Convention | Examples |
-|---|---|---|
+| --- | --- | --- |
 | Classes, structs, enums, type aliases | `PascalCase` | `NetworkAdapter`, `GameLoop`, `SoemFieldbusDriver` |
 | Functions (free and member) | `camelCase` | `isMacAddress()`, `addTask()`, `resolveNetworkAdapter()` |
 | Variables, parameters, struct members | `camelCase` | `macLinux`, `adapterName`, `certFile` |

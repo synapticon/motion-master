@@ -6,7 +6,7 @@ It runs as a local daemon exposing an HTTP API (`127.0.0.1:61447`) and a WebSock
 catalogs the features it provides today. The stable, built-in HTTP API is specified in
 `apps/motion_master/swagger.yml` — and served by the running binary itself at
 `GET /api/swagger.yml`. Installation, configuration, and client usage are covered in
-[`README.md`](README.md); architecture and design rationale live in `NEXTGEN.md`.
+[`README.md`](./README.md); architecture and design rationale live in `NEXTGEN.md`.
 
 ## Fieldbus / EtherCAT Bus Control
 
@@ -207,5 +207,5 @@ A React PWA at `https://motion-master.synapticon.com` provides UI for the above:
   (`logLevel`), the RT cycle period (`gameLoop`), recorder ring depth and dump directory
   (`recorder`), the on-disk parameter-definition cache (`parameterCache`), object-dictionary
   read behaviour (`parameters`), and TLS paths plus cert auto-update (`tls`). See
-  [`README.md`](README.md#configuration) for the annotated block reference, and
+  [`README.md`](./README.md#configuration) for the annotated block reference, and
   `apps/motion_master/motion-master.example.jsonc` for every key with its default.

@@ -47,11 +47,11 @@ diagnostics on `DeviceManager`/`FieldbusDriver`, not a standalone RT task.)*
 
 ## Session 2026-05-16 — HTTPS, WebSocket security, and PWA connectivity
 
-**Deployment model**
+### Deployment model
 
 Motion Master is distributed as a Windows installer and Linux `.deb`/`.rpm` packages. There is no Electron wrapper. The UI is a PWA served from `https://motion-master.synapticon.com`. The PWA connects to the locally-running Motion Master process over HTTPS and WSS.
 
-**TLS — subdomain resolving to localhost**
+### TLS — subdomain resolving to localhost
 
 The DNS record `local.motion-master.synapticon.com A 127.0.0.1` is maintained by Synapticon. Motion Master bundles a real TLS certificate for that hostname issued by Let's Encrypt (or a paid CA). Because the cert is signed by a real CA, browsers trust it with no warnings and no install steps required from the customer.
 
@@ -61,11 +61,11 @@ Cert renewal must be automated in the CI/CD pipeline via a DNS-01 ACME challenge
 
 This cert is completely independent of Synapticon's existing `*.synapticon.com` wildcard cert. That cert lives on Synapticon's web servers and is used to serve `motion-master.synapticon.com`; its private key never leaves Synapticon's infrastructure. The two certs share the `synapticon.com` domain name only by convention. Note also that the existing wildcard cannot be reused here — `*.synapticon.com` matches only a single label deep (e.g. `foo.synapticon.com`) and does not cover `local.motion-master.synapticon.com`.
 
-**CORS**
+### CORS
 
 Motion Master sets `Access-Control-Allow-Origin: https://motion-master.synapticon.com` on all responses. This prevents any other website from making browser-based requests to the local API. CORS is a browser-enforced mechanism — it does not block non-browser clients (curl, local scripts, other processes).
 
-**PWA connectivity**
+### PWA connectivity
 
 The PWA at `https://motion-master.synapticon.com` connects to:
 
@@ -76,7 +76,7 @@ Port 8443 is fixed and well-known; no discovery mechanism is needed.
 
 > **Superseded by Session 2026-06-06 — HTTP and WebSocket on separate ports/loops.** The WebSocket now runs on its own port (`wss://…:62281`, `--ws-port`) and event loop so a blocking HTTP handler can't stall it; the HTTP API is on `61447`. (Defaults moved off 8443/8444 — see that session.)
 
-**Bearer token (optional — not implemented in v1)**
+### Bearer token (optional — not implemented in v1)
 
 CORS covers the primary threat (other websites controlling drives via the browser). A bearer token would additionally block non-browser local processes (malware, rogue scripts) from talking to the API — relevant because Motion Master controls physical hardware.
 
@@ -86,11 +86,11 @@ If added: Motion Master generates a random token on first install and persists i
 
 ## Session 2026-05-16 — Class diagram, device hierarchy, naming
 
-**Revised class diagram**
+### Revised class diagram
 
 Based on reviewing the current source (`comm::base::Device`, `VirtualDevice`, `EthercatMaster`, `Cia402Drive`, `DeviceParameterRefresher`, etc.) the main structural problem is two overlapping device abstractions. NEXTGEN has one.
 
-```
+```text
 App  (composition root, owns everything)
  ├── Config
  ├── DeviceManager                (owns FieldbusDriver + Device[]; drives scanning)
@@ -117,33 +117,33 @@ App  (composition root, owns everything)
        └── uses: DeviceManager
 ```
 
-**What carries over from current code**
+### What carries over from current code
 
 - `DeviceParameter` with index, subindex, and a `DeviceParameterValue` — solid design, keep it
 - `PdoMappings` with `rxPdos`/`txPdos` and `PdoMappingEntry` — keep as-is
 - Socket-level mutex per slave — SDO calls from any thread are safe as long as FieldbusDriver owns and holds the mutex
 
-**What changes**
+### What changes
 
 - `IEthercatDriver` → `IFieldbusDriver` — SPoE is not EtherCAT; the name was inaccurate
 - `MainTimer` singleton → removed; `GameLoop` owns the timer directly
 - Static `slaveMap_` in `EthernetMaster` → removed; `DeviceManager` owns `Device[]` directly
 - `Cia402Drive` (currently just static maps/enums) → `Cia402StateMachine`, a proper owned component of `Device`
 
-**Device hierarchy — inheritance vs composition**
+### Device hierarchy — inheritance vs composition
 
 > **Superseded by Session 2026-06-05 — Device profiles as borrowed views.** The conclusion below (CiA402 as a subtype-or-component *of* `Device`; Somanet relegated to free functions because subclassing would force downcasting) was reasoned about the wrong ownership direction. The resolved model inverts it: profiles *borrow* a `Device&` rather than being owned *by* `Device`, which makes a full `SomanetDrive → Cia402Drive → ProfileDevice` inheritance chain correct. Read the later session; the notes here are kept only for the reasoning trail.
 
 `Device → Cia402Drive` via inheritance: correct. The relationship is genuinely "is-a" — CiA402 is a standard and every such device has the same state machine, op modes, and control/status word bits. Shallow inheritance is appropriate.
 
-`Cia402Drive → SomanetDevice` via inheritance: no. Somanet-specific features are not what the device _is_, they are what you _do with it_ using knowledge of Somanet's OD layout. Subclassing here would force `DeviceManager` to know about `SomanetDevice` or require downcasting — both are signs the abstraction is wrong.
+`Cia402Drive → SomanetDevice` via inheritance: no. Somanet-specific features are not what the device *is*, they are what you *do with it* using knowledge of Somanet's OD layout. Subclassing here would force `DeviceManager` to know about `SomanetDevice` or require downcasting — both are signs the abstraction is wrong.
 
 Instead:
 
 - Simple Somanet-specific OD access → free functions in `namespace somanet`
 - Complex multi-step procedures (encoder calibration, auto-tuning) → separate `ICyclicTask` implementations that take a `Cia402Drive&`
 
-**Naming**
+### Naming
 
 `DeviceParameter` over `OdEntry` — `OdEntry` is CoE jargon; `DeviceParameter` is self-explanatory and consistent with the existing codebase (`parametersMap_`, `VirtualParameter`). `OdEntry` can remain as an internal term inside driver implementations where object dictionary mechanics are explicit.
 
@@ -160,7 +160,7 @@ using DeviceParameterValue = std::variant<
 
 `DeviceParameter` holds an index, subindex, and a `DeviceParameterValue`. Type dispatch at call sites uses `std::visit`.
 
-**Dependency injection**
+### Dependency injection
 
 `App` is the only place that instantiates concrete types. `FieldbusDriver` is injected into `DeviceManager` and `NetworkScanner`; `DeviceManager` passes a `FieldbusDriver&` into each `Device` it creates. `GameLoop` and `HttpServer` both receive a `DeviceManager&` — `GameLoop` calls `exchangeProcessData`, `HttpServer` calls SDO/file/state methods. Inject `NotificationBus` into `Watchdog`, `DeviceManager`, `WebSocketServer`.
 
@@ -168,7 +168,7 @@ using DeviceParameterValue = std::variant<
 
 ## Session 2026-05-18 — Monitoring WebSocket protocol
 
-**Message format**
+### Message format
 
 Two message types flow over the monitoring WebSocket:
 
@@ -179,11 +179,11 @@ Two message types flow over the monitoring WebSocket:
 
 `data` in a monitoring message is a positionally-ordered array of numbers. The array order is stable for the lifetime of a monitoring session. Clients fetch the schema once via HTTP (e.g. `GET /api/monitoring/pdos`) and use the positional index to look up meaning — no keys are repeated in every 1 ms message.
 
-```
+```text
 GET /api/monitoring/pdos → [{"index": "6064:00", "name": "actual_position"}, ...]
 ```
 
-**Throughput**
+### Throughput
 
 At ~40 × 32-bit PDO values per message, a monitoring message is approximately 450 bytes of JSON. At 1 ms cycles with up to 5 simultaneous clients, total loopback throughput is ~2.25 MB/s — negligible on loopback. Using an array rather than a key-value map halves the message size and keeps the high-frequency path minimal.
 
@@ -191,7 +191,7 @@ At ~40 × 32-bit PDO values per message, a monitoring message is approximately 4
 
 ## Session 2026-05-18 — Configuration file format
 
-**JSONC over plain JSON**
+### JSONC over plain JSON
 
 Config files use JSONC — JSON with `//` line comments and `/* */` block comments. This is the right choice for a C++ app that already depends on nlohmann-json: no new dependency, and operators can annotate their config files naturally.
 
@@ -239,11 +239,11 @@ TOML was considered (clean syntax, native comment support, `toml++` available in
 
 ## Session 2026-05-16 — RT loop, SDO threading, object dictionary
 
-**HTTP API + real-time loop**
+### HTTP API + real-time loop
 
 The RT loop runs on a `SCHED_FIFO` thread and owns the EtherCAT context. SDO operations (CoE mailbox) and PDO exchange (LRW datagrams) are separate EtherCAT mechanisms. `FieldbusDriver` owns `controlPlaneMutex_`, which serializes the **control-plane** operations (mailbox/SDO, FoE, ESC register, state access) amongst non-RT callers. The **PDO path (`exchangeProcessData`) is deliberately lock-free**: SOEM's port layer is internally thread-safe — each datagram gets a unique index (`ecx_getindex` under `getindex_mutex`), `tx_mutex`/`rx_mutex` are held only around a single non-blocking poll (`ecx_inframe`), and a frame received for another waiter's index is cooperatively routed to its buffer. PDO and the control plane also touch disjoint high-level state (process-data IOmap vs mailbox pool / slave state). So a PDO thread and an SDO/mailbox call can share one socket without our mutex, and the RT cycle is never stalled by a slow SDO or a multi-second object-dictionary enumeration. HTTP handlers call `device.readSdo()` / `device.writeSdo()` directly on their thread; each call takes `controlPlaneMutex_` for the duration of one transaction — never across a sleep, a blocking wait, or a user callback — so `readObjectDictionary` and `transitionToState` lock per transaction rather than for their whole run. The remaining contention is at SOEM's port layer (tx/rx mutex, ~µs per frame), an acceptable sub-cycle cost.
 
-**Object dictionary threading**
+### Object dictionary threading
 
 PDO values are written by the RT loop after each exchange and read by HTTP handlers and the monitoring subsystem. With ~100 values of 32 bits each (≈400 bytes), a seqlock is the right pattern: simple, lock-free on the write path, and the retry path on reads is effectively never triggered at 1 ms cycle times.
 
@@ -270,7 +270,7 @@ Triple buffering was considered but is unnecessary at this data size. `memcpy` i
 
 ## Session 2026-05-16 — Game loop timing and startup wiring
 
-**Main thread is the game loop**
+### Main thread is the game loop
 
 `GameLoop::run()` blocks the calling thread. The main thread becomes the RT thread — no artificial sleep, no extra thread to manage. All other subsystems start their own threads before `run()` is called:
 
@@ -291,7 +291,7 @@ std::signal(SIGINT,  [](int) { running = false; });
 std::signal(SIGTERM, [](int) { running = false; });
 ```
 
-**Cycle timing — platform-specific behind a common interface**
+### Cycle timing — platform-specific behind a common interface
 
 ```cpp
 class CyclicTimer {
@@ -336,7 +336,7 @@ void CyclicTimer::waitForNextCycle() {
 }
 ```
 
-**GameLoop::run()**
+### GameLoop::run()
 
 ```cpp
 void GameLoop::run() {
@@ -365,7 +365,7 @@ void GameLoop::run() {
 
 ## Session 2026-05-16 — Project structure, toolchain, namespaces
 
-**Toolchain — keep from current project**
+### Toolchain — keep from current project
 
 - CMake + CMakePresets — modern, consistent builds across machines and CI; keep all four presets (`x64-linux-debug`, `x64-linux-release`, `x64-windows-debug`, `x64-windows-release`)
 - vcpkg — right choice for C++ dependency management; `vcpkg_installed/` in `.gitignore`
@@ -374,9 +374,9 @@ void GameLoop::run() {
 - GTest — unit testing
 - CI split into separate workflows: lint, test, release, docker
 
-**Directory layout**
+### Directory layout
 
-```
+```text
 motion-master/
   apps/
     motion-master/        ← main executable; flat file layout within
@@ -399,24 +399,24 @@ motion-master/
 
 Flat layout within each app and lib is intentional — files are navigated by name and grep, not by folder hierarchy. Keep the number of files manageable by keeping each library focused.
 
-**Naming convention — hyphens vs underscores**
+### Naming convention — hyphens vs underscores
 
 - Repo name and top-level folder: `motion-master` (hyphen) — follows git/GitHub convention and matches the domain name
 - Everything inside the repo (source files, directories): `lowercase_with_underscores` — hyphens cannot appear in C++ identifiers, so `soem_driver.cc` pairs naturally with `SoemFieldbusDriver`; `soem-driver.cc` breaks that relationship. Consistent with the Google C++ Style Guide.
 
-**What to avoid from the current codebase**
+### What to avoid from the current codebase
 
 - Private keys or certificates committed to the repo — add `*.key` and `*.pem` to `.gitignore` immediately; never commit cryptographic material
 - Bloated `.gitignore` based on a Visual Studio template — write a lean, project-specific file covering only what this project actually produces
 - Paired `.sh`/`.ps1` scripts duplicated at root — replace with CMake custom targets (`format`, `lint`, `docs`) so there is one way to do things on both platforms; put any remaining scripts in `tools/`
 - Two `util` files in different locations — all cross-cutting utilities live in `libs/core/`; nothing utility-shaped goes into an app directory
 
-**Dependencies — changes from current**
+### Dependencies — changes from current
 
 - `loguru` — move from `extern/loguru` git submodule to vcpkg; cleaner dependency management, no manual submodule updates
 - `std::expected` — use from the standard library (C++23); no third-party `tl::expected` needed; bump the CMake `CMAKE_CXX_STANDARD` to 23
 
-**Namespaces vs modules**
+### Namespaces vs modules
 
 Use namespaces. Do not use C++20 modules yet.
 
@@ -440,11 +440,11 @@ namespace mm::api { }
 
 ## Session 2026-05-19 — RT jitter benchmark (`hil/jitter_bench`)
 
-**Why a standalone jitter bench**
+### Why a standalone jitter bench
 
 The `GameLoop` uses `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME)` and `SCHED_FIFO` priority 80 for its cycle timer. Characterising actual OS scheduling latency on a given kernel (standard vs `PREEMPT_RT`) cannot be done in a unit test — it requires real RT privileges, a real kernel, and enough cycles to observe the tail distribution. The `hil/` folder was created for exactly this class of test.
 
-**Measurement: cycle-to-cycle jitter**
+### Measurement: cycle-to-cycle jitter
 
 The metric is `(t[i] - t[i-1]) - period_ns`, where `t[i]` is a `clock_gettime(CLOCK_MONOTONIC)` timestamp taken immediately after `waitForNextCycle()` returns. This is cycle-to-cycle jitter: how much each actual interval deviated from the nominal period.
 
@@ -462,7 +462,7 @@ The bench re-implements the same loop: construct `mm::core::CyclicTimer`, call `
 
 A CPU-bound spin-wait (spinning on `clock_gettime`) simulates task execution time without yielding the CPU. This is realistic: the actual per-cycle work (PDO exchange, state machine updates, monitoring publish) is CPU-bound. The option lets you answer: does 300 µs of work in a 1 ms cycle cause overruns on this kernel? Overruns are defined as `|jitter| > one period` — the next `waitForNextCycle()` returned immediately because we had already passed its absolute deadline.
 
-**Output**
+### Output
 
 CSV: `cycle`, `elapsed_ms`, `jitter_ns`. Python plot script (`plot_jitter.py`): two-panel figure with a time-series (line chart with P99/P99.9 reference lines) and a histogram clipped at 1.5× P99.9 so extreme spikes do not compress the main distribution. Both the bench and the plot script print a statistics table: min, max, mean, stddev, P50, P95, P99, P99.9.
 
@@ -474,7 +474,7 @@ CSV: `cycle`, `elapsed_ms`, `jitter_ns`. Python plot script (`plot_jitter.py`): 
 
 Unit tests verify individual C++ components in isolation. The `hil/api` suite exercises the full running server — HTTP response shapes, status codes, semver-valid version strings, and WebSocket message framing — things that only manifest when the complete stack is assembled. These tests live in `hil/` because they, like `jitter_bench`, cannot run in CTest: they require a live server process and, optionally, real OS primitives.
 
-**Docker as the test fixture**
+### Docker as the test fixture
 
 The server is started as a Docker container managed entirely by the Vitest global setup (`src/global-setup.ts`). On `setup()`: remove any stale container by name, `docker build` from the repo root, `docker run -d --rm --network host`. On `teardown()`: `docker stop` (the `--rm` flag handles removal). This means `npm test` is self-contained — no manual server startup, no leaked processes.
 
@@ -484,7 +484,7 @@ The server is started as a Docker container managed entirely by the Vitest globa
 
 Bypasses the Docker lifecycle and polls an already-running instance. Useful when iterating locally with `./tools/run.sh` in a separate terminal — avoids the rebuild cost on every test run.
 
-**TLS**
+### TLS
 
 The container entrypoint generates a self-signed certificate for `local.motion-master.synapticon.com` on each start. The test suite sets `NODE_TLS_REJECT_UNAUTHORIZED=0` to accept it. This is acceptable because the tests run against localhost and certificate pinning is not a testing concern here.
 
@@ -494,11 +494,11 @@ Revisit modules when vcpkg packages start shipping module interfaces and CMake s
 
 ## Session 2026-05-22 — Device, DeviceManager, SlaveInfo, and fieldbus driver selection
 
-**No NetworkScanner**
+### No NetworkScanner
 
 There will be no separate `NetworkScanner` class. `DeviceManager` owns slave discovery and network scanning directly via `FieldbusDriver`. This keeps the dependency graph flat — one fewer class, no forwarding methods.
 
-**FieldbusDriver startup sequence**
+### FieldbusDriver startup sequence
 
 Three calls in order:
 
@@ -506,7 +506,7 @@ Three calls in order:
 2. `scan()` — discovers slaves and configures SM/FMMU (`ecx_config_init`). Sets `manualstatechange = 1` so slaves remain in INIT; all EtherCAT state transitions are left entirely to the caller (HTTP API or test code). Returns the slave count on success.
 3. `exchangeProcessData()` — called each game loop cycle once slaves are in OP.
 
-**SlaveInfo — immutable identity from EEPROM**
+### SlaveInfo — immutable identity from EEPROM
 
 After `scan()`, SOEM has read each slave's SII EEPROM. These fields do not change for the lifetime of the session and are captured immediately into `SlaveInfo`:
 
@@ -522,21 +522,21 @@ struct SlaveInfo {
 
 `Device` reads `SlaveInfo` from the driver in its constructor and stores the values as plain members. This avoids repeated SOEM lookups and makes identity always available without driver access.
 
-**Device**
+### Device
 
 `Device` holds a 1-based `slavePosition` (SOEM's slave array index; 0 is the master) and a `FieldbusDriver&` for SDO and state operations. Immutable identity fields (`name`, `vendorId`, `productCode`, `revisionNumber`, `serialNumber`) are populated from `SlaveInfo` at construction.
 
-**DeviceManager::scan() populates devices_**
+### DeviceManager::scan() populates devices_
 
 `DeviceManager::scan()` calls `driver_.scan()`, then constructs one `Device` per slave (positions 1..n) and stores them in `devices_`. This is the single place where the device list is created.
 
-**Driver selection and deferred initialisation**
+### Driver selection and deferred initialisation
 
 `--driver` and `--adapter` are optional at startup. If `--driver` is given, `main.cc` constructs the concrete driver and immediately calls `deviceManager.init(std::move(driver))` + `scan()`; the app starts with devices ready. If omitted, the app starts in an uninitialised state and the HTTP API is used to initialise later.
 
 `DeviceManager` owns the driver via `unique_ptr<FieldbusDriver>` (null until `init()` is called). Adding a new driver type is an `else if` in `main.cc`'s `makeDriver` lambda; `DeviceManager` has no knowledge of the concrete type.
 
-**Linux capabilities**
+### Linux capabilities
 
 `motion-master` requires `cap_net_raw` (raw EtherCAT socket), `cap_sys_nice` (SCHED_FIFO), and `cap_ipc_lock` (`mlockall` memory pinning). `tools/build.sh --setcap` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip` on the binary after linking so developers do not need to run the binary as root.
 
@@ -544,7 +544,7 @@ struct SlaveInfo {
 
 ## Session 2026-05-22 — libs/node and the mm::node library
 
-**Why a separate library layer**
+### Why a separate library layer
 
 `mm::comm` is the transport/protocol layer: `FieldbusDriver` (abstract interface), `SoemFieldbusDriver`, `SpoeFieldbusDriver`. It is stable and protocol-focused. `Device` and `DeviceManager` are the device model — and as CiA402, drive profiles, and encoder calibration are added, they accumulate application-layer logic that does not belong in a transport library.
 
@@ -557,9 +557,9 @@ struct SlaveInfo {
 - `mm::drives` — accurate for CiA402 servo drives but breaks when I/O modules, sensors, or other non-drive nodes are added.
 - `mm::node` — the standard protocol-agnostic term for any addressable device on a fieldbus. Scales to drives, I/O modules, sensors equally.
 
-**Layer summary**
+### Layer summary
 
-```
+```text
 libs/comm/   mm::comm   ← EtherCAT/SPoE transport: FieldbusDriver interface + concrete drivers
 libs/node/   mm::node   ← Device model: Device, DeviceManager, CiA402, profiles, encoder
 apps/        (app layer) ← GameLoop, HttpServer, WebSocket, CLI — thin shell, not distributable
@@ -571,24 +571,24 @@ apps/        (app layer) ← GameLoop, HttpServer, WebSocket, CLI — thin shell
 
 ## Session 2026-05-22 — Deferred fieldbus initialisation and HTTP lifecycle API
 
-**Motivation**
+### Motivation
 
 Previously the app required `--driver` and could not start without a functioning EtherCAT adapter. This prevented headless deployment scenarios and made the app harder to test without hardware. The fieldbus lifecycle is now fully controllable via the HTTP API.
 
-**Ownership change: DeviceManager owns FieldbusDriver**
+### Ownership change: DeviceManager owns FieldbusDriver
 
 `DeviceManager` changed from holding a `FieldbusDriver&` (non-owning reference) to owning a `unique_ptr<FieldbusDriver>` (null until initialised). The driver is never constructed inside `DeviceManager` — `main.cc` creates the concrete type and transfers ownership via `DeviceManager::init(unique_ptr<FieldbusDriver>)`. This keeps the composition-root rule intact.
 
 `reset()` ordering is now mechanically enforced: `devices_.clear()` first (so `Device` objects drop their `FieldbusDriver&` before the driver stops), then `driver_->stop()`, then `driver_.reset()`. With the old reference-based design this ordering was a soft contract enforced only by convention.
 
-**Server::Config::InitDriverFn**
+### Server::Config::InitDriverFn
 
 `Server::Config` carries an `InitDriverFn` callback (`std::function<std::expected<void, std::string>(std::string driver, std::string adapter)>`). The lambda is wired in `main.cc` and creates the concrete driver, then calls `deviceManager.init()`. The server only knows the abstract callback — no concrete driver type leaks past the composition root.
 
-**New HTTP lifecycle endpoints**
+### New HTTP lifecycle endpoints
 
 | Endpoint | Body | Effect |
-|---|---|---|
+| --- | --- | --- |
 | `POST /api/init` | `{"driver":"soem","adapter":"eth0"}` (adapter optional) | Creates driver, calls `DeviceManager::init()` |
 | `POST /api/scan` | — | Calls `DeviceManager::scan()`; returns `{"slaves": N}` |
 | `POST /api/reset` | — | Calls `DeviceManager::reset()`; releases driver |
@@ -596,11 +596,11 @@ Previously the app required `--driver` and could not start without a functioning
 
 `GET /api/devices` returns an empty array when uninitialised; all other behaviour is unchanged.
 
-**GameLoop start**
+### GameLoop start
 
 The GameLoop starts unconditionally regardless of whether a driver is present. `exchangeProcessData()` is a no-op when `driver_` is null, so the loop runs safely in the uninitialised state.
 
-**Thread safety — open issue**
+### Thread safety — open issue
 
 `POST /api/init`, `POST /api/scan`, and `POST /api/reset` run on the HTTP server thread and mutate `driver_` and `devices_`. `exchangeProcessData()` runs on the RT GameLoop thread and reads both. There is currently no lock guarding this boundary. This is safe only because `exchangeProcessData()` is not yet wired into the GameLoop. Before enabling live PDO exchange, the loop must be stopped (or drained for one cycle) before `init()` or `reset()` is called via the API.
 
@@ -608,24 +608,24 @@ The GameLoop starts unconditionally regardless of whether a driver is present. `
 
 ## Session 2026-05-23 — TLS certificate automation
 
-**Problem**
+### Problem
 
 The PWA at `https://motion-master.synapticon.com` targets `https://local.motion-master.synapticon.com:8443`. Because the PWA is served over a real HTTPS origin, browsers enforce strict certificate validation. The previous `tools/run.sh` generated a self-signed cert on every start, causing `ERR_CERT_AUTHORITY_INVALID` in the browser.
 
-**Solution: Let's Encrypt via DNS-01 + acme-dns delegation**
+### Solution: Let's Encrypt via DNS-01 + acme-dns delegation
 
 A real Let's Encrypt cert is issued for `local.motion-master.synapticon.com` using DNS-01. HTTP-01 is not viable because the domain resolves to `127.0.0.1` and Let's Encrypt's validators cannot reach localhost. DNS-01 only requires a publicly visible TXT record — no inbound connectivity.
 
 Automating the DNS-01 challenge without direct DNS API access uses **acme-dns**: a small service that holds ACME challenge TXT records and exposes a simple update API. A one-time permanent CNAME is added to the main zone:
 
-```
+```text
 _acme-challenge.local.motion-master.synapticon.com
   → CNAME → 4723b93a-99f5-43d7-93f1-195dbb4168ea.auth.acme-dns.io
 ```
 
 When Let's Encrypt validates, it follows the CNAME and reads the TXT record from `auth.acme-dns.io`. The acme-dns account credentials are stored as the GitHub Secret `ACMEDNS_CONFIG` (JSON). The `acme.sh` tool with its `dns_acmedns` plugin updates the challenge record over the acme-dns REST API automatically — the main DNS zone (`synapticon.com`) is never touched again.
 
-**cert-renewal.yml**
+### cert-renewal.yml
 
 *(The `~/.acmedns.json` step described here was a no-op — acme.sh reads `ACMEDNS_*` env vars, not that file. See Session 2026-06-06 — TLS cert auto-update for the fix and the rolling-release/self-heal additions.)*
 
@@ -636,17 +636,17 @@ Runs on the 1st of every month via `schedule`. Installs `acme.sh`, writes `~/.ac
 - `TLS_CERT` — full-chain PEM (renewed cert + Let's Encrypt intermediate)
 - `TLS_KEY` — EC private key
 
-**release.yml**
+### release.yml
 
 Triggered by `v*` tag pushes. Builds with the `x64-linux-release` CMake preset, reads `TLS_CERT` and `TLS_KEY` from secrets, writes them as `cert.pem`/`key.pem` into the build output directory, then packages `motion-master`, `cert.pem`, and `key.pem` into `motion-master-<version>-linux-x64.tar.gz` and publishes a GitHub Release. *(Superseded — since Session 2026-07-08 each leg `curl`s the cert/key from the rolling `tls-cert` release instead of reading secrets; the release is now multi-platform, see that session and the README CI table.)*
 
-**tools/run.sh cert discovery order**
+### tools/run.sh cert discovery order
 
 1. `cert.pem` / `key.pem` next to the binary — present in release installs
 2. `~/.acme.sh/local.motion-master.synapticon.com_ecc/fullchain.cer` + `.key` — present on developer machines with `acme.sh` installed; renewed automatically by the cron job `acme.sh` registers on install
 3. Self-signed fallback — generated fresh each run; browsers require a one-time exception
 
-**Private key in release artifact**
+### Private key in release artifact
 
 The key is bundled alongside the binary in every release (effectively public). This is acceptable: the domain always resolves to `127.0.0.1`, so an attacker with the key can only serve HTTPS on their own loopback interface — not intercept traffic between a user's PWA and their own Motion Master instance.
 
@@ -654,7 +654,7 @@ The key is bundled alongside the binary in every release (effectively public). T
 
 ## Session 2026-05-23 — DeviceManager::transitionToState and POST /api/state
 
-**DeviceManager::transitionToState**
+### DeviceManager::transitionToState
 
 `DeviceManager` now exposes `transitionToState` as a thin delegation to `FieldbusDriver::transitionToState`. Requires both `init()` and `scan()` to have been called — `init()` opens the NIC and `scan()` configures slave addresses and the io map; neither is meaningful without the other.
 
@@ -670,18 +670,19 @@ std::expected<void, std::string> transitionToState(
 - Devices that do not reach the target state within `timeout` are logged at error level; the call still returns successfully — the caller can inspect device state via `GET /api/devices` if needed.
 - `requiredState` (pre-filter) and `tick` (watchdog keepalive) are not exposed at the `DeviceManager` level for now; they are implementation details of the driver that will be wired in when live PDO exchange is enabled.
 
-**POST /api/state**
+### POST /api/state
 
-```
+```text
 POST /api/state
 {"state": 8, "positions": [1, 2], "timeout": 5000}
 ```
 
 `state` uses the standard ETG.1000.6 AL control register encoding: 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op). Numbers were chosen over strings because these values are well-known to EtherCAT engineers and map directly to the wire protocol. `positions` and `timeout` are optional; omitting `positions` targets all discovered devices, `timeout` defaults to 5000 ms.
 
-**Firmware update lifecycle — future work**
+### Firmware update lifecycle — future work
 
 The planned firmware update flow is:
+
 1. Transition target device to BOOT (other devices continue PDO exchange normally).
 2. Flash firmware over the Boot mailbox.
 3. Device returns to INIT — at this point it is stale: potentially a new PDO layout and updated object dictionary.
@@ -724,6 +725,7 @@ The figures are meaningful only while exchanging in SAFE-OP/OP: this stack runs 
 **Roadmap — fieldbus capabilities not yet exposed.** The exposed surface is now bus-level Control / Configuration / Process Image / Diagnostics / DC Sync, plus per-device FoE / Parameters (CoE OD + SDO) / PDO Mapping (read + write, shipped 2026-07-06 — see that session) / Registers (ESC) / SII (EEPROM read). What remains, ranked by value-vs-effort, deferred for a later session:
 
 *Tier 1 — high value, mostly presentation of data the driver already caches (read-only, no RT):*
+
 1. **Topology / cabling map.** SOEM already caches per-slave `topology`, `activeports`, `consumedports`, `parent`, `parentport`, `entryport`, and the `DCnext`/`DCprevious` chain (`extern/.../soem/ec_main.h`). Combined with the per-port link state already read in Diagnostics (DL Status 0x0110), this renders the physical bus tree — line/ring/branch, hot-connect groups, which port connects to which neighbour. The view a field engineer reaches for first; spots a miscabled port instantly. Shape: a `busTopology()` driver method (cached read) + a tree/graph UI.
 2. **Frame / WKC health timeline (master-side).** Process Image shows `lastWkc`/`expectedWkc` as a point value; the GameLoop gets a WKC every cycle. Accumulate master-side stats over time — WKC-mismatch count, lost frames, longest cycle overrun, "drops in the last minute" — to catch *intermittent* faults a point-in-time reading walks past. Distinct from the slave-side ESC counters. Pairs with the delta-tracking follow-up already noted for the Diagnostics page.
 
@@ -928,6 +930,7 @@ A **seqlock, not per-field atomics**, precisely because the snapshot must be con
 **Rolling release as a stable fetch source.** Releases bundle the cert, but they're tied to `v*` tags — a 4-month release gap means the bundled cert is already expired, useless as a refresh source. So `cert-renewal.yml` also publishes the monthly cert/key as assets on a fixed-tag `tls-cert` release (marked **pre-release** so it never becomes the repo's "Latest" and shadows app releases — `--latest=false` was not enough once it was the only non-prerelease). Stable URL, decoupled from app cadence: `https://github.com/synapticon/motion-master/releases/download/tls-cert/{cert,key}.pem`. Publishing the keypair is safe: it only authenticates `local.motion-master.synapticon.com`, which resolves to `127.0.0.1`.
 
 **Self-heal in the binary, not (only) the API.** The load-bearing refresh path is in the binary, because an expired cert blocks the very API call that would fix it: the PWA reaches the local server via cross-origin `fetch()`, which a browser refuses (with no click-through) once the cert is invalid — and terminal-only users never open the UI. So:
+
 - `cert_updater.{h,cc}` (`fetchAndSwapCert`, libcurl + the already-linked OpenSSL) downloads cert+key, validates the pair (parses, CN matches, not expired, key matches cert), then atomically installs them (temp + rename; key `0600`).
 - `main.cc` self-heals at startup: a missing/expired cert triggers a fetch before binding TLS (missing + fail is fatal; expired + fail serves the expired cert). `--no-cert-update` opts out (air-gapped); `--update-cert` fetches and exits (headless/CLI); `--cert-url`/`--key-url` override the source.
 - `GET /api/cert` reports validity (`expiresSoon` within 7 days); `POST /api/cert/refresh` is the still-valid proactive path, surfaced as a button on the PWA Connection page. It returns `restartRequired: true` — the TLS listener loads the cert once at listen, so a restart applies it (chosen over hairy in-process listener reload). It runs synchronously on the HTTP loop; tolerable because it's rare and ~1 s, and after the split below it no longer touches the WebSocket.
@@ -961,6 +964,7 @@ Cycling a device INIT → BOOT → INIT → PRE-OP → SAFE-OP (and the delibera
 The "Class Diagram UML" stub and the *Session 2026-05-16* detailed diagram had drifted from what was actually built. Walked the source and brought the canonical references in `CLAUDE.md` ("Class Structure" + "Game Loop / RT Threading") back in line; this note records the as-built shape and what is still only designed. The historical session entries are left intact as the reasoning trail.
 
 **Built and load-bearing today:**
+
 - **Composition root is `main.cc`**, not an `App` class — `main.cc` is the one place concrete types are instantiated and wired (the DI seam `Server::Config::InitDriverFn` is the exception that lets `POST /api/init` build a driver without the server knowing concrete types).
 - **`DeviceManager` owns `unique_ptr<FieldbusDriver>` + `std::vector<Device>` + `unique_ptr<ProcessData>`.** It hands each `Device` a `FieldbusDriver&` and a raw `ProcessData*` (non-owning; the manager outlives every device). The only concrete driver in the tree is `SoemFieldbusDriver`; `SpoeFieldbusDriver`/IgH remain planned.
 - **Profiles are borrowed views, confirmed in code:** `ProfileDevice ← Cia402Drive ← SomanetDrive`, each holding only a `Device&`, built via `createCia402Drive` / `createSomanetDrive`. There is **no** `Cia402StateMachine` owned by `Device` — that 2026-05-16 ownership model was already inverted by the 2026-06-05 borrowed-views session; the older diagram just hadn't caught up.
@@ -969,6 +973,7 @@ The "Class Diagram UML" stub and the *Session 2026-05-16* detailed diagram had d
 - **Monitoring is off-RT.** `MonitoringManager` (constructed in `main.cc` over `DeviceManager`, reached by `HttpServer` for `/api/monitorings`) owns a sampler thread and a `ParameterRefresher` thread; it publishes batches via a `setPublish` callback wired to `WebSocketServer::publish`. It is deliberately **not** a `CyclicTask`.
 
 **Designed but not yet in code (kept in the diagram, flagged `planned`):**
+
 - `SineWaveTask` and the per-device `SeqLock<SineWaveParams>` control block (the RT cyclic-procedure pattern from 2026-06-05).
 - `NotificationBus` (the observer that would decouple producers from the servers) — notifications currently go straight through `WebSocketServer::broadcast`.
 - `FirmwareInstaller` — the off-RT `std::jthread` procedure shape now has a real precedent in `MonitoringManager`'s threads rather than `FirmwareInstaller` itself.
@@ -977,27 +982,32 @@ The "Class Diagram UML" stub and the *Session 2026-05-16* detailed diagram had d
 ## Session 2026-06-08 — Lossless process-data capture: a big circular recorder (design)
 
 **The gap.** The monitoring path is structurally *lossy* and always will be, by two independent mechanisms, and that is correct for what it does — live display:
+
 1. `ProcessData`'s `inputSnapshot`/`outputSnapshot` are `SeqLock<ProcessBuffer>` — a **single slot, last-writer-wins**. The RT loop overwrites it every cycle; a reader gets *whatever is there now*. The seqlock guarantees a coherent (non-torn) read, not *every* read.
 2. `MonitoringManager` samples off-RT on its own `interval` (`Entry::nextDue`). Even at `interval = 1 ms`, an off-RT thread cannot observe every distinct 1 ms RT cycle — scheduling jitter alone skips cycles. It reads the *current* snapshot, not a queue.
 
 For "the user must get **every** cycle, no skips" (trajectory recording, offline analysis, post-mortem after a fault) neither layer can deliver. This is the same lossless-capture need that the *previous, unrecorded* session raised — writing it down this time.
 
-**Not a drain queue — a continuous circular recorder, and the source for the live stream too.** The decided shape (not an SPSC producer→consumer where the consumer advances a tail and frees slots) is a flight-data-recorder ring in master RAM. Crucially, **monitoring must deliver _every_ cycle for plotting** — the live WebSocket path has to be lossless, not just the bulk pull — so the ring is the source for *both*:
+**Not a drain queue — a continuous circular recorder, and the source for the live stream too.** The decided shape (not an SPSC producer→consumer where the consumer advances a tail and frees slots) is a flight-data-recorder ring in master RAM. Crucially, **monitoring must deliver *every* cycle for plotting** — the live WebSocket path has to be lossless, not just the bulk pull — so the ring is the source for *both*:
+
 - **RT loop writes one record every cycle, forever**, advancing a head and overwriting the oldest only on wrap. "Very big" ⇒ a long rolling history is always resident.
 - **One ring, two non-destructive readers, both reading every cycle.** (a) The **live streamer** (`MonitoringManager`'s thread) holds a per-monitoring **read cursor** — a read index, *not* a tail. Each flush it reads `ring[cursor..head]`, decodes that monitoring's parameters for **every record in the span**, packs them as rows, publishes the batch, advances *its own* cursor, frees nothing. `interval` stops meaning "sample one value per interval" and becomes the **flush cadence** (flush every 50 ms ⇒ ~50 cycle-rows/batch at 1 ms); the client plot gets a contiguous, gap-free series. (b) The **dump** is a second non-destructive reader — **deferred, see the parked section at the end of this note**. The existing WebSocket protocol already carries "one inner array per sample" — a batch now holds every cycle-row since the last flush instead of interval-samples, **no protocol change**.
-- **The `SeqLock<ProcessBuffer>` snapshots are dropped entirely (settled 2026-06-09).** Earlier this note kept them "for point reads"; that's redundant — **`ring[head-1]` _is_ the latest coherent snapshot.** A point read (`readPdo`, current-value lookups) loads `head`, targets `seq = head-1`, reads `ring[seq % capacity]`, and re-checks the slot's sequence (the same per-record seqlock guard the live cursor/dump use) — identical coherence to the old seqlock. Wins: **the RT loop writes only `ring[head]` once per cycle** (not ring + input snapshot + output snapshot); one source of truth; and a single record holds inputs *and* outputs from the *same* cycle, so a combined read can't straddle cycles the way two separately-written seqlocks could. Health gating is unchanged (WKC atomic + published-image pointer, independent of the seqlock; `head == 0` ⇒ no cycle yet ⇒ same SDO fallback). Output *staging* is unaffected (`outputSlots` atomics, Design B); the output read-back just comes from `head-1` too. `ProcessData` stops holding `SeqLock<ProcessBuffer>` members — the generic `SeqLock` in `libs/core` stays (a ring slot is morally one). The ring is the single RT-written structure and the source for the full history, the live plot, *and* point reads.
+- **The `SeqLock<ProcessBuffer>` snapshots are dropped entirely (settled 2026-06-09).** Earlier this note kept them "for point reads"; that's redundant — **`ring[head-1]` *is* the latest coherent snapshot.** A point read (`readPdo`, current-value lookups) loads `head`, targets `seq = head-1`, reads `ring[seq % capacity]`, and re-checks the slot's sequence (the same per-record seqlock guard the live cursor/dump use) — identical coherence to the old seqlock. Wins: **the RT loop writes only `ring[head]` once per cycle** (not ring + input snapshot + output snapshot); one source of truth; and a single record holds inputs *and* outputs from the *same* cycle, so a combined read can't straddle cycles the way two separately-written seqlocks could. Health gating is unchanged (WKC atomic + published-image pointer, independent of the seqlock; `head == 0` ⇒ no cycle yet ⇒ same SDO fallback). Output *staging* is unaffected (`outputSlots` atomics, Design B); the output read-back just comes from `head-1` too. `ProcessData` stops holding `SeqLock<ProcessBuffer>` members — the generic `SeqLock` in `libs/core` stays (a ring slot is morally one). The ring is the single RT-written structure and the source for the full history, the live plot, *and* point reads.
 
 **Two decisions taken (2026-06-08):**
+
 - **Sizing: configurable *seconds*, in the JSONC config — not a CLI flag** (settled 2026-06-08). Ring depth is a persistent, per-machine RAM budget set once per install, which is what the config file is for — and the config (added but unused so far) gets its first real consumer, setting the pattern. A `recorder` block, **`historySeconds` only for now**: `{ "historySeconds": 300 }`. (`dumpDir` is **not** added yet — it belongs to the deferred dump, and a `/tmp` default is wrong cross-platform: Windows has no `/tmp`. When the dump returns, derive the default from `std::filesystem::temp_directory_path()`, not a hardcoded path.) `capacity = historySeconds × 1000 cycles/s`; the byte allocation can't be computed until the process image exists (record size = whole-image size, bus-dependent), so the **ring is allocated and `mlock`'d at `configureProcessData` time, not at startup** — its lifecycle is tied to the process image. A per-cycle record is 28 B fixed (20-byte header + 8-byte publication word) plus the whole-bus IOmap (~82 B per SOMANET drive, budget ~100 B ⇒ ~128 B/cycle for a single drive). At ~128 B/cycle: 1 min ≈ 7.7 MB, 10 min ≈ 77 MB, 1 hr ≈ 460 MB. Default leaning ~300 s ≈ 38 MB per drive; it scales with drive count.
 - **Scope: one global recorder of the *whole raw process image* per cycle**, not per-monitoring projections. The RT push is one `memcpy` of the input (and output) IOmap; **decoding to specific parameters happens at read time**. Consequence — the full history is available for parameters never declared in a monitoring, which is what you want after an unexpected fault. (Per-monitoring rings were rejected: N RT writes, and you only capture what you declared up front.)
 
 **The ring is gapless; only a slow *reader* can "gap".** The RT producer writes *every* cycle, contiguously — the recorded data never has holes. A "gap" can only mean a *reader* fell so far behind that the producer overwrote its data before it was read. That is a property of a slow consumer, not of the recording, and it can only happen to the **live cursor** (a pathologically stalled client, > the whole ring depth), never to a bulk read of a frozen span. Mechanism — **per-record sequence numbers**, not a global seqlock over the whole ring:
+
 - Each slot carries a `seq` (the absolute cycle count, monotonic, never reused; `slot = seq % capacity`), written *after* the payload with **release** ordering. `head` is the producer's atomic next-sequence counter. RT write stays wait-free: one `memcpy` + one atomic release store — no lock, never blocks on a reader.
 - The **oldest still-valid record** is `max(nextReadSeq, head − capacity)` — valid sequences are always the window `[head − capacity, head)`.
 - A live reader keeps `nextReadSeq`. Each wake: load `head` (acquire). If `nextReadSeq < head − capacity` it was lapped → emit a **gap notification** over the WebSocket (`missed [nextReadSeq, head − capacity)`) and jump `nextReadSeq = head − capacity`. Otherwise read `[nextReadSeq, head)`, re-checking each slot's `seq` after the copy (seqlock-style) to catch a mid-copy overwrite; then `nextReadSeq = head`.
 - So the gap is a **stream-side notification, never a stored artifact**. Lossless-or-explicitly-flagged on the live path; the user always *knows* if a read raced a wrap (vanishingly rare with a seconds-deep ring, but never silent).
 
 **Monitoring config: interval only, no `bufferSize` (settled 2026-06-08).** Configure a monitoring by **interval** (refresh/flush cadence), not buffer size. Rationale: users think in refresh rate not sample counts; interval is invariant to cycle rate (`bufferSize` of N means N ms at 1 kHz but 2N ms at 500 Hz); and `bufferSize` is now redundant since the producer writes every cycle regardless — the only thing left to choose is how often the reader wakes. **Drop the `bufferSize` field from `Monitoring`** and its `>= 16` validation in `create`.
+
 - **Interval bounds: [10 ms, 1000 ms], default 20 ms (50 Hz).** Throughput is constant regardless of interval (lossless — all data flows either way); interval only trades message size vs frequency (`rows_per_msg ≈ interval / cycle`, ~450 B/row). Lower bound 10 ms (≈4.5 KB/msg, 100/s) avoids a message storm and sub-cycle pointlessness; upper bound 1000 ms (≈450 KB/msg, 1/s) supports a slow-trend view and is the accepted big-bursty-message case.
 - **The reader loop (settled):** each wake, **snapshot `head` once** into a local, ship decoded rows for the half-open span `[cursor, head)` as **one WebSocket message**, then `cursor = head`. `head` is the *next* write slot, so `head-1` is the newest completed record. Snapshotting `head` once is what bounds the message (don't re-read live `head` mid-copy). A jitter-delayed wake just produces one occasionally-bigger message — still drains to `head`, so it **never falls behind and never loses data**. No drain-loop / per-message row cap needed because the bounded interval already bounds `head - cursor`.
 - **Two delivery modes — lossless stream vs. last-N telemetry (added 2026-06-09, design only; lives ONLY in this ring redesign, not the current interval-sampler).** A monitoring picks one:
@@ -1038,6 +1048,7 @@ The JSONC config (`nlohmann::json::parse(stream, nullptr, true, true)`, `.jsonc`
 - **No `/tmp` defaults in config.** Followed through when the dump shipped (2026-06-10): `recorder.dumpDir` defaults to `""`, resolved at dump time to `std::filesystem::temp_directory_path() / "motion-master"`, never a hardcoded `/tmp` (Windows has none).
 
 **Settings are config-file-ONLY — they have no CLI flags (settled & implemented 2026-06-09; reverses the earlier "CLI overrides config" plan).** A tunable setting is set *only* through the JSONC file; the corresponding `--port`/`--ws-port`/`--cert`/`--key`/`--driver`/`--adapter`/`--log-level`/`--cors-origin`/`--no-cert-update` flags were **removed**. The CLI surface is now just actions + cert-fetch sources: `--help`, `--version`, `--list-adapters`, `--config`, `--open`, `--update-cert`, `--cert-url`, `--key-url`. This dropped the whole CLI-override layer (no precedence merge, no two-phase pre-pass) — `parseOptions` parses the CLI actions, then loads the file into `opts.config` and resolves the adapter. The settings schema (mapped 1-1 to the `Config` struct tree, `config.h`):
+
   ```jsonc
   {
     "server":   { "httpPort": 61447, "wsPort": 62281, "corsOrigin": "https://motion-master.synapticon.com" },
@@ -1046,7 +1057,9 @@ The JSONC config (`nlohmann::json::parse(stream, nullptr, true, true)`, `.jsonc`
     "tls":      { "certPath": "cert.pem", "keyPath": "key.pem", "autoUpdate": true },
     "recorder": { "historySeconds": 300, "dumpDir": "" }   // dumpDir "" ⇒ <temp>/motion-master (added 2026-06-10)
   }
+
   ```
+
   Notes: keys are **`httpPort`/`wsPort`** (symmetry) and **`certPath`/`keyPath`** (explicit they are paths). **`fieldbus` empty/omitted ⇒ no startup auto-init** — the fieldbus waits for `POST /api/init`; set `driver`+`adapter` to auto-init at startup. The `fieldbus` block is partly **driver-specific** (`soem` → `adapter`; `spoe` → `ipAddresses`). **`tls.autoUpdate` defaults `true`** (air-gapped sets `false`). **`certUrl`/`keyUrl` stay CLI-only** (`--cert-url`/`--key-url`), excluded from the config/example. Implementation: `Config` uses nlohmann `NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT` so absent keys fall back to defaults; `parseConfig` adds the enum checks nlohmann can't (`logLevel`, `fieldbus.driver`). Callers that used the removed flags now **generate a config file**: `tools/run.sh` (cert/cors/logLevel via `CORS_ORIGIN`/`LOG_LEVEL` env), `tools/run-dev.sh`, and `docker-entrypoint.sh` (or mount one and set `MM_CONFIG`).
 
 ## Session 2026-06-10 — Recorder dump shipped (`POST /api/process-data/dump`, the `.mmpd` file)
@@ -1166,6 +1179,7 @@ Reverse-order stack destruction destroys `processDataCyclicTask` first — so th
 Roadmap item #6 (fieldbus capabilities, Session 2026-06-01) shipped: the user can now change *which* objects are in the cyclic image, not just view the existing mapping. End-to-end — `Device`/`DeviceManager` methods, `GET`/`PUT /api/devices/:slavePosition/pdo-mapping`, swagger + regenerated TS client, and a **PDO Mapping** editor page in the console.
 
 **One CoE read source, two shapes.** The mapping is read over the CoE mailbox by walking the PDO assignment objects (`0x1C12` outputs/RxPDO, `0x1C13` inputs/TxPDO) and the mapping objects they reference (`0x16xx`/`0x1Axx`) via SDO upload. That single reader (`readPdoAssignment`) now feeds two views:
+
 - **Grouped** (`Device::readPdoMapping → PdoMapping`): each mapping object keeps its `pdoIndex` and its own entries (with derived `bitOffset`) — the round-trippable shape the editor loads and the write echoes back.
 - **Flat** (`Device::readFlatPdoMapping → FlatPdoMapping`, cached in `flatPdoMapping_`): one flat list of `PdoMappingEntry` per direction, what the process-image builder consumes. Now *derived* from the grouped read rather than a separate walk.
 
@@ -1255,6 +1269,7 @@ struct TrajectoryControl {                                    // per-device, uni
 **The non-negotiable requirement.** `createCia402Drive(device)->state()` — and every other profile operation (`setControlword`, `shutdown`/`switchOn`/`enableOperation`, `setOperationMode`, `setTargetPosition`, all the CiA402 bit work) — must run **from the same call site, unchanged, on both the RT loop and an HTTP thread.** The alternative is a second copy of the state machine, the controlword-bit composition, and the mode handshakes living inside every RT task — a large, drift-prone duplication of exactly the knowledge `Cia402Drive`/`SomanetDrive` exist to hold *once*. So the profile layer stays single-source and RT-safety is pushed *below* it, into the one seam every profile method already bottoms out in: `Device::readValue<T>` / `writeValue<T>`. This is what an RT `TrajectoryCyclicTask` / `SineWaveTask` uses to drive state instead of reaching for `ProcessData::writePdo(pos, 0x607A, 0, bytes)` raw (as the 2026-07-09 Trajectory session sketched) — the raw call works but bypasses the profile, which is the very thing we refuse to reimplement.
 
 **Why it isn't true yet** (this reconciles the aspirational claim in *Session 2026-06-05 — Design B*, which already said `readParameter`/`writeParameter` serve the value "identically from an HTTP handler or an RT task"). Two things make the current path unsafe to call from the RT loop:
+
 1. `Device::readParameter`/`writeParameter` take `parametersMutex_` (a blocking `std::mutex`) around the **whole** body (`device.cc:761`, `:873`) — a lock on the RT cycle, priority-inversion against the monitoring/refresher/control-plane threads. Forbidden by this codebase's own RT rules.
 2. `ProcessData::readPdo` returns `std::optional<std::vector<uint8_t>>` — a heap allocation per read, per cycle.
 
@@ -1277,11 +1292,13 @@ std::expected<T, std::string> readValue(uint16_t idx, uint8_t sub) {
 The RT trajectory/sine task only runs while the device is in OP, so it **always** takes the fast path and can never reach the SDO branch. Off-RT callers take the fast path when exchanging and the SDO branch only when offline. One method body, safe in both, by construction — and the whole `Cia402Drive`/`SomanetDrive` chain above it stays transport-agnostic and never learns which world it is in.
 
 **Three pieces to build.**
+
 1. **A non-allocating `readPdo` overload** — `bool ProcessData::readPdo(pos, idx, sub, std::span<uint8_t> out)` decoding ≤8 bytes into a caller buffer (re-checking the ring sequence for tear-safety, same as the vector overload today), sitting alongside the vector-returning one the HTTP path keeps.
 2. **Thin `Device` helpers `readPdoFast` / `stageOutput`** — declared in `device.h`, **defined in `device.cc`.** Non-inline on purpose: an inline fast path would force `device.h` to `#include process_data.h` and drag the heavy recorder/buffers into every `mm::node` consumer, breaking the "only device.cc pulls the buffers" encapsulation. The helpers touch **neither** `parameters_` **nor** `parametersMutex_` — they delegate straight to `readPdo`/`writePdo`.
 3. **The fast path lives in the typed templates** — in `readValue<T>`/`writeValue<T>`, because `T` is known there, so decoding/encoding needs no data-type lookup in the parameter map (the lookup is *what forces the lock* in the non-template path). The non-template `readParameter`/`writeParameter` keep their locked+cached+SDO body verbatim for generic HTTP handlers that don't know `T`. Every RT-relevant CiA402 accessor is already templated with a known type (`statusword`→`readValue<uint16_t>`, `setControlword`→`writeValue(...,uint16_t)`, `setTargetPosition`→`writeValue(...,int32_t)`, …), so they all inherit the fast path for free.
 
 **Two behaviour changes this forces — both accepted.**
+
 - *The health/WKC gate becomes advisory, not a diverter.* Today `readPdo` returns `nullopt` for inputs on a short working counter, so `readValue` falls through to a **blocking** SDO upload — fatal on RT. So the fast path serves the newest ring record **unconditionally while exchanging** (the freshest real value we have), and health/WKC is surfaced separately for the caller to react to, not used to silently divert into SDO. Off-RT effect: an exchanging-but-momentarily-unhealthy bus now serves the last recorded value instead of a fresh SDO upload — consistent with what the wire actually carried, and the price of one uniform call. Design B already made the analogous change for *output* read-back; this extends it to *inputs* on the fast path.
 - *The live fast path does not write the cache.* Storing the decoded value into `parameters_` (as `readParameter` does at `device.cc:777`) needs the lock. So after this lands `parameter(0x6041)->value` reflects the last *offline/SDO* value while `readValue<uint16_t>(0x6041,0)` reflects *live* — arguably more correct (cache = offline snapshot, ring = live truth), but a real shift for any code reading `->value` expecting freshness. Monitoring reads the ring, not the cache, so it is unaffected.
 
@@ -1459,7 +1476,7 @@ std::expected<void, std::string> startCoordinatedTrajectory(DeviceManager& dm, c
 `DeviceManager` owns one `RtMailboxPool<T>` per task family (`trajectoryPool()`, `sinePool()`); the RT task iterates `pool[i].current()` each cycle. Both directions use **composition, not inheritance** — lambdas/policies, no single-impl interface (repo rule). And **do not** generalize the HTTP *surface* into a command-bus routing a generic `POST /api/rt-tasks {type}`: routes stay explicit per `swagger.yml` and the plug-in design; only the plumbing *beneath* the handlers is generalized.
 
 | | Outbound (RT → client) | Inbound (client → RT) |
-|---|---|---|
+| --- | --- | --- |
 | Generalized as | `NotificationBus` + `Source{changeToken, render}` | `RtMailboxPool<T>` + `launchRtTask(validate, build)` |
 | Per-task surface | two functions | two functions |
 | Owns a thread? | **yes** — RT can't call out, a pump polls | **no** — HTTP thread writes the atomic directly |
@@ -1474,12 +1491,14 @@ Clarification session, no code change. Records the runtime shape of the live mon
 **"Topic" is a uWebSockets application-level feature, not part of the WebSocket standard.** RFC 6455 gives exactly one thing: a single TCP connection (upgraded from HTTP via `101 Switching Protocols`) carrying discrete messages bidirectionally between *one* client and the server. No topics, channels, rooms, or broadcast — each connection is its own island and the protocol doesn't know other clients exist. uWS layers **pub/sub** on top (MQTT-borrowed vocabulary + wildcard syntax): a server-side **topic tree** mapping topic strings → the set of subscribed sockets. Three ops: `ws->subscribe(topic)` (adds *that socket* to the set — per-connection state stored on the socket), `ws->unsubscribe(topic)`, and `app->publish(topic, msg)` (sends to every socket in the set, one call). It is in-memory and per-process; publishing to a topic with zero subscribers is a silent no-op. All three appear in `ws_server.cc` (`message` handler ~L88 does `ws->subscribe`/`unsubscribe`; `publish()` at L60 does `app->publish`).
 
 **Why subscribe/unsubscribe lives on the WS, not on an HTTP route.** Not arbitrary — it falls out of the uWS model:
+
 - **A subscription is per-connection state, and the WS socket *is* the connection.** `subscribe` is a method *on the socket* (`ws->subscribe`); there is no `ws` handle on the HTTP side. Delivering (`app->publish`) is keyed on that same per-socket subscriber set. HTTP would force a parallel topic→connection registry plus an invented session/correlation token to link a stateless HTTP request back to a specific WS socket.
 - **Automatic teardown on disconnect.** Because the subscription lives on the socket, uWS drops it from every topic on close — the `close` handler (`ws_server.cc:81`) has nothing to undo. HTTP-side subscribe would orphan subscriptions the moment a WS connection died and need reconciliation.
 - **No cross-loop hop.** `HttpServer` (61447) and `WebSocketServer` (62281) run on separate loops/threads. The `message` handler runs on the very loop that owns the socket, so `ws->subscribe()` mutates socket state with zero locking. An HTTP subscribe would have to `defer()` the mutation onto the WS loop (the way `publish()` already must, since the sampler thread calls it) *and* first resolve which socket.
 - The only case that would push the registry off the socket is **durable subscriptions surviving reconnects** — not a requirement here, and the roadmap keeps adding *inbound WS* commands (output staging), reinforcing the WS as the bidirectional control channel.
 
 **Two decoupled layers — the crux of "will another client see it?".** The word "topic" spans two separate concepts:
+
 - *Layer 1 — the Monitoring (server-side, global, created over HTTP).* `POST /api/monitorings` (body carries `topic` id + parameter list; `monitoring_api.cc:55`) creates a shared server object validated + owned by `MonitoringManager`. Its sampler thread reads the recorder ring and calls the publish callback for that topic **on its flush cadence regardless of who is listening**. It is global — visible to anyone via `GET /api/monitorings`.
 - *Layer 2 — the Subscription (per-connection, over WS).* Whether *your* connection *receives* those batches depends on whether *you* sent `{"subscribe":"<topic>"}` on *your* socket.
 
@@ -1572,7 +1591,7 @@ Resolved where a runtime RT procedure's *state* lives, and the answer retires a 
 
 **What it collapses.** A runtime RT procedure becomes **one node object** that is its own tick and self-registers, reading a channel the composition root owns (see the *Refinement* below — the mailbox is **not** a task member):
 
-```
+```text
 libs/core/cyclic_task.h     ← CyclicTask, CycleContext            (moved here; joins CyclicTimer)
 libs/node/trajectory_task.h ← class TrajectoryCyclicTask : public CyclicTask
                                 RtMailboxPool<TrajectoryRun>&   (injected channel — owned at the root, not here)
@@ -1586,6 +1605,7 @@ apps/motion_master/main.cc  ← RtMailboxPool<TrajectoryRun> trajectoryMailbox; 
 ```
 
 Three things from the earlier design are **rejected outright**, each as a symptom of the accident rather than a real need:
+
 - **`DeviceManager` does not own the pool.** "It cannot live on any one `Device` → therefore `DeviceManager`" skipped the real answer: *→ therefore a channel owned by neither device nor manager* (the composition root owns it — see the *Refinement* below). Multi-axis is unaffected — a coordinated program spans devices only in that the task holds `DeviceManager&` and re-resolves each axis per cycle via `findDevice`, exactly as before. This supersedes the pool-on-`DeviceManager` model in Sessions 2026-07-09/07-13.
 - **No `TrajectoryController`.** It existed only to give the pool a node-layer owner separate from the app-layer task. Once the task itself is node-layer, task and controller merge.
 - **No app-layer adapter.** `TrajectoryCyclicTask` registers itself with `GameLoop` directly; the launcher is a node free function that arms the shared channel (see the *Refinement* — it names no task, and the `Cia402Drive` view does only the handshake).
@@ -1615,6 +1635,7 @@ Discussion session prompted by a question about `readFile`/`writeFile` in the fi
 **The artefact: `libs/comm/foe_error.h`, deliberately unused.** It defines `FoeError { FoeErrorKind kind; Retry retry; std::string message; }` with a string face (`operator<<`, `.message`, `.what()`) so promoting `readFile`/`writeFile` from `std::string` to `FoeError` would change forwarding callers by at most one word (`.error()` → `.error().message`) and ripple no further — the whole point of the mandate's "keep the two interchangeable" clause. The transport-agnostic vocabulary (kind + retry + reason) lives in the header; the SOEM-specific `wkc → kind` decode stays in the driver `.cc` where the SOEM include already is, so a future SPoE driver maps its own codes to the same `FoeErrorKind`. A top-of-file comment records that it is currently unused, when it would be used (a firmware flasher branching retry-on-transient / abort-on-permanent — the live candidate, given the BOOT warm-up drain-retry work), and why the design is shaped this way.
 
 **Why this shape and not the two nearby alternatives.**
+
 - *Not a plain string forever*: the predictable next consumer is a flasher that must distinguish "device still warming up after BOOT, retry" from "no such file, give up." That's genuine branching, and message-matching to do it is exactly the smell the mandate names.
 - *Not a generic `OpError` swept across the codebase* (the question that came up explicitly): a single shared error type forces its enum to be either too coarse to serve the branching caller — who then string-matches the message anyway, defeating the point — or a grab-bag union of every layer's failure modes (FoE + SDO + AL-state + register), which is just all the per-surface enums glued together, buying cross-layer coupling with no abstraction. It also taxes the ~90 % of call sites that only log, forcing them to pick a `kind` they never read. Hence per-surface-or-string, nothing in between; and the type is named for its surface (`FoeError`), not `OpError`, because a generic name is a magnet for the global-sweep anti-pattern the mandate forbids.
 
@@ -1639,6 +1660,7 @@ Decision — **partially reverse the 2026-06-08 "explicit `--config` only, no de
 Why a real config file rather than a compiled-in `#ifdef _WIN32` default of 4000: the value stays **visible and operator-editable** (unzip, open `motion-master.jsonc`, change the number) instead of baked into the binary, and it reuses the config path already exercised by `--config` — one loader, one schema, no platform branch in `config.h`. The built-in default remains 1000 for every platform; Windows just ships a file that overrides it.
 
 Mechanics:
+
 - **Loader (`options.cc`):** resolve the effective path — `--config` if present, else `exeDir()/motion-master.jsonc` if it exists — then the existing parse/validate/`parseConfig` path runs unchanged. `Options::configPath` now records the *effective* path (was: only `--config`).
 - **Shipped file:** `apps/motion_master/motion-master.windows.jsonc` (a minimal partial override — just `gameLoop.periodUs: 4000` + comments; every other key stays default). `release.yml`'s Windows leg copies it to `motion-master.jsonc` beside the exe before zipping. Linux/macOS legs ship **only** the annotated `motion-master.example.jsonc` (unchanged) — no active config, so their 1 ms default holds.
 - **Docs touched:** `motion-master.example.jsonc` header (now documents the two-file load order + how to activate it by copying to `motion-master.jsonc`), CLAUDE.md (config mandate + release.yml description), swagger `GET /api/config` description, and this note. The example file stays *not loaded* under its own name — only the exact basename `motion-master.jsonc` is auto-discovered.
@@ -1650,6 +1672,7 @@ Why `SoemFieldbusDriver::blockLrwOnPruIcssSlaves()` exists, and how EtherCAT pro
 **What a soft-ESC is.** An EtherCAT Slave Controller (ESC) is the chip that terminates the EtherCAT protocol on a slave: it processes frames on the fly at wire speed, applies FMMUs/SyncManagers, maintains the Distributed Clock, and increments the working counter. Normally it is a dedicated hardware ASIC or FPGA (Beckhoff ET1100/ET1200, Microchip LAN9252) with the datagram-processing unit implemented in silicon. A **soft-ESC** implements that same processing unit in *software/firmware on a general-purpose core* instead. SOMANET **Jasper** uses TI's **PRU-ICSS** (Programmable Real-time Unit — Industrial Communication SubSystem): small deterministic RISC cores on the TI SoC run firmware that emulates the ESC. It is a real EtherCAT slave to the outside world, but its frame processing is code on the PRU, not gates — and that firmware does not implement the full datagram-command set with the same completeness a hardware ESC does. We detect it by reading ESC register `0x0000` (`ECT_REG_TYPE`): low byte `0x90` == TI PRU-ICSS (`blockLrwOnPruIcssSlaves()`, `soem_fieldbus_driver.cc`).
 
 **EtherCAT process-data addressing — the three logical commands.** Cyclic process data uses *logical addressing*: each slave's FMMU maps a slice of a flat logical address space to its local physical memory, so the master addresses the whole bus's process image by offset without naming individual slaves. Three EtherCAT commands operate on that space:
+
 - **LWR** (Logical Write) — master puts output data in the datagram; each slave *copies its outputs out* as the frame passes.
 - **LRD** (Logical Read) — each slave *stamps its inputs into* the datagram as the frame passes; the master reads them when it returns.
 - **LRW** (Logical Read/Write) — **one** datagram does both in a single pass: at a shared logical range, output slaves read their outputs out of the frame *and* input slaves write their inputs into it, in transit. This is the default and the optimisation — one datagram, both directions.
@@ -1673,15 +1696,19 @@ Designed the shape of the first **off-RT procedure with live progress** — Offs
 **`ProcedureManager` owns the threads *and* the per-device busy-set — this is the decided piece.** It is the `MonitoringManager` analogue for command-and-wait work: it owns the cancellable `std::jthread`s and a **per-device exclusive activity token**. The busy-set is the part `controlPlaneMutex_` cannot provide — that mutex serializes *individual transactions* (one SDO, one mailbox round-trip), but a procedure is a *multi-second span of many transactions* interleaved with sleeps, and "this device is busy detecting offset — reject a second start, reject a conflicting motion, block a rescan" is a span-level exclusion. So `ProcedureManager::start(devicePos, …)` **try-acquires the device's token** and returns *rejected* (→ HTTP 409) if it's already held; the token releases when the jthread exits (success, failure, or cancel). This supersedes the earlier "a dedicated `FirmwareInstaller` … is planned" note in CLAUDE.md: firmware install is not a bespoke class, it is *another procedure body + step template* hosted by the same `ProcedureManager`.
 
 **Progress is a full-array snapshot, re-emitted on every step change — never a delta.** The procedure seeds its `std::vector<ProgressStep>` from a per-procedure template (the C++ mirror of `offsetDetectionSteps`) and re-emits the *entire* array each time a step transitions. Full-snapshot is what makes a **late-joining subscriber correct with zero replay logic**: a UI that opens mid-run receives the next snapshot and renders the complete current state — no need to have seen the earlier messages. The POD, in `mm::node`:
-```
+
+```cpp
 enum class ProgressStatus { Idle, Running, Succeeded, Failed };
 struct ProgressStep { std::string id; ProgressStatus status; std::optional<double> value; std::optional<std::string> error; };
 ```
 
 **Delivery does *not* go through the RT `NotificationBus` poll — it publishes directly.** Important distinction from the trajectory outbound design (Session 2026-07-14): the `NotificationBus` exists because an **RT** producer *cannot call out* (no alloc, no strings, no server handle), so it bumps a `revision` atomic and an off-RT poll thread renders + publishes. A procedure has none of that constraint — it *already runs on a normal off-RT thread* and knows exactly when a step changed — so it calls the publish seam **directly** when it mutates a step, with no version-counter poll in between. `ProcedureManager` holds the same `std::function<void(topic, json)>` publish callback wired in `main.cc` (mirroring `MonitoringManager::setPublish`), names no `WebSocketServer`. Reuse the existing notification message type rather than inventing one:
+
 ```json
 {"type":"notification","data":{"event":"offset-detection-progress","devicePosition":3,"steps":[ … ]}}
+
 ```
+
 So the RT/off-RT boundary decides the transport: RT sources → `NotificationBus` poll pump; off-RT procedures → direct publish through the identical seam. Both keep `node` ignorant of the server; only the trigger cadence differs.
 
 **Start surface mirrors `MonitoringManager`.** A node entry point (free function or `ProcedureManager` method) `startOffsetDetection(DeviceManager&, devicePos)` resolves the device, builds a `SomanetDrive` view for validation, try-acquires the token, and spawns the jthread; it returns *accepted*/*rejected* synchronously (nothing else running → accepted). HTTP is a thin `POST /api/devices/:pos/procedures/offset-detection` → 202 accepted / 409 busy, wired so `HttpServer` reaches `ProcedureManager` the same way it reaches `MonitoringManager` today (a held reference or a composition-root callback — dumb HTTP layer, node owns the logic). A C++ caller hits the node function directly. Cancel is `DELETE`/a second endpoint that requests the jthread's `stop_token`.
@@ -1691,6 +1718,7 @@ So the RT/off-RT boundary decides the transport: RT sources → `NotificationBus
 **The WebSocket is optional — polling the `GET` alone is a fully supported, lossless mode.** A client that never opens a WebSocket can just poll the `GET` on an interval to track a procedure to completion, and the snapshot design is what makes that correct rather than lossy. Because each notification is a *full-array snapshot in which every step retains its terminal `succeeded`/`failed` status and its measured `value`* — an accumulating state, not a discrete-event feed — a poller **cannot miss a result**: even a step that both starts and finishes between two polls is still visible as `succeeded` (with its value) in the next snapshot. The only thing polling skips is the transient `running` blip on a fast step, which carries no data. For offset detection (seconds-long measurement steps) a 500 ms–1 s poll observes every transition in practice anyway. So WebSocket is the low-latency *push*; `GET`-poll is the equivalent *pull* — same authoritative snapshot, client's choice. Two requirements this places on `ProcedureManager` for polling-only to be fully correct: **(1) the last `steps` snapshot persists after the jthread exits** (retained per device until the next run overwrites it) — otherwise a client polling *after* completion would see the idle template and never learn the outcome; and **(2) the payload carries an overall procedure `status`** (`idle`/`running`/`succeeded`/`failed`) alongside the per-step array, so "is it done?" is a single-field check and a polling loop is trivial (`while status == running: sleep; GET`) instead of scanning every step.
 
 **Open items, with current leans (not locked — only `ProcedureManager` ownership is decided):**
+
 - *`value` type* — TS uses a single `number` and formats client-side (`Yes/No`, `mΩ`, `Normal/Inverted`). Lean: keep server `value` numeric + client-side formatting (server stays dumb, i18n on the client, matches the reference's `formatOffsetDetectionStepValue`); revisit only if a step needs a genuinely non-numeric payload.
 - *label ownership* — reference emits `label` from the server template. Lean: server emits only `id/status/value/error`; **client owns labels + formatting** (it already owns the formatter). Less server churn for wording.
 - *cancellation granularity* — `stop_token` checked *between* steps; an in-flight OS command finishes (they aren't abortable once issued), then the procedure stops and returns the drive to a safe state (disable → SwitchOnDisabled) before exiting. Lean: accept between-step cancellation as sufficient.
@@ -1703,11 +1731,13 @@ So the RT/off-RT boundary decides the transport: RT sources → `NotificationBus
 A user noticed that reading an unknown object gave two *different* error messages for adjacent subindices — `0x2345:00` → `SDOread slave 1 0x2345:00 failed (SDO abort 0x08000000: General error)`, but `0x2345:01` → a bare `SDOread slave 1 0x2345:01 failed` with no abort code — and asked why. This note records the answer, because it's a genuinely useful diagnostic that isn't obvious from the message and I initially guessed it wrong.
 
 **Both messages come from the same branch in `SoemFieldbusDriver::readSdo`** (`wkc <= 0` after `ecx_SDOread`; `wkc` is the EtherCAT **working counter** — SOEM's `ec_main.h` documents the `outputsWKC`/`inputsWKC` fields as "workcounter", `ec_type.h`'s `EC_WKCSIZE` as the datagram's workcounter item — the field a slave's ESC increments only when it processes the addressed memory, so at the end of a mailbox transaction `wkc > 0` is SOEM's own "succeeded to read slave response?" test and `<= 0` means the receive datagram went unanswered). **Caveat — the working-counter reading is CoE-specific.** CoE (`ec_coe.c`) keeps `wkc` a genuine working counter: on an abort/packet error it sets `wkc = 0` and pushes the detail onto the error queue (which is why `readSdo` classifies via `ecx_poperror`, above). FoE (`ec_foe.c`) and EoE (`ec_eoe.c`) instead **overload the identically-named return with a negated `EC_ERR_TYPE_*` enum** on failure — `ecx_FOEread` returns e.g. `-EC_ERR_TYPE_FOE_FILE_NOTFOUND` (`= -10`) or `-EC_ERR_TYPE_FOE_BUF2SMALL` (`= -6`) — so a *negative* FoE/EoE return is an error code carrying the specific reason, not a working counter, and there is nothing on the error queue to pop. That is exactly why the FoE path decodes the return value directly: `SoemFieldbusDriver::foeErrorDetail(int wkc)` does `switch (-wkc)` over the `EC_ERR_TYPE_FOE_*` set rather than calling `sdoErrorSuffix`. Same variable name across `ecx_*` functions, two different contracts — don't carry the CoE working-counter reading over to FoE/EoE. The base line is always `SDOread slave N 0xIIII:SS failed`; `sdoErrorSuffix()` appends a suffix **only if** `ecx_poperror(ctx, &err)` pops an `ec_errort` off SOEM's per-context error queue. So the presence/absence of the suffix is entirely "did SOEM enqueue an error for this transaction," and reading `ecx_SDOread` (`ec_coe.c`) shows exactly when it does:
+
 - The slave returns a proper CoE **Abort SDO Transfer** frame (`Command == ECT_SDO_ABORT`) → `ecx_SDOerror()` enqueues `EC_ERR_TYPE_SDO_ERROR` with the abort code → **`failed (SDO abort 0x…: <reason>)`**. This is *the slave answering and refusing* — fast (single mailbox round-trip, ~ms).
 - An unexpected/wrong-shape frame comes back → `ecx_packeterror()` enqueues `EC_ERR_TYPE_PACKET_ERROR` → **`failed (packet/timeout error)`**.
 - `ecx_mbxsend` fails **or** `ecx_mbxreceive` times out — *no CoE response arrives at all* → `ecx_SDOread` returns `wkc <= 0` having **enqueued nothing** → **bare `failed`**. Crucially, the receive blocks the full `EC_TIMEOUTRXM` (**700000 µs = 700 ms** in the pinned SOEM `ec_options.h`) before giving up.
 
 **Does the CoE `wkc` return carry meaning without `ecx_poperror`? Partially — and it's a genuinely useful distinction we currently throw away.** Following up on the question of whether SOEM encodes the failure reason in the return value the way FoE does: for CoE it's a *hybrid*. The documented `EC_*` return codes (`ec_type.h`: `EC_NOFRAME -1`, `EC_OTHERFRAME -2`, `EC_ERROR -3`, `EC_SLAVECOUNTEXCEEDED -4`, `EC_TIMEOUT -5`) can come straight out of `ecx_SDOread`, so a **negative** return is self-describing, but a **zero** return is not. Tracing the three CoE failure paths:
+
 - **Mailbox-receive timeout** (slave never answers): `ecx_mbxreceive`'s "no read mailbox available" branch sets `wkc = EC_TIMEOUT` and does **not** clear it, so `ecx_SDOread` returns **`-5`** — meaningful *on its own*, no error queue needed.
 - **Mailbox-send failure**: `ecx_mbxsend` ends with `if (wkc < 0) wkc = 0;` (`ec_main.c`) — it **clamps its own negatives to `0`** — so `ecx_SDOread` returns **`0`**.
 - **Abort / unexpected frame**: enqueues the detail (`ecx_SDOerror`/`ecx_packeterror`) and forces **`wkc = 0`**.
@@ -1717,7 +1747,7 @@ So `0` is the *only* ambiguous value (send-failed vs. answered-with-abort), and 
 **Verified against real hardware, not reasoned** — the user had a SOMANET Integro wired up in PRE-OP, so I read it through the running server's `GET /api/devices/1/sdo/0x2345/0x{00,01}` and timed it with `curl -w %{time_total}`:
 
 | Read | Latency | Body |
-|---|---|---|
+| --- | --- | --- |
 | `0x2345:00` | **~6 ms** | `… failed (SDO abort 0x08000000: General error)` |
 | `0x2345:01` | **~703 ms** | `… failed` (bare) |
 
@@ -1756,10 +1786,12 @@ Shipped the generic CANopen **store-parameters** feature: `ProfileDevice::runSto
 **A is a strict subset of B — no throwaway work.** Both paths need the *same* wildcard cert and the *same* binary change; A simply omits the responder and the client transform. Doing A first and B later re-uses everything A built. The only A-specific artifact is the handful of static records, which coexist harmlessly with a later responder (an explicit `A` record shadows the wildcard delegation for that one name, or is deleted).
 
 **What is already in place (don't rebuild it).**
+
 - **Client host-change UI exists.** `web/apps/console/src/pages/ConnectionPage.tsx` already edits host + HTTP/WS ports and persists them to `localStorage` via `ConnectionContext`; `@synapticon/motion-master-client` (`constants.ts`, `client.ts`) already takes overridable API/WS URLs. Pointing the PWA at another backend is *done*. Path A needs **no** client code — only the existing field, filled with the `.ip.…` hostname. Path B adds the transform + a LAN-mode copy variant (today's explanatory text is entirely localhost-framed).
 - **The binary serves whatever `cert.pem`/`key.pem` are on disk.** Baking a wildcard cert into an image (or dropping it next to the binary) needs **zero** serving-side change. `tools/run.sh`'s discovery order and the `POST /api/init` TLS bind don't care about the cert's name.
 
 **What changes in this repo (small, and shared by A and B).**
+
 1. **Binary: two hard-coded localhost assumptions in the cert self-heal must become config-driven.** `apps/motion_master/cert_updater.cc` hard-codes `kCertCommonName = "local.motion-master.synapticon.com"` (line ~28) and *rejects* any downloaded cert whose CN differs (`validatePair`, line ~98) — so a server expected to serve the wildcard would fail its own self-heal validation. Promote the **expected CN** and the **default fetch URL** (`mm::defaultCertUrl()`, already overridable via `--cert-url`/`--key-url` and surfaced in `options.cc`) into config, defaulting to today's localhost values; an image/host serving the wildcard overrides both (expected CN `*.ip.motion-master.synapticon.com`, fetch URL → the wildcard release asset). Note the CN check is a *convenience* identity check, not a security control (TLS trust comes from the CA chain the browser validates) — but keep it honest by matching against configured expectation rather than loosening it to "anything". ~½ day.
 2. **CI: a wildcard issuance leg.** `cert-renewal.yml` already issues `local.…` via acme.sh + `dns_acmedns` (DNS-01, the only challenge type that issues wildcards). Add a parallel `--issue -d '*.ip.motion-master.synapticon.com'` that needs a **second acme-dns CNAME** — `_acme-challenge.ip.motion-master.synapticon.com` → a new acme-dns subdomain — which **dnsBOX access now lets us add ourselves**. Publish the wildcard cert/key to a **separate** rolling release asset (parallel to the `tls-cert` release, e.g. `tls-cert-ip`) so the two certs rotate independently and a host fetches exactly the one it serves. Reuse acme-dns rather than switching acme.sh to a dnsBOX-native DNS-01 plugin — less churn, the machinery is proven. ~½ day.
 3. **Client (Path B only): IP→dashed-hostname transform + LAN-mode copy.** A pure helper (`192.168.1.50` → `192-168-1-50.ip.motion-master.synapticon.com`) plus a branch in `ConnectionPage` and a second explanatory-copy variant. Purely additive. ~½–1 day. **Skipped for Path A / the Pi.**
@@ -1770,6 +1802,7 @@ Shipped the generic CANopen **store-parameters** feature: `ProfileDevice::runSto
 **Discovery is still a separate problem from the cert (unchanged from 2026-06-12).** Even Path B leaves the user needing to *know* the server's IP to type it. Ladder by effort, later: manual IP entry → mDNS/Avahi (`motion-master.local`, then connect via the `.ip.…` name so the cert still matches). Out of scope here.
 
 **Phasing.**
+
 - **Now → ~2 weeks (Pi bring-up, Path A):** add the second acme-dns CNAME in dnsBOX; add the wildcard issuance leg (#2); make the binary CN/URL config-driven (#1); add one static `A` record for the Pi + a DHCP reservation; hand-deploy the arm64 binary. No client change, no responder, no image build. Gets a real Pi answering the console over TLS.
 - **Then (Path B, the product path):** stand up the synthesizing responder (or a dnsBOX-native scripted zone if the appliance supports it) under `ip.…`; add the client IP→hostname transform + LAN-mode UI (#3). Now any PC running the server is reachable from the console with nothing to pre-register — the stated end goal.
 - **Parallel track:** arm64 `.deb` + flashable image leg (#4) for the appliance form factor.

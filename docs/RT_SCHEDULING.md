@@ -38,7 +38,7 @@ sched_setscheduler(0, SCHED_FIFO, &param);  // or pthread_setschedparam()
 ### Priority range
 
 | Policy | Priority axis | Range |
-|---|---|---|
+| --- | --- | --- |
 | `SCHED_FIFO`, `SCHED_RR` | `sched_priority` | **1 – 99** (1 lowest, 99 highest) |
 | `SCHED_OTHER` (normal/CFS) | always RT priority **0**; tune with **nice** | nice −20 … +19 |
 
@@ -79,7 +79,7 @@ Locks the process's virtual memory pages into physical RAM so the kernel can nev
 (swap) them out.
 
 | Flag | Effect |
-|---|---|
+| --- | --- |
 | `MCL_CURRENT` | lock all pages currently mapped |
 | `MCL_FUTURE` | lock all pages mapped in the future (heap growth, new mmaps, growing stack) |
 | `MCL_ONFAULT` | (with one of the above) lock lazily as pages fault in, rather than pre-faulting everything |
@@ -104,7 +104,7 @@ On bare metal `setcap` stamps the binary; inside Docker use `--cap-add` (file ca
 ignored in containers). See the capability table in [../CLAUDE.md](../CLAUDE.md).
 
 | Need | Capability | Notes |
-|---|---|---|
+| --- | --- | --- |
 | Set an RT scheduling policy | `CAP_SYS_NICE` | for `SCHED_FIFO` |
 | Lock process memory | `CAP_IPC_LOCK` | plus `--ulimit memlock=-1` in Docker to lift `RLIMIT_MEMLOCK` |
 

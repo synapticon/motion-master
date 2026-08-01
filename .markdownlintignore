@@ -1,0 +1,8 @@
+# Third-party markdown we don't own — excluded so a workspace-wide lint
+# ("Lint all files in workspace" in the VS Code extension, or a CI step)
+# reports only our own docs.
+node_modules/
+build/
+dist/
+extern/
+.venv/

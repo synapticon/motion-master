@@ -29,7 +29,7 @@ The fix is a real, publicly-trusted *name* that points at the private address. M
 bundled certificate covers `*.ip.motion-master.synapticon.com`, and by convention the address is
 written into the leftmost label with dashes:
 
-```
+```text
 192.168.1.50   ->   192-168-1-50.ip.motion-master.synapticon.com
 ```
 
@@ -57,7 +57,7 @@ next to the binary — it is auto-discovered, no flag needed:
 
 Restart. The log confirms the bind and what it means:
 
-```
+```text
 [info] HTTP server listening on 0.0.0.0:61447
 [info] WebSocket server listening on 0.0.0.0:62281
 [warning] Bound off loopback — reachable from the network, and the API has NO authentication. Use only on a trusted network.
@@ -88,7 +88,7 @@ Ports are unchanged (61447 / 62281), and the committed endpoint persists in that
 
 The page shows the equivalent hostname under the entered address with a **Use hostname** button:
 
-```
+```text
 192.168.1.50   →   192-168-1-50.ip.motion-master.synapticon.com
 ```
 
@@ -105,7 +105,7 @@ running the browser** — your laptop, not the server:
 A script in this repository does it for you. It is not shipped with the release, because it belongs
 on the client rather than the server — download it onto the computer you browse from:
 
-**Linux, macOS**
+**Linux, macOS** — in a terminal:
 
 ```bash
 curl -fsSLO https://raw.githubusercontent.com/synapticon/motion-master/main/add-host.sh
@@ -124,12 +124,12 @@ URL to open. Re-running is harmless, and `--remove` / `-Remove` takes the entry 
 
 Doing it by hand is one line, if you prefer:
 
-```
+```text
 192.168.1.50    192-168-1-50.ip.motion-master.synapticon.com
 ```
 
 | OS | Path |
-|---|---|
+| --- | --- |
 | Linux, macOS | `/etc/hosts` |
 | Windows | `C:\Windows\System32\drivers\etc\hosts` |
 
@@ -188,7 +188,7 @@ Nothing per-device: **one** certificate covers both deployments, and every insta
 file.
 
 | Name | Used when |
-|---|---|
+| --- | --- |
 | `local.motion-master.synapticon.com` | server and browser on the same machine (a public A record for `127.0.0.1`) |
 | `*.ip.motion-master.synapticon.com` | server on another machine, resolved by a hosts entry |
 
@@ -200,7 +200,7 @@ certificates last 90 days, and once one expires the browser refuses the connecti
 is no click-through for a cross-origin request.
 
 | The server can reach the internet | It cannot |
-|---|---|
+| --- | --- |
 | Nothing to do. The startup self-heal fetches a fresh certificate when the current one is missing, expired, or within 7 days of expiring, and **Refresh certificate** on the Connection page does it on demand. | Copy `cert.pem` and `key.pem` next to the binary before the current one lapses, from `https://github.com/synapticon/motion-master/releases/download/tls-cert/`, and restart. |
 
 There is no way around the periodic copy for an air-gapped machine, and it is not worth trying:
@@ -244,7 +244,7 @@ Issuing a wildcard requires proving control of `ip.motion-master.synapticon.com`
 static record is needed in the `synapticon.com` zone — **once, ever**, not per device:
 
 | Name | RR Type | Value |
-|---|---|---|
+| --- | --- | --- |
 | `_acme-challenge.ip.motion-master` | `CNAME` | `4723b93a-99f5-43d7-93f1-195dbb4168ea.auth.acme-dns.io.` |
 
 That is the same acme-dns account the existing `local.…` name uses, so no new secret is involved.
@@ -266,7 +266,7 @@ certificate's private key is published with every release.
 ## Troubleshooting
 
 | Symptom | Cause |
-|---|---|
+| --- | --- |
 | Connection refused / no response | Server still bound to loopback — check the startup log for `0.0.0.0` — or a firewall on the device. |
 | Everything looks correct but nothing connects | Chrome's **local network access** permission was denied for `https://motion-master.synapticon.com`; denied requests fail silently. Check the icon at the left of the address bar. |
 | Name does not resolve | The hosts entry is missing, has a typo, or the address is not the one the server logged. Check with `getent hosts <name>` (Linux), `dscacheutil -q host -a name <name>` (macOS), or `ping <name>` (Windows). |

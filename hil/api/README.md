@@ -36,7 +36,7 @@ The global setup (`src/global-setup.ts`) manages the full Docker lifecycle:
 ## Environment variables
 
 | Variable | Default | Description |
-|---|---|---|
+| --- | --- | --- |
 | `MM_URL` | `https://local.motion-master.synapticon.com:61447` | Base URL of the HTTP API under test |
 | `MM_WS_URL` | `wss://local.motion-master.synapticon.com:62281` | URL of the WebSocket |
 | `MM_SKIP_DOCKER` | _(unset)_ | Set to `1` to skip Docker management and connect to a running instance |
@@ -51,7 +51,7 @@ Useful when iterating locally with `./tools/run.sh` already running in another t
 
 ## File layout
 
-```
+```text
 hil/api/
   src/
     global-setup.ts   ← Docker lifecycle + waitForApi (Vitest globalSetup)

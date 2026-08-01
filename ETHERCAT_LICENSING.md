@@ -13,7 +13,7 @@ Motion Master is licensed under **GPL v3** (changed from Apache 2.0 to be compat
 
 ### v2 (v2.0.0+) — GPL v3 or commercial
 
-- **Dual-licensed: GPL v3 OR commercial** (rt-labs AB, contact: sales@rt-labs.com)
+- **Dual-licensed: GPL v3 OR commercial** (rt-labs AB, contact: <sales@rt-labs.com>)
 - GPL v3 + Apache 2.0: compatible, but the combined work must be distributed as GPL v3 — Motion Master cannot remain Apache 2.0
 - Commercial license: removes the GPL constraint entirely — Motion Master can stay Apache 2.0
 - Breaking change from v1: legacy `ec_` API removed, must use `ecx_` API
@@ -39,7 +39,7 @@ Commit `a901500618405760a564e64a6816705e29f50f9f`, version-date `2023-06-09`. Ve
 ## License Compatibility Matrix
 
 | Stack | Open source Motion Master | Commercial Motion Master |
-|---|---|---|
+| --- | --- | --- |
 | SOEM v1 | Not viable (Apache 2.0 + GPL v2 incompatible) | Legally grey |
 | SOEM v2, GPL v3 path | Must license Motion Master as **GPL v3** ← current | Buy rt-labs commercial license |
 | SOEM v2, commercial license | Any permissive license (Apache 2.0, MIT) | Any |
@@ -74,7 +74,7 @@ If a custom EtherCAT master driver is developed in the future, the GPL constrain
 ## Summary
 
 | Goal | Recommended path |
-|---|---|
+| --- | --- |
 | Open source, Windows + Linux | SOEM v2 + **GPL v3** |
 | Commercial, Windows + Linux | SOEM v2 + **rt-labs commercial license** |
 | Open source, Linux only | IgH dynamic link + **Apache 2.0 or MIT** |

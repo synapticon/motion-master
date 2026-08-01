@@ -21,6 +21,7 @@ These are members of a single pnpm workspace **rooted at the repository root** (
 Anything outside `/`, `/apps/*`, and `/docs/*` is a genuine 404.
 
 **Adding another PWA under `/apps/`** — the quickest start is to copy [`apps/example`](apps/example), which already has all of the below wired up; rename the package and the `scope`/`start_url`/base. The pieces that matter:
+
 1. Build it with `VITE_BASE=/apps/<app>` and `BrowserRouter basename={import.meta.env.BASE_URL…}`.
 2. Copy the deep-link **decoder snippet** that's in `apps/example/index.html` (`<head>`) into the new app's `index.html` — `web/404.html` redirects a cold-loaded route to `/apps/<app>/?/<route>`, and the decoder rewrites it back before the router mounts. `web/404.html` is app-agnostic; no change needed there.
 3. Add a build + copy step in `deploy-pages.yml` (`VITE_BASE=/apps/<app> pnpm --filter <app> build`, then copy its `dist/` to `build/pages/apps/<app>/`).

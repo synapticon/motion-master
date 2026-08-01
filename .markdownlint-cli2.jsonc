@@ -1,0 +1,10 @@
+// markdownlint-cli2 settings. Rule configuration lives in .markdownlint.json
+// (shared with the VS Code extension); this file only scopes which files are
+// linted, because cli2 does not read .markdownlintignore.
+{
+  // Skips node_modules/, build/, dist/, clients/python/.venv/ — everything
+  // .gitignore already excludes.
+  "gitignore": true,
+  // Vendored but tracked: the vcpkg submodule and the npcap SDK.
+  "ignores": ["extern/**"]
+}

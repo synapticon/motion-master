@@ -173,7 +173,7 @@ the Raspberry Pi appliance is headed, but neither carries the same hardware cove
   to, instead of pinning a copy that goes stale.
 - **The C++ source is Doxygen-documented** and published at
   <https://motion-master.synapticon.com/docs>.
-- **[`FEATURES.md`](FEATURES.md)** catalogs every capability; **[`README.md`](README.md)**
+- **[`FEATURES.md`](FEATURES.md)** catalogs every capability; **[`README.md`](./README.md)**
   covers install, configuration, and clients.
 - **Every page in the Console explains what it is** — what the data means, why it matters,
   and what the caveats are. v6 doubles as a way to *learn* EtherCAT and CiA402, which matters
@@ -195,6 +195,7 @@ folder bolted on; extension is the shape of the thing.
 **Tier 1 — Web applications.** Every app lives under `web/apps/<name>` and deploys to
 `/apps/<name>` (e.g. `/apps/position-configurator`). All of them are **PWAs — installable and
 usable offline**. They share:
+
 - `@synapticon/ui` — the Synapticon **design system**: theme plus React components, so a new
   app is on-brand from the first commit.
 - `@synapticon/motion-master-client` — the published, isomorphic **TypeScript SDK** (generated
@@ -329,7 +330,7 @@ decade. The beta is where it freezes; `6.0.0` is where we stand behind it.
 
 - **Try it:** <https://motion-master.synapticon.com>
 - **Features:** [`FEATURES.md`](FEATURES.md) — every capability, endpoint by endpoint
-- **Install & configure:** [`README.md`](README.md)
+- **Install & configure:** [`README.md`](./README.md)
 - **C++ reference:** <https://motion-master.synapticon.com/docs>
 - **Class diagram:** [`docs/CLASS_DIAGRAM.md`](docs/CLASS_DIAGRAM.md) — class structure,
   ownership, and inheritance

@@ -190,7 +190,7 @@ classDiagram
 `<|..` = implements an interface.
 
 | Holder | Member | Type | Owns? | File |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `GameLoop` | `tasks_` | `vector<CyclicTask*>` | No — caller owns | `apps/motion_master/game_loop.h` |
 | `GameLoop` | `timer_` | `CyclicTimer` | Yes | `apps/motion_master/game_loop.h` |
 | `ProcessDataCyclicTask` | `deviceManager_` | `DeviceManager&` | No | `libs/node/process_data_cyclic_task.h` |
@@ -219,7 +219,7 @@ The design favours composition. Two of the three hierarchies are single-interfac
 points; the third is a stateless view chain:
 
 | Derived | Base | File |
-|---|---|---|
+| --- | --- | --- |
 | `ProcessDataCyclicTask` | `CyclicTask` (`libs/core/cyclic_task.h`) | `libs/node/process_data_cyclic_task.h` |
 | `SoemFieldbusDriver` | `FieldbusDriver` | `libs/comm/soem_fieldbus_driver.h` |
 | `Cia402Drive` | `ProfileDevice` | `libs/node/cia402_drive.h` |

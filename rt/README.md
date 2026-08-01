@@ -42,12 +42,12 @@ cat /sys/kernel/realtime   # prints 1
 
 Add to `GRUB_CMDLINE_LINUX` in `/etc/default/grub`, then run `sudo update-grub`:
 
-```
+```text
 isolcpus=2,3 rcu_nocbs=2,3 nohz_full=2,3 intel_idle.max_cstate=1 processor.max_cstate=1 quiet
 ```
 
 | Parameter | Purpose |
-|---|---|
+| --- | --- |
 | `isolcpus=2,3` | Removes cores 2–3 from the general scheduler; only explicitly pinned tasks run there |
 | `rcu_nocbs=2,3` | Offloads RCU callbacks off isolated cores |
 | `nohz_full=2,3` | Disables the periodic timer tick on isolated cores (tickless mode) |
@@ -69,7 +69,7 @@ sudo usermod -aG realtime $USER
 
 Create `/etc/security/limits.d/99-realtime.conf`:
 
-```
+```text
 @realtime soft rtprio  99
 @realtime hard rtprio  99
 @realtime soft memlock unlimited

@@ -1,6 +1,0 @@
-# Read by ripgrep, fd, and the marksman Markdown LSP — not by git.
-#
-# Vendored third-party trees. They are tracked (vcpkg and doxygen-awesome-css
-# are submodules), so .gitignore cannot exclude them, and searching them buries
-# our own results. Pass --no-ignore / -u to search them anyway.
-extern/

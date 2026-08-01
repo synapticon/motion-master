@@ -19,6 +19,14 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **EtherCAT Slave Information (ESI) files can now be parsed offline**, via the new `POST /api/esi/parse` endpoint — the ESI counterpart of the existing SII tool, and usable with no hardware connected. Upload a vendor's ESI XML and get back every device it describes, each with its **complete flat object dictionary**: one row per index/subindex with its display name, data type, bit size, default, minimum, maximum, engineering unit, every access and mapping flag, its description, and its enum option labels. Most of that metadata exists nowhere else — a drive's CoE object dictionary can be enumerated over the bus, but the service returns no descriptions, no enum labels, no units and no bounds.
+- The flat dictionary is **assembled the way the device actually presents it**: a SOMANET drive keeps its communication objects in the device description and every CiA402 object (0x6040, 0x6060, 0x607A, …) in a plugged-in module, so the entries are merged across both and each one records which dictionary it came from. Where a slot offers mutually exclusive module variants — the Circulo SMM's four FSoE options — all of them are merged and the overlaps reported, since which one is fitted cannot be known offline; pass `?modules=` to model one configuration exactly.
+- A malformed or unusual ESI reports what it found rather than refusing the file: a value whose length disagrees with its declared type, an object referencing a type the dictionary never declares, or an overlap between two modules all come back as warnings alongside the entries that parsed fine.
+- **A new ESI page under Tools in the Console.** Load a vendor's `.xml` and read each device's assembled object dictionary as a filterable table — address, name, type, width, access, category, PDO mappability, default, minimum, maximum, unit and which dictionary each entry came from. Click a row for its description, enum option labels and raw vendor properties. The **Modules** table lists what the file declares, which devices can take each one, and a tick-box to narrow the merge — leave them all clear and every module is merged, which is the right default when there is no bus to ask.
+- An object's description is carried **once, on subindex 0**, rather than repeated onto every one of its subindices — a RECORD member still has its own, an ARRAY element has none. That alone took a four-device file from 18 MB of JSON down to 3 MB, which is why every device's dictionary now arrives in a single request.
+
 ## [6.0.0-alpha.62] - 2026-08-01
 
 ### Added

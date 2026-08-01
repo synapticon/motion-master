@@ -25,10 +25,18 @@ export function WireTiming({
   label,
   timing,
   className,
+  title,
 }: {
   label: string
   timing: WireTimingValue | null
   className?: string
+  /**
+   * Overrides the tooltip for the server-measured figure. The default describes a fieldbus
+   * transaction, which is what almost every caller is doing — but the same header carries the
+   * timing of a purely server-side operation too (parsing an uploaded ESI, say), and calling that
+   * "the true cost of talking to the device" would be a lie.
+   */
+  title?: string
 }) {
   if (!timing) return null
   return (
@@ -36,14 +44,17 @@ export function WireTiming({
       {timing.wireMs !== null && (
         <span
           className="cursor-help"
-          title={`${label} — server-measured duration of the on-device operation itself (control-plane lock acquire + the mailbox/ESC wire transaction(s)), reported by the backend. This is the true cost of talking to the device.`}
+          title={
+            title ??
+            `${label} — server-measured duration of the on-device operation itself (control-plane lock acquire + the mailbox/ESC wire transaction(s)), reported by the backend. This is the true cost of talking to the device.`
+          }
         >
           {label} {formatWireMs(timing.wireMs)}
         </span>
       )}
       <span
         className="text-grey-400 cursor-help"
-        title="Round-trip — total time this browser observed for the HTTP request, measured around the fetch call. It includes the device time plus cross-origin/TLS and transport overhead, so it is normally much larger than the device figure and is not device time."
+        title="Round-trip — total time this browser observed for the HTTP request, measured around the fetch call. It includes the server-measured figure plus request upload, response download, and cross-origin/TLS overhead, so it is normally much larger and is not itself a measure of the operation."
       >
         {timing.wireMs !== null ? ' · round-trip ' : 'round-trip '}
         {formatWireMs(timing.roundTripMs)}

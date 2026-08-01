@@ -9,6 +9,7 @@
     "neargye-semver",
     "nlohmann-json",
     "openssl",
+    "pugixml",
     "soem",
     "spdlog",
     {

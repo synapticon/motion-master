@@ -45,3 +45,18 @@ syntaxError:*/profile_device_test.cc
 syntaxError:*/somanet_drive_test.cc
 syntaxError:*/sii_test.cc
 syntaxError:*/base_test.cc
+syntaxError:*/esi_data_type_test.cc
+syntaxError:*/esi_entry_test.cc
+syntaxError:*/esi_request_test.cc
+syntaxError:*/esi_somanet_test.cc
+syntaxError:*/esi_test.cc
+syntaxError:*/esi_unit_test.cc
+
+// The ESI parser builds vectors by appending inside a range-for over an XML child range or a
+// parsed collection. cppcheck suggests std::transform/std::copy_if for each; rewriting them would
+// mean std::back_inserter over pugixml's iterators (no clearer than the loop) and, for
+// esiSlotModuleIdents, a copy_if whose predicate searches the very vector being appended to —
+// correct but needlessly subtle. The loops stay.
+useStlAlgorithm:*/esi.cc
+useStlAlgorithm:*/esi_entry.cc
+useStlAlgorithm:*/esi_request.cc

@@ -986,3 +986,145 @@ export interface SiiPdo {
     flags?: number;
   }[];
 }
+
+/** One addressable `(index, subindex)` of a device's object dictionary, assembled from the ESI. `defaultData`/`minData`/`maxData` are **raw little-endian bytes** as uppercase hexBinary, the same spelling the ESI itself uses — the first byte is the least significant, so `92010200` is `0x00020192`. Decode them with `dataType`; a byte-wise comparison of `minData` against `maxData` is wrong when `isSigned`. */
+export interface EsiEntry {
+  /** Effective CoE index */
+  index: number;
+  subindex: number;
+  /** Index as written in the source dictionary; omitted when unrelocated */
+  rawIndex?: number;
+  /** The parent object's name — identical across all its subindices */
+  objectName: string;
+  /** This subindex's own name */
+  entryName: string;
+  /** The ESI's display-name override, else `entryName` */
+  displayName: string;
+  objectCode: "VAR" | "ARRAY" | "RECORD";
+  /** The CoE object code (ETG.1000.6 §5) — 7, 8 or 9 */
+  objectCodeValue?: number;
+  /** Highest subindex; omitted for a VAR */
+  numberOfEntries?: number;
+  /**
+   * ESI/IEC 61131-3 type name, e.g. `UDINT`, `STRING(50)`
+   * @example "UDINT"
+   */
+  dataTypeName: string;
+  /**
+   * ETG.1020 code, matching `DeviceParameter.dataType`; 0 if unresolved
+   * @example 7
+   */
+  dataType: number;
+  isSigned: boolean;
+  bitSize: number;
+  /** Offset within the object's complete-access image */
+  bitOffset: number;
+  /** Uppercase hexBinary */
+  defaultData?: string;
+  minData?: string;
+  maxData?: string;
+  /** Packed ETG.1004 notation value */
+  unit?: number;
+  /** @example "mV" */
+  unitSymbol?: string;
+  access: {
+    mode: "ro" | "rw" | "wo";
+    readRestrictions?:
+      | "PreOP"
+      | "PreOP_SafeOP"
+      | "PreOP_OP"
+      | "SafeOP"
+      | "SafeOP_OP"
+      | "OP";
+    writeRestrictions?:
+      | "PreOP"
+      | "PreOP_SafeOP"
+      | "PreOP_OP"
+      | "SafeOP"
+      | "SafeOP_OP"
+      | "OP";
+  };
+  /** Mandatory, optional or conditional */
+  category: "m" | "o" | "c";
+  /** Empty when not mappable; `t` TxPDO, `r` RxPDO */
+  pdoMapping: "" | "t" | "r" | "tr";
+  safetyMapping?: "si" | "so" | "sio" | "sp";
+  sdoAccess: "SubIndexAccess" | "CompleteAccess";
+  backup: boolean;
+  setting: boolean;
+  /** SoE IDN */
+  attribute?: number;
+  /** ETG.1000.6 ObjAccess bitfield synthesised from the flags — bits 0-2 read in PreOP/SafeOP/OP, 3-5 write, 6 RxPDO-mappable, 7 TxPDO-mappable, 8 backup, 9 setting. Matches `DeviceParameter.access`. */
+  objAccess: number;
+  /** This row's description (HTML), decoded from `properties`. On subindex 0 it is the object's; on a RECORD member it is that member's; an ARRAY element has none. */
+  description?: string;
+  /** Enum labels, from `<EnumInfo>` and/or an `options` property */
+  options?: {
+    label: string;
+    value: number;
+  }[];
+  /** Raw `<Property>` annotations as written, for whatever this row describes. This is the ESI's generic extension mechanism; `description` and `options` above are conveniences decoded from the two conventional names, so a vendor using other names still has its data here. **Subindex 0 carries the object's own annotation** (stored once, not repeated onto every subindex); other rows carry only what that entry itself declares. */
+  properties?: EsiProperties;
+  /** Which dictionary this entry came from. The module's *name* is not repeated here — resolve `moduleIdent` against the top-level `modules` list. */
+  source: {
+    kind: "device" | "module";
+    moduleIdent?: number;
+    /** Zero-based slot number */
+    slot?: number;
+    /** Slot offset applied to `rawIndex` */
+    indexOffset?: number;
+  };
+}
+
+/** Raw `<Property>` annotations as written, for whatever this row describes. This is the ESI's generic extension mechanism; `description` and `options` above are conveniences decoded from the two conventional names, so a vendor using other names still has its data here. **Subindex 0 carries the object's own annotation** (stored once, not repeated onto every subindex); other rows carry only what that entry itself declares. */
+export type EsiProperties = {
+  name: string;
+  value: string;
+}[];
+
+export interface EsiDeviceSummary {
+  /** Zero-based position in the file */
+  ordinal: number;
+  /** @example "SOMANET Node" */
+  type: string;
+  name: string;
+  productCode?: number;
+  revisionNo?: number;
+  /** @example 402 */
+  profileNo?: number;
+  groupType: string;
+  /** Objects in the device's own dictionary, before any module merge */
+  objectCount: number;
+  rxPdoCount?: number;
+  txPdoCount?: number;
+  /** Every `ModuleIdent` the device's slots reference, in slot order */
+  moduleIdents: number[];
+  /** The parsed `<Slots>` block */
+  slots?: object;
+  /** This device's flat, slot-merged object dictionary */
+  entries?: EsiEntry[];
+  /** Problems found while assembling *this device* — a value whose byte length disagrees with its declared width, an unresolvable type, a module collision. Distinct from the top-level `warnings`, which are about the document; a different `modules` selection would produce a different list here. */
+  warnings?: string[];
+}
+
+/** A parsed ESI. Every device carries its own assembled `entries` table. */
+export interface EsiParseResult {
+  /** The `EtherCATInfo/@Version` attribute */
+  version?: string;
+  vendor: {
+    /** @example 8914 */
+    id: number;
+    name: string;
+    url?: string;
+  };
+  devices: EsiDeviceSummary[];
+  modules: {
+    moduleIdent: number;
+    /** @example "CiA402 Dictionary" */
+    type: string;
+    name: string;
+    objectCount?: number;
+  }[];
+  /** Recoverable problems in the document itself — a skipped malformed object, an unparsable value. A file with warnings still parses. Per-device assembly problems are reported on the device instead. */
+  warnings?: string[];
+}

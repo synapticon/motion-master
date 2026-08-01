@@ -9,6 +9,7 @@ import {
   type MmpdFile,
   type MmpdPdoEntry,
 } from '@synapticon/motion-master-client'
+import Checkbox from '../components/Checkbox'
 import PageHeader from '../components/PageHeader'
 import RecorderExplainer from '../components/RecorderExplainer'
 import MonitoringChart from '../components/MonitoringChart'
@@ -73,7 +74,7 @@ function EntryCheckbox({
       }`}
       title={item.plottable ? item.entry.name : 'Not a plottable numeric type'}
     >
-      <input type="checkbox" disabled={!item.plottable} checked={checked} onChange={onToggle} />
+      <Checkbox disabled={!item.plottable} checked={checked} onChange={onToggle} />
       <span className="font-mono">
         {formatHex(item.entry.index, 4)}:{formatHex(item.entry.subindex, 2, false)}
       </span>

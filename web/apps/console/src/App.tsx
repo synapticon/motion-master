@@ -20,6 +20,7 @@ import MetaFoeErrorCodesPage from './pages/MetaFoeErrorCodesPage'
 import MetaMailboxErrorCodesPage from './pages/MetaMailboxErrorCodesPage'
 import MetaObjectDataTypesPage from './pages/MetaObjectDataTypesPage'
 import MetaSdoAbortCodesPage from './pages/MetaSdoAbortCodesPage'
+import ToolsEsiPage from './pages/ToolsEsiPage'
 import ToolsSiiPage from './pages/ToolsSiiPage'
 import DeviceEthercatStatePage from './pages/DeviceEthercatStatePage'
 import DeviceObjectDictionaryPage from './pages/DeviceObjectDictionaryPage'
@@ -65,6 +66,7 @@ export default function App() {
           <Route path="sdo-abort-codes" element={<MetaSdoAbortCodesPage />} />
         </Route>
         <Route path="tools">
+          <Route path="esi" element={<ToolsEsiPage />} />
           <Route path="sii" element={<ToolsSiiPage />} />
         </Route>
         <Route path="devices/:deviceId">

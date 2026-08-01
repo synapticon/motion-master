@@ -30,6 +30,7 @@
 #include "comm/sii.h"
 #include "core/system_info.h"
 #include "core/util.h"
+#include "etg/esi_request.h"
 #include "monitoring_api.h"
 #include "node/cia402.h"
 #include "node/cia402_drive.h"
@@ -708,6 +709,54 @@ void HttpServer::run() {
                 }
                 sendJson(res, config_.corsOrigin, nlohmann::json(*parsed));
               });
+            })
+      .post("/api/esi/parse",
+            [this](auto* res, auto* req) {
+              // Bus-independent utility, the ESI counterpart of /api/sii/parse: decode a vendor's
+              // EtherCAT Slave Information XML uploaded in the request body. No device involved —
+              // the Tools page uses this to inspect an ESI with no hardware present, which is the
+              // only way to see descriptions, enum labels, units and min/max bounds, none of which
+              // the CoE SDO-Information service reports.
+              //
+              // The response carries every device with its own assembled entry table. That is
+              // affordable because object-level annotation is stored once, on subindex 0, rather
+              // than repeated onto every subindex — repeating it made one device's JSON 4.7 MB,
+              // 83% of it duplicated description HTML. The optional modules= query narrows the
+              // merge where a slot offers a choice of modules.
+              //
+              // req is only valid synchronously — capture the query before onData.
+              mm::etg::EsiParseRequest request;
+              std::string selectorError;
+              if (const auto q = req->getQuery("modules"); !q.empty()) {
+                auto idents = mm::etg::parseIdentList(q);
+                if (idents) {
+                  request.moduleIdents = std::move(*idents);
+                } else {
+                  selectorError = std::format("modules: {}", idents.error());
+                }
+              }
+
+              auto aborted = std::make_shared<bool>(false);
+              auto body = std::make_shared<std::string>();
+              res->onAborted([aborted]() { *aborted = true; });
+              res->onData(
+                  [this, res, body, aborted, request = std::move(request),
+                   selectorError = std::move(selectorError)](std::string_view chunk, bool last) {
+                    body->append(chunk);
+                    if (!last || *aborted) {
+                      return;
+                    }
+                    if (!selectorError.empty()) {
+                      sendError(res, "400 Bad Request", config_.corsOrigin, selectorError);
+                      return;
+                    }
+                    // Timed like a device operation, through the same X-Wire-Us channel — the
+                    // figure is CPU rather than wire time here (parse + assemble every device's
+                    // dictionary), which for a megabyte-scale ESI is the part worth watching.
+                    // JSON serialisation stays outside it, as it does everywhere else.
+                    sendTimedJson(res, config_.corsOrigin, "400 Bad Request",
+                                  [&]() { return mm::etg::buildEsiResponse(*body, request); });
+                  });
             })
       .post("/api/devices/:slavePosition/registers/:address",
             [this](auto* res, auto* req) {

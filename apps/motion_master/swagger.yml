@@ -2002,6 +2002,61 @@ paths:
                 $ref: "#/components/schemas/SlaveInformationInterface"
         "400":
           description: The body is not a valid SII image (e.g. shorter than the 128-byte header)
+  /api/esi/parse:
+    post:
+      summary: Parse an EtherCAT Slave Information (ESI) file
+      operationId: parseEsi
+      description: >
+        Decodes a vendor's ESI XML supplied in the request body. No device is involved —
+        the Tools page uses this to inspect an ESI with no hardware present, which is the
+        only way to see object descriptions, enum option labels, engineering units and
+        min/max bounds: the CoE SDO-Information service reports none of them.
+
+
+        The response carries the vendor, every module, and **every device with its own
+        assembled `entries` table** — one row per addressable `(index, subindex)`, merged
+        from the device's own dictionary plus the dictionaries of the modules its slots
+        reference, with each row recording in `source` where it came from.
+
+
+        Object-level annotation (an object's description and raw properties) is attached to
+        **subindex 0 only** — that row *is* the object — rather than repeated onto every
+        subindex. A RECORD member still carries its own description on its own row; an
+        ARRAY element carries none, because the ESI describes an array once rather than per
+        element. To read an object's text for any subindex, look at subindex 0 of the same
+        index.
+
+
+        Where a slot offers mutually exclusive module variants the merge necessarily
+        collides; it is resolved last-wins and reported in that device's `warnings`. Pass
+        `modules` to model one concrete configuration instead.
+      parameters:
+        - name: modules
+          in: query
+          required: false
+          description: >
+            Comma-separated `ModuleIdent` values (hexadecimal or decimal) restricting the merge,
+            applied to every device by intersection with the idents that device's slots actually
+            reference. Omit to merge every module each device references.
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              type: string
+      responses:
+        "200":
+          description: The parsed ESI — every device with its assembled entry table
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EsiParseResult"
+        "400":
+          description: The body is not a valid ESI file, or the `modules` query is malformed
   /api/devices/diagnostics:
     get:
       summary: Read live ESC health diagnostics for devices
@@ -3829,6 +3884,193 @@ components:
               dataType: { type: integer }
               bitLen: { type: integer }
               flags: { type: integer }
+    EsiEntry:
+      type: object
+      description: >
+        One addressable `(index, subindex)` of a device's object dictionary, assembled
+        from the ESI. `defaultData`/`minData`/`maxData` are **raw little-endian bytes**
+        as uppercase hexBinary, the same spelling the ESI itself uses — the first byte is
+        the least significant, so `92010200` is `0x00020192`. Decode them with `dataType`;
+        a byte-wise comparison of `minData` against `maxData` is wrong when `isSigned`.
+      required:
+        [index, subindex, objectName, entryName, displayName, objectCode, dataTypeName,
+         dataType, isSigned, bitSize, bitOffset, access, category, pdoMapping, sdoAccess,
+         backup, setting, objAccess, source]
+      properties:
+        index: { type: integer, description: Effective CoE index, slot offset applied }
+        subindex: { type: integer }
+        rawIndex:
+          type: integer
+          description: Index as written in the source dictionary; omitted when unrelocated
+        objectName:
+          type: string
+          description: The parent object's name — identical across all its subindices
+        entryName: { type: string, description: This subindex's own name }
+        displayName:
+          type: string
+          description: The ESI's display-name override, else `entryName`
+        objectCode: { type: string, enum: [VAR, ARRAY, RECORD] }
+        objectCodeValue:
+          type: integer
+          description: The CoE object code (ETG.1000.6 §5) — 7, 8 or 9
+        numberOfEntries:
+          type: integer
+          description: Highest subindex; omitted for a VAR
+        dataTypeName:
+          type: string
+          description: ESI/IEC 61131-3 type name, e.g. `UDINT`, `STRING(50)`
+          example: "UDINT"
+        dataType:
+          type: integer
+          description: ETG.1020 code, matching `DeviceParameter.dataType`; 0 if unresolved
+          example: 7
+        isSigned: { type: boolean }
+        bitSize: { type: integer }
+        bitOffset:
+          type: integer
+          description: Offset within the object's complete-access image
+        defaultData: { type: string, description: Uppercase hexBinary, little-endian }
+        minData: { type: string }
+        maxData: { type: string }
+        unit: { type: integer, description: Packed ETG.1004 notation value }
+        unitSymbol: { type: string, example: "mV" }
+        access:
+          type: object
+          required: [mode]
+          properties:
+            mode: { type: string, enum: [ro, rw, wo] }
+            readRestrictions:
+              type: string
+              enum: [PreOP, PreOP_SafeOP, PreOP_OP, SafeOP, SafeOP_OP, OP]
+            writeRestrictions:
+              type: string
+              enum: [PreOP, PreOP_SafeOP, PreOP_OP, SafeOP, SafeOP_OP, OP]
+        category:
+          type: string
+          enum: [m, o, c]
+          description: Mandatory, optional or conditional
+        pdoMapping:
+          type: string
+          enum: ["", t, r, tr]
+          description: Empty when not mappable; `t` TxPDO, `r` RxPDO
+        safetyMapping: { type: string, enum: [si, so, sio, sp] }
+        sdoAccess: { type: string, enum: [SubIndexAccess, CompleteAccess] }
+        backup: { type: boolean }
+        setting: { type: boolean }
+        attribute: { type: integer, description: SoE IDN, when declared }
+        objAccess:
+          type: integer
+          description: >
+            ETG.1000.6 ObjAccess bitfield synthesised from the flags — bits 0-2 read in
+            PreOP/SafeOP/OP, 3-5 write, 6 RxPDO-mappable, 7 TxPDO-mappable, 8 backup,
+            9 setting. Matches `DeviceParameter.access`.
+        description:
+          type: string
+          description: >
+            This row's description (HTML), decoded from `properties`. On subindex 0 it is the
+            object's; on a RECORD member it is that member's; an ARRAY element has none.
+        options:
+          type: array
+          description: Enum labels, from `<EnumInfo>` and/or an `options` property
+          items:
+            type: object
+            required: [label, value]
+            properties:
+              label: { type: string }
+              value: { type: integer }
+        properties: { $ref: "#/components/schemas/EsiProperties" }
+        source:
+          type: object
+          description: >
+            Which dictionary this entry came from. The module's *name* is not repeated here —
+            resolve `moduleIdent` against the top-level `modules` list.
+          required: [kind]
+          properties:
+            kind: { type: string, enum: [device, module] }
+            moduleIdent: { type: integer }
+            slot: { type: integer, description: Zero-based slot number }
+            indexOffset: { type: integer, description: Slot offset applied to `rawIndex` }
+    EsiProperties:
+      type: array
+      description: >
+        Raw `<Property>` annotations as written, for whatever this row describes. This is the
+        ESI's generic extension mechanism; `description` and `options` above are conveniences
+        decoded from the two conventional names, so a vendor using other names still has its
+        data here. **Subindex 0 carries the object's own annotation** (stored once, not repeated
+        onto every subindex); other rows carry only what that entry itself declares.
+      items:
+        type: object
+        required: [name, value]
+        properties:
+          name: { type: string }
+          value: { type: string }
+    EsiDeviceSummary:
+      type: object
+      required: [ordinal, type, name, groupType, objectCount, moduleIdents]
+      properties:
+        ordinal: { type: integer, description: Zero-based position in the file }
+        type: { type: string, example: "SOMANET Node" }
+        name: { type: string }
+        productCode: { type: integer }
+        revisionNo: { type: integer }
+        profileNo: { type: integer, example: 402 }
+        groupType: { type: string }
+        objectCount:
+          type: integer
+          description: Objects in the device's own dictionary, before any module merge
+        rxPdoCount: { type: integer }
+        txPdoCount: { type: integer }
+        moduleIdents:
+          type: array
+          description: Every `ModuleIdent` the device's slots reference, in slot order
+          items: { type: integer }
+        slots: { type: object, description: The parsed `<Slots>` block }
+        entries:
+          type: array
+          description: This device's flat, slot-merged object dictionary
+          items: { $ref: "#/components/schemas/EsiEntry" }
+        warnings:
+          type: array
+          description: >
+            Problems found while assembling *this device* — a value whose byte length disagrees
+            with its declared width, an unresolvable type, a module collision. Distinct from the
+            top-level `warnings`, which are about the document; a different `modules` selection
+            would produce a different list here.
+          items: { type: string }
+    EsiParseResult:
+      type: object
+      description: >
+        A parsed ESI. Every device carries its own assembled `entries` table.
+      required: [vendor, devices, modules]
+      properties:
+        version: { type: string, description: The `EtherCATInfo/@Version` attribute }
+        vendor:
+          type: object
+          required: [id, name]
+          properties:
+            id: { type: integer, example: 8914 }
+            name: { type: string }
+            url: { type: string }
+        devices:
+          type: array
+          items: { $ref: "#/components/schemas/EsiDeviceSummary" }
+        modules:
+          type: array
+          items:
+            type: object
+            required: [moduleIdent, type, name]
+            properties:
+              moduleIdent: { type: integer }
+              type: { type: string, example: "CiA402 Dictionary" }
+              name: { type: string }
+              objectCount: { type: integer }
+        warnings:
+          type: array
+          description: >
+            Recoverable problems in the document itself — a skipped malformed object, an
+            unparsable value. A file with warnings still parses. Per-device assembly problems
+            are reported on the device instead.
+          items: { type: string }
   headers:
     WireTime:
       description: >

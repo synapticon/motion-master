@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import Checkbox from '../components/Checkbox'
 import PageHeader from '../components/PageHeader'
 import { isPollRequestUrl, useRequests, type RequestEntry } from '../contexts/RequestsContext'
 import { btnOutline } from '../utils/styles'
@@ -199,11 +200,9 @@ export default function ServerRequestsPage() {
               {entries.length} request{entries.length === 1 ? '' : 's'} (max 1000)
             </p>
             <label className="flex items-center gap-1.5 text-xs text-grey-700 cursor-pointer">
-              <input
-                type="checkbox"
+              <Checkbox
                 checked={showPollRequests}
-                onChange={e => setShowPollRequests(e.target.checked)}
-                className="cursor-pointer accent-syn-red"
+                onChange={setShowPollRequests}
               />
               Show poll requests
             </label>

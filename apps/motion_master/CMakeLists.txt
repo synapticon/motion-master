@@ -45,6 +45,7 @@ find_package(CURL REQUIRED)
 target_link_libraries(
   motion_master
   PRIVATE mm::node
+          mm::etg
           mm::example
           CLI11::CLI11
           nlohmann_json::nlohmann_json

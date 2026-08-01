@@ -17,6 +17,7 @@ import {
   DeviceDiagnostics,
   DeviceParameter,
   EscRegister,
+  EsiParseResult,
   FoeErrorCode,
   GameLoopHealth,
   MailboxErrorCode,
@@ -1292,6 +1293,29 @@ export class Api<
     this.request<SlaveInformationInterface, void>({
       path: `/api/sii/parse`,
       method: "POST",
+      body: data,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Decodes a vendor's ESI XML supplied in the request body. No device is involved — the Tools page uses this to inspect an ESI with no hardware present, which is the only way to see object descriptions, enum option labels, engineering units and min/max bounds: the CoE SDO-Information service reports none of them. The response carries the vendor, every module, and **every device with its own assembled `entries` table** — one row per addressable `(index, subindex)`, merged from the device's own dictionary plus the dictionaries of the modules its slots reference, with each row recording in `source` where it came from. Object-level annotation (an object's description and raw properties) is attached to **subindex 0 only** — that row *is* the object — rather than repeated onto every subindex. A RECORD member still carries its own description on its own row; an ARRAY element carries none, because the ESI describes an array once rather than per element. To read an object's text for any subindex, look at subindex 0 of the same index. Where a slot offers mutually exclusive module variants the merge necessarily collides; it is resolved last-wins and reported in that device's `warnings`. Pass `modules` to model one concrete configuration instead.
+   *
+   * @name ParseEsi
+   * @summary Parse an EtherCAT Slave Information (ESI) file
+   * @request POST:/api/esi/parse
+   */
+  parseEsi = (
+    data: string,
+    query?: {
+      /** Comma-separated `ModuleIdent` values (hexadecimal or decimal) restricting the merge, applied to every device by intersection with the idents that device's slots actually reference. Omit to merge every module each device references. */
+      modules?: string;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<EsiParseResult, void>({
+      path: `/api/esi/parse`,
+      method: "POST",
+      query: query,
       body: data,
       format: "json",
       ...params,

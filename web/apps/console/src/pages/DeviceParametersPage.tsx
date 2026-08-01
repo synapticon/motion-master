@@ -1,6 +1,7 @@
 import { memo, useState } from 'react'
 import { useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import Checkbox from '../components/Checkbox'
 import DevicePageHeader from '../components/DevicePageHeader'
 import HexDecInput from '../components/HexDecInput'
 import { WireTiming, useWireTiming } from '../components/WireTiming'
@@ -923,12 +924,7 @@ export default function DeviceParametersPage() {
               )}
               <div className="flex flex-wrap items-center gap-3 ml-auto">
                 <label className="flex items-center gap-2 text-xs text-grey-700 select-none cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={readValues}
-                    onChange={e => setReadValues(e.target.checked)}
-                    className="cursor-pointer"
-                  />
+                  <Checkbox checked={readValues} onChange={setReadValues} />
                   <span>Read values during re-initialize</span>
                 </label>
                 <button

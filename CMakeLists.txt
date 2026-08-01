@@ -39,10 +39,15 @@ if(WIN32)
 endif()
 
 # Ordered by dependency layer (foundation first, consumers last), not alphabetically: mm::core ->
-# mm::comm -> mm::node -> mm::api -> mm::example, then the apps that consume them. CMake resolves
-# link targets at generate time so any order would configure; this ordering is for readability,
-# keeping the architectural layering obvious at a glance.
+# {mm::etg, mm::comm} -> mm::node -> mm::api -> mm::example, then the apps that consume them. CMake
+# resolves link targets at generate time so any order would configure; this ordering is for
+# readability, keeping the architectural layering obvious at a glance.
+#
+# mm::etg and mm::comm are siblings, not a chain: etg is a pure XML->struct transform over mm::core
+# alone and deliberately does not depend on mm::comm (which links SOEM), so parsing an ESI file
+# needs no fieldbus. mm::node is where the two meet.
 add_subdirectory(libs/core)
+add_subdirectory(libs/etg)
 add_subdirectory(libs/comm)
 add_subdirectory(libs/node)
 add_subdirectory(libs/api)

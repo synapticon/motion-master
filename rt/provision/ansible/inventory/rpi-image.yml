@@ -32,5 +32,4 @@ rt_targets:
     rt_force_cpu_governor: true
     motion_master_start: false
 
-    motion_master_install: true
     motion_master_fieldbus_driver: soem

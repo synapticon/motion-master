@@ -21,5 +21,4 @@ rt_targets:
     rt_user: debian
     # The VM has no EtherCAT NIC, so the fieldbus is left uninitialised; the
     # daemon still starts and serves the API, which is what is worth testing here.
-    motion_master_install: true
     motion_master_fieldbus_driver: ""

@@ -45,10 +45,15 @@
     # After the reboot, so the daemon starts on the RT kernel with the isolated
     # core already present — gameLoop.cpuAffinity would otherwise name a core
     # that the running kernel has not reserved.
+    # On by default: a real-time target exists to run Motion Master, so making
+    # the daemon opt-in would leave every board one forgotten variable short of
+    # doing its job. Set motion_master_install: false in the inventory for a
+    # bare real-time host. Defaulted here rather than as a play var, which would
+    # outrank the inventory and make that impossible.
     - name: Install Motion Master
       ansible.builtin.include_role:
         name: motion-master
         apply:
           tags: motion-master
-      when: motion_master_install | default(false)
+      when: motion_master_install | default(true)
       tags: motion-master

@@ -25,9 +25,9 @@ rt_targets:
     # unset to touch no interface at all.
     rt_ethercat_interface: enp2s0
 
-    # Install Motion Master as a systemd daemon. Off by default, so the RT roles
-    # alone still give you a bare real-time host.
-    motion_master_install: true
+    # Motion Master is installed as a systemd daemon by default. Set this to
+    # false for a bare real-time host with no daemon on it.
+    # motion_master_install: false
     motion_master_version: 6.0.0-alpha.62
     motion_master_fieldbus_driver: soem
     motion_master_fieldbus_adapter: enp2s0

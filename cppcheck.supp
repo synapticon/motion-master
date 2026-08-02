@@ -45,6 +45,7 @@ syntaxError:*/cia402_test.cc
 syntaxError:*/cia402_drive_test.cc
 syntaxError:*/profile_device_test.cc
 syntaxError:*/somanet_drive_test.cc
+syntaxError:*/somanet_procedures_test.cc
 syntaxError:*/sii_test.cc
 syntaxError:*/base_test.cc
 syntaxError:*/esi_data_type_test.cc

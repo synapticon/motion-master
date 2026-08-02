@@ -2,10 +2,16 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <expected>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
 #include <span>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -544,6 +550,99 @@ TEST(DeviceManagerPositions, BulkMethodsRejectUnknownPosition) {
   // The empty list (all devices) and the known position still succeed.
   EXPECT_TRUE(dm.deviceStates({}).has_value());
   EXPECT_TRUE(dm.deviceStates({1}).has_value());
+}
+
+// --- withDevice ----------------------------------------------------------------------------------
+
+TEST(DeviceManagerWithDevice, RunsTheCallbackAgainstTheAddressedDevice) {
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true, 3)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  auto position = dm.withDevice(2, [](mm::node::Device& device) -> std::expected<int, std::string> {
+    return device.slavePosition();
+  });
+  ASSERT_TRUE(position.has_value()) << position.error();
+  EXPECT_EQ(*position, 2);
+}
+
+TEST(DeviceManagerWithDevice, PassesTheCallbackErrorThrough) {
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  auto result = dm.withDevice(1, [](mm::node::Device&) -> std::expected<void, std::string> {
+    return std::unexpected("the operation itself failed");
+  });
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), "the operation itself failed");
+}
+
+TEST(DeviceManagerWithDevice, RejectsAnUnknownPositionWithoutRunningTheCallback) {
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  bool ran = false;
+  auto result = dm.withDevice(99, [&ran](mm::node::Device&) -> std::expected<void, std::string> {
+    ran = true;
+    return {};
+  });
+  ASSERT_FALSE(result.has_value());
+  EXPECT_FALSE(ran);
+  EXPECT_NE(result.error().find("device 99 not found"), std::string::npos) << result.error();
+}
+
+TEST(DeviceManagerWithDevice, HoldsTheBusLockForTheWholeCallback) {
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  // The whole point of the primitive: a borrowed Device& stays valid for a multi-second operation
+  // because the exclusive rebuilders cannot run meanwhile. Proving that needs the rescan to be
+  // observed *blocked* — hence the one grace period below, which is the only way to distinguish
+  // "waiting on the lock" from "has not started yet".
+  std::mutex mutex;
+  std::condition_variable inCallback;
+  std::condition_variable release;
+  bool entered = false;
+  bool released = false;
+  std::atomic<bool> rescanFinished{false};
+
+  std::thread borrower([&] {
+    (void)dm.withDevice(1, [&](mm::node::Device&) -> std::expected<void, std::string> {
+      {
+        const std::lock_guard lock(mutex);
+        entered = true;
+      }
+      inCallback.notify_one();
+      std::unique_lock lock(mutex);
+      release.wait(lock, [&] { return released; });
+      return {};
+    });
+  });
+
+  {
+    std::unique_lock lock(mutex);
+    inCallback.wait(lock, [&] { return entered; });
+  }
+
+  std::thread rescanner([&] {
+    (void)dm.scan();
+    rescanFinished.store(true);
+  });
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  EXPECT_FALSE(rescanFinished.load()) << "scan() ran while a device was borrowed";
+
+  {
+    const std::lock_guard lock(mutex);
+    released = true;
+  }
+  release.notify_one();
+  borrower.join();
+  rescanner.join();
+  EXPECT_TRUE(rescanFinished.load()) << "scan() never completed after the borrow ended";
 }
 
 }  // namespace

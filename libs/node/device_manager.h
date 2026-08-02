@@ -2,8 +2,10 @@
 
 #include <atomic>
 #include <chrono>
+#include <concepts>
 #include <cstdint>
 #include <expected>
+#include <format>
 #include <iosfwd>
 #include <memory>
 #include <nlohmann/json_fwd.hpp>
@@ -11,6 +13,8 @@
 #include <shared_mutex>
 #include <span>
 #include <string>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
@@ -256,6 +260,41 @@ class DeviceManager {
   /// position-based methods such as @c readDeviceParameter, which look the device up under the
   /// lock and never hand out a pointer that @c scan / @c reset could dangle.
   Device* findDevice(uint16_t slavePosition);
+
+  /// @brief Runs @p fn against the device at @p slavePosition, holding the bus lock throughout.
+  ///
+  /// The safe way to *borrow* a device from outside @c DeviceManager. @c findDevice hands back a
+  /// pointer that @c scan / @c reset can dangle, and the lock that would make it safe
+  /// (@c busMutex_) is private — so code living outside this class previously had no way to hold a
+  /// @c Device& for the length of an operation, and every such operation had to be added here as
+  /// another method. This lends locked access instead of adding a verb: @c DeviceManager's job
+  /// stays "own the devices, lend safe access to them", and it never has to name what the caller
+  /// intends to do with one.
+  ///
+  /// The lock is **shared**, so any number of borrowers (and the position-based read/write methods)
+  /// proceed concurrently; only the exclusive rebuilders — @c scan and @c reset — wait. Holding it
+  /// for a multi-second operation is therefore correct rather than merely tolerable: a rescan
+  /// midway through would invalidate the very device the caller is working on. The RT loop and the
+  /// WebSocket are unaffected either way, since each individual bus transaction takes the driver's
+  /// control-plane lock only for its own duration.
+  ///
+  /// @warning @p fn must not call back into an exclusive @c DeviceManager operation (@c scan,
+  ///          @c reset, @c init): @c busMutex_ is not recursive and the wait would never end.
+  ///
+  /// @param slavePosition  1-based position of the device on the fieldbus.
+  /// @param fn             Callable taking @c Device& and returning @c std::expected<T,
+  /// std::string>.
+  /// @return Whatever @p fn returns, or an error if no device holds that position.
+  template <typename Fn>
+    requires std::same_as<typename std::invoke_result_t<Fn, Device&>::error_type, std::string>
+  auto withDevice(uint16_t slavePosition, Fn&& fn) -> std::invoke_result_t<Fn, Device&> {
+    const std::shared_lock lock(busMutex_);
+    Device* device = findDevice(slavePosition);
+    if (device == nullptr) {
+      return std::unexpected(std::format("device {} not found", slavePosition));
+    }
+    return std::forward<Fn>(fn)(*device);
+  }
 
   /// @brief Monotonic counter bumped every time the device set is rebuilt (@c scan / @c reset).
   ///

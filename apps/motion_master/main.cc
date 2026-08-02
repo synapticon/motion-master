@@ -200,7 +200,7 @@ int main(int argc, char** argv) {
   // server, which runs on its own port/loop so a slow HTTP handler can never stall the stream.
   mm::node::MonitoringManager monitoringManager{deviceManager};
 
-  // Runs off-RT procedures (OS commands today) and retains their results for polling.
+  // Runs off-RT procedures and retains their results for polling.
   mm::node::ProcedureManager procedureManager{deviceManager};
 
   // The user-writable file store behind /api/user-cache, rooted at the shared cache directory

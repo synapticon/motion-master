@@ -66,3 +66,9 @@ useStlAlgorithm:*/esi_request.cc
 // a fold and suggests std::accumulate; expressing a path join that way is strictly less readable
 // (a lambda returning path{} / part, over a container of strings) for no gain.
 useStlAlgorithm:*/user_cache.cc
+
+// runOsCommand arms a local scope guard (ModeRestorer) by assigning its members, which are then
+// read by its destructor to restore the OS command mode. cppcheck does not treat a destructor as a
+// reader and reports both assignments as dead stores. Reading them "visibly" would mean an
+// optional<ModeRestorer> constructed inside the poll loop — worse code for a tool artefact.
+unreadVariable:*/somanet_drive.cc

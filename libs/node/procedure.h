@@ -123,6 +123,14 @@ struct ProcedureSnapshot {
   std::optional<int64_t> startedAt;   ///< Epoch ms the run began; absent when never run.
   std::optional<int64_t> finishedAt;  ///< Epoch ms the run ended; absent while running.
   std::vector<ProgressStep> steps;    ///< The ordered step array, always the full template.
+
+  /// @brief Why the run failed, when no step captured it.
+  ///
+  /// A body normally fails the step that went wrong, so the reason is visible where it happened
+  /// and this stays empty. It is for the failure that belongs to no step — the device turning out
+  /// not to be the right kind, say — which would otherwise leave a run marked failed with nothing
+  /// anywhere saying why.
+  std::optional<std::string> error;
 };
 void to_json(nlohmann::json& j, const ProcedureSnapshot& snapshot);
 

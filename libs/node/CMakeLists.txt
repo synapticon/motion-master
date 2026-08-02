@@ -11,6 +11,7 @@ add_library(
   parameter_refresher.cc
   pdo_mapping.cc
   procedure.cc
+  procedure_manager.cc
   profile_control.cc
   profile_device.cc
   process_data_dump.cc

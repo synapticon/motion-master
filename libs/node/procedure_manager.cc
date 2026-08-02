@@ -1,0 +1,155 @@
+#include "node/procedure_manager.h"
+
+#include <spdlog/spdlog.h>
+
+#include <chrono>
+#include <format>
+#include <memory>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace mm::node {
+
+namespace {
+
+int64_t nowMs() {
+  return std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::system_clock::now().time_since_epoch())
+      .count();
+}
+
+}  // namespace
+
+ProcedureManager::~ProcedureManager() {
+  std::vector<std::jthread> threads;
+  {
+    const std::lock_guard lock(mutex_);
+    for (auto& [key, run] : runs_) {
+      if (run->thread.joinable()) {
+        run->thread.request_stop();
+        threads.push_back(std::move(run->thread));
+      }
+    }
+  }
+  // Joined here, by leaving this scope with the mutex released: a run on its way out takes the bus
+  // lock, and a poller may be mid-snapshot, so waiting while holding ours would serialise both for
+  // no reason. Nothing can start a new run — the manager is being destroyed.
+}
+
+void ProcedureManager::discardIfRescanned() const {
+  const uint64_t generation = deviceManager_.topologyGeneration();
+  if (generation == topologyGeneration_) {
+    return;
+  }
+  topologyGeneration_ = generation;
+  if (runs_.empty()) {
+    return;
+  }
+  // Every retained run is finished: a body executes inside withDevice, which holds the bus lock
+  // shared, and the scan that bumped the generation needed it exclusively — so it cannot have
+  // overlapped one. Clearing therefore joins only threads that have already returned.
+  spdlog::debug("Device set rebuilt; discarding {} retained procedure snapshot(s)", runs_.size());
+  runs_.clear();
+}
+
+std::expected<void, ProcedureStartError> ProcedureManager::start(uint16_t devicePosition,
+                                                                 std::string name,
+                                                                 std::vector<ProgressStep> steps,
+                                                                 ProcedureBody body) {
+  const std::lock_guard lock(mutex_);
+  discardIfRescanned();
+
+  for (const auto& [key, run] : runs_) {
+    if (key.first == devicePosition && run->running.load()) {
+      return std::unexpected(ProcedureStartError{
+          .kind = ProcedureStartError::Kind::kBusy,
+          .message = std::format("device {} is busy running '{}'", devicePosition, key.second)});
+    }
+  }
+
+  // Resolve now rather than inside the thread, so an unknown position is reported to the caller
+  // instead of surfacing later as a run that failed immediately.
+  if (auto found = deviceManager_.withDevice(
+          devicePosition, [](Device&) -> std::expected<void, std::string> { return {}; });
+      !found) {
+    return std::unexpected(ProcedureStartError{.kind = ProcedureStartError::Kind::kUnknownDevice,
+                                               .message = found.error()});
+  }
+
+  const Key key{devicePosition, std::move(name)};
+  auto previous = runs_.find(key);
+  const uint32_t runCount = (previous == runs_.end() ? 0 : previous->second->runCount) + 1;
+
+  auto run = std::make_shared<Run>();
+  run->reporter = std::make_shared<ProgressReporter>(std::move(steps));
+  run->runCount = runCount;
+  run->startedAt = nowMs();
+
+  // Replacing the entry drops the previous run, joining its thread — already finished, since the
+  // busy check above passed.
+  runs_[key] = run;
+
+  run->thread =
+      std::jthread([this, run, devicePosition, body = std::move(body)](std::stop_token stop) {
+        auto result = deviceManager_.withDevice(
+            devicePosition, [&](Device& device) { return body(device, *run->reporter, stop); });
+
+        if (!result) {
+          run->error.store(std::make_shared<const std::string>(result.error()));
+        }
+        run->finishedAt.store(nowMs());
+        if (result) {
+          run->status.store(ProcedureStatus::kSucceeded);
+        } else if (stop.stop_requested()) {
+          // A stop was asked for and the body did not complete: report why it ended, not the error
+          // it ended with — "I stopped it" is the useful distinction, and the failing step still
+          // records whatever the drive last said.
+          run->status.store(ProcedureStatus::kCancelled);
+        } else {
+          run->status.store(ProcedureStatus::kFailed);
+        }
+        // Last, so a poller that sees the run finished also sees its outcome.
+        run->running.store(false);
+      });
+
+  return {};
+}
+
+std::optional<ProcedureSnapshot> ProcedureManager::snapshot(uint16_t devicePosition,
+                                                            std::string_view name) const {
+  const std::lock_guard lock(mutex_);
+  discardIfRescanned();
+  auto it = runs_.find(Key{devicePosition, std::string(name)});
+  if (it == runs_.end()) {
+    return std::nullopt;
+  }
+  const Run& run = *it->second;
+
+  ProcedureSnapshot snapshot;
+  snapshot.status = run.status.load();
+  snapshot.runCount = run.runCount;
+  snapshot.startedAt = run.startedAt;
+  if (const int64_t finishedAt = run.finishedAt.load(); finishedAt != 0) {
+    snapshot.finishedAt = finishedAt;
+  }
+  if (auto error = run.error.load()) {
+    snapshot.error = *error;
+  }
+  snapshot.steps = run.reporter->steps();
+  return snapshot;
+}
+
+bool ProcedureManager::cancel(uint16_t devicePosition, std::string_view name) {
+  const std::lock_guard lock(mutex_);
+  discardIfRescanned();
+  auto it = runs_.find(Key{devicePosition, std::string(name)});
+  if (it == runs_.end() || !it->second->running.load()) {
+    return false;
+  }
+  spdlog::debug("Cancelling procedure '{}' on device {}", name, devicePosition);
+  it->second->thread.request_stop();
+  return true;
+}
+
+}  // namespace mm::node

@@ -37,6 +37,7 @@ syntaxError:*/parameter_refresher_test.cc
 syntaxError:*/process_data_ring_test.cc
 syntaxError:*/process_data_dump_test.cc
 syntaxError:*/procedure_test.cc
+syntaxError:*/procedure_manager_test.cc
 syntaxError:*/ring_log_sink_test.cc
 syntaxError:*/monitoring_api_test.cc
 syntaxError:*/process_image_test.cc
@@ -73,6 +74,12 @@ useStlAlgorithm:*/user_cache.cc
 // signature differing from the rest would read as meaningful when it is incidental. The uniform
 // Cia402Drive& is the point: these lambdas are the operation, and the operation drives a device.
 constParameterReference:*/cia402_control.cc
+
+// ~ProcedureManager collects the running threads inside a locked block and joins them by leaving
+// the *outer* scope, after the mutex is released. cppcheck sees the variable used only within the
+// inner block and suggests narrowing its scope — which would join every thread while still holding
+// the mutex, deadlocking against a run that takes it on the way out. The wide scope is the design.
+variableScope:*/procedure_manager.cc
 
 // runOsCommand arms a local scope guard (ModeRestorer) by assigning its members, which are then
 // read by its destructor to restore the OS command mode. cppcheck does not treat a destructor as a

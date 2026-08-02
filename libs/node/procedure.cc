@@ -85,6 +85,9 @@ void to_json(nlohmann::json& j, const ProcedureSnapshot& snapshot) {
   if (snapshot.finishedAt) {
     j["finishedAt"] = *snapshot.finishedAt;
   }
+  if (snapshot.error) {
+    j["error"] = *snapshot.error;
+  }
 }
 
 }  // namespace mm::node

@@ -1965,6 +1965,14 @@ The raw escape hatch is `procedures/os-command` (body: the eight command bytes +
 
 **The accepted cost.** Some OS commands are instant and read-like — skipped-cycles counter (13), read object dictionary (21), use-internal-encoder-velocity (18, a setter). Wrapping a ~10 ms operation in start/poll/cancel is ceremony. Taken deliberately: an instant procedure is simply one whose first `GET` already reads `succeeded`, and the alternative is two API shapes plus a per-command judgement about which one each command earns. Uniformity is worth more than a saved round trip — but it is a trade, not a free win.
 
+**"Every OS command is a procedure" does not invert — and firmware installation is the proof.** There are three of them, on three different transports, and all three are procedures:
+
+- **Drive firmware — no OS commands at all.** Transition the device to BOOT, write two files over FoE, optionally write the SII, transition back to PRE-OP. The generic OS-command body does not serve this one; its body is state transitions plus FoE.
+- **SMM firmware — FoE *and* OS commands.** The safety module is updated through a combination of file transfer and the 11.x SMM acyclic handler commands (11.9 software update login, 11.10 configure, 11.11 transmit, 11.12 finalize).
+- **Kübler encoder firmware — OS commands only** (17.2 switch to bootloader, 17.3 check update size, 17.4 erase, 17.5 write, 17.6 exit bootloader). A different artefact reached *through* the drive's mailbox, not the drive's own firmware — easy to confuse with the first, and the two are unrelated.
+
+That spread is the argument, not a complication: **a procedure is classified by its lifecycle — off-RT, multi-second, multi-step, cancellable, exclusive on one device — never by the transport its body happens to use.** All three want the same `ProgressStep[]` snapshot, the same busy token, the same run/poll/cancel surface, while their bodies share almost no code. It is also why 2026-07-19 was right to retire the standalone `FirmwareInstaller`: there was never one firmware installer to build.
+
 **Sequencing — validate the machinery before the volume:**
 
 1. `ProcedureManager` core with raw `os-command` as its **only** procedure. The ideal first one: no per-command knowledge, exercises run/poll/cancel/retain/busy-set end to end, immediately useful on the bench.

@@ -2002,3 +2002,34 @@ The trigger was `ProcedureManager` needing to hold a `SomanetDrive&` for a thirt
 **What stays on `DeviceManager`:** `readParameter`/`writeParameter`/`readPdoMapping`/`writePdoMapping` by position. Those are `Device`-level operations on something it genuinely owns, with no profile vocabulary involved. Also unchanged: the *no service layer* mandate. A control free function is not a service — it holds no state, owns nothing, and its entire body is borrow, bind, delegate. The domain logic stays on the view.
 
 **One consequence to be aware of:** `runCia402Command`'s `enable()` walk holds the shared lock for up to its full timeout, so a rescan issued during an enable waits for it. That is unchanged behaviour — the method did exactly this before — but it is now visible in one place instead of buried in six.
+
+## Session 2026-08-02 — A procedure body cannot change AL state, and firmware installation is the exception that needs a second body shape (as-built + design)
+
+`ProcedureManager` shipped this session. One constraint fell out of it that is invisible until you hit it, and firmware installation hits it immediately.
+
+**The constraint.** A body runs inside `DeviceManager::withDevice`, which holds `busMutex_` **shared** for the run's whole duration. Mapping the lock modes settles what that costs:
+
+| Mode | Operations | During a running procedure |
+| --- | --- | --- |
+| **Exclusive** | `init`, `scan`, `reset`, `configureProcessData`, **`transitionToState`** | blocked |
+| **Shared** | every parameter read/write, `readAllDeviceParameters`, PDO mapping read/write, output staging, diagnostics, watchdog config, recorder dump | concurrent |
+| **Untouched** | `exchangeProcessData` (RT loop, lock-free), monitoring, the WebSocket | unaffected |
+
+So a five-second procedure leaves the UI responsive, SDO reads working, monitoring streaming and the drive cycling — the cost is confined to `init`/`scan`/`reset` and, decisively, **`transitionToState`**.
+
+That last one is not merely "a user cannot change state meanwhile": **the body cannot either**. It holds the lock shared and `transitionToState` wants it exclusively, and `std::shared_mutex` offers no upgrade — the body would deadlock against itself. Harmless for everything queued next (os-command, offset detection, store/restore, auto-tuning are SDO/mailbox work) and fatal for firmware installation, which *is* its state transitions: BOOT → two FoE writes → PRE-OP, and the SMM and Kübler variants likewise.
+
+**The exception: a second body shape, not a redesign.** The deadlock comes entirely from who holds the lock, so the fix is to stop holding it across the span. Alongside today's
+
+```cpp
+ProcedureBody = std::function<expected<void, string>(Device&, ProgressReporter&, stop_token)>
+```
+
+firmware installation gets a body taking `(DeviceManager&, uint16_t position, ProgressReporter&, stop_token)`, which the manager spawns **without** borrowing anything. That body borrows per *step* — `withDevice` around each FoE write — and calls `transitionToState` between steps, when it holds nothing. Same thread, same busy token, same snapshot, same cancellation; only the borrowing granularity differs, and it is an added `start` overload rather than a change to the existing one. This is also the shape CLAUDE.md already prescribes for long-lived work ("re-resolves its `Device` via `findDevice` each cycle") — the whole-span hold is the special case, justified for measurements because a rescan mid-measurement is meaningless.
+
+**Two consequences to handle when it is built**, neither fatal:
+
+- *A rescan can interleave*, since nothing holds the lock between steps. The install itself copes — the next borrow fails with "device not found" and the run fails cleanly — but `discardIfRescanned` must then **skip entries that are still running**, or it will join a live thread while holding the manager's mutex. Today it may clear unconditionally precisely because a rescan cannot overlap a run.
+- *Nothing blocks a concurrent `scan()` during the install.* The busy token cannot prevent it without `DeviceManager` consulting `ProcedureManager`, which would undo the profile-ignorance established earlier today. Probably acceptable — flashing fails safely — but it is the trade being made, not an oversight.
+
+**Also worth recording from the build:** the destructor collects running threads under the lock and joins them *after* releasing it, because a finishing run takes the bus lock on its way out (cppcheck's "reduce the scope of `threads`" would reintroduce the deadlock — suppressed with that reasoning). And a run's outcome is written through atomics so the finishing thread never needs the manager's mutex at all, which is what makes that destructor ordering possible. The other trap, found by a hung test: **`request_stop()` does not notify a `std::condition_variable`**, so a body that blocks must wait on the stop-aware `std::condition_variable_any` overload or it will never wake, and the joining destructor hangs with it.

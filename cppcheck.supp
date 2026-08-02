@@ -36,6 +36,7 @@ syntaxError:*/parameter_cache_test.cc
 syntaxError:*/parameter_refresher_test.cc
 syntaxError:*/process_data_ring_test.cc
 syntaxError:*/process_data_dump_test.cc
+syntaxError:*/procedure_test.cc
 syntaxError:*/ring_log_sink_test.cc
 syntaxError:*/monitoring_api_test.cc
 syntaxError:*/process_image_test.cc

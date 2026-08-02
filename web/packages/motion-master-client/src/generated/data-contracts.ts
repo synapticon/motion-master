@@ -378,6 +378,54 @@ export interface ProcessImageObject {
   bitLength: number;
 }
 
+/** One step of a procedure. `id` is stable across runs, so a client keys its label and its value formatting off it. A step never reports cancellation: cancelling stops the procedure, leaving the step it was on `running` and the rest `idle`, which records how far it got. */
+export interface ProgressStep {
+  /**
+   * Stable identifier of the step within its procedure.
+   * @example "command"
+   */
+  id: string;
+  /** @example "succeeded" */
+  status: "idle" | "running" | "succeeded" | "failed";
+  /**
+   * What the step produced, if anything — shape is per procedure. Absent when the step produced nothing. For `os-command` it is an object with `status`, `data`, and `errorCode` when the drive sent one.
+   * @example {"status":1,"data":[1,2,3,4,5,6]}
+   */
+  value?: any;
+  /** Why the step failed. Absent unless it did. */
+  error?: string;
+}
+
+/** The complete state of a procedure on one device — an accumulating snapshot rather than an event, which is what makes polling lossless. */
+export interface ProcedureSnapshot {
+  /**
+   * The one field a polling loop checks. `cancelled` is distinct from `failed` on purpose: "I stopped it" and "the drive could not do it" are different outcomes.
+   * @example "succeeded"
+   */
+  status: "idle" | "running" | "succeeded" | "failed" | "cancelled";
+  /**
+   * How many runs have been accepted on this device since the last scan or reset; a rejected start does not count. Doubles as a generation counter — with no run id, a changed `runCount` is how a poller can tell one run from the next.
+   * @example 3
+   */
+  runCount: number;
+  /**
+   * Epoch milliseconds the run began. Absent when never run.
+   * @format int64
+   * @example 1735821000123
+   */
+  startedAt?: number;
+  /**
+   * Epoch milliseconds the run ended. Absent while running.
+   * @format int64
+   * @example 1735821042456
+   */
+  finishedAt?: number;
+  /** The procedure's ordered steps, always the full template. */
+  steps: ProgressStep[];
+  /** Why the run failed when no step captured it — a failure belonging to no step, such as the device not being the kind the procedure needs. Absent otherwise. */
+  error?: string;
+}
+
 export interface OutputStageResult {
   /**
    * 1-based bus position of the owning device (echoes the request)

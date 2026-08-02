@@ -1527,6 +1527,134 @@ paths:
           description: No device at that slavePosition
         "409":
           description: The device is not a CiA402 drive, or the write failed
+  /api/devices/{slavePosition}/procedures/os-command:
+    post:
+      summary: Start a raw OS command on a device
+      description: >
+        Starts the raw OS command procedure (CANopen 0x1023 / 0x1024, as SOMANET firmware drives
+        it) and returns as soon as the run is under way — this does **not** wait for the command to
+        finish. Poll `GET` on the same path for its outcome, or `DELETE` to cancel it.
+
+
+        The escape hatch for commands that have no typed procedure yet: the eight request bytes are
+        passed through as given (byte 0 is the OS command ID, bytes 1-7 its parameters). Only one
+        procedure may run on a device at a time; a second start is refused with 409 while the first
+        is in flight.
+
+
+        Requires the device to be a SOMANET drive with an active mailbox (PRE-OP/SAFE-OP/OP). A
+        command the drive answers with an error is not a failure of this request — it is reported
+        in the snapshot as a failed run.
+      operationId: startOsCommand
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [command]
+              properties:
+                command:
+                  type: array
+                  minItems: 8
+                  maxItems: 8
+                  items: { type: integer, minimum: 0, maximum: 255 }
+                  description: >
+                    The eight request bytes. Byte 0 is the OS command ID; bytes 1-7 are that
+                    command's parameters.
+                  example: [8, 0, 0, 0, 0, 0, 0, 0]
+                timeoutMs:
+                  type: integer
+                  minimum: 1
+                  maximum: 600000
+                  default: 1000
+                  description: >
+                    Ceiling on the whole command. Not a liveness check — the drive fails a command
+                    no service acknowledges within 5 s on its own — so size it for the command
+                    being run. Hitting it aborts the command on the drive.
+                  example: 30000
+                pollIntervalMs:
+                  type: integer
+                  minimum: 1
+                  maximum: 1000
+                  default: 10
+                  description: How often the server reads the drive's response object while waiting.
+      responses:
+        "202":
+          description: >
+            The run has started. The body is the initial snapshot, with `status` `running` and
+            `runCount` already bumped.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProcedureSnapshot" }
+        "400":
+          description: slavePosition is invalid, or the body is not a valid OS command request
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: Another procedure is already running on that device
+    get:
+      summary: Read the state of a device's OS command procedure
+      description: >
+        Returns the current run, or the last one to have finished. This is the whole progress
+        surface — there is no push channel — and polling it is lossless: every finished step keeps
+        its terminal status and value, so a step that both starts and completes between two polls
+        is still reported as succeeded. A polling loop is `while status == "running"`.
+
+
+        The snapshot is retained after the run ends, so a client that reconnects (or a user
+        returning to a page) sees how the last run went. It is dropped when the device set is
+        rebuilt by a scan or reset, because bus positions may then name different hardware.
+      operationId: getOsCommandProcedure
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The current or last-known state of the procedure
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProcedureSnapshot" }
+        "400":
+          description: slavePosition is invalid
+        "404":
+          description: >
+            The procedure has never run on that device, or its result was dropped by a rescan
+    delete:
+      summary: Cancel a device's running OS command procedure
+      description: >
+        Asks the running procedure to stop and returns immediately; the drive is told to abort the
+        in-flight command (0x1024 = 3), so a long measurement stops rather than running to
+        completion. The run then finishes with status `cancelled`.
+
+
+        This cancels the *run*, not the record: the snapshot remains and reports how far it got.
+      operationId: cancelOsCommandProcedure
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "202":
+          description: The running procedure has been asked to stop
+        "400":
+          description: slavePosition is invalid
+        "404":
+          description: Nothing is running for that procedure on that device
   /api/devices/{slavePosition}/store-parameters:
     post:
       summary: Store a device's parameters to non-volatile memory
@@ -3362,6 +3490,71 @@ components:
           type: integer
           description: Width of the value in bits
           example: 32
+    ProgressStep:
+      type: object
+      description: >
+        One step of a procedure. `id` is stable across runs, so a client keys its label and its
+        value formatting off it. A step never reports cancellation: cancelling stops the procedure,
+        leaving the step it was on `running` and the rest `idle`, which records how far it got.
+      properties:
+        id:
+          type: string
+          description: Stable identifier of the step within its procedure.
+          example: command
+        status:
+          type: string
+          enum: [idle, running, succeeded, failed]
+          example: succeeded
+        value:
+          description: >
+            What the step produced, if anything — shape is per procedure. Absent when the step
+            produced nothing. For `os-command` it is an object with `status`, `data`, and
+            `errorCode` when the drive sent one.
+          example: { status: 1, data: [1, 2, 3, 4, 5, 6] }
+        error:
+          type: string
+          description: Why the step failed. Absent unless it did.
+      required: [id, status]
+    ProcedureSnapshot:
+      type: object
+      description: >
+        The complete state of a procedure on one device — an accumulating snapshot rather than an
+        event, which is what makes polling lossless.
+      properties:
+        status:
+          type: string
+          enum: [idle, running, succeeded, failed, cancelled]
+          description: >
+            The one field a polling loop checks. `cancelled` is distinct from `failed` on purpose:
+            "I stopped it" and "the drive could not do it" are different outcomes.
+          example: succeeded
+        runCount:
+          type: integer
+          description: >
+            How many runs have been accepted on this device since the last scan or reset; a
+            rejected start does not count. Doubles as a generation counter — with no run id, a
+            changed `runCount` is how a poller can tell one run from the next.
+          example: 3
+        startedAt:
+          type: integer
+          format: int64
+          description: Epoch milliseconds the run began. Absent when never run.
+          example: 1735821000123
+        finishedAt:
+          type: integer
+          format: int64
+          description: Epoch milliseconds the run ended. Absent while running.
+          example: 1735821042456
+        steps:
+          type: array
+          items: { $ref: "#/components/schemas/ProgressStep" }
+          description: The procedure's ordered steps, always the full template.
+        error:
+          type: string
+          description: >
+            Why the run failed when no step captured it — a failure belonging to no step, such as
+            the device not being the kind the procedure needs. Absent otherwise.
+      required: [status, runCount, steps]
     OutputStageResult:
       type: object
       required: [slavePosition, index, subindex, staged, error]

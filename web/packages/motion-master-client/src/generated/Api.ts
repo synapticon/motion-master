@@ -27,6 +27,7 @@ import {
   ParameterCacheEntry,
   PdoMapping,
   PdoMappingRequest,
+  ProcedureSnapshot,
   ProcessDataWatchdog,
   ProcessImageObject,
   SdoAbortCode,
@@ -1027,6 +1028,79 @@ export class Api<
       method: "POST",
       body: data,
       type: ContentType.Json,
+      ...params,
+    });
+  /**
+   * @description Starts the raw OS command procedure (CANopen 0x1023 / 0x1024, as SOMANET firmware drives it) and returns as soon as the run is under way — this does **not** wait for the command to finish. Poll `GET` on the same path for its outcome, or `DELETE` to cancel it. The escape hatch for commands that have no typed procedure yet: the eight request bytes are passed through as given (byte 0 is the OS command ID, bytes 1-7 its parameters). Only one procedure may run on a device at a time; a second start is refused with 409 while the first is in flight. Requires the device to be a SOMANET drive with an active mailbox (PRE-OP/SAFE-OP/OP). A command the drive answers with an error is not a failure of this request — it is reported in the snapshot as a failed run.
+   *
+   * @name StartOsCommand
+   * @summary Start a raw OS command on a device
+   * @request POST:/api/devices/{slavePosition}/procedures/os-command
+   */
+  startOsCommand = (
+    slavePosition: number,
+    data: {
+      /**
+       * The eight request bytes. Byte 0 is the OS command ID; bytes 1-7 are that command's parameters.
+       * @maxItems 8
+       * @minItems 8
+       * @example [8,0,0,0,0,0,0,0]
+       */
+      command: number[];
+      /**
+       * Ceiling on the whole command. Not a liveness check — the drive fails a command no service acknowledges within 5 s on its own — so size it for the command being run. Hitting it aborts the command on the drive.
+       * @min 1
+       * @max 600000
+       * @default 1000
+       * @example 30000
+       */
+      timeoutMs?: number;
+      /**
+       * How often the server reads the drive's response object while waiting.
+       * @min 1
+       * @max 1000
+       * @default 10
+       */
+      pollIntervalMs?: number;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<ProcedureSnapshot, void>({
+      path: `/api/devices/${slavePosition}/procedures/os-command`,
+      method: "POST",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Returns the current run, or the last one to have finished. This is the whole progress surface — there is no push channel — and polling it is lossless: every finished step keeps its terminal status and value, so a step that both starts and completes between two polls is still reported as succeeded. A polling loop is `while status == "running"`. The snapshot is retained after the run ends, so a client that reconnects (or a user returning to a page) sees how the last run went. It is dropped when the device set is rebuilt by a scan or reset, because bus positions may then name different hardware.
+   *
+   * @name GetOsCommandProcedure
+   * @summary Read the state of a device's OS command procedure
+   * @request GET:/api/devices/{slavePosition}/procedures/os-command
+   */
+  getOsCommandProcedure = (slavePosition: number, params: RequestParams = {}) =>
+    this.request<ProcedureSnapshot, void>({
+      path: `/api/devices/${slavePosition}/procedures/os-command`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Asks the running procedure to stop and returns immediately; the drive is told to abort the in-flight command (0x1024 = 3), so a long measurement stops rather than running to completion. The run then finishes with status `cancelled`. This cancels the *run*, not the record: the snapshot remains and reports how far it got.
+   *
+   * @name CancelOsCommandProcedure
+   * @summary Cancel a device's running OS command procedure
+   * @request DELETE:/api/devices/{slavePosition}/procedures/os-command
+   */
+  cancelOsCommandProcedure = (
+    slavePosition: number,
+    params: RequestParams = {},
+  ) =>
+    this.request<void, void>({
+      path: `/api/devices/${slavePosition}/procedures/os-command`,
+      method: "DELETE",
       ...params,
     });
   /**

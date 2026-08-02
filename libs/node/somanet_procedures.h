@@ -42,6 +42,19 @@ struct OsCommandRequest {
   std::chrono::milliseconds pollInterval{10};  ///< Delay between response polls.
 };
 
+/// @brief Parses and validates a client's OS command request body.
+///
+/// Lives here rather than in the HTTP handler because validation is domain knowledge — how many
+/// bytes a command is, what a byte may hold, what timing is sane — and the handler's job is only to
+/// forward. A C++ caller building a request directly gets the same checks.
+///
+/// Accepts `{"command": [8, 0, ...], "timeoutMs": 30000, "pollIntervalMs": 10}`. Both timing fields
+/// are optional and default as @c OsCommandRequest declares.
+///
+/// @param body  Parsed request JSON.
+/// @return The validated request, or a message naming what is wrong with it.
+std::expected<OsCommandRequest, std::string> parseOsCommandRequest(const nlohmann::json& body);
+
 /// @brief What one raw OS command run produced — the step's value.
 ///
 /// A procedure-specific value type with its own @c to_json, which is how a body records something

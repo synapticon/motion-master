@@ -41,7 +41,9 @@
 #include "node/device_parameter.h"
 #include "node/monitoring_manager.h"
 #include "node/pdo_mapping.h"
+#include "node/procedure_manager.h"
 #include "node/profile_control.h"
+#include "node/somanet_procedures.h"
 #include "swagger_spec.h"
 
 namespace {
@@ -336,10 +338,11 @@ Res* setUserCacheDownloadHeaders(Res* res, std::string_view corsOrigin) {
 
 HttpServer::HttpServer(Config config, mm::node::DeviceManager& deviceManager,
                        mm::node::MonitoringManager& monitoringManager,
-                       mm::core::UserCache& userCache)
+                       mm::node::ProcedureManager& procedureManager, mm::core::UserCache& userCache)
     : config_(std::move(config)),
       deviceManager_(deviceManager),
       monitoringManager_(monitoringManager),
+      procedureManager_(procedureManager),
       userCache_(userCache) {}
 
 HttpServer::~HttpServer() {
@@ -1300,6 +1303,98 @@ void HttpServer::run() {
                   wireUs)
                   ->end();
             })
+      // --- procedures -----------------------------------------------------------------------
+      //
+      // One resource per (device, procedure), three verbs: POST starts a run, GET returns the
+      // snapshot, DELETE cancels. Progress is polled, never pushed — each snapshot is accumulating
+      // state in which finished steps keep their status and value, so a client cannot miss a
+      // result between polls, and one that reconnects sees how the last run went.
+      .post(
+          "/api/devices/:slavePosition/procedures/os-command",
+          [this](auto* res, auto* req) {
+            uint16_t pos{};
+            auto posParam = req->getParameter("slavePosition");
+            auto [p, ec] = std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+            const bool posOk = (ec == std::errc() && p == posParam.data() + posParam.size());
+            auto aborted = std::make_shared<bool>(false);
+            auto body = std::make_shared<std::string>();
+            res->onAborted([aborted]() { *aborted = true; });
+            res->onData([this, res, body, aborted, pos, posOk](std::string_view chunk, bool last) {
+              body->append(chunk);
+              if (!last || *aborted) {
+                return;
+              }
+              if (!posOk) {
+                sendStatus(res, "400 Bad Request", config_.corsOrigin);
+                return;
+              }
+              auto json = nlohmann::json::parse(*body, nullptr, false);
+              if (json.is_discarded()) {
+                sendError(res, "400 Bad Request", config_.corsOrigin, "invalid JSON body");
+                return;
+              }
+              // Validation is the node layer's: what a command may hold is domain knowledge.
+              auto request = mm::node::parseOsCommandRequest(json);
+              if (!request) {
+                sendError(res, "400 Bad Request", config_.corsOrigin, request.error());
+                return;
+              }
+              auto started = procedureManager_.start(
+                  pos, std::string(mm::node::kOsCommandProcedure), mm::node::osCommandSteps(),
+                  [spec = *request](mm::node::Device& device, mm::node::ProgressReporter& reporter,
+                                    std::stop_token stop) {
+                    return mm::node::runOsCommandProcedure(device, reporter, std::move(stop), spec);
+                  });
+              if (!started) {
+                // The two failures mean different things to a client: retry later versus never.
+                const bool busy =
+                    started.error().kind == mm::node::ProcedureStartError::Kind::kBusy;
+                sendError(res, busy ? "409 Conflict" : "404 Not Found", config_.corsOrigin,
+                          started.error().message);
+                return;
+              }
+              // 202: the run is under way, not finished. Poll the GET for its outcome.
+              auto snapshot = procedureManager_.snapshot(pos, mm::node::kOsCommandProcedure);
+              mm::api::setCorsOrigin(res->writeStatus("202 Accepted"), config_.corsOrigin)
+                  ->writeHeader("Content-Type", "application/json")
+                  ->end(nlohmann::json(snapshot.value_or(mm::node::ProcedureSnapshot{})).dump());
+            });
+          })
+      .get("/api/devices/:slavePosition/procedures/os-command",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p, ec] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
+               return;
+             }
+             auto snapshot = procedureManager_.snapshot(pos, mm::node::kOsCommandProcedure);
+             if (!snapshot) {
+               // Never run on this device (or cleared by a rescan) — there is no state to report.
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
+               return;
+             }
+             sendJson(res, config_.corsOrigin, nlohmann::json(*snapshot));
+           })
+      .del("/api/devices/:slavePosition/procedures/os-command",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p, ec] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
+               return;
+             }
+             // Cancels the run, not the record: the snapshot stays, reporting how far it got.
+             if (!procedureManager_.cancel(pos, mm::node::kOsCommandProcedure)) {
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
+               return;
+             }
+             sendStatus(res, "202 Accepted", config_.corsOrigin);
+           })
       .get("/api/devices/:slavePosition/sdo/:index/:subindex",
            [this](auto* res, auto* req) {
              uint16_t pos{};

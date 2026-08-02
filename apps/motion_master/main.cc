@@ -22,6 +22,7 @@
 #include "http_server.h"
 #include "node/device_manager.h"
 #include "node/monitoring_manager.h"
+#include "node/procedure_manager.h"
 #include "node/process_data_cyclic_task.h"
 #include "options.h"
 #include "ring_log_sink.h"
@@ -199,6 +200,9 @@ int main(int argc, char** argv) {
   // server, which runs on its own port/loop so a slow HTTP handler can never stall the stream.
   mm::node::MonitoringManager monitoringManager{deviceManager};
 
+  // Runs off-RT procedures (OS commands today) and retains their results for polling.
+  mm::node::ProcedureManager procedureManager{deviceManager};
+
   // The user-writable file store behind /api/user-cache, rooted at the shared cache directory
   // resolved above. Like the parameter cache, its location is a process-level setting fixed at
   // startup, not something init() can change. Everything Motion Master writes lands under this
@@ -249,7 +253,7 @@ int main(int argc, char** argv) {
           },
           .corsOrigin = opts.config.server.corsOrigin,
       },
-      deviceManager, monitoringManager, userCache};
+      deviceManager, monitoringManager, procedureManager, userCache};
   // Wire the example C++ route plug-in (/api/example/...) before start(): the composition root is
   // the only place that knows the concrete plug-in. Copy libs/example to add your own.
   httpServer.addRoutes(mm::example::registerRoutes);

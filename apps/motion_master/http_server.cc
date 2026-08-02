@@ -35,11 +35,13 @@
 #include "etg/esi_request.h"
 #include "monitoring_api.h"
 #include "node/cia402.h"
+#include "node/cia402_control.h"
 #include "node/cia402_drive.h"
 #include "node/device_manager.h"
 #include "node/device_parameter.h"
 #include "node/monitoring_manager.h"
 #include "node/pdo_mapping.h"
+#include "node/profile_control.h"
 #include "swagger_spec.h"
 
 namespace {
@@ -1035,7 +1037,7 @@ void HttpServer::run() {
              // layer's message says which; the client uses the device's isCia402 flag to avoid
              // asking in the first place.
              sendTimedJson(res, config_.corsOrigin, "409 Conflict",
-                           [&] { return deviceManager_.getCia402Status(pos); });
+                           [&] { return mm::node::cia402Status(deviceManager_, pos); });
            })
       .post(
           "/api/devices/:slavePosition/cia402/mode",
@@ -1078,7 +1080,7 @@ void HttpServer::run() {
                 sendStatus(res, "404 Not Found", config_.corsOrigin);
                 return;
               }
-              auto r = deviceManager_.setCia402OperationMode(pos, *mode);
+              auto r = mm::node::setCia402OperationMode(deviceManager_, pos, *mode);
               if (!r) {
                 sendError(res, "409 Conflict", config_.corsOrigin, r.error());
                 return;
@@ -1126,7 +1128,7 @@ void HttpServer::run() {
                 sendStatus(res, "404 Not Found", config_.corsOrigin);
                 return;
               }
-              auto r = deviceManager_.runCia402Command(pos, *command);
+              auto r = mm::node::runCia402Command(deviceManager_, pos, *command);
               if (!r) {
                 sendError(res, "409 Conflict", config_.corsOrigin, r.error());
                 return;
@@ -1178,7 +1180,7 @@ void HttpServer::run() {
                 sendStatus(res, "404 Not Found", config_.corsOrigin);
                 return;
               }
-              auto r = deviceManager_.setCia402Target(pos, *kind, value);
+              auto r = mm::node::setCia402Target(deviceManager_, pos, *kind, value);
               if (!r) {
                 sendError(res, "409 Conflict", config_.corsOrigin, r.error());
                 return;
@@ -1225,7 +1227,7 @@ void HttpServer::run() {
             // whole settle + confirm-poll budget, so the server-measured duration is most of the
             // client's round-trip; the readout lets the UI separate device time from transport.
             const auto t0 = std::chrono::steady_clock::now();
-            auto r = deviceManager_.runStoreParameters(pos, storeConfig);
+            auto r = mm::node::runStoreParameters(deviceManager_, pos, storeConfig);
             const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
                 std::chrono::steady_clock::now() - t0);
             if (!r) {
@@ -1285,7 +1287,8 @@ void HttpServer::run() {
               }
               // Synchronous + timed, exactly like store-parameters above.
               const auto t0 = std::chrono::steady_clock::now();
-              auto r = deviceManager_.runRestoreDefaultParameters(pos, group, restoreConfig);
+              auto r =
+                  mm::node::runRestoreDefaultParameters(deviceManager_, pos, group, restoreConfig);
               const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
                   std::chrono::steady_clock::now() - t0);
               if (!r) {

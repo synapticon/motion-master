@@ -1,5 +1,6 @@
 add_library(
   node STATIC
+  cia402_control.cc
   cia402_drive.cc
   device.cc
   device_manager.cc
@@ -10,6 +11,7 @@ add_library(
   parameter_refresher.cc
   pdo_mapping.cc
   procedure.cc
+  profile_control.cc
   profile_device.cc
   process_data_dump.cc
   process_data_ring.cc

@@ -68,6 +68,12 @@ useStlAlgorithm:*/esi_request.cc
 // (a lambda returning path{} / part, over a container of strings) for no gain.
 useStlAlgorithm:*/user_cache.cc
 
+// The control headers pass a bound profile view to a lambda per operation. cia402Status' lambda
+// only reads, so cppcheck suggests a const Cia402Drive& — but its three siblings mutate, and one
+// signature differing from the rest would read as meaningful when it is incidental. The uniform
+// Cia402Drive& is the point: these lambdas are the operation, and the operation drives a device.
+constParameterReference:*/cia402_control.cc
+
 // runOsCommand arms a local scope guard (ModeRestorer) by assigning its members, which are then
 // read by its destructor to restore the OS command mode. cppcheck does not treat a destructor as a
 // reader and reports both assignments as dead stores. Reading them "visibly" would mean an

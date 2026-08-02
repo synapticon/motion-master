@@ -1936,3 +1936,40 @@ Never-run is well-formed too — `status: "idle"`, `runCount: 0`, no timestamps,
 **Retained snapshots are cleared on `scan()`/`reset()`.** Retention is keyed by slave position, and a rescan rebuilds `DeviceManager::devices_` with positions that may remap — a retained "offset = 1234" would then be rendered against a *different physical drive*. Keying by device identity (serial / vendor+product+serial) so results survive a rescan is more faithful but more machinery for a value that is explicitly session-scoped; a missing result is strictly better than a wrong-drive result, so the snapshots (and `runCount`) reset on rescan.
 
 **What is unchanged.** `ProgressReporter` still exists and still owns the step-mutation vocabulary — it simply updates the retained array in place instead of also calling out, which is what keeps `runOffsetDetection` transport-free and testable against a fake reporter. The busy-set is still the span-level exclusion `controlPlaneMutex_` cannot provide (that mutex serializes individual transactions; a procedure is a multi-second span of many, interleaved with sleeps). Cancellation is still checked *between* steps, with an in-flight OS command allowed to finish and the drive returned to a safe state before exit. The `value`-stays-numeric and client-owns-labels leans stand. And the standing restraint stands: no procedure registry/dispatcher until a second procedure actually exists.
+
+## Session 2026-08-02 — Every OS command is a procedure: one `/procedures` surface, a descriptor catalogue, and composition below the manager (design)
+
+**Extends** *Session 2026-07-19* and the poll-only note above. The question that opened it: should a raw OS command get its own endpoint? The answer generalises — **a single OS command already *is* a procedure**, and treating it as one collapses what would otherwise be a second API dialect.
+
+**The structural argument.** A single OS command is a multi-second command-and-wait span on one device, cancellable, reporting progress, needing exclusion for its whole duration. That is the definition `ProcedureManager` was built around. Every piece of it — the cancellable `std::jthread`, the per-device busy token, the retained snapshot, `runCount`, the timestamps — is exactly what running one raw OS command needs, with **no machinery to add, only a body to supply**. Offset detection is then not a different *kind* of thing but a composite one: several OS commands under a single span. So the surface is uniform for both:
+
+```text
+POST   /api/devices/:pos/procedures/<name>   → 202 accepted | 409 busy
+GET    /api/devices/:pos/procedures/<name>   → the snapshot
+DELETE /api/devices/:pos/procedures/<name>   → cancel
+GET    /api/devices/:pos/procedures          → every procedure + descriptor + last-run snapshot
+```
+
+The raw escape hatch is `procedures/os-command` (body: the eight command bytes + timeout), **not** a sibling `/api/devices/:pos/os-command` — one collection, one set of verbs, addressed by procedure name. Both it and the typed commands stay: the raw one is for bring-up and for commands not yet wrapped (the previous client carried the same idea as its `CUSTOM_OS_COMMAND`), while a named procedure adds parameter validation, error-code naming, and a decoded typed result.
+
+**The list endpoint is what makes a UI possible.** With ~23 commands a per-device *Procedures* page cannot issue 23 requests or hard-code 23 descriptions. `GET .../procedures` returns the catalogue — each procedure's descriptor plus its last-run snapshot — so the page renders in one request and stays generic as commands are added.
+
+**Three earlier decisions this voids, all of them conditional when made:**
+
+- *The registry restraint.* 2026-07-19 said "resist a procedure registry until a second procedure actually exists". That condition is now met many times over. But the answer is **not** 23 hand-written bodies: most OS commands are a single call, so they are served by **one generic body parameterised by (command bytes, response decoder, step template)**; only genuinely multi-step procedures (offset detection) get a bespoke body. The registry is a table of descriptors, not a pile of near-duplicate functions.
+- *Progress was logged and dropped.* `SomanetDrive::runOsCommand` currently logs the firmware's 0-100 % (status band 100-200) at debug level and discards it, justified at the time by "nothing consumes it". Something does now: a single-OS-command procedure has exactly one step, and that step's percentage **is** the progress bar. So `ProgressStep` gains an optional `progress`, and `OsCommandConfig` regains the progress callback deliberately left out — driven by a real consumer rather than speculation.
+- *Client-owned labels.* Leaning the labels and formatting onto the client was free with one procedure and is a liability with ~23: a client-side catalogue must be kept in sync with the server's procedure set by hand. The **server owns a descriptor** per procedure — title, description, caveats, whether it moves the motor, whether it requires the drive enabled, the step template. The house rule that every action control carries a description *and its caveats* means that text exists regardless; duplicating it in the console is how it goes stale. (Per-step *labels* may still be client-side; the per-procedure descriptor is not.)
+
+**The trap, recorded before it is built: procedures compose as functions, never as procedures.** Offset detection runs several OS commands. The tidy-looking implementation has it call `ProcedureManager::start("phase-resistance")` for each — which tries to acquire a device token **the parent already holds**, and self-deadlocks (or spuriously 409s against itself). The rule is that a procedure body calls `drive.runOsCommand(...)` **directly**; the token is acquired exactly once, by the outermost thing the *user* started, and composition happens below the manager in plain calls on the view. This is the same layering that keeps the body a free function over a reporter.
+
+**The accepted cost.** Some OS commands are instant and read-like — skipped-cycles counter (13), read object dictionary (21), use-internal-encoder-velocity (18, a setter). Wrapping a ~10 ms operation in start/poll/cancel is ceremony. Taken deliberately: an instant procedure is simply one whose first `GET` already reads `succeeded`, and the alternative is two API shapes plus a per-command judgement about which one each command earns. Uniformity is worth more than a saved round trip — but it is a trade, not a free win.
+
+**Sequencing — validate the machinery before the volume:**
+
+1. `ProcedureManager` core with raw `os-command` as its **only** procedure. The ideal first one: no per-command knowledge, exercises run/poll/cancel/retain/busy-set end to end, immediately useful on the bench.
+2. The catalogue — descriptors and `GET .../procedures`.
+3. Typed commands one at a time, `phase-resistance-measurement` first (the smallest thing that proves the decoder and error-naming layer).
+4. Offset detection — proves composition.
+5. The console *Procedures* page, once the catalogue lets it be generic. With ~23 commands it will want grouping: Measurement, Calibration, Encoder, Diagnostics, and an Advanced group holding the raw command.
+
+Two corrections to *Session 2026-07-19* fall out of the OS command work and belong in its as-built note rather than as retro-edits: its **three tiers are two** (the mechanism is as vendor-specific as the commands — see the `runOsCommand` placement rationale), and its lean that **cancellation can only happen between steps is wrong** — `0x1024 = 3` aborts an in-flight command, so a 30 s measurement stops within one poll interval.

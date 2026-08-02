@@ -1,5 +1,6 @@
 import { useMemo, useRef, useState } from 'react'
-import { useMutation } from '@tanstack/react-query'
+import { Link } from 'react-router'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type uPlot from 'uplot'
 import {
   fetchProcessDataDump,
@@ -17,6 +18,13 @@ import CycleStatsBar from '../components/CycleStatsBar'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { cycleStats } from '../utils/cycleStats'
+import { formatBytes } from '../utils/format'
+import {
+  DUMPS_FOLDER,
+  encodeUserCachePath,
+  userCacheBasename,
+  userCacheUrl,
+} from '../utils/userCache'
 import { btnOutline } from '../utils/styles'
 
 // Pulls the server's { error } message out of a thrown request, for inline display.
@@ -85,16 +93,41 @@ function EntryCheckbox({
 
 export default function DataRecorderPage() {
   const { api, host, httpPort } = useConnection()
+  const queryClient = useQueryClient()
 
   const [file, setFile] = useState<MmpdFile | null>(null)
   const [source, setSource] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [viewError, setViewError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+  const [busyPath, setBusyPath] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // POST → writes a file on the server and returns its path (for terminal/headless users).
-  const dumpMutation = useMutation({ mutationFn: () => api.dumpProcessData() })
+  // Dumps written by "Dump to disk" land in the user cache, so they are listed with the same query
+  // the Storage → User Cache page uses — one shared key, so a delete on either page refreshes both.
+  const cacheQuery = useQuery({
+    queryKey: ['user-cache'],
+    queryFn: () => api.listUserCacheFiles(),
+  })
+  const dumps = useMemo(
+    () =>
+      (cacheQuery.data?.data?.files ?? [])
+        .filter(f => f.path.startsWith(`${DUMPS_FOLDER}/`))
+        // Newest first: the dump you just took is the one you want to open.
+        .sort((a, b) => b.modifiedMs - a.modifiedMs),
+    [cacheQuery.data],
+  )
+
+  // POST → writes a file on the server. Refresh the listing so the new dump appears below.
+  const dumpMutation = useMutation({
+    mutationFn: () => api.dumpProcessData(),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['user-cache'] }),
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (path: string) => api.deleteUserCacheFile(encodeUserCachePath(path)),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['user-cache'] }),
+  })
 
   function load(parsed: MmpdFile, src: string) {
     setFile(parsed)
@@ -115,6 +148,31 @@ export default function DataRecorderPage() {
       setViewError(errorText(e))
     } finally {
       setLoading(false)
+    }
+  }
+
+  // Fetch a dump the server already wrote and plot it — no download/re-upload round trip, and it
+  // works from a browser that never has filesystem access to the machine running Motion Master.
+  async function openSavedDump(path: string) {
+    setBusyPath(path)
+    setViewError(null)
+    try {
+      const res = await fetch(userCacheUrl(api.baseUrl, path))
+      if (!res.ok) {
+        throw new Error(`HTTP ${res.status}`)
+      }
+      const parsed = parseMmpd(await res.arrayBuffer())
+      load(parsed, `${userCacheBasename(path)} — ${parsed.rowCount.toLocaleString()} cycles`)
+    } catch (e) {
+      setViewError(errorText(e))
+    } finally {
+      setBusyPath(null)
+    }
+  }
+
+  function deleteSavedDump(path: string) {
+    if (window.confirm(`Delete ${userCacheBasename(path)} from the server?`)) {
+      deleteMutation.mutate(path)
     }
   }
 
@@ -196,7 +254,8 @@ export default function DataRecorderPage() {
             The lossless process-data recorder captures every cyclic exchange into a circular ring
             held in memory — full raw inputs and outputs, an epoch-nanosecond timestamp, and the
             working counter for each cycle. It is the source for the live monitoring stream and for
-            the dumps below.
+            the dumps below, which you can plot straight away, or keep on the server and reopen
+            later.
           </>
         }
       />
@@ -209,10 +268,13 @@ export default function DataRecorderPage() {
             A <span className="font-mono">.mmpd</span> dump is every process-data cycle currently in
             the ring — full raw inputs and outputs, with the current process-image layout embedded
             as a header — captured oldest→newest at the moment you act (works while exchanging too)
-            and decodable fully offline. <span className="font-medium">Record &amp; view</span>{' '}
-            streams it here and plots it; <span className="font-medium">Open .mmpd file</span> loads
-            one you saved earlier; <span className="font-medium">Dump to disk</span> writes it on the
-            machine running Motion Master (for terminal use) and reports the path.
+            and decodable fully offline. The three buttons differ in{' '}
+            <span className="font-medium">where the dump ends up</span>:{' '}
+            <span className="font-medium">Record &amp; view</span> keeps it nowhere and plots it here
+            and now; <span className="font-medium">Dump to disk</span> stores it on the machine
+            running Motion Master until you delete it, ready to reopen from the list below;{' '}
+            <span className="font-medium">Open .mmpd file</span> reads one from <em>this</em>{' '}
+            computer.
           </p>
           <div className="flex flex-wrap gap-2 mt-3">
             <button
@@ -235,7 +297,7 @@ export default function DataRecorderPage() {
               onClick={() => dumpMutation.mutate()}
               disabled={dumpMutation.isPending}
               className={btnOutline}
-              title="Write a .mmpd dump on the machine running Motion Master and report its path"
+              title="Write a .mmpd dump on the machine running Motion Master, kept until you delete it"
             >
               {dumpMutation.isPending ? 'Dumping…' : 'Dump to disk'}
             </button>
@@ -255,6 +317,83 @@ export default function DataRecorderPage() {
           )}
           {dumpMutation.isError && (
             <p className="text-[11px] text-status-bad mt-2">{apiError(dumpMutation.error)}</p>
+          )}
+        </div>
+
+        <div className="border border-grey-200 px-4 py-3 max-w-2xl">
+          <div className="flex items-center justify-between gap-3">
+            <p className="eyebrow">Saved dumps</p>
+            <button
+              onClick={() => cacheQuery.refetch()}
+              disabled={cacheQuery.isFetching}
+              className={btnOutline}
+            >
+              {cacheQuery.isFetching ? 'Loading…' : 'Refresh'}
+            </button>
+          </div>
+          <p className="text-[11px] leading-snug text-grey-600 mt-1">
+            Dumps <span className="font-medium">Dump to disk</span> left on the machine running
+            Motion Master, in the <span className="font-mono">{DUMPS_FOLDER}/</span> folder of its
+            user cache. <span className="font-medium">Open</span> decodes one straight into the
+            chart below — the file never leaves the server, so this works from a browser with no
+            access to that machine's filesystem. They are large and nothing removes them for you;
+            the same files are listed with everything else under{' '}
+            <Link to="/storage/user-cache" className="underline hover:text-ocean">
+              Storage → User Cache
+            </Link>
+            .
+          </p>
+
+          {cacheQuery.isError && (
+            <p className="text-[11px] text-status-bad mt-2">Failed to list the saved dumps.</p>
+          )}
+
+          {!cacheQuery.isError && dumps.length === 0 && (
+            <p className="text-[11px] text-grey-500 mt-2">
+              No saved dumps. <span className="font-medium">Dump to disk</span> writes one here —
+              unless <span className="font-mono">recorder.dumpDir</span> points outside the cache
+              directory, in which case dumps are written but cannot be reached from a browser.
+            </p>
+          )}
+
+          {dumps.length > 0 && (
+            <ul className="mt-3 border-t border-grey-100">
+              {dumps.map(dump => (
+                <li
+                  key={dump.path}
+                  className="flex items-center justify-between gap-3 py-1.5 border-b border-grey-100 last:border-0"
+                >
+                  <span className="min-w-0">
+                    <span className="font-mono text-[11px] break-all">
+                      {userCacheBasename(dump.path)}
+                    </span>
+                    <span className="text-[11px] text-grey-500">
+                      {' · '}
+                      {formatBytes(dump.size)}
+                      {' · '}
+                      {new Date(dump.modifiedMs).toLocaleString()}
+                    </span>
+                  </span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <button
+                      onClick={() => openSavedDump(dump.path)}
+                      disabled={busyPath === dump.path}
+                      className={btnOutline}
+                      title="Decode this dump on the server and plot it here"
+                    >
+                      {busyPath === dump.path ? 'Opening…' : 'Open'}
+                    </button>
+                    <button
+                      onClick={() => deleteSavedDump(dump.path)}
+                      disabled={deleteMutation.isPending}
+                      className="border border-grey-300 text-grey-700 px-3 py-1.5 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                    >
+                      Delete
+                    </button>
+                  </span>
+                </li>
+              ))}
+            </ul>
           )}
         </div>
 

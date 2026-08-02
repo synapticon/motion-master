@@ -6,6 +6,7 @@ import Callout from '../components/Callout'
 import ConnectionExplainer from '../components/ConnectionExplainer';
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
+import { formatBytes } from '../utils/format'
 import { btnOutline, btnPrimary } from '../utils/styles'
 
 const RELEASES_URL = 'https://github.com/synapticon/motion-master/releases'
@@ -37,18 +38,11 @@ function formatDate(iso?: string): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
-// Formats a byte count as a binary-prefix size (KiB/MiB/GiB/TiB). 0 renders as "—" since the
-// backend reports 0 for a value it could not determine on the current platform.
-function formatBytes(bytes?: number): string {
-  if (!bytes) return '—'
-  const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB']
-  let value = bytes
-  let unit = 0
-  while (value >= 1024 && unit < units.length - 1) {
-    value /= 1024
-    unit++
-  }
-  return `${value.toFixed(unit === 0 ? 0 : 1)} ${units[unit]}`
+// System sizes render as "—" when absent or zero, because the backend reports 0 for a value it
+// could not determine on the current platform — unlike a file size, where 0 is a real answer. The
+// formatting itself is the shared one, so a size reads the same here as on the storage pages.
+function formatSystemBytes(bytes?: number): string {
+  return bytes ? formatBytes(bytes) : '—'
 }
 
 // Combines the two related deployment facts into one cell: the container runtime MM runs inside (if
@@ -571,10 +565,10 @@ export default function ConnectionPage() {
                     <Field label="Hostname" value={system.hostname || '—'} />
                     <Field label="CPU" value={system.cpuModel || '—'} />
                     <Field label="Logical cores" value={system.cpuCores || '—'} />
-                    <Field label="Total memory" value={formatBytes(system.totalMemoryBytes)} />
+                    <Field label="Total memory" value={formatSystemBytes(system.totalMemoryBytes)} />
                     <Field
                       label="Disk (free / total)"
-                      value={`${formatBytes(system.diskFreeBytes)} / ${formatBytes(system.diskTotalBytes)}`}
+                      value={`${formatSystemBytes(system.diskFreeBytes)} / ${formatSystemBytes(system.diskTotalBytes)}`}
                     />
                     <Field
                       label="Docker / Container"

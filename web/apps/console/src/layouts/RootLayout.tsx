@@ -442,10 +442,10 @@ export default function RootLayout() {
 
           {/* Groups unlock in tiers by how much of the stack is live:
               - API online: the group headings + the pages that work without slaves —
-                Control (where init/scan/reset happen) and Parameter Caches (reads the
-                on-disk OD cache, independent of any live scan).
-              - Bus scanned (hasScanned): the per-slave bus views and the process-data /
-                monitoring pages, which need discovered devices to show anything.
+                Control (where init/scan/reset happen) and all of Storage (on-disk files,
+                independent of any live scan).
+              - Bus scanned (hasScanned): the per-slave bus views and the whole Data group,
+                which need discovered devices to show anything.
               Every group is a SidebarGroup — same look, same collapse behaviour. */}
           {online && (
             <SidebarGroup label="Fieldbus">
@@ -461,16 +461,23 @@ export default function RootLayout() {
             </SidebarGroup>
           )}
 
-          {online && (
+          {online && hasScanned && (
             <SidebarGroup label="Data">
-              {hasScanned && (
-                <>
-                  <NavItem to="/data/process-data" label="Process Data" />
-                  <NavItem to="/data/monitorings" label="Monitorings" />
-                  <NavItem to="/data/recorder" label="Recorder" />
-                </>
-              )}
-              <NavItem to="/data/parameter-caches" label="Parameter Caches" />
+              <NavItem to="/data/process-data" label="Process Data" />
+              <NavItem to="/data/monitorings" label="Monitorings" />
+              <NavItem to="/data/recorder" label="Recorder" />
+            </SidebarGroup>
+          )}
+
+          {/* Files on this machine's disk, as opposed to Data's live streams off the bus. Both
+              entries read the same per-user cache root: Parameter Cache shows the object
+              dictionaries Motion Master caches there by device identity, User Cache shows every
+              file under the root by path — including those same caches and the recorder's dumps,
+              since Motion Master writes into the store too. Neither needs a scan. */}
+          {online && (
+            <SidebarGroup label="Storage">
+              <NavItem to="/storage/parameter-cache" label="Parameter Cache" />
+              <NavItem to="/storage/user-cache" label="User Cache" />
             </SidebarGroup>
           )}
 

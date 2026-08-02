@@ -12,6 +12,7 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <span>
 #include <sstream>
 #include <string>
 #include <string_view>
@@ -29,6 +30,7 @@
 #include "comm/sdo_abort_codes.h"
 #include "comm/sii.h"
 #include "core/system_info.h"
+#include "core/user_cache.h"
 #include "core/util.h"
 #include "etg/esi_request.h"
 #include "monitoring_api.h"
@@ -272,13 +274,71 @@ nlohmann::json certInfoJson(const mm::CertInfo& info, const std::string& path) {
           {"chain", chain}};
 }
 
+/// The path component of a `/api/user-cache/...` URL, relative to the cache root.
+///
+/// uWS hands the raw, still percent-encoded URL, so a file called `v5.6.6 (rev 2).xml` arrives as
+/// `v5.6.6%20(rev%202).xml` — decoded here so the name on disk is the name the user chose. An
+/// invalid escape is left verbatim rather than dropped: it then reaches @c UserCache::resolve as an
+/// ordinary character, which either names a real file or fails cleanly. Decoding cannot introduce a
+/// traversal that resolve() would miss — resolve() validates the *decoded* path, so a `%2e%2e`
+/// spelling of `..` is rejected exactly like the literal one.
+std::string userCacheRelPath(std::string_view url) {
+  constexpr std::string_view kPrefix = "/api/user-cache/";
+  std::string_view encoded = url.starts_with(kPrefix) ? url.substr(kPrefix.size()) : url;
+  std::string decoded;
+  decoded.reserve(encoded.size());
+  for (size_t i = 0; i < encoded.size(); ++i) {
+    uint32_t byte = 0;
+    const char* first = encoded.data() + i + 1;
+    const char* last = encoded.data() + i + 3;
+    // Both hex digits must be consumed: from_chars would happily read `%4Z` as 4 and leave the
+    // `Z`, which would silently drop a character the user typed.
+    if (encoded[i] == '%' && i + 2 < encoded.size() &&
+        std::from_chars(first, last, byte, 16) == std::from_chars_result{last, std::errc()}) {
+      decoded.push_back(static_cast<char>(byte));
+      i += 2;
+    } else {
+      decoded.push_back(encoded[i]);
+    }
+  }
+  return decoded;
+}
+
+/// Writes the headers that make a user-cache download inert in a browser, and returns @p res for
+/// chaining.
+///
+/// The cache serves bytes the user themselves uploaded, from the API's own origin — so a rendered
+/// response is stored XSS against the origin that controls the drives, and one that CORS does not
+/// help with (a script *on* this origin is same-origin by definition). An earlier draft guessed a
+/// content type from the extension so an ESI would display inline; that is exactly the hole, since
+/// a browser executes script in an `application/xml` document (an XSLT processing instruction, or
+/// inline XHTML). Four headers close it, and none of them cost the real consumers anything — the
+/// console and the SDK both read the bytes, never render them:
+///
+/// - `application/octet-stream` unconditionally — no extension is trusted to name a type.
+/// - `Content-Disposition: attachment` — download, never render. Deliberately with **no**
+///   `filename`: the path is user-controlled, and a quote or newline in a header value is response
+///   splitting. The client names the saved file itself.
+/// - `X-Content-Type-Options: nosniff` — stops a browser from second-guessing the type above.
+/// - A `default-src 'none'; sandbox` CSP — belt and braces if the response is rendered anyway.
+template <typename Res>
+Res* setUserCacheDownloadHeaders(Res* res, std::string_view corsOrigin) {
+  return mm::api::setCorsOrigin(res, corsOrigin)
+      ->writeHeader("Content-Type", "application/octet-stream")
+      ->writeHeader("Content-Disposition", "attachment")
+      ->writeHeader("X-Content-Type-Options", "nosniff")
+      ->writeHeader("Content-Security-Policy", "default-src 'none'; sandbox");
+}
+
 }  // namespace
 
 HttpServer::HttpServer(Config config, mm::node::DeviceManager& deviceManager,
-                       mm::node::MonitoringManager& monitoringManager)
+                       mm::node::MonitoringManager& monitoringManager,
+                       mm::core::UserCache& userCache)
     : config_(std::move(config)),
       deviceManager_(deviceManager),
-      monitoringManager_(monitoringManager) {}
+      monitoringManager_(monitoringManager),
+      userCache_(userCache) {}
 
 HttpServer::~HttpServer() {
   stop();
@@ -1798,11 +1858,11 @@ void HttpServer::run() {
                sendStatus(res, "404 Not Found", config_.corsOrigin);
              }
            })
-      .get("/api/parameter-caches",
+      .get("/api/parameter-cache",
            [this](auto* res, auto* /*req*/) {
              sendJson(res, config_.corsOrigin, deviceManager_.parameterCache().list());
            })
-      .get("/api/parameter-caches/:id",
+      .get("/api/parameter-cache/:id",
            [this](auto* res, auto* req) {
              auto raw = deviceManager_.parameterCache().readRaw(req->getParameter("id"));
              if (!raw) {
@@ -1813,11 +1873,84 @@ void HttpServer::run() {
              sendBytes(res, config_.corsOrigin, "application/json",
                        std::string_view{reinterpret_cast<const char*>(raw->data()), raw->size()});
            })
-      .del("/api/parameter-caches/:id", [this](auto* res, auto* req) {
-        if (deviceManager_.parameterCache().remove(req->getParameter("id"))) {
-          sendStatus(res, "204 No Content", config_.corsOrigin);
+      .del("/api/parameter-cache/:id",
+           [this](auto* res, auto* req) {
+             if (deviceManager_.parameterCache().remove(req->getParameter("id"))) {
+               sendStatus(res, "204 No Content", config_.corsOrigin);
+             } else {
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
+             }
+           })
+      // The user cache: a plain file store under Motion Master's per-user cache directory, with
+      // the path after `/api/user-cache/` taken verbatim (percent-decoded) as the path under the
+      // root. Sub-directories are implied by the path — there is no create-directory call; a PUT
+      // makes whatever parents it needs, and a DELETE prunes whatever it empties. Every path is
+      // validated by UserCache::resolve, which is what confines this unauthenticated endpoint to
+      // the cache directory.
+      // Each route reports its server-side cost via the same `X-Wire-Us` header the fieldbus
+      // endpoints use. There is no device here — the figure is the filesystem operation (path
+      // validation plus the read/write/list/remove) — but the channel is the uniform one, and the
+      // split it enables is just as useful: a 40 MB dump that takes 2 s to download is a transfer
+      // cost, not a slow server, and the two figures side by side say so.
+      .get("/api/user-cache",
+           [this](auto* res, auto* /*req*/) {
+             // The root is reported so the page can tell the user where the files actually live —
+             // it differs per platform and is overridable in the config.
+             mm::api::sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error", [this] {
+               return userCache_.list().transform([this](const auto& files) {
+                 return nlohmann::json{{"root", userCache_.root().string()}, {"files", files}};
+               });
+             });
+           })
+      .get("/api/user-cache/*",
+           [this](auto* res, auto* req) {
+             const std::string relPath = userCacheRelPath(req->getUrl());
+             const auto t0 = std::chrono::steady_clock::now();
+             auto data = userCache_.read(relPath);
+             const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                 std::chrono::steady_clock::now() - t0);
+             if (!data) {
+               sendError(res, "404 Not Found", config_.corsOrigin, data.error(), wireUs);
+               return;
+             }
+             setWireTime(setUserCacheDownloadHeaders(res, config_.corsOrigin), wireUs)
+                 ->end(std::string_view{reinterpret_cast<const char*>(data->data()), data->size()});
+           })
+      .put("/api/user-cache/*",
+           [this](auto* res, auto* req) {
+             // req is only valid synchronously — capture the path before onData.
+             const auto relPath = std::make_shared<std::string>(userCacheRelPath(req->getUrl()));
+             auto aborted = std::make_shared<bool>(false);
+             auto body = std::make_shared<std::string>();
+             res->onAborted([aborted]() { *aborted = true; });
+             res->onData([this, res, body, aborted, relPath](std::string_view chunk, bool last) {
+               body->append(chunk);
+               if (!last) return;
+               if (*aborted) return;
+               // Only the write is timed — the body upload that precedes it is transport cost the
+               // client already sees in its own round-trip figure.
+               mm::api::sendTimedJson(
+                   res, config_.corsOrigin, "400 Bad Request", [this, relPath, body] {
+                     std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(body->data()),
+                                                   body->size()};
+                     return userCache_.write(*relPath, data).transform([&] {
+                       return nlohmann::json{{"path", *relPath}, {"size", body->size()}};
+                     });
+                   });
+             });
+           })
+      .del("/api/user-cache/*", [this](auto* res, auto* req) {
+        const auto t0 = std::chrono::steady_clock::now();
+        auto removed = userCache_.remove(userCacheRelPath(req->getUrl()));
+        const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - t0);
+        if (!removed) {
+          sendError(res, "400 Bad Request", config_.corsOrigin, removed.error(), wireUs);
         } else {
-          sendStatus(res, "404 Not Found", config_.corsOrigin);
+          // A recursive directory delete is the one operation here that can take real time, so it
+          // is worth reporting even though the success response carries no body.
+          sendStatus(res, *removed ? "204 No Content" : "404 Not Found", config_.corsOrigin,
+                     wireUs);
         }
       });
 

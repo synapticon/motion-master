@@ -10,6 +10,12 @@ interface FilePickerButtonProps {
   accept?: string
   disabled?: boolean
   title?: string
+  /**
+   * Extra classes for the button. Chiefly for height: btnOutline sizes itself by padding, which
+   * leaves it shorter than the h-[38px] text inputs, so a picker standing next to one passes
+   * `h-[38px]` to line the two up.
+   */
+  className?: string
 }
 
 // A button that opens the OS file-selection dialog and hands back the chosen File. Hides the
@@ -21,6 +27,7 @@ export default function FilePickerButton({
   accept = '.bin,application/octet-stream',
   disabled,
   title,
+  className = '',
 }: FilePickerButtonProps) {
   const inputRef = useRef<HTMLInputElement>(null)
 
@@ -40,7 +47,7 @@ export default function FilePickerButton({
         onClick={() => inputRef.current?.click()}
         disabled={disabled}
         title={title}
-        className={`${btnOutline} inline-flex items-center gap-1.5`}
+        className={`${btnOutline} inline-flex items-center gap-1.5 ${className}`}
       >
         <Upload className="h-3.5 w-3.5" aria-hidden="true" />
         {children}

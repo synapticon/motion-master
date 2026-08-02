@@ -51,6 +51,7 @@ syntaxError:*/esi_request_test.cc
 syntaxError:*/esi_somanet_test.cc
 syntaxError:*/esi_test.cc
 syntaxError:*/esi_unit_test.cc
+syntaxError:*/user_cache_test.cc
 
 // The ESI parser builds vectors by appending inside a range-for over an XML child range or a
 // parsed collection. cppcheck suggests std::transform/std::copy_if for each; rewriting them would
@@ -60,3 +61,8 @@ syntaxError:*/esi_unit_test.cc
 useStlAlgorithm:*/esi.cc
 useStlAlgorithm:*/esi_entry.cc
 useStlAlgorithm:*/esi_request.cc
+
+// UserCache::resolve joins validated path components with `p /= part`. cppcheck reads the loop as
+// a fold and suggests std::accumulate; expressing a path join that way is strictly less readable
+// (a lambda returning path{} / part, over a container of strings) for no gain.
+useStlAlgorithm:*/user_cache.cc

@@ -15,6 +15,7 @@
 #include "comm/base.h"
 #include "comm/soem_fieldbus_driver.h"
 #include "core/platform.h"
+#include "core/user_cache.h"
 #include "core/version.h"
 #include "example/example_routes.h"
 #include "game_loop.h"
@@ -74,14 +75,29 @@ int main(int argc, char** argv) {
     CurlGlobal& operator=(const CurlGlobal&) = delete;
   } curlGlobal;
 
+  // Where everything Motion Master keeps on this machine's disk lives. Resolved once, here, so the
+  // user-cache store and the recorder's dump directory cannot drift apart: pointing
+  // `userCache.directory` somewhere else moves the dumps with it, and they stay listable through
+  // /api/user-cache. An explicit `recorder.dumpDir` still wins for anyone who wants them elsewhere.
+  const std::filesystem::path userCacheRoot =
+      opts.config.userCache.directory.empty()
+          ? mm::core::userCacheDir()
+          : std::filesystem::path{opts.config.userCache.directory};
+
   mm::node::DeviceManager deviceManager;
   // The parameter cache is a process-level setting (its directory comes from the config file, like
   // the ports), independent of whether/when a driver is initialised — so apply it at startup, not
   // from init(). This keeps the cache directory correct for the management API and every device's
   // parameter load from the get-go.
+  // Its directory is derived from the shared root for the same reason the recorder's dump
+  // directory is: moving `userCache.directory` has to move everything Motion Master writes, or the
+  // /api/user-cache listing stops being the whole picture. An explicit `parameterCache.directory`
+  // still wins.
   deviceManager.configureParameterCache(
       {.cacheAllVendors = opts.config.parameterCache.cacheAllVendors,
-       .directory = opts.config.parameterCache.directory,
+       .directory = opts.config.parameterCache.directory.empty()
+                        ? (userCacheRoot / "parameters").string()
+                        : opts.config.parameterCache.directory,
        .enabled = opts.config.parameterCache.enabled});
 
   // Runtime tuning for DeviceManager::init, derived once from the config and shared by both the
@@ -89,7 +105,8 @@ int main(int argc, char** argv) {
   const mm::node::DeviceManagerConfig deviceManagerConfig{
       .readObjectDictionaryOnPreop = opts.config.parameters.readObjectDictionaryOnPreop,
       .useCompleteAccess = opts.config.parameters.useCompleteAccess,
-      .recorderDumpDir = opts.config.recorder.dumpDir,
+      .recorderDumpDir = opts.config.recorder.dumpDir.empty() ? (userCacheRoot / "dumps").string()
+                                                              : opts.config.recorder.dumpDir,
       .recorderCapacity = opts.config.recorder.capacity};
 
   // Resolve the adapter, construct the concrete driver, and hand it to DeviceManager::init. Used
@@ -182,6 +199,13 @@ int main(int argc, char** argv) {
   // server, which runs on its own port/loop so a slow HTTP handler can never stall the stream.
   mm::node::MonitoringManager monitoringManager{deviceManager};
 
+  // The user-writable file store behind /api/user-cache, rooted at the shared cache directory
+  // resolved above. Like the parameter cache, its location is a process-level setting fixed at
+  // startup, not something init() can change. Everything Motion Master writes lands under this
+  // root — the parameter cache's `parameters/` and the recorder's `dumps/` included — so the API
+  // lists those too.
+  mm::core::UserCache userCache{userCacheRoot};
+
   // Exchange process data every cycle. No-op until devices are mapped and brought into SAFE-OP/OP
   // via the API, at which point DeviceManager publishes the image and the loop begins driving PDO
   // automatically. Declared before gameLoop so it is destroyed after it — a registered task must
@@ -225,7 +249,7 @@ int main(int argc, char** argv) {
           },
           .corsOrigin = opts.config.server.corsOrigin,
       },
-      deviceManager, monitoringManager};
+      deviceManager, monitoringManager, userCache};
   // Wire the example C++ route plug-in (/api/example/...) before start(): the composition root is
   // the only place that knows the concrete plug-in. Copy libs/example to add your own.
   httpServer.addRoutes(mm::example::registerRoutes);

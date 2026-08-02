@@ -13,6 +13,10 @@
 #include "api/web_api.h"
 #include "game_loop.h"  // GameLoopHealth (returned by the GET /api/game-loop callback)
 
+namespace mm::core {
+class UserCache;
+}  // namespace mm::core
+
 namespace mm::node {
 class DeviceManager;
 class MonitoringManager;
@@ -97,8 +101,10 @@ class HttpServer {
   /// @param deviceManager      Device list source; lifetime must exceed that of this object.
   /// @param monitoringManager  Monitoring registry backing the `/api/monitorings` routes; lifetime
   ///                           must exceed that of this object.
+  /// @param userCache          File store backing the `/api/user-cache` routes; lifetime must
+  ///                           exceed that of this object.
   HttpServer(Config config, mm::node::DeviceManager& deviceManager,
-             mm::node::MonitoringManager& monitoringManager);
+             mm::node::MonitoringManager& monitoringManager, mm::core::UserCache& userCache);
 
   /// @brief Destructor.  Calls stop() if the server is still running.
   ~HttpServer();
@@ -135,6 +141,7 @@ class HttpServer {
   Config config_;
   mm::node::DeviceManager& deviceManager_;
   mm::node::MonitoringManager& monitoringManager_;
+  mm::core::UserCache& userCache_;
   std::vector<mm::api::RegisterRoutesFn> routeModules_;
   std::atomic<bool> running_{false};
   std::thread thread_;

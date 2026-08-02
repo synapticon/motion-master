@@ -5,7 +5,6 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
-#include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <nlohmann/json.hpp>
@@ -14,6 +13,8 @@
 #include <utility>
 #include <variant>
 #include <vector>
+
+#include "core/platform.h"  // userCacheDir — the shared root this cache lives under
 
 namespace mm::node {
 
@@ -93,14 +94,6 @@ DeviceParameter definitionFromJson(const nlohmann::json& j) {
   return p;
 }
 
-std::optional<std::string> envVar(const char* name) {
-  const char* v = std::getenv(name);
-  if (v == nullptr || *v == '\0') {
-    return std::nullopt;
-  }
-  return std::string(v);
-}
-
 /// Parses an id of the form "<vendor>-<product>-<revision>" (three hex fields, the inverse of
 /// @c makeId) into its identity triple. Returns nullopt on any malformed or extra/missing field.
 std::optional<std::array<uint32_t, 3>> parseId(std::string_view id) {
@@ -145,27 +138,11 @@ fs::path ParameterCache::resolveDir() const {
   if (!config_.directory.empty()) {
     return fs::path(config_.directory);
   }
-  // A standard per-user cache directory, so the cache survives restarts (the main win) rather than
-  // living in temp. Falls back to the OS temp directory when the platform's home/cache env is
-  // unset.
-#if defined(_WIN32)
-  if (auto p = envVar("LOCALAPPDATA")) {
-    return fs::path(*p) / "motion-master" / "parameters";
-  }
-#elif defined(__APPLE__)
-  if (auto p = envVar("HOME")) {
-    return fs::path(*p) / "Library" / "Caches" / "motion-master" / "parameters";
-  }
-#else
-  if (auto p = envVar("XDG_CACHE_HOME")) {
-    return fs::path(*p) / "motion-master" / "parameters";
-  }
-  if (auto p = envVar("HOME")) {
-    return fs::path(*p) / ".cache" / "motion-master" / "parameters";
-  }
-#endif
-  std::error_code ec;
-  return fs::temp_directory_path(ec) / "motion-master" / "parameters";
+  // A subdirectory of the standard per-user cache directory, so the cache survives restarts (the
+  // main win) rather than living in temp. Sharing that root with the user cache is deliberate: the
+  // `/api/user-cache` browser then lists these files too, which is the honest picture of what
+  // Motion Master has written to the machine.
+  return mm::core::userCacheDir() / "parameters";
 }
 
 std::string ParameterCache::makeId(uint32_t vendorId, uint32_t productCode,

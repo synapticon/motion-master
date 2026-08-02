@@ -32,6 +32,7 @@ import {
   SdoAbortCode,
   SlaveConfig,
   SlaveInformationInterface,
+  UserCacheListing,
 } from "./data-contracts";
 import { ContentType, HttpClient, RequestParams } from "./http-client";
 
@@ -1709,7 +1710,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Serialises the process-data recorder's current span — every cycle from the oldest still in the ring up to the newest at the instant of the call — to a `.mmpd` file and returns its path. Each cycle's full raw input and output images, sequence, and epoch-nanosecond timestamp are written, with the process image (per-device identity and PDO object layout, including object names and data types where the object dictionary has been enumerated) embedded as a header, so the file decodes fully offline with no running Motion Master and no live bus. Works in any state: while devices are exchanging (SAFE-OP/OP) it captures tail→head at that moment and ignores cycles recorded afterwards; after the bus has left the exchange states it uses the most recent retained image layout. The file is written under the configured `recorder.dumpDir` (default: a `motion-master` subdirectory of the OS temporary directory), created if absent. Motion Master binds 127.0.0.1, so the file is on the caller's own machine — only the path is returned (there is no download, list, or delete endpoint).
+   * @description Serialises the process-data recorder's current span — every cycle from the oldest still in the ring up to the newest at the instant of the call — to a `.mmpd` file and returns its path. Each cycle's full raw input and output images, sequence, and epoch-nanosecond timestamp are written, with the process image (per-device identity and PDO object layout, including object names and data types where the object dictionary has been enumerated) embedded as a header, so the file decodes fully offline with no running Motion Master and no live bus. Works in any state: while devices are exchanging (SAFE-OP/OP) it captures tail→head at that moment and ignores cycles recorded afterwards; after the bus has left the exchange states it uses the most recent retained image layout. The file is written under the configured `recorder.dumpDir`, created if absent; by default that is a `dumps` subdirectory of the user-cache root, so the written file is also reachable through the `/api/user-cache` endpoints — list it, download it, or delete it there. Only the path is returned here. (Setting an explicit `recorder.dumpDir` outside the cache root opts out of that; the file is then only reachable from a shell on the server.)
    *
    * @name DumpProcessData
    * @summary Dump the recorder ring to a binary .mmpd file
@@ -1867,13 +1868,13 @@ export class Api<
   /**
    * @description Returns one entry per cached parameter-definition file on disk, keyed by device identity (vendor, product, revision). The cache stores only the object-dictionary *definitions* (not live values), so a scan of previously-seen hardware can skip the slow SDO enumeration. Independent of the bus — works whether or not a driver is initialised.
    *
-   * @name ListParameterCaches
+   * @name ListParameterCacheEntries
    * @summary List on-disk parameter caches
-   * @request GET:/api/parameter-caches
+   * @request GET:/api/parameter-cache
    */
-  listParameterCaches = (params: RequestParams = {}) =>
+  listParameterCacheEntries = (params: RequestParams = {}) =>
     this.request<ParameterCacheEntry[], any>({
-      path: `/api/parameter-caches`,
+      path: `/api/parameter-cache`,
       method: "GET",
       format: "json",
       ...params,
@@ -1883,11 +1884,11 @@ export class Api<
    *
    * @name GetParameterCache
    * @summary Download a parameter-cache file
-   * @request GET:/api/parameter-caches/{id}
+   * @request GET:/api/parameter-cache/{id}
    */
   getParameterCache = (id: string, params: RequestParams = {}) =>
     this.request<object, void>({
-      path: `/api/parameter-caches/${id}`,
+      path: `/api/parameter-cache/${id}`,
       method: "GET",
       format: "json",
       ...params,
@@ -1897,11 +1898,80 @@ export class Api<
    *
    * @name DeleteParameterCache
    * @summary Delete a parameter-cache file
-   * @request DELETE:/api/parameter-caches/{id}
+   * @request DELETE:/api/parameter-cache/{id}
    */
   deleteParameterCache = (id: string, params: RequestParams = {}) =>
     this.request<void, void>({
-      path: `/api/parameter-caches/${id}`,
+      path: `/api/parameter-cache/${id}`,
+      method: "DELETE",
+      ...params,
+    });
+  /**
+   * @description Returns every file in Motion Master's per-user cache directory, flattened: one entry per file with its full path relative to the cache root, whatever the nesting. Directories have no entries of their own. Independent of the bus — works whether or not a driver is initialised. The cache is a plain file store for data that should outlive a restart. The store itself neither validates nor interprets an upload — `PUT` accepts any bytes at any valid path, and putting a file here does not, on its own, make Motion Master do anything with it; the client chooses the paths. That is separate from whether a *feature* reads a given file, and several do: `parameters/` (the on-disk object-dictionary cache) and `dumps/` (`.mmpd` recorder dumps) are written and consumed by those features, with more to follow. Their files appear in this listing alongside everything else, so a client must not assume every entry was uploaded through this API, nor that deleting one is inconsequential.
+   *
+   * @name ListUserCacheFiles
+   * @summary List the files in the user cache
+   * @request GET:/api/user-cache
+   */
+  listUserCacheFiles = (params: RequestParams = {}) =>
+    this.request<UserCacheListing, void>({
+      path: `/api/user-cache`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Returns the file verbatim, always as `application/octet-stream` and always with `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` and a `default-src 'none'; sandbox` CSP. The bytes are whatever a user uploaded, served from the API's own origin, so a browser must never *render* them — a rendered upload would be stored XSS against the origin that controls the drives, which CORS cannot help with. No extension is trusted to name a content type, and the attachment carries no `filename` (the path is user-controlled and must not reach a response header). Clients read the bytes and name the saved file themselves.
+   *
+   * @name GetUserCacheFile
+   * @summary Download a user-cache file
+   * @request GET:/api/user-cache/{path}
+   */
+  getUserCacheFile = (path: string, params: RequestParams = {}) =>
+    this.request<Blob, void>({
+      path: `/api/user-cache/${path}`,
+      method: "GET",
+      ...params,
+    });
+  /**
+   * @description Writes the request body to the given path, creating parent directories as needed and replacing any existing file. The write is atomic — a concurrent reader sees either the old contents or the new one, never a partial file. The body is taken as raw bytes whatever its content type.
+   *
+   * @name PutUserCacheFile
+   * @summary Upload a user-cache file
+   * @request PUT:/api/user-cache/{path}
+   */
+  putUserCacheFile = (path: string, data: File, params: RequestParams = {}) =>
+    this.request<
+      {
+        /**
+         * The path written, relative to the cache root.
+         * @example "configs/machine-a.json"
+         */
+        path: string;
+        /**
+         * Bytes written.
+         * @example 20480
+         */
+        size: number;
+      },
+      void
+    >({
+      path: `/api/user-cache/${path}`,
+      method: "PUT",
+      body: data,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Removes a file, or a directory and everything under it. Directories left empty between the removed path and the cache root are pruned, so no husks remain.
+   *
+   * @name DeleteUserCacheFile
+   * @summary Delete a user-cache file or directory
+   * @request DELETE:/api/user-cache/{path}
+   */
+  deleteUserCacheFile = (path: string, params: RequestParams = {}) =>
+    this.request<void, void>({
+      path: `/api/user-cache/${path}`,
       method: "DELETE",
       ...params,
     });

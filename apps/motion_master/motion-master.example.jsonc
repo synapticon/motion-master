@@ -79,8 +79,17 @@
     // the whole-bus IOmap (~82 B per SOMANET drive, budget ~100 B). A single drive at 300000 cycles
     // × ~128 B ≈ 38 MB (≈ 5 min at a 1 ms period); it scales with drive count.
     "capacity": 300000,
-    // Directory for .mmpd dumps written by POST /api/process-data/dump.
-    // Empty = a "motion-master" subdirectory of the OS temp directory (created on first dump).
+    // Directory for .mmpd dumps written by POST /api/process-data/dump (created on first dump).
+    //
+    // Empty (default) = a "dumps" subdirectory of the user-cache root below, which is what makes
+    // dumps reachable through /api/user-cache — list, download and delete them from the Console's
+    // Storage -> User Cache page rather than logging into this machine. Setting userCache.directory
+    // moves them along with it. Dumps are NOT written to the OS temp directory: the platform reaps
+    // that on a timer, which would silently delete a dump someone meant to keep.
+    //
+    // Set an explicit path to put them elsewhere — the API then cannot reach them, and nothing
+    // deletes them for you. Dumps are large (see capacity above), so whichever location you pick,
+    // old ones need clearing eventually.
     "dumpDir": ""
   },
 
@@ -109,6 +118,22 @@
     // Directory for the cache files. Empty = a standard per-user cache directory
     // ($XDG_CACHE_HOME or ~/.cache on Linux, %LOCALAPPDATA% on Windows, ~/Library/Caches on macOS),
     // under "motion-master/parameters". Set an absolute path to override.
+    "directory": ""
+  },
+
+  // The user-writable file store served at /api/user-cache (console: Storage -> User Cache). A
+  // plain place to keep files that should outlive a restart. The store itself neither validates nor
+  // interprets an upload — putting a file here does not, on its own, make Motion Master do anything
+  // with it. Several features do own subtrees under this root and parse their own files
+  // ("parameters", "dumps", more later); those appear in the listing alongside everything else.
+  "userCache": {
+    // Root directory for the store. Empty = the standard per-user cache directory
+    // ($XDG_CACHE_HOME or ~/.cache on Linux, %LOCALAPPDATA% on Windows, ~/Library/Caches on macOS),
+    // under "motion-master" — the same root the parameter cache writes its "parameters"
+    // subdirectory into, so the API lists those files too. Set an absolute path to override.
+    //
+    // Everything under this directory is readable, writable and deletable through the API (which
+    // is unauthenticated), so point it somewhere that holds nothing else.
     "directory": ""
   },
 

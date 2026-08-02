@@ -9,7 +9,7 @@ import FieldbusDcSyncPage from './pages/FieldbusDcSyncPage'
 import DataProcessDataPage from './pages/DataProcessDataPage'
 import DataMonitoringsPage from './pages/DataMonitoringsPage'
 import DataRecorderPage from './pages/DataRecorderPage'
-import DataParameterCachesPage from './pages/DataParameterCachesPage'
+import StorageParameterCachePage from './pages/StorageParameterCachePage'
 import ServerGameLoopPage from './pages/ServerGameLoopPage'
 import ServerLogPage from './pages/ServerLogPage'
 import ServerRequestsPage from './pages/ServerRequestsPage'
@@ -22,6 +22,7 @@ import MetaObjectDataTypesPage from './pages/MetaObjectDataTypesPage'
 import MetaSdoAbortCodesPage from './pages/MetaSdoAbortCodesPage'
 import ToolsEsiPage from './pages/ToolsEsiPage'
 import ToolsSiiPage from './pages/ToolsSiiPage'
+import StorageUserCachePage from './pages/StorageUserCachePage'
 import DeviceEthercatStatePage from './pages/DeviceEthercatStatePage'
 import DeviceObjectDictionaryPage from './pages/DeviceObjectDictionaryPage'
 import DeviceSiiPage from './pages/DeviceSiiPage'
@@ -47,7 +48,10 @@ export default function App() {
           <Route path="process-data" element={<DataProcessDataPage />} />
           <Route path="monitorings" element={<DataMonitoringsPage />} />
           <Route path="recorder" element={<DataRecorderPage />} />
-          <Route path="parameter-caches" element={<DataParameterCachesPage />} />
+        </Route>
+        <Route path="storage">
+          <Route path="parameter-cache" element={<StorageParameterCachePage />} />
+          <Route path="user-cache" element={<StorageUserCachePage />} />
         </Route>
         <Route path="server">
           <Route path="game-loop" element={<ServerGameLoopPage />} />

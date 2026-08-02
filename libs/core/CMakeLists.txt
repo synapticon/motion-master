@@ -11,7 +11,7 @@ else()
   set(CYCLIC_TIMER_SRC cyclic_timer_linux.cc)
 endif()
 
-add_library(core STATIC version.cc system_info.cc platform.cc realtime.cc
+add_library(core STATIC version.cc system_info.cc platform.cc realtime.cc user_cache.cc
                         ${CYCLIC_TIMER_SRC})
 add_library(mm::core ALIAS core)
 

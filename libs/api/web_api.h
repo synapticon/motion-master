@@ -140,9 +140,18 @@ void sendError(Res* res, std::string_view status, std::string_view corsOrigin,
 }
 
 /// @brief Writes a bare @p status response (no body) with the CORS header.
+///
+/// @p wireUs optionally attaches the server-measured operation time, exactly as @c sendError does —
+/// an endpoint whose success case carries no body (a `204 No Content` delete) still spent time
+/// doing the work, and the client shows it the same way as for a body-bearing response.
 template <typename Res>
-void sendStatus(Res* res, std::string_view status, std::string_view corsOrigin) {
-  setCorsOrigin(res->writeStatus(status), corsOrigin)->end();
+void sendStatus(Res* res, std::string_view status, std::string_view corsOrigin,
+                std::optional<std::chrono::microseconds> wireUs = std::nullopt) {
+  auto* r = setCorsOrigin(res->writeStatus(status), corsOrigin);
+  if (wireUs) {
+    r = setWireTime(r, *wireUs);
+  }
+  r->end();
 }
 
 /// @brief Runs a fieldbus operation @p op, times it, and sends the timed JSON response.

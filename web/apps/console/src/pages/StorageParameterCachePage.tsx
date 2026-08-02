@@ -5,14 +5,12 @@ import PageHeader from '../components/PageHeader'
 import ParameterCacheExplainer from '../components/ParameterCacheExplainer'
 import { useConnection } from '../contexts/ConnectionContext'
 import { downloadBytes } from '../utils/download'
+import { formatBytes } from '../utils/format'
 import { btnOutline } from '../utils/styles'
 
 const hex = (n: number) => `0x${n.toString(16).toUpperCase()}`
 
-const formatSize = (bytes: number) =>
-  bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`
-
-export default function DataParameterCachesPage() {
+export default function StorageParameterCachePage() {
   const { api } = useConnection()
   const queryClient = useQueryClient()
   const [downloadingId, setDownloadingId] = useState<string | null>(null)
@@ -20,20 +18,20 @@ export default function DataParameterCachesPage() {
   // Caches live on disk, independent of the bus — no scan/connect gate. The query simply fails if
   // Motion Master is unreachable, surfaced as the error state below.
   const cachesQuery = useQuery({
-    queryKey: ['parameter-caches'],
-    queryFn: () => api.listParameterCaches(),
+    queryKey: ['parameter-cache'],
+    queryFn: () => api.listParameterCacheEntries(),
   })
   const caches = cachesQuery.data?.data ?? []
 
   const deleteMutation = useMutation({
     mutationFn: (id: string) => api.deleteParameterCache(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['parameter-caches'] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['parameter-cache'] }),
   })
 
   async function handleDownload(entry: ParameterCacheEntry) {
     setDownloadingId(entry.id)
     try {
-      const res = await fetch(`${api.baseUrl}/api/parameter-caches/${entry.id}`)
+      const res = await fetch(`${api.baseUrl}/api/parameter-cache/${entry.id}`)
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}`)
       }
@@ -71,8 +69,8 @@ export default function DataParameterCachesPage() {
   return (
     <div>
       <PageHeader
-        eyebrow="Data"
-        title="Parameter Caches"
+        eyebrow="Storage"
+        title="Parameter Cache"
         description="Manage Motion Master's on-disk cache of device object dictionaries. Download a cached definition to inspect it offline, or delete one to force a fresh enumeration on the next scan."
       />
       <div className="p-4 sm:px-8 sm:py-7 space-y-6">
@@ -135,7 +133,7 @@ export default function DataParameterCachesPage() {
                     <td className="px-4 py-2 font-mono">{hex(entry.productCode)}</td>
                     <td className="px-4 py-2 font-mono">{hex(entry.revisionNumber)}</td>
                     <td className="px-4 py-2">{entry.parameterCount}</td>
-                    <td className="px-4 py-2">{formatSize(entry.sizeBytes)}</td>
+                    <td className="px-4 py-2">{formatBytes(entry.sizeBytes)}</td>
                     <td className="px-4 py-2">
                       <div className="flex items-center justify-end gap-2">
                         <button

@@ -18,6 +18,22 @@ namespace mm::core {
 /// @return Absolute path to the executable's parent directory.
 std::filesystem::path exeDir();
 
+/// @brief Return Motion Master's per-user cache directory.
+/// @details The platform's standard cache location with a @c motion-master subdirectory, so cached
+///          data survives restarts (unlike the temp directory) without needing an install-wide or
+///          privileged path.
+///
+///          **Platform behaviour**
+///          - Windows: `%LOCALAPPDATA%\motion-master`.
+///          - macOS: `$HOME/Library/Caches/motion-master`.
+///          - Linux: `$XDG_CACHE_HOME/motion-master`, or `$HOME/.cache/motion-master` when unset.
+///
+///          Falls back to a @c motion-master subdirectory of the OS temp directory when the
+///          platform's home/cache environment variable is unset (a service account, a stripped
+///          container). The directory is not created here — the caller creates it on first write.
+/// @return Absolute path to the cache directory (never empty).
+std::filesystem::path userCacheDir();
+
 /// @brief Open the given URL in the system default browser.
 /// @details Non-blocking — returns immediately after spawning the browser process.
 ///          Uses xdg-open on Linux, `open` on macOS, and ShellExecute on Windows.

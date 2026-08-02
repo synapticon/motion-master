@@ -19,7 +19,10 @@
 #endif
 #endif
 
+#include <cstdlib>
+#include <optional>
 #include <string>
+#include <system_error>
 #include <utility>
 
 namespace mm::core {
@@ -40,6 +43,41 @@ std::filesystem::path exeDir() {
 #else
   return std::filesystem::canonical("/proc/self/exe").parent_path();
 #endif
+}
+
+namespace {
+
+/// The value of an environment variable, or nullopt when it is unset *or* empty — an empty value is
+/// as unusable as an absent one for a path root, and both must fall through to the next candidate.
+std::optional<std::string> envVar(const char* name) {
+  const char* v = std::getenv(name);
+  if (v == nullptr || *v == '\0') {
+    return std::nullopt;
+  }
+  return std::string{v};
+}
+
+}  // namespace
+
+std::filesystem::path userCacheDir() {
+#if defined(_WIN32)
+  if (auto p = envVar("LOCALAPPDATA")) {
+    return std::filesystem::path(*p) / "motion-master";
+  }
+#elif defined(__APPLE__)
+  if (auto p = envVar("HOME")) {
+    return std::filesystem::path(*p) / "Library" / "Caches" / "motion-master";
+  }
+#else
+  if (auto p = envVar("XDG_CACHE_HOME")) {
+    return std::filesystem::path(*p) / "motion-master";
+  }
+  if (auto p = envVar("HOME")) {
+    return std::filesystem::path(*p) / ".cache" / "motion-master";
+  }
+#endif
+  std::error_code ec;
+  return std::filesystem::temp_directory_path(ec) / "motion-master";
 }
 
 void openInBrowser(const std::string& url) {

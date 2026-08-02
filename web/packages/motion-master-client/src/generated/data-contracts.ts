@@ -128,6 +128,35 @@ export interface GameLoopHealth {
   timestampUs: number;
 }
 
+/** The user cache's location on disk plus every file it holds. */
+export interface UserCacheListing {
+  /**
+   * Absolute path of the cache directory on the server's filesystem. Platform-dependent (and overridable via the `userCache.directory` config key), so it is reported rather than assumed — show it to the user so they can find the files themselves.
+   * @example "/home/user/.cache/motion-master"
+   */
+  root: string;
+  files: UserCacheFile[];
+}
+
+/** One file in the user cache. */
+export interface UserCacheFile {
+  /**
+   * Path relative to the cache root, always with `/` separators. Use it verbatim in the download/upload/delete endpoints.
+   * @example "configs/machine-a.json"
+   */
+  path: string;
+  /**
+   * File size in bytes.
+   * @example 20480
+   */
+  size: number;
+  /**
+   * Last-write time, in milliseconds since the Unix epoch.
+   * @example 1783968687738
+   */
+  modifiedMs: number;
+}
+
 /** Summary of one on-disk parameter-cache file (its identity, size, and count). */
 export interface ParameterCacheEntry {
   /**

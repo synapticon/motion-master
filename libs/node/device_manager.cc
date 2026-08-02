@@ -24,6 +24,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/platform.h"  // userCacheDir — the default root for recorder dumps
 #include "node/process_data.h"
 #include "node/process_data_dump.h"
 
@@ -527,14 +528,15 @@ std::expected<DeviceManager::DumpSpan, std::string> DeviceManager::serializeDump
 }
 
 std::expected<std::string, std::string> DeviceManager::dumpProcessData() {
-  // Resolve the output directory (empty => <temp>/motion-master, cross-platform) and create it.
+  // Resolve the output directory and create it. An empty setting means a "dumps" subdirectory of
+  // the per-user cache — deliberately *not* the OS temp directory, which the platform reaps on a
+  // timer (systemd-tmpfiles clears /tmp after days), silently deleting dumps a user meant to keep.
+  // Landing under the cache root also puts them in reach of the /api/user-cache endpoints, so a
+  // dump can be listed, downloaded and deleted remotely instead of only by logging into the host.
   namespace fs = std::filesystem;
   std::error_code ec;
-  fs::path dir = config_.recorderDumpDir.empty() ? fs::temp_directory_path(ec) / "motion-master"
+  fs::path dir = config_.recorderDumpDir.empty() ? mm::core::userCacheDir() / "dumps"
                                                  : fs::path(config_.recorderDumpDir);
-  if (ec) {
-    return std::unexpected("could not resolve a temporary directory: " + ec.message());
-  }
   fs::create_directories(dir, ec);
   if (ec) {
     return std::unexpected("could not create dump directory '" + dir.string() +

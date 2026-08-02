@@ -168,8 +168,9 @@ struct DeviceManagerConfig {
   /// read, falling back to per-subindex reads on slaves that do not support it. See
   /// @c Device::initializeParameters.
   bool useCompleteAccess = true;
-  /// Directory for `.mmpd` recorder dumps. Empty resolves to a @c "motion-master" subdirectory of
-  /// the OS temporary directory at dump time. Passed through to @c dumpProcessData.
+  /// Directory for `.mmpd` recorder dumps. Empty resolves at dump time to a @c "dumps"
+  /// subdirectory of the per-user cache directory (@c mm::core::userCacheDir) — not the OS
+  /// temporary directory, which is reaped on a timer. Passed through to @c dumpProcessData.
   std::string recorderDumpDir;
   /// Depth of the process-data recorder ring in cycles/rows; the ring is allocated at
   /// @c configureProcessData to hold exactly this many cycles, independent of the loop period.
@@ -347,11 +348,11 @@ class DeviceManager {
   /// parameter map (empty/0 when the object dictionary has not been enumerated).
   ///
   /// The file is written to the configured @c recorderDumpDir (created if absent); an empty
-  /// @c recorderDumpDir
-  /// (the default) resolves to a @c "motion-master" subdirectory of the OS temporary directory. The
-  /// filename is @c dump-<UTC-timestamp>-<endSequence>.mmpd. Motion Master binds @c 127.0.0.1, so
-  /// the file is on the caller's own machine — the path is all that is returned (no
-  /// download/list/delete).
+  /// @c recorderDumpDir (the default) resolves to a @c "dumps" subdirectory of the per-user cache
+  /// directory. The filename is @c dump-<UTC-timestamp>-<endSequence>.mmpd. Only the path is
+  /// returned, but because the default location sits under the user-cache root, the written file
+  /// is reachable through the @c /api/user-cache endpoints — listed, downloaded and deleted
+  /// remotely rather than only from a shell on the host.
   ///
   /// @return The absolute path of the written file, or an error string if no image has ever been
   ///         mapped, the recorder is empty, or the directory/file could not be written.

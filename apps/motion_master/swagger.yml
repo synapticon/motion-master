@@ -2539,10 +2539,12 @@ paths:
         exchanging (SAFE-OP/OP) it captures tail→head at that moment and ignores
         cycles recorded afterwards; after the bus has left the exchange states it
         uses the most recent retained image layout. The file is written under the
-        configured `recorder.dumpDir` (default: a `motion-master` subdirectory of
-        the OS temporary directory), created if absent. Motion Master binds
-        127.0.0.1, so the file is on the caller's own machine — only the path is
-        returned (there is no download, list, or delete endpoint).
+        configured `recorder.dumpDir`, created if absent; by default that is a
+        `dumps` subdirectory of the user-cache root, so the written file is also
+        reachable through the `/api/user-cache` endpoints — list it, download it,
+        or delete it there. Only the path is returned here. (Setting an explicit
+        `recorder.dumpDir` outside the cache root opts out of that; the file is
+        then only reachable from a shell on the server.)
       operationId: dumpProcessData
       responses:
         "200":
@@ -2772,10 +2774,10 @@ paths:
           description: Monitoring deleted
         "404":
           description: No monitoring with this topic
-  /api/parameter-caches:
+  /api/parameter-cache:
     get:
       summary: List on-disk parameter caches
-      operationId: listParameterCaches
+      operationId: listParameterCacheEntries
       description: >
         Returns one entry per cached parameter-definition file on disk, keyed by device identity
         (vendor, product, revision). The cache stores only the object-dictionary *definitions* (not
@@ -2790,14 +2792,14 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ParameterCacheEntry"
-  /api/parameter-caches/{id}:
+  /api/parameter-cache/{id}:
     parameters:
       - name: id
         in: path
         required: true
         schema:
           type: string
-        description: Opaque cache id from listParameterCaches ("<vendor>-<product>-<revision>").
+        description: Opaque cache id from listParameterCacheEntries ("<vendor>-<product>-<revision>").
     get:
       summary: Download a parameter-cache file
       operationId: getParameterCache
@@ -2824,6 +2826,138 @@ paths:
           description: Cache file deleted.
         "404":
           description: No cache file with this id (or the id is malformed).
+  /api/user-cache:
+    get:
+      summary: List the files in the user cache
+      operationId: listUserCacheFiles
+      description: >
+        Returns every file in Motion Master's per-user cache directory, flattened: one entry per
+        file with its full path relative to the cache root, whatever the nesting. Directories have
+        no entries of their own. Independent of the bus — works whether or not a driver is
+        initialised.
+
+
+        The cache is a plain file store for data that should outlive a restart. The store itself
+        neither validates nor interprets an upload — `PUT` accepts any bytes at any valid path, and
+        putting a file here does not, on its own, make Motion Master do anything with it; the client
+        chooses the paths.
+
+
+        That is separate from whether a *feature* reads a given file, and several do: `parameters/`
+        (the on-disk object-dictionary cache) and `dumps/` (`.mmpd` recorder dumps) are written and
+        consumed by those features, with more to follow. Their files appear in this listing
+        alongside everything else, so a client must not assume every entry was uploaded through this
+        API, nor that deleting one is inconsequential.
+      responses:
+        "200":
+          description: The cache root and its files.
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserCacheListing"
+        "500":
+          description: The cache directory could not be listed.
+  /api/user-cache/{path}:
+    parameters:
+      - name: path
+        in: path
+        required: true
+        schema:
+          type: string
+        description: >
+          Path relative to the cache root, e.g. `configs/machine-a.json`. May contain `/` to nest
+          into subdirectories, which are created and removed implicitly. Percent-encoding is
+          decoded, so a name with spaces or other reserved characters round-trips.
+
+
+          Nothing may resolve outside the cache directory, so a component is rejected with 400 if
+          it is `.` or `..`, is empty (a leading, trailing or doubled `/`), contains `:` or any
+          control character (including `%00`), ends in a dot or a space, or is a Windows device
+          name (`CON`, `NUL`, `COM1`, …, matched before the extension). The last three close
+          spellings of `..` that survive an exact-match check: a `%00` is truncated back to `..` by
+          the C string the OS path API takes, and Windows strips trailing dots and spaces before
+          resolving. The same rules apply on every platform.
+    get:
+      summary: Download a user-cache file
+      operationId: getUserCacheFile
+      description: >
+        Returns the file verbatim, always as `application/octet-stream` and always with
+        `Content-Disposition: attachment`, `X-Content-Type-Options: nosniff` and a
+        `default-src 'none'; sandbox` CSP. The bytes are whatever a user uploaded, served from the
+        API's own origin, so a browser must never *render* them — a rendered upload would be stored
+        XSS against the origin that controls the drives, which CORS cannot help with. No extension
+        is trusted to name a content type, and the attachment carries no `filename` (the path is
+        user-controlled and must not reach a response header). Clients read the bytes and name the
+        saved file themselves.
+      responses:
+        "200":
+          description: The file's contents.
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: No such file (or the path is invalid).
+    put:
+      summary: Upload a user-cache file
+      operationId: putUserCacheFile
+      description: >
+        Writes the request body to the given path, creating parent directories as needed and
+        replacing any existing file. The write is atomic — a concurrent reader sees either the old
+        contents or the new one, never a partial file. The body is taken as raw bytes whatever its
+        content type.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: The file was written.
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path, size]
+                properties:
+                  path:
+                    type: string
+                    description: The path written, relative to the cache root.
+                    example: configs/machine-a.json
+                  size:
+                    type: integer
+                    description: Bytes written.
+                    example: 20480
+        "400":
+          description: The path is invalid, or the file could not be written.
+    delete:
+      summary: Delete a user-cache file or directory
+      operationId: deleteUserCacheFile
+      description: >
+        Removes a file, or a directory and everything under it. Directories left empty between the
+        removed path and the cache root are pruned, so no husks remain.
+      responses:
+        "204":
+          description: The file or directory was removed.
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+        "400":
+          description: The path is invalid, or the removal failed.
+        "404":
+          description: No such file or directory.
 components:
   schemas:
     Cia402Status:
@@ -2949,6 +3083,41 @@ components:
           format: int64
           description: Server wall-clock timestamp (epoch microseconds) when sampled
           example: 1783968687738680
+    UserCacheListing:
+      type: object
+      description: The user cache's location on disk plus every file it holds.
+      required: [root, files]
+      properties:
+        root:
+          type: string
+          description: >
+            Absolute path of the cache directory on the server's filesystem. Platform-dependent
+            (and overridable via the `userCache.directory` config key), so it is reported rather
+            than assumed — show it to the user so they can find the files themselves.
+          example: /home/user/.cache/motion-master
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserCacheFile"
+    UserCacheFile:
+      type: object
+      description: One file in the user cache.
+      required: [path, size, modifiedMs]
+      properties:
+        path:
+          type: string
+          description: >
+            Path relative to the cache root, always with `/` separators. Use it verbatim in the
+            download/upload/delete endpoints.
+          example: configs/machine-a.json
+        size:
+          type: integer
+          description: File size in bytes.
+          example: 20480
+        modifiedMs:
+          type: integer
+          description: Last-write time, in milliseconds since the Unix epoch.
+          example: 1783968687738
     ParameterCacheEntry:
       type: object
       description: Summary of one on-disk parameter-cache file (its identity, size, and count).
@@ -4086,6 +4255,14 @@ components:
         endpoint that performs a fieldbus operation — a failed operation still consumed device time
         (e.g. an SDO read that waits out the mailbox timeout). CORS-exposed
         (`Access-Control-Expose-Headers`) so a cross-origin client may read it.
+
+
+        A few endpoints touch no device at all and report their **server-side** work on this same
+        header, because the client-side split it enables is the same one: the `/api/user-cache`
+        routes report the filesystem operation (path validation plus the read/write/list/remove),
+        so a slow large-file transfer is visibly transport cost rather than a slow server. Read the
+        figure as "time the server spent doing the work", of which a fieldbus transaction is the
+        usual — but not the only — case.
       schema:
         type: integer
         minimum: 0

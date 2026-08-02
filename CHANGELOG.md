@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.63] - 2026-08-02
+
 ### Added
 
 - **EtherCAT Slave Information (ESI) files can now be parsed offline**, via the new `POST /api/esi/parse` endpoint — the ESI counterpart of the existing SII tool, and usable with no hardware connected. Upload a vendor's ESI XML and get back every device it describes, each with its **complete flat object dictionary**: one row per index/subindex with its display name, data type, bit size, default, minimum, maximum, engineering unit, every access and mapping flag, its description, and its enum option labels. Most of that metadata exists nowhere else — a drive's CoE object dictionary can be enumerated over the bus, but the service returns no descriptions, no enum labels, no units and no bounds.
@@ -462,7 +464,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.62...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.63...HEAD
+[6.0.0-alpha.63]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.62...v6.0.0-alpha.63
 [6.0.0-alpha.62]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.61...v6.0.0-alpha.62
 [6.0.0-alpha.61]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.60...v6.0.0-alpha.61
 [6.0.0-alpha.60]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.59...v6.0.0-alpha.60

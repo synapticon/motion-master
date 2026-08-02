@@ -1895,3 +1895,44 @@ What remains outside the repo is therefore **one static record, once, ever**: `_
 - **Rejected for now: serving the Console from the device** (same-origin + long-lived self-signed, which needs no DNS and no renewal and works air-gapped). It is the strongest offline answer on paper, but it costs a one-time browser warning per device, static-asset serving in the binary, and the API and WebSocket collapsed onto one port — browsers key certificate exceptions by host *and port*, and the WebSocket connection cannot prompt for one. Kept on the shelf as the escape hatch it has been since 2026-06-12.
 
 **Status:** as-built for everything in this repo (283/283 tests, cppcheck/lint/format clean, console typechecks). Not yet exercised end to end — that waits on the one `_acme-challenge` CNAME, a certificate reissued with the wildcard SAN, and a Pi on the bench.
+
+## Session 2026-08-02 — Procedure progress is poll-only: drop the WebSocket push, retain the last run per device in memory, and let `runCount` stand in for a run id (design)
+
+**Supersedes** the delivery half of *Session 2026-07-19* (`ProcedureManager` … `ProgressStep[]` snapshot). Everything that session decided about *structure* stands unchanged — the three tiers (`ProfileDevice::runOsCommand` as generic mechanism, typed measurements on `SomanetDrive`, `runOffsetDetection(SomanetDrive&, ProgressReporter&, std::stop_token)` as a transport-free free function), `ProcedureManager` owning the cancellable `std::jthread`s and the per-device exclusive activity token, and progress as a full-array accumulating snapshot. What changes is that **the WebSocket push is dropped entirely**: a client learns about a procedure by polling one `GET`, and nothing else.
+
+**The push was never load-bearing, and the earlier session had already proved it.** 2026-07-19 argued at length that polling the companion `GET` alone is a *fully supported, lossless* mode, because each notification is a full-array snapshot in which every step retains its terminal `succeeded`/`failed` status and its measured `value` — an accumulating state, not a discrete-event feed. A poller therefore cannot miss a *result*; the only thing it skips is the transient `running` blip on a fast step, which carries no data. Having established that the pull path is complete on its own, keeping the push path meant maintaining a second delivery mechanism for a latency improvement nobody needs on a procedure whose individual steps take seconds. So it goes.
+
+**What that deletes.** `ProcedureManager` holds **no publish callback** — no `std::function<void(topic, json)>` member, no `setPublish`, no wiring in `main.cc` (contrast `MonitoringManager`, which keeps its seam because a monitoring stream genuinely is a high-rate feed). The RT-vs-off-RT transport split from 2026-07-19 ("RT sources → `NotificationBus` poll pump; off-RT procedures → direct publish through the identical seam") collapses to just the first half: the `NotificationBus` remains for RT producers that cannot call out, and procedures are simply not a WebSocket producer at all. The *message type* open item (reuse `notification` vs a dedicated `procedure` type) is moot. The late-joiner/replay reasoning that justified full-snapshot-over-delta is still architecturally true but no longer carries any weight — the snapshot shape is now justified by the poll path alone.
+
+**The surface is one resource with three verbs.** The addressed thing is the pair `(devicePosition, procedureName)` — `offset-detection` *is* the procedure identifier — and there is deliberately **no run id in the path**, because only the latest run per device+procedure is retained and there is nothing else to address. It is a singleton sub-resource keyed by name, not a collection of runs:
+
+```text
+POST   /api/devices/:pos/procedures/offset-detection   → 202 accepted | 409 busy
+GET    /api/devices/:pos/procedures/offset-detection   → the snapshot (below)
+DELETE /api/devices/:pos/procedures/offset-detection   → request the jthread's stop_token
+```
+
+`DELETE` means **cancel the running procedure**, not *delete the record*: the retained snapshot stays behind with `status: "cancelled"`. Clearing retained state is not a user need — the next run overwrites it and a rescan drops it — so nothing addresses that operation. (`POST …/cancel` was the alternative if the verb read ambiguously against a resource that persists; it does not, because the thing being deleted is the *run*, not its result.)
+
+**The snapshot, with two additions the poll-only model requires and one it earns.**
+
+```jsonc
+{
+  "status": "succeeded",          // idle | running | succeeded | failed | cancelled
+  "runCount": 3,
+  "startedAt": 1735821000123,     // epoch ms; absent while idle / never run
+  "finishedAt": 1735821042456,    // epoch ms; absent while running
+  "steps": [ { "id": "…", "status": "succeeded", "value": 1234 }, … ]
+}
+```
+
+- **Overall `status`** was already required by 2026-07-19 so that "is it done?" is a single-field check. It gains **`cancelled`** as a fifth value — *overall only*; the per-step `ProgressStatus` stays `Idle/Running/Succeeded/Failed`. Folding a user cancel into `failed` would lose the distinction between "the drive could not measure" and "I stopped it", which is exactly the distinction a returning user needs.
+- **Retention after the thread exits** was likewise already required. It is now the feature rather than a correctness footnote: a user who navigates back to the Offset Detection page sees the result of the last run **for that session**, with no run in flight and no polling.
+- **`startedAt`/`finishedAt`.** Without a push channel there is no temporal cue that the displayed result is ten minutes old, and a stale commutation offset presented as current is actively misleading. The timestamps are what make the returning-user view honest.
+- **`runCount` earns more than a UI label.** With no run id, a poller cannot otherwise distinguish one run from another: a second run started from another tab that begins *and* completes between two polls is invisible, and the client would read a different run's result as the one it was watching. `runCount` is a cheap per-device generation counter that closes that gap — if it changed since the last poll, this is a different run — and `(devicePosition, procedureName, runCount)` is a stable run identifier should one ever be needed, with no id allocation. It increments on each **accepted** start (a 409 does not count).
+
+Never-run is well-formed too — `status: "idle"`, `runCount: 0`, no timestamps, every step `idle` from the per-procedure template — so the client renders one component with no empty/absent special case. The client loop is `while (status === 'running') { sleep; GET; }`, and a page mount that finds anything else polls zero times.
+
+**Retained snapshots are cleared on `scan()`/`reset()`.** Retention is keyed by slave position, and a rescan rebuilds `DeviceManager::devices_` with positions that may remap — a retained "offset = 1234" would then be rendered against a *different physical drive*. Keying by device identity (serial / vendor+product+serial) so results survive a rescan is more faithful but more machinery for a value that is explicitly session-scoped; a missing result is strictly better than a wrong-drive result, so the snapshots (and `runCount`) reset on rescan.
+
+**What is unchanged.** `ProgressReporter` still exists and still owns the step-mutation vocabulary — it simply updates the retained array in place instead of also calling out, which is what keeps `runOffsetDetection` transport-free and testable against a fake reporter. The busy-set is still the span-level exclusion `controlPlaneMutex_` cannot provide (that mutex serializes individual transactions; a procedure is a multi-second span of many, interleaved with sleeps). Cancellation is still checked *between* steps, with an in-flight OS command allowed to finish and the drive returned to a safe state before exit. The `value`-stays-numeric and client-owns-labels leans stand. And the standing restraint stands: no procedure registry/dispatcher until a second procedure actually exists.

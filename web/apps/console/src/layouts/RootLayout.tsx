@@ -11,6 +11,7 @@ const deviceLinks = [
   { to: 'foe', label: 'FoE' },
   { to: 'parameters', label: 'Parameters' },
   { to: 'pdo-mapping', label: 'PDO Mapping' },
+  { to: 'procedures', label: 'Procedures' },
   { to: 'registers', label: 'Registers' },
   { to: 'sii', label: 'SII' },
 ]

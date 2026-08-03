@@ -31,6 +31,7 @@ import DeviceFoePage from './pages/DeviceFoePage'
 import DeviceParametersPage from './pages/DeviceParametersPage'
 import DevicePdoMappingPage from './pages/DevicePdoMappingPage'
 import DeviceMotionPage from './pages/DeviceMotionPage'
+import DeviceProceduresPage from './pages/DeviceProceduresPage'
 
 export default function App() {
   return (
@@ -82,6 +83,10 @@ export default function App() {
           <Route path="parameters" element={<DeviceParametersPage />} />
           <Route path="pdo-mapping" element={<DevicePdoMappingPage />} />
           <Route path="motion" element={<DeviceMotionPage />} />
+          {/* The selected procedure lives in the URL, so one page serves both paths: no selection
+              (the list plus a prompt) and a named procedure (the list plus its detail). */}
+          <Route path="procedures" element={<DeviceProceduresPage />} />
+          <Route path="procedures/:procedureName" element={<DeviceProceduresPage />} />
         </Route>
       </Route>
     </Routes>

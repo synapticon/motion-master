@@ -86,20 +86,31 @@ class DiagnosticsRestorer {
     const auto note = [&failures](const std::string& what) {
       failures += failures.empty() ? what : "; " + what;
     };
-    // Brake first, then the mode, then the state: the brake is only the master's to command while
-    // the drive is still enabled and in diagnostics mode, so putting it back has to happen before
-    // either of those is undone.
+    // Brake first, then the state, then the mode — and each position is load-bearing.
+    //
+    // The brake has to go back first because it is only the master's to command while the drive is
+    // still enabled and in diagnostics mode, so undoing either of those first would strand it.
+    //
+    // The mode goes back **after** the drive is disabled, never before: the mode being restored is
+    // whatever the drive was in before the procedure, which is very often a motion mode, and its
+    // setpoint object is not something a procedure ever wrote. Restoring it while the drive is
+    // still in Operation Enabled asks the drive to follow that setpoint — in CSP, a target position
+    // staged at 0 against a real position somewhere else — for as long as it takes the disable to
+    // land. On the default PDO mapping that window is usually nil, since 0x6060 and 0x6040 are both
+    // RxPDO-mapped and stage into the same cycle; it opens for a mailbox round-trip as soon as a
+    // custom mapping leaves 0x6060 out of the RxPDO and the write falls back to SDO. Disabling
+    // first costs nothing (0x6060 is writable in any state) and closes it either way.
     if (brake_) {
       if (auto r = drive_.setBrakeStatus(*brake_); !r) {
         note(std::format("failed to restore the brake: {}", r.error()));
       }
     }
     if (mode_) {
-      if (auto r = drive_.setOperationModeValue(*mode_); !r) {
-        note(std::format("failed to restore operation mode {}: {}", *mode_, r.error()));
-      }
       if (auto r = drive_.disable(); !r) {
         note(std::format("failed to return the drive to Switch On Disabled: {}", r.error()));
+      }
+      if (auto r = drive_.setOperationModeValue(*mode_); !r) {
+        note(std::format("failed to restore operation mode {}: {}", *mode_, r.error()));
       }
     }
     if (failures.empty()) {

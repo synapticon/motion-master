@@ -211,6 +211,19 @@ class OsCommandFakeDriver : public FieldbusDriver {
     return first >= 0 && second >= 0 && first < second;
   }
 
+  // Position of the *last* write to index/subindex, or -1. The restore's ordering has to be
+  // asserted on last writes rather than first ones: the operation mode and the controlword are each
+  // written on the way in as well, so wroteBefore would compare the preparation, not the restore.
+  int lastWriteIndex(uint16_t index, uint8_t subindex) const {
+    int found = -1;
+    for (size_t k = 0; k < writeLog.size(); ++k) {
+      if (writeLog[k].first == index && writeLog[k].second == subindex) {
+        found = static_cast<int>(k);
+      }
+    }
+    return found;
+  }
+
   std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
     return ods;
   }
@@ -528,6 +541,29 @@ TEST(RunPolePairDetectionProcedure, RestoresTheBrakeAndModeItFound) {
       std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
   EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
             std::vector<uint8_t>{8});
+}
+
+TEST(RunPolePairDetectionProcedure, RestoresTheBrakeThenDisablesThenPutsTheModeBack) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(polePairDetectionSteps());
+
+  driver.responses = {{1, 0, 4, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(runPolePairDetectionProcedure(device, reporter, std::stop_token{}).has_value());
+
+  const int brake = driver.lastWriteIndex(somanet::kBrakeOptions, somanet::kBrakeStatus);
+  const int controlword = driver.lastWriteIndex(Object::kControlword, 0);
+  const int mode = driver.lastWriteIndex(Object::kModeOfOperation, 0);
+  ASSERT_GE(brake, 0);
+  ASSERT_GE(controlword, 0);
+  ASSERT_GE(mode, 0);
+
+  // The brake goes back while the drive is still enabled and in diagnostics mode, which is the only
+  // state it is the master's to command from.
+  EXPECT_LT(brake, controlword);
+  // And the mode goes back only *after* the disable, never before: restoring a motion mode while
+  // the drive is still in Operation Enabled asks it to follow a setpoint no procedure ever wrote.
+  EXPECT_LT(controlword, mode);
 }
 
 TEST(RunPolePairDetectionProcedure, AFailedDetectionStillRestoresTheBrake) {

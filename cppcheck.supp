@@ -104,3 +104,11 @@ variableScope:*/procedure_manager.cc
 // reader and reports both assignments as dead stores. Reading them "visibly" would mean an
 // optional<ModeRestorer> constructed inside the poll loop — worse code for a tool artefact.
 unreadVariable:*/somanet_drive.cc
+
+// The same scope guards, seen from the other end: their destructors return early when the guard was
+// never armed (`if (drive == nullptr) return;`), and cppcheck reports that check as always true
+// because it does not connect the later `guard.drive = &*drive` in the enclosing scope to the member
+// it reads in the destructor. The check is exactly what makes arm-after-the-first-real-change work,
+// so it stays. (Newer cppcheck than 2.21 reports this; CI has one, a local 2.21.1 does not.)
+knownConditionTrueFalse:*/somanet_drive.cc
+knownConditionTrueFalse:*/somanet_procedures.cc

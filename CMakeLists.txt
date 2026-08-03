@@ -19,6 +19,25 @@ else()
   add_compile_options(-Wall -Wextra -Wpedantic -Werror)
 endif()
 
+# Apple's libc++ still gates three C++20 facilities this codebase uses behind its experimental flag:
+# std::jthread, std::stop_token (with the stop-aware std::condition_variable_any::wait overload),
+# and the std::atomic<std::shared_ptr<T>> specialisation. All three are load-bearing in
+# ProcedureManager — cooperative cancellation of a running procedure, and recording a run's outcome
+# without taking the manager's mutex so its destructor can join a finishing thread. Without the flag
+# the macOS build fails outright: "no type named 'stop_token' in namespace 'std'" and "_Atomic
+# cannot be applied to type std::shared_ptr<...>".
+#
+# The cost is bounded, and worth stating because the flag's name invites alarm. libc++experimental
+# is linked *statically*, so a shipped binary gains no runtime dependency and no ABI exposure; what
+# the flag really forfeits is source stability across toolchain upgrades. A future Xcode may rename
+# or retire it — that shows up as an immediate CI failure on this leg, not as a silent runtime
+# problem, and the fallback is to replace the three facilities with portable equivalents (a small
+# stop-token type and a mutex-guarded error slot, ~19 call sites in libs/node).
+if(APPLE)
+  add_compile_options(-fexperimental-library)
+  add_link_options(-fexperimental-library)
+endif()
+
 enable_testing()
 
 # SOEM's EtherCAT NIC driver on Windows talks to Npcap. We vendor the Npcap SDK (headers + import

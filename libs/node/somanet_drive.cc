@@ -5,7 +5,9 @@
 #include <format>
 #include <iterator>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -54,6 +56,71 @@ OsCommandResponse decodeResponse(const std::vector<uint8_t>& response) {
       break;
   }
   return decoded;
+}
+
+// Decodes a big-endian integer from the front of a response payload.
+//
+// OS command payload integers are **big-endian** — the opposite of the little-endian convention the
+// rest of the object dictionary follows — so the most significant byte comes first, which is where
+// a payload starts. The width is per command: one byte for a pole pair count, two for a commutation
+// offset, four for a resistance.
+template <typename T>
+std::expected<T, std::string> decodeBigEndian(const std::vector<uint8_t>& payload,
+                                              std::string_view what) {
+  if (payload.size() < sizeof(T)) {
+    return std::unexpected(std::format("{} reported success with {} payload bytes, expected {}",
+                                       what, payload.size(), sizeof(T)));
+  }
+  T value = 0;
+  for (size_t i = 0; i < sizeof(T); ++i) {
+    value = static_cast<T>(value << 8 | payload[i]);
+  }
+  return value;
+}
+
+// Issues a parameterless motor-measurement command and returns its response payload.
+//
+// The shared front half of pole pair (7), phase resistance (8) and phase inductance (9): all three
+// take no parameters, share one command-specific error table, and differ only in how wide the value
+// in the payload is — which each caller decodes itself with decodeBigEndian.
+//
+// A failed command is an error here rather than a result, which is the opposite of open phase
+// detection: that command's failure *is* its finding, while these either produce a measurement or
+// produce nothing, so there is nothing to report but the reason.
+//
+// @param what  How to name the command in an error message ("phase resistance measurement").
+std::expected<std::vector<uint8_t>, std::string> runMotorMeasurement(
+    SomanetDrive& drive, somanet::OsCommandId id, std::string_view what,
+    const OsCommandConfig& config) {
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(id);
+
+  auto response = drive.runOsCommand(command, config);
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+
+  if (response->failed()) {
+    if (!response->errorCode) {
+      // Status 2: failed, and the drive sent no code at all. Nothing more can be said than that.
+      return std::unexpected(std::format("{} failed and the drive reported no error code", what));
+    }
+    const uint8_t code = *response->errorCode;
+    if (auto general = osCommandErrorName(code)) {
+      return std::unexpected(
+          std::format("{} was not performed: {} (OS error {})", what, *general, code));
+    }
+    if (code == static_cast<uint8_t>(somanet::MotorMeasurementFault::kCurrentAmplitudeError)) {
+      return std::unexpected(
+          std::format("{} failed: {}", what,
+                      somanet::describe(somanet::MotorMeasurementFault::kCurrentAmplitudeError)));
+    }
+    // A command-specific code this build does not name: report the number rather than swallowing
+    // it, so a firmware that grows the table is still actionable.
+    return std::unexpected(
+        std::format("{} failed with OS error {} (command-specific)", what, code));
+  }
+  return response->data;
 }
 
 }  // namespace
@@ -339,6 +406,75 @@ std::expected<OpenPhaseResult, std::string> SomanetDrive::runOpenPhaseDetection(
   // Status 2 (failed, no data) carries no code at all; the drive still said a phase is open.
   result.phaseOpened = true;
   return result;
+}
+
+std::string PolePairResult::describe() const {
+  return std::format("{} pole pair{}", polePairs, polePairs == 1 ? "" : "s");
+}
+
+void to_json(nlohmann::json& j, const PolePairResult& result) {
+  j = nlohmann::json{{"polePairs", result.polePairs}, {"description", result.describe()}};
+}
+
+std::expected<PolePairResult, std::string> SomanetDrive::runPolePairDetection(
+    const OsCommandConfig& config) {
+  static constexpr std::string_view kWhat = "pole pair detection";
+  auto payload =
+      runMotorMeasurement(*this, somanet::OsCommandId::kPolePairDetection, kWhat, config);
+  if (!payload) {
+    return std::unexpected(payload.error());
+  }
+  auto polePairs = decodeBigEndian<uint8_t>(*payload, kWhat);
+  if (!polePairs) {
+    return std::unexpected(polePairs.error());
+  }
+  return PolePairResult{.polePairs = *polePairs};
+}
+
+std::string PhaseResistanceResult::describe() const {
+  return std::format("phase resistance {} mΩ", milliohms);
+}
+
+void to_json(nlohmann::json& j, const PhaseResistanceResult& result) {
+  j = nlohmann::json{{"milliohms", result.milliohms}, {"description", result.describe()}};
+}
+
+std::expected<PhaseResistanceResult, std::string> SomanetDrive::runPhaseResistanceMeasurement(
+    const OsCommandConfig& config) {
+  static constexpr std::string_view kWhat = "phase resistance measurement";
+  auto payload =
+      runMotorMeasurement(*this, somanet::OsCommandId::kPhaseResistanceMeasurement, kWhat, config);
+  if (!payload) {
+    return std::unexpected(payload.error());
+  }
+  auto milliohms = decodeBigEndian<uint32_t>(*payload, kWhat);
+  if (!milliohms) {
+    return std::unexpected(milliohms.error());
+  }
+  return PhaseResistanceResult{.milliohms = *milliohms};
+}
+
+std::string PhaseInductanceResult::describe() const {
+  return std::format("phase inductance {} µH", microhenries);
+}
+
+void to_json(nlohmann::json& j, const PhaseInductanceResult& result) {
+  j = nlohmann::json{{"microhenries", result.microhenries}, {"description", result.describe()}};
+}
+
+std::expected<PhaseInductanceResult, std::string> SomanetDrive::runPhaseInductanceMeasurement(
+    const OsCommandConfig& config) {
+  static constexpr std::string_view kWhat = "phase inductance measurement";
+  auto payload =
+      runMotorMeasurement(*this, somanet::OsCommandId::kPhaseInductanceMeasurement, kWhat, config);
+  if (!payload) {
+    return std::unexpected(payload.error());
+  }
+  auto microhenries = decodeBigEndian<uint32_t>(*payload, kWhat);
+  if (!microhenries) {
+    return std::unexpected(microhenries.error());
+  }
+  return PhaseInductanceResult{.microhenries = *microhenries};
 }
 
 std::expected<void, std::string> SomanetDrive::setOperationMode(somanet::OperationMode mode) {

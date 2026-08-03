@@ -90,8 +90,12 @@ constexpr std::string_view toString(BrakeReleaseStrategy strategy) {
 /// Only the commands this codebase issues are listed; the firmware implements more. The numbering
 /// is the firmware's, so gaps are real rather than reserved space.
 enum class OsCommandId : uint8_t {
-  kOpenPhaseDetection = 6,    ///< Checks every motor phase and FET leg for an open circuit.
-  kSkippedCycleCounter = 13,  ///< Reads the drive's skipped-cycle counter. Harmless; no motion.
+  kOpenPhaseDetection = 6,          ///< Checks every motor phase and FET leg for an open circuit.
+  kPolePairDetection = 7,           ///< Detects the motor's pole pair count. Rotates the rotor.
+  kPhaseResistanceMeasurement = 8,  ///< Measures the motor's phase resistance, in milliohms.
+  kPhaseInductanceMeasurement = 9,  ///< Measures the motor's phase inductance, in microhenries.
+  kSkippedCycleCounter = 13,        ///< Reads the drive's skipped-cycle counter. Harmless; no
+                                    ///< motion.
 };
 
 /// @brief The faults open phase detection (command 6) reports, as its command-specific OS error
@@ -158,6 +162,39 @@ constexpr std::string_view describe(OpenPhaseFault fault) {
       return "the upper FET in leg C is not conducting (open circuit fault)";
     case OpenPhaseFault::kOpenFetCLow:
       return "the lower FET in leg C is not conducting (open circuit fault)";
+  }
+  return "unknown fault";
+}
+
+/// @brief The faults the current-injecting motor measurements report as their command-specific OS
+///        error code — pole pair (7), phase resistance (8) and phase inductance (9), which the
+///        firmware specification gives the same single-entry table.
+///
+/// A table shared between commands is only safe *because* the specification gives them the same
+/// one; command-specific codes count up from 0 and otherwise mean nothing outside the command that
+/// issued them (general codes count down from 254 — see @c OsCommandError). Open phase detection's
+/// code 0 means "open terminal A", which is exactly why each command decodes its own table.
+enum class MotorMeasurementFault : uint8_t {
+  kCurrentAmplitudeError = 0,  ///< The drive could not reach the current amplitude it needed.
+};
+
+/// @brief Name of a motor-measurement fault, as the console and logs should render it. Never
+///        @c nullptr.
+constexpr std::string_view toString(MotorMeasurementFault fault) {
+  switch (fault) {
+    case MotorMeasurementFault::kCurrentAmplitudeError:
+      return "current amplitude error";
+  }
+  return "unknown";
+}
+
+/// @brief What a motor-measurement fault means, for a message a user has to act on. Never
+///        @c nullptr.
+constexpr std::string_view describe(MotorMeasurementFault fault) {
+  switch (fault) {
+    case MotorMeasurementFault::kCurrentAmplitudeError:
+      return "the drive could not raise the motor phase currents to the amplitude it needed, which "
+             "a limited DC-link voltage or a high motor phase impedance can both cause";
   }
   return "unknown fault";
 }
@@ -297,6 +334,40 @@ struct OpenPhaseResult {
 };
 void to_json(nlohmann::json& j, const OpenPhaseResult& result);
 
+/// @brief What pole pair detection (command 7) found.
+struct PolePairResult {
+  uint8_t polePairs = 0;  ///< Pole pairs the drive counted.
+
+  /// @brief One line describing the finding, ready to put in front of a user.
+  std::string describe() const;
+};
+void to_json(nlohmann::json& j, const PolePairResult& result);
+
+/// @brief What phase resistance measurement (command 8) measured.
+///
+/// The drive reports a whole number of milliohms and that is what is stored: the unit is named in
+/// the member rather than applied to it, because scaling to ohms here would invent precision the
+/// drive never reported and force every consumer to scale back to compare two readings.
+struct PhaseResistanceResult {
+  uint32_t milliohms = 0;  ///< Phase resistance in mΩ, exactly as the drive reported it.
+
+  /// @brief One line describing the measurement, ready to put in front of a user.
+  std::string describe() const;
+};
+void to_json(nlohmann::json& j, const PhaseResistanceResult& result);
+
+/// @brief What phase inductance measurement (command 9) measured.
+///
+/// Microhenries as the drive reported them, for the same reason @c PhaseResistanceResult keeps
+/// milliohms: the unit belongs in the member name, not in a conversion that would invent precision.
+struct PhaseInductanceResult {
+  uint32_t microhenries = 0;  ///< Phase inductance in µH, exactly as the drive reported it.
+
+  /// @brief One line describing the measurement, ready to put in front of a user.
+  std::string describe() const;
+};
+void to_json(nlohmann::json& j, const PhaseInductanceResult& result);
+
 /// @brief Borrowed view of a SOMANET drive — a CiA402 drive plus Synapticon-specific
 ///        object-dictionary access (encoder/motor configuration, custom OS commands, etc.).
 ///
@@ -435,9 +506,12 @@ class SomanetDrive : public Cia402Drive {
   ///
   /// Preconditions, all of which the drive enforces by refusing with OS error 251 ("command not
   /// allowed") rather than by misbehaving: operation mode @c somanet::OperationMode::kDiagnostics,
-  /// CiA402 state Operation Enabled, no limit switch active, and the brake released — in
-  /// diagnostics mode the brake is not released by enabling the drive the way it is in normal
-  /// operation, so it has to be released explicitly (see @c releaseBrake).
+  /// CiA402 state Operation Enabled, and no limit switch active. **A released brake is deliberately
+  /// not among them.** The firmware specification does not list one for this command, and says only
+  /// that it "might rotate the motor if there is no brake, or if it's disengaged" — so an engaged
+  /// brake does not prevent the check, it merely keeps the shaft still while it runs, which is the
+  /// safer way to run it. Contrast pole pair (7) and motor phase order (4), whose restrictions do
+  /// require a disengaged brake.
   ///
   /// It may turn the motor if the brake is disengaged and nothing else holds the shaft.
   ///
@@ -445,6 +519,68 @@ class SomanetDrive : public Cia402Drive {
   /// @return What the detection found, or why no verdict was reached.
   std::expected<OpenPhaseResult, std::string> runOpenPhaseDetection(
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(10),
+                                       .pollInterval = std::chrono::milliseconds(100)});
+
+  /// @brief Runs pole pair detection (OS command 7) and decodes the count it reports.
+  ///
+  /// Counts the connected motor's pole pairs by turning the rotor. A failed command is an error
+  /// rather than a finding, as with the winding measurements: the command either answers with a
+  /// count or does not answer at all.
+  ///
+  /// Preconditions, all enforced by the drive refusing with OS error 251: operation mode
+  /// @c somanet::OperationMode::kDiagnostics, CiA402 state Operation Enabled, no limit switch
+  /// active, **and the brake disengaged** if one is configured. That last one is a real requirement
+  /// here — unlike open phase detection and the winding measurements, whose restrictions omit it —
+  /// because in diagnostics mode enabling the drive does not release the brake the way normal
+  /// operation does, so a caller has to release it explicitly (see @c releaseBrake).
+  ///
+  /// **This command turns the rotor.** Not "may": the specification says it needs to, so the shaft
+  /// must be free to move and whatever it drives must be safe to move with it.
+  ///
+  /// @param config  Timing and cancellation. The default timeout is sized for this command.
+  /// @return The pole pair count, or why none was produced.
+  std::expected<PolePairResult, std::string> runPolePairDetection(
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(60),
+                                       .pollInterval = std::chrono::milliseconds(100)});
+
+  /// @brief Runs phase resistance measurement (OS command 8) and decodes the value it reports.
+  ///
+  /// Measures the resistance of one motor phase by driving current into the windings and observing
+  /// what it takes. Unlike open phase detection, a failed command here is a plain failure and not a
+  /// finding: this command either answers with a value or does not answer at all, so a refusal
+  /// comes back as an error naming the reason — the drive's one command-specific code is
+  /// @c somanet::PhaseMeasurementFault::kCurrentAmplitudeError, and a general code (251 "command
+  /// not allowed", 253 timeout, ...) is named too.
+  ///
+  /// Preconditions, all enforced by the drive refusing with OS error 251: operation mode
+  /// @c somanet::OperationMode::kDiagnostics, CiA402 state Operation Enabled, and no limit switch
+  /// active. **The brake is deliberately not among them** — the firmware specification does not ask
+  /// for it, and an engaged brake holding the shaft during the measurement is the safer state — so
+  /// a caller should leave the brake alone rather than release it out of symmetry with the commands
+  /// that do require it (motor phase order, pole pair).
+  ///
+  /// It may turn the motor if the brake is disengaged and nothing else holds the shaft.
+  ///
+  /// @param config  Timing and cancellation. The default timeout is sized for this command.
+  /// @return The measured resistance, or why no measurement was produced.
+  std::expected<PhaseResistanceResult, std::string> runPhaseResistanceMeasurement(
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(30),
+                                       .pollInterval = std::chrono::milliseconds(100)});
+
+  /// @brief Runs phase inductance measurement (OS command 9) and decodes the value it reports.
+  ///
+  /// The companion of @c runPhaseResistanceMeasurement in every respect that matters — same
+  /// preconditions (diagnostics mode, Operation Enabled, no limit switch, and **no brake
+  /// requirement**), same command-specific fault
+  /// (@c somanet::PhaseMeasurementFault::kCurrentAmplitudeError), and a failure is likewise an
+  /// error rather than a finding. Only the quantity differs: microhenries instead of milliohms.
+  ///
+  /// It may turn the motor if the brake is disengaged and nothing else holds the shaft.
+  ///
+  /// @param config  Timing and cancellation. The default timeout is sized for this command.
+  /// @return The measured inductance, or why no measurement was produced.
+  std::expected<PhaseInductanceResult, std::string> runPhaseInductanceMeasurement(
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(30),
                                        .pollInterval = std::chrono::milliseconds(100)});
 
   /// @brief Reads the requested operation mode (0x6060) as its raw value.

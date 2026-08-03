@@ -89,42 +89,51 @@ std::expected<void, std::string> runOsCommandProcedure(Device& device, ProgressR
                                                        std::stop_token stop,
                                                        const OsCommandRequest& request);
 
+/// @brief The step ids shared by every procedure that prepares a drive, measures, and puts it back.
+///
+/// The preparation and its undoing are the *same work* in each of them — SOMANET's diagnostics
+/// operation mode, CiA402 Operation Enabled, and for some commands a released brake — so they carry
+/// the same ids everywhere rather than a near-identical set named per procedure, and a client
+/// labels them once. What differs is the measurement step in between, which each procedure names
+/// itself.
+///
+/// They are steps rather than hidden setup because each can fail on real hardware — a drive that
+/// will not enable, a brake that will not restore — and a user staring at a stalled procedure needs
+/// to see *which* part stalled. @c kReleaseBrakeStep appears only in the procedures whose command
+/// requires the brake released; the others leave it exactly as they found it.
+inline constexpr std::string_view kPrepareStep = "prepare";
+inline constexpr std::string_view kReleaseBrakeStep = "release-brake";
+inline constexpr std::string_view kRestoreStep = "restore";
+
 /// @brief Procedure name for open phase detection, as it appears in its URL and its snapshot key.
 inline constexpr std::string_view kOpenPhaseDetectionProcedure = "open-phase-detection";
 
-/// @brief The steps open phase detection reports against, in order.
-///
-/// The middle one is the measurement; the two around it are the drive preparation the firmware
-/// requires and the undoing of it. They are steps rather than hidden setup because either can fail
-/// on real hardware — a drive that will not enable, a brake that will not restore — and a user
-/// staring at a stalled procedure needs to see *which* part stalled.
-inline constexpr std::string_view kOpenPhasePrepareStep = "prepare";
-inline constexpr std::string_view kOpenPhaseReleaseBrakeStep = "release-brake";
-inline constexpr std::string_view kOpenPhaseDetectStep = "open-phase-detection";
-inline constexpr std::string_view kOpenPhaseRestoreStep = "restore";
+/// @brief The step open phase detection's own measurement reports against.
+inline constexpr std::string_view kOpenPhaseDetectionStep = "open-phase-detection";
 
-/// @brief Open phase detection's step template — the four steps above, all idle.
+/// @brief Open phase detection's step template — prepare, check, restore, all idle.
 std::vector<ProgressStep> openPhaseDetectionSteps();
 
 /// @brief Runs open phase detection as a procedure body.
 ///
-/// Prepares the drive, releases the brake, runs the check, and puts everything back:
+/// Prepares the drive, runs the check, and puts everything back:
 ///
-/// 1. **prepare** — saves the current operation mode and brake state, sets
-///    @c somanet::OperationMode::kDiagnostics, and walks the CiA402 state machine to Operation
-///    Enabled. Diagnostics mode and Operation Enabled are both preconditions the firmware enforces
-///    by refusing the command with OS error 251.
-/// 2. **release-brake** — has to come *after* step 1, and cannot be folded into it. Writing the
-///    brake state only performs a real release while the drive is in OP ENABLED, and in diagnostics
-///    mode enabling the drive does **not** release the brake the way normal operation does. So the
-///    brake is the master's to release here, and only once the drive is enabled.
-/// 3. **open-phase-detection** — the OS command. An open phase *fails* this step, naming the
+/// 1. **prepare** — saves the current operation mode, sets @c somanet::OperationMode::kDiagnostics,
+///    and walks the CiA402 state machine to Operation Enabled. Diagnostics mode and Operation
+///    Enabled are both preconditions the firmware enforces by refusing the command with OS error
+///    251.
+/// 2. **open-phase-detection** — the OS command. An open phase *fails* this step, naming the
 ///    offending terminal or FET: the check ran and found a fault, which is a result the user must
 ///    act on, so it is not reported as a success carrying bad news.
-/// 4. **restore** — puts back the brake state and the operation mode as they were found and returns
-///    the drive to Switch On Disabled. It runs on **every** path out, including a failure or a
-///    cancellation, because a procedure that leaves a brake released and a drive in diagnostics
-///    mode is worse than one that never ran.
+/// 3. **restore** — puts back the operation mode as it was found and returns the drive to Switch On
+///    Disabled. It runs on **every** path out, including a failure or a cancellation, because a
+///    procedure that leaves a drive in diagnostics mode is worse than one that never ran.
+///
+/// **The brake is not touched.** This command's restrictions do not require a disengaged one, and
+/// the firmware specification says only that the command "might rotate the motor if there is no
+/// brake, or if it's disengaged" — so an engaged brake does not prevent the check, it keeps the
+/// shaft still while it runs. Contrast @c runPolePairDetectionProcedure, whose command does require
+/// it.
 ///
 /// Needs the bus exchanging process data: the CiA402 state machine only advances while the
 /// statusword is updating, so a device that is not in OP will fail at step 1 rather than hanging.
@@ -137,5 +146,99 @@ std::vector<ProgressStep> openPhaseDetectionSteps();
 std::expected<void, std::string> runOpenPhaseDetectionProcedure(Device& device,
                                                                 ProgressReporter& reporter,
                                                                 std::stop_token stop);
+
+/// @brief Procedure name for pole pair detection, as it appears in its URL and its snapshot key.
+inline constexpr std::string_view kPolePairDetectionProcedure = "pole-pair-detection";
+
+/// @brief The step pole pair detection's own measurement reports against.
+inline constexpr std::string_view kPolePairDetectionStep = "pole-pair-detection";
+
+/// @brief Pole pair detection's step template — prepare, release the brake, detect, restore.
+std::vector<ProgressStep> polePairDetectionSteps();
+
+/// @brief Runs pole pair detection as a procedure body.
+///
+/// Four steps, and **the only measurement procedure here that releases the brake**: this command's
+/// restrictions do require a disengaged one, and in diagnostics mode enabling the drive does not
+/// release it the way normal operation does, so the master has to. It is released after Operation
+/// Enabled (never before — the write only performs a real release from that state) and put back by
+/// the restore step on every path out, including a failure or a cancellation.
+///
+/// **The command turns the rotor.** The specification says it needs to, not that it might, so the
+/// shaft must be free and whatever it drives must be safe to move. On a vertical or loaded axis,
+/// support the load before running it: the brake is released for the duration.
+///
+/// Needs the bus exchanging process data, for the same reason as its siblings — the CiA402 state
+/// machine only advances while the statusword is updating.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; checked between steps and passed into the OS command so a
+///                 running detection is aborted rather than abandoned.
+/// @return Void when the drive reported a pole pair count, otherwise why it did not.
+std::expected<void, std::string> runPolePairDetectionProcedure(Device& device,
+                                                               ProgressReporter& reporter,
+                                                               std::stop_token stop);
+
+/// @brief Procedure name for phase resistance measurement, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kPhaseResistanceMeasurementProcedure =
+    "phase-resistance-measurement";
+
+/// @brief The step phase resistance measurement's own measurement reports against.
+inline constexpr std::string_view kPhaseResistanceMeasurementStep = "phase-resistance-measurement";
+
+/// @brief Phase resistance measurement's step template — prepare, measure, restore, all idle.
+std::vector<ProgressStep> phaseResistanceMeasurementSteps();
+
+/// @brief Runs phase resistance measurement as a procedure body.
+///
+/// Three steps: the shared **prepare** (diagnostics mode, Operation Enabled), the measurement, and
+/// the shared **restore**, which runs on every path out including a failure or a cancellation.
+///
+/// **The brake is not touched, and that is the firmware's requirement rather than an omission.**
+/// Unlike motor phase order and pole pair detection, this command does not ask for a released
+/// brake, so releasing one here would drop whatever it holds for no benefit — and an engaged brake
+/// steadying the shaft while current is driven into the windings is the better state to measure in.
+/// The one consequence worth knowing is that a *loose* shaft can still turn.
+///
+/// Needs the bus exchanging process data: the CiA402 state machine only advances while the
+/// statusword is updating, so a device that is not in OP will fail at the prepare step rather than
+/// hanging.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; checked between steps and passed into the OS command so a
+///                 running measurement is aborted rather than abandoned.
+/// @return Void when the drive reported a resistance, otherwise why it did not.
+std::expected<void, std::string> runPhaseResistanceMeasurementProcedure(Device& device,
+                                                                        ProgressReporter& reporter,
+                                                                        std::stop_token stop);
+
+/// @brief Procedure name for phase inductance measurement, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kPhaseInductanceMeasurementProcedure =
+    "phase-inductance-measurement";
+
+/// @brief The step phase inductance measurement's own measurement reports against.
+inline constexpr std::string_view kPhaseInductanceMeasurementStep = "phase-inductance-measurement";
+
+/// @brief Phase inductance measurement's step template — prepare, measure, restore, all idle.
+std::vector<ProgressStep> phaseInductanceMeasurementSteps();
+
+/// @brief Runs phase inductance measurement as a procedure body.
+///
+/// Structurally identical to @c runPhaseResistanceMeasurementProcedure — the same three steps, the
+/// same preparation, and the same deliberate refusal to touch the brake, which this command no more
+/// requires than that one does. Only the quantity measured differs.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; checked between steps and passed into the OS command so a
+///                 running measurement is aborted rather than abandoned.
+/// @return Void when the drive reported an inductance, otherwise why it did not.
+std::expected<void, std::string> runPhaseInductanceMeasurementProcedure(Device& device,
+                                                                        ProgressReporter& reporter,
+                                                                        std::stop_token stop);
 
 }  // namespace mm::node

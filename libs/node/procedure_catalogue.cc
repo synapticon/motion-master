@@ -75,12 +75,12 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "it finds a fault. Worth running first when commissioning a motor: the measurements that "
       "follow all assume the three phases are actually connected, and each would otherwise fail in "
       "a way that points at the wrong thing. The drive is prepared and put back automatically — "
-      "diagnostics mode, Operation Enabled, brake released, then everything restored as found.";
+      "diagnostics mode, Operation Enabled, then the mode restored as found.";
   openPhase.caveats = {
-      "The brake is released while the check runs, so anything the brake was holding is free to "
-      "move. On a vertical or loaded axis, support the load first.",
-      "The check itself can turn the motor when nothing else holds the shaft.",
-      "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
+      "The brake is left exactly as found — this command does not require it released, and an "
+      "engaged brake simply keeps the shaft still while the check runs.",
+      "The check can turn the motor when nothing holds the shaft: no brake, or one already "
+      "disengaged.",
       "The bus must be exchanging process data (OP state): the drive's state machine only advances "
       "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
       "A detected open phase is reported as a failed run — the check completed and found a fault, "
@@ -99,6 +99,110 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
         return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
           return runOpenPhaseDetectionProcedure(device, reporter, std::move(stop));
+        };
+      },
+  });
+
+  ProcedureDescriptor polePair;
+  polePair.name = std::string(kPolePairDetectionProcedure);
+  polePair.title = "Pole pair detection";
+  polePair.description =
+      "Counts the connected motor's pole pairs, by turning the rotor and watching what it takes to "
+      "do so. Part of commissioning an absolute-encoder axis, where it is run after open phase "
+      "detection and before motor phase order detection and commutation offset measurement. The "
+      "drive is put into diagnostics mode, enabled, its brake released, and all of that restored "
+      "afterwards.";
+  polePair.caveats = {
+      "This command turns the rotor — it has to, in order to count poles. The shaft must be free "
+      "to "
+      "move, and whatever it drives must be safe to move with it.",
+      "The brake is released while it runs, because this command requires that. Anything the brake "
+      "was holding is free to move: on a vertical or loaded axis, support the load first.",
+      "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
+      "The counted value is reported back, not stored: nothing in the drive's configuration is "
+      "changed by running this, so writing it somewhere is up to you.",
+      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
+      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
+      "A drive that cannot raise the motor phase currents far enough reports the run as failed — a "
+      "limited DC-link voltage or a high motor phase impedance can both cause that.",
+  };
+  polePair.movesMotor = true;
+  polePair.requiresEnabled = false;
+  polePair.steps = polePairDetectionSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(polePair),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runPolePairDetectionProcedure(device, reporter, std::move(stop));
+        };
+      },
+  });
+
+  ProcedureDescriptor phaseResistance;
+  phaseResistance.name = std::string(kPhaseResistanceMeasurementProcedure);
+  phaseResistance.title = "Phase resistance measurement";
+  phaseResistance.description =
+      "Measures the resistance of one motor phase, in milliohms, and reports it. The drive is put "
+      "into diagnostics mode, enabled, and restored to exactly the state it was found in "
+      "afterwards. Measured at the drive's own terminals, so what comes back is the winding plus "
+      "whatever is in series with it — your cabling and connectors included.";
+  phaseResistance.caveats = {
+      "The measured value is reported back, not stored: nothing in the drive's configuration is "
+      "changed by running this, so writing it somewhere is up to you.",
+      "The brake is left exactly as found — this command does not require it released, and an "
+      "engaged brake steadying the shaft is the better state to measure in.",
+      "The shaft can still turn if nothing holds it: no brake, or one already disengaged.",
+      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
+      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
+      "A drive that cannot raise the current amplitude far enough reports the run as failed rather "
+      "than returning a low reading.",
+  };
+  phaseResistance.movesMotor = true;
+  phaseResistance.requiresEnabled = false;
+  phaseResistance.steps = phaseResistanceMeasurementSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(phaseResistance),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runPhaseResistanceMeasurementProcedure(device, reporter, std::move(stop));
+        };
+      },
+  });
+
+  ProcedureDescriptor phaseInductance;
+  phaseInductance.name = std::string(kPhaseInductanceMeasurementProcedure);
+  phaseInductance.title = "Phase inductance measurement";
+  phaseInductance.description =
+      "Measures the inductance of one motor phase, in microhenries, and reports it. The companion "
+      "of phase resistance measurement: same preconditions, same preparation, and the brake "
+      "handled "
+      "the same way — only the quantity differs. The drive is put into diagnostics mode, enabled, "
+      "and restored to exactly the state it was found in afterwards.";
+  phaseInductance.caveats = {
+      "The measured value is reported back, not stored: nothing in the drive's configuration is "
+      "changed by running this, so writing it somewhere is up to you.",
+      "The brake is left exactly as found — this command does not require it released, and an "
+      "engaged brake steadying the shaft is the better state to measure in.",
+      "The shaft can still turn if nothing holds it: no brake, or one already disengaged.",
+      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
+      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
+      "A drive that cannot raise the current amplitude far enough reports the run as failed rather "
+      "than returning a low reading.",
+  };
+  phaseInductance.movesMotor = true;
+  phaseInductance.requiresEnabled = false;
+  phaseInductance.steps = phaseInductanceMeasurementSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(phaseInductance),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runPhaseInductanceMeasurementProcedure(device, reporter, std::move(stop));
         };
       },
   });

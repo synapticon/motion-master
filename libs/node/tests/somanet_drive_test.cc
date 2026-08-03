@@ -723,4 +723,163 @@ TEST(RunOpenPhaseDetection, AFailureWithoutACodeStillReportsAnOpenPhase) {
   EXPECT_FALSE(result->faultCode.has_value());
 }
 
+// --- Pole pair detection (command 7) -------------------------------------------------------------
+
+TEST(RunPolePairDetection, DecodesTheCountFromTheFirstPayloadByte) {
+  // The specification's example: 3 pole pairs, reported in response byte 2.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 3, 0, 0, 0, 0, 0}};
+  auto result = drive->runPolePairDetection({.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->polePairs, 3);
+  EXPECT_EQ(result->describe(), "3 pole pairs");
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 7);
+}
+
+TEST(RunPolePairDetection, SaysPolePairSingularForOne) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 1, 0, 0, 0, 0, 0}};
+  auto result = drive->runPolePairDetection({.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->describe(), "1 pole pair");
+}
+
+TEST(RunPolePairDetection, NamesTheCurrentAmplitudeFaultAndWhatCausesIt) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = drive->runPolePairDetection({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("pole pair detection"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("DC-link voltage"), std::string::npos) << result.error();
+}
+
+// --- Phase resistance measurement (command 8) ----------------------------------------------------
+
+TEST(RunPhaseResistanceMeasurement, DecodesTheBigEndianMilliohmValue) {
+  // The firmware specification's own example: 100000 mΩ arrives as 0x000186A0 in response bytes
+  // 2-5, most significant byte first — the opposite order to every SDO value in the dictionary, so
+  // decoding it little-endian would read 2691137536 and look plausible.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0x00, 0x01, 0x86, 0xA0, 0, 0}};
+  auto result = drive->runPhaseResistanceMeasurement({.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->milliohms, 100000u);
+  EXPECT_EQ(result->describe(), "phase resistance 100000 mΩ");
+}
+
+TEST(RunPhaseResistanceMeasurement, IssuesCommandEight) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0, 0, 0, 1, 0, 0}};
+  ASSERT_TRUE(drive->runPhaseResistanceMeasurement({.pollInterval = kNoDelay}).has_value());
+
+  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  ASSERT_EQ(written.size(), 8u);
+  EXPECT_EQ(written[0], 8);
+}
+
+TEST(RunPhaseResistanceMeasurement, NamesTheCommandSpecificCurrentAmplitudeFault) {
+  // Code 0 is command-specific here, and means something entirely different from open phase
+  // detection's code 0 ("open terminal A") — which is why each command decodes its own table.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = drive->runPhaseResistanceMeasurement({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("could not raise the motor phase currents"), std::string::npos)
+      << result.error();
+}
+
+TEST(RunPhaseResistanceMeasurement, AGeneralOsErrorNamesItself) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};
+  auto result = drive->runPhaseResistanceMeasurement({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("was not performed"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
+}
+
+TEST(RunPhaseResistanceMeasurement, ATooShortPayloadIsAnErrorRatherThanAZero) {
+  // Status 0 is "completed, no response data". A measurement command that answers that way has
+  // produced no value, and reporting 0 mΩ would be a plausible-looking lie about a real motor.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = drive->runPhaseResistanceMeasurement({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("payload bytes"), std::string::npos) << result.error();
+}
+
+// --- Phase inductance measurement (command 9) ----------------------------------------------------
+
+TEST(RunPhaseInductanceMeasurement, DecodesTheBigEndianMicrohenryValue) {
+  // The specification's example: 4244 µH as 0x00001094.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0x00, 0x00, 0x10, 0x94, 0, 0}};
+  auto result = drive->runPhaseInductanceMeasurement({.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->microhenries, 4244u);
+  EXPECT_EQ(result->describe(), "phase inductance 4244 µH");
+}
+
+TEST(RunPhaseInductanceMeasurement, IssuesCommandNine) {
+  // The two winding measurements share a decoder, so the command byte is what distinguishes them.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0, 0, 0, 1, 0, 0}};
+  ASSERT_TRUE(drive->runPhaseInductanceMeasurement({.pollInterval = kNoDelay}).has_value());
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 9);
+}
+
+TEST(RunPhaseInductanceMeasurement, SharesTheCurrentAmplitudeFaultTable) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = drive->runPhaseInductanceMeasurement({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("phase inductance measurement"), std::string::npos)
+      << result.error();
+  EXPECT_NE(result.error().find("could not raise the motor phase currents"), std::string::npos)
+      << result.error();
+}
+
 }  // namespace

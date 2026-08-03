@@ -25,8 +25,69 @@ namespace somanet {
 
 /// @brief Manufacturer-specific object indices (the 0x2000-0x5FFF vendor range).
 enum Object : uint16_t {
-  kBrakeOptions = 0x2004,  ///< RECORD — brake voltages, timing, release strategy and status.
+  kCommutationAngleOffset = 0x2001,  ///< The offset commutation offset measurement (5) writes.
+  kMotorSpecificSettings = 0x2003,   ///< RECORD — motor configuration; :05 is the phase order.
+  kBrakeOptions = 0x2004,            ///< RECORD — brake voltages, timing, release strategy, status.
+  kCommutationOffsetDetection = 0x2009,  ///< RECORD — how commutation offset (5) is measured.
 };
+
+/// @brief Sub-entries of 0x2003 (motor specific settings). The enum value @b is the subindex.
+enum MotorSetting : uint8_t {
+  kMotorPhasesInverted = 5,  ///< The phase order motor phase order detection (4) writes.
+};
+
+/// @brief Sub-entries of 0x2009 (commutation offset detection). The enum value @b is the subindex.
+enum CommutationOffsetSetting : uint8_t {
+  kCommutationOffsetState = 1,              ///< Set to OFFSET_VALID by a successful command 5.
+  kCommutationOffsetCurrentPercentage = 2,  ///< Current used during the measurement.
+  kCommutationOffsetMethod = 3,             ///< Which method runs; see CommutationOffsetMethod.
+  kCommutationOffsetKp = 4,                 ///< Method 1 only — proportional gain.
+  kCommutationOffsetKi = 5,                 ///< Method 1 only — integral gain.
+  kCommutationOffsetKd = 6,                 ///< Method 1 only — derivative gain.
+};
+
+/// @brief How commutation offset measurement (command 5) is performed (0x2009:03).
+///
+/// **The choice changes what the command physically does, not just its accuracy**, which is why a
+/// caller has to read it rather than assume: the two rotating methods need the brake *released*,
+/// and the stationary one needs it *engaged* — the drive cannot hold the load itself under that
+/// method.
+enum class CommutationOffsetMethod : uint8_t {
+  /// Rotates the rotor by up to one pole pair. Holds the load, needs no tuning, good precision —
+  /// the default, and the one to use unless there is a reason not to.
+  kRotating = 0,
+
+  /// Rotates typically less than 20° and holds the load, but **requires the Kp/Ki/Kd gains in
+  /// 0x2009:04-06 to have been tuned**; intended for the prototype phase.
+  kRotatingTuned = 1,
+
+  /// Does not rotate the rotor at all and completes in around 250 ms, at the cost of precision.
+  /// **Does not hold the load, so the brake stays engaged** for the duration.
+  kStationary = 2,
+};
+
+/// @brief Name of a commutation offset method (for logging / JSON). Never returns @c nullptr.
+constexpr std::string_view toString(CommutationOffsetMethod method) {
+  switch (method) {
+    case CommutationOffsetMethod::kRotating:
+      return "rotating";
+    case CommutationOffsetMethod::kRotatingTuned:
+      return "rotatingTuned";
+    case CommutationOffsetMethod::kStationary:
+      return "stationary";
+  }
+  return "unknown";
+}
+
+/// @brief Whether the method needs the brake released, as opposed to engaged.
+///
+/// True for the rotating methods, whose restrictions require a disengaged brake. False for
+/// @c kStationary, which is the one command in this family that wants the brake **engaged** — it
+/// cannot hold the load, so releasing the brake for it would be actively wrong rather than merely
+/// unnecessary.
+constexpr bool requiresBrakeReleased(CommutationOffsetMethod method) {
+  return method != CommutationOffsetMethod::kStationary;
+}
 
 /// @brief Sub-entries of 0x2004 (brake options). The enum value @b is the subindex.
 enum BrakeOption : uint8_t {
@@ -90,13 +151,15 @@ constexpr std::string_view toString(BrakeReleaseStrategy strategy) {
 /// Only the commands this codebase issues are listed; the firmware implements more. The numbering
 /// is the firmware's, so gaps are real rather than reserved space.
 enum class OsCommandId : uint8_t {
-  kMotorPhaseOrderDetection = 4,    ///< Detects the motor phase order. Rotates the rotor.
-  kOpenPhaseDetection = 6,          ///< Checks every motor phase and FET leg for an open circuit.
-  kPolePairDetection = 7,           ///< Detects the motor's pole pair count. Rotates the rotor.
-  kPhaseResistanceMeasurement = 8,  ///< Measures the motor's phase resistance, in milliohms.
-  kPhaseInductanceMeasurement = 9,  ///< Measures the motor's phase inductance, in microhenries.
-  kSkippedCycleCounter = 13,        ///< Reads the drive's skipped-cycle counter. Harmless; no
-                                    ///< motion.
+  kMotorPhaseOrderDetection = 4,      ///< Detects the motor phase order. Rotates the rotor.
+  kCommutationOffsetMeasurement = 5,  ///< Measures the commutation angle offset; see
+                                      ///< somanet::CommutationOffsetMethod.
+  kOpenPhaseDetection = 6,            ///< Checks every motor phase and FET leg for an open circuit.
+  kPolePairDetection = 7,             ///< Detects the motor's pole pair count. Rotates the rotor.
+  kPhaseResistanceMeasurement = 8,    ///< Measures the motor's phase resistance, in milliohms.
+  kPhaseInductanceMeasurement = 9,    ///< Measures the motor's phase inductance, in microhenries.
+  kSkippedCycleCounter = 13,          ///< Reads the drive's skipped-cycle counter. Harmless; no
+                                      ///< motion.
 };
 
 /// @brief The faults open phase detection (command 6) reports, as its command-specific OS error
@@ -374,6 +437,22 @@ struct MotorPhaseOrderResult {
 };
 void to_json(nlohmann::json& j, const MotorPhaseOrderResult& result);
 
+/// @brief What commutation offset measurement (command 5) measured.
+///
+/// Like motor phase order detection, **the drive stores this itself**: on success the firmware
+/// writes the offset into 0x2001 and sets 0x2009:01 to OFFSET_VALID, so a successful run has
+/// commissioned the axis rather than merely reported a number.
+struct CommutationOffsetResult {
+  uint16_t angleOffset = 0;  ///< The measured commutation angle offset, as the drive reported it.
+
+  /// @brief The method the measurement ran under, which decides whether the rotor turned.
+  somanet::CommutationOffsetMethod method{somanet::CommutationOffsetMethod::kRotating};
+
+  /// @brief One line describing the measurement, ready to put in front of a user.
+  std::string describe() const;
+};
+void to_json(nlohmann::json& j, const CommutationOffsetResult& result);
+
 /// @brief What pole pair detection (command 7) found.
 struct PolePairResult {
   uint8_t polePairs = 0;  ///< Pole pairs the drive counted.
@@ -584,6 +663,42 @@ class SomanetDrive : public Cia402Drive {
   /// @param config  Timing and cancellation. The default timeout is sized for this command.
   /// @return The detected phase order, or why none was produced.
   std::expected<MotorPhaseOrderResult, std::string> runMotorPhaseOrderDetection(
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(60),
+                                       .pollInterval = std::chrono::milliseconds(100)});
+
+  /// @brief Reads which commutation offset method is configured (0x2009:03).
+  ///
+  /// Worth reading before running command 5 rather than after, because the method decides whether
+  /// the rotor will turn and whether the brake must be released or engaged — see
+  /// @c somanet::requiresBrakeReleased. A value outside the defined 0-2 range is reported as an
+  /// error rather than cast, since acting on a misread method would mean handling the brake the
+  /// wrong way.
+  std::expected<somanet::CommutationOffsetMethod, std::string> commutationOffsetMethod() const;
+
+  /// @brief Runs commutation offset measurement (OS command 5) and decodes the offset it reports.
+  ///
+  /// **A successful run reconfigures the drive**: the firmware writes the measured offset into
+  /// 0x2001 and sets 0x2009:01 to OFFSET_VALID, which is the point of running it — this is the
+  /// measurement that commissions the axis.
+  ///
+  /// Preconditions, all enforced by the drive refusing with OS error 251: operation mode
+  /// @c somanet::OperationMode::kDiagnostics and CiA402 state Operation Enabled always, plus —
+  /// **for the rotating methods only** — no limit switch active and the brake disengaged. Motor
+  /// phase order detection (command 4) must also have been run; that one the drive does not check.
+  ///
+  /// **Whether it turns the rotor depends on the configured method** (0x2009:03), so a caller that
+  /// has not read the method does not know what this will do physically. @c kStationary does not
+  /// turn it and needs the brake engaged; the two rotating methods turn it and need the brake
+  /// released.
+  ///
+  /// This command has no command-specific error codes, so a failure always carries a general one.
+  ///
+  /// @param method  The method read from the drive, recorded in the result so a reader of the value
+  ///                knows which measurement produced it.
+  /// @param config  Timing and cancellation. The default timeout is sized for this command.
+  /// @return The measured offset, or why none was produced.
+  std::expected<CommutationOffsetResult, std::string> runCommutationOffsetMeasurement(
+      somanet::CommutationOffsetMethod method,
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(60),
                                        .pollInterval = std::chrono::milliseconds(100)});
 

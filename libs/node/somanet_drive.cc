@@ -478,6 +478,46 @@ std::expected<MotorPhaseOrderResult, std::string> SomanetDrive::runMotorPhaseOrd
   return MotorPhaseOrderResult{.order = static_cast<somanet::MotorPhaseOrder>(*order)};
 }
 
+std::string CommutationOffsetResult::describe() const {
+  return std::format("commutation angle offset {} ({} method)", angleOffset,
+                     somanet::toString(method));
+}
+
+void to_json(nlohmann::json& j, const CommutationOffsetResult& result) {
+  j = nlohmann::json{{"angleOffset", result.angleOffset},
+                     {"method", somanet::toString(result.method)},
+                     {"description", result.describe()}};
+}
+
+std::expected<somanet::CommutationOffsetMethod, std::string> SomanetDrive::commutationOffsetMethod()
+    const {
+  auto raw = device_.readValue<uint8_t>(somanet::kCommutationOffsetDetection,
+                                        somanet::kCommutationOffsetMethod);
+  if (!raw) {
+    return std::unexpected(raw.error());
+  }
+  if (*raw > static_cast<uint8_t>(somanet::CommutationOffsetMethod::kStationary)) {
+    return std::unexpected(
+        std::format("commutation offset method {} is outside the defined range 0-2", *raw));
+  }
+  return static_cast<somanet::CommutationOffsetMethod>(*raw);
+}
+
+std::expected<CommutationOffsetResult, std::string> SomanetDrive::runCommutationOffsetMeasurement(
+    somanet::CommutationOffsetMethod method, const OsCommandConfig& config) {
+  static constexpr std::string_view kWhat = "commutation offset measurement";
+  auto payload = runMotorMeasurement(*this, somanet::OsCommandId::kCommutationOffsetMeasurement,
+                                     kWhat, CommandSpecificFault::kNone, config);
+  if (!payload) {
+    return std::unexpected(payload.error());
+  }
+  auto offset = decodeBigEndian<uint16_t>(*payload, kWhat);
+  if (!offset) {
+    return std::unexpected(offset.error());
+  }
+  return CommutationOffsetResult{.angleOffset = *offset, .method = method};
+}
+
 std::string PolePairResult::describe() const {
   return std::format("{} pole pair{}", polePairs, polePairs == 1 ? "" : "s");
 }

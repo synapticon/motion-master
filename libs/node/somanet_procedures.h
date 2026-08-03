@@ -215,6 +215,52 @@ std::expected<void, std::string> runMotorPhaseOrderDetectionProcedure(Device& de
                                                                       ProgressReporter& reporter,
                                                                       std::stop_token stop);
 
+/// @brief Procedure name for commutation offset measurement, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kCommutationOffsetMeasurementProcedure =
+    "commutation-offset-measurement";
+
+/// @brief The step commutation offset measurement's own measurement reports against.
+inline constexpr std::string_view kCommutationOffsetMeasurementStep =
+    "commutation-offset-measurement";
+
+/// @brief The step that puts the brake where the configured method needs it.
+///
+/// Its own id rather than @c kReleaseBrakeStep, because this is the one procedure that may
+/// **engage** the brake instead of releasing it: the stationary method cannot hold the load, so it
+/// runs with the brake on. A step called "release-brake" that sometimes engages would be a lie in
+/// the step array.
+inline constexpr std::string_view kSetBrakeStep = "set-brake";
+
+/// @brief Commutation offset measurement's step template — prepare, set the brake, measure,
+/// restore.
+std::vector<ProgressStep> commutationOffsetMeasurementSteps();
+
+/// @brief Runs commutation offset measurement as a procedure body.
+///
+/// The measurement that commissions an axis, and **the one procedure here whose physical behaviour
+/// is configured on the drive rather than fixed by the procedure**: the method in 0x2009:03 decides
+/// both whether the rotor turns and which way the brake has to go. So the method is read first —
+/// before the drive is touched at all, since a method that cannot be read or is out of range means
+/// the brake would be handled by guesswork — and reported in the result.
+///
+/// Four steps: the shared **prepare**, **set-brake** (released for the rotating methods, *engaged*
+/// for the stationary one), the measurement, and the shared **restore**, which puts the brake and
+/// the operation mode back on every path out.
+///
+/// **A successful run changes the drive's configuration** — the firmware writes 0x2001 and sets
+/// 0x2009:01 to OFFSET_VALID — and the restore deliberately leaves that alone, exactly as with
+/// motor phase order detection. Motor phase order detection must have been run first; the drive
+/// does not check that, so nothing here can enforce it either.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; checked between steps and passed into the OS command so a
+///                 running measurement is aborted rather than abandoned.
+/// @return Void when the drive reported an offset, otherwise why it did not.
+std::expected<void, std::string> runCommutationOffsetMeasurementProcedure(
+    Device& device, ProgressReporter& reporter, std::stop_token stop);
+
 /// @brief Procedure name for phase resistance measurement, as it appears in its URL and its
 ///        snapshot key.
 inline constexpr std::string_view kPhaseResistanceMeasurementProcedure =

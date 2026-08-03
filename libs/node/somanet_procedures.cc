@@ -431,6 +431,71 @@ std::expected<void, std::string> runMotorPhaseOrderDetectionProcedure(Device& de
                                  });
 }
 
+std::vector<ProgressStep> commutationOffsetMeasurementSteps() {
+  return stepsFrom({kPrepareStep, kSetBrakeStep, kCommutationOffsetMeasurementStep, kRestoreStep});
+}
+
+std::expected<void, std::string> runCommutationOffsetMeasurementProcedure(
+    Device& device, ProgressReporter& reporter, std::stop_token stop) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+
+  // Read before anything is changed, and reported as a run-level failure rather than against a
+  // step: the method decides which way the brake has to go, so not knowing it means there is no
+  // safe way to proceed — and refusing here leaves the drive untouched instead of enabled in
+  // diagnostics mode.
+  auto method = drive->commutationOffsetMethod();
+  if (!method) {
+    return std::unexpected(method.error());
+  }
+
+  DiagnosticsRestorer restorer(*drive, reporter, kCommutationOffsetMeasurementProcedure);
+
+  if (auto r = prepareForDiagnostics(*drive, reporter, restorer); !r) {
+    return std::unexpected(r.error());
+  }
+  if (stop.stop_requested()) {
+    return std::unexpected("commutation offset measurement was cancelled");
+  }
+
+  // Released for the rotating methods, engaged for the stationary one — which is not a shortcut for
+  // "leave it alone": a brake found released would let a load move under a method that cannot hold
+  // it, so it is commanded either way. Armed before the write, like every other brake change here.
+  reporter.start(kSetBrakeStep);
+  auto savedBrake = drive->brakeStatus();
+  if (!savedBrake) {
+    reporter.fail(kSetBrakeStep, savedBrake.error());
+    return std::unexpected(savedBrake.error());
+  }
+  restorer.restoreBrake(*savedBrake);
+
+  auto brake =
+      somanet::requiresBrakeReleased(*method) ? drive->releaseBrake() : drive->engageBrake();
+  if (!brake) {
+    reporter.fail(kSetBrakeStep, brake.error());
+    return std::unexpected(brake.error());
+  }
+  reporter.succeed(kSetBrakeStep, *brake);
+
+  if (stop.stop_requested()) {
+    return std::unexpected("commutation offset measurement was cancelled");
+  }
+
+  reporter.start(kCommutationOffsetMeasurementStep);
+  auto result = drive->runCommutationOffsetMeasurement(
+      *method, {.timeout = std::chrono::seconds(60),
+                .pollInterval = std::chrono::milliseconds(100),
+                .stop = std::move(stop)});
+  if (!result) {
+    reporter.fail(kCommutationOffsetMeasurementStep, result.error());
+    return std::unexpected(result.error());
+  }
+  reporter.succeed(kCommutationOffsetMeasurementStep, *result);
+  return {};
+}
+
 std::vector<ProgressStep> phaseResistanceMeasurementSteps() {
   return stepsFrom({kPrepareStep, kPhaseResistanceMeasurementStep, kRestoreStep});
 }

@@ -825,6 +825,62 @@ TEST(RunMotorPhaseOrderDetection, AGeneralOsErrorNamesItself) {
   EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
 }
 
+// --- Commutation offset measurement (command 5) --------------------------------------------------
+
+TEST(RunCommutationOffsetMeasurement, DecodesTheTwoByteBigEndianOffset) {
+  // The specification's example: 2035 (0x07F3) in response bytes 2-3.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0x07, 0xF3, 0, 0, 0, 0}};
+  auto result = drive->runCommutationOffsetMeasurement(somanet::CommutationOffsetMethod::kRotating,
+                                                       {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->angleOffset, 2035);
+  EXPECT_EQ(result->method, somanet::CommutationOffsetMethod::kRotating);
+  EXPECT_EQ(result->describe(), "commutation angle offset 2035 (rotating method)");
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 5);
+}
+
+TEST(RunCommutationOffsetMeasurement, RecordsTheMethodItRanUnder) {
+  // The offset alone does not say whether the rotor turned to produce it, so the method travels
+  // with the value rather than being left for a reader to look up separately.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0x00, 0x10, 0, 0, 0, 0}};
+  auto result = drive->runCommutationOffsetMeasurement(
+      somanet::CommutationOffsetMethod::kStationary, {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->method, somanet::CommutationOffsetMethod::kStationary);
+  EXPECT_NE(result->describe().find("stationary"), std::string::npos) << result->describe();
+}
+
+TEST(RunCommutationOffsetMeasurement, AGeneralOsErrorNamesItself) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};
+  auto result = drive->runCommutationOffsetMeasurement(somanet::CommutationOffsetMethod::kRotating,
+                                                       {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
+}
+
+TEST(RequiresBrakeReleased, IsTrueForTheRotatingMethodsOnly) {
+  // The stationary method wants the brake *engaged*, so this is not a "needs no brake handling"
+  // flag.
+  EXPECT_TRUE(somanet::requiresBrakeReleased(somanet::CommutationOffsetMethod::kRotating));
+  EXPECT_TRUE(somanet::requiresBrakeReleased(somanet::CommutationOffsetMethod::kRotatingTuned));
+  EXPECT_FALSE(somanet::requiresBrakeReleased(somanet::CommutationOffsetMethod::kStationary));
+}
+
 // --- Pole pair detection (command 7) -------------------------------------------------------------
 
 TEST(RunPolePairDetection, DecodesTheCountFromTheFirstPayloadByte) {

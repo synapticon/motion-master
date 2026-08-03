@@ -180,6 +180,49 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor commutationOffset;
+  commutationOffset.name = std::string(kCommutationOffsetMeasurementProcedure);
+  commutationOffset.title = "Commutation offset measurement";
+  commutationOffset.description =
+      "Measures the commutation angle offset and stores it in the drive (0x2001), marking the "
+      "offset "
+      "valid (0x2009:01). This is the measurement that commissions an axis, and the last step of "
+      "the "
+      "sequence: open phase detection, pole pair detection, motor phase order detection, then "
+      "this. "
+      "How it behaves is configured on the drive rather than chosen here — the method in 0x2009:03 "
+      "decides whether the rotor turns and whether the brake is released or engaged, and the "
+      "method "
+      "that ran is reported with the result. The drive is prepared and restored automatically.";
+  commutationOffset.caveats = {
+      "Motor phase order detection must have been run first. The drive does not check this, so "
+      "nothing here can enforce it — an offset measured against an unknown phase order is wrong.",
+      "The two rotating methods (0x2009:03 = 0 or 1) turn the rotor and need the brake released, "
+      "so "
+      "anything it was holding is free to move: support the load first. Method 1 additionally "
+      "needs "
+      "the gains in 0x2009:04-06 tuned.",
+      "The stationary method (0x2009:03 = 2) does not turn the rotor and runs with the brake "
+      "engaged, but it cannot hold the load and is less precise.",
+      "A successful run changes the drive's configuration, and the restore does not undo it — the "
+      "measured offset is the result, not a side effect.",
+      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
+      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
+  };
+  commutationOffset.movesMotor = true;
+  commutationOffset.requiresEnabled = false;
+  commutationOffset.steps = commutationOffsetMeasurementSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(commutationOffset),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runCommutationOffsetMeasurementProcedure(device, reporter, std::move(stop));
+        };
+      },
+  });
+
   ProcedureDescriptor phaseResistance;
   phaseResistance.name = std::string(kPhaseResistanceMeasurementProcedure);
   phaseResistance.title = "Phase resistance measurement";

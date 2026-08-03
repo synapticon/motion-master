@@ -30,6 +30,7 @@ using mm::comm::FieldbusDriver;
 using mm::comm::ObjectDataType;
 using mm::comm::OdEntry;
 using mm::comm::SlaveInfo;
+using mm::node::commutationOffsetMeasurementSteps;
 using mm::node::Device;
 using mm::node::kOsCommand;
 using mm::node::kOsCommandMode;
@@ -44,6 +45,7 @@ using mm::node::phaseResistanceMeasurementSteps;
 using mm::node::polePairDetectionSteps;
 using mm::node::ProgressReporter;
 using mm::node::ProgressStatus;
+using mm::node::runCommutationOffsetMeasurementProcedure;
 using mm::node::runMotorPhaseOrderDetectionProcedure;
 using mm::node::runOpenPhaseDetectionProcedure;
 using mm::node::runOsCommandProcedure;
@@ -66,6 +68,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
   int responseReads = 0;
   int drainReads = 0;
   int commandWrites = 0;
+  std::vector<uint8_t> brakeStatusWrites;
   uint32_t vendorId = kSynapticonVendorId;
   uint16_t statusword = 0x0040;  // SwitchOnDisabled
   std::vector<std::pair<uint16_t, uint8_t>> writeLog;
@@ -104,6 +107,9 @@ class OsCommandFakeDriver : public FieldbusDriver {
                   {static_cast<uint8_t>(somanet::BrakeReleaseStrategy::kClutch)});
     programObject(somanet::kBrakeOptions, somanet::kBrakeStatus, ObjectDataType::UNSIGNED8,
                   {static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+    programObject(somanet::kCommutationOffsetDetection, somanet::kCommutationOffsetMethod,
+                  ObjectDataType::UNSIGNED8,
+                  {static_cast<uint8_t>(somanet::CommutationOffsetMethod::kRotating)});
     store[key(Object::kStatusword, 0)] = {0x40, 0x00};
   }
 
@@ -135,6 +141,9 @@ class OsCommandFakeDriver : public FieldbusDriver {
     writeLog.push_back({index, subindex});
     if (index == kOsCommand && subindex == 1) {
       ++commandWrites;
+    }
+    if (index == somanet::kBrakeOptions && subindex == somanet::kBrakeStatus && !data.empty()) {
+      brakeStatusWrites.push_back(data[0]);
     }
     // Model just enough of the CiA402 machine for enable() to converge: a controlword write
     // advances the state and the statusword follows it. Without that the drive never reports
@@ -326,14 +335,19 @@ TEST(OpenPhaseDetectionSteps, DeclaresThreeStepsWithNoBrakeStep) {
 }
 
 // Finds a step by id in a reporter snapshot.
-const mm::node::ProgressStep* stepById(const std::vector<mm::node::ProgressStep>& steps,
-                                       std::string_view id) {
+//
+// Returns by value on purpose. ProgressReporter::steps() hands back a *copy*, so a function
+// returning a pointer into it would dangle the moment it was called on the temporary —
+// stepById(reporter.steps(), id) reads freed memory, and does it quietly: the status often survives
+// while the json value comes back null.
+std::optional<mm::node::ProgressStep> stepById(const std::vector<mm::node::ProgressStep>& steps,
+                                               std::string_view id) {
   for (const auto& step : steps) {
     if (step.id == id) {
-      return &step;
+      return step;
     }
   }
-  return nullptr;
+  return std::nullopt;
 }
 
 // Whether the brake object was written at all during a run.
@@ -353,8 +367,8 @@ TEST(RunOpenPhaseDetectionProcedure, PreparesChecksAndRestores) {
 
   const auto steps = reporter.steps();
   for (auto id : {"prepare", "open-phase-detection", "restore"}) {
-    const auto* step = stepById(steps, id);
-    ASSERT_NE(step, nullptr) << id;
+    const auto step = stepById(steps, id);
+    ASSERT_TRUE(step.has_value()) << id;
     EXPECT_EQ(step->status, ProgressStatus::kSucceeded) << id;
   }
 
@@ -398,16 +412,16 @@ TEST(RunOpenPhaseDetectionProcedure, AnOpenPhaseFailsTheStepAndStillRestores) {
   EXPECT_NE(result.error().find("open terminal A"), std::string::npos) << result.error();
 
   const auto steps = reporter.steps();
-  const auto* detect = stepById(steps, "open-phase-detection");
-  ASSERT_NE(detect, nullptr);
+  const auto detect = stepById(steps, "open-phase-detection");
+  ASSERT_TRUE(detect.has_value());
   EXPECT_EQ(detect->status, ProgressStatus::kFailed);
   ASSERT_TRUE(detect->error.has_value());
   EXPECT_NE(detect->error->find("terminal A of the drive is not connected"), std::string::npos);
 
   // The restore is not conditional on success — a failed run must not leave the drive in
   // diagnostics mode.
-  const auto* restore = stepById(steps, "restore");
-  ASSERT_NE(restore, nullptr);
+  const auto restore = stepById(steps, "restore");
+  ASSERT_TRUE(restore.has_value());
   EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
   EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
             std::vector<uint8_t>{8});
@@ -424,8 +438,8 @@ TEST(RunOpenPhaseDetectionProcedure, RestoresAfterCancellation) {
   ASSERT_FALSE(result.has_value());
 
   const auto steps = reporter.steps();
-  const auto* restore = stepById(steps, "restore");
-  ASSERT_NE(restore, nullptr);
+  const auto restore = stepById(steps, "restore");
+  ASSERT_TRUE(restore.has_value());
   EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
   EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
             std::vector<uint8_t>{8});
@@ -456,13 +470,13 @@ TEST(RunPolePairDetectionProcedure, PreparesReleasesDetectsAndRestores) {
 
   const auto steps = reporter.steps();
   for (auto id : {"prepare", "release-brake", "pole-pair-detection", "restore"}) {
-    const auto* step = stepById(steps, id);
-    ASSERT_NE(step, nullptr) << id;
+    const auto step = stepById(steps, id);
+    ASSERT_TRUE(step.has_value()) << id;
     EXPECT_EQ(step->status, ProgressStatus::kSucceeded) << id;
   }
 
-  const auto* detected = stepById(steps, "pole-pair-detection");
-  ASSERT_NE(detected, nullptr);
+  const auto detected = stepById(steps, "pole-pair-detection");
+  ASSERT_TRUE(detected.has_value());
   EXPECT_EQ(detected->value.at("polePairs").get<uint8_t>(), 3);
 
   // The brake may only be released once the drive is enabled: in diagnostics mode enabling does not
@@ -500,8 +514,8 @@ TEST(RunPolePairDetectionProcedure, AFailedDetectionStillRestoresTheBrake) {
   EXPECT_NE(result.error().find("could not raise the motor phase currents"), std::string::npos)
       << result.error();
 
-  const auto* restore = stepById(reporter.steps(), "restore");
-  ASSERT_NE(restore, nullptr);
+  const auto restore = stepById(reporter.steps(), "restore");
+  ASSERT_TRUE(restore.has_value());
   EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
   EXPECT_EQ(
       driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
@@ -530,13 +544,13 @@ TEST(RunMotorPhaseOrderDetectionProcedure, PreparesReleasesDetectsAndRestores) {
 
   const auto steps = reporter.steps();
   for (auto id : {"prepare", "release-brake", "motor-phase-order-detection", "restore"}) {
-    const auto* step = stepById(steps, id);
-    ASSERT_NE(step, nullptr) << id;
+    const auto step = stepById(steps, id);
+    ASSERT_TRUE(step.has_value()) << id;
     EXPECT_EQ(step->status, ProgressStatus::kSucceeded) << id;
   }
 
-  const auto* detected = stepById(steps, "motor-phase-order-detection");
-  ASSERT_NE(detected, nullptr);
+  const auto detected = stepById(steps, "motor-phase-order-detection");
+  ASSERT_TRUE(detected.has_value());
   EXPECT_EQ(detected->value.at("order").get<std::string>(), "inverted");
   EXPECT_TRUE(detected->value.at("inverted").get<bool>());
 
@@ -578,12 +592,101 @@ TEST(RunMotorPhaseOrderDetectionProcedure, RestoresAfterCancellation) {
   auto result = runMotorPhaseOrderDetectionProcedure(device, reporter, source.get_token());
   ASSERT_FALSE(result.has_value());
 
-  const auto* restore = stepById(reporter.steps(), "restore");
-  ASSERT_NE(restore, nullptr);
+  const auto restore = stepById(reporter.steps(), "restore");
+  ASSERT_TRUE(restore.has_value());
   EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
   EXPECT_EQ(
       driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
       std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+}
+
+// --- Commutation offset measurement procedure ----------------------------------------------------
+
+TEST(CommutationOffsetMeasurementSteps, DeclaresFourStepsWithItsOwnBrakeStep) {
+  // "set-brake" rather than "release-brake": this procedure may engage the brake instead.
+  auto steps = commutationOffsetMeasurementSteps();
+  ASSERT_EQ(steps.size(), 4u);
+  EXPECT_EQ(steps[0].id, "prepare");
+  EXPECT_EQ(steps[1].id, "set-brake");
+  EXPECT_EQ(steps[2].id, "commutation-offset-measurement");
+  EXPECT_EQ(steps[3].id, "restore");
+}
+
+TEST(RunCommutationOffsetMeasurementProcedure, ARotatingMethodReleasesTheBrake) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(commutationOffsetMeasurementSteps());
+
+  driver.responses = {{1, 0, 0x07, 0xF3, 0, 0, 0, 0}};  // 2035
+  auto result = runCommutationOffsetMeasurementProcedure(device, reporter, std::stop_token{});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto steps = reporter.steps();
+  for (auto id : {"prepare", "set-brake", "commutation-offset-measurement", "restore"}) {
+    const auto step = stepById(steps, id);
+    ASSERT_TRUE(step.has_value()) << id;
+    EXPECT_EQ(step->status, ProgressStatus::kSucceeded) << id;
+  }
+
+  const auto measured = stepById(steps, "commutation-offset-measurement");
+  ASSERT_TRUE(measured.has_value());
+  EXPECT_EQ(measured->value.at("angleOffset").get<uint16_t>(), 2035);
+  EXPECT_EQ(measured->value.at("method").get<std::string>(), "rotating");
+
+  // Released during the run, and back to engaged afterwards.
+  EXPECT_NE(std::ranges::find(driver.brakeStatusWrites,
+                              static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged)),
+            driver.brakeStatusWrites.end());
+  EXPECT_EQ(
+      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
+      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 5);
+}
+
+TEST(RunCommutationOffsetMeasurementProcedure, TheStationaryMethodEngagesTheBrakeInstead) {
+  // Method 2 cannot hold the load, so the brake must never be released for it — not even briefly,
+  // which is why this asserts on every value written rather than on the state at the end.
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  driver.store[OsCommandFakeDriver::key(somanet::kCommutationOffsetDetection,
+                                        somanet::kCommutationOffsetMethod)] = {
+      static_cast<uint8_t>(somanet::CommutationOffsetMethod::kStationary)};
+  ProgressReporter reporter(commutationOffsetMeasurementSteps());
+
+  driver.responses = {{1, 0, 0x00, 0x10, 0, 0, 0, 0}};
+  auto result = runCommutationOffsetMeasurementProcedure(device, reporter, std::stop_token{});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  EXPECT_EQ(std::ranges::find(driver.brakeStatusWrites,
+                              static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged)),
+            driver.brakeStatusWrites.end());
+  EXPECT_NE(std::ranges::find(driver.brakeStatusWrites,
+                              static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)),
+            driver.brakeStatusWrites.end());
+
+  const auto measured = stepById(reporter.steps(), "commutation-offset-measurement");
+  ASSERT_TRUE(measured.has_value());
+  EXPECT_EQ(measured->value.at("method").get<std::string>(), "stationary");
+}
+
+TEST(RunCommutationOffsetMeasurementProcedure, AnUnreadableMethodLeavesTheDriveUntouched) {
+  // Not knowing the method means not knowing which way the brake goes, so the run must fail before
+  // the drive is enabled rather than guess — no step runs, and nothing is written.
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  driver.store[OsCommandFakeDriver::key(somanet::kCommutationOffsetDetection,
+                                        somanet::kCommutationOffsetMethod)] = {7};
+  ProgressReporter reporter(commutationOffsetMeasurementSteps());
+
+  auto result = runCommutationOffsetMeasurementProcedure(device, reporter, std::stop_token{});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("outside the defined range"), std::string::npos) << result.error();
+
+  for (const auto& step : reporter.steps()) {
+    EXPECT_EQ(step.status, ProgressStatus::kIdle) << step.id;
+  }
+  EXPECT_TRUE(driver.brakeStatusWrites.empty());
+  EXPECT_EQ(driver.commandWrites, 0);
 }
 
 // --- Phase resistance measurement procedure ------------------------------------------------------
@@ -609,13 +712,13 @@ TEST(RunPhaseResistanceMeasurementProcedure, PreparesMeasuresAndRestores) {
 
   const auto steps = reporter.steps();
   for (auto id : {"prepare", "phase-resistance-measurement", "restore"}) {
-    const auto* step = stepById(steps, id);
-    ASSERT_NE(step, nullptr) << id;
+    const auto step = stepById(steps, id);
+    ASSERT_TRUE(step.has_value()) << id;
     EXPECT_EQ(step->status, ProgressStatus::kSucceeded) << id;
   }
 
-  const auto* measured = stepById(steps, "phase-resistance-measurement");
-  ASSERT_NE(measured, nullptr);
+  const auto measured = stepById(steps, "phase-resistance-measurement");
+  ASSERT_TRUE(measured.has_value());
   EXPECT_EQ(measured->value.at("milliohms").get<uint32_t>(), 100000u);
 
   // Diagnostics mode was requested before the command ran, and the mode was put back afterwards.
@@ -650,12 +753,12 @@ TEST(RunPhaseResistanceMeasurementProcedure, FailsTheMeasurementStepAndStillRest
       << result.error();
 
   const auto steps = reporter.steps();
-  const auto* measured = stepById(steps, "phase-resistance-measurement");
-  ASSERT_NE(measured, nullptr);
+  const auto measured = stepById(steps, "phase-resistance-measurement");
+  ASSERT_TRUE(measured.has_value());
   EXPECT_EQ(measured->status, ProgressStatus::kFailed);
 
-  const auto* restore = stepById(steps, "restore");
-  ASSERT_NE(restore, nullptr);
+  const auto restore = stepById(steps, "restore");
+  ASSERT_TRUE(restore.has_value());
   EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
   EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
             std::vector<uint8_t>{8});
@@ -671,8 +774,8 @@ TEST(RunPhaseResistanceMeasurementProcedure, RestoresAfterCancellation) {
   auto result = runPhaseResistanceMeasurementProcedure(device, reporter, source.get_token());
   ASSERT_FALSE(result.has_value());
 
-  const auto* restore = stepById(reporter.steps(), "restore");
-  ASSERT_NE(restore, nullptr);
+  const auto restore = stepById(reporter.steps(), "restore");
+  ASSERT_TRUE(restore.has_value());
   EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
   EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
             std::vector<uint8_t>{8});
@@ -699,13 +802,13 @@ TEST(RunPhaseInductanceMeasurementProcedure, PreparesMeasuresAndRestores) {
 
   const auto steps = reporter.steps();
   for (auto id : {"prepare", "phase-inductance-measurement", "restore"}) {
-    const auto* step = stepById(steps, id);
-    ASSERT_NE(step, nullptr) << id;
+    const auto step = stepById(steps, id);
+    ASSERT_TRUE(step.has_value()) << id;
     EXPECT_EQ(step->status, ProgressStatus::kSucceeded) << id;
   }
 
-  const auto* measured = stepById(steps, "phase-inductance-measurement");
-  ASSERT_NE(measured, nullptr);
+  const auto measured = stepById(steps, "phase-inductance-measurement");
+  ASSERT_TRUE(measured.has_value());
   EXPECT_EQ(measured->value.at("microhenries").get<uint32_t>(), 4244u);
 
   // Command 9, not 8 — the two procedures share their whole body, so which command each issues is

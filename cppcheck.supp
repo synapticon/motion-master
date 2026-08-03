@@ -38,6 +38,7 @@ syntaxError:*/process_data_ring_test.cc
 syntaxError:*/process_data_dump_test.cc
 syntaxError:*/procedure_test.cc
 syntaxError:*/procedure_manager_test.cc
+syntaxError:*/procedure_catalogue_test.cc
 syntaxError:*/ring_log_sink_test.cc
 syntaxError:*/monitoring_api_test.cc
 syntaxError:*/process_image_test.cc
@@ -64,6 +65,20 @@ syntaxError:*/user_cache_test.cc
 useStlAlgorithm:*/esi.cc
 useStlAlgorithm:*/esi_entry.cc
 useStlAlgorithm:*/esi_request.cc
+
+// Two append-in-a-loop builders: ProcedureDescriptor's to_json collects step ids into a
+// nlohmann::json array, and listProcedures pairs each catalogue entry with its snapshot into a
+// reserved vector. Both would become a std::transform over a std::back_inserter — for the first,
+// over a json array, which is obscure rather than clearer. The loops stay.
+useStlAlgorithm:*/procedure.cc
+useStlAlgorithm:*/procedure_catalogue.cc
+
+// A catalogue entry's `applies` predicate is a std::function<bool(Device&)>. The one entry there is
+// today only reads the vendor ID, so cppcheck suggests a const Device& — but the signature is
+// deliberately non-const, because a predicate that binds a profile view to decide applicability
+// needs a mutable device, and one lambda differing from its siblings would read as meaningful when
+// it is incidental. Same reasoning as cia402_control.cc above.
+constParameterReference:*/procedure_catalogue.cc
 
 // UserCache::resolve joins validated path components with `p /= part`. cppcheck reads the loop as
 // a fold and suggests std::accumulate; expressing a path join that way is strictly less readable

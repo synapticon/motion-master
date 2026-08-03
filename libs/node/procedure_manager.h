@@ -36,15 +36,24 @@ namespace mm::node {
 using ProcedureBody =
     std::function<std::expected<void, std::string>(Device&, ProgressReporter&, std::stop_token)>;
 
-/// @brief Why a procedure could not be started. A caller must branch on this — an HTTP handler maps
-///        @c kBusy to 409 and @c kUnknownDevice to 404 — which is what earns a structured error
+/// @brief Why a procedure operation could not be performed. A caller must branch on this — an HTTP
+///        handler maps each kind to a different status — which is what earns a structured error
 ///        here rather than the usual @c std::string (see CLAUDE.md's no-exceptions mandate, and
 ///        @c libs/comm/foe_error.h for the shape). It keeps a string face so forwarding callers are
 ///        unaffected.
-struct ProcedureStartError {
+///
+/// Two layers raise these, and the split is worth knowing: @c ProcedureManager produces only
+/// @c kBusy and @c kUnknownDevice, because those are the only two things it can judge. Whether a
+/// procedure *exists* and whether a request *is valid* are the catalogue's business
+/// (@c procedure_catalogue.h) — the manager is told a body, never a name it could validate. One
+/// error type across both keeps a handler's mapping in one place instead of translating between
+/// two.
+struct ProcedureError {
   enum class Kind : uint8_t {
-    kBusy,           ///< Another procedure is already running on that device.
-    kUnknownDevice,  ///< No device holds that bus position.
+    kBusy,              ///< Another procedure is already running on that device. → 409
+    kUnknownDevice,     ///< No device holds that bus position. → 404
+    kUnknownProcedure,  ///< No procedure by that name, or not one this device supports. → 404
+    kInvalidRequest,    ///< The procedure exists but the request for it does not validate. → 400
   };
 
   Kind kind = Kind::kBusy;
@@ -55,7 +64,7 @@ struct ProcedureStartError {
 };
 
 /// @brief Streams the message, so `ASSERT_TRUE(r) << r.error()` and spdlog `{}` work unchanged.
-inline std::ostream& operator<<(std::ostream& os, const ProcedureStartError& e) {
+inline std::ostream& operator<<(std::ostream& os, const ProcedureError& e) {
   return os << e.message;
 }
 
@@ -113,10 +122,9 @@ class ProcedureManager {
   /// @param name            Procedure identifier, e.g. "os-command"; scopes the retained snapshot.
   /// @param steps           The procedure's step template, in order, all idle.
   /// @param body            The work to run (see @c ProcedureBody).
-  /// @return Void once started, or why it could not be (see @c ProcedureStartError).
-  std::expected<void, ProcedureStartError> start(uint16_t devicePosition, std::string name,
-                                                 std::vector<ProgressStep> steps,
-                                                 ProcedureBody body);
+  /// @return Void once started, or why it could not be (see @c ProcedureError).
+  std::expected<void, ProcedureError> start(uint16_t devicePosition, std::string name,
+                                            std::vector<ProgressStep> steps, ProcedureBody body);
 
   /// @brief The current or last-known state of @p name on @p devicePosition.
   ///

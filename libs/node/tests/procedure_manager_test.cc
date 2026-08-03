@@ -28,8 +28,8 @@ using mm::comm::OdEntry;
 using mm::comm::SlaveInfo;
 using mm::node::Device;
 using mm::node::DeviceManager;
+using mm::node::ProcedureError;
 using mm::node::ProcedureManager;
-using mm::node::ProcedureStartError;
 using mm::node::ProcedureStatus;
 using mm::node::ProgressReporter;
 using mm::node::ProgressStatus;
@@ -231,7 +231,7 @@ TEST(ProcedureManagerStart, RejectsASecondRunOnABusyDevice) {
                     [](Device&, ProgressReporter&,
                        std::stop_token) -> std::expected<void, std::string> { return {}; });
   ASSERT_FALSE(rejected.has_value());
-  EXPECT_EQ(rejected.error().kind, ProcedureStartError::Kind::kBusy);
+  EXPECT_EQ(rejected.error().kind, ProcedureError::Kind::kBusy);
   EXPECT_NE(rejected.error().message.find("slow"), std::string::npos) << rejected.error();
 
   gate.open();
@@ -279,7 +279,7 @@ TEST(ProcedureManagerStart, RejectsAnUnknownDeviceBeforeSpawning) {
         return {};
       });
   ASSERT_FALSE(rejected.has_value());
-  EXPECT_EQ(rejected.error().kind, ProcedureStartError::Kind::kUnknownDevice);
+  EXPECT_EQ(rejected.error().kind, ProcedureError::Kind::kUnknownDevice);
   EXPECT_FALSE(ran) << "an unknown position must fail before any thread is spawned";
   EXPECT_FALSE(manager.snapshot(99, "demo").has_value());
 }

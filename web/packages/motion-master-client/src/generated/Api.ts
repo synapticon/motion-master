@@ -27,6 +27,8 @@ import {
   ParameterCacheEntry,
   PdoMapping,
   PdoMappingRequest,
+  ProcedureListing,
+  ProcedureRequest,
   ProcedureSnapshot,
   ProcessDataWatchdog,
   ProcessImageObject,
@@ -1031,42 +1033,34 @@ export class Api<
       ...params,
     });
   /**
-   * @description Starts the raw OS command procedure (CANopen 0x1023 / 0x1024, as SOMANET firmware drives it) and returns as soon as the run is under way — this does **not** wait for the command to finish. Poll `GET` on the same path for its outcome, or `DELETE` to cancel it. The escape hatch for commands that have no typed procedure yet: the eight request bytes are passed through as given (byte 0 is the OS command ID, bytes 1-7 its parameters). Only one procedure may run on a device at a time; a second start is refused with 409 while the first is in flight. Requires the device to be a SOMANET drive with an active mailbox (PRE-OP/SAFE-OP/OP). A command the drive answers with an error is not a failure of this request — it is reported in the snapshot as a failed run.
+   * @description Returns every procedure available on the device, each with its descriptor and the state of its current or last run. One request is enough to render a whole per-device procedures view: the descriptor carries the title, description and caveats to display, and the snapshot says whether anything is running or how the last run went. The list is per device, not global — a procedure is offered only where it applies, so a third-party slave reports an empty list rather than controls that could only ever fail. A procedure that has never run reports an idle snapshot (`status` `idle`, `runCount` 0, every step `idle`), so every entry has the same shape.
    *
-   * @name StartOsCommand
-   * @summary Start a raw OS command on a device
-   * @request POST:/api/devices/{slavePosition}/procedures/os-command
+   * @name ListProcedures
+   * @summary List the procedures a device supports
+   * @request GET:/api/devices/{slavePosition}/procedures
    */
-  startOsCommand = (
+  listProcedures = (slavePosition: number, params: RequestParams = {}) =>
+    this.request<ProcedureListing[], void>({
+      path: `/api/devices/${slavePosition}/procedures`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Starts the named procedure and returns as soon as the run is under way — this does **not** wait for it to finish. Poll `GET` on the same path for its outcome, or `DELETE` to cancel it. The request body carries the procedure's parameters; which fields it accepts (and whether it needs any at all) is per procedure, so consult the descriptor from `GET /api/devices/{slavePosition}/procedures`. A procedure that takes no parameters may be started with no body. Only one procedure may run on a device at a time; a second start is refused with 409 while the first is in flight. Most procedures require an active mailbox, so the device must be in PRE-OP, SAFE-OP or OP. A run the drive answers with an error is not a failure of *this* request — it is reported in the snapshot as a failed run.
+   *
+   * @name StartProcedure
+   * @summary Start a procedure on a device
+   * @request POST:/api/devices/{slavePosition}/procedures/{procedureName}
+   */
+  startProcedure = (
     slavePosition: number,
-    data: {
-      /**
-       * The eight request bytes. Byte 0 is the OS command ID; bytes 1-7 are that command's parameters.
-       * @maxItems 8
-       * @minItems 8
-       * @example [8,0,0,0,0,0,0,0]
-       */
-      command: number[];
-      /**
-       * Ceiling on the whole command. Not a liveness check — the drive fails a command no service acknowledges within 5 s on its own — so size it for the command being run. Hitting it aborts the command on the drive.
-       * @min 1
-       * @max 600000
-       * @default 1000
-       * @example 30000
-       */
-      timeoutMs?: number;
-      /**
-       * How often the server reads the drive's response object while waiting.
-       * @min 1
-       * @max 1000
-       * @default 10
-       */
-      pollIntervalMs?: number;
-    },
+    procedureName: string,
+    data?: ProcedureRequest,
     params: RequestParams = {},
   ) =>
     this.request<ProcedureSnapshot, void>({
-      path: `/api/devices/${slavePosition}/procedures/os-command`,
+      path: `/api/devices/${slavePosition}/procedures/${procedureName}`,
       method: "POST",
       body: data,
       type: ContentType.Json,
@@ -1074,32 +1068,37 @@ export class Api<
       ...params,
     });
   /**
-   * @description Returns the current run, or the last one to have finished. This is the whole progress surface — there is no push channel — and polling it is lossless: every finished step keeps its terminal status and value, so a step that both starts and completes between two polls is still reported as succeeded. A polling loop is `while status == "running"`. The snapshot is retained after the run ends, so a client that reconnects (or a user returning to a page) sees how the last run went. It is dropped when the device set is rebuilt by a scan or reset, because bus positions may then name different hardware.
+   * @description Returns the current run, or the last one to have finished. This is the whole progress surface — there is no push channel — and polling it is lossless: every finished step keeps its terminal status and value, so a step that both starts and completes between two polls is still reported as succeeded. A polling loop is `while status == "running"`. A procedure that has never run is not an absence: it reports an idle snapshot built from the procedure's step template, so a client renders one shape and needs no empty-state branch. The snapshot is retained after a run ends, so a client that reconnects (or a user returning to a page) sees how the last run went. It is dropped when the device set is rebuilt by a scan or reset, because bus positions may then name different hardware.
    *
-   * @name GetOsCommandProcedure
-   * @summary Read the state of a device's OS command procedure
-   * @request GET:/api/devices/{slavePosition}/procedures/os-command
+   * @name GetProcedure
+   * @summary Read the state of a procedure on a device
+   * @request GET:/api/devices/{slavePosition}/procedures/{procedureName}
    */
-  getOsCommandProcedure = (slavePosition: number, params: RequestParams = {}) =>
+  getProcedure = (
+    slavePosition: number,
+    procedureName: string,
+    params: RequestParams = {},
+  ) =>
     this.request<ProcedureSnapshot, void>({
-      path: `/api/devices/${slavePosition}/procedures/os-command`,
+      path: `/api/devices/${slavePosition}/procedures/${procedureName}`,
       method: "GET",
       format: "json",
       ...params,
     });
   /**
-   * @description Asks the running procedure to stop and returns immediately; the drive is told to abort the in-flight command (0x1024 = 3), so a long measurement stops rather than running to completion. The run then finishes with status `cancelled`. This cancels the *run*, not the record: the snapshot remains and reports how far it got.
+   * @description Asks the running procedure to stop and returns immediately. Where the procedure is waiting on the drive it also tells the drive to abort (for an OS command, 0x1024 = 3), so a run that is waiting stops when asked rather than carrying on to completion. The run then finishes with status `cancelled`. This cancels the *run*, not the record: the snapshot remains and reports how far it got.
    *
-   * @name CancelOsCommandProcedure
-   * @summary Cancel a device's running OS command procedure
-   * @request DELETE:/api/devices/{slavePosition}/procedures/os-command
+   * @name CancelProcedure
+   * @summary Cancel a running procedure on a device
+   * @request DELETE:/api/devices/{slavePosition}/procedures/{procedureName}
    */
-  cancelOsCommandProcedure = (
+  cancelProcedure = (
     slavePosition: number,
+    procedureName: string,
     params: RequestParams = {},
   ) =>
     this.request<void, void>({
-      path: `/api/devices/${slavePosition}/procedures/os-command`,
+      path: `/api/devices/${slavePosition}/procedures/${procedureName}`,
       method: "DELETE",
       ...params,
     });

@@ -33,9 +33,11 @@ inline constexpr std::string_view kOsCommandStep = "command";
 
 /// @brief What one raw OS command run was asked to do.
 ///
-/// The escape hatch behind @c POST @c /api/devices/:pos/procedures/os-command: arbitrary command
-/// bytes, for bring-up and for the commands that have no typed wrapper yet. A typed procedure
-/// builds its own bytes instead and exposes only the parameters that make sense for it.
+/// The request behind @c POST @c /api/devices/:pos/procedures/os-command: the caller supplies the
+/// command bytes, which is the direct route to the drive's whole OS command set and a perfectly
+/// ordinary way to drive it. A typed procedure is the other route to the same mechanism — it builds
+/// the bytes itself and exposes only the parameters that make sense for its command — not a
+/// replacement that makes this one a fallback.
 struct OsCommandRequest {
   std::vector<uint8_t> command;                ///< The 8 request bytes (byte 0 = command ID).
   std::chrono::milliseconds timeout{1000};     ///< Ceiling on the whole command.

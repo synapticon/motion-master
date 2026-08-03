@@ -41,9 +41,9 @@
 #include "node/device_parameter.h"
 #include "node/monitoring_manager.h"
 #include "node/pdo_mapping.h"
+#include "node/procedure_catalogue.h"
 #include "node/procedure_manager.h"
 #include "node/profile_control.h"
-#include "node/somanet_procedures.h"
 #include "swagger_spec.h"
 
 namespace {
@@ -85,6 +85,23 @@ using mm::api::sendStatus;
 using mm::api::sendTimedJson;
 using mm::api::setCorsOrigin;
 using mm::api::setWireTime;
+
+// Maps a failed procedure operation to its status line. This translation is the whole reason
+// ProcedureError is structured rather than a string: each kind tells a client to do something
+// different — wait and retry, fix the address, fix the body — and doing it in one place is what
+// keeps the four procedure handlers from each inventing their own mapping.
+constexpr std::string_view procedureErrorStatus(mm::node::ProcedureError::Kind kind) {
+  switch (kind) {
+    case mm::node::ProcedureError::Kind::kBusy:
+      return "409 Conflict";
+    case mm::node::ProcedureError::Kind::kUnknownDevice:
+    case mm::node::ProcedureError::Kind::kUnknownProcedure:
+      return "404 Not Found";
+    case mm::node::ProcedureError::Kind::kInvalidRequest:
+      return "400 Bad Request";
+  }
+  return "500 Internal Server Error";
+}
 
 // Parses the "value" field of a smart parameter-write body into a DeviceParameterValue. The exact
 // numeric width does not matter here — DeviceManager::writeDeviceParameter coerces the value to the
@@ -1305,62 +1322,17 @@ void HttpServer::run() {
             })
       // --- procedures -----------------------------------------------------------------------
       //
-      // One resource per (device, procedure), three verbs: POST starts a run, GET returns the
-      // snapshot, DELETE cancels. Progress is polled, never pushed — each snapshot is accumulating
-      // state in which finished steps keep their status and value, so a client cannot miss a
-      // result between polls, and one that reconnects sees how the last run went.
-      .post(
-          "/api/devices/:slavePosition/procedures/os-command",
-          [this](auto* res, auto* req) {
-            uint16_t pos{};
-            auto posParam = req->getParameter("slavePosition");
-            auto [p, ec] = std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-            const bool posOk = (ec == std::errc() && p == posParam.data() + posParam.size());
-            auto aborted = std::make_shared<bool>(false);
-            auto body = std::make_shared<std::string>();
-            res->onAborted([aborted]() { *aborted = true; });
-            res->onData([this, res, body, aborted, pos, posOk](std::string_view chunk, bool last) {
-              body->append(chunk);
-              if (!last || *aborted) {
-                return;
-              }
-              if (!posOk) {
-                sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                return;
-              }
-              auto json = nlohmann::json::parse(*body, nullptr, false);
-              if (json.is_discarded()) {
-                sendError(res, "400 Bad Request", config_.corsOrigin, "invalid JSON body");
-                return;
-              }
-              // Validation is the node layer's: what a command may hold is domain knowledge.
-              auto request = mm::node::parseOsCommandRequest(json);
-              if (!request) {
-                sendError(res, "400 Bad Request", config_.corsOrigin, request.error());
-                return;
-              }
-              auto started = procedureManager_.start(
-                  pos, std::string(mm::node::kOsCommandProcedure), mm::node::osCommandSteps(),
-                  [spec = *request](mm::node::Device& device, mm::node::ProgressReporter& reporter,
-                                    std::stop_token stop) {
-                    return mm::node::runOsCommandProcedure(device, reporter, std::move(stop), spec);
-                  });
-              if (!started) {
-                // The two failures mean different things to a client: retry later versus never.
-                const bool busy =
-                    started.error().kind == mm::node::ProcedureStartError::Kind::kBusy;
-                sendError(res, busy ? "409 Conflict" : "404 Not Found", config_.corsOrigin,
-                          started.error().message);
-                return;
-              }
-              // 202: the run is under way, not finished. Poll the GET for its outcome.
-              auto snapshot = procedureManager_.snapshot(pos, mm::node::kOsCommandProcedure);
-              mm::api::setCorsOrigin(res->writeStatus("202 Accepted"), config_.corsOrigin)
-                  ->writeHeader("Content-Type", "application/json")
-                  ->end(nlohmann::json(snapshot.value_or(mm::node::ProcedureSnapshot{})).dump());
-            });
-          })
-      .get("/api/devices/:slavePosition/procedures/os-command",
+      // One resource per (device, procedure), addressed by name, with three verbs — POST starts a
+      // run, GET returns the snapshot, DELETE cancels — plus a collection GET returning the
+      // catalogue. These four handlers serve *every* procedure: the catalogue resolves the name,
+      // decides whether the device has it, validates the request and supplies the body, so adding a
+      // procedure is a row in that table and touches nothing here. It is also why this file names
+      // no profile type — the descriptor text and the parameter rules live with the procedure.
+      //
+      // Progress is polled, never pushed — each snapshot is accumulating state in which finished
+      // steps keep their status and value, so a client cannot miss a result between polls, and one
+      // that reconnects sees how the last run went.
+      .get("/api/devices/:slavePosition/procedures",
            [this](auto* res, auto* req) {
              uint16_t pos{};
              auto posParam = req->getParameter("slavePosition");
@@ -1370,15 +1342,82 @@ void HttpServer::run() {
                sendStatus(res, "400 Bad Request", config_.corsOrigin);
                return;
              }
-             auto snapshot = procedureManager_.snapshot(pos, mm::node::kOsCommandProcedure);
+             auto listings = mm::node::listProcedures(deviceManager_, procedureManager_, pos);
+             if (!listings) {
+               sendError(res, procedureErrorStatus(listings.error().kind), config_.corsOrigin,
+                         listings.error().message);
+               return;
+             }
+             sendJson(res, config_.corsOrigin, nlohmann::json(*listings));
+           })
+      .post("/api/devices/:slavePosition/procedures/:name",
+            [this](auto* res, auto* req) {
+              uint16_t pos{};
+              auto posParam = req->getParameter("slavePosition");
+              auto [p, ec] =
+                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+              const bool posOk = (ec == std::errc() && p == posParam.data() + posParam.size());
+              // req is valid only for this call, so the name is copied out before onData can run.
+              auto name = std::make_shared<std::string>(req->getParameter("name"));
+              auto aborted = std::make_shared<bool>(false);
+              auto body = std::make_shared<std::string>();
+              res->onAborted([aborted]() { *aborted = true; });
+              res->onData(
+                  [this, res, body, name, aborted, pos, posOk](std::string_view chunk, bool last) {
+                    body->append(chunk);
+                    if (!last || *aborted) {
+                      return;
+                    }
+                    if (!posOk) {
+                      sendStatus(res, "400 Bad Request", config_.corsOrigin);
+                      return;
+                    }
+                    // A procedure that takes no parameters is started with no body at all: an
+                    // absent body becomes an empty object, so every validator reads its fields the
+                    // same way instead of each one having to accept "nothing" as well.
+                    nlohmann::json request = nlohmann::json::object();
+                    if (!body->empty()) {
+                      request = nlohmann::json::parse(*body, nullptr, false);
+                      if (request.is_discarded()) {
+                        sendError(res, "400 Bad Request", config_.corsOrigin, "invalid JSON body");
+                        return;
+                      }
+                    }
+                    auto snapshot = mm::node::startProcedure(deviceManager_, procedureManager_, pos,
+                                                             *name, request);
+                    if (!snapshot) {
+                      sendError(res, procedureErrorStatus(snapshot.error().kind),
+                                config_.corsOrigin, snapshot.error().message);
+                      return;
+                    }
+                    // 202: the run is under way, not finished. Poll the GET for its outcome.
+                    mm::api::setCorsOrigin(res->writeStatus("202 Accepted"), config_.corsOrigin)
+                        ->writeHeader("Content-Type", "application/json")
+                        ->end(nlohmann::json(*snapshot).dump());
+                  });
+            })
+      .get("/api/devices/:slavePosition/procedures/:name",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p, ec] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
+               return;
+             }
+             // Never having run is not an absence: this reports the all-idle snapshot built from
+             // the procedure's step template, so a client renders one shape and polls one loop.
+             auto snapshot = mm::node::procedureSnapshot(deviceManager_, procedureManager_, pos,
+                                                         req->getParameter("name"));
              if (!snapshot) {
-               // Never run on this device (or cleared by a rescan) — there is no state to report.
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
+               sendError(res, procedureErrorStatus(snapshot.error().kind), config_.corsOrigin,
+                         snapshot.error().message);
                return;
              }
              sendJson(res, config_.corsOrigin, nlohmann::json(*snapshot));
            })
-      .del("/api/devices/:slavePosition/procedures/os-command",
+      .del("/api/devices/:slavePosition/procedures/:name",
            [this](auto* res, auto* req) {
              uint16_t pos{};
              auto posParam = req->getParameter("slavePosition");
@@ -1389,8 +1428,11 @@ void HttpServer::run() {
                return;
              }
              // Cancels the run, not the record: the snapshot stays, reporting how far it got.
-             if (!procedureManager_.cancel(pos, mm::node::kOsCommandProcedure)) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
+             auto cancelled = mm::node::cancelProcedure(deviceManager_, procedureManager_, pos,
+                                                        req->getParameter("name"));
+             if (!cancelled) {
+               sendError(res, procedureErrorStatus(cancelled.error().kind), config_.corsOrigin,
+                         cancelled.error().message);
                return;
              }
              sendStatus(res, "202 Accepted", config_.corsOrigin);

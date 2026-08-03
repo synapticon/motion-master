@@ -426,6 +426,74 @@ export interface ProcedureSnapshot {
   error?: string;
 }
 
+/** What a procedure *is*, independent of any run — everything needed to render a control for it. The text is served rather than held per client, because the house rule that every action carries a description and its caveats means it has to exist somewhere, and duplicating it in each client is how it goes stale. */
+export interface ProcedureDescriptor {
+  /**
+   * Identifier: the `procedureName` path segment, and the key its snapshot is retained under.
+   * @example "os-command"
+   */
+  name: string;
+  /**
+   * Short human-readable name.
+   * @example "OS command"
+   */
+  title: string;
+  /** What the procedure does. */
+  description: string;
+  /** What a user must know before running it. May be empty. */
+  caveats: string[];
+  /**
+   * True if running it can move the shaft.
+   * @example true
+   */
+  movesMotor: boolean;
+  /**
+   * True if the drive must be enabled before it will run.
+   * @example false
+   */
+  requiresEnabled: boolean;
+  /**
+   * The ordered step ids the procedure reports against — bare ids, because a template's per-step status is always idle and says nothing. Live status for the same ids is in the snapshot's `steps`.
+   * @example ["command"]
+   */
+  steps: string[];
+}
+
+/** One procedure paired with how its last run on this device went — an entry of `GET /api/devices/{slavePosition}/procedures`. The pairing is what lets a page render in a single request instead of one per procedure. */
+export interface ProcedureListing {
+  /** What a procedure *is*, independent of any run — everything needed to render a control for it. The text is served rather than held per client, because the house rule that every action carries a description and its caveats means it has to exist somewhere, and duplicating it in each client is how it goes stale. */
+  descriptor: ProcedureDescriptor;
+  /** The complete state of a procedure on one device — an accumulating snapshot rather than an event, which is what makes polling lossless. */
+  snapshot: ProcedureSnapshot;
+}
+
+/** A procedure's parameters. Which fields apply is per procedure — consult its descriptor — so this schema is open, and a procedure that takes none may be started with no body at all. The properties below are those of `os-command`, where `command` is required. */
+export interface ProcedureRequest {
+  /**
+   * `os-command` only, and required for it: the eight request bytes. Byte 0 is the OS command ID; bytes 1-7 are that command's parameters.
+   * @maxItems 8
+   * @minItems 8
+   * @example [8,0,0,0,0,0,0,0]
+   */
+  command?: number[];
+  /**
+   * Ceiling on the whole command. Not a liveness check — the drive fails a command no service acknowledges within 5 s on its own — so size it for the command being run. Hitting it aborts the command on the drive.
+   * @min 1
+   * @max 600000
+   * @default 1000
+   * @example 30000
+   */
+  timeoutMs?: number;
+  /**
+   * How often the server reads the drive's response object while waiting.
+   * @min 1
+   * @max 1000
+   * @default 10
+   */
+  pollIntervalMs?: number;
+  [key: string]: any;
+}
+
 export interface OutputStageResult {
   /**
    * 1-based bus position of the owning device (echoes the request)

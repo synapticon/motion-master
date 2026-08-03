@@ -53,17 +53,17 @@ void ProcedureManager::discardIfRescanned() const {
   runs_.clear();
 }
 
-std::expected<void, ProcedureStartError> ProcedureManager::start(uint16_t devicePosition,
-                                                                 std::string name,
-                                                                 std::vector<ProgressStep> steps,
-                                                                 ProcedureBody body) {
+std::expected<void, ProcedureError> ProcedureManager::start(uint16_t devicePosition,
+                                                            std::string name,
+                                                            std::vector<ProgressStep> steps,
+                                                            ProcedureBody body) {
   const std::lock_guard lock(mutex_);
   discardIfRescanned();
 
   for (const auto& [key, run] : runs_) {
     if (key.first == devicePosition && run->running.load()) {
-      return std::unexpected(ProcedureStartError{
-          .kind = ProcedureStartError::Kind::kBusy,
+      return std::unexpected(ProcedureError{
+          .kind = ProcedureError::Kind::kBusy,
           .message = std::format("device {} is busy running '{}'", devicePosition, key.second)});
     }
   }
@@ -73,8 +73,8 @@ std::expected<void, ProcedureStartError> ProcedureManager::start(uint16_t device
   if (auto found = deviceManager_.withDevice(
           devicePosition, [](Device&) -> std::expected<void, std::string> { return {}; });
       !found) {
-    return std::unexpected(ProcedureStartError{.kind = ProcedureStartError::Kind::kUnknownDevice,
-                                               .message = found.error()});
+    return std::unexpected(
+        ProcedureError{.kind = ProcedureError::Kind::kUnknownDevice, .message = found.error()});
   }
 
   const Key key{devicePosition, std::move(name)};

@@ -34,11 +34,14 @@ using mm::node::kOsCommand;
 using mm::node::kOsCommandMode;
 using mm::node::kOsCommandStep;
 using mm::node::kSynapticonVendorId;
+using mm::node::openPhaseDetectionSteps;
 using mm::node::OsCommandRequest;
 using mm::node::osCommandSteps;
 using mm::node::ProgressReporter;
 using mm::node::ProgressStatus;
+using mm::node::runOpenPhaseDetectionProcedure;
 using mm::node::runOsCommandProcedure;
+namespace somanet = mm::node::somanet;
 using mm::node::cia402::Object;
 
 constexpr uint16_t kPreOp = static_cast<uint16_t>(EtherCatState::PreOp);
@@ -53,6 +56,8 @@ class OsCommandFakeDriver : public FieldbusDriver {
   std::vector<std::vector<uint8_t>> responses{{0, 0, 0, 0, 0, 0, 0, 0}};
   int responseReads = 0;
   uint32_t vendorId = kSynapticonVendorId;
+  uint16_t statusword = 0x0040;  // SwitchOnDisabled
+  std::vector<std::pair<uint16_t, uint8_t>> writeLog;
 
   static uint32_t key(uint16_t index, uint8_t subindex) {
     return (static_cast<uint32_t>(index) << 8) | subindex;
@@ -77,6 +82,18 @@ class OsCommandFakeDriver : public FieldbusDriver {
     programObject(kOsCommand, 1, ObjectDataType::OCTET_STRING, std::vector<uint8_t>(8, 0));
     programObject(kOsCommand, 3, ObjectDataType::OCTET_STRING, std::vector<uint8_t>(8, 0));
     programObject(kOsCommandMode, 0, ObjectDataType::UNSIGNED8, {0});
+    programObject(Object::kModeOfOperation, 0, ObjectDataType::INTEGER8, {8});  // CSP, to restore
+    programObject(somanet::kBrakeOptions, somanet::kBrakePullVoltage, ObjectDataType::UNSIGNED32,
+                  {0, 0, 0, 0});
+    programObject(somanet::kBrakeOptions, somanet::kBrakeHoldVoltage, ObjectDataType::UNSIGNED32,
+                  {0, 0, 0, 0});
+    programObject(somanet::kBrakeOptions, somanet::kBrakePullTime, ObjectDataType::UNSIGNED16,
+                  {0, 0});
+    programObject(somanet::kBrakeOptions, somanet::kBrakeReleaseStrategy, ObjectDataType::UNSIGNED8,
+                  {static_cast<uint8_t>(somanet::BrakeReleaseStrategy::kClutch)});
+    programObject(somanet::kBrakeOptions, somanet::kBrakeStatus, ObjectDataType::UNSIGNED8,
+                  {static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+    store[key(Object::kStatusword, 0)] = {0x40, 0x00};
   }
 
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t index,
@@ -96,7 +113,44 @@ class OsCommandFakeDriver : public FieldbusDriver {
   std::expected<void, std::string> writeSdo(uint16_t, uint16_t index, uint8_t subindex,
                                             std::span<const uint8_t> data) override {
     store[key(index, subindex)] = std::vector<uint8_t>(data.begin(), data.end());
+    writeLog.push_back({index, subindex});
+    // Model just enough of the CiA402 machine for enable() to converge: a controlword write
+    // advances the state and the statusword follows it. Without that the drive never reports
+    // OperationEnabled and every enable in a test would sit out its full timeout.
+    if (index == Object::kControlword && data.size() >= 2) {
+      const uint16_t cw = static_cast<uint16_t>(data[0] | (data[1] << 8));
+      const uint16_t cmd = cw & 0x000F;
+      if (cmd == 0x0006) {
+        statusword = 0x0021;  // ReadyToSwitchOn
+      } else if (cmd == 0x0007) {
+        statusword = 0x0023;  // SwitchedOn
+      } else if (cmd == 0x000F) {
+        statusword = 0x0027;  // OperationEnabled
+      } else {
+        statusword = 0x0040;  // SwitchOnDisabled
+      }
+      store[key(Object::kStatusword, 0)] = {static_cast<uint8_t>(statusword & 0xFF),
+                                            static_cast<uint8_t>(statusword >> 8)};
+    }
     return {};
+  }
+
+  // Whether index/subindex was written before otherIndex/otherSubindex — the procedure's step order
+  // is a correctness property (the brake may only be released once the drive is enabled), so it is
+  // asserted rather than assumed.
+  bool wroteBefore(uint16_t index, uint8_t subindex, uint16_t otherIndex,
+                   uint8_t otherSubindex) const {
+    auto at = [this](uint16_t i, uint8_t s) {
+      for (size_t k = 0; k < writeLog.size(); ++k) {
+        if (writeLog[k].first == i && writeLog[k].second == s) {
+          return static_cast<int>(k);
+        }
+      }
+      return -1;
+    };
+    const int first = at(index, subindex);
+    const int second = at(otherIndex, otherSubindex);
+    return first >= 0 && second >= 0 && first < second;
   }
 
   std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
@@ -231,6 +285,130 @@ TEST(RunOsCommandProcedure, LeavesTheStepIdleWhenTheDeviceIsNotASomanetDrive) {
   // what was wrong with the device.
   EXPECT_EQ(reporter.steps()[0].status, ProgressStatus::kIdle);
   EXPECT_EQ(driver.responseReads, 0);
+}
+
+// --- Open phase detection procedure --------------------------------------------------------------
+
+TEST(OpenPhaseDetectionSteps, DeclaresTheFourStepsInOrder) {
+  auto steps = openPhaseDetectionSteps();
+  ASSERT_EQ(steps.size(), 4u);
+  EXPECT_EQ(steps[0].id, "prepare");
+  EXPECT_EQ(steps[1].id, "release-brake");
+  EXPECT_EQ(steps[2].id, "open-phase-detection");
+  EXPECT_EQ(steps[3].id, "restore");
+  for (const auto& step : steps) {
+    EXPECT_EQ(step.status, ProgressStatus::kIdle);
+  }
+}
+
+// Finds a step by id in a reporter snapshot.
+const mm::node::ProgressStep* stepById(const std::vector<mm::node::ProgressStep>& steps,
+                                       std::string_view id) {
+  for (const auto& step : steps) {
+    if (step.id == id) {
+      return &step;
+    }
+  }
+  return nullptr;
+}
+
+TEST(RunOpenPhaseDetectionProcedure, PreparesReleasesChecksAndRestores) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(openPhaseDetectionSteps());
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};  // no phase open
+  auto result = runOpenPhaseDetectionProcedure(device, reporter, std::stop_token{});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto steps = reporter.steps();
+  for (auto id : {"prepare", "release-brake", "open-phase-detection", "restore"}) {
+    const auto* step = stepById(steps, id);
+    ASSERT_NE(step, nullptr) << id;
+    EXPECT_EQ(step->status, ProgressStatus::kSucceeded) << id;
+  }
+
+  // The brake may only be released once the drive is enabled: in diagnostics mode enabling does not
+  // release it, and the write only takes effect from OP ENABLED. So the controlword walk must come
+  // first — this is the ordering the firmware requires, not a stylistic preference.
+  EXPECT_TRUE(
+      driver.wroteBefore(Object::kControlword, 0, somanet::kBrakeOptions, somanet::kBrakeStatus));
+  // Diagnostics mode was requested before the command ran.
+  EXPECT_TRUE(driver.wroteBefore(Object::kModeOfOperation, 0, kOsCommand, 1));
+}
+
+TEST(RunOpenPhaseDetectionProcedure, RestoresTheBrakeAndModeItFound) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(openPhaseDetectionSteps());
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(runOpenPhaseDetectionProcedure(device, reporter, std::stop_token{}).has_value());
+
+  // Back as found: brake engaged, mode 8 (CSP) — not left in diagnostics with the brake released.
+  EXPECT_EQ(
+      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
+      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+            std::vector<uint8_t>{8});
+}
+
+TEST(RunOpenPhaseDetectionProcedure, AnOpenPhaseFailsTheStepAndStillRestores) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(openPhaseDetectionSteps());
+
+  driver.responses = {{3, 0, 0, 0, 0, 0, 0, 0}};  // failed with data, code 0 → open terminal A
+  auto result = runOpenPhaseDetectionProcedure(device, reporter, std::stop_token{});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("open terminal A"), std::string::npos) << result.error();
+
+  const auto steps = reporter.steps();
+  const auto* detect = stepById(steps, "open-phase-detection");
+  ASSERT_NE(detect, nullptr);
+  EXPECT_EQ(detect->status, ProgressStatus::kFailed);
+  ASSERT_TRUE(detect->error.has_value());
+  EXPECT_NE(detect->error->find("terminal A of the drive is not connected"), std::string::npos);
+
+  // The restore is not conditional on success — a failed run must not leave the brake released.
+  const auto* restore = stepById(steps, "restore");
+  ASSERT_NE(restore, nullptr);
+  EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(
+      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
+      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+}
+
+TEST(RunOpenPhaseDetectionProcedure, RestoresAfterCancellation) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(openPhaseDetectionSteps());
+
+  std::stop_source source;
+  source.request_stop();
+  auto result = runOpenPhaseDetectionProcedure(device, reporter, source.get_token());
+  ASSERT_FALSE(result.has_value());
+
+  const auto steps = reporter.steps();
+  const auto* restore = stepById(steps, "restore");
+  ASSERT_NE(restore, nullptr);
+  EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(
+      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
+      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+}
+
+TEST(RunOpenPhaseDetectionProcedure, FailsTheDeviceCheckBeforeAnyStepRuns) {
+  OsCommandFakeDriver driver;
+  driver.vendorId = 0x00000002;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(openPhaseDetectionSteps());
+
+  auto result = runOpenPhaseDetectionProcedure(device, reporter, std::stop_token{});
+  ASSERT_FALSE(result.has_value());
+  for (const auto& step : reporter.steps()) {
+    EXPECT_EQ(step.status, ProgressStatus::kIdle) << step.id;
+  }
 }
 
 }  // namespace

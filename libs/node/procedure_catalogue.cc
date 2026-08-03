@@ -67,6 +67,42 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor openPhase;
+  openPhase.name = std::string(kOpenPhaseDetectionProcedure);
+  openPhase.title = "Open phase detection";
+  openPhase.description =
+      "Checks every motor terminal and FET leg for an open circuit, and names the offending one if "
+      "it finds a fault. Worth running first when commissioning a motor: the measurements that "
+      "follow all assume the three phases are actually connected, and each would otherwise fail in "
+      "a way that points at the wrong thing. The drive is prepared and put back automatically — "
+      "diagnostics mode, Operation Enabled, brake released, then everything restored as found.";
+  openPhase.caveats = {
+      "The brake is released while the check runs, so anything the brake was holding is free to "
+      "move. On a vertical or loaded axis, support the load first.",
+      "The check itself can turn the motor when nothing else holds the shaft.",
+      "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
+      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
+      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
+      "A detected open phase is reported as a failed run — the check completed and found a fault, "
+      "which is a result rather than an error.",
+  };
+  openPhase.movesMotor = true;
+  // Not requiresEnabled: the procedure enables the drive itself as its first step. That flag is for
+  // a procedure needing the drive *already* enabled, which would make enabling the operator's job.
+  openPhase.requiresEnabled = false;
+  openPhase.steps = openPhaseDetectionSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(openPhase),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      // Takes no parameters: the timings are properties of the command, not a caller's choice.
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runOpenPhaseDetectionProcedure(device, reporter, std::move(stop));
+        };
+      },
+  });
+
   return entries;
 }
 

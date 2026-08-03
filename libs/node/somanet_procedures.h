@@ -89,4 +89,53 @@ std::expected<void, std::string> runOsCommandProcedure(Device& device, ProgressR
                                                        std::stop_token stop,
                                                        const OsCommandRequest& request);
 
+/// @brief Procedure name for open phase detection, as it appears in its URL and its snapshot key.
+inline constexpr std::string_view kOpenPhaseDetectionProcedure = "open-phase-detection";
+
+/// @brief The steps open phase detection reports against, in order.
+///
+/// The middle one is the measurement; the two around it are the drive preparation the firmware
+/// requires and the undoing of it. They are steps rather than hidden setup because either can fail
+/// on real hardware — a drive that will not enable, a brake that will not restore — and a user
+/// staring at a stalled procedure needs to see *which* part stalled.
+inline constexpr std::string_view kOpenPhasePrepareStep = "prepare";
+inline constexpr std::string_view kOpenPhaseReleaseBrakeStep = "release-brake";
+inline constexpr std::string_view kOpenPhaseDetectStep = "open-phase-detection";
+inline constexpr std::string_view kOpenPhaseRestoreStep = "restore";
+
+/// @brief Open phase detection's step template — the four steps above, all idle.
+std::vector<ProgressStep> openPhaseDetectionSteps();
+
+/// @brief Runs open phase detection as a procedure body.
+///
+/// Prepares the drive, releases the brake, runs the check, and puts everything back:
+///
+/// 1. **prepare** — saves the current operation mode and brake state, sets
+///    @c somanet::OperationMode::kDiagnostics, and walks the CiA402 state machine to Operation
+///    Enabled. Diagnostics mode and Operation Enabled are both preconditions the firmware enforces
+///    by refusing the command with OS error 251.
+/// 2. **release-brake** — has to come *after* step 1, and cannot be folded into it. Writing the
+///    brake state only performs a real release while the drive is in OP ENABLED, and in diagnostics
+///    mode enabling the drive does **not** release the brake the way normal operation does. So the
+///    brake is the master's to release here, and only once the drive is enabled.
+/// 3. **open-phase-detection** — the OS command. An open phase *fails* this step, naming the
+///    offending terminal or FET: the check ran and found a fault, which is a result the user must
+///    act on, so it is not reported as a success carrying bad news.
+/// 4. **restore** — puts back the brake state and the operation mode as they were found and returns
+///    the drive to Switch On Disabled. It runs on **every** path out, including a failure or a
+///    cancellation, because a procedure that leaves a brake released and a drive in diagnostics
+///    mode is worse than one that never ran.
+///
+/// Needs the bus exchanging process data: the CiA402 state machine only advances while the
+/// statusword is updating, so a device that is not in OP will fail at step 1 rather than hanging.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; checked between steps and passed into the OS command so a
+///                 running check is aborted rather than abandoned.
+/// @return Void when the drive found no open phase, otherwise why not.
+std::expected<void, std::string> runOpenPhaseDetectionProcedure(Device& device,
+                                                                ProgressReporter& reporter,
+                                                                std::stop_token stop);
+
 }  // namespace mm::node

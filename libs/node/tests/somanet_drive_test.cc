@@ -154,6 +154,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
 
   std::vector<std::vector<uint8_t>> responses{{0, 0, 0, 0, 0, 0, 0, 0}};
   int responseReads = 0;
+  int drainReads = 0;
   int statusReads = 0;
 
   std::vector<uint8_t> lastCommand;
@@ -190,6 +191,14 @@ class OsCommandFakeDriver : public FieldbusDriver {
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t index,
                                                            uint8_t subindex) override {
     if (index == kOsCommand && subindex == 3) {
+      // Nothing to answer with until a command has been issued, which is what a real drive holding
+      // no response does — and what lets the drain read runOsCommand performs before every command
+      // not consume a scripted reply. drainReads counts those separately from the polls that
+      // follow.
+      if (commandWrites == 0) {
+        ++drainReads;
+        return std::vector<uint8_t>(8, 0);
+      }
       const size_t at = std::min(static_cast<size_t>(responseReads), responses.size() - 1);
       ++responseReads;
       return responses[at];
@@ -450,6 +459,25 @@ TEST(RunOsCommand, RestoresTheModeWhenTheAbortIsNeverConfirmed) {
   EXPECT_NE(response.error().find("did not report the abort"), std::string::npos)
       << response.error();
   EXPECT_EQ(driver.modeWrites, (std::vector<uint8_t>{0, 3, 0}));
+}
+
+TEST(RunOsCommand, ReadsTheResponseBeforeIssuingSoAStaleOneCannotBeReported) {
+  // The drive returns to idle only once 0x1023:03 has been read, and one still holding an unread
+  // response ignores the write to 0x1023:01 as silently as one whose mode is not 0. Without this
+  // read the first poll would return the *previous* command's terminal status and it would be
+  // reported as this command's verdict — a failure this command never produced.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 7, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive->runOsCommand(kRequest, {.pollInterval = kNoDelay}).has_value());
+
+  // drainReads only counts reads taken while no command had been written yet, so a non-zero count
+  // *is* the ordering assertion: the response was read before the command was issued.
+  EXPECT_EQ(driver.drainReads, 1);
+  EXPECT_EQ(driver.commandWrites, 1);
 }
 
 TEST(RunOsCommand, ForwardsTheCommandWriteErrorVerbatim) {

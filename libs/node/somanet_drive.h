@@ -303,8 +303,10 @@ struct OsCommandResponse {
 /// bounds how long the drive is given to report that abort (its own internal abort path is
 /// bounded by 5 s).
 struct OsCommandConfig {
-  std::chrono::milliseconds timeout{1000};        ///< Ceiling on the whole command.
-  std::chrono::milliseconds pollInterval{10};     ///< Delay between response polls.
+  std::chrono::milliseconds timeout{1000};  ///< Ceiling on the whole command.
+
+  std::chrono::milliseconds pollInterval{1000};  ///< Delay between response polls.
+
   std::chrono::milliseconds abortTimeout{10000};  ///< Time allowed to confirm a forced abort.
   std::stop_token stop{};  ///< Requesting a stop aborts the command; default never stops.
 };

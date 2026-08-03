@@ -64,6 +64,8 @@ class OsCommandFakeDriver : public FieldbusDriver {
   std::map<uint32_t, std::vector<uint8_t>> store;
   std::vector<std::vector<uint8_t>> responses{{0, 0, 0, 0, 0, 0, 0, 0}};
   int responseReads = 0;
+  int drainReads = 0;
+  int commandWrites = 0;
   uint32_t vendorId = kSynapticonVendorId;
   uint16_t statusword = 0x0040;  // SwitchOnDisabled
   std::vector<std::pair<uint16_t, uint8_t>> writeLog;
@@ -108,6 +110,14 @@ class OsCommandFakeDriver : public FieldbusDriver {
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t index,
                                                            uint8_t subindex) override {
     if (index == kOsCommand && subindex == 3) {
+      // Nothing to answer with until a command has been issued, which is what a real drive holding
+      // no response does — and what lets the drain read runOsCommand performs before every command
+      // not consume a scripted reply. drainReads counts those separately from the polls that
+      // follow.
+      if (commandWrites == 0) {
+        ++drainReads;
+        return std::vector<uint8_t>(8, 0);
+      }
       const size_t at = std::min(static_cast<size_t>(responseReads), responses.size() - 1);
       ++responseReads;
       return responses[at];
@@ -123,6 +133,9 @@ class OsCommandFakeDriver : public FieldbusDriver {
                                             std::span<const uint8_t> data) override {
     store[key(index, subindex)] = std::vector<uint8_t>(data.begin(), data.end());
     writeLog.push_back({index, subindex});
+    if (index == kOsCommand && subindex == 1) {
+      ++commandWrites;
+    }
     // Model just enough of the CiA402 machine for enable() to converge: a controlword write
     // advances the state and the statusword follows it. Without that the drive never reports
     // OperationEnabled and every enable in a test would sit out its full timeout.

@@ -35,6 +35,15 @@ constexpr size_t kErrorCodeIndex = 2;
 constexpr size_t kDataIndex = 2;
 constexpr size_t kDataIndexAfterErrorCode = 3;
 
+// Space-separated hex, for a log line that has to be comparable against a specification table.
+std::string hexBytes(const std::vector<uint8_t>& bytes) {
+  std::string text;
+  for (const uint8_t byte : bytes) {
+    text += std::format("{}{:02X}", text.empty() ? "" : " ", byte);
+  }
+  return text;
+}
+
 std::vector<uint8_t> responsePayload(const std::vector<uint8_t>& response, size_t from) {
   return {std::next(response.begin(), static_cast<std::ptrdiff_t>(from)), response.end()};
 }
@@ -182,6 +191,23 @@ std::expected<OsCommandResponse, std::string> SomanetDrive::runOsCommand(
     }
   } modeRestorer;
 
+  // Drain any response left unread, because the drive returns to its idle state only when 0x1023:03
+  // has been read. **Both preconditions for accepting a command are made true rather than assumed,
+  // and this is the second of them**: a drive still holding an unread response ignores the write to
+  // 0x1023:01 exactly as silently as one whose mode is not 0, and then the first poll below reads
+  // that *stale* terminal status and reports it as this command's verdict — a failure this command
+  // never produced, or worse a success with someone else's payload. A response can be left behind
+  // by any client on the bus, or by this process being killed between the write and the read.
+  //
+  // Reading it while a command is genuinely in progress is harmless: that returns 255 and drains
+  // nothing. A failed read is not fatal either — the command write below will fail for the same
+  // reason if the mailbox is really unusable — so it is logged and stepped over rather than
+  // returned, which keeps a drive that answers oddly here from being unusable.
+  if (auto drained = osCommandResponse(); !drained) {
+    spdlog::debug("Device {}: could not drain the OS command response before command 0x{:02X}: {}",
+                  position, id, drained.error());
+  }
+
   // Make the precondition true rather than assuming it: a stale mode 3 (a process killed
   // mid-abort, another tool on the same bus) would otherwise let the command write succeed while
   // the drive quietly discards it.
@@ -213,6 +239,12 @@ std::expected<OsCommandResponse, std::string> SomanetDrive::runOsCommand(
 
     const uint8_t status = (*response)[0];
     if (status <= static_cast<uint8_t>(OsCommandStatus::kFailedWithData)) {
+      // Logged with the whole reply, not just the status: a terminal answer that turns out to be
+      // wrong on hardware — a stale response, a payload of an unexpected width — is diagnosable
+      // from the bytes and from nothing else, and by the time a caller sees the error they are
+      // gone.
+      spdlog::debug("Device {}: OS command 0x{:02X} terminal response [{}]", position, id,
+                    hexBytes(*response));
       if (!abortReason.empty()) {
         return std::unexpected(abortReason);
       }

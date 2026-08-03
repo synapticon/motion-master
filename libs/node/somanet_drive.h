@@ -29,6 +29,12 @@ enum Object : uint16_t {
   kMotorSpecificSettings = 0x2003,   ///< RECORD — motor configuration; :05 is the phase order.
   kBrakeOptions = 0x2004,            ///< RECORD — brake voltages, timing, release strategy, status.
   kCommutationOffsetDetection = 0x2009,  ///< RECORD — how commutation offset (5) is measured.
+  kErrorReport = 0x203F,                 ///< RECORD — :01 describes the drive's most recent fault.
+};
+
+/// @brief Sub-entries of 0x203F (error report). The enum value @b is the subindex.
+enum ErrorReportEntry : uint8_t {
+  kErrorReportDescription = 1,  ///< STRING — what the drive says about its most recent fault.
 };
 
 /// @brief Sub-entries of 0x2003 (motor specific settings). The enum value @b is the subindex.
@@ -53,7 +59,10 @@ enum MotorSetting : uint8_t {
 enum CommutationOffsetSetting : uint8_t {
   kCommutationOffsetState = 1,  ///< INTEGER16 — set to OFFSET_VALID by a successful command 5.
 
-  /// INTEGER16 — "Applied percent of rated torque": how hard the measurement drives the motor.
+  /// INTEGER16, 0-100, default 100 — how hard the measurement drives the motor. The drive names
+  /// this entry "Applied percent of rated torque", which is the name used here, but its own
+  /// description and the published documentation both call it a percentage of rated **current**.
+  /// The two disagree in the source data, so do not read the name as settling the quantity.
   kCommutationOffsetAppliedTorquePercent = 2,
 
   kCommutationOffsetMethod = 3,  ///< INTEGER8 — which method runs; see CommutationOffsetMethod.
@@ -73,8 +82,12 @@ enum class CommutationOffsetMethod : uint8_t {
   /// the default, and the one to use unless there is a reason not to.
   kRotating = 0,
 
-  /// Rotates typically less than 20° and holds the load, but **requires the Kp/Ki/Kd gains in
-  /// 0x2009:04-06 to have been tuned**; intended for the prototype phase.
+  /// Rotates the rotor only a few electrical degrees and holds the load, but **requires the
+  /// Kp/Ki/Kd gains in 0x2009:04-06 to have been tuned**; intended for the prototype phase. How
+  /// few depends entirely on the quality of that tuning, and the firmware documentation quotes two
+  /// different figures for a well-tuned controller — "less than 5 degrees" in prose, "less than 20
+  /// electrical degrees" in its comparison table — so treat either as an order of magnitude rather
+  /// than a bound, and method 0 as the predictable one.
   kRotatingTuned = 1,
 
   /// Does not rotate the rotor at all and completes in around 250 ms, at the cost of precision.
@@ -569,6 +582,14 @@ class SomanetDrive : public Cia402Drive {
   ///         (forwarded as-is), an unknown status byte, a timeout, or a cancellation.
   std::expected<OsCommandResponse, std::string> runOsCommand(const std::vector<uint8_t>& command,
                                                              const OsCommandConfig& config = {});
+
+  /// @brief Reads the drive's description of its most recent fault (0x203F:01).
+  ///
+  /// The one thing that turns a bare CiA402 @c Fault into an actionable message, which is why a
+  /// procedure that finds a drive faulted mid-sequence reads it. Best-effort by nature: the object
+  /// is manufacturer-specific and the string is short, so a caller should attach whatever it gets
+  /// and carry on rather than treat a failed read as the real problem.
+  std::expected<std::string, std::string> errorReport() const;
 
   // --- Brake (0x2004) --------------------------------------------------------------------------
 

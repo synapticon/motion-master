@@ -77,6 +77,11 @@ class OsCommandFakeDriver : public FieldbusDriver {
   uint16_t statusword = 0x0040;  // SwitchOnDisabled
   std::vector<std::pair<uint16_t, uint8_t>> writeLog;
 
+  // Faults the drive once this many commands have been issued, modelling the drive dropping out of
+  // Operation Enabled part-way through a sequence — what a real fault or a quick stop does. Zero
+  // leaves the drive healthy for the whole run.
+  int faultAfterCommands = 0;
+
   static uint32_t key(uint16_t index, uint8_t subindex) {
     return (static_cast<uint32_t>(index) << 8) | subindex;
   }
@@ -115,6 +120,9 @@ class OsCommandFakeDriver : public FieldbusDriver {
     programObject(somanet::kCommutationOffsetDetection, somanet::kCommutationOffsetMethod,
                   ObjectDataType::INTEGER8,
                   {static_cast<uint8_t>(somanet::CommutationOffsetMethod::kRotating)});
+    // What the drive says about a fault, which a blocked step quotes back.
+    programObject(somanet::kErrorReport, somanet::kErrorReportDescription,
+                  ObjectDataType::VISIBLE_STRING, {'O', 'V', 'E', 'R', 'C', 'U', 'R', 'R'});
     store[key(Object::kStatusword, 0)] = {0x40, 0x00};
   }
 
@@ -154,6 +162,11 @@ class OsCommandFakeDriver : public FieldbusDriver {
       awaitingCommand = false;
       if (!data.empty()) {
         commandIds.push_back(data[0]);
+      }
+      if (faultAfterCommands > 0 && commandWrites >= faultAfterCommands) {
+        statusword = 0x0008;  // Fault
+        store[key(Object::kStatusword, 0)] = {static_cast<uint8_t>(statusword & 0xFF),
+                                              static_cast<uint8_t>(statusword >> 8)};
       }
     }
     if (index == somanet::kBrakeOptions && subindex == somanet::kBrakeStatus && !data.empty()) {
@@ -745,6 +758,38 @@ TEST(RunOffsetDetectionProcedure, AFailedMeasurementStopsTheRestOfTheSequence) {
   EXPECT_EQ(stepById(steps, "restore")->status, ProgressStatus::kSucceeded);
 }
 
+TEST(RunOffsetDetectionProcedure, AFaultMidSequenceStopsAndQuotesTheDriveErrorReport) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(offsetDetectionSteps());
+
+  // Open phase detection passes, and the drive faults on the way out of it — what a real fault or a
+  // quick stop does part-way through the sequence.
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  driver.faultAfterCommands = 1;
+
+  auto result = runOffsetDetectionProcedure(device, reporter, std::stop_token{});
+  ASSERT_FALSE(result.has_value());
+
+  // Named for what actually happened, not the OS error 251 ("command not allowed") the drive would
+  // have answered every later command with — that code names a precondition, so it would have
+  // pointed at the operation mode or the brake instead of at the fault.
+  EXPECT_NE(result.error().find("Fault"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("OVERCURR"), std::string::npos) << result.error();
+
+  const auto steps = reporter.steps();
+  EXPECT_EQ(stepById(steps, "open-phase-detection")->status, ProgressStatus::kSucceeded);
+  // Reported against the step that could not run, which is the one a user is waiting on.
+  EXPECT_EQ(stepById(steps, "phase-resistance-measurement")->status, ProgressStatus::kFailed);
+  EXPECT_EQ(stepById(steps, "phase-inductance-measurement")->status, ProgressStatus::kIdle);
+  EXPECT_EQ(stepById(steps, "pole-pair-detection")->status, ProgressStatus::kIdle);
+
+  // The point of checking first: no further command is put on the wire once the drive has left
+  // Operation Enabled.
+  EXPECT_EQ(driver.commandIds, std::vector<uint8_t>{6});
+  EXPECT_EQ(stepById(steps, "restore")->status, ProgressStatus::kSucceeded);
+}
+
 // --- Commutation offset measurement procedure ----------------------------------------------------
 
 TEST(CommutationOffsetDetectionSteps, DeclaresSixStepsIncludingThePhaseOrderDetection) {
@@ -836,6 +881,27 @@ TEST(RunCommutationOffsetDetectionProcedure, RestoresTheBrakeItFoundAfterChangin
   EXPECT_EQ(
       driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
       std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged)});
+}
+
+TEST(RunCommutationOffsetDetectionProcedure, AFaultAfterThePhaseOrderBlocksTheMeasurement) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(commutationOffsetDetectionSteps());
+
+  // Command 4 succeeds and the drive faults on the way out of it. Command 5 must not be issued: an
+  // offset is only meaningful measured on a healthy, enabled drive.
+  driver.responses = {{1, 0, 1, 0, 0, 0, 0, 0}};
+  driver.faultAfterCommands = 1;
+
+  auto result = runCommutationOffsetDetectionProcedure(device, reporter, std::stop_token{});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("Fault"), std::string::npos) << result.error();
+
+  const auto steps = reporter.steps();
+  EXPECT_EQ(stepById(steps, "motor-phase-order-detection")->status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(stepById(steps, "commutation-offset-measurement")->status, ProgressStatus::kFailed);
+  EXPECT_EQ(driver.commandIds, std::vector<uint8_t>{4});
+  EXPECT_EQ(stepById(steps, "restore")->status, ProgressStatus::kSucceeded);
 }
 
 TEST(RunCommutationOffsetDetectionProcedure, AFailedPhaseOrderStepStopsBeforeTheMeasurement) {

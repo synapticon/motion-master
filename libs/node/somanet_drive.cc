@@ -296,6 +296,10 @@ void to_json(nlohmann::json& j, const BrakeState& state) {
   };
 }
 
+std::expected<std::string, std::string> SomanetDrive::errorReport() const {
+  return device_.readValue<std::string>(somanet::kErrorReport, somanet::kErrorReportDescription);
+}
+
 std::expected<somanet::BrakeStatus, std::string> SomanetDrive::brakeStatus() const {
   auto raw = device_.readValue<uint8_t>(somanet::kBrakeOptions, somanet::kBrakeStatus);
   if (!raw) {

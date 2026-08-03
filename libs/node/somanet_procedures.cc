@@ -190,20 +190,62 @@ std::expected<void, std::string> releaseBrakeForDiagnostics(SomanetDrive& drive,
   return {};
 }
 
-// Runs one command of a composite procedure: checks for cancellation, starts the step, issues the
-// command, and records what it produced. On failure the step carries the reason and the composite
-// stops — every later step depends on the ones before it, so carrying on would measure against a
-// value that was never established.
+// Confirms the drive is still in Operation Enabled, before the next command of a multi-command
+// sequence is issued.
+//
+// Worth one bus read per step rather than letting the command speak for itself. A drive that has
+// left Operation Enabled midway — a fault, or the quick stop the firmware documentation says aborts
+// offset detection and disables the drive — refuses every command after it with OS error 251,
+// "command not allowed". That code names a *precondition*, so it reads as though the mode or the
+// brake were wrong and looks identical whatever actually happened; the fault that caused it is
+// nowhere in the message. Reading the state first names the real cause, and for a fault attaches
+// the drive's own description of it.
+//
+// Only the composites need this: a single-command procedure enables the drive and issues its
+// command immediately, so there is no window for the state to change behind it.
+std::expected<void, std::string> confirmStillEnabled(SomanetDrive& drive) {
+  auto state = drive.state();
+  if (!state) {
+    return std::unexpected(
+        std::format("could not confirm the drive is still enabled: {}", state.error()));
+  }
+  if (*state == cia402::State::kOperationEnabled) {
+    return {};
+  }
+
+  auto reason = std::format(
+      "the drive left Operation Enabled and is now in {}, so the command was not issued",
+      cia402::toString(*state));
+  if (*state == cia402::State::kFault || *state == cia402::State::kFaultReactionActive) {
+    // Best-effort: a description is what makes the fault actionable, but failing to read one must
+    // not replace the state we do know with a read error.
+    if (auto report = drive.errorReport(); report && !report->empty()) {
+      reason += std::format(" (drive error report: {})", *report);
+    }
+  }
+  return std::unexpected(reason);
+}
+
+// Runs one command of a composite procedure: checks for cancellation, starts the step, confirms the
+// drive is still enabled, issues the command, and records what it produced. On failure the step
+// carries the reason and the composite stops — every later step depends on the ones before it, so
+// carrying on would measure against a value that was never established.
 //
 // @param run  Issues one command and returns its result, or why there is none.
 template <typename Run>
-std::expected<void, std::string> compositeStep(ProgressReporter& reporter, std::string_view step,
-                                               std::string_view what, const std::stop_token& stop,
-                                               Run run) {
+std::expected<void, std::string> compositeStep(ProgressReporter& reporter, SomanetDrive& drive,
+                                               std::string_view step, std::string_view what,
+                                               const std::stop_token& stop, Run run) {
   if (stop.stop_requested()) {
     return std::unexpected(std::format("{} was cancelled", what));
   }
   reporter.start(step);
+  // Reported against the step that could not run, not the one that broke the drive: that is the
+  // step a user is waiting on, and the reason says what the drive is doing instead.
+  if (auto ready = confirmStillEnabled(drive); !ready) {
+    reporter.fail(step, ready.error());
+    return std::unexpected(ready.error());
+  }
   auto result = run();
   if (!result) {
     reporter.fail(step, result.error());
@@ -490,6 +532,10 @@ std::expected<void, std::string> runOffsetDetectionProcedure(Device& device,
     return std::unexpected(std::format("{} was cancelled", kWhat));
   }
   reporter.start(kOpenPhaseDetectionStep);
+  if (auto ready = confirmStillEnabled(*drive); !ready) {
+    reporter.fail(kOpenPhaseDetectionStep, ready.error());
+    return std::unexpected(ready.error());
+  }
   auto openPhase = drive->runOpenPhaseDetection({.timeout = std::chrono::seconds(10),
                                                  .pollInterval = std::chrono::milliseconds(100),
                                                  .stop = stop});
@@ -506,7 +552,7 @@ std::expected<void, std::string> runOffsetDetectionProcedure(Device& device,
 
   // The two winding measurements, which need no brake handling — so they run while the brake is
   // still where it was found, and the load stays held for as long as possible.
-  if (auto r = compositeStep(reporter, kPhaseResistanceMeasurementStep, kWhat, stop,
+  if (auto r = compositeStep(reporter, *drive, kPhaseResistanceMeasurementStep, kWhat, stop,
                              [&drive, &stop] {
                                return drive->runPhaseResistanceMeasurement(
                                    {.timeout = std::chrono::seconds(30),
@@ -516,7 +562,7 @@ std::expected<void, std::string> runOffsetDetectionProcedure(Device& device,
       !r) {
     return std::unexpected(r.error());
   }
-  if (auto r = compositeStep(reporter, kPhaseInductanceMeasurementStep, kWhat, stop,
+  if (auto r = compositeStep(reporter, *drive, kPhaseInductanceMeasurementStep, kWhat, stop,
                              [&drive, &stop] {
                                return drive->runPhaseInductanceMeasurement(
                                    {.timeout = std::chrono::seconds(30),
@@ -533,7 +579,7 @@ std::expected<void, std::string> runOffsetDetectionProcedure(Device& device,
     return std::unexpected(r.error());
   }
 
-  if (auto r = compositeStep(reporter, kPolePairDetectionStep, kWhat, stop,
+  if (auto r = compositeStep(reporter, *drive, kPolePairDetectionStep, kWhat, stop,
                              [&drive, &stop] {
                                return drive->runPolePairDetection(
                                    {.timeout = std::chrono::seconds(60),
@@ -543,7 +589,7 @@ std::expected<void, std::string> runOffsetDetectionProcedure(Device& device,
       !r) {
     return std::unexpected(r.error());
   }
-  if (auto r = compositeStep(reporter, kMotorPhaseOrderDetectionStep, kWhat, stop,
+  if (auto r = compositeStep(reporter, *drive, kMotorPhaseOrderDetectionStep, kWhat, stop,
                              [&drive, &stop] {
                                return drive->runMotorPhaseOrderDetection(
                                    {.timeout = std::chrono::seconds(60),
@@ -569,7 +615,7 @@ std::expected<void, std::string> runOffsetDetectionProcedure(Device& device,
   }
   reporter.succeed(kSetBrakeStep, *brake);
 
-  return compositeStep(reporter, kCommutationOffsetMeasurementStep, kWhat, stop,
+  return compositeStep(reporter, *drive, kCommutationOffsetMeasurementStep, kWhat, stop,
                        [&drive, &method, &stop] {
                          return drive->runCommutationOffsetMeasurement(
                              *method, {.timeout = std::chrono::seconds(60),
@@ -619,6 +665,10 @@ std::expected<void, std::string> runCommutationOffsetDetectionProcedure(Device& 
   }
 
   reporter.start(kMotorPhaseOrderDetectionStep);
+  if (auto ready = confirmStillEnabled(*drive); !ready) {
+    reporter.fail(kMotorPhaseOrderDetectionStep, ready.error());
+    return std::unexpected(ready.error());
+  }
   auto phaseOrder =
       drive->runMotorPhaseOrderDetection({.timeout = std::chrono::seconds(60),
                                           .pollInterval = std::chrono::milliseconds(100),
@@ -654,6 +704,10 @@ std::expected<void, std::string> runCommutationOffsetDetectionProcedure(Device& 
   }
 
   reporter.start(kCommutationOffsetMeasurementStep);
+  if (auto ready = confirmStillEnabled(*drive); !ready) {
+    reporter.fail(kCommutationOffsetMeasurementStep, ready.error());
+    return std::unexpected(ready.error());
+  }
   auto result = drive->runCommutationOffsetMeasurement(
       *method, {.timeout = std::chrono::seconds(60),
                 .pollInterval = std::chrono::milliseconds(100),

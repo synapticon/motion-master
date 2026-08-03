@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.64] - 2026-08-03
+
 ### Added
 
 - **Procedures: one uniform way to run the operations a device can carry out.** `POST /api/devices/{slavePosition}/procedures/{procedureName}` starts a run and returns immediately, `GET` on the same path reports how it is going, and `DELETE` cancels it. Every procedure has that same shape regardless of how long it takes — one that finishes before your first read simply reports as succeeded — so a client drives all of them with one loop instead of a per-operation dialect. A run happens on its own thread, so the API stays responsive, monitoring keeps streaming and the drive keeps cycling while it works; only one procedure runs on a device at a time, and a second start is refused rather than queued.
@@ -479,7 +481,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.63...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.64...HEAD
+[6.0.0-alpha.64]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.63...v6.0.0-alpha.64
 [6.0.0-alpha.63]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.62...v6.0.0-alpha.63
 [6.0.0-alpha.62]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.61...v6.0.0-alpha.62
 [6.0.0-alpha.61]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.60...v6.0.0-alpha.61

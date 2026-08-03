@@ -96,7 +96,7 @@ std::expected<void, ProcedureError> ProcedureManager::start(uint16_t devicePosit
             devicePosition, [&](Device& device) { return body(device, *run->reporter, stop); });
 
         if (!result) {
-          run->error.store(std::make_shared<const std::string>(result.error()));
+          run->setError(result.error());
         }
         run->finishedAt.store(nowMs());
         if (result) {
@@ -133,7 +133,7 @@ std::optional<ProcedureSnapshot> ProcedureManager::snapshot(uint16_t devicePosit
   if (const int64_t finishedAt = run.finishedAt.load(); finishedAt != 0) {
     snapshot.finishedAt = finishedAt;
   }
-  if (auto error = run.error.load()) {
+  if (auto error = run.error()) {
     snapshot.error = *error;
   }
   snapshot.steps = run.reporter->steps();

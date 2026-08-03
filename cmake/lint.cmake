@@ -42,9 +42,42 @@ endif()
 # ---------- cppcheck ----------
 find_program(CPPCHECK_EXECUTABLE cppcheck)
 
+# cppcheck's findings drift between releases, so the version CI runs is pinned in .cppcheck-version
+# and that file is the single source of truth for both sides. This is not pedantry: 2.13 reports a
+# scope guard's null check as always-true where 2.21 correctly does not, so a suppression list tuned
+# to one version is wrong for the other — and a local check that passes while CI fails is worse than
+# having no local check at all.
+#
+# The mismatch is detected here but reported by the target, not at configure time: it is only worth
+# saying when someone actually runs the check, and a warning on every unrelated cmake configure
+# would soon be scrolled past. It warns rather than fails, because a mismatched cppcheck is still
+# useful — it just is not the one whose verdict gates the build.
+set(CPPCHECK_VERSION_NOTE "")
 if(CPPCHECK_EXECUTABLE)
+  file(STRINGS "${CMAKE_SOURCE_DIR}/.cppcheck-version" CPPCHECK_PINNED_VERSION)
+  execute_process(
+    COMMAND ${CPPCHECK_EXECUTABLE} --version
+    OUTPUT_VARIABLE CPPCHECK_VERSION_OUTPUT
+    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+  string(REGEX MATCH "[0-9]+\\.[0-9]+(\\.[0-9]+)?" CPPCHECK_LOCAL_VERSION
+               "${CPPCHECK_VERSION_OUTPUT}")
+  if(NOT CPPCHECK_LOCAL_VERSION VERSION_EQUAL CPPCHECK_PINNED_VERSION)
+    set(CPPCHECK_VERSION_NOTE
+        "NOTE: local cppcheck is ${CPPCHECK_LOCAL_VERSION}, CI runs ${CPPCHECK_PINNED_VERSION} (.cppcheck-version) -- findings differ between versions, so a clean run here does not guarantee a clean CI run."
+    )
+  endif()
+endif()
+
+if(CPPCHECK_EXECUTABLE)
+  # The version note (if any) is echoed first, so it is read before the findings rather than after.
+  if(CPPCHECK_VERSION_NOTE)
+    set(CPPCHECK_NOTE_COMMAND COMMAND ${CMAKE_COMMAND} -E echo "${CPPCHECK_VERSION_NOTE}")
+  else()
+    set(CPPCHECK_NOTE_COMMAND "")
+  endif()
   add_custom_target(
     cppcheck
+    ${CPPCHECK_NOTE_COMMAND}
     COMMAND
       ${CPPCHECK_EXECUTABLE} --enable=warning,style,performance,portability --std=c++23
       --suppress=missingIncludeSystem --suppressions-list=${CMAKE_SOURCE_DIR}/cppcheck.supp

@@ -156,8 +156,33 @@ class ProcedureManager {
     std::atomic<ProcedureStatus> status{ProcedureStatus::kRunning};
     std::atomic<int64_t> finishedAt{0};  ///< Epoch ms; 0 while running.
     std::atomic<bool> running{true};     ///< Cleared last, once the outcome is recorded.
-    std::atomic<std::shared_ptr<const std::string>> error;  ///< Set only on an out-of-step failure.
     std::jthread thread;
+
+    /// @brief Records why the run failed when no step captured it. Called once, by the running
+    ///        thread, on its way out.
+    void setError(std::string reason) {
+      const std::lock_guard lock(errorMutex_);
+      error_ = std::move(reason);
+    }
+
+    /// @brief The out-of-step failure reason, if there was one.
+    std::optional<std::string> error() const {
+      const std::lock_guard lock(errorMutex_);
+      return error_;
+    }
+
+   private:
+    /// The one field here that cannot be an atomic. libc++ does not implement
+    /// @c std::atomic<std::shared_ptr<T>> at all — it is unimplemented rather than merely gated
+    /// behind -fexperimental-library, so no flag makes the macOS build accept it — and a string is
+    /// not trivially copyable, so no plain atomic will take one either.
+    ///
+    /// A mutex of its own preserves the property that actually matters here, which is *not* being
+    /// lock-free: the finishing thread must never need **the manager's** mutex, so that the
+    /// destructor can collect the running threads under that lock and join them after releasing it.
+    /// This mutex is per-run, uncontended, and held for one assignment.
+    mutable std::mutex errorMutex_;
+    std::optional<std::string> error_;
   };
 
   using Key = std::pair<uint16_t, std::string>;

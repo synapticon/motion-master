@@ -25,25 +25,41 @@ namespace somanet {
 
 /// @brief Manufacturer-specific object indices (the 0x2000-0x5FFF vendor range).
 enum Object : uint16_t {
-  kCommutationAngleOffset = 0x2001,  ///< The offset commutation offset measurement (5) writes.
+  kCommutationAngleOffset = 0x2001,  ///< INTEGER16 — the offset command 5 measures and writes.
   kMotorSpecificSettings = 0x2003,   ///< RECORD — motor configuration; :05 is the phase order.
   kBrakeOptions = 0x2004,            ///< RECORD — brake voltages, timing, release strategy, status.
   kCommutationOffsetDetection = 0x2009,  ///< RECORD — how commutation offset (5) is measured.
 };
 
 /// @brief Sub-entries of 0x2003 (motor specific settings). The enum value @b is the subindex.
+///
+/// Types are the drive's own, read off a SOMANET Integro's object dictionary rather than assumed.
+/// Worth knowing that **this is where the motor measurements belong**: pole pair detection (7),
+/// phase resistance (8) and phase inductance (9) report a value without storing it, and :01, :03
+/// and :04 are the entries it goes in.
 enum MotorSetting : uint8_t {
-  kMotorPhasesInverted = 5,  ///< The phase order motor phase order detection (4) writes.
+  kMotorPolePairs = 1,        ///< UNSIGNED8 — where a pole pair count (command 7) belongs.
+  kMotorTorqueConstant = 2,   ///< INTEGER32 — where a torque constant (command 10) belongs.
+  kMotorPhaseResistance = 3,  ///< INTEGER32 — where a phase resistance (command 8) belongs.
+  kMotorPhaseInductance = 4,  ///< INTEGER32 — where a phase inductance (command 9) belongs.
+  kMotorPhasesInverted = 5,   ///< BOOLEAN — the phase order motor phase order detection (4) writes.
 };
 
 /// @brief Sub-entries of 0x2009 (commutation offset detection). The enum value @b is the subindex.
+///
+/// Types and names are the drive's own, read off a SOMANET Integro rather than assumed — and none
+/// of them is what a reader would guess. The method is **signed** (INTEGER8), the state and torque
+/// percentage are INTEGER16 rather than byte-sized, and the three gains are REAL32 floats.
 enum CommutationOffsetSetting : uint8_t {
-  kCommutationOffsetState = 1,              ///< Set to OFFSET_VALID by a successful command 5.
-  kCommutationOffsetCurrentPercentage = 2,  ///< Current used during the measurement.
-  kCommutationOffsetMethod = 3,             ///< Which method runs; see CommutationOffsetMethod.
-  kCommutationOffsetKp = 4,                 ///< Method 1 only — proportional gain.
-  kCommutationOffsetKi = 5,                 ///< Method 1 only — integral gain.
-  kCommutationOffsetKd = 6,                 ///< Method 1 only — derivative gain.
+  kCommutationOffsetState = 1,  ///< INTEGER16 — set to OFFSET_VALID by a successful command 5.
+
+  /// INTEGER16 — "Applied percent of rated torque": how hard the measurement drives the motor.
+  kCommutationOffsetAppliedTorquePercent = 2,
+
+  kCommutationOffsetMethod = 3,  ///< INTEGER8 — which method runs; see CommutationOffsetMethod.
+  kCommutationOffsetKp = 4,      ///< REAL32 — phasing controller Kp; method 1 only.
+  kCommutationOffsetKi = 5,      ///< REAL32 — phasing controller Ki; method 1 only.
+  kCommutationOffsetKd = 6,      ///< REAL32 — phasing controller Kd; method 1 only.
 };
 
 /// @brief How commutation offset measurement (command 5) is performed (0x2009:03).
@@ -96,11 +112,17 @@ enum BrakeOption : uint8_t {
   kBrakePullTime = 3,         ///< UNSIGNED16, ms — how long the pull voltage is applied.
   kBrakeReleaseStrategy = 4,  ///< UNSIGNED8 — how the brake is driven; see BrakeReleaseStrategy.
   kBrakeControllerDisableDelay = 5,  ///< UNSIGNED16, ms — engage-to-controller-off delay.
+  kBrakeDcBusVoltage = 6,            ///< UNSIGNED16 — deprecated; the drive still lists it.
   kBrakeStatus = 7,  ///< UNSIGNED8 — reports *and* commands the brake; see BrakeStatus.
   kBrakeMinimumDisplacement = 8,  ///< UNSIGNED32 — pin-brake release travel threshold.
-  kBrakeMaximumTorque = 9,        ///< UNSIGNED16, mNm — torque ceiling during a pin-brake release.
-  kBrakeOutputVoltage = 10,       ///< UNSIGNED16, mV — phase-D voltage in manual mode.
-  kBrakeSwitchingFrequency = 11,  ///< UNSIGNED8 — phase-D PWM rate (0: 16, 1: 32, 2: 64 kHz).
+
+  /// UNSIGNED16 — "Percentage of Rated Current": the current ceiling a pin-brake release works up
+  /// to. A percentage of rated current, *not* a torque in mNm.
+  kBrakePinCurrentPercent = 9,
+
+  kBrakeOutputVoltage = 10,        ///< UNSIGNED16, mV — phase-D voltage in manual mode.
+  kBrakeSwitchingFrequency = 11,   ///< UNSIGNED8 — phase-D PWM rate (0: 16, 1: 32, 2: 64 kHz).
+  kBrakePinInitialDirection = 12,  ///< INTEGER8 — which way a pin-brake release moves first.
 };
 
 /// @brief How the brake is driven (0x2004:04).
@@ -443,7 +465,7 @@ void to_json(nlohmann::json& j, const MotorPhaseOrderResult& result);
 /// writes the offset into 0x2001 and sets 0x2009:01 to OFFSET_VALID, so a successful run has
 /// commissioned the axis rather than merely reported a number.
 struct CommutationOffsetResult {
-  uint16_t angleOffset = 0;  ///< The measured commutation angle offset, as the drive reported it.
+  int16_t angleOffset = 0;  ///< The measured offset, signed as the drive's own 0x2001 is.
 
   /// @brief The method the measurement ran under, which decides whether the rotor turned.
   somanet::CommutationOffsetMethod method{somanet::CommutationOffsetMethod::kRotating};
@@ -580,10 +602,10 @@ class SomanetDrive : public Cia402Drive {
   /// ENABLED does **not** release the brake automatically the way normal operation does — which is
   /// exactly why a diagnostics procedure has to call this at all.
   ///
-  /// **On a pin brake (@c kPin) this moves the shaft.** The controller raises torque progressively
+  /// **On a pin brake (@c kPin) this moves the shaft.** The controller raises current progressively
   /// until the load has lifted off the pin by the minimum displacement (0x2004:08), reversing
-  /// direction if it hits the torque ceiling (0x2004:09) first. Releasing a brake is not
-  /// electrically passive on that strategy.
+  /// direction if it reaches the current ceiling (0x2004:09, a percentage of rated current) first.
+  /// Releasing a brake is not electrically passive on that strategy.
   ///
   /// Control-plane only: it sleeps. Requires an active mailbox.
   ///

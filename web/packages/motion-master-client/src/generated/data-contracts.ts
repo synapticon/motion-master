@@ -459,7 +459,7 @@ export interface BrakeState {
    */
   softwareControllable: boolean;
   /**
-   * Whether releasing this brake turns the motor. True only for a pin brake, whose release raises torque progressively to lift the load off the pin.
+   * Whether releasing this brake turns the motor. True only for a pin brake, whose release raises current progressively to lift the load off the pin.
    * @example false
    */
   releaseMovesShaft: boolean;

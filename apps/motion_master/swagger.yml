@@ -1734,9 +1734,9 @@ paths:
         owns the brake — which is why a diagnostics procedure has to call this.
 
 
-        **On a pin brake this moves the shaft**: the controller raises torque progressively until the
+        **On a pin brake this moves the shaft**: the controller raises current progressively until the
         load has lifted off the pin by the minimum displacement (0x2004:08), reversing direction if it
-        reaches the torque ceiling (0x2004:09) first. Check `releaseMovesShaft` on `GET .../brake`.
+        reaches the current ceiling (0x2004:09, a percentage of rated current) first. Check `releaseMovesShaft` on `GET .../brake`.
 
 
         Brake release is open-loop — nothing confirms the brake let go — so the wait is the only
@@ -3761,7 +3761,7 @@ components:
           type: boolean
           description: >
             Whether releasing this brake turns the motor. True only for a pin brake, whose release
-            raises torque progressively to lift the load off the pin.
+            raises current progressively to lift the load off the pin.
           example: false
       required:
         [status, releaseStrategy, pullTimeMs, pullVoltageMv, holdVoltageMv, softwareControllable,

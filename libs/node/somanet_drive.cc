@@ -491,12 +491,14 @@ void to_json(nlohmann::json& j, const CommutationOffsetResult& result) {
 
 std::expected<somanet::CommutationOffsetMethod, std::string> SomanetDrive::commutationOffsetMethod()
     const {
-  auto raw = device_.readValue<uint8_t>(somanet::kCommutationOffsetDetection,
-                                        somanet::kCommutationOffsetMethod);
+  // INTEGER8, not UNSIGNED8: the drive declares the method signed, and reading it as unsigned is
+  // refused outright ("parameter 0x2009:03 holds a different type") rather than quietly misread.
+  auto raw = device_.readValue<int8_t>(somanet::kCommutationOffsetDetection,
+                                       somanet::kCommutationOffsetMethod);
   if (!raw) {
     return std::unexpected(raw.error());
   }
-  if (*raw > static_cast<uint8_t>(somanet::CommutationOffsetMethod::kStationary)) {
+  if (*raw < 0 || *raw > static_cast<int8_t>(somanet::CommutationOffsetMethod::kStationary)) {
     return std::unexpected(
         std::format("commutation offset method {} is outside the defined range 0-2", *raw));
   }
@@ -511,7 +513,7 @@ std::expected<CommutationOffsetResult, std::string> SomanetDrive::runCommutation
   if (!payload) {
     return std::unexpected(payload.error());
   }
-  auto offset = decodeBigEndian<uint16_t>(*payload, kWhat);
+  auto offset = decodeBigEndian<int16_t>(*payload, kWhat);
   if (!offset) {
     return std::unexpected(offset.error());
   }

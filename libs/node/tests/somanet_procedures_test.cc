@@ -107,8 +107,9 @@ class OsCommandFakeDriver : public FieldbusDriver {
                   {static_cast<uint8_t>(somanet::BrakeReleaseStrategy::kClutch)});
     programObject(somanet::kBrakeOptions, somanet::kBrakeStatus, ObjectDataType::UNSIGNED8,
                   {static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+    // INTEGER8, matching the drive: reading it as unsigned is refused outright.
     programObject(somanet::kCommutationOffsetDetection, somanet::kCommutationOffsetMethod,
-                  ObjectDataType::UNSIGNED8,
+                  ObjectDataType::INTEGER8,
                   {static_cast<uint8_t>(somanet::CommutationOffsetMethod::kRotating)});
     store[key(Object::kStatusword, 0)] = {0x40, 0x00};
   }

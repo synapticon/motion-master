@@ -52,26 +52,33 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      # Pinned so a runner-image refresh cannot silently change what this job reports. cppcheck's
-      # findings drift between releases (2.13 flags a scope guard's null check that 2.21 does not), so
-      # an unpinned CI check can start disagreeing with a developer's local one for no reason anybody
-      # changed. .cppcheck-version is the single source of truth; cmake/lint.cmake warns when a local
-      # install differs from it.
-      - name: Install cppcheck
+      # cppcheck is built from source at the version pinned in .cppcheck-version, rather than
+      # installed from apt. Its findings change between releases, so a suppression list is only valid
+      # for the version it was written against — and apt offers no choice: Ubuntu 24.04 has 2.13 while
+      # a developer's Fedora has 2.21.x, which is exactly how a check that passes locally starts
+      # failing here for reasons nobody changed. Building it is the only way both sides can run the
+      # same binary, and the result is cached on the pinned version so it compiles once per bump.
+      - name: Cache cppcheck
+        id: cache-cppcheck
+        uses: actions/cache@v5
+        with:
+          path: ~/.cppcheck-pinned
+          key: cppcheck-${{ runner.os }}-${{ hashFiles('.cppcheck-version') }}
+
+      - name: Build cppcheck
+        if: steps.cache-cppcheck.outputs.cache-hit != 'true'
+        run: ./tools/install-cppcheck.sh "$HOME/.cppcheck-pinned"
+
+      - name: Verify the pinned cppcheck
         run: |
+          echo "$HOME/.cppcheck-pinned/bin" >> "$GITHUB_PATH"
           pinned="$(cat .cppcheck-version)"
-          if ! sudo apt-get install -y "cppcheck=${pinned}-*"; then
-            echo "::error::cppcheck ${pinned} is no longer available from apt on this runner."
-            echo "Pick the version the runner now ships, put it in .cppcheck-version, and re-run"
-            echo "cppcheck locally against that version — cppcheck.supp is tuned per version."
-            exit 1
-          fi
-          installed="$(cppcheck --version | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?')"
+          installed="$("$HOME/.cppcheck-pinned/bin/cppcheck" --version | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?')"
           if [ "$installed" != "$pinned" ]; then
-            echo "::error::expected cppcheck ${pinned}, got ${installed}."
+            echo "::error::expected cppcheck ${pinned}, got ${installed}. Stale cache?"
             exit 1
           fi
-          echo "cppcheck ${installed} (pinned)"
+          echo "cppcheck ${installed} (pinned, built from source)"
 
       - name: Run cppcheck
         run: |

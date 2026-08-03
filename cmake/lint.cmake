@@ -42,11 +42,12 @@ endif()
 # ---------- cppcheck ----------
 find_program(CPPCHECK_EXECUTABLE cppcheck)
 
-# cppcheck's findings drift between releases, so the version CI runs is pinned in .cppcheck-version
-# and that file is the single source of truth for both sides. This is not pedantry: 2.13 reports a
-# scope guard's null check as always-true where 2.21 correctly does not, so a suppression list tuned
-# to one version is wrong for the other — and a local check that passes while CI fails is worse than
-# having no local check at all.
+# cppcheck's findings change between releases, so .cppcheck-version pins one version for CI and
+# every developer machine alike. This is not pedantry: 2.13 reports a scope guard's null check as
+# always-true where 2.21 correctly does not, so a suppression list is only valid for the version it
+# was written against, and a local check that passes while CI fails is worse than no local check. CI
+# builds the pinned version from source (tools/install-cppcheck.sh) because no distribution offers a
+# choice; run that script if your system's cppcheck is not the pinned one.
 #
 # The mismatch is detected here but reported by the target, not at configure time: it is only worth
 # saying when someone actually runs the check, and a warning on every unrelated cmake configure

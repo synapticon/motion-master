@@ -105,14 +105,3 @@ variableScope:*/procedure_manager.cc
 // optional<ModeRestorer> constructed inside the poll loop — worse code for a tool artefact.
 unreadVariable:*/somanet_drive.cc
 
-// The same scope guards, seen from the other end: their destructors return early when the guard was
-// never armed (`if (drive == nullptr) return;`), and cppcheck reports that check as always true
-// because it does not connect the later `guard.drive = &*drive` in the enclosing scope to the member
-// it reads in the destructor. The check is exactly what makes arm-after-the-first-real-change work,
-// so it stays.
-//
-// Version-specific: the pinned 2.13 (.cppcheck-version, what CI runs) reports it; 2.21 has learned
-// better and does not. The suppression is harmless on a version that no longer needs it, which is
-// why it is written for the older one.
-knownConditionTrueFalse:*/somanet_drive.cc
-knownConditionTrueFalse:*/somanet_procedures.cc

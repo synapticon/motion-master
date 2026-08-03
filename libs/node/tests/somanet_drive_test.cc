@@ -723,6 +723,80 @@ TEST(RunOpenPhaseDetection, AFailureWithoutACodeStillReportsAnOpenPhase) {
   EXPECT_FALSE(result->faultCode.has_value());
 }
 
+// --- Motor phase order detection (command 4) -----------------------------------------------------
+
+TEST(RunMotorPhaseOrderDetection, DecodesNormalOrder) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = drive->runMotorPhaseOrderDetection({.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->order, somanet::MotorPhaseOrder::kNormal);
+  EXPECT_FALSE(result->inverted());
+  EXPECT_EQ(result->describe(), "motor phase order is normal");
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 4);
+}
+
+TEST(RunMotorPhaseOrderDetection, DecodesInvertedOrder) {
+  // The specification's example: 0x0000000000010001 — status 1, inverted.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 1, 0, 0, 0, 0, 0}};
+  auto result = drive->runMotorPhaseOrderDetection({.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_TRUE(result->inverted());
+  EXPECT_EQ(result->describe(), "motor phase order is inverted");
+}
+
+TEST(RunMotorPhaseOrderDetection, RejectsAnOrderValueItCannotInterpret) {
+  // Only 0 and 1 are defined. Guessing at anything else would misreport how a motor is wired, which
+  // commutation offset measurement then builds on.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 7, 0, 0, 0, 0, 0}};
+  auto result = drive->runMotorPhaseOrderDetection({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("neither normal (0) nor inverted (1)"), std::string::npos)
+      << result.error();
+}
+
+TEST(RunMotorPhaseOrderDetection, DoesNotReadCodeZeroAsACurrentAmplitudeFault) {
+  // This command has no command-specific codes at all, so code 0 means nothing here — while for
+  // pole pair, resistance and inductance it means "current amplitude error". Naming it would invent
+  // a motor diagnosis, so the raw number is reported instead.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = drive->runMotorPhaseOrderDetection({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().find("current"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("OS error 0"), std::string::npos) << result.error();
+}
+
+TEST(RunMotorPhaseOrderDetection, AGeneralOsErrorNamesItself) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};
+  auto result = drive->runMotorPhaseOrderDetection({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
+}
+
 // --- Pole pair detection (command 7) -------------------------------------------------------------
 
 TEST(RunPolePairDetection, DecodesTheCountFromTheFirstPayloadByte) {

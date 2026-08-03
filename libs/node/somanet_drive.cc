@@ -78,11 +78,22 @@ std::expected<T, std::string> decodeBigEndian(const std::vector<uint8_t>& payloa
   return value;
 }
 
+// Whether a command has command-specific error codes, and if so which table.
+//
+// Motor phase order detection (4) has **none** — the specification says its status 3 can only ever
+// carry a general code — so decoding its code 0 as the current-amplitude fault its siblings share
+// would invent a motor diagnosis out of a code that means nothing.
+enum class CommandSpecificFault {
+  kNone,
+  kCurrentAmplitude,  // Pole pair (7), phase resistance (8), phase inductance (9).
+};
+
 // Issues a parameterless motor-measurement command and returns its response payload.
 //
-// The shared front half of pole pair (7), phase resistance (8) and phase inductance (9): all three
-// take no parameters, share one command-specific error table, and differ only in how wide the value
-// in the payload is — which each caller decodes itself with decodeBigEndian.
+// The shared front half of motor phase order (4), pole pair (7), phase resistance (8) and phase
+// inductance (9): all take no parameters and differ only in how wide the value in the payload is —
+// which each caller decodes itself with decodeBigEndian — and in whether they have a
+// command-specific error code.
 //
 // A failed command is an error here rather than a result, which is the opposite of open phase
 // detection: that command's failure *is* its finding, while these either produce a measurement or
@@ -91,7 +102,7 @@ std::expected<T, std::string> decodeBigEndian(const std::vector<uint8_t>& payloa
 // @param what  How to name the command in an error message ("phase resistance measurement").
 std::expected<std::vector<uint8_t>, std::string> runMotorMeasurement(
     SomanetDrive& drive, somanet::OsCommandId id, std::string_view what,
-    const OsCommandConfig& config) {
+    CommandSpecificFault commandSpecificFault, const OsCommandConfig& config) {
   std::vector<uint8_t> command(kOsCommandSize, 0);
   command[0] = static_cast<uint8_t>(id);
 
@@ -110,13 +121,15 @@ std::expected<std::vector<uint8_t>, std::string> runMotorMeasurement(
       return std::unexpected(
           std::format("{} was not performed: {} (OS error {})", what, *general, code));
     }
-    if (code == static_cast<uint8_t>(somanet::MotorMeasurementFault::kCurrentAmplitudeError)) {
+    if (commandSpecificFault == CommandSpecificFault::kCurrentAmplitude &&
+        code == static_cast<uint8_t>(somanet::MotorMeasurementFault::kCurrentAmplitudeError)) {
       return std::unexpected(
           std::format("{} failed: {}", what,
                       somanet::describe(somanet::MotorMeasurementFault::kCurrentAmplitudeError)));
     }
-    // A command-specific code this build does not name: report the number rather than swallowing
-    // it, so a firmware that grows the table is still actionable.
+    // A command-specific code this build does not name — including any code from a command the
+    // specification says has none. Report the number rather than swallowing it or guessing at a
+    // meaning, so a firmware that grows the table is still actionable.
     return std::unexpected(
         std::format("{} failed with OS error {} (command-specific)", what, code));
   }
@@ -408,6 +421,39 @@ std::expected<OpenPhaseResult, std::string> SomanetDrive::runOpenPhaseDetection(
   return result;
 }
 
+std::string MotorPhaseOrderResult::describe() const {
+  return std::format("motor phase order is {}", somanet::toString(order));
+}
+
+void to_json(nlohmann::json& j, const MotorPhaseOrderResult& result) {
+  j = nlohmann::json{{"order", somanet::toString(result.order)},
+                     {"inverted", result.inverted()},
+                     {"description", result.describe()}};
+}
+
+std::expected<MotorPhaseOrderResult, std::string> SomanetDrive::runMotorPhaseOrderDetection(
+    const OsCommandConfig& config) {
+  static constexpr std::string_view kWhat = "motor phase order detection";
+  auto payload = runMotorMeasurement(*this, somanet::OsCommandId::kMotorPhaseOrderDetection, kWhat,
+                                     CommandSpecificFault::kNone, config);
+  if (!payload) {
+    return std::unexpected(payload.error());
+  }
+  auto order = decodeBigEndian<uint8_t>(*payload, kWhat);
+  if (!order) {
+    return std::unexpected(order.error());
+  }
+  // Only 0 and 1 are defined. Anything else is a value this build cannot interpret, and guessing at
+  // it would misreport how a motor is wired — which the next command, commutation offset
+  // measurement, then builds on.
+  if (*order > static_cast<uint8_t>(somanet::MotorPhaseOrder::kInverted)) {
+    return std::unexpected(std::format(
+        "{} reported motor phase order {}, which is neither normal (0) nor inverted (1)", kWhat,
+        *order));
+  }
+  return MotorPhaseOrderResult{.order = static_cast<somanet::MotorPhaseOrder>(*order)};
+}
+
 std::string PolePairResult::describe() const {
   return std::format("{} pole pair{}", polePairs, polePairs == 1 ? "" : "s");
 }
@@ -419,8 +465,8 @@ void to_json(nlohmann::json& j, const PolePairResult& result) {
 std::expected<PolePairResult, std::string> SomanetDrive::runPolePairDetection(
     const OsCommandConfig& config) {
   static constexpr std::string_view kWhat = "pole pair detection";
-  auto payload =
-      runMotorMeasurement(*this, somanet::OsCommandId::kPolePairDetection, kWhat, config);
+  auto payload = runMotorMeasurement(*this, somanet::OsCommandId::kPolePairDetection, kWhat,
+                                     CommandSpecificFault::kCurrentAmplitude, config);
   if (!payload) {
     return std::unexpected(payload.error());
   }
@@ -442,8 +488,8 @@ void to_json(nlohmann::json& j, const PhaseResistanceResult& result) {
 std::expected<PhaseResistanceResult, std::string> SomanetDrive::runPhaseResistanceMeasurement(
     const OsCommandConfig& config) {
   static constexpr std::string_view kWhat = "phase resistance measurement";
-  auto payload =
-      runMotorMeasurement(*this, somanet::OsCommandId::kPhaseResistanceMeasurement, kWhat, config);
+  auto payload = runMotorMeasurement(*this, somanet::OsCommandId::kPhaseResistanceMeasurement,
+                                     kWhat, CommandSpecificFault::kCurrentAmplitude, config);
   if (!payload) {
     return std::unexpected(payload.error());
   }
@@ -465,8 +511,8 @@ void to_json(nlohmann::json& j, const PhaseInductanceResult& result) {
 std::expected<PhaseInductanceResult, std::string> SomanetDrive::runPhaseInductanceMeasurement(
     const OsCommandConfig& config) {
   static constexpr std::string_view kWhat = "phase inductance measurement";
-  auto payload =
-      runMotorMeasurement(*this, somanet::OsCommandId::kPhaseInductanceMeasurement, kWhat, config);
+  auto payload = runMotorMeasurement(*this, somanet::OsCommandId::kPhaseInductanceMeasurement,
+                                     kWhat, CommandSpecificFault::kCurrentAmplitude, config);
   if (!payload) {
     return std::unexpected(payload.error());
   }

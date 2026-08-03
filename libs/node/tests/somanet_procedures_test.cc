@@ -35,6 +35,7 @@ using mm::node::kOsCommand;
 using mm::node::kOsCommandMode;
 using mm::node::kOsCommandStep;
 using mm::node::kSynapticonVendorId;
+using mm::node::motorPhaseOrderDetectionSteps;
 using mm::node::openPhaseDetectionSteps;
 using mm::node::OsCommandRequest;
 using mm::node::osCommandSteps;
@@ -43,6 +44,7 @@ using mm::node::phaseResistanceMeasurementSteps;
 using mm::node::polePairDetectionSteps;
 using mm::node::ProgressReporter;
 using mm::node::ProgressStatus;
+using mm::node::runMotorPhaseOrderDetectionProcedure;
 using mm::node::runOpenPhaseDetectionProcedure;
 using mm::node::runOsCommandProcedure;
 using mm::node::runPhaseInductanceMeasurementProcedure;
@@ -484,6 +486,84 @@ TEST(RunPolePairDetectionProcedure, AFailedDetectionStillRestoresTheBrake) {
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("could not raise the motor phase currents"), std::string::npos)
       << result.error();
+
+  const auto* restore = stepById(reporter.steps(), "restore");
+  ASSERT_NE(restore, nullptr);
+  EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(
+      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
+      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+}
+
+// --- Motor phase order detection procedure -------------------------------------------------------
+
+TEST(MotorPhaseOrderDetectionSteps, DeclaresFourStepsIncludingTheBrake) {
+  auto steps = motorPhaseOrderDetectionSteps();
+  ASSERT_EQ(steps.size(), 4u);
+  EXPECT_EQ(steps[0].id, "prepare");
+  EXPECT_EQ(steps[1].id, "release-brake");
+  EXPECT_EQ(steps[2].id, "motor-phase-order-detection");
+  EXPECT_EQ(steps[3].id, "restore");
+}
+
+TEST(RunMotorPhaseOrderDetectionProcedure, PreparesReleasesDetectsAndRestores) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(motorPhaseOrderDetectionSteps());
+
+  driver.responses = {{1, 0, 1, 0, 0, 0, 0, 0}};  // inverted
+  auto result = runMotorPhaseOrderDetectionProcedure(device, reporter, std::stop_token{});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto steps = reporter.steps();
+  for (auto id : {"prepare", "release-brake", "motor-phase-order-detection", "restore"}) {
+    const auto* step = stepById(steps, id);
+    ASSERT_NE(step, nullptr) << id;
+    EXPECT_EQ(step->status, ProgressStatus::kSucceeded) << id;
+  }
+
+  const auto* detected = stepById(steps, "motor-phase-order-detection");
+  ASSERT_NE(detected, nullptr);
+  EXPECT_EQ(detected->value.at("order").get<std::string>(), "inverted");
+  EXPECT_TRUE(detected->value.at("inverted").get<bool>());
+
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 4);
+  // The brake may only be released once the drive is enabled.
+  EXPECT_TRUE(
+      driver.wroteBefore(Object::kControlword, 0, somanet::kBrakeOptions, somanet::kBrakeStatus));
+}
+
+TEST(RunMotorPhaseOrderDetectionProcedure, RestoresTheBrakeAndModeButNotThePhaseOrder) {
+  // The drive writes the detected order into 0x2003:05 itself, and that is the result of the run
+  // rather than a side effect — so the restore must put back the mode and the brake and leave the
+  // phase order alone. Motion Master never writes 0x2003:05 at all.
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(motorPhaseOrderDetectionSteps());
+
+  driver.responses = {{1, 0, 1, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(
+      runMotorPhaseOrderDetectionProcedure(device, reporter, std::stop_token{}).has_value());
+
+  EXPECT_EQ(
+      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
+      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+            std::vector<uint8_t>{8});
+  const auto motorSettingWrites = std::ranges::count_if(
+      driver.writeLog, [](const auto& write) { return write.first == 0x2003; });
+  EXPECT_EQ(motorSettingWrites, 0);
+}
+
+TEST(RunMotorPhaseOrderDetectionProcedure, RestoresAfterCancellation) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(motorPhaseOrderDetectionSteps());
+
+  std::stop_source source;
+  source.request_stop();
+  auto result = runMotorPhaseOrderDetectionProcedure(device, reporter, source.get_token());
+  ASSERT_FALSE(result.has_value());
 
   const auto* restore = stepById(reporter.steps(), "restore");
   ASSERT_NE(restore, nullptr);

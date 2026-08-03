@@ -140,6 +140,46 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor motorPhaseOrder;
+  motorPhaseOrder.name = std::string(kMotorPhaseOrderDetectionProcedure);
+  motorPhaseOrder.title = "Motor phase order detection";
+  motorPhaseOrder.description =
+      "Works out whether the motor's phases are wired normally or inverted — whether the sensor "
+      "angle and the rotor angle move in the same direction — and stores the answer in the drive "
+      "(0x2003:05). Unlike the other detections this one reconfigures the drive, which is the "
+      "point "
+      "of running it: commutation offset measurement requires that it has been done, so it is the "
+      "step immediately before it, and it has to be repeated after every power-on on an axis with "
+      "an "
+      "incremental encoder. The drive is put into diagnostics mode, enabled, its brake released, "
+      "and "
+      "all of that restored afterwards.";
+  motorPhaseOrder.caveats = {
+      "This command turns the rotor. The shaft must be free to move, and whatever it drives must "
+      "be "
+      "safe to move with it.",
+      "The brake is released while it runs, because this command requires that. Anything the brake "
+      "was holding is free to move: on a vertical or loaded axis, support the load first.",
+      "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
+      "A successful run changes the drive's configuration, and the restore does not undo it — the "
+      "new phase order is the result, not a side effect.",
+      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
+      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
+  };
+  motorPhaseOrder.movesMotor = true;
+  motorPhaseOrder.requiresEnabled = false;
+  motorPhaseOrder.steps = motorPhaseOrderDetectionSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(motorPhaseOrder),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runMotorPhaseOrderDetectionProcedure(device, reporter, std::move(stop));
+        };
+      },
+  });
+
   ProcedureDescriptor phaseResistance;
   phaseResistance.name = std::string(kPhaseResistanceMeasurementProcedure);
   phaseResistance.title = "Phase resistance measurement";

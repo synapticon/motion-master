@@ -180,6 +180,41 @@ std::expected<void, std::string> runPolePairDetectionProcedure(Device& device,
                                                                ProgressReporter& reporter,
                                                                std::stop_token stop);
 
+/// @brief Procedure name for motor phase order detection, as it appears in its URL and its snapshot
+///        key.
+inline constexpr std::string_view kMotorPhaseOrderDetectionProcedure =
+    "motor-phase-order-detection";
+
+/// @brief The step motor phase order detection's own measurement reports against.
+inline constexpr std::string_view kMotorPhaseOrderDetectionStep = "motor-phase-order-detection";
+
+/// @brief Motor phase order detection's step template — prepare, release the brake, detect,
+/// restore.
+std::vector<ProgressStep> motorPhaseOrderDetectionSteps();
+
+/// @brief Runs motor phase order detection as a procedure body.
+///
+/// Four steps, with a brake release like @c runPolePairDetectionProcedure and for the same reason —
+/// this command's restrictions require a disengaged brake, and diagnostics mode suppresses the
+/// automatic release. The brake and the operation mode are put back on every path out.
+///
+/// **This is the first procedure whose success changes the drive's configuration.** The firmware
+/// writes the detected order into 0x2003:05 itself, so there is nothing to save afterwards — and
+/// nothing to undo either: the restore puts back the mode and the brake, not the phase order,
+/// because the new value *is* the result the run was for. It is also a prerequisite: commutation
+/// offset measurement requires that this has been run.
+///
+/// **The command rotates the rotor**, so the shaft must be free and its load safe to move.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; checked between steps and passed into the OS command so a
+///                 running detection is aborted rather than abandoned.
+/// @return Void when the drive reported a phase order, otherwise why it did not.
+std::expected<void, std::string> runMotorPhaseOrderDetectionProcedure(Device& device,
+                                                                      ProgressReporter& reporter,
+                                                                      std::stop_token stop);
+
 /// @brief Procedure name for phase resistance measurement, as it appears in its URL and its
 ///        snapshot key.
 inline constexpr std::string_view kPhaseResistanceMeasurementProcedure =

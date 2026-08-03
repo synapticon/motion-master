@@ -410,6 +410,27 @@ std::expected<void, std::string> runPolePairDetectionProcedure(Device& device,
                                  });
 }
 
+std::vector<ProgressStep> motorPhaseOrderDetectionSteps() {
+  return stepsFrom({kPrepareStep, kReleaseBrakeStep, kMotorPhaseOrderDetectionStep, kRestoreStep});
+}
+
+std::expected<void, std::string> runMotorPhaseOrderDetectionProcedure(Device& device,
+                                                                      ProgressReporter& reporter,
+                                                                      std::stop_token stop) {
+  // Releases the brake and turns the rotor, both because the command requires it. Note what the
+  // restore does *not* undo: the phase order the firmware wrote into 0x2003:05 is the result, not a
+  // side effect, so only the mode and the brake go back.
+  return runMeasurementProcedure(device, reporter, std::move(stop),
+                                 {.procedure = kMotorPhaseOrderDetectionProcedure,
+                                  .step = kMotorPhaseOrderDetectionStep,
+                                  .what = "motor phase order detection",
+                                  .releaseBrake = true,
+                                  .timeout = std::chrono::seconds(60)},
+                                 [](SomanetDrive& drive, const OsCommandConfig& config) {
+                                   return drive.runMotorPhaseOrderDetection(config);
+                                 });
+}
+
 std::vector<ProgressStep> phaseResistanceMeasurementSteps() {
   return stepsFrom({kPrepareStep, kPhaseResistanceMeasurementStep, kRestoreStep});
 }

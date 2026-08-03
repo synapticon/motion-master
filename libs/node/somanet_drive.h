@@ -90,6 +90,7 @@ constexpr std::string_view toString(BrakeReleaseStrategy strategy) {
 /// Only the commands this codebase issues are listed; the firmware implements more. The numbering
 /// is the firmware's, so gaps are real rather than reserved space.
 enum class OsCommandId : uint8_t {
+  kMotorPhaseOrderDetection = 4,    ///< Detects the motor phase order. Rotates the rotor.
   kOpenPhaseDetection = 6,          ///< Checks every motor phase and FET leg for an open circuit.
   kPolePairDetection = 7,           ///< Detects the motor's pole pair count. Rotates the rotor.
   kPhaseResistanceMeasurement = 8,  ///< Measures the motor's phase resistance, in milliohms.
@@ -164,6 +165,27 @@ constexpr std::string_view describe(OpenPhaseFault fault) {
       return "the lower FET in leg C is not conducting (open circuit fault)";
   }
   return "unknown fault";
+}
+
+/// @brief Which way round the motor's phases are wired, as motor phase order detection (command 4)
+///        reports it and as 0x2003:05 "Motor phases inverted" stores it.
+///
+/// "Inverted" means the sensor angle and the rotor angle move in opposite directions; normal means
+/// they increase together.
+enum class MotorPhaseOrder : uint8_t {
+  kNormal = 0,    ///< Sensor and rotor angles change in the same direction.
+  kInverted = 1,  ///< They change in opposite directions.
+};
+
+/// @brief Name of a motor phase order (for logging / JSON). Never returns @c nullptr.
+constexpr std::string_view toString(MotorPhaseOrder order) {
+  switch (order) {
+    case MotorPhaseOrder::kNormal:
+      return "normal";
+    case MotorPhaseOrder::kInverted:
+      return "inverted";
+  }
+  return "unknown";
 }
 
 /// @brief The faults the current-injecting motor measurements report as their command-specific OS
@@ -333,6 +355,22 @@ struct OpenPhaseResult {
   std::string describe() const;
 };
 void to_json(nlohmann::json& j, const OpenPhaseResult& result);
+
+/// @brief What motor phase order detection (command 4) found.
+///
+/// Unlike the other measurements, **the drive stores this one**: on success the firmware writes the
+/// detected order into 0x2003:05 "Motor phases inverted" itself, so a successful run has
+/// reconfigured the drive rather than merely reported a number.
+struct MotorPhaseOrderResult {
+  somanet::MotorPhaseOrder order{somanet::MotorPhaseOrder::kNormal};  ///< What the drive detected.
+
+  /// @brief Whether the phases are inverted — the one bit a caller normally branches on.
+  bool inverted() const { return order == somanet::MotorPhaseOrder::kInverted; }
+
+  /// @brief One line describing the finding, ready to put in front of a user.
+  std::string describe() const;
+};
+void to_json(nlohmann::json& j, const MotorPhaseOrderResult& result);
 
 /// @brief What pole pair detection (command 7) found.
 struct PolePairResult {
@@ -519,6 +557,32 @@ class SomanetDrive : public Cia402Drive {
   /// @return What the detection found, or why no verdict was reached.
   std::expected<OpenPhaseResult, std::string> runOpenPhaseDetection(
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(10),
+                                       .pollInterval = std::chrono::milliseconds(100)});
+
+  /// @brief Runs motor phase order detection (OS command 4) and decodes what it found.
+  ///
+  /// Determines whether the motor's phases are wired normally or inverted, by turning the rotor and
+  /// comparing which way the sensor angle moves. **A successful run reconfigures the drive**: the
+  /// firmware writes the detected order into 0x2003:05 itself, which is the point of running it —
+  /// commutation offset measurement (command 5) requires it to have been done.
+  ///
+  /// Preconditions, all enforced by the drive refusing with OS error 251: operation mode
+  /// @c somanet::OperationMode::kDiagnostics, CiA402 state Operation Enabled, no limit switch
+  /// active,
+  /// **and the brake disengaged** if one is configured (see @c releaseBrake — in diagnostics mode
+  /// enabling the drive does not release it).
+  ///
+  /// **This command rotates the rotor.** As with pole pair detection the specification states it
+  /// outright rather than as a possibility.
+  ///
+  /// This command has **no command-specific error codes at all** — a failure can only carry a
+  /// general one (251 "command not allowed", 253 timeout, ...), so an error from here always names
+  /// a reason the command did not run rather than something about the motor.
+  ///
+  /// @param config  Timing and cancellation. The default timeout is sized for this command.
+  /// @return The detected phase order, or why none was produced.
+  std::expected<MotorPhaseOrderResult, std::string> runMotorPhaseOrderDetection(
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(60),
                                        .pollInterval = std::chrono::milliseconds(100)});
 
   /// @brief Runs pole pair detection (OS command 7) and decodes the count it reports.

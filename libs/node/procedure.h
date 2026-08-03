@@ -134,6 +134,42 @@ struct ProcedureSnapshot {
 };
 void to_json(nlohmann::json& j, const ProcedureSnapshot& snapshot);
 
+/// @brief A well-formed snapshot for a procedure that has never run — idle, no timestamps, and
+///        every step idle from @p steps.
+///
+/// @c ProcedureManager cannot produce this — it is only told a step template when a run starts — so
+/// it is the job of whoever holds the template (the catalogue). With it, "never run" and "ran" have
+/// the same shape on the wire and a client renders one component with no empty-state branch, which
+/// is the whole point of the accumulating-snapshot model.
+ProcedureSnapshot idleSnapshot(std::vector<ProgressStep> steps);
+
+/// @brief What a procedure *is*, independent of any run — the half of the catalogue a client needs
+///        to render a control for it.
+///
+/// The text lives here, on the server, rather than in each client: the house rule that every action
+/// control carries a description *and its caveats* means it has to exist somewhere, and duplicating
+/// it per client is how it goes stale. A client renders whatever the catalogue reports, so it stays
+/// in step with the server's procedure set without hard-coding an entry per procedure.
+///
+/// What it deliberately does *not* carry is presentation or parameters. Formatting a step's value
+/// is the client's business (see @c ProgressStep), and a parameter schema waits until a procedure
+/// with *named* parameters shows what one actually needs. The only procedure taking parameters
+/// today asks for raw command bytes, which no schema would describe usefully — so it is the wrong
+/// shape to design against, not a lesser case.
+struct ProcedureDescriptor {
+  std::string name;   ///< Identifier: the URL segment, and the key its snapshot is retained under.
+  std::string title;  ///< Short human-readable name, e.g. "OS command".
+  std::string description;           ///< What the procedure does, in a sentence or two.
+  std::vector<std::string> caveats;  ///< What a user must know before running it; may be empty.
+  bool movesMotor = false;           ///< True if running it can move the shaft.
+  bool requiresEnabled = false;      ///< True if the drive must be enabled first.
+
+  /// The ordered step template, all idle — both what a run is seeded with and what an idle snapshot
+  /// is rendered from.
+  std::vector<ProgressStep> steps;
+};
+void to_json(nlohmann::json& j, const ProcedureDescriptor& descriptor);
+
 /// @brief The handle a procedure body uses to report where it has got to.
 ///
 /// A body is a plain function over one of these — @c runXxx(SomanetDrive&, ProgressReporter&,

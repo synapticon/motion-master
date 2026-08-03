@@ -73,6 +73,12 @@ void to_json(nlohmann::json& j, const ProgressStep& step) {
   }
 }
 
+ProcedureSnapshot idleSnapshot(std::vector<ProgressStep> steps) {
+  ProcedureSnapshot snapshot;
+  snapshot.steps = std::move(steps);
+  return snapshot;
+}
+
 void to_json(nlohmann::json& j, const ProcedureSnapshot& snapshot) {
   j = nlohmann::json{
       {"status", toString(snapshot.status)},
@@ -88,6 +94,27 @@ void to_json(nlohmann::json& j, const ProcedureSnapshot& snapshot) {
   if (snapshot.error) {
     j["error"] = *snapshot.error;
   }
+}
+
+void to_json(nlohmann::json& j, const ProcedureDescriptor& descriptor) {
+  // The template is emitted as bare step ids, not as ProgressSteps: every entry would carry
+  // status "idle" and no value, which says nothing a client can use. Live per-step status belongs
+  // to the snapshot; the descriptor only declares which steps exist, and in what order.
+  auto steps = nlohmann::json::array();
+  for (const auto& step : descriptor.steps) {
+    steps.push_back(step.id);
+  }
+  // Every field is emitted unconditionally, empty or not — a client renders one control per
+  // procedure, and branching on absent-versus-empty would be a distinction without a difference.
+  j = nlohmann::json{
+      {"name", descriptor.name},
+      {"title", descriptor.title},
+      {"description", descriptor.description},
+      {"caveats", descriptor.caveats},
+      {"movesMotor", descriptor.movesMotor},
+      {"requiresEnabled", descriptor.requiresEnabled},
+      {"steps", std::move(steps)},
+  };
 }
 
 }  // namespace mm::node

@@ -155,6 +155,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
   std::vector<std::vector<uint8_t>> responses{{0, 0, 0, 0, 0, 0, 0, 0}};
   int responseReads = 0;
   int drainReads = 0;
+  bool awaitingCommand = true;
   int statusReads = 0;
 
   std::vector<uint8_t> lastCommand;
@@ -191,17 +192,22 @@ class OsCommandFakeDriver : public FieldbusDriver {
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t index,
                                                            uint8_t subindex) override {
     if (index == kOsCommand && subindex == 3) {
-      // Nothing to answer with until a command has been issued, which is what a real drive holding
-      // no response does — and what lets the drain read runOsCommand performs before every command
-      // not consume a scripted reply. drainReads counts those separately from the polls that
-      // follow.
-      if (commandWrites == 0) {
+      // A real drive has a response to give only between a command being issued and that response
+      // being read: reading it returns the drive to idle. Modelling that is what lets the drain
+      // read runOsCommand performs before *every* command avoid eating the next command's scripted
+      // reply, which in a composite procedure would hand each command the one after it. drainReads
+      // counts those idle reads separately from the polls that follow a command.
+      if (awaitingCommand) {
         ++drainReads;
         return std::vector<uint8_t>(8, 0);
       }
       const size_t at = std::min(static_cast<size_t>(responseReads), responses.size() - 1);
       ++responseReads;
-      return responses[at];
+      const auto& reply = responses[at];
+      if (!reply.empty() && reply[0] <= 3) {  // terminal: the drive is idle again
+        awaitingCommand = true;
+      }
+      return reply;
     }
     if (index == kOsCommand && subindex == 2) {
       ++statusReads;
@@ -222,6 +228,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
             "SDO abort 0x08000021: Data cannot be transferred because of local control");
       }
       ++commandWrites;
+      awaitingCommand = false;
       lastCommand.assign(data.begin(), data.end());
     }
     if (index == kOsCommandMode && subindex == 0 && !data.empty()) {

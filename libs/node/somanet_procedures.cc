@@ -190,6 +190,29 @@ std::expected<void, std::string> releaseBrakeForDiagnostics(SomanetDrive& drive,
   return {};
 }
 
+// Runs one command of a composite procedure: checks for cancellation, starts the step, issues the
+// command, and records what it produced. On failure the step carries the reason and the composite
+// stops — every later step depends on the ones before it, so carrying on would measure against a
+// value that was never established.
+//
+// @param run  Issues one command and returns its result, or why there is none.
+template <typename Run>
+std::expected<void, std::string> compositeStep(ProgressReporter& reporter, std::string_view step,
+                                               std::string_view what, const std::stop_token& stop,
+                                               Run run) {
+  if (stop.stop_requested()) {
+    return std::unexpected(std::format("{} was cancelled", what));
+  }
+  reporter.start(step);
+  auto result = run();
+  if (!result) {
+    reporter.fail(step, result.error());
+    return std::unexpected(result.error());
+  }
+  reporter.succeed(step, *result);
+  return {};
+}
+
 // What differs between the diagnostics-mode measurement procedures. Everything else — the prepare,
 // the optional brake release, the measurement, the restore, the cancellation checks — is identical,
 // which is why they share one body.
@@ -429,6 +452,130 @@ std::expected<void, std::string> runMotorPhaseOrderDetectionProcedure(Device& de
                                  [](SomanetDrive& drive, const OsCommandConfig& config) {
                                    return drive.runMotorPhaseOrderDetection(config);
                                  });
+}
+
+std::vector<ProgressStep> offsetDetectionSteps() {
+  return stepsFrom({kPrepareStep, kOpenPhaseDetectionStep, kPhaseResistanceMeasurementStep,
+                    kPhaseInductanceMeasurementStep, kReleaseBrakeStep, kPolePairDetectionStep,
+                    kMotorPhaseOrderDetectionStep, kSetBrakeStep, kCommutationOffsetMeasurementStep,
+                    kRestoreStep});
+}
+
+std::expected<void, std::string> runOffsetDetectionProcedure(Device& device,
+                                                             ProgressReporter& reporter,
+                                                             std::stop_token stop) {
+  static constexpr std::string_view kWhat = "offset detection";
+
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+
+  // Read before anything is touched, for the same reason as in commutation offset detection: the
+  // method decides which way the brake goes at the end, and a run that cannot tell must not start.
+  auto method = drive->commutationOffsetMethod();
+  if (!method) {
+    return std::unexpected(method.error());
+  }
+
+  DiagnosticsRestorer restorer(*drive, reporter, kOffsetDetectionProcedure);
+
+  if (auto r = prepareForDiagnostics(*drive, reporter, restorer); !r) {
+    return std::unexpected(r.error());
+  }
+
+  // Open phase detection first, because every measurement after it assumes the three phases are
+  // actually connected — each would otherwise fail in a way that points at the wrong thing.
+  if (stop.stop_requested()) {
+    return std::unexpected(std::format("{} was cancelled", kWhat));
+  }
+  reporter.start(kOpenPhaseDetectionStep);
+  auto openPhase = drive->runOpenPhaseDetection({.timeout = std::chrono::seconds(10),
+                                                 .pollInterval = std::chrono::milliseconds(100),
+                                                 .stop = stop});
+  if (!openPhase) {
+    reporter.fail(kOpenPhaseDetectionStep, openPhase.error());
+    return std::unexpected(openPhase.error());
+  }
+  if (openPhase->phaseOpened) {
+    const auto reason = openPhase->describe();
+    reporter.fail(kOpenPhaseDetectionStep, reason);
+    return std::unexpected(reason);
+  }
+  reporter.succeed(kOpenPhaseDetectionStep, *openPhase);
+
+  // The two winding measurements, which need no brake handling — so they run while the brake is
+  // still where it was found, and the load stays held for as long as possible.
+  if (auto r = compositeStep(reporter, kPhaseResistanceMeasurementStep, kWhat, stop,
+                             [&drive, &stop] {
+                               return drive->runPhaseResistanceMeasurement(
+                                   {.timeout = std::chrono::seconds(30),
+                                    .pollInterval = std::chrono::milliseconds(100),
+                                    .stop = stop});
+                             });
+      !r) {
+    return std::unexpected(r.error());
+  }
+  if (auto r = compositeStep(reporter, kPhaseInductanceMeasurementStep, kWhat, stop,
+                             [&drive, &stop] {
+                               return drive->runPhaseInductanceMeasurement(
+                                   {.timeout = std::chrono::seconds(30),
+                                    .pollInterval = std::chrono::milliseconds(100),
+                                    .stop = stop});
+                             });
+      !r) {
+    return std::unexpected(r.error());
+  }
+
+  // Released once, here — as late as the sequence allows. Pole pair and motor phase order detection
+  // both require a disengaged brake, and everything before this point did not.
+  if (auto r = releaseBrakeForDiagnostics(*drive, reporter, restorer); !r) {
+    return std::unexpected(r.error());
+  }
+
+  if (auto r = compositeStep(reporter, kPolePairDetectionStep, kWhat, stop,
+                             [&drive, &stop] {
+                               return drive->runPolePairDetection(
+                                   {.timeout = std::chrono::seconds(60),
+                                    .pollInterval = std::chrono::milliseconds(100),
+                                    .stop = stop});
+                             });
+      !r) {
+    return std::unexpected(r.error());
+  }
+  if (auto r = compositeStep(reporter, kMotorPhaseOrderDetectionStep, kWhat, stop,
+                             [&drive, &stop] {
+                               return drive->runMotorPhaseOrderDetection(
+                                   {.timeout = std::chrono::seconds(60),
+                                    .pollInterval = std::chrono::milliseconds(100),
+                                    .stop = stop});
+                             });
+      !r) {
+    return std::unexpected(r.error());
+  }
+
+  // The brake goes where the offset method needs it: left released for the rotating methods,
+  // engaged for the stationary one. The restore is not re-armed — it holds the status found before
+  // any of this, which is the only status worth putting back.
+  if (stop.stop_requested()) {
+    return std::unexpected(std::format("{} was cancelled", kWhat));
+  }
+  reporter.start(kSetBrakeStep);
+  auto brake =
+      somanet::requiresBrakeReleased(*method) ? drive->releaseBrake() : drive->engageBrake();
+  if (!brake) {
+    reporter.fail(kSetBrakeStep, brake.error());
+    return std::unexpected(brake.error());
+  }
+  reporter.succeed(kSetBrakeStep, *brake);
+
+  return compositeStep(reporter, kCommutationOffsetMeasurementStep, kWhat, stop,
+                       [&drive, &method, &stop] {
+                         return drive->runCommutationOffsetMeasurement(
+                             *method, {.timeout = std::chrono::seconds(60),
+                                       .pollInterval = std::chrono::milliseconds(100),
+                                       .stop = stop});
+                       });
 }
 
 std::vector<ProgressStep> commutationOffsetDetectionSteps() {

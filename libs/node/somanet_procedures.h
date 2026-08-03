@@ -215,6 +215,56 @@ std::expected<void, std::string> runMotorPhaseOrderDetectionProcedure(Device& de
                                                                       ProgressReporter& reporter,
                                                                       std::stop_token stop);
 
+/// @brief Procedure name for the whole commissioning sequence, as it appears in its URL and its
+///        snapshot key.
+///
+/// *Offset detection* is what this sequence has always been called, and the name people will look
+/// for. Not to be confused with @c kCommutationOffsetDetectionProcedure, which is the last two
+/// commands of this sequence on their own — the pair an incremental-encoder axis repeats after
+/// every power-on, once a full offset detection has been done.
+inline constexpr std::string_view kOffsetDetectionProcedure = "offset-detection";
+
+/// @brief The commissioning sequence's step template — every command in the order it runs, plus the
+///        shared prepare, brake and restore steps.
+std::vector<ProgressStep> offsetDetectionSteps();
+
+/// @brief Runs the whole commissioning sequence as one procedure body.
+///
+/// Every measurement a motor needs, in the order they depend on each other, in **one prepared
+/// session**: open phase detection (6), phase resistance (8), phase inductance (9), pole pair
+/// detection (7), motor phase order detection (4), commutation offset measurement (5). Each step
+/// records its own result, so a run that stops half way still reports everything it established.
+///
+/// **Why one procedure rather than six runs.** The drive is put into diagnostics mode and enabled
+/// once, and the brake is released once, so the axis spends the minimum time in a state where it
+/// can move; and the sequence cannot be got wrong — open phase detection before the measurements
+/// that assume connected phases, and motor phase order before the offset that is meaningless
+/// without it.
+///
+/// **The brake is released as late as the sequence allows**, not at the start: open phase detection
+/// and the two winding measurements do not require it, so the load stays held until pole pair
+/// detection needs it free. It is put where the offset method needs it before the last step, and
+/// restored to what it was on the way out.
+///
+/// **A stopping failure stops the run.** Every step depends on the ones before it, so a failed
+/// measurement is not skipped past — carrying on would measure against a value that was never
+/// established. An open phase fails the run outright for the same reason.
+///
+/// **What it does not do is store the measurements.** Commands 7, 8 and 9 report a value without
+/// writing it (unlike 4 and 5, which the firmware stores itself), and the objects it would belong
+/// in — 0x2003:01, :03 and :04 — hold their values in units this code has not confirmed against the
+/// firmware. Writing an unverified scaling into a motor's configuration is worse than reporting the
+/// number and letting the caller place it.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; checked between every step and passed into each command so a
+///                 running measurement is aborted rather than abandoned.
+/// @return Void when every step succeeded, otherwise why the run stopped.
+std::expected<void, std::string> runOffsetDetectionProcedure(Device& device,
+                                                             ProgressReporter& reporter,
+                                                             std::stop_token stop);
+
 /// @brief Procedure name for commutation offset measurement, as it appears in its URL and its
 ///        snapshot key.
 inline constexpr std::string_view kCommutationOffsetDetectionProcedure =

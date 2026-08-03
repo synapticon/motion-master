@@ -37,6 +37,7 @@ using mm::node::kOsCommandMode;
 using mm::node::kOsCommandStep;
 using mm::node::kSynapticonVendorId;
 using mm::node::motorPhaseOrderDetectionSteps;
+using mm::node::offsetDetectionSteps;
 using mm::node::openPhaseDetectionSteps;
 using mm::node::OsCommandRequest;
 using mm::node::osCommandSteps;
@@ -47,6 +48,7 @@ using mm::node::ProgressReporter;
 using mm::node::ProgressStatus;
 using mm::node::runCommutationOffsetDetectionProcedure;
 using mm::node::runMotorPhaseOrderDetectionProcedure;
+using mm::node::runOffsetDetectionProcedure;
 using mm::node::runOpenPhaseDetectionProcedure;
 using mm::node::runOsCommandProcedure;
 using mm::node::runPhaseInductanceMeasurementProcedure;
@@ -67,8 +69,10 @@ class OsCommandFakeDriver : public FieldbusDriver {
   std::vector<std::vector<uint8_t>> responses{{0, 0, 0, 0, 0, 0, 0, 0}};
   int responseReads = 0;
   int drainReads = 0;
+  bool awaitingCommand = true;
   int commandWrites = 0;
   std::vector<uint8_t> brakeStatusWrites;
+  std::vector<uint8_t> commandIds;
   uint32_t vendorId = kSynapticonVendorId;
   uint16_t statusword = 0x0040;  // SwitchOnDisabled
   std::vector<std::pair<uint16_t, uint8_t>> writeLog;
@@ -117,17 +121,22 @@ class OsCommandFakeDriver : public FieldbusDriver {
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t index,
                                                            uint8_t subindex) override {
     if (index == kOsCommand && subindex == 3) {
-      // Nothing to answer with until a command has been issued, which is what a real drive holding
-      // no response does — and what lets the drain read runOsCommand performs before every command
-      // not consume a scripted reply. drainReads counts those separately from the polls that
-      // follow.
-      if (commandWrites == 0) {
+      // A real drive has a response to give only between a command being issued and that response
+      // being read: reading it returns the drive to idle. Modelling that is what lets the drain
+      // read runOsCommand performs before *every* command avoid eating the next command's scripted
+      // reply, which in a composite procedure would hand each command the one after it. drainReads
+      // counts those idle reads separately from the polls that follow a command.
+      if (awaitingCommand) {
         ++drainReads;
         return std::vector<uint8_t>(8, 0);
       }
       const size_t at = std::min(static_cast<size_t>(responseReads), responses.size() - 1);
       ++responseReads;
-      return responses[at];
+      const auto& reply = responses[at];
+      if (!reply.empty() && reply[0] <= 3) {  // terminal: the drive is idle again
+        awaitingCommand = true;
+      }
+      return reply;
     }
     auto it = store.find(key(index, subindex));
     if (it == store.end()) {
@@ -142,6 +151,10 @@ class OsCommandFakeDriver : public FieldbusDriver {
     writeLog.push_back({index, subindex});
     if (index == kOsCommand && subindex == 1) {
       ++commandWrites;
+      awaitingCommand = false;
+      if (!data.empty()) {
+        commandIds.push_back(data[0]);
+      }
     }
     if (index == somanet::kBrakeOptions && subindex == somanet::kBrakeStatus && !data.empty()) {
       brakeStatusWrites.push_back(data[0]);
@@ -599,6 +612,137 @@ TEST(RunMotorPhaseOrderDetectionProcedure, RestoresAfterCancellation) {
   EXPECT_EQ(
       driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
       std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
+}
+
+// --- Offset detection (the whole commissioning sequence)
+// ------------------------------------------
+
+TEST(OffsetDetectionSteps, DeclaresEveryCommandInTheOrderItRuns) {
+  auto steps = offsetDetectionSteps();
+  ASSERT_EQ(steps.size(), 10u);
+  EXPECT_EQ(steps[0].id, "prepare");
+  EXPECT_EQ(steps[1].id, "open-phase-detection");
+  EXPECT_EQ(steps[2].id, "phase-resistance-measurement");
+  EXPECT_EQ(steps[3].id, "phase-inductance-measurement");
+  EXPECT_EQ(steps[4].id, "release-brake");
+  EXPECT_EQ(steps[5].id, "pole-pair-detection");
+  EXPECT_EQ(steps[6].id, "motor-phase-order-detection");
+  EXPECT_EQ(steps[7].id, "set-brake");
+  EXPECT_EQ(steps[8].id, "commutation-offset-measurement");
+  EXPECT_EQ(steps[9].id, "restore");
+}
+
+TEST(RunOffsetDetectionProcedure, RunsEverySixCommandsInOrderAndRecordsEachResult) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(offsetDetectionSteps());
+
+  // One reply per command, in sequence: no open phase, 100000 mOhm, 4244 uH, 3 pole pairs,
+  // inverted, offset 2035.
+  driver.responses = {
+      {0, 0, 0, 0, 0, 0, 0, 0},
+      {1, 0, 0x00, 0x01, 0x86, 0xA0, 0, 0},
+      {1, 0, 0x00, 0x00, 0x10, 0x94, 0, 0},
+      {1, 0, 3, 0, 0, 0, 0, 0},
+      {1, 0, 1, 0, 0, 0, 0, 0},
+      {1, 0, 0x07, 0xF3, 0, 0, 0, 0},
+  };
+  auto result = runOffsetDetectionProcedure(device, reporter, std::stop_token{});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto steps = reporter.steps();
+  for (const auto& step : steps) {
+    EXPECT_EQ(step.status, ProgressStatus::kSucceeded) << step.id;
+  }
+
+  // The order is the whole point of running these as one procedure, so it is asserted rather than
+  // assumed: open phase, resistance, inductance, pole pair, phase order, offset.
+  EXPECT_EQ(driver.commandIds, (std::vector<uint8_t>{6, 8, 9, 7, 4, 5}));
+
+  // Every measurement kept its own value, so a reader gets the whole commissioning result from one
+  // snapshot rather than having to run six procedures and collect them.
+  EXPECT_EQ(stepById(steps, "phase-resistance-measurement")->value.at("milliohms").get<uint32_t>(),
+            100000u);
+  EXPECT_EQ(
+      stepById(steps, "phase-inductance-measurement")->value.at("microhenries").get<uint32_t>(),
+      4244u);
+  EXPECT_EQ(stepById(steps, "pole-pair-detection")->value.at("polePairs").get<uint8_t>(), 3);
+  EXPECT_EQ(stepById(steps, "motor-phase-order-detection")->value.at("order").get<std::string>(),
+            "inverted");
+  EXPECT_EQ(
+      stepById(steps, "commutation-offset-measurement")->value.at("angleOffset").get<int16_t>(),
+      2035);
+}
+
+TEST(RunOffsetDetectionProcedure, ReleasesTheBrakeOnlyAfterTheWindingMeasurements) {
+  // The brake is released as late as the sequence allows: open phase, resistance and inductance do
+  // not need it, so the load stays held until pole pair detection does. Asserting on order rather
+  // than on the final state is the only way to catch a release that happens too early.
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(offsetDetectionSteps());
+
+  driver.responses = {
+      {0, 0, 0, 0, 0, 0, 0, 0},
+      {1, 0, 0x00, 0x01, 0x86, 0xA0, 0, 0},
+      {1, 0, 0x00, 0x00, 0x10, 0x94, 0, 0},
+      {1, 0, 3, 0, 0, 0, 0, 0},
+      {1, 0, 1, 0, 0, 0, 0, 0},
+      {1, 0, 0x07, 0xF3, 0, 0, 0, 0},
+  };
+  ASSERT_TRUE(runOffsetDetectionProcedure(device, reporter, std::stop_token{}).has_value());
+
+  // Three commands were issued before the brake was ever written.
+  const auto& log = driver.writeLog;
+  const auto firstBrakeWrite = std::ranges::find_if(log, [](const auto& write) {
+    return write.first == somanet::kBrakeOptions && write.second == somanet::kBrakeStatus;
+  });
+  ASSERT_NE(firstBrakeWrite, log.end());
+  const auto commandsBeforeBrake = std::ranges::count_if(
+      log.begin(), firstBrakeWrite,
+      [](const auto& write) { return write.first == kOsCommand && write.second == 1; });
+  EXPECT_EQ(commandsBeforeBrake, 3);
+}
+
+TEST(RunOffsetDetectionProcedure, AnOpenPhaseStopsTheRunBeforeAnythingElseIsMeasured) {
+  // Every measurement after this one assumes the phases are connected, so a fault has to stop the
+  // run rather than let five more steps fail in ways that point at the wrong thing.
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(offsetDetectionSteps());
+
+  driver.responses = {{3, 0, 1, 0, 0, 0, 0, 0}};  // open terminal B
+  auto result = runOffsetDetectionProcedure(device, reporter, std::stop_token{});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("open terminal B"), std::string::npos) << result.error();
+
+  const auto steps = reporter.steps();
+  EXPECT_EQ(stepById(steps, "open-phase-detection")->status, ProgressStatus::kFailed);
+  for (auto id : {"phase-resistance-measurement", "phase-inductance-measurement", "release-brake",
+                  "pole-pair-detection", "motor-phase-order-detection", "set-brake",
+                  "commutation-offset-measurement"}) {
+    EXPECT_EQ(stepById(steps, id)->status, ProgressStatus::kIdle) << id;
+  }
+  // Nothing was released, and the drive was put back.
+  EXPECT_TRUE(driver.brakeStatusWrites.empty());
+  EXPECT_EQ(stepById(steps, "restore")->status, ProgressStatus::kSucceeded);
+}
+
+TEST(RunOffsetDetectionProcedure, AFailedMeasurementStopsTheRestOfTheSequence) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(offsetDetectionSteps());
+
+  // Open phase passes, then phase resistance is refused.
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}, {3, 0, 251, 0, 0, 0, 0, 0}};
+  auto result = runOffsetDetectionProcedure(device, reporter, std::stop_token{});
+  ASSERT_FALSE(result.has_value());
+
+  const auto steps = reporter.steps();
+  EXPECT_EQ(stepById(steps, "open-phase-detection")->status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(stepById(steps, "phase-resistance-measurement")->status, ProgressStatus::kFailed);
+  EXPECT_EQ(stepById(steps, "pole-pair-detection")->status, ProgressStatus::kIdle);
+  EXPECT_EQ(stepById(steps, "restore")->status, ProgressStatus::kSucceeded);
 }
 
 // --- Commutation offset measurement procedure ----------------------------------------------------

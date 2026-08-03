@@ -67,6 +67,53 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor commissioning;
+  commissioning.name = std::string(kOffsetDetectionProcedure);
+  commissioning.title = "Offset detection";
+  commissioning.description =
+      "Runs every measurement a motor needs, in the order they depend on each other, in one "
+      "prepared "
+      "session: open phase detection, phase resistance, phase inductance, pole pair detection, "
+      "motor phase order detection, and commutation offset measurement. Running it as one "
+      "procedure "
+      "is what makes the order impossible to get wrong, and each step reports its own result, so "
+      "a run that stops half way still shows everything it established. The drive is put into "
+      "diagnostics mode and enabled once, the brake is released once, and everything is restored "
+      "afterwards.";
+  commissioning.caveats = {
+      "This turns the rotor: pole pair detection and motor phase order detection both have to, and "
+      "the offset measurement may. The shaft must be free, and whatever it drives must be safe to "
+      "move through several separate motions.",
+      "The brake is released partway through — as late as the sequence allows, since the first "
+      "three "
+      "measurements do not need it — and stays released until the end. Anything it was holding is "
+      "free to move for that whole stretch: on a vertical or loaded axis, support the load first.",
+      "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
+      "The measured resistance, inductance and pole pair count are reported but not stored — the "
+      "drive does not write them, and this does not either. Objects 0x2003:03, :04 and :01 are "
+      "where "
+      "they belong. The phase order and the commutation offset the firmware does store itself, and "
+      "the restore does not undo those.",
+      "A failing step stops the run rather than being skipped, because every step depends on the "
+      "ones "
+      "before it. An open phase stops it immediately.",
+      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
+      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
+  };
+  commissioning.movesMotor = true;
+  commissioning.requiresEnabled = false;
+  commissioning.steps = offsetDetectionSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(commissioning),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runOffsetDetectionProcedure(device, reporter, std::move(stop));
+        };
+      },
+  });
+
   ProcedureDescriptor openPhase;
   openPhase.name = std::string(kOpenPhaseDetectionProcedure);
   openPhase.title = "Open phase detection";

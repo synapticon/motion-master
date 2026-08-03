@@ -431,12 +431,14 @@ std::expected<void, std::string> runMotorPhaseOrderDetectionProcedure(Device& de
                                  });
 }
 
-std::vector<ProgressStep> commutationOffsetMeasurementSteps() {
-  return stepsFrom({kPrepareStep, kSetBrakeStep, kCommutationOffsetMeasurementStep, kRestoreStep});
+std::vector<ProgressStep> commutationOffsetDetectionSteps() {
+  return stepsFrom({kPrepareStep, kReleaseBrakeStep, kMotorPhaseOrderDetectionStep, kSetBrakeStep,
+                    kCommutationOffsetMeasurementStep, kRestoreStep});
 }
 
-std::expected<void, std::string> runCommutationOffsetMeasurementProcedure(
-    Device& device, ProgressReporter& reporter, std::stop_token stop) {
+std::expected<void, std::string> runCommutationOffsetDetectionProcedure(Device& device,
+                                                                        ProgressReporter& reporter,
+                                                                        std::stop_token stop) {
   auto drive = createSomanetDrive(device);
   if (!drive) {
     return std::unexpected(drive.error());
@@ -451,26 +453,47 @@ std::expected<void, std::string> runCommutationOffsetMeasurementProcedure(
     return std::unexpected(method.error());
   }
 
-  DiagnosticsRestorer restorer(*drive, reporter, kCommutationOffsetMeasurementProcedure);
+  DiagnosticsRestorer restorer(*drive, reporter, kCommutationOffsetDetectionProcedure);
 
   if (auto r = prepareForDiagnostics(*drive, reporter, restorer); !r) {
     return std::unexpected(r.error());
   }
   if (stop.stop_requested()) {
-    return std::unexpected("commutation offset measurement was cancelled");
+    return std::unexpected("commutation offset detection was cancelled");
   }
 
-  // Released for the rotating methods, engaged for the stationary one — which is not a shortcut for
-  // "leave it alone": a brake found released would let a load move under a method that cannot hold
-  // it, so it is commanded either way. Armed before the write, like every other brake change here.
+  // Motor phase order detection first, and the brake released for it: command 4 requires a
+  // disengaged brake unconditionally, whatever the offset method turns out to need afterwards.
+  if (auto r = releaseBrakeForDiagnostics(*drive, reporter, restorer); !r) {
+    return std::unexpected(r.error());
+  }
+  if (stop.stop_requested()) {
+    return std::unexpected("commutation offset detection was cancelled");
+  }
+
+  reporter.start(kMotorPhaseOrderDetectionStep);
+  auto phaseOrder =
+      drive->runMotorPhaseOrderDetection({.timeout = std::chrono::seconds(60),
+                                          .pollInterval = std::chrono::milliseconds(100),
+                                          .stop = stop});
+  if (!phaseOrder) {
+    reporter.fail(kMotorPhaseOrderDetectionStep, phaseOrder.error());
+    return std::unexpected(phaseOrder.error());
+  }
+  reporter.succeed(kMotorPhaseOrderDetectionStep, *phaseOrder);
+
+  if (stop.stop_requested()) {
+    return std::unexpected("commutation offset detection was cancelled");
+  }
+
+  // Now put the brake where the *offset method* needs it: still released for the rotating methods,
+  // but engaged for the stationary one, which cannot hold the load. Not a shortcut for "leave it
+  // alone" — the brake was released for command 4 a moment ago, so method 2 has to undo that.
+  //
+  // The restore is deliberately *not* re-armed here: it already holds the status the brake had
+  // before any of this, and re-arming would overwrite that with the released state and put the
+  // brake back wrong.
   reporter.start(kSetBrakeStep);
-  auto savedBrake = drive->brakeStatus();
-  if (!savedBrake) {
-    reporter.fail(kSetBrakeStep, savedBrake.error());
-    return std::unexpected(savedBrake.error());
-  }
-  restorer.restoreBrake(*savedBrake);
-
   auto brake =
       somanet::requiresBrakeReleased(*method) ? drive->releaseBrake() : drive->engageBrake();
   if (!brake) {
@@ -480,7 +503,7 @@ std::expected<void, std::string> runCommutationOffsetMeasurementProcedure(
   reporter.succeed(kSetBrakeStep, *brake);
 
   if (stop.stop_requested()) {
-    return std::unexpected("commutation offset measurement was cancelled");
+    return std::unexpected("commutation offset detection was cancelled");
   }
 
   reporter.start(kCommutationOffsetMeasurementStep);

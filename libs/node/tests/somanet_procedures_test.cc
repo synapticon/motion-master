@@ -30,7 +30,7 @@ using mm::comm::FieldbusDriver;
 using mm::comm::ObjectDataType;
 using mm::comm::OdEntry;
 using mm::comm::SlaveInfo;
-using mm::node::commutationOffsetMeasurementSteps;
+using mm::node::commutationOffsetDetectionSteps;
 using mm::node::Device;
 using mm::node::kOsCommand;
 using mm::node::kOsCommandMode;
@@ -45,7 +45,7 @@ using mm::node::phaseResistanceMeasurementSteps;
 using mm::node::polePairDetectionSteps;
 using mm::node::ProgressReporter;
 using mm::node::ProgressStatus;
-using mm::node::runCommutationOffsetMeasurementProcedure;
+using mm::node::runCommutationOffsetDetectionProcedure;
 using mm::node::runMotorPhaseOrderDetectionProcedure;
 using mm::node::runOpenPhaseDetectionProcedure;
 using mm::node::runOsCommandProcedure;
@@ -603,83 +603,131 @@ TEST(RunMotorPhaseOrderDetectionProcedure, RestoresAfterCancellation) {
 
 // --- Commutation offset measurement procedure ----------------------------------------------------
 
-TEST(CommutationOffsetMeasurementSteps, DeclaresFourStepsWithItsOwnBrakeStep) {
-  // "set-brake" rather than "release-brake": this procedure may engage the brake instead.
-  auto steps = commutationOffsetMeasurementSteps();
-  ASSERT_EQ(steps.size(), 4u);
+TEST(CommutationOffsetDetectionSteps, DeclaresSixStepsIncludingThePhaseOrderDetection) {
+  // Command 4 is part of the procedure, not a prerequisite left to the caller: an offset measured
+  // against an unknown phase order is wrong, and the drive does not check that it was run.
+  auto steps = commutationOffsetDetectionSteps();
+  ASSERT_EQ(steps.size(), 6u);
   EXPECT_EQ(steps[0].id, "prepare");
-  EXPECT_EQ(steps[1].id, "set-brake");
-  EXPECT_EQ(steps[2].id, "commutation-offset-measurement");
-  EXPECT_EQ(steps[3].id, "restore");
+  EXPECT_EQ(steps[1].id, "release-brake");
+  EXPECT_EQ(steps[2].id, "motor-phase-order-detection");
+  EXPECT_EQ(steps[3].id, "set-brake");
+  EXPECT_EQ(steps[4].id, "commutation-offset-measurement");
+  EXPECT_EQ(steps[5].id, "restore");
 }
 
-TEST(RunCommutationOffsetMeasurementProcedure, ARotatingMethodReleasesTheBrake) {
+TEST(RunCommutationOffsetDetectionProcedure, DetectsThePhaseOrderThenMeasuresTheOffset) {
   OsCommandFakeDriver driver;
   Device device = makeDevice(driver);
-  ProgressReporter reporter(commutationOffsetMeasurementSteps());
+  ProgressReporter reporter(commutationOffsetDetectionSteps());
 
-  driver.responses = {{1, 0, 0x07, 0xF3, 0, 0, 0, 0}};  // 2035
-  auto result = runCommutationOffsetMeasurementProcedure(device, reporter, std::stop_token{});
+  // One scripted reply per command, in order: command 4 answers "inverted", command 5 answers 2035.
+  driver.responses = {{1, 0, 1, 0, 0, 0, 0, 0}, {1, 0, 0x07, 0xF3, 0, 0, 0, 0}};
+  auto result = runCommutationOffsetDetectionProcedure(device, reporter, std::stop_token{});
   ASSERT_TRUE(result.has_value()) << result.error();
 
   const auto steps = reporter.steps();
-  for (auto id : {"prepare", "set-brake", "commutation-offset-measurement", "restore"}) {
+  for (auto id : {"prepare", "release-brake", "motor-phase-order-detection", "set-brake",
+                  "commutation-offset-measurement", "restore"}) {
     const auto step = stepById(steps, id);
     ASSERT_TRUE(step.has_value()) << id;
     EXPECT_EQ(step->status, ProgressStatus::kSucceeded) << id;
   }
 
+  const auto phaseOrder = stepById(steps, "motor-phase-order-detection");
+  ASSERT_TRUE(phaseOrder.has_value());
+  EXPECT_EQ(phaseOrder->value.at("order").get<std::string>(), "inverted");
+
   const auto measured = stepById(steps, "commutation-offset-measurement");
   ASSERT_TRUE(measured.has_value());
-  EXPECT_EQ(measured->value.at("angleOffset").get<uint16_t>(), 2035);
+  EXPECT_EQ(measured->value.at("angleOffset").get<int16_t>(), 2035);
   EXPECT_EQ(measured->value.at("method").get<std::string>(), "rotating");
-
-  // Released during the run, and back to engaged afterwards.
-  EXPECT_NE(std::ranges::find(driver.brakeStatusWrites,
-                              static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged)),
-            driver.brakeStatusWrites.end());
-  EXPECT_EQ(
-      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
-      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
-  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 5);
 }
 
-TEST(RunCommutationOffsetMeasurementProcedure, TheStationaryMethodEngagesTheBrakeInstead) {
-  // Method 2 cannot hold the load, so the brake must never be released for it — not even briefly,
-  // which is why this asserts on every value written rather than on the state at the end.
+TEST(RunCommutationOffsetDetectionProcedure, TheStationaryMethodEngagesTheBrakeForTheMeasurement) {
+  // Method 2 cannot hold the load, so the brake goes back on before the offset measurement — but it
+  // is still released first, because command 4 requires that unconditionally. So "stationary
+  // method" does not mean "the brake never moves"; it means the brake is on for the measurement
+  // itself.
   OsCommandFakeDriver driver;
   Device device = makeDevice(driver);
   driver.store[OsCommandFakeDriver::key(somanet::kCommutationOffsetDetection,
                                         somanet::kCommutationOffsetMethod)] = {
       static_cast<uint8_t>(somanet::CommutationOffsetMethod::kStationary)};
-  ProgressReporter reporter(commutationOffsetMeasurementSteps());
+  ProgressReporter reporter(commutationOffsetDetectionSteps());
 
-  driver.responses = {{1, 0, 0x00, 0x10, 0, 0, 0, 0}};
-  auto result = runCommutationOffsetMeasurementProcedure(device, reporter, std::stop_token{});
-  ASSERT_TRUE(result.has_value()) << result.error();
+  driver.responses = {{1, 0, 0, 0, 0, 0, 0, 0}, {1, 0, 0x00, 0x10, 0, 0, 0, 0}};
+  ASSERT_TRUE(
+      runCommutationOffsetDetectionProcedure(device, reporter, std::stop_token{}).has_value());
 
-  EXPECT_EQ(std::ranges::find(driver.brakeStatusWrites,
-                              static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged)),
-            driver.brakeStatusWrites.end());
-  EXPECT_NE(std::ranges::find(driver.brakeStatusWrites,
-                              static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)),
-            driver.brakeStatusWrites.end());
+  // Released for command 4, then engaged again before command 5 — in that order.
+  const auto disengaged = static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged);
+  const auto engaged = static_cast<uint8_t>(somanet::BrakeStatus::kEngaged);
+  const auto& writes = driver.brakeStatusWrites;
+  const auto releasedAt = std::ranges::find(writes, disengaged);
+  ASSERT_NE(releasedAt, writes.end());
+  EXPECT_NE(std::ranges::find(releasedAt, writes.end(), engaged), writes.end());
 
   const auto measured = stepById(reporter.steps(), "commutation-offset-measurement");
   ASSERT_TRUE(measured.has_value());
   EXPECT_EQ(measured->value.at("method").get<std::string>(), "stationary");
 }
 
-TEST(RunCommutationOffsetMeasurementProcedure, AnUnreadableMethodLeavesTheDriveUntouched) {
+TEST(RunCommutationOffsetDetectionProcedure, RestoresTheBrakeItFoundAfterChangingItTwice) {
+  // The brake is written twice in this procedure, so the restore must hold the status found
+  // *before* either change. A drive found with the brake already released must be left that way.
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  driver.store[OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)] = {
+      static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged)};
+  driver.store[OsCommandFakeDriver::key(somanet::kCommutationOffsetDetection,
+                                        somanet::kCommutationOffsetMethod)] = {
+      static_cast<uint8_t>(somanet::CommutationOffsetMethod::kStationary)};
+  ProgressReporter reporter(commutationOffsetDetectionSteps());
+
+  driver.responses = {{1, 0, 0, 0, 0, 0, 0, 0}, {1, 0, 0x00, 0x10, 0, 0, 0, 0}};
+  ASSERT_TRUE(
+      runCommutationOffsetDetectionProcedure(device, reporter, std::stop_token{}).has_value());
+
+  EXPECT_EQ(
+      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
+      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged)});
+}
+
+TEST(RunCommutationOffsetDetectionProcedure, AFailedPhaseOrderStepStopsBeforeTheMeasurement) {
+  // The offset measurement must not run on a phase order that was not established.
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(commutationOffsetDetectionSteps());
+
+  driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};  // command 4 refused
+  auto result = runCommutationOffsetDetectionProcedure(device, reporter, std::stop_token{});
+  ASSERT_FALSE(result.has_value());
+
+  const auto steps = reporter.steps();
+  const auto phaseOrder = stepById(steps, "motor-phase-order-detection");
+  ASSERT_TRUE(phaseOrder.has_value());
+  EXPECT_EQ(phaseOrder->status, ProgressStatus::kFailed);
+
+  const auto measured = stepById(steps, "commutation-offset-measurement");
+  ASSERT_TRUE(measured.has_value());
+  EXPECT_EQ(measured->status, ProgressStatus::kIdle);
+
+  const auto restore = stepById(steps, "restore");
+  ASSERT_TRUE(restore.has_value());
+  EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
+}
+
+TEST(RunCommutationOffsetDetectionProcedure, AnUnreadableMethodLeavesTheDriveUntouched) {
   // Not knowing the method means not knowing which way the brake goes, so the run must fail before
   // the drive is enabled rather than guess — no step runs, and nothing is written.
   OsCommandFakeDriver driver;
   Device device = makeDevice(driver);
   driver.store[OsCommandFakeDriver::key(somanet::kCommutationOffsetDetection,
                                         somanet::kCommutationOffsetMethod)] = {7};
-  ProgressReporter reporter(commutationOffsetMeasurementSteps());
+  ProgressReporter reporter(commutationOffsetDetectionSteps());
 
-  auto result = runCommutationOffsetMeasurementProcedure(device, reporter, std::stop_token{});
+  auto result = runCommutationOffsetDetectionProcedure(device, reporter, std::stop_token{});
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("outside the defined range"), std::string::npos) << result.error();
 

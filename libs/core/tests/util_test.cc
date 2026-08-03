@@ -12,6 +12,7 @@ using mm::core::fromBytes;
 using mm::core::isUrlSafeId;
 using mm::core::parseHexOrDec;
 using mm::core::toBytes;
+using mm::core::toHex;
 
 TEST(ParseHexOrDecTest, DecimalUint16) {
   EXPECT_EQ(parseHexOrDec<uint16_t>("0"), 0u);
@@ -143,4 +144,35 @@ TEST(BytesRoundTrip, EncodeThenDecodeIsIdentity) {
     EXPECT_EQ(fromBytes<uint32_t>(toBytes(v)), v);
     EXPECT_EQ(fromBytes<uint32_t>(toBytes(v, std::endian::big), std::endian::big), v);
   }
+}
+
+TEST(ToHexTest, ContinuousByDefault) {
+  // The default is the ESI hexBinary spelling: uppercase, no separator, two digits per byte.
+  EXPECT_EQ(toHex(std::vector<uint8_t>{0x0A, 0x1B, 0x2C}), "0A1B2C");
+}
+
+TEST(ToHexTest, SeparatorGoesBetweenBytesOnly) {
+  // No leading or trailing separator — the string is meant to be read against a byte table.
+  EXPECT_EQ(toHex(std::vector<uint8_t>{0x0A, 0x1B, 0x2C}, " "), "0A 1B 2C");
+  EXPECT_EQ(toHex(std::vector<uint8_t>{0xFF}, " "), "FF");
+  EXPECT_EQ(toHex(std::vector<uint8_t>{0x01, 0x02}, ":"), "01:02");
+  EXPECT_EQ(toHex(std::vector<uint8_t>{0x01, 0x02}, ", "), "01, 02");
+}
+
+TEST(ToHexTest, PadsEachByteToTwoUppercaseDigits) {
+  // Zero-padding is what keeps the output parseable at a fixed width, and upper case is what the
+  // ESI and the OS command specification both use.
+  EXPECT_EQ(toHex(std::vector<uint8_t>{0x00, 0x05, 0xAB, 0xCD, 0xEF}), "0005ABCDEF");
+}
+
+TEST(ToHexTest, EmptyInputIsAnEmptyString) {
+  EXPECT_EQ(toHex(std::vector<uint8_t>{}), "");
+  EXPECT_EQ(toHex(std::vector<uint8_t>{}, " "), "");
+}
+
+TEST(ToHexTest, AcceptsAnyContiguousByteRange) {
+  // std::span means an array binds as readily as a vector, which is what the OS command paths hand
+  // it: a fixed-size reply buffer.
+  const std::array<uint8_t, 4> reply{0x01, 0x00, 0x86, 0xA0};
+  EXPECT_EQ(toHex(reply, " "), "01 00 86 A0");
 }

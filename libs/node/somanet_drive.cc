@@ -2,6 +2,7 @@
 
 #include <spdlog/spdlog.h>
 
+#include <bit>
 #include <format>
 #include <iterator>
 #include <nlohmann/json.hpp>
@@ -12,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/util.h"
 #include "node/synapticon.h"
 
 namespace mm::node {
@@ -34,15 +36,6 @@ constexpr uint8_t kModeAbort = 3;
 constexpr size_t kErrorCodeIndex = 2;
 constexpr size_t kDataIndex = 2;
 constexpr size_t kDataIndexAfterErrorCode = 3;
-
-// Space-separated hex, for a log line that has to be comparable against a specification table.
-std::string hexBytes(const std::vector<uint8_t>& bytes) {
-  std::string text;
-  for (const uint8_t byte : bytes) {
-    text += std::format("{}{:02X}", text.empty() ? "" : " ", byte);
-  }
-  return text;
-}
 
 std::vector<uint8_t> responsePayload(const std::vector<uint8_t>& response, size_t from) {
   return {std::next(response.begin(), static_cast<std::ptrdiff_t>(from)), response.end()};
@@ -80,11 +73,10 @@ std::expected<T, std::string> decodeBigEndian(const std::vector<uint8_t>& payloa
     return std::unexpected(std::format("{} reported success with {} payload bytes, expected {}",
                                        what, payload.size(), sizeof(T)));
   }
-  T value = 0;
-  for (size_t i = 0; i < sizeof(T); ++i) {
-    value = static_cast<T>(value << 8 | payload[i]);
-  }
-  return value;
+  // core::fromBytes zero-pads a short buffer rather than refusing it, which is right for an SDO
+  // value of a declared type and wrong here — a measurement command answering with too few bytes
+  // produced no measurement — so the length is checked above and the decode reused.
+  return core::fromBytes<T>(payload, std::endian::big);
 }
 
 // Whether a command has command-specific error codes, and if so which table.
@@ -244,7 +236,7 @@ std::expected<OsCommandResponse, std::string> SomanetDrive::runOsCommand(
       // from the bytes and from nothing else, and by the time a caller sees the error they are
       // gone.
       spdlog::debug("Device {}: OS command 0x{:02X} terminal response [{}]", position, id,
-                    hexBytes(*response));
+                    core::toHex(*response, " "));
       if (!abortReason.empty()) {
         return std::unexpected(abortReason);
       }

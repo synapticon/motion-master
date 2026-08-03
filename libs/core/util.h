@@ -6,8 +6,10 @@
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
+#include <format>
 #include <optional>
 #include <span>
+#include <string>
 #include <string_view>
 #include <type_traits>
 
@@ -59,6 +61,26 @@ std::optional<T> parseHexOrDec(std::string_view s) {
     return std::nullopt;
   }
   return value;
+}
+
+/// @brief Formats bytes as uppercase hexadecimal.
+///
+/// For the two shapes this codebase needs: a continuous string (the ESI @c hexBinary XML encoding)
+/// and a separated one (a log line meant to be read against a specification's byte table).
+///
+/// @param bytes      Source buffer (a @c std::vector<uint8_t> binds implicitly).
+/// @param separator  Placed between bytes; empty (the default) for a continuous string.
+/// @return @c "0A1B2C", or @c "0A 1B 2C" given a @c " " separator. Empty for empty input.
+inline std::string toHex(std::span<const uint8_t> bytes, std::string_view separator = {}) {
+  std::string out;
+  out.reserve(bytes.size() * (2 + separator.size()));
+  for (std::size_t i = 0; i < bytes.size(); ++i) {
+    if (i != 0) {
+      out += separator;
+    }
+    out += std::format("{:02X}", bytes[i]);
+  }
+  return out;
 }
 
 /// @brief Encodes an integer into a fixed-width byte array in the given byte order.

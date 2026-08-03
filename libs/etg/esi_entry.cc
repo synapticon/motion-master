@@ -317,15 +317,6 @@ std::string sourceLabel(const EsiEntrySource& source) {
              : std::format("module 0x{:08X} slot {}", source.moduleIdent, source.slot);
 }
 
-std::string hexBinary(const std::vector<uint8_t>& bytes) {
-  std::string out;
-  out.reserve(bytes.size() * 2);
-  for (const uint8_t b : bytes) {
-    out += std::format("{:02X}", b);
-  }
-  return out;
-}
-
 }  // namespace
 
 std::expected<EsiEntryTable, std::string> buildDeviceEntries(const EsiFile& file,
@@ -856,13 +847,13 @@ void to_json(nlohmann::json& j, const EsiEntry& v) {
   // Raw bytes go out as uppercase hexBinary, the same spelling the ESI itself uses, so a value
   // round-trips visually against the source file.
   if (v.defaultData) {
-    j["defaultData"] = hexBinary(*v.defaultData);
+    j["defaultData"] = mm::core::toHex(*v.defaultData);
   }
   if (v.minData) {
-    j["minData"] = hexBinary(*v.minData);
+    j["minData"] = mm::core::toHex(*v.minData);
   }
   if (v.maxData) {
-    j["maxData"] = hexBinary(*v.maxData);
+    j["maxData"] = mm::core::toHex(*v.maxData);
   }
   if (v.unit) {
     j["unit"] = *v.unit;

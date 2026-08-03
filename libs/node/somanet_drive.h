@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <stop_token>
 #include <string>
@@ -13,6 +14,97 @@
 #include "node/cia402_drive.h"
 
 namespace mm::node {
+
+/// @brief Pure SOMANET (Synapticon manufacturer-specific) vocabulary — object indices, sub-entry
+///        numbers and enumerations, with no dependency on @c Device.
+///
+/// The vendor counterpart of @c mm::node::cia402, and nested rather than flat for one concrete
+/// reason: SOMANET extends 0x6060 with modes CiA402 does not define, so @c somanet::OperationMode
+/// has to sit beside @c cia402::OperationMode without colliding with it.
+namespace somanet {
+
+/// @brief Manufacturer-specific object indices (the 0x2000-0x5FFF vendor range).
+enum Object : uint16_t {
+  kBrakeOptions = 0x2004,  ///< RECORD — brake voltages, timing, release strategy and status.
+};
+
+/// @brief Sub-entries of 0x2004 (brake options). The enum value @b is the subindex.
+enum BrakeOption : uint8_t {
+  kBrakePullVoltage = 1,      ///< UNSIGNED32, mV — voltage that disengages the brake.
+  kBrakeHoldVoltage = 2,      ///< UNSIGNED32, mV — lower voltage that keeps it disengaged.
+  kBrakePullTime = 3,         ///< UNSIGNED16, ms — how long the pull voltage is applied.
+  kBrakeReleaseStrategy = 4,  ///< UNSIGNED8 — how the brake is driven; see BrakeReleaseStrategy.
+  kBrakeControllerDisableDelay = 5,  ///< UNSIGNED16, ms — engage-to-controller-off delay.
+  kBrakeStatus = 7,  ///< UNSIGNED8 — reports *and* commands the brake; see BrakeStatus.
+  kBrakeMinimumDisplacement = 8,  ///< UNSIGNED32 — pin-brake release travel threshold.
+  kBrakeMaximumTorque = 9,        ///< UNSIGNED16, mNm — torque ceiling during a pin-brake release.
+  kBrakeOutputVoltage = 10,       ///< UNSIGNED16, mV — phase-D voltage in manual mode.
+  kBrakeSwitchingFrequency = 11,  ///< UNSIGNED8 — phase-D PWM rate (0: 16, 1: 32, 2: 64 kHz).
+};
+
+/// @brief How the brake is driven (0x2004:04).
+///
+/// @c kManualOutputVoltage is the one that matters to a caller: the brake is not under firmware
+/// control at all, so commanding @c BrakeStatus does nothing and release/engage are no-ops.
+enum class BrakeReleaseStrategy : uint8_t {
+  kManualOutputVoltage = 0,  ///< Not firmware-controlled — a raw phase-D voltage (0x2004:10).
+  kClutch = 1,               ///< Standard brake: pull voltage for the pull time, then hold voltage.
+  kPin = 2,                  ///< Pin brake — releasing it *moves the shaft* (see releaseBrake).
+};
+
+/// @brief Brake state (0x2004:07), which both reports the brake and commands it when written.
+enum class BrakeStatus : uint8_t {
+  kNotConfigured = 0,  ///< No brake configured.
+  kEngaged = 1,        ///< Holding. A brake is spring-engaged, so this is its powered-off state.
+  kDisengaged = 2,     ///< Released.
+};
+
+/// @brief Human-readable name of a brake status (for logging / JSON). Never returns @c nullptr.
+constexpr std::string_view toString(BrakeStatus status) {
+  switch (status) {
+    case BrakeStatus::kNotConfigured:
+      return "notConfigured";
+    case BrakeStatus::kEngaged:
+      return "engaged";
+    case BrakeStatus::kDisengaged:
+      return "disengaged";
+  }
+  return "unknown";
+}
+
+/// @brief Human-readable name of a release strategy (for logging / JSON). Never @c nullptr.
+constexpr std::string_view toString(BrakeReleaseStrategy strategy) {
+  switch (strategy) {
+    case BrakeReleaseStrategy::kManualOutputVoltage:
+      return "manualOutputVoltage";
+    case BrakeReleaseStrategy::kClutch:
+      return "clutch";
+    case BrakeReleaseStrategy::kPin:
+      return "pin";
+  }
+  return "unknown";
+}
+
+/// @brief SOMANET's manufacturer-specific operation modes — the negative half of 0x6060, which
+///        CiA402 leaves to the vendor.
+///
+/// Deliberately a separate enum rather than extra enumerators on @c cia402::OperationMode: that one
+/// is the standard set, and @c cia402::toOperationMode exists so an API boundary can reject a mode
+/// it does not know. Folding these in would make every vendor mode validate as a CiA402 mode
+/// everywhere the standard enum is used, including the console's mode list.
+enum class OperationMode : int8_t {
+  kCyclicSyncOutputTorque = -110,
+  kCyclicSyncOutputVelocity = -109,
+  kCyclicSyncOutputPosition = -108,
+  kProfileOutputVelocity = -103,
+  kProfileOutputPosition = -101,
+  kSystemIdentification = -4,
+  kOpenLoopField = -3,
+  kDiagnostics = -2,  ///< Where the master owns the brake and the measurement OS commands run.
+  kCoggingCompensationRecording = -1,
+};
+
+}  // namespace somanet
 
 /// @brief Byte length of the OS command and response octet strings (0x1023:01 / 0x1023:03).
 ///        Manufacturer-specific — the firmware specification allows it to grow, so read it from
@@ -81,6 +173,33 @@ struct OsCommandConfig {
   std::stop_token stop{};  ///< Requesting a stop aborts the command; default never stops.
 };
 
+/// @brief The brake's configuration and its current state — one read of the parts of 0x2004 that
+///        decide what a release or engage will actually do.
+///
+/// Returned by the brake operations as well as by @c brakeState, so a caller always learns the
+/// outcome from the same shape. It is also the answer to "why did nothing happen?": a release is a
+/// no-op when the brake is not firmware-controlled, and @c softwareControllable says so without the
+/// caller having to know that strategy 0 means manual.
+struct BrakeState {
+  somanet::BrakeStatus status{somanet::BrakeStatus::kNotConfigured};  ///< 0x2004:07.
+  somanet::BrakeReleaseStrategy releaseStrategy{
+      somanet::BrakeReleaseStrategy::kManualOutputVoltage};  ///< 0x2004:04.
+  std::chrono::milliseconds pullTime{};                      ///< 0x2004:03.
+  uint32_t pullVoltageMv = 0;                                ///< 0x2004:01.
+  uint32_t holdVoltageMv = 0;                                ///< 0x2004:02.
+
+  /// @brief Whether the firmware drives the brake, i.e. whether commanding 0x2004:07 does anything.
+  ///        False for @c kManualOutputVoltage, where the brake is a raw phase-D voltage instead.
+  bool softwareControllable() const {
+    return releaseStrategy != somanet::BrakeReleaseStrategy::kManualOutputVoltage;
+  }
+
+  /// @brief Whether releasing this brake turns the motor — true only for a pin brake, whose release
+  ///        procedure lifts the load off the pin under progressively raised torque.
+  bool releaseMovesShaft() const { return releaseStrategy == somanet::BrakeReleaseStrategy::kPin; }
+};
+void to_json(nlohmann::json& j, const BrakeState& state);
+
 /// @brief Borrowed view of a SOMANET drive — a CiA402 drive plus Synapticon-specific
 ///        object-dictionary access (encoder/motor configuration, custom OS commands, etc.).
 ///
@@ -141,6 +260,81 @@ class SomanetDrive : public Cia402Drive {
   ///         (forwarded as-is), an unknown status byte, a timeout, or a cancellation.
   std::expected<OsCommandResponse, std::string> runOsCommand(const std::vector<uint8_t>& command,
                                                              const OsCommandConfig& config = {});
+
+  // --- Brake (0x2004) --------------------------------------------------------------------------
+
+  /// @brief Reads the whole brake configuration and its current state in one call.
+  std::expected<BrakeState, std::string> brakeState() const;
+
+  /// @brief Reads the brake state (0x2004:07).
+  std::expected<somanet::BrakeStatus, std::string> brakeStatus() const;
+
+  /// @brief Commands the brake by writing 0x2004:07 — the raw write, with no wait and no checks.
+  ///
+  /// Prefer @c releaseBrake / @c engageBrake, which apply the timing the firmware requires. This is
+  /// for restoring a previously captured status, where the point is to write exactly what was read.
+  std::expected<void, std::string> setBrakeStatus(somanet::BrakeStatus status);
+
+  /// @brief Releases (disengages) the brake and waits for it to have done so.
+  ///
+  /// Writes @c kDisengaged to 0x2004:07, then waits the drive's pull time (0x2004:03) plus @p
+  /// settle before returning, because the firmware blocks motion — and motion-related OS commands —
+  /// until the pull time expires. **Release is open-loop**: nothing confirms the brake actually let
+  /// go, so that wait is the only margin there is, which is why @p settle is a parameter and not a
+  /// constant.
+  ///
+  /// Does nothing when the release strategy is @c kManualOutputVoltage (the brake is not
+  /// firmware-controlled) or when it is already disengaged. That is not an error, and the returned
+  /// state is how a caller tells: @c BrakeState::softwareControllable is false in the first case.
+  ///
+  /// **Two preconditions that make this a no-op rather than a failure if unmet**, both from the
+  /// SOMANET brake documentation: the release procedure runs only while the drive is in OP ENABLED,
+  /// and in any other state the write merely energises phase D. In *diagnostics* mode entering OP
+  /// ENABLED does **not** release the brake automatically the way normal operation does — which is
+  /// exactly why a diagnostics procedure has to call this at all.
+  ///
+  /// **On a pin brake (@c kPin) this moves the shaft.** The controller raises torque progressively
+  /// until the load has lifted off the pin by the minimum displacement (0x2004:08), reversing
+  /// direction if it hits the torque ceiling (0x2004:09) first. Releasing a brake is not
+  /// electrically passive on that strategy.
+  ///
+  /// Control-plane only: it sleeps. Requires an active mailbox.
+  ///
+  /// @param settle  Extra wait on top of the drive's pull time.
+  /// @return The brake state read back afterwards, or why the attempt failed.
+  std::expected<BrakeState, std::string> releaseBrake(
+      std::chrono::milliseconds settle = std::chrono::milliseconds(50));
+
+  /// @brief Engages the brake and waits @p settle for it to bite.
+  ///
+  /// Writes @c kEngaged to 0x2004:07 and waits. There is no pull time on the way in — the brake is
+  /// spring-engaged, so engaging is removing voltage — so the wait is only @p settle. Like
+  /// @c releaseBrake it does nothing when the strategy is @c kManualOutputVoltage.
+  ///
+  /// @param settle  How long to wait after commanding the brake before returning.
+  /// @return The brake state read back afterwards, or why the attempt failed.
+  std::expected<BrakeState, std::string> engageBrake(
+      std::chrono::milliseconds settle = std::chrono::milliseconds(50));
+
+  // --- Vendor operation modes (0x6060) ---------------------------------------------------------
+
+  // Keep the inherited standard-mode setter visible: declaring an overload below would otherwise
+  // hide it, since name lookup stops at the first scope that has a match.
+  using Cia402Drive::setOperationMode;
+
+  /// @brief Requests one of SOMANET's manufacturer-specific operation modes (0x6060).
+  std::expected<void, std::string> setOperationMode(somanet::OperationMode mode);
+
+  /// @brief Reads the requested operation mode (0x6060) as its raw value.
+  ///
+  /// For saving a mode in order to put it back later, where the point is *not* to interpret it: the
+  /// drive may be in a standard mode or a vendor one, and a round trip through either enum would
+  /// have to decide which. Use @c operationMode() (inherited) or @c somanet::OperationMode when the
+  /// mode is being reasoned about rather than preserved.
+  std::expected<int8_t, std::string> operationModeValue() const;
+
+  /// @brief Writes a raw operation-mode value to 0x6060 — the counterpart of @c operationModeValue.
+  std::expected<void, std::string> setOperationModeValue(int8_t mode);
 
   // SOMANET-specific synchronous object-dictionary accessors are added here as their object
   // indices are confirmed (encoder type/resolution, motor pole pairs, commutation offset, ...).

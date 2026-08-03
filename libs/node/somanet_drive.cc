@@ -4,6 +4,7 @@
 
 #include <format>
 #include <iterator>
+#include <nlohmann/json.hpp>
 #include <string>
 #include <thread>
 #include <utility>
@@ -175,6 +176,124 @@ std::expected<OsCommandResponse, std::string> SomanetDrive::runOsCommand(
 
     std::this_thread::sleep_for(config.pollInterval);
   }
+}
+
+void to_json(nlohmann::json& j, const BrakeState& state) {
+  j = nlohmann::json{
+      {"status", somanet::toString(state.status)},
+      {"releaseStrategy", somanet::toString(state.releaseStrategy)},
+      {"pullTimeMs", state.pullTime.count()},
+      {"pullVoltageMv", state.pullVoltageMv},
+      {"holdVoltageMv", state.holdVoltageMv},
+      // Derived, and deliberately on the wire: without them a client has to know that strategy 0
+      // means "commands do nothing" and strategy 2 means "releasing turns the motor".
+      {"softwareControllable", state.softwareControllable()},
+      {"releaseMovesShaft", state.releaseMovesShaft()},
+  };
+}
+
+std::expected<somanet::BrakeStatus, std::string> SomanetDrive::brakeStatus() const {
+  auto raw = device_.readValue<uint8_t>(somanet::kBrakeOptions, somanet::kBrakeStatus);
+  if (!raw) {
+    return std::unexpected(raw.error());
+  }
+  return static_cast<somanet::BrakeStatus>(*raw);
+}
+
+std::expected<void, std::string> SomanetDrive::setBrakeStatus(somanet::BrakeStatus status) {
+  return device_.writeValue<uint8_t>(somanet::kBrakeOptions, somanet::kBrakeStatus,
+                                     static_cast<uint8_t>(status));
+}
+
+std::expected<BrakeState, std::string> SomanetDrive::brakeState() const {
+  BrakeState state;
+
+  auto status = brakeStatus();
+  if (!status) {
+    return std::unexpected(status.error());
+  }
+  state.status = *status;
+
+  auto strategy =
+      device_.readValue<uint8_t>(somanet::kBrakeOptions, somanet::kBrakeReleaseStrategy);
+  if (!strategy) {
+    return std::unexpected(strategy.error());
+  }
+  state.releaseStrategy = static_cast<somanet::BrakeReleaseStrategy>(*strategy);
+
+  auto pullTime = device_.readValue<uint16_t>(somanet::kBrakeOptions, somanet::kBrakePullTime);
+  if (!pullTime) {
+    return std::unexpected(pullTime.error());
+  }
+  state.pullTime = std::chrono::milliseconds(*pullTime);
+
+  auto pullVoltage =
+      device_.readValue<uint32_t>(somanet::kBrakeOptions, somanet::kBrakePullVoltage);
+  if (!pullVoltage) {
+    return std::unexpected(pullVoltage.error());
+  }
+  state.pullVoltageMv = *pullVoltage;
+
+  auto holdVoltage =
+      device_.readValue<uint32_t>(somanet::kBrakeOptions, somanet::kBrakeHoldVoltage);
+  if (!holdVoltage) {
+    return std::unexpected(holdVoltage.error());
+  }
+  state.holdVoltageMv = *holdVoltage;
+
+  return state;
+}
+
+std::expected<BrakeState, std::string> SomanetDrive::releaseBrake(
+    std::chrono::milliseconds settle) {
+  auto state = brakeState();
+  if (!state) {
+    return std::unexpected(state.error());
+  }
+  // Nothing to do, and neither case is a failure: a manual brake is not the firmware's to drive,
+  // and one already disengaged needs no second write (nor a second pull-time wait).
+  if (!state->softwareControllable() || state->status == somanet::BrakeStatus::kDisengaged) {
+    return *state;
+  }
+
+  if (auto written = setBrakeStatus(somanet::BrakeStatus::kDisengaged); !written) {
+    return std::unexpected(written.error());
+  }
+  // The pull time is the firmware's own gate: it blocks motion, and motion-related OS commands,
+  // until that window closes. Release is open-loop, so this wait is the whole guarantee.
+  std::this_thread::sleep_for(state->pullTime + settle);
+
+  return brakeState();
+}
+
+std::expected<BrakeState, std::string> SomanetDrive::engageBrake(std::chrono::milliseconds settle) {
+  auto state = brakeState();
+  if (!state) {
+    return std::unexpected(state.error());
+  }
+  if (!state->softwareControllable()) {
+    return *state;
+  }
+
+  if (auto written = setBrakeStatus(somanet::BrakeStatus::kEngaged); !written) {
+    return std::unexpected(written.error());
+  }
+  // No pull time on the way in: the brake is spring-engaged, so this is the removal of voltage.
+  std::this_thread::sleep_for(settle);
+
+  return brakeState();
+}
+
+std::expected<void, std::string> SomanetDrive::setOperationMode(somanet::OperationMode mode) {
+  return setOperationModeValue(static_cast<int8_t>(mode));
+}
+
+std::expected<int8_t, std::string> SomanetDrive::operationModeValue() const {
+  return device_.readValue<int8_t>(cia402::kModeOfOperation, 0);
+}
+
+std::expected<void, std::string> SomanetDrive::setOperationModeValue(int8_t mode) {
+  return device_.writeValue<int8_t>(cia402::kModeOfOperation, 0, mode);
 }
 
 std::expected<SomanetDrive, std::string> createSomanetDrive(Device& device) {

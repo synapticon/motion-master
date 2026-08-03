@@ -27,6 +27,7 @@ using mm::comm::ObjectDataType;
 using mm::comm::OdEntry;
 using mm::comm::SlaveInfo;
 using mm::node::createSomanetDrive;
+namespace somanet = mm::node::somanet;
 using mm::node::Device;
 using mm::node::kOsCommand;
 using mm::node::kOsCommandMode;
@@ -273,6 +274,41 @@ constexpr auto kNoDelay = std::chrono::milliseconds(0);
 // An arbitrary well-formed request: command ID 8 (phase resistance measurement) and no parameters.
 const std::vector<uint8_t> kRequest{8, 0, 0, 0, 0, 0, 0, 0};
 
+// Programs the 0x2004 sub-entries the brake operations touch. Voltages and pull time are arbitrary
+// but distinct, so a test can tell which object a value came from.
+void programBrakeObjects(OsCommandFakeDriver& driver, somanet::BrakeReleaseStrategy strategy,
+                         somanet::BrakeStatus status, uint16_t pullTimeMs = 120) {
+  driver.programObject(somanet::kBrakeOptions, somanet::kBrakePullVoltage,
+                       ObjectDataType::UNSIGNED32, {0xE8, 0x03, 0, 0});  // 1000 mV
+  driver.programObject(somanet::kBrakeOptions, somanet::kBrakeHoldVoltage,
+                       ObjectDataType::UNSIGNED32, {0xF4, 0x01, 0, 0});  // 500 mV
+  driver.programObject(
+      somanet::kBrakeOptions, somanet::kBrakePullTime, ObjectDataType::UNSIGNED16,
+      {static_cast<uint8_t>(pullTimeMs & 0xFF), static_cast<uint8_t>((pullTimeMs >> 8) & 0xFF)});
+  driver.programObject(somanet::kBrakeOptions, somanet::kBrakeReleaseStrategy,
+                       ObjectDataType::UNSIGNED8, {static_cast<uint8_t>(strategy)});
+  driver.programObject(somanet::kBrakeOptions, somanet::kBrakeStatus, ObjectDataType::UNSIGNED8,
+                       {static_cast<uint8_t>(status)});
+}
+
+// A device whose brake is programmed as given. Brake tests use a zero settle so they never really
+// wait; the pull time is still read and added, so it is kept small.
+Device makeBrakeDevice(OsCommandFakeDriver& driver, somanet::BrakeReleaseStrategy strategy,
+                       somanet::BrakeStatus status) {
+  driver.programObject(Object::kControlword, 0, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(Object::kStatusword, 0, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(Object::kModeOfOperation, 0, ObjectDataType::INTEGER8, {0});
+  programBrakeObjects(driver, strategy, status, /*pullTimeMs=*/1);
+  Device device(1, driver);
+  EXPECT_TRUE(device.initializeParameters().has_value());
+  return device;
+}
+
+uint8_t storedBrakeStatus(const OsCommandFakeDriver& driver) {
+  return driver.store.at(
+      OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus))[0];
+}
+
 Device makeOsCommandDevice(OsCommandFakeDriver& driver) {
   driver.programOsCommandObjects();
   Device device(1, driver);
@@ -464,6 +500,131 @@ TEST(OsCommandErrorName, NamesGeneralCodesOnly) {
   // Codes counting up from 0 are command-specific — only the issuing command can name them.
   EXPECT_FALSE(mm::node::osCommandErrorName(0).has_value());
   EXPECT_FALSE(mm::node::osCommandErrorName(8).has_value());
+}
+
+// --- Brake (0x2004) ---------------------------------------------------------------------------
+
+constexpr auto kNoSettle = std::chrono::milliseconds(0);
+
+TEST(BrakeState, ReportsTheConfigurationAndDerivedFlags) {
+  OsCommandFakeDriver driver;
+  Device device =
+      makeBrakeDevice(driver, somanet::BrakeReleaseStrategy::kPin, somanet::BrakeStatus::kEngaged);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  auto state = drive->brakeState();
+  ASSERT_TRUE(state.has_value()) << state.error();
+  EXPECT_EQ(state->status, somanet::BrakeStatus::kEngaged);
+  EXPECT_EQ(state->releaseStrategy, somanet::BrakeReleaseStrategy::kPin);
+  EXPECT_EQ(state->pullVoltageMv, 1000u);
+  EXPECT_EQ(state->holdVoltageMv, 500u);
+  EXPECT_TRUE(state->softwareControllable());
+  // A pin brake is the one whose release turns the motor, which a client has to be told.
+  EXPECT_TRUE(state->releaseMovesShaft());
+}
+
+TEST(ReleaseBrake, DisengagesAClutchBrakeAndReadsItBack) {
+  OsCommandFakeDriver driver;
+  Device device = makeBrakeDevice(driver, somanet::BrakeReleaseStrategy::kClutch,
+                                  somanet::BrakeStatus::kEngaged);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  auto state = drive->releaseBrake(kNoSettle);
+  ASSERT_TRUE(state.has_value()) << state.error();
+  EXPECT_EQ(storedBrakeStatus(driver), static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged));
+  EXPECT_EQ(state->status, somanet::BrakeStatus::kDisengaged);
+  EXPECT_FALSE(state->releaseMovesShaft());
+}
+
+TEST(ReleaseBrake, LeavesAManualBrakeAloneAndSaysWhy) {
+  // Release strategy 0 means the brake is not the firmware's to drive, so commanding 0x2004:07
+  // would do nothing. That is not a failure — and the returned state is how a caller tells, without
+  // having to know that 0 means manual.
+  OsCommandFakeDriver driver;
+  Device device = makeBrakeDevice(driver, somanet::BrakeReleaseStrategy::kManualOutputVoltage,
+                                  somanet::BrakeStatus::kEngaged);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  auto state = drive->releaseBrake(kNoSettle);
+  ASSERT_TRUE(state.has_value()) << state.error();
+  EXPECT_EQ(storedBrakeStatus(driver), static_cast<uint8_t>(somanet::BrakeStatus::kEngaged));
+  EXPECT_FALSE(state->softwareControllable());
+}
+
+TEST(ReleaseBrake, DoesNotRewriteAnAlreadyDisengagedBrake) {
+  // Skipping the write also skips a second pull-time wait, which is the point: releasing an already
+  // released brake should not cost the caller another pull time.
+  OsCommandFakeDriver driver;
+  Device device = makeBrakeDevice(driver, somanet::BrakeReleaseStrategy::kClutch,
+                                  somanet::BrakeStatus::kDisengaged);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  auto state = drive->releaseBrake(kNoSettle);
+  ASSERT_TRUE(state.has_value()) << state.error();
+  EXPECT_EQ(state->status, somanet::BrakeStatus::kDisengaged);
+}
+
+TEST(EngageBrake, EngagesAClutchBrake) {
+  OsCommandFakeDriver driver;
+  Device device = makeBrakeDevice(driver, somanet::BrakeReleaseStrategy::kClutch,
+                                  somanet::BrakeStatus::kDisengaged);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  auto state = drive->engageBrake(kNoSettle);
+  ASSERT_TRUE(state.has_value()) << state.error();
+  EXPECT_EQ(storedBrakeStatus(driver), static_cast<uint8_t>(somanet::BrakeStatus::kEngaged));
+  EXPECT_EQ(state->status, somanet::BrakeStatus::kEngaged);
+}
+
+TEST(EngageBrake, LeavesAManualBrakeAlone) {
+  OsCommandFakeDriver driver;
+  Device device = makeBrakeDevice(driver, somanet::BrakeReleaseStrategy::kManualOutputVoltage,
+                                  somanet::BrakeStatus::kDisengaged);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  auto state = drive->engageBrake(kNoSettle);
+  ASSERT_TRUE(state.has_value()) << state.error();
+  EXPECT_EQ(storedBrakeStatus(driver), static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged));
+}
+
+TEST(SetBrakeStatus, WritesTheRawValueForRestoring) {
+  // The raw write exists so a guard can put back exactly what it read, with no timing and no
+  // checks.
+  OsCommandFakeDriver driver;
+  Device device = makeBrakeDevice(driver, somanet::BrakeReleaseStrategy::kClutch,
+                                  somanet::BrakeStatus::kDisengaged);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  ASSERT_TRUE(drive->setBrakeStatus(somanet::BrakeStatus::kEngaged).has_value());
+  EXPECT_EQ(storedBrakeStatus(driver), static_cast<uint8_t>(somanet::BrakeStatus::kEngaged));
+}
+
+TEST(OperationModeValue, RoundTripsAVendorModeTheCia402EnumCannotName) {
+  // The reason the raw pair exists: diagnostics is -2, which is not a CiA402 mode, and save/restore
+  // must preserve whatever mode it finds without deciding which enum names it.
+  OsCommandFakeDriver driver;
+  Device device = makeBrakeDevice(driver, somanet::BrakeReleaseStrategy::kClutch,
+                                  somanet::BrakeStatus::kEngaged);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  ASSERT_TRUE(drive->setOperationMode(somanet::OperationMode::kDiagnostics).has_value());
+  auto mode = drive->operationModeValue();
+  ASSERT_TRUE(mode.has_value()) << mode.error();
+  EXPECT_EQ(*mode, -2);
+
+  // And the inherited standard-mode setter is still reachable — declaring the vendor overload would
+  // otherwise have hidden it.
+  ASSERT_TRUE(
+      drive->setOperationMode(mm::node::cia402::OperationMode::kCyclicSyncPosition).has_value());
+  EXPECT_EQ(drive->operationModeValue().value(), 8);
 }
 
 }  // namespace

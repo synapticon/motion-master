@@ -119,8 +119,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "The brake is released while it runs, because this command requires that. Anything the brake "
       "was holding is free to move: on a vertical or loaded axis, support the load first.",
       "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
-      "The counted value is reported back, not stored: nothing in the drive's configuration is "
-      "changed by running this, so writing it somewhere is up to you.",
+      "The count is reported, not stored — nothing in the drive's configuration changes, so "
+      "saving it is up to you.",
       "The bus must be exchanging process data (OP state): the drive's state machine only advances "
       "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
       "A drive that cannot raise the motor phase currents far enough reports the run as failed — a "
@@ -149,8 +149,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "afterwards. Measured at the drive's own terminals, so what comes back is the winding plus "
       "whatever is in series with it — your cabling and connectors included.";
   phaseResistance.caveats = {
-      "The measured value is reported back, not stored: nothing in the drive's configuration is "
-      "changed by running this, so writing it somewhere is up to you.",
+      "The value is reported, not stored — nothing in the drive's configuration changes, so "
+      "saving it is up to you.",
       "The brake is left exactly as found — this command does not require it released, and an "
       "engaged brake steadying the shaft is the better state to measure in.",
       "The shaft can still turn if nothing holds it: no brake, or one already disengaged.",
@@ -183,8 +183,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "the same way — only the quantity differs. The drive is put into diagnostics mode, enabled, "
       "and restored to exactly the state it was found in afterwards.";
   phaseInductance.caveats = {
-      "The measured value is reported back, not stored: nothing in the drive's configuration is "
-      "changed by running this, so writing it somewhere is up to you.",
+      "The value is reported, not stored — nothing in the drive's configuration changes, so "
+      "saving it is up to you.",
       "The brake is left exactly as found — this command does not require it released, and an "
       "engaged brake steadying the shaft is the better state to measure in.",
       "The shaft can still turn if nothing holds it: no brake, or one already disengaged.",

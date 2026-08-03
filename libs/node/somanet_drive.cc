@@ -284,6 +284,63 @@ std::expected<BrakeState, std::string> SomanetDrive::engageBrake(std::chrono::mi
   return brakeState();
 }
 
+std::string OpenPhaseResult::describe() const {
+  if (!phaseOpened) {
+    return "no open phase detected";
+  }
+  if (fault) {
+    return std::format("{} — {}", somanet::toString(*fault), somanet::describe(*fault));
+  }
+  // A code this build does not name: report the number rather than swallowing the finding, so a
+  // firmware that extends the table is still actionable.
+  return std::format("an open phase was detected (fault code {})",
+                     faultCode ? std::to_string(*faultCode) : "unknown");
+}
+
+void to_json(nlohmann::json& j, const OpenPhaseResult& result) {
+  j = nlohmann::json{{"phaseOpened", result.phaseOpened}, {"description", result.describe()}};
+  if (result.faultCode) {
+    j["faultCode"] = *result.faultCode;
+  }
+  if (result.fault) {
+    j["fault"] = somanet::toString(*result.fault);
+  }
+}
+
+std::expected<OpenPhaseResult, std::string> SomanetDrive::runOpenPhaseDetection(
+    const OsCommandConfig& config) {
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(somanet::OsCommandId::kOpenPhaseDetection);
+
+  auto response = runOsCommand(command, config);
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+
+  OpenPhaseResult result;
+  if (!response->failed()) {
+    // Success is the good news: the drive checked every phase and found none open.
+    return result;
+  }
+
+  // A failure is the finding — but only when it is command-specific. A general code (251 "command
+  // not allowed", 253 timeout, ...) says the drive never performed the check, and reporting that as
+  // "a phase is open" would be a false hardware fault, which is far worse than an error.
+  if (response->errorCode) {
+    if (auto general = osCommandErrorName(*response->errorCode)) {
+      return std::unexpected(std::format("open phase detection was not performed: {} (OS error {})",
+                                         *general, *response->errorCode));
+    }
+    result.faultCode = *response->errorCode;
+    if (*response->errorCode <= static_cast<uint8_t>(somanet::OpenPhaseFault::kOpenFetCLow)) {
+      result.fault = static_cast<somanet::OpenPhaseFault>(*response->errorCode);
+    }
+  }
+  // Status 2 (failed, no data) carries no code at all; the drive still said a phase is open.
+  result.phaseOpened = true;
+  return result;
+}
+
 std::expected<void, std::string> SomanetDrive::setOperationMode(somanet::OperationMode mode) {
   return setOperationModeValue(static_cast<int8_t>(mode));
 }

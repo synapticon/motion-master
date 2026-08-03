@@ -627,4 +627,100 @@ TEST(OperationModeValue, RoundTripsAVendorModeTheCia402EnumCannotName) {
   EXPECT_EQ(drive->operationModeValue().value(), 8);
 }
 
+// --- Open phase detection (OS command 6) --------------------------------------------------------
+
+TEST(RunOpenPhaseDetection, ASuccessfulCommandMeansNoPhaseIsOpen) {
+  // The command's verdict is inverted: the drive answers success when it found nothing wrong.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};  // completed, no error
+  auto result = drive->runOpenPhaseDetection({.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_FALSE(result->phaseOpened);
+  EXPECT_FALSE(result->fault.has_value());
+  EXPECT_EQ(result->describe(), "no open phase detected");
+}
+
+TEST(RunOpenPhaseDetection, IssuesCommandSix) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  ASSERT_TRUE(drive->runOpenPhaseDetection({.pollInterval = kNoDelay}).has_value());
+  ASSERT_EQ(driver.lastCommand.size(), 8u);
+  EXPECT_EQ(driver.lastCommand[0], 6);
+  // No parameters: bytes 1-7 are zero.
+  EXPECT_EQ(std::vector<uint8_t>(driver.lastCommand.begin() + 1, driver.lastCommand.end()),
+            std::vector<uint8_t>(7, 0));
+}
+
+TEST(RunOpenPhaseDetection, AFailedCommandIsTheFindingAndNamesTheFault) {
+  // A *failed* OS command with a command-specific code is a completed measurement reporting which
+  // terminal or FET is open — a value, emphatically not a transport error.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  // Status 3 (failed with data), OS error code 1 in byte 2 → open terminal B.
+  driver.responses = {{3, 0, 1, 0, 0, 0, 0, 0}};
+  auto result = drive->runOpenPhaseDetection({.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_TRUE(result->phaseOpened);
+  ASSERT_TRUE(result->fault.has_value());
+  EXPECT_EQ(*result->fault, somanet::OpenPhaseFault::kOpenTerminalB);
+  EXPECT_EQ(result->faultCode, 1);
+  EXPECT_EQ(result->describe(), "open terminal B — terminal B of the drive is not connected");
+}
+
+TEST(RunOpenPhaseDetection, ReportsAFaultCodeItCannotName) {
+  // A firmware that grows the fault table must stay actionable: the finding stands and the raw code
+  // is reported rather than swallowed.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 42, 0, 0, 0, 0, 0}};
+  auto result = drive->runOpenPhaseDetection({.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_TRUE(result->phaseOpened);
+  EXPECT_FALSE(result->fault.has_value());
+  EXPECT_EQ(result->faultCode, 42);
+  EXPECT_EQ(result->describe(), "an open phase was detected (fault code 42)");
+}
+
+TEST(RunOpenPhaseDetection, AGeneralOsErrorIsAnErrorNotAFinding) {
+  // 251 "command not allowed" means the check never ran — the drive was in the wrong mode or state.
+  // Reporting that as "a phase is open" would invent a hardware fault, so it must be an error.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};
+  auto result = drive->runOpenPhaseDetection({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("not performed"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
+}
+
+TEST(RunOpenPhaseDetection, AFailureWithoutACodeStillReportsAnOpenPhase) {
+  // Status 2 is "failed, no response data": the drive gave a verdict but no code.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{2, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = drive->runOpenPhaseDetection({.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_TRUE(result->phaseOpened);
+  EXPECT_FALSE(result->faultCode.has_value());
+}
+
 }  // namespace

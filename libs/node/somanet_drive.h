@@ -85,6 +85,83 @@ constexpr std::string_view toString(BrakeReleaseStrategy strategy) {
   return "unknown";
 }
 
+/// @brief OS command IDs (byte 0 of 0x1023:01).
+///
+/// Only the commands this codebase issues are listed; the firmware implements more. The numbering
+/// is the firmware's, so gaps are real rather than reserved space.
+enum class OsCommandId : uint8_t {
+  kOpenPhaseDetection = 6,    ///< Checks every motor phase and FET leg for an open circuit.
+  kSkippedCycleCounter = 13,  ///< Reads the drive's skipped-cycle counter. Harmless; no motion.
+};
+
+/// @brief The faults open phase detection (command 6) reports, as its command-specific OS error
+/// code.
+///
+/// Command-specific codes count up from 0 and mean nothing outside their own command — general
+/// codes
+/// (@c OsCommandError) count down from 254 — so this table is only valid for command 6.
+enum class OpenPhaseFault : uint8_t {
+  kOpenTerminalA = 0,  ///< Terminal A of the drive is not connected.
+  kOpenTerminalB = 1,  ///< Terminal B of the drive is not connected.
+  kOpenTerminalC = 2,  ///< Terminal C of the drive is not connected.
+  kOpenFetAHigh = 3,   ///< Upper FET in leg A is not conducting (open circuit fault).
+  kOpenFetALow = 4,    ///< Lower FET in leg A is not conducting (open circuit fault).
+  kOpenFetBHigh = 5,   ///< Upper FET in leg B is not conducting (open circuit fault).
+  kOpenFetBLow = 6,    ///< Lower FET in leg B is not conducting (open circuit fault).
+  kOpenFetCHigh = 7,   ///< Upper FET in leg C is not conducting (open circuit fault).
+  kOpenFetCLow = 8,    ///< Lower FET in leg C is not conducting (open circuit fault).
+};
+
+/// @brief Name of an open-phase fault, as the console and logs should render it. Never @c nullptr.
+constexpr std::string_view toString(OpenPhaseFault fault) {
+  switch (fault) {
+    case OpenPhaseFault::kOpenTerminalA:
+      return "open terminal A";
+    case OpenPhaseFault::kOpenTerminalB:
+      return "open terminal B";
+    case OpenPhaseFault::kOpenTerminalC:
+      return "open terminal C";
+    case OpenPhaseFault::kOpenFetAHigh:
+      return "open FET A high";
+    case OpenPhaseFault::kOpenFetALow:
+      return "open FET A low";
+    case OpenPhaseFault::kOpenFetBHigh:
+      return "open FET B high";
+    case OpenPhaseFault::kOpenFetBLow:
+      return "open FET B low";
+    case OpenPhaseFault::kOpenFetCHigh:
+      return "open FET C high";
+    case OpenPhaseFault::kOpenFetCLow:
+      return "open FET C low";
+  }
+  return "unknown";
+}
+
+/// @brief What an open-phase fault means, for a message a user has to act on. Never @c nullptr.
+constexpr std::string_view describe(OpenPhaseFault fault) {
+  switch (fault) {
+    case OpenPhaseFault::kOpenTerminalA:
+      return "terminal A of the drive is not connected";
+    case OpenPhaseFault::kOpenTerminalB:
+      return "terminal B of the drive is not connected";
+    case OpenPhaseFault::kOpenTerminalC:
+      return "terminal C of the drive is not connected";
+    case OpenPhaseFault::kOpenFetAHigh:
+      return "the upper FET in leg A is not conducting (open circuit fault)";
+    case OpenPhaseFault::kOpenFetALow:
+      return "the lower FET in leg A is not conducting (open circuit fault)";
+    case OpenPhaseFault::kOpenFetBHigh:
+      return "the upper FET in leg B is not conducting (open circuit fault)";
+    case OpenPhaseFault::kOpenFetBLow:
+      return "the lower FET in leg B is not conducting (open circuit fault)";
+    case OpenPhaseFault::kOpenFetCHigh:
+      return "the upper FET in leg C is not conducting (open circuit fault)";
+    case OpenPhaseFault::kOpenFetCLow:
+      return "the lower FET in leg C is not conducting (open circuit fault)";
+  }
+  return "unknown fault";
+}
+
 /// @brief SOMANET's manufacturer-specific operation modes — the negative half of 0x6060, which
 ///        CiA402 leaves to the vendor.
 ///
@@ -199,6 +276,26 @@ struct BrakeState {
   bool releaseMovesShaft() const { return releaseStrategy == somanet::BrakeReleaseStrategy::kPin; }
 };
 void to_json(nlohmann::json& j, const BrakeState& state);
+
+/// @brief What open phase detection found.
+///
+/// The command's verdict is inverted relative to every other OS command, and that is the firmware's
+/// design rather than a quirk to paper over: the drive reports **success when no phase is open**,
+/// and reports a *failure* whose command-specific error code names which terminal or FET leg is
+/// open. So a failed OS command here is a completed measurement with a negative finding, not a
+/// malfunction — which is why this is a value and not an error.
+struct OpenPhaseResult {
+  bool phaseOpened = false;  ///< True when the drive found an open phase.
+
+  /// Which fault, when the drive reported a code this build names. Absent for a code it does not,
+  /// which @c faultCode still carries — a firmware that grows the table stays reportable.
+  std::optional<somanet::OpenPhaseFault> fault;
+  std::optional<uint8_t> faultCode;  ///< The raw code, present whenever @c phaseOpened.
+
+  /// @brief One line describing the finding, ready to put in front of a user.
+  std::string describe() const;
+};
+void to_json(nlohmann::json& j, const OpenPhaseResult& result);
 
 /// @brief Borrowed view of a SOMANET drive — a CiA402 drive plus Synapticon-specific
 ///        object-dictionary access (encoder/motor configuration, custom OS commands, etc.).
@@ -324,6 +421,31 @@ class SomanetDrive : public Cia402Drive {
 
   /// @brief Requests one of SOMANET's manufacturer-specific operation modes (0x6060).
   std::expected<void, std::string> setOperationMode(somanet::OperationMode mode);
+
+  // --- Typed OS commands -----------------------------------------------------------------------
+
+  /// @brief Runs open phase detection (OS command 6) and decodes its verdict.
+  ///
+  /// Checks every motor terminal and FET leg for an open circuit. **The drive answers success when
+  /// nothing is open**, and answers with a *failed* command whose command-specific error code names
+  /// the offending terminal or FET when something is — so a failure here is a finding, and this
+  /// returns it as an @c OpenPhaseResult value rather than an error. An error comes back only when
+  /// the command could not be run or produced no verdict at all (a general OS error, a timeout, a
+  /// cancellation, an SDO failure).
+  ///
+  /// Preconditions, all of which the drive enforces by refusing with OS error 251 ("command not
+  /// allowed") rather than by misbehaving: operation mode @c somanet::OperationMode::kDiagnostics,
+  /// CiA402 state Operation Enabled, no limit switch active, and the brake released — in
+  /// diagnostics mode the brake is not released by enabling the drive the way it is in normal
+  /// operation, so it has to be released explicitly (see @c releaseBrake).
+  ///
+  /// It may turn the motor if the brake is disengaged and nothing else holds the shaft.
+  ///
+  /// @param config  Timing and cancellation. The default timeout is sized for this command.
+  /// @return What the detection found, or why no verdict was reached.
+  std::expected<OpenPhaseResult, std::string> runOpenPhaseDetection(
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(10),
+                                       .pollInterval = std::chrono::milliseconds(100)});
 
   /// @brief Reads the requested operation mode (0x6060) as its raw value.
   ///

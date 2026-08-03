@@ -89,7 +89,9 @@ useStlAlgorithm:*/user_cache.cc
 // only reads, so cppcheck suggests a const Cia402Drive& — but its three siblings mutate, and one
 // signature differing from the rest would read as meaningful when it is incidental. The uniform
 // Cia402Drive& is the point: these lambdas are the operation, and the operation drives a device.
+// somanet_control.cc is the same shape: brakeState reads, release/engage write.
 constParameterReference:*/cia402_control.cc
+constParameterReference:*/somanet_control.cc
 
 // ~ProcedureManager collects the running threads inside a locked block and joins them by leaving
 // the *outer* scope, after the mutex is released. cppcheck sees the variable used only within the

@@ -44,6 +44,7 @@
 #include "node/procedure_catalogue.h"
 #include "node/procedure_manager.h"
 #include "node/profile_control.h"
+#include "node/somanet_control.h"
 #include "swagger_spec.h"
 
 namespace {
@@ -101,6 +102,46 @@ constexpr std::string_view procedureErrorStatus(mm::node::ProcedureError::Kind k
       return "400 Bad Request";
   }
   return "500 Internal Server Error";
+}
+
+// Release or engage a device's brake, which differ only in which operation runs — everything around
+// it (position, the optional settle, the timed call, the state read back) is identical, so the two
+// routes share this rather than duplicating it. A template because the uWS response/request types
+// are the loop's, deduced at the route.
+template <typename Res, typename Req>
+void handleBrakeCommand(Res* res, Req* req, mm::node::DeviceManager& deviceManager,
+                        std::string_view corsOrigin, bool release) {
+  uint16_t pos{};
+  auto posParam = req->getParameter("slavePosition");
+  auto [p, ec] = std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+  if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+    sendStatus(res, "400 Bad Request", corsOrigin);
+    return;
+  }
+  // The wait after the brake is commanded. It is exposed because brake release is open-loop — the
+  // firmware reports no confirmation — so this margin is the only thing standing between
+  // "commanded" and "assume it let go", and the right value is a property of the machine.
+  auto settle = std::chrono::milliseconds(50);
+  if (auto q = req->getQuery("settle"); !q.empty()) {
+    uint32_t settleMs = 0;
+    auto [qp, qec] = std::from_chars(q.data(), q.data() + q.size(), settleMs);
+    if (qec != std::errc() || qp != q.data() + q.size()) {
+      sendStatus(res, "400 Bad Request", corsOrigin);
+      return;
+    }
+    settle = std::chrono::milliseconds(settleMs);
+  }
+  if (!deviceManager.findDevice(pos)) {
+    sendStatus(res, "404 Not Found", corsOrigin);
+    return;
+  }
+  // Synchronous and timed like store-parameters: this blocks the HTTP thread for the pull time
+  // while the WebSocket (own loop) and the RT loop run on. The wire time is most of the round trip
+  // here, since the call is mostly that deliberate wait.
+  sendTimedJson(res, corsOrigin, "409 Conflict", [&] {
+    return release ? mm::node::releaseBrake(deviceManager, pos, settle)
+                   : mm::node::engageBrake(deviceManager, pos, settle);
+  });
 }
 
 // Parses the "value" field of a smart parameter-write body into a DeviceParameterValue. The exact
@@ -1319,6 +1360,42 @@ void HttpServer::run() {
                   mm::api::setCorsOrigin(res->writeStatus("204 No Content"), config_.corsOrigin),
                   wireUs)
                   ->end();
+            })
+      // --- brake ----------------------------------------------------------------------------
+      //
+      // GET reports the brake, POST release/engage command it. Two verbs rather than one
+      // PUT {released}: they are not symmetric operations — a release waits out the drive's pull
+      // time because the firmware blocks motion until it expires, an engage waits only a short
+      // settle — and both answer with the state read back, which is also how a caller learns that
+      // nothing happened (a brake on release strategy 0 is not the firmware's to drive).
+      .get("/api/devices/:slavePosition/brake",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p, ec] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
+               return;
+             }
+             if (!deviceManager_.findDevice(pos)) {
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
+               return;
+             }
+             auto state = mm::node::brakeState(deviceManager_, pos);
+             if (!state) {
+               sendError(res, "409 Conflict", config_.corsOrigin, state.error());
+               return;
+             }
+             sendJson(res, config_.corsOrigin, nlohmann::json(*state));
+           })
+      .post("/api/devices/:slavePosition/brake/release",
+            [this](auto* res, auto* req) {
+              handleBrakeCommand(res, req, deviceManager_, config_.corsOrigin, /*release=*/true);
+            })
+      .post("/api/devices/:slavePosition/brake/engage",
+            [this](auto* res, auto* req) {
+              handleBrakeCommand(res, req, deviceManager_, config_.corsOrigin, /*release=*/false);
             })
       // --- procedures -----------------------------------------------------------------------
       //

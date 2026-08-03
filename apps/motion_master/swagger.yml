@@ -1686,6 +1686,135 @@ paths:
         "404":
           description: >
             No device at that slavePosition, no procedure by that name, or nothing running for it
+  /api/devices/{slavePosition}/brake:
+    get:
+      summary: Read a drive's brake configuration and state
+      description: >
+        Reports the brake objects (0x2004) that decide what a release or engage will do: its current
+        state, the release strategy, the pull time and the pull/hold voltages.
+
+
+        Read this before commanding the brake. `softwareControllable` is false when the release
+        strategy is `manualOutputVoltage`, meaning the firmware does not drive the brake at all and
+        both commands below are no-ops. `releaseMovesShaft` is true for a pin brake, whose release
+        procedure turns the motor to lift the load off the pin.
+      operationId: getBrake
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The brake's configuration and current state
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrakeState" }
+        "400":
+          description: slavePosition is invalid
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: The device is not a SOMANET drive, or a read failed
+  /api/devices/{slavePosition}/brake/release:
+    post:
+      summary: Release (disengage) a drive's brake
+      description: >
+        Writes "disengaged" to the brake state object (0x2004:07) and waits the drive's pull time
+        (0x2004:03) plus `settle` before answering, because the firmware blocks motion — and
+        motion-related OS commands — until the pull time expires. Answers with the brake state read
+        back.
+
+
+        **The release only actually happens while the drive is in OP ENABLED.** In any other state the
+        write merely energises the brake output (phase D). Note also that entering OP ENABLED releases
+        the brake automatically in normal operation but **not** in diagnostics mode, where the master
+        owns the brake — which is why a diagnostics procedure has to call this.
+
+
+        **On a pin brake this moves the shaft**: the controller raises torque progressively until the
+        load has lifted off the pin by the minimum displacement (0x2004:08), reversing direction if it
+        reaches the torque ceiling (0x2004:09) first. Check `releaseMovesShaft` on `GET .../brake`.
+
+
+        Brake release is open-loop — nothing confirms the brake let go — so the wait is the only
+        margin there is. A brake whose release strategy is `manualOutputVoltage` is left alone and the
+        returned state says so; that is not an error. **A released brake stays released**: nothing
+        re-engages it for you, so on a vertical or loaded axis engage it again when you are done.
+      operationId: releaseBrake
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: settle
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 50 }
+          description: >
+            Extra wait in milliseconds on top of the drive's pull time. Size it for the machine —
+            release is open-loop, so this is the only margin between "commanded" and "assumed
+            released".
+          example: 50
+      responses:
+        "200":
+          description: The brake state read back after the command
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrakeState" }
+        "400":
+          description: slavePosition or settle is invalid
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: The device is not a SOMANET drive, or the command failed
+  /api/devices/{slavePosition}/brake/engage:
+    post:
+      summary: Engage a drive's brake
+      description: >
+        Writes "engaged" to the brake state object (0x2004:07) and waits `settle` before answering
+        with the brake state read back. There is no pull time on the way in — a brake is
+        spring-engaged, so engaging it is the removal of voltage — so the wait is only `settle`.
+
+
+        As with release, a brake whose release strategy is `manualOutputVoltage` is left alone and the
+        returned state says so.
+      operationId: engageBrake
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: settle
+          in: query
+          required: false
+          schema: { type: integer, minimum: 0, default: 50 }
+          description: How long to wait in milliseconds after commanding the brake before answering.
+          example: 50
+      responses:
+        "200":
+          description: The brake state read back after the command
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BrakeState" }
+        "400":
+          description: slavePosition or settle is invalid
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: The device is not a SOMANET drive, or the command failed
   /api/devices/{slavePosition}/store-parameters:
     post:
       summary: Store a device's parameters to non-volatile memory
@@ -3586,6 +3715,57 @@ components:
             Why the run failed when no step captured it — a failure belonging to no step, such as
             the device not being the kind the procedure needs. Absent otherwise.
       required: [status, runCount, steps]
+    BrakeState:
+      type: object
+      description: >
+        A drive's brake configuration and current state — the parts of object 0x2004 that decide what
+        commanding the brake will actually do. Returned by every brake endpoint, so the outcome of a
+        release or engage arrives in the same shape as a plain read.
+      properties:
+        status:
+          type: string
+          enum: [notConfigured, engaged, disengaged]
+          description: >
+            Brake state (0x2004:07). A brake is spring-engaged, so `engaged` is also its powered-off
+            state.
+          example: engaged
+        releaseStrategy:
+          type: string
+          enum: [manualOutputVoltage, clutch, pin]
+          description: >
+            How the brake is driven (0x2004:04). `manualOutputVoltage` means the firmware does not
+            drive it — the brake is a raw output voltage (0x2004:10) instead.
+          example: clutch
+        pullTimeMs:
+          type: integer
+          description: >
+            How long the pull voltage is applied to release the brake (0x2004:03). The firmware blocks
+            motion, and motion-related OS commands, until this expires.
+          example: 120
+        pullVoltageMv:
+          type: integer
+          description: Voltage that disengages the brake, in millivolts (0x2004:01).
+          example: 24000
+        holdVoltageMv:
+          type: integer
+          description: >
+            Lower voltage that keeps it disengaged once released, in millivolts (0x2004:02).
+          example: 12000
+        softwareControllable:
+          type: boolean
+          description: >
+            Whether commanding the brake does anything at all — false for `manualOutputVoltage`.
+            Derived from the release strategy and served so a client need not encode that rule.
+          example: true
+        releaseMovesShaft:
+          type: boolean
+          description: >
+            Whether releasing this brake turns the motor. True only for a pin brake, whose release
+            raises torque progressively to lift the load off the pin.
+          example: false
+      required:
+        [status, releaseStrategy, pullTimeMs, pullVoltageMv, holdVoltageMv, softwareControllable,
+         releaseMovesShaft]
     ProcedureDescriptor:
       type: object
       description: >

@@ -426,6 +426,45 @@ export interface ProcedureSnapshot {
   error?: string;
 }
 
+/** A drive's brake configuration and current state — the parts of object 0x2004 that decide what commanding the brake will actually do. Returned by every brake endpoint, so the outcome of a release or engage arrives in the same shape as a plain read. */
+export interface BrakeState {
+  /**
+   * Brake state (0x2004:07). A brake is spring-engaged, so `engaged` is also its powered-off state.
+   * @example "engaged"
+   */
+  status: "notConfigured" | "engaged" | "disengaged";
+  /**
+   * How the brake is driven (0x2004:04). `manualOutputVoltage` means the firmware does not drive it — the brake is a raw output voltage (0x2004:10) instead.
+   * @example "clutch"
+   */
+  releaseStrategy: "manualOutputVoltage" | "clutch" | "pin";
+  /**
+   * How long the pull voltage is applied to release the brake (0x2004:03). The firmware blocks motion, and motion-related OS commands, until this expires.
+   * @example 120
+   */
+  pullTimeMs: number;
+  /**
+   * Voltage that disengages the brake, in millivolts (0x2004:01).
+   * @example 24000
+   */
+  pullVoltageMv: number;
+  /**
+   * Lower voltage that keeps it disengaged once released, in millivolts (0x2004:02).
+   * @example 12000
+   */
+  holdVoltageMv: number;
+  /**
+   * Whether commanding the brake does anything at all — false for `manualOutputVoltage`. Derived from the release strategy and served so a client need not encode that rule.
+   * @example true
+   */
+  softwareControllable: boolean;
+  /**
+   * Whether releasing this brake turns the motor. True only for a pin brake, whose release raises torque progressively to lift the load off the pin.
+   * @example false
+   */
+  releaseMovesShaft: boolean;
+}
+
 /** What a procedure *is*, independent of any run — everything needed to render a control for it. The text is served rather than held per client, because the house rule that every action carries a description and its caveats means it has to exist somewhere, and duplicating it in each client is how it goes stale. */
 export interface ProcedureDescriptor {
   /**

@@ -18,6 +18,7 @@ add_library(
   process_data_dump.cc
   process_data_ring.cc
   process_image.cc
+  somanet_control.cc
   somanet_drive.cc
   somanet_procedures.cc)
 add_library(mm::node ALIAS node)

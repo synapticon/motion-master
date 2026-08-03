@@ -12,6 +12,7 @@
 
 import {
   AlStatusCode,
+  BrakeState,
   Cia402Status,
   DcSyncStatus,
   DeviceDiagnostics,
@@ -1100,6 +1101,74 @@ export class Api<
     this.request<void, void>({
       path: `/api/devices/${slavePosition}/procedures/${procedureName}`,
       method: "DELETE",
+      ...params,
+    });
+  /**
+   * @description Reports the brake objects (0x2004) that decide what a release or engage will do: its current state, the release strategy, the pull time and the pull/hold voltages. Read this before commanding the brake. `softwareControllable` is false when the release strategy is `manualOutputVoltage`, meaning the firmware does not drive the brake at all and both commands below are no-ops. `releaseMovesShaft` is true for a pin brake, whose release procedure turns the motor to lift the load off the pin.
+   *
+   * @name GetBrake
+   * @summary Read a drive's brake configuration and state
+   * @request GET:/api/devices/{slavePosition}/brake
+   */
+  getBrake = (slavePosition: number, params: RequestParams = {}) =>
+    this.request<BrakeState, void>({
+      path: `/api/devices/${slavePosition}/brake`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Writes "disengaged" to the brake state object (0x2004:07) and waits the drive's pull time (0x2004:03) plus `settle` before answering, because the firmware blocks motion — and motion-related OS commands — until the pull time expires. Answers with the brake state read back. **The release only actually happens while the drive is in OP ENABLED.** In any other state the write merely energises the brake output (phase D). Note also that entering OP ENABLED releases the brake automatically in normal operation but **not** in diagnostics mode, where the master owns the brake — which is why a diagnostics procedure has to call this. **On a pin brake this moves the shaft**: the controller raises torque progressively until the load has lifted off the pin by the minimum displacement (0x2004:08), reversing direction if it reaches the torque ceiling (0x2004:09) first. Check `releaseMovesShaft` on `GET .../brake`. Brake release is open-loop — nothing confirms the brake let go — so the wait is the only margin there is. A brake whose release strategy is `manualOutputVoltage` is left alone and the returned state says so; that is not an error. **A released brake stays released**: nothing re-engages it for you, so on a vertical or loaded axis engage it again when you are done.
+   *
+   * @name ReleaseBrake
+   * @summary Release (disengage) a drive's brake
+   * @request POST:/api/devices/{slavePosition}/brake/release
+   */
+  releaseBrake = (
+    slavePosition: number,
+    query?: {
+      /**
+       * Extra wait in milliseconds on top of the drive's pull time. Size it for the machine — release is open-loop, so this is the only margin between "commanded" and "assumed released".
+       * @min 0
+       * @default 50
+       * @example 50
+       */
+      settle?: number;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<BrakeState, void>({
+      path: `/api/devices/${slavePosition}/brake/release`,
+      method: "POST",
+      query: query,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Writes "engaged" to the brake state object (0x2004:07) and waits `settle` before answering with the brake state read back. There is no pull time on the way in — a brake is spring-engaged, so engaging it is the removal of voltage — so the wait is only `settle`. As with release, a brake whose release strategy is `manualOutputVoltage` is left alone and the returned state says so.
+   *
+   * @name EngageBrake
+   * @summary Engage a drive's brake
+   * @request POST:/api/devices/{slavePosition}/brake/engage
+   */
+  engageBrake = (
+    slavePosition: number,
+    query?: {
+      /**
+       * How long to wait in milliseconds after commanding the brake before answering.
+       * @min 0
+       * @default 50
+       * @example 50
+       */
+      settle?: number;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<BrakeState, void>({
+      path: `/api/devices/${slavePosition}/brake/engage`,
+      method: "POST",
+      query: query,
+      format: "json",
       ...params,
     });
   /**

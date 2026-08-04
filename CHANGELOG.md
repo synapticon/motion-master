@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.65] - 2026-08-04
+
+Nothing changed in the server, the web apps or the client library. This release exists so that the Raspberry Pi appliance image can install a current build instead of one pinned several releases back — the work behind it is in the image build under `rt/` and its documentation, neither of which ships inside a release artifact.
+
 ## [6.0.0-alpha.64] - 2026-08-03
 
 ### Added
@@ -481,7 +485,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.64...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.65...HEAD
+[6.0.0-alpha.65]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.64...v6.0.0-alpha.65
 [6.0.0-alpha.64]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.63...v6.0.0-alpha.64
 [6.0.0-alpha.63]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.62...v6.0.0-alpha.63
 [6.0.0-alpha.62]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.61...v6.0.0-alpha.62

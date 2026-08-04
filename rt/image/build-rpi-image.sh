@@ -589,8 +589,20 @@ if [ -n "$ROOT_PASSWORD" ]; then
     ROOT_HASH=$(openssl passwd -6 "$ROOT_PASSWORD")
     [ -n "$ROOT_HASH" ] || die "could not hash the root password"
     sudo sed -i "s|^root:[^:]*:|root:$ROOT_HASH:|" "$MOUNT_DIR/root/etc/shadow"
-    sudo grep -q "^root:\$6\$" "$MOUNT_DIR/root/etc/shadow" ||
-        die "the root password was not set in the image"
+    # Read the field back and test its prefix, rather than matching a pattern.
+    # A crypt hash both starts and ends with the "$" that a regex reads as an
+    # end-of-line anchor, so the obvious grep for "^root:\$6\$" matches nothing
+    # however it is quoted — it demands the line stop right after "root:$6".
+    # This failed a build against an image whose password had in fact been set
+    # perfectly well.
+    ROOT_FIELD=$(sudo awk -F: '$1 == "root" { print $2 }' "$MOUNT_DIR/root/etc/shadow")
+    # shellcheck disable=SC2016  # '$6$' is the literal SHA-512 crypt prefix,
+    # not an expansion — single quotes are the point. Rewriting it to satisfy
+    # this check is what produced the bug the comment above describes.
+    case "$ROOT_FIELD" in
+    '$6$'*) ;;
+    *) die "the root password was not set in the image" ;;
+    esac
 else
     log "  RT_IMAGE_ROOT_PASSWORD is empty — leaving root locked, key-only"
 fi

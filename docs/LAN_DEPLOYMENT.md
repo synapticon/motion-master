@@ -71,12 +71,10 @@ bridge) and only one of them is the one you want, so the log would be guessing; 
 Give the machine a **fixed address** — a DHCP reservation is enough — so the name stays valid.
 Nothing else is needed on the device: the certificate it already ships with covers the name.
 
-### Making it findable
-
-The user still has to learn the address. Configure mDNS on the device (Raspberry Pi OS ships Avahi)
-so it answers to something like `motion-master.local`; `ping motion-master.local` then reveals the
-address. Note the `.local` name cannot be used to *connect* — no CA will issue for a reserved TLD —
-it is only a way to discover the address.
+There is no discovery service, and none is planned: nothing advertises itself on the network. Read
+the address off the machine as above, or from the router's lease list. A `.local` name would not
+have helped you connect in any case — no CA issues for a reserved TLD, so it could only ever have
+revealed the address you then have to type anyway.
 
 ## Part 2 — the client machine
 

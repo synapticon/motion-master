@@ -484,15 +484,44 @@ needs any of them. `./tools/install-deps.sh` installs all of it.
 The image ships neither cloud-init nor `openssh-server`, so the build installs sshd in that chroot
 before first boot; without it there would be no way for Ansible to get in.
 
+### Logging in
+
+```bash
+ssh -i ~/.ssh/motion-master-rpi root@<address>   # over the network
+                                                 # on the console: root / root
+```
+
+Two keypairs are in play and they are not interchangeable. The one in `.cache` is a throwaway,
+authorised only while the image is being provisioned and removed before the image is finished. The
+one above — `~/.ssh/motion-master-rpi`, generated on the first run of the build and **not** kept in
+the repository — is durable, and its public half is baked into every image. It is the key handed to
+whoever owns a board, so **treat it as published, and back it up**: a card only accepts the key it
+was built with, so losing it locks you out of every board already in the field.
+
+The root password is the account name, and root may log in over SSH. That is deliberate. The
+board's HTTP API has no authentication and binds every interface, so login credentials are not what
+stands between the drives and the network — the network's own trust boundary is, and these
+credentials add nothing an attacker who can reach port 61447 does not already have. What they buy
+is a board that stays recoverable when Ethernet does not come up, which is exactly the failure this
+hardware has not been proven against. `RT_IMAGE_ROOT_PASSWORD=` (empty) leaves root locked and the
+key the only way in, for whoever wants the opposite trade.
+
 ### Unverified on hardware
 
-The script itself has not been run end to end, and whether the 7.1.3-rt kernel drives BCM2712 and
-RP1 on a real Pi 5 **cannot be established in QEMU** — QEMU is not a Pi. That is a card-in-the-slot
-test. On first boot, confirm over serial or HDMI that the board comes up and that Ethernet appears.
-Debian's position is that Forky supports the board, but "supported" and "boots with an RT kernel and
-a 1 ms EtherCAT cycle" are different claims.
+The build itself now runs end to end — first on 2026-08-01, and again on 2026-08-04, whose image was
+checked offline (RT kernel and matching `initramfs` in `config.txt`, `isolcpus`/`nohz_full` on the
+command line, `motion-master` installed and enabled, machine ID blank, build key gone). What
+**cannot** be established in QEMU is whether the 7.1.3-rt kernel drives BCM2712 and RP1 on a real
+Pi 5 — QEMU is not a Pi. That is a card-in-the-slot test. On first boot, confirm over serial
+(`enable_uart=1` and `console=ttyAMA0,115200` are already set) or HDMI that the board comes up and
+that Ethernet appears. Debian's position is that Forky supports the board, but "supported" and
+"boots with an RT kernel and a 1 ms EtherCAT cycle" are different claims.
 
-Also still open: mDNS/Avahi discovery so the Pi can be found without knowing its address. Design
-context for the appliance — the LAN certificate scheme and what ships in the image — is in
+Networking on the card comes from `netplan.io`, which generates the `systemd-networkd` configuration
+into `/run` at boot — which is why `/etc/systemd/network` is empty and DHCP nevertheless works. Its
+globs are `en*` and `eth*`, and `net.ifnames=0` on the kernel command line means the Pi's interface
+appears as plain `eth0`, so it is matched either way.
+
+Design context for the appliance — the LAN certificate scheme and what ships in the image — is in
 `NEXTGEN.md` (sessions 2026-06-12, 2026-07-24 and 2026-07-31) and
 [`docs/LAN_DEPLOYMENT.md`](../docs/LAN_DEPLOYMENT.md).

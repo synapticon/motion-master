@@ -2,12 +2,17 @@
 # Release to install. The .deb is published per tag with both amd64 and arm64
 # assets, so the same version string serves the AAeon board and the Pi.
 #
-# 6.0.0-alpha.62 is the first release carrying gameLoop.cpuAffinity. On anything
+# This is a pin, not a floor: provisioning installs exactly this version, so a
+# board is reprovisioned onto a newer release only by editing it here. Bump it
+# when a board should carry newer firmware — and note the release has to exist
+# first, since the play downloads the .deb from that tag.
+#
+# 6.0.0-alpha.62 was the first release carrying gameLoop.cpuAffinity. On anything
 # older the key is still written to the config and simply ignored (an unknown key
 # is not an error), so the RT thread stays unpinned and the isolated core stays
 # idle — with GET /api/game-loop reporting no cpuAffinity field at all as the
-# only symptom. Keep this at or above alpha.62.
-motion_master_version: 6.0.0-alpha.62
+# only symptom. Never take this below alpha.62.
+motion_master_version: 6.0.0-alpha.65
 motion_master_release_url: >-
   https://github.com/synapticon/motion-master/releases/download/v{{ motion_master_version }}
 

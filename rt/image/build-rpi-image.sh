@@ -32,6 +32,20 @@
 #   qemu-user-static         binfmt handler, so apt can run in the arm64 chroot
 #   sudo rights              for loop-mount, mount and chroot only
 #
+# Getting into the finished card. Every image is built to be logged into, by a
+# key that is meant to be shared and a password that is not a secret:
+#
+#   ssh -i ~/.ssh/motion-master-rpi root@<address>     (generated on first run)
+#   console: root / root
+#
+# Neither is a weakness to be fixed later. The board's HTTP API is
+# unauthenticated and binds every interface, so the credentials are not what
+# stands between the drives and the network — the network's own trust boundary
+# is. What they buy is a board that can be recovered when Ethernet does not come
+# up, which is the failure this hardware has not yet been proven against.
+# Override with RT_IMAGE_ACCESS_KEY and RT_IMAGE_ROOT_PASSWORD; setting the
+# latter empty leaves root locked and the key the only way in.
+#
 # Where the base image comes from, and a trap worth knowing about.
 #
 # raspi.debian.net still serves two pages of "daily" and "tested" images that
@@ -88,6 +102,39 @@ require curl
 require xz
 require ssh
 require ansible-playbook
+require openssl
+
+# How the finished card is logged into. Two separate keypairs are in play, and
+# conflating them is the mistake to avoid:
+#
+#   SSH_KEY     throwaway, per-.cache, build-only. Authorised before the QEMU
+#               boot so Ansible can get in, and removed again at the end.
+#   ACCESS_KEY  durable, and deliberately NOT a secret — this is the key handed
+#               to whoever owns a board. Its public half is baked into every
+#               image built here.
+#
+# ACCESS_KEY lives in the invoking user's ~/.ssh, not in the repository: it is an
+# SSH key and that is where SSH keys go, whereas a private key inside a git
+# working tree is one `git add -A` away from being committed to a public
+# repository (whose push protection would likely reject it anyway). Nor does it
+# belong in .cache, which is advertised as disposable — deleting that directory
+# must never cost you the key that opens every card already in the field.
+#
+# $HOME is not usable to find it. This script is frequently run under sudo, where
+# $HOME is /root, and the key would land somewhere its owner cannot read.
+INVOKING_USER="${SUDO_USER:-$(id -un)}"
+INVOKING_HOME="$(getent passwd "$INVOKING_USER" | cut -d: -f6)"
+[ -n "$INVOKING_HOME" ] || die "could not determine the home directory of $INVOKING_USER"
+
+ACCESS_KEY="${RT_IMAGE_ACCESS_KEY:-$INVOKING_HOME/.ssh/motion-master-rpi}"
+
+# The root password is the account name by default (root/root), which is a
+# deliberate choice rather than an oversight: the board's HTTP API is
+# unauthenticated and binds every interface, so a login password is not what is
+# protecting anything, and console access is what makes a board recoverable on
+# the day the network does not come up. Set RT_IMAGE_ROOT_PASSWORD to override,
+# or to the empty string to leave the account locked and key-only.
+ROOT_PASSWORD="${RT_IMAGE_ROOT_PASSWORD-root}"
 
 # Run this as yourself, not under sudo. Only the loop-mount/chroot block needs
 # root; the download, the image resize, the QEMU boot, Ansible and the checks are
@@ -218,6 +265,27 @@ parted -s "$WORK_IMAGE" resizepart "$ROOT_NUM" 100% 2>/dev/null ||
 
 if [ ! -f "$SSH_KEY" ]; then
     ssh-keygen -t ed25519 -N '' -C motion-master-rpi-image -f "$SSH_KEY" >/dev/null
+fi
+
+# Only the public half is needed to build an image; the private half is the thing
+# handed to board owners, and a build host has no business needing it. Generating
+# a fresh pair whenever the public key is merely missing would be the worst
+# outcome available here — the build would succeed and produce a card that the
+# key already distributed to owners cannot open — so this writes both halves
+# exactly once, and says so loudly enough to be noticed.
+if [ ! -f "$ACCESS_KEY.pub" ]; then
+    install -d -m 700 -o "$INVOKING_USER" "$(dirname "$ACCESS_KEY")"
+    ssh-keygen -t ed25519 -N '' -C motion-master-rpi -f "$ACCESS_KEY" >/dev/null
+    # Under sudo ssh-keygen writes root-owned files into someone else's ~/.ssh,
+    # where the person who has to use the key cannot read it.
+    chown "$INVOKING_USER" "$ACCESS_KEY" "$ACCESS_KEY.pub"
+    log ""
+    log "NOTE: no access key was found, so a new one has been generated:"
+    log "  $ACCESS_KEY      (private — give this to board owners)"
+    log "  $ACCESS_KEY.pub  (public  — baked into every image built here)"
+    log "Keep both, and back them up. A card built from one key will not accept"
+    log "another, so losing these locks you out of every board already flashed."
+    log ""
 fi
 
 # ── 2. open the image and prepare first boot ─────────────────────────────────
@@ -478,7 +546,9 @@ rm -f "$PID_FILE"
 #     provisioning boot would fill it straight back in. Leaving it set gives
 #     every card flashed from this image one identity, and one DHCP DUID.
 #   * The build key and its sshd drop-in are removed here rather than over SSH,
-#     for the ordering reason above.
+#     for the ordering reason above — and the durable access key replaces them,
+#     so the swap is a single atomic-looking step with no window in which the
+#     image carries both, or neither.
 log "finalising the image"
 LOOP_DEV=$(sudo losetup --find --show --partscan "$WORK_IMAGE")
 sudo udevadm settle --timeout=10 2>/dev/null || true
@@ -489,8 +559,41 @@ sudo truncate -s 0 "$MOUNT_DIR/root/etc/machine-id"
 
 sudo rm -f "$MOUNT_DIR/root/root/.ssh/authorized_keys" \
     "$MOUNT_DIR/root/etc/ssh/sshd_config.d/99-image-build.conf"
-[ ! -e "$MOUNT_DIR/root/root/.ssh/authorized_keys" ] ||
-    die "the build SSH key is still in the image"
+
+log "installing the access key and root password"
+sudo install -d -m 700 "$MOUNT_DIR/root/root/.ssh"
+sudo install -m 600 -o root -g root "$ACCESS_KEY.pub" \
+    "$MOUNT_DIR/root/root/.ssh/authorized_keys"
+sudo grep -qF "$(cut -d' ' -f2 <"$ACCESS_KEY.pub")" \
+    "$MOUNT_DIR/root/root/.ssh/authorized_keys" ||
+    die "the access key was not installed into the image"
+
+# Root over SSH, permanently this time. "yes" rather than prohibit-password
+# because a password is being set and both routes in are wanted; with an empty
+# RT_IMAGE_ROOT_PASSWORD the account stays locked and this degrades to key-only
+# on its own, since sshd cannot accept a password that does not exist.
+sudo install -d "$MOUNT_DIR/root/etc/ssh/sshd_config.d"
+sudo tee "$MOUNT_DIR/root/etc/ssh/sshd_config.d/50-motion-master.conf" >/dev/null <<'EOF'
+# Motion Master appliance: root login by the distributed motion-master-rpi key,
+# and by password on the console. See rt/README.md.
+PermitRootLogin yes
+EOF
+
+# The password is written straight into /etc/shadow rather than through chpasswd
+# in a chroot: the bind mounts this needs were torn down before the QEMU boot,
+# and re-establishing /proc and /dev to run one command is more moving parts than
+# a hash and a substitution. openssl computes the same SHA-512 crypt hash that
+# chpasswd would. The field is replaced wholesale, which also clears the "!" that
+# locks the account in the stock image.
+if [ -n "$ROOT_PASSWORD" ]; then
+    ROOT_HASH=$(openssl passwd -6 "$ROOT_PASSWORD")
+    [ -n "$ROOT_HASH" ] || die "could not hash the root password"
+    sudo sed -i "s|^root:[^:]*:|root:$ROOT_HASH:|" "$MOUNT_DIR/root/etc/shadow"
+    sudo grep -q "^root:\$6\$" "$MOUNT_DIR/root/etc/shadow" ||
+        die "the root password was not set in the image"
+else
+    log "  RT_IMAGE_ROOT_PASSWORD is empty — leaving root locked, key-only"
+fi
 
 cleanup_mounts
 
@@ -498,6 +601,18 @@ log "image ready: $WORK_IMAGE"
 log ""
 log "Flash it (CHECK THE DEVICE NAME — this overwrites the target):"
 log "  sudo dd if=$WORK_IMAGE of=/dev/sdX bs=4M status=progress conv=fsync"
+log ""
+log "Logging in — the board answers to '$IMAGE_HOSTNAME':"
+log "  over SSH        ssh -i $ACCESS_KEY root@<address>"
+if [ -n "$ROOT_PASSWORD" ]; then
+    log "  on the console  user 'root', password '$ROOT_PASSWORD'"
+else
+    log "  on the console  disabled — root is locked, the key above is the only way in"
+fi
+log ""
+log "Neither credential is a secret: the key is meant to be handed to board"
+log "owners, and the HTTP API on this board is unauthenticated and listens on"
+log "every interface regardless. Put it on a network you trust."
 log ""
 log "The kernel has never run on real hardware. On first boot, confirm over"
 log "serial or HDMI that it comes up and that Ethernet appears."

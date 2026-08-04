@@ -1,0 +1,33 @@
+---
+- name: Install the partition-growing tools
+  ansible.builtin.apt:
+    name: "{{ growroot_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install the expansion script
+  ansible.builtin.template:
+    src: growroot.j2
+    dest: "{{ growroot_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the systemd unit
+  ansible.builtin.template:
+    src: growroot.service.j2
+    dest: "/etc/systemd/system/{{ growroot_service }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# Enabled, never started here. On a disk image the guest's disk *is* the image,
+# so there is nothing to grow and a run would only prove that; on a running host
+# the boot after this play is when it matters. Either way the work belongs to
+# the first boot of the medium it was written to.
+- name: Enable expansion on boot
+  ansible.builtin.systemd_service:
+    name: "{{ growroot_service }}"
+    enabled: true
+    daemon_reload: true

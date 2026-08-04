@@ -1,0 +1,61 @@
+#!/bin/sh
+# Managed by Ansible (growroot role) — do not edit.
+#
+# Expand the root partition, and then the filesystem in it, to fill whatever
+# medium this system was written to. A disk image has a fixed size; the card or
+# SSD it is flashed to does not, and everything past the image's last sector is
+# unallocated until something claims it.
+#
+# Safe to run on every boot, which is why there is no stamp file: growpart
+# reports "no change" once the partition already reaches the end of the disk,
+# and an online resize2fs is a no-op once the filesystem already fills its
+# partition. A stamp file is a piece of state that can be wrong; idempotence
+# cannot be.
+
+set -eu
+
+# Derived, never hardcoded: the same image has to work on the Pi's microSD
+# (/dev/mmcblk0p1) and on a USB SSD (/dev/sda1), whose names share no pattern —
+# note the "p" that only the former carries. sysfs knows the answer for both.
+root_source=$(findmnt --noheadings --output SOURCE --mountpoint /)
+root_name=${root_source#/dev/}
+
+[ -e "/sys/class/block/$root_name/partition" ] || {
+    echo "growroot: / is $root_source, which is not a partition — nothing to grow" >&2
+    exit 0
+}
+
+part_number=$(cat "/sys/class/block/$root_name/partition")
+disk_name=$(basename "$(readlink -f "/sys/class/block/$root_name/..")")
+disk="/dev/$disk_name"
+
+# growpart's exit codes are meaningful and must not be flattened: 0 grew it,
+# 2 means there was nothing to grow (every boot after the first), and anything
+# else is a real failure that should be visible in the journal rather than
+# swallowed by a "|| true".
+set +e
+growpart_output=$(growpart "$disk" "$part_number" 2>&1)
+growpart_status=$?
+set -e
+
+case "$growpart_status" in
+0)
+    echo "growroot: grew ${disk} partition ${part_number}: ${growpart_output}"
+    # The kernel is still holding the old partition geometry; resize2fs would
+    # otherwise be told the filesystem cannot grow past a boundary that no
+    # longer exists.
+    partx --update "$disk" || true
+    ;;
+2)
+    echo "growroot: ${disk} partition ${part_number} already fills the disk"
+    ;;
+*)
+    echo "growroot: growpart failed (${growpart_status}): ${growpart_output}" >&2
+    exit "$growpart_status"
+    ;;
+esac
+
+# Online resize of the mounted root — ext4 supports this, and it is a no-op when
+# the filesystem already spans its partition, so it runs unconditionally rather
+# than only in the branch above.
+resize2fs "$root_source"

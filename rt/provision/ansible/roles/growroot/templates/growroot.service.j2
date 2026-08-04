@@ -1,0 +1,19 @@
+# Managed by Ansible (growroot role) — do not edit.
+[Unit]
+Description=Expand the root partition and filesystem to fill the disk
+Documentation=file://{{ growroot_script }}
+
+# After the root filesystem is mounted and writable, and before anything that
+# might fill it. It deliberately does not order itself before motion-master:
+# the daemon does not need the space to start, and coupling the two would make
+# a failure here delay the thing the appliance exists to run.
+After=local-fs.target
+ConditionPathIsReadWrite=/
+
+[Service]
+Type=oneshot
+ExecStart={{ growroot_script }}
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

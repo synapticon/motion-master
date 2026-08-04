@@ -56,3 +56,17 @@
           tags: motion-master
       when: motion_master_install | default(false)
       tags: motion-master
+
+    # Off by default, for the same reason as the daemon above: a host someone
+    # points this playbook at may have been partitioned deliberately, and
+    # growing its root partition over the free space is not a decision to make
+    # on its behalf. A card written from a golden image is the opposite case —
+    # its partition table is an artefact of the image's size, not a choice —
+    # so rpi-image.yml turns it on.
+    - name: Expand the root filesystem on first boot
+      ansible.builtin.include_role:
+        name: growroot
+        apply:
+          tags: growroot
+      when: growroot_install | default(false)
+      tags: growroot

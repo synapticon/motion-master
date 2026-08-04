@@ -34,3 +34,10 @@ rt_targets:
 
     motion_master_install: true
     motion_master_fieldbus_driver: soem
+
+    # The image is deliberately small so that writing a card is quick; the card
+    # itself is whatever the user had, commonly 32 or 64 GB. Without this the
+    # root partition would stay at the image's size and the rest of the card
+    # would sit unallocated forever — nothing else in this image grows it, since
+    # it carries no cloud-init and the base ships no systemd-repart.
+    growroot_install: true

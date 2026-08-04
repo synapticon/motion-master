@@ -137,6 +137,7 @@ rt/
         rt-tuning/           irqbalance, CPU governor, NIC offload
         rt-verify/           assertions, summary, cyclictest
         motion-master/       release .deb, config, systemd unit
+        growroot/            grow the root partition to the card on first boot
   image/
     build-rpi-image.sh       flashable Raspberry Pi 5 image (arm64, slow)
 ```
@@ -389,6 +390,40 @@ motion-master    TS      -   1     ← parameter refresher
 `GET /api/game-loop` reports the same thing as `cpuAffinity` and `cpuPinned`, and the Console's
 Game Loop page shows it — including a loud warning if a core was configured but the pin failed.
 
+### growroot — the card's real size
+
+A disk image has a fixed size and the medium it is written to does not, so everything past the
+image's last sector sits unallocated until something claims it. Flash an 8 GB image to a 64 GB card
+and you get 7.5 GiB of root filesystem and 56 GB of nothing. Nothing in this image fixes that on its
+own: the base carries no cloud-init (so no `growpart`) and no `systemd-repart`, and the
+`x-systemd.growfs` already in `/etc/fstab` only grows the *filesystem* to fill its *partition* —
+which the build has already done, so it finds nothing to do and never touches the partition table.
+
+So the role installs `growpart` (`cloud-guest-utils`) plus `gdisk`, a small script, and a oneshot
+unit that runs on every boot. `sgdisk` is what makes the GPT case work: a card larger than the image
+leaves the GPT **backup header** stranded at the image's old end, and the partition cannot be grown
+until it is moved — the same trap the image build hits on the host side with
+`sfdisk --relocate gpt-bak-std`.
+
+Two properties worth knowing. **There is no stamp file**, deliberately: `growpart` exits 2 for "no
+change" and an online `resize2fs` is a no-op once the filesystem already fills its partition, so
+re-running costs nothing — and a stamp file is a piece of state that can be wrong, where idempotence
+cannot be. Exit 2 is tolerated; any other failure is loud in the journal rather than swallowed.
+And **the device is derived, never hardcoded** — from `/sys/class/block/<name>/partition` and the
+sysfs parent link — so one image works on the Pi's microSD (`/dev/mmcblk0p1`) and on a USB SSD
+(`/dev/sda1`), whose names share no pattern.
+
+It is **off unless an inventory asks for it** (`growroot_install`), for the same reason as the
+daemon: a machine someone points this playbook at may have been partitioned deliberately, and
+growing its root over the free space is not a decision to make on its behalf. A card written from a
+golden image is the opposite case — its partition table is an artefact of the image's size, not a
+choice — so `rpi-image.yml` turns it on.
+
+**It cannot be proven in QEMU.** The provisioning guest's disk *is* the image, so there is by
+definition no free space past the partition and `growpart` correctly reports nothing to do. The
+build checks only that the unit is enabled and the tools are present; the first real exercise is the
+card's first boot, where `df -h /` should report the card's size rather than the image's.
+
 ## What the VM Can and Cannot Tell You
 
 **It can prove the automation is correct.** That the playbook converges from a genuinely clean
@@ -483,6 +518,13 @@ needs any of them. `./tools/install-deps.sh` installs all of it.
 
 The image ships neither cloud-init nor `openssh-server`, so the build installs sshd in that chroot
 before first boot; without it there would be no way for Ansible to get in.
+
+**The image is 8 GB and the card is whatever you flashed.** That is not the appliance's capacity:
+the `growroot` role expands the root partition to fill the medium on first boot, so a 64 GB card
+reports 64 GB the first time it comes up, and the image's size only decides how much provisioning
+has to fit into and how long `dd` runs. 8 GB is roughly four times what a provisioned image uses,
+and the margin is deliberate — running out of space happens at the `apt` step of a two-hour
+emulated build, so `RT_IMAGE_SIZE` buys headroom far more cheaply than it buys flash time.
 
 ### Logging in
 

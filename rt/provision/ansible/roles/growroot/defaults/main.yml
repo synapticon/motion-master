@@ -1,0 +1,12 @@
+---
+# Where the expansion script lands, and the unit that runs it.
+growroot_script: /usr/local/sbin/growroot
+growroot_service: growroot.service
+
+# growpart does the partition, and needs sgdisk for the GPT case — moving the
+# backup header, which a card larger than the image always requires. gdisk is
+# only a Recommends of cloud-guest-utils, so it is named explicitly rather than
+# left to apt's recommends handling, which an image build may have disabled.
+growroot_packages:
+  - cloud-guest-utils
+  - gdisk

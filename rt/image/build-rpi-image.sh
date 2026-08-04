@@ -80,6 +80,16 @@ PID_FILE="$CACHE_DIR/qemu.pid"
 SERIAL_LOG="$CACHE_DIR/serial.log"
 MOUNT_DIR="$CACHE_DIR/mnt"
 
+# This is build headroom, not the appliance's capacity: the growroot role grows
+# the card to its real size on first boot, so this number only decides how much
+# provisioning has to fit into and how many bytes dd has to write.
+#
+# A provisioned image uses about 2 GiB, so 8G is roughly four times what is
+# needed today. That margin is deliberate — running out of space happens at the
+# apt step of a two-hour emulated build, and a smaller image would have to be
+# revisited every time a role installs something bulky. Writing the extra
+# gigabytes costs a couple of minutes once per card; being wrong costs the whole
+# build.
 IMAGE_SIZE="${RT_IMAGE_SIZE:-8G}"
 VM_CPUS="${RT_IMAGE_CPUS:-4}"
 VM_MEMORY_MB="${RT_IMAGE_MEMORY_MB:-4096}"
@@ -477,6 +487,18 @@ log "provisioning with the same playbook the AAeon board uses"
 # into the image. What the image contains is checked below instead.
 "$ANSIBLE_DIR/../play-rt.sh" inventory/rpi-image.yml --skip-tags rt-verify
 
+# Provisioning downloads a kernel, its headers and a compiler, and apt keeps
+# every .deb it fetched — around 170 MB serving no purpose on a card that will
+# never reinstall those exact versions from cache. Dropped here rather than by a
+# role, because it is a property of shipping an image and not of configuring a
+# host: a real machine benefits from its cache.
+#
+# Not fatal. With the image sized as it is this is hygiene, not necessity, and
+# failing a two-hour build over an unswept cache would be the wrong trade.
+log "dropping the apt cache"
+ssh "${SSH_OPTS[@]}" "$VM_USER@$SSH_HOST" 'apt-get clean' ||
+    log "  (could not clean the apt cache — continuing)"
+
 # ── 4. check what the image ended up containing ───────────────────────────────
 #
 # Not a real-time check — nothing here can be, since none of it has run on the
@@ -508,6 +530,12 @@ check "nohz_full on the command line" "grep -q nohz_full /boot/firmware/cmdline.
 check "rtprio limits installed"      "test -f /etc/security/limits.d/99-realtime.conf"
 check "motion-master installed"      "test -x /opt/motion-master/motion-master"
 check "motion-master enabled"        "systemctl is-enabled motion-master"
+# Only that it is armed. Whether it *works* cannot be tested here: this guest's
+# disk is the image itself, so there is by definition no free space past the
+# partition, and growpart would correctly report nothing to do. The first real
+# exercise is the card's first boot.
+check "growroot enabled"             "systemctl is-enabled growroot"
+check "growroot tooling present"     "command -v growpart && command -v sgdisk"
 check "cpuAffinity configured"       "grep -q '\"cpuAffinity\"' /opt/motion-master/motion-master.jsonc"
 check "interactive firstboot masked" "test \"\$(systemctl is-enabled systemd-firstboot.service 2>/dev/null)\" = masked"
 check "hostname set"                 "test -s /etc/hostname && ! grep -qx localhost /etc/hostname"

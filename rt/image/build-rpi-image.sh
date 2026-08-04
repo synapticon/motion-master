@@ -85,11 +85,11 @@ MOUNT_DIR="$CACHE_DIR/mnt"
 # provisioning has to fit into and how many bytes dd has to write.
 #
 # A provisioned image uses about 2 GiB, so 8G is roughly four times what is
-# needed today. That margin is deliberate — running out of space happens at the
-# apt step of a two-hour emulated build, and a smaller image would have to be
-# revisited every time a role installs something bulky. Writing the extra
-# gigabytes costs a couple of minutes once per card; being wrong costs the whole
-# build.
+# needed today. That margin is deliberate — running out of space surfaces at the
+# apt step, part-way through a build that then has to start again from the
+# beginning, and a smaller image would have to be revisited every time a role
+# installs something bulky. Writing the extra gigabytes costs a little longer
+# once per card; being wrong costs the whole run.
 IMAGE_SIZE="${RT_IMAGE_SIZE:-8G}"
 VM_CPUS="${RT_IMAGE_CPUS:-4}"
 VM_MEMORY_MB="${RT_IMAGE_MEMORY_MB:-4096}"
@@ -494,7 +494,7 @@ log "provisioning with the same playbook the AAeon board uses"
 # host: a real machine benefits from its cache.
 #
 # Not fatal. With the image sized as it is this is hygiene, not necessity, and
-# failing a two-hour build over an unswept cache would be the wrong trade.
+# discarding a finished image over an unswept cache would be the wrong trade.
 log "dropping the apt cache"
 ssh "${SSH_OPTS[@]}" "$VM_USER@$SSH_HOST" 'apt-get clean' ||
     log "  (could not clean the apt cache — continuing)"
@@ -653,6 +653,3 @@ log ""
 log "Neither credential is a secret: the key is meant to be handed to board"
 log "owners, and the HTTP API on this board is unauthenticated and listens on"
 log "every interface regardless. Put it on a network you trust."
-log ""
-log "The kernel has never run on real hardware. On first boot, confirm over"
-log "serial or HDMI that it comes up and that Ethernet appears."

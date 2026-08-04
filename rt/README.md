@@ -523,8 +523,9 @@ before first boot; without it there would be no way for Ansible to get in.
 the `growroot` role expands the root partition to fill the medium on first boot, so a 64 GB card
 reports 64 GB the first time it comes up, and the image's size only decides how much provisioning
 has to fit into and how long `dd` runs. 8 GB is roughly four times what a provisioned image uses,
-and the margin is deliberate — running out of space happens at the `apt` step of a two-hour
-emulated build, so `RT_IMAGE_SIZE` buys headroom far more cheaply than it buys flash time.
+and the margin is deliberate — running out of space surfaces at the `apt` step, part-way through an
+emulated build that has to be started again from the beginning, so `RT_IMAGE_SIZE` buys headroom far
+more cheaply than it buys flash time.
 
 ### Logging in
 

@@ -1569,9 +1569,10 @@ paths:
         wait for it to finish. Poll `GET` on the same path for its outcome, or `DELETE` to cancel it.
 
 
-        The request body carries the procedure's parameters; which fields it accepts (and whether it
-        needs any at all) is per procedure, so consult the descriptor from
-        `GET /api/devices/{slavePosition}/procedures`. A procedure that takes no parameters may be
+        The request body carries the procedure's parameters, and each descriptor from
+        `GET /api/devices/{slavePosition}/procedures` reports its own in `parameters` — name, type,
+        bounds, default, and whether it is required — which is enough to build a form for any
+        procedure without hard-coding one per name. A procedure that takes no parameters may be
         started with no body.
 
 
@@ -3798,6 +3799,13 @@ components:
           type: boolean
           description: True if the drive must be enabled before it will run.
           example: false
+        parameters:
+          type: array
+          items: { $ref: "#/components/schemas/ProcedureParameter" }
+          description: >
+            What the request body may carry, in the order a client should present it. Empty for a
+            procedure that takes none, which is most of them — a procedure's timings are properties
+            of the command it issues rather than a caller's choice.
         steps:
           type: array
           items: { type: string }
@@ -3806,7 +3814,71 @@ components:
             per-step status is always idle and says nothing. Live status for the same ids is in the
             snapshot's `steps`.
           example: [command]
-      required: [name, title, description, caveats, movesMotor, requiresEnabled, steps]
+      required:
+        [name, title, description, caveats, movesMotor, requiresEnabled, parameters, steps]
+    ParameterOption:
+      type: object
+      description: One choice of an `enum` parameter.
+      properties:
+        value:
+          description: What the request body carries when this option is chosen.
+          example: 1
+        title:
+          type: string
+          description: What the user picks.
+          example: Encoder 1
+      required: [value, title]
+    ProcedureParameter:
+      type: object
+      description: >
+        One named parameter a procedure accepts — enough to render a field for it and to know what
+        to put in. Descriptive rather than authoritative: the server validates every request whatever
+        a client sends, and this is what lets a client build a sensible form and catch a mistake
+        before the request goes out. The three type-specific fields are absent where they do not
+        apply.
+      properties:
+        name:
+          type: string
+          description: "The key in the request body."
+          example: registerAddress
+        title:
+          type: string
+          description: Short label.
+          example: Register address
+        description:
+          type: string
+          description: What it does and what a sensible value is.
+        type:
+          type: string
+          enum: [integer, boolean, enum, byteArray]
+          description: Which kind of control to render.
+          example: integer
+        required:
+          type: boolean
+          description: >
+            Whether a request must carry it — true exactly when there is no `defaultValue`. Reported
+            rather than left to be derived, so a client need not know the rule.
+          example: true
+        defaultValue:
+          description: What an omitting request gets. Absent when the parameter is required.
+          example: 1
+        minValue:
+          type: integer
+          description: "`integer` only: smallest accepted value."
+          example: 0
+        maxValue:
+          type: integer
+          description: "`integer` only: largest accepted value."
+          example: 255
+        length:
+          type: integer
+          description: "`byteArray` only: the exact number of bytes."
+          example: 8
+        options:
+          type: array
+          items: { $ref: "#/components/schemas/ParameterOption" }
+          description: "`enum` only: the values that may be chosen."
+      required: [name, title, description, type, required]
     ProcedureListing:
       type: object
       description: >
@@ -3821,9 +3893,10 @@ components:
       type: object
       additionalProperties: true
       description: >
-        A procedure's parameters. Which fields apply is per procedure — consult its descriptor — so
-        this schema is open, and a procedure that takes none may be started with no body at all. The
-        properties below are those of `os-command`, where `command` is required.
+        A procedure's parameters. Which fields apply is per procedure, and each descriptor reports
+        its own in `parameters` — so this schema is open, and a procedure that takes none may be
+        started with no body at all. The properties below are the union of every procedure's, each
+        naming the procedure it belongs to.
       properties:
         command:
           type: array
@@ -3849,7 +3922,40 @@ components:
           minimum: 1
           maximum: 1000
           default: 10
-          description: How often the server reads the drive's response object while waiting.
+          description: >
+            `os-command` only: how often the server reads the drive's response object while waiting.
+        encoder:
+          type: integer
+          enum: [1, 2]
+          default: 1
+          description: >
+            `encoder-register-communication` only: which of the drive's encoders to address. Encoder
+            1 is whatever 0x2110 configures and encoder 2 whatever 0x2112 does, so the ordinal picks
+            a configured slot rather than a kind of encoder.
+          example: 1
+        write:
+          type: boolean
+          default: false
+          description: >
+            `encoder-register-communication` only: false reads the register, true writes `value`
+            into it. Either way the drive reports what the register holds afterwards.
+        registerAddress:
+          type: integer
+          minimum: 0
+          maximum: 255
+          description: >
+            `encoder-register-communication` only, and required for it: the register to access. The
+            map belongs to the encoder chip rather than to the drive's firmware.
+          example: 117
+        value:
+          type: integer
+          minimum: 0
+          maximum: 255
+          default: 0
+          description: >
+            `encoder-register-communication` only: the byte to write into the register. Ignored when
+            reading.
+          example: 7
     OutputStageResult:
       type: object
       required: [slavePosition, index, subindex, staged, error]

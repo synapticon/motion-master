@@ -137,6 +137,87 @@ std::expected<std::vector<uint8_t>, std::string> runMotorMeasurement(
   return response->data;
 }
 
+// Byte layout of the encoder register communication request (command 0) — the one command here
+// that takes parameters, so the only place an OS command request is more than its ID.
+constexpr size_t kEncoderOrdinalByte = 1;
+constexpr size_t kEncoderAccessByte = 2;
+constexpr size_t kEncoderRegisterAddressByte = 3;
+constexpr size_t kEncoderRegisterValueByte = 4;
+
+// Byte 2 is `(slaveAddress << 1) | direction`. The BiSS service supports a single slave per device,
+// so the address is always 0 and the byte is the direction bit alone — which is why these are the
+// two packed byte values rather than a shift over a constant zero. A firmware that ever addressed a
+// second slave would build this byte instead of choosing between two constants.
+constexpr uint8_t kEncoderRegisterRead = 0;
+constexpr uint8_t kEncoderRegisterWrite = 1;
+
+// Reads or writes one encoder register — the shared body of readEncoderRegister and
+// writeEncoderRegister, which differ only in the direction bit and in whether the value byte is
+// used. The drive answers both the same way, by reporting what the register holds.
+std::expected<EncoderRegisterResult, std::string> accessEncoderRegister(
+    SomanetDrive& drive, somanet::EncoderOrdinal encoder, bool write, uint8_t registerAddress,
+    uint8_t value, const OsCommandConfig& config) {
+  const std::string what = std::format("{} {} register 0x{:02X}", write ? "writing" : "reading",
+                                       somanet::toString(encoder), registerAddress);
+
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(somanet::OsCommandId::kEncoderRegisterCommunication);
+  command[kEncoderOrdinalByte] = static_cast<uint8_t>(encoder);
+  command[kEncoderAccessByte] = write ? kEncoderRegisterWrite : kEncoderRegisterRead;
+  command[kEncoderRegisterAddressByte] = registerAddress;
+  // Ignored by the drive on a read, and sent as 0 rather than as whatever the caller passed, so a
+  // read is one request whatever it was called with.
+  command[kEncoderRegisterValueByte] = write ? value : 0;
+
+  auto response = drive.runOsCommand(command, config);
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+
+  if (response->failed()) {
+    if (!response->errorCode) {
+      // Status 2: the register transaction failed and the drive sent no code with it. The
+      // specification names the causes, and every one of them is something a user can act on, so
+      // they are named here rather than leaving a bare "failed".
+      return std::unexpected(
+          std::format("{} failed: the register transaction did not complete, which a BiSS timeout "
+                      "set too short, a BiSS clock frequency set too high, or a register that does "
+                      "not exist can all cause",
+                      what));
+    }
+    const uint8_t code = *response->errorCode;
+    if (auto general = osCommandErrorName(code)) {
+      return std::unexpected(
+          std::format("{} was not performed: {} (OS error {})", what, *general, code));
+    }
+    if (code <= static_cast<uint8_t>(somanet::EncoderRegisterFault::kRegisterNotAllowed)) {
+      const auto fault = static_cast<somanet::EncoderRegisterFault>(code);
+      return std::unexpected(std::format("{} failed: {} — {}", what, somanet::toString(fault),
+                                         somanet::describe(fault)));
+    }
+    // A command-specific code this build does not name. Report the number rather than guessing, so
+    // a firmware that grows the table stays actionable.
+    return std::unexpected(
+        std::format("{} failed with OS error {} (command-specific)", what, code));
+  }
+
+  EncoderRegisterResult result{.encoder = encoder,
+                               .registerAddress = registerAddress,
+                               .wrote = write,
+                               .value = std::nullopt};
+  if (response->status == OsCommandStatus::kCompletedWithData) {
+    auto reported = decodeBigEndian<uint8_t>(response->data, what);
+    if (!reported) {
+      return std::unexpected(reported.error());
+    }
+    result.value = *reported;
+  }
+  // Status 0 is a completion with no response at all. The firmware documents exactly one access
+  // that answers this way — the iC-MU soft reset, which restarts the chip — so it is a success
+  // without a reading rather than a truncated payload.
+  return result;
+}
+
 }  // namespace
 
 std::optional<std::string_view> osCommandErrorName(uint8_t code) {
@@ -390,6 +471,36 @@ std::expected<BrakeState, std::string> SomanetDrive::engageBrake(std::chrono::mi
   std::this_thread::sleep_for(settle);
 
   return brakeState();
+}
+
+std::string EncoderRegisterResult::describe() const {
+  if (!value) {
+    return std::format("{} register 0x{:02X} {} acknowledged without a response",
+                       somanet::toString(encoder), registerAddress, wrote ? "write" : "read");
+  }
+  return std::format("{} register 0x{:02X} = 0x{:02X} ({})", somanet::toString(encoder),
+                     registerAddress, *value, *value);
+}
+
+void to_json(nlohmann::json& j, const EncoderRegisterResult& result) {
+  j = nlohmann::json{{"encoder", static_cast<uint8_t>(result.encoder)},
+                     {"registerAddress", result.registerAddress},
+                     {"wrote", result.wrote},
+                     {"description", result.describe()}};
+  if (result.value) {
+    j["value"] = *result.value;
+  }
+}
+
+std::expected<EncoderRegisterResult, std::string> SomanetDrive::readEncoderRegister(
+    somanet::EncoderOrdinal encoder, uint8_t registerAddress, const OsCommandConfig& config) {
+  return accessEncoderRegister(*this, encoder, false, registerAddress, 0, config);
+}
+
+std::expected<EncoderRegisterResult, std::string> SomanetDrive::writeEncoderRegister(
+    somanet::EncoderOrdinal encoder, uint8_t registerAddress, uint8_t value,
+    const OsCommandConfig& config) {
+  return accessEncoderRegister(*this, encoder, true, registerAddress, value, config);
 }
 
 std::string OpenPhaseResult::describe() const {

@@ -6,8 +6,10 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <format>
 #include <functional>
 #include <map>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <ranges>
 #include <span>
@@ -32,6 +34,10 @@ using mm::comm::OdEntry;
 using mm::comm::SlaveInfo;
 using mm::node::commutationOffsetDetectionSteps;
 using mm::node::Device;
+using mm::node::encoderRegisterParameters;
+using mm::node::EncoderRegisterRequest;
+using mm::node::encoderRegisterSteps;
+using mm::node::kEncoderRegisterStep;
 using mm::node::kOsCommand;
 using mm::node::kOsCommandMode;
 using mm::node::kOsCommandStep;
@@ -41,12 +47,14 @@ using mm::node::offsetDetectionSteps;
 using mm::node::openPhaseDetectionSteps;
 using mm::node::OsCommandRequest;
 using mm::node::osCommandSteps;
+using mm::node::parseEncoderRegisterRequest;
 using mm::node::phaseInductanceMeasurementSteps;
 using mm::node::phaseResistanceMeasurementSteps;
 using mm::node::polePairDetectionSteps;
 using mm::node::ProgressReporter;
 using mm::node::ProgressStatus;
 using mm::node::runCommutationOffsetDetectionProcedure;
+using mm::node::runEncoderRegisterProcedure;
 using mm::node::runMotorPhaseOrderDetectionProcedure;
 using mm::node::runOffsetDetectionProcedure;
 using mm::node::runOpenPhaseDetectionProcedure;
@@ -356,6 +364,136 @@ TEST(RunOsCommandProcedure, LeavesTheStepIdleWhenTheDeviceIsNotASomanetDrive) {
   // what was wrong with the device.
   EXPECT_EQ(reporter.steps()[0].status, ProgressStatus::kIdle);
   EXPECT_EQ(driver.responseReads, 0);
+}
+
+// --- Encoder register communication procedure ----------------------------------------------------
+
+TEST(ParseEncoderRegisterRequest, DefaultsEverythingButTheRegisterAddress) {
+  auto request = parseEncoderRegisterRequest(nlohmann::json{{"registerAddress", 0x75}});
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->encoder, somanet::EncoderOrdinal::kEncoder1);
+  EXPECT_FALSE(request->write);
+  EXPECT_EQ(request->registerAddress, 0x75);
+  EXPECT_EQ(request->value, 0);
+}
+
+TEST(ParseEncoderRegisterRequest, RequiresTheRegisterAddress) {
+  // The one parameter with no default: reading whichever register happened to be first would be a
+  // guess at what the caller meant.
+  auto request = parseEncoderRegisterRequest(nlohmann::json::object());
+  ASSERT_FALSE(request.has_value());
+  EXPECT_NE(request.error().find("registerAddress"), std::string::npos) << request.error();
+}
+
+TEST(ParseEncoderRegisterRequest, RejectsAnOrdinalThatIsNeitherSlot) {
+  auto request =
+      parseEncoderRegisterRequest(nlohmann::json{{"encoder", 3}, {"registerAddress", 0x11}});
+  ASSERT_FALSE(request.has_value());
+  EXPECT_NE(request.error().find("must be 1 or 2"), std::string::npos) << request.error();
+}
+
+TEST(ParseEncoderRegisterRequest, RejectsAValueWiderThanAByte) {
+  auto request =
+      parseEncoderRegisterRequest(nlohmann::json{{"registerAddress", 0x11}, {"value", 256}});
+  ASSERT_FALSE(request.has_value());
+  EXPECT_NE(request.error().find("byte value"), std::string::npos) << request.error();
+}
+
+TEST(ParseEncoderRegisterRequest, RejectsAWriteFlagThatIsNotBoolean) {
+  auto request =
+      parseEncoderRegisterRequest(nlohmann::json{{"registerAddress", 0x11}, {"write", 1}});
+  ASSERT_FALSE(request.has_value());
+  EXPECT_NE(request.error().find("true or false"), std::string::npos) << request.error();
+}
+
+TEST(EncoderRegisterParameters, DescribeExactlyWhatTheParserAccepts) {
+  // The descriptor is what a client builds its form from, so a parameter it advertises must be one
+  // the parser knows and vice versa — the two drifting apart is what this pairing exists to stop.
+  const auto parameters = encoderRegisterParameters();
+  std::vector<std::string> names;
+  for (const auto& parameter : parameters) {
+    names.push_back(parameter.name);
+  }
+  EXPECT_EQ(names, (std::vector<std::string>{"encoder", "write", "registerAddress", "value"}));
+
+  const auto find = [&parameters](std::string_view name) {
+    return std::ranges::find(parameters, name, &mm::node::ProcedureParameter::name);
+  };
+  EXPECT_TRUE(find("registerAddress")->required());
+  EXPECT_FALSE(find("encoder")->required());
+  EXPECT_FALSE(find("write")->required());
+  EXPECT_FALSE(find("value")->required());
+  EXPECT_EQ(find("encoder")->options.size(), 2u);
+  EXPECT_EQ(find("value")->maxValue, 0xFF);
+}
+
+TEST(RunEncoderRegisterProcedure, RecordsWhatTheRegisterHoldsAsTheStepValue) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(encoderRegisterSteps());
+
+  driver.responses = {{1, 0, 0x08, 0, 0, 0, 0, 0}};
+  auto result = runEncoderRegisterProcedure(device, reporter, std::stop_token{},
+                                            EncoderRegisterRequest{.registerAddress = 0x11});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto steps = reporter.steps();
+  ASSERT_EQ(steps.size(), 1u);
+  EXPECT_EQ(steps[0].id, kEncoderRegisterStep);
+  EXPECT_EQ(steps[0].status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(steps[0].value["value"], 0x08);
+  EXPECT_EQ(steps[0].value["wrote"], false);
+}
+
+TEST(RunEncoderRegisterProcedure, AWriteCarriesTheDirectionBitAndTheValue) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(encoderRegisterSteps());
+
+  driver.responses = {{1, 0, 0x08, 0, 0, 0, 0, 0}};
+  auto result = runEncoderRegisterProcedure(
+      device, reporter, std::stop_token{},
+      EncoderRegisterRequest{.encoder = somanet::EncoderOrdinal::kEncoder2,
+                             .write = true,
+                             .registerAddress = 0x11,
+                             .value = 0x08});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver.store[OsCommandFakeDriver::key(kOsCommand, 1)],
+            (std::vector<uint8_t>{0, 2, 1, 0x11, 0x08, 0, 0, 0}));
+}
+
+TEST(RunEncoderRegisterProcedure, PreparesNothingAndRestoresNothing) {
+  // The property that makes this procedure a single step: command 0 needs no diagnostics mode, no
+  // Operation Enabled and no brake, so nothing but the OS command objects may be touched — running
+  // it must not disturb a drive that is doing something else.
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(encoderRegisterSteps());
+
+  driver.responses = {{1, 0, 0x08, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(runEncoderRegisterProcedure(device, reporter, std::stop_token{},
+                                          EncoderRegisterRequest{.registerAddress = 0x11})
+                  .has_value());
+
+  for (const auto& [index, subindex] : driver.writeLog) {
+    EXPECT_TRUE(index == kOsCommand || index == kOsCommandMode)
+        << std::format("wrote 0x{:04X}:{:02X}", index, subindex);
+  }
+  EXPECT_TRUE(driver.brakeStatusWrites.empty());
+}
+
+TEST(RunEncoderRegisterProcedure, FailsTheStepWhenTheDriveRefusesTheCommand) {
+  // What a non-BiSS or unconfigured encoder produces.
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(encoderRegisterSteps());
+
+  driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};
+  auto result = runEncoderRegisterProcedure(device, reporter, std::stop_token{},
+                                            EncoderRegisterRequest{.registerAddress = 0x11});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
+  EXPECT_EQ(reporter.steps()[0].status, ProgressStatus::kFailed);
 }
 
 // --- Open phase detection procedure --------------------------------------------------------------

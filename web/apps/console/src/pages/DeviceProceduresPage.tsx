@@ -9,11 +9,15 @@ import type {
 import Callout from '../components/Callout'
 import DevicePageHeader from '../components/DevicePageHeader'
 import ProceduresExplainer from '../components/ProceduresExplainer'
+import ProcedureParameters, {
+  initialParameterValues,
+  parseParameterValues,
+  type ParameterValues,
+} from '../components/ProcedureParameters'
 import { useConnection } from '../contexts/ConnectionContext'
 
 // One shared control height for every interactive control, matching the other device pages: this
 // theme's spacing scale is geometric (h-9 = 6rem = 96px!), so the height has to be explicit px.
-const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm w-full bg-white'
 const btnCls =
   'inline-flex items-center justify-center bg-syn-red text-white px-4 h-[38px] text-xs ' +
   'hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
@@ -22,17 +26,6 @@ const btnGhostCls =
   'text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ' +
   'transition-colors'
 const statLabelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display'
-// The same label, but `block` so it sits above its field. Without it a label beside a narrow input
-// stays on the same line while one beside a full-width input wraps above — the two then disagree and
-// the fields lose their shared baseline.
-const formLabelCls = `${statLabelCls} block`
-
-// The one procedure whose name this page knows, because it is the one whose parameters are raw
-// command bytes rather than named fields — nothing a generic form could be derived from a descriptor.
-// That makes it the wrong shape to design a parameter schema against, not a lesser way to work: going
-// straight to a command is an ordinary thing to do. Every other procedure is Run-and-watch until
-// descriptors carry a schema for named parameters.
-const OS_COMMAND = 'os-command'
 
 // Overall run status → badge colour. Mirrors the AL-state and CiA402 badges elsewhere: green for a
 // clean finish, red for a failure, amber for a user cancel (not an error, but not success either),
@@ -92,25 +85,6 @@ function formatTime(epochMs?: number): string {
 function formatDuration(ms: number): string {
   if (ms < 1000) return `${ms} ms`
   return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`
-}
-
-// Parses the raw OS command's byte field: eight values, decimal or 0x-prefixed hex, separated by
-// spaces or commas. Returns the bytes or why they were rejected — the same shape of check the server
-// applies, done here only so the mistake is caught before a request goes out.
-function parseCommandBytes(text: string): { bytes: number[] } | { error: string } {
-  const tokens = text.trim().split(/[\s,]+/).filter(t => t.length > 0)
-  if (tokens.length !== 8) {
-    return { error: `Enter exactly 8 bytes (got ${tokens.length}).` }
-  }
-  const bytes: number[] = []
-  for (const token of tokens) {
-    const value = /^0[xX]/.test(token) ? Number.parseInt(token.slice(2), 16) : Number(token)
-    if (!Number.isInteger(value) || value < 0 || value > 255) {
-      return { error: `"${token}" is not a byte value (0-255, or 0x00-0xFF).` }
-    }
-    bytes.push(value)
-  }
-  return { bytes }
 }
 
 export default function DeviceProceduresPage() {
@@ -318,30 +292,19 @@ function ProcedureDetail({
     return formatDuration(Math.max(0, end - snapshot.startedAt))
   }, [snapshot.startedAt, snapshot.finishedAt, running, now])
 
-  // The raw OS command's parameters. Held here (keyed on the procedure by the parent's `key`) so
-  // switching procedures does not carry one procedure's input into another.
-  const [commandText, setCommandText] = useState('')
-  const [timeoutMs, setTimeoutMs] = useState('1000')
-  const [pollIntervalMs, setPollIntervalMs] = useState('10')
-  const parsedCommand = commandText.trim() === '' ? null : parseCommandBytes(commandText)
-  const commandError = parsedCommand && 'error' in parsedCommand ? parsedCommand.error : null
-  const canRunOsCommand = parsedCommand !== null && 'bytes' in parsedCommand
+  // The procedure's parameters, seeded from the defaults its descriptor declares. Held here (keyed
+  // on the procedure by the parent's `key`) so switching procedures does not carry one procedure's
+  // input into another.
+  const [values, setValues] = useState<ParameterValues>(() =>
+    initialParameterValues(descriptor.parameters),
+  )
+  const { body, errors } = parseParameterValues(descriptor.parameters, values)
 
-  const isOsCommand = descriptor.name === OS_COMMAND
-  const canRun =
-    running || starting || busyWith !== undefined ? false : isOsCommand ? canRunOsCommand : true
+  const canRun = running || starting || busyWith !== undefined ? false : body !== null
 
   function start() {
-    if (!isOsCommand) {
-      onStart()
-      return
-    }
-    if (parsedCommand && 'bytes' in parsedCommand) {
-      onStart({
-        command: parsedCommand.bytes,
-        timeoutMs: Number(timeoutMs),
-        pollIntervalMs: Number(pollIntervalMs),
-      })
+    if (body !== null) {
+      onStart(body)
     }
   }
 
@@ -379,62 +342,16 @@ function ProcedureDetail({
           </Callout>
         )}
 
-        {/* Parameters — only the OS command has any; see OS_COMMAND above. The form and the note
-            explaining its format are one block, so the note stays with the field it describes. */}
-        {isOsCommand && (
-          <div className="space-y-2 max-w-3xl">
-            <div className="grid grid-cols-1 sm:grid-cols-[1fr_auto_auto] gap-3">
-              <div className="space-y-1">
-                <label htmlFor="os-command-bytes" className={formLabelCls}>
-                  Command bytes
-                </label>
-                <input
-                  id="os-command-bytes"
-                  className={inputCls}
-                  placeholder="13 0 0 0 0 0 0 0"
-                  value={commandText}
-                  onChange={e => setCommandText(e.target.value)}
-                  disabled={running}
-                />
-              </div>
-              <div className="space-y-1">
-                <label htmlFor="os-command-timeout" className={formLabelCls}>
-                  Timeout (ms)
-                </label>
-                <input
-                  id="os-command-timeout"
-                  className={`${inputCls} sm:w-28`}
-                  type="number"
-                  min={1}
-                  max={600000}
-                  value={timeoutMs}
-                  onChange={e => setTimeoutMs(e.target.value)}
-                  disabled={running}
-                />
-              </div>
-              <div className="space-y-1">
-                <label htmlFor="os-command-poll" className={formLabelCls}>
-                  Poll (ms)
-                </label>
-                <input
-                  id="os-command-poll"
-                  className={`${inputCls} sm:w-24`}
-                  type="number"
-                  min={1}
-                  max={1000}
-                  value={pollIntervalMs}
-                  onChange={e => setPollIntervalMs(e.target.value)}
-                  disabled={running}
-                />
-              </div>
-            </div>
-            <p className="text-xs text-grey-500">
-              Eight bytes, decimal or <code>0x</code> hex, separated by spaces or commas. Byte 0 is
-              the OS command ID; bytes 1-7 are that command&apos;s parameters.
-            </p>
-          </div>
-        )}
-        {commandError && <p className="text-status-bad text-xs">{commandError}</p>}
+        {/* Parameters, rendered from what the descriptor declares rather than from a form written
+            per procedure — so a new parameterized procedure is a row in the server's catalogue and
+            nothing here. */}
+        <ProcedureParameters
+          parameters={descriptor.parameters}
+          values={values}
+          errors={errors}
+          disabled={running}
+          onChange={(name, value) => setValues(previous => ({ ...previous, [name]: value }))}
+        />
 
         {/* Run / Cancel, with the elapsed or last-run duration beside the button that produced it. */}
         <div className="flex items-center justify-between gap-4 pt-1">

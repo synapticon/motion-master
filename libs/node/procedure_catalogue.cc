@@ -43,6 +43,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   // mechanism itself needs nothing; the commands that do are covered by the caveat above, and a
   // command with a procedure of its own sets the flag for what that command actually needs.
   osCommand.movesMotor = true;
+  osCommand.parameters = osCommandParameters();
   osCommand.steps = osCommandSteps();
 
   entries.push_back(ProcedureCatalogueEntry{
@@ -63,6 +64,47 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
         }
         return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
           return runOsCommandProcedure(device, reporter, std::move(stop), spec);
+        };
+      },
+  });
+
+  ProcedureDescriptor encoderRegister;
+  encoderRegister.name = std::string(kEncoderRegisterProcedure);
+  encoderRegister.title = "Encoder register communication";
+  encoderRegister.description =
+      "Reads or writes one register of an encoder, through the encoder's own register "
+      "communication service. Only BiSS implements that today, so this addresses a BiSS encoder — "
+      "the internal encoder of a Circulo, say — and the register map is the encoder chip's rather "
+      "than the drive's: what a register means comes from its own documentation. Unlike the motor "
+      "measurements this prepares nothing and moves nothing, so it can be run on a drive that is "
+      "exchanging process data without disturbing it. A write is answered the same way a read is, "
+      "with what the register holds afterwards.";
+  encoderRegister.caveats = {
+      "A write reconfigures the encoder, and nothing here checks what a value means — a wrong one "
+      "can leave an encoder unable to report position. Read the encoder chip's own register "
+      "documentation first.",
+      "The command works only on a configured BiSS encoder. Any other encoder, or an ordinal whose "
+      "slot is not configured, is refused by the drive as OS error 251 (\"command not allowed\").",
+      "The iC-MU soft reset (0x07 into register 0x75) restarts the chip and is acknowledged "
+      "without a value, so that one access reports no reading.",
+      "The mailbox must be active, so the device has to be in PRE-OP or above — but it need not be "
+      "enabled, in any particular mode of operation, or exchanging process data.",
+  };
+  encoderRegister.movesMotor = false;
+  encoderRegister.requiresEnabled = false;
+  encoderRegister.parameters = encoderRegisterParameters();
+  encoderRegister.steps = encoderRegisterSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(encoderRegister),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseEncoderRegisterRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runEncoderRegisterProcedure(device, reporter, std::move(stop), spec);
         };
       },
   });

@@ -57,6 +57,13 @@ struct OsCommandRequest {
 /// @return The validated request, or a message naming what is wrong with it.
 std::expected<OsCommandRequest, std::string> parseOsCommandRequest(const nlohmann::json& body);
 
+/// @brief What the OS command procedure accepts, as its descriptor advertises it.
+///
+/// Lives beside @c parseOsCommandRequest deliberately: the description a client builds a form from
+/// and the validation a request is actually held to are two views of one thing, and keeping them
+/// apart is how they drift.
+std::vector<ProcedureParameter> osCommandParameters();
+
 /// @brief What one raw OS command run produced — the step's value.
 ///
 /// A procedure-specific value type with its own @c to_json, which is how a body records something
@@ -88,6 +95,65 @@ std::vector<ProgressStep> osCommandSteps();
 std::expected<void, std::string> runOsCommandProcedure(Device& device, ProgressReporter& reporter,
                                                        std::stop_token stop,
                                                        const OsCommandRequest& request);
+
+/// @brief Procedure name for encoder register communication, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kEncoderRegisterProcedure = "encoder-register-communication";
+
+/// @brief The single step encoder register communication reports against.
+inline constexpr std::string_view kEncoderRegisterStep = "register-access";
+
+/// @brief What one encoder register access was asked to do.
+///
+/// The request behind @c POST @c /api/devices/:pos/procedures/encoder-register-communication, and
+/// **the first procedure request made of named parameters** rather than raw command bytes — which
+/// is what @c ProcedureParameter exists to describe.
+struct EncoderRegisterRequest {
+  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
+  bool write = false;           ///< Write the register rather than read it.
+  uint8_t registerAddress = 0;  ///< The register to access; no default, so a request must say.
+  uint8_t value = 0;            ///< The byte to write; ignored when reading.
+};
+
+/// @brief Parses and validates a client's encoder register request body.
+///
+/// Accepts `{"encoder": 1, "write": false, "registerAddress": 117, "value": 7}`. Only
+/// `registerAddress` is required; the rest default as @c EncoderRegisterRequest declares, which is
+/// exactly what @c encoderRegisterParameters advertises.
+///
+/// @param body  Parsed request JSON.
+/// @return The validated request, or a message naming what is wrong with it.
+std::expected<EncoderRegisterRequest, std::string> parseEncoderRegisterRequest(
+    const nlohmann::json& body);
+
+/// @brief What encoder register communication accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> encoderRegisterParameters();
+
+/// @brief Encoder register communication's step template — one step, idle.
+std::vector<ProgressStep> encoderRegisterSteps();
+
+/// @brief Runs one encoder register access as a procedure body.
+///
+/// **The one procedure here that prepares nothing.** OS command 0's only restrictions are that the
+/// addressed encoder is configured and that it is a BiSS encoder — no diagnostics mode, no
+/// Operation Enabled, no brake, and no motion — so there is no preparation to do and nothing to
+/// restore, and it runs from PRE-OP up on a drive that may be exchanging process data. Its single
+/// step is the access itself.
+///
+/// A read and a write are one procedure because they are one firmware command, told apart by
+/// @c EncoderRegisterRequest::write; the drive answers both by reporting what the register holds,
+/// so a write confirms itself.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; passed into the command so an in-flight access is aborted,
+///                 not merely abandoned.
+/// @param request  Which encoder, which register, and whether to write it.
+/// @return Void when the drive performed the access, otherwise why it did not.
+std::expected<void, std::string> runEncoderRegisterProcedure(Device& device,
+                                                             ProgressReporter& reporter,
+                                                             std::stop_token stop,
+                                                             const EncoderRegisterRequest& request);
 
 /// @brief The step ids shared by every procedure that prepares a drive, measures, and puts it back.
 ///

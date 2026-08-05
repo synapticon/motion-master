@@ -491,11 +491,75 @@ export interface ProcedureDescriptor {
    * @example false
    */
   requiresEnabled: boolean;
+  /** What the request body may carry, in the order a client should present it. Empty for a procedure that takes none, which is most of them — a procedure's timings are properties of the command it issues rather than a caller's choice. */
+  parameters: ProcedureParameter[];
   /**
    * The ordered step ids the procedure reports against — bare ids, because a template's per-step status is always idle and says nothing. Live status for the same ids is in the snapshot's `steps`.
    * @example ["command"]
    */
   steps: string[];
+}
+
+/** One choice of an `enum` parameter. */
+export interface ParameterOption {
+  /**
+   * What the request body carries when this option is chosen.
+   * @example 1
+   */
+  value: any;
+  /**
+   * What the user picks.
+   * @example "Encoder 1"
+   */
+  title: string;
+}
+
+/** One named parameter a procedure accepts — enough to render a field for it and to know what to put in. Descriptive rather than authoritative: the server validates every request whatever a client sends, and this is what lets a client build a sensible form and catch a mistake before the request goes out. The three type-specific fields are absent where they do not apply. */
+export interface ProcedureParameter {
+  /**
+   * The key in the request body.
+   * @example "registerAddress"
+   */
+  name: string;
+  /**
+   * Short label.
+   * @example "Register address"
+   */
+  title: string;
+  /** What it does and what a sensible value is. */
+  description: string;
+  /**
+   * Which kind of control to render.
+   * @example "integer"
+   */
+  type: "integer" | "boolean" | "enum" | "byteArray";
+  /**
+   * Whether a request must carry it — true exactly when there is no `defaultValue`. Reported rather than left to be derived, so a client need not know the rule.
+   * @example true
+   */
+  required: boolean;
+  /**
+   * What an omitting request gets. Absent when the parameter is required.
+   * @example 1
+   */
+  defaultValue?: any;
+  /**
+   * `integer` only: smallest accepted value.
+   * @example 0
+   */
+  minValue?: number;
+  /**
+   * `integer` only: largest accepted value.
+   * @example 255
+   */
+  maxValue?: number;
+  /**
+   * `byteArray` only: the exact number of bytes.
+   * @example 8
+   */
+  length?: number;
+  /** `enum` only: the values that may be chosen. */
+  options?: ParameterOption[];
 }
 
 /** One procedure paired with how its last run on this device went — an entry of `GET /api/devices/{slavePosition}/procedures`. The pairing is what lets a page render in a single request instead of one per procedure. */
@@ -506,7 +570,7 @@ export interface ProcedureListing {
   snapshot: ProcedureSnapshot;
 }
 
-/** A procedure's parameters. Which fields apply is per procedure — consult its descriptor — so this schema is open, and a procedure that takes none may be started with no body at all. The properties below are those of `os-command`, where `command` is required. */
+/** A procedure's parameters. Which fields apply is per procedure, and each descriptor reports its own in `parameters` — so this schema is open, and a procedure that takes none may be started with no body at all. The properties below are the union of every procedure's, each naming the procedure it belongs to. */
 export interface ProcedureRequest {
   /**
    * `os-command` only, and required for it: the eight request bytes. Byte 0 is the OS command ID; bytes 1-7 are that command's parameters.
@@ -524,12 +588,38 @@ export interface ProcedureRequest {
    */
   timeoutMs?: number;
   /**
-   * How often the server reads the drive's response object while waiting.
+   * `os-command` only: how often the server reads the drive's response object while waiting.
    * @min 1
    * @max 1000
    * @default 10
    */
   pollIntervalMs?: number;
+  /**
+   * `encoder-register-communication` only: which of the drive's encoders to address. Encoder 1 is whatever 0x2110 configures and encoder 2 whatever 0x2112 does, so the ordinal picks a configured slot rather than a kind of encoder.
+   * @default 1
+   * @example 1
+   */
+  encoder?: 1 | 2;
+  /**
+   * `encoder-register-communication` only: false reads the register, true writes `value` into it. Either way the drive reports what the register holds afterwards.
+   * @default false
+   */
+  write?: boolean;
+  /**
+   * `encoder-register-communication` only, and required for it: the register to access. The map belongs to the encoder chip rather than to the drive's firmware.
+   * @min 0
+   * @max 255
+   * @example 117
+   */
+  registerAddress?: number;
+  /**
+   * `encoder-register-communication` only: the byte to write into the register. Ignored when reading.
+   * @min 0
+   * @max 255
+   * @default 0
+   * @example 7
+   */
+  value?: number;
   [key: string]: any;
 }
 

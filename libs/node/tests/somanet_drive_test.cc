@@ -662,6 +662,116 @@ TEST(OperationModeValue, RoundTripsAVendorModeTheCia402EnumCannotName) {
   EXPECT_EQ(drive->operationModeValue().value(), 8);
 }
 
+// --- Encoder register communication (OS command 0) ----------------------------------------------
+
+TEST(ReadEncoderRegister, IssuesCommandZeroWithTheAddressAndTheReadDirection) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0x08, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive
+                  ->readEncoderRegister(somanet::EncoderOrdinal::kEncoder1, 0x11,
+                                        {.pollInterval = kNoDelay})
+                  .has_value());
+  // Byte 1 the ordinal, byte 2 the slave address (always 0) above the direction bit, byte 3 the
+  // register. Byte 4 stays 0 on a read whatever a caller passed.
+  EXPECT_EQ(driver.lastCommand, (std::vector<uint8_t>{0, 1, 0, 0x11, 0, 0, 0, 0}));
+}
+
+TEST(ReadEncoderRegister, DecodesTheRegisterValue) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0x08, 0, 0, 0, 0, 0}};  // completed with data
+  auto result = drive->readEncoderRegister(somanet::EncoderOrdinal::kEncoder1, 0x11,
+                                           {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->value, 0x08);
+  EXPECT_FALSE(result->wrote);
+  EXPECT_EQ(result->registerAddress, 0x11);
+  EXPECT_EQ(result->describe(), "encoder 1 register 0x11 = 0x08 (8)");
+}
+
+TEST(WriteEncoderRegister, PacksTheSpecificationsWorkedExample) {
+  // The firmware specification's own example: write 0x08 into register 0x11 of encoder 2.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0x08, 0, 0, 0, 0, 0}};
+  auto result = drive->writeEncoderRegister(somanet::EncoderOrdinal::kEncoder2, 0x11, 0x08,
+                                            {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver.lastCommand, (std::vector<uint8_t>{0, 2, 1, 0x11, 0x08, 0, 0, 0}));
+  // The drive answers a write the way it answers a read, so the write confirms itself.
+  EXPECT_TRUE(result->wrote);
+  EXPECT_EQ(result->value, 0x08);
+}
+
+TEST(WriteEncoderRegister, ASoftResetIsAcknowledgedWithoutAValue) {
+  // Status 0 — completed with no response at all. The one access the firmware documents as
+  // answering this way is the iC-MU soft reset, which restarts the chip.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = drive->writeEncoderRegister(somanet::EncoderOrdinal::kEncoder1, 0x75, 0x07,
+                                            {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_FALSE(result->value.has_value());
+  EXPECT_EQ(result->describe(), "encoder 1 register 0x75 write acknowledged without a response");
+}
+
+TEST(ReadEncoderRegister, NamesACommandSpecificFault) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 1, 0, 0, 0, 0, 0}};  // command-specific code 1
+  auto result = drive->readEncoderRegister(somanet::EncoderOrdinal::kEncoder1, 0x11,
+                                           {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("register not allowed"), std::string::npos) << result.error();
+}
+
+TEST(ReadEncoderRegister, AGeneralOsErrorNamesItself) {
+  // What a non-BiSS or unconfigured encoder produces: the drive refuses the command outright.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};
+  auto result = drive->readEncoderRegister(somanet::EncoderOrdinal::kEncoder2, 0x11,
+                                           {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("encoder 2"), std::string::npos) << result.error();
+}
+
+TEST(ReadEncoderRegister, AFailureWithoutACodeNamesWhatCanCauseIt) {
+  // Status 2: the BiSS transaction failed and the drive sent no code. The causes are all things a
+  // user can act on, so the message names them rather than reporting a bare failure.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{2, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = drive->readEncoderRegister(somanet::EncoderOrdinal::kEncoder1, 0x11,
+                                           {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("BiSS clock frequency"), std::string::npos) << result.error();
+}
+
 // --- Open phase detection (OS command 6) --------------------------------------------------------
 
 TEST(RunOpenPhaseDetection, ASuccessfulCommandMeansNoPhaseIsOpen) {

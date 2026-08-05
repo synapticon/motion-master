@@ -31,6 +31,7 @@ using mm::node::cancelProcedure;
 using mm::node::DeviceManager;
 using mm::node::kSynapticonVendorId;
 using mm::node::listProcedures;
+using mm::node::ParameterType;
 using mm::node::procedureCatalogue;
 using mm::node::ProcedureError;
 using mm::node::ProcedureManager;
@@ -146,6 +147,46 @@ TEST(ProcedureCatalogue, DescribesEveryProcedureItHolds) {
     EXPECT_FALSE(entry.descriptor.steps.empty()) << entry.descriptor.name;
     EXPECT_TRUE(entry.applies) << entry.descriptor.name;
     EXPECT_TRUE(entry.makeBody) << entry.descriptor.name;
+  }
+}
+
+TEST(ProcedureCatalogue, DescribesEveryParameterWellEnoughToRenderAField) {
+  // A client builds its form from these, so a parameter missing the field its type needs renders as
+  // a control with nothing to offer — a select with no options, a byte field of unknown length —
+  // rather than as anything that would fail a build.
+  for (const auto& entry : procedureCatalogue()) {
+    for (const auto& parameter : entry.descriptor.parameters) {
+      const std::string where = entry.descriptor.name + "." + parameter.name;
+      EXPECT_FALSE(parameter.name.empty()) << entry.descriptor.name;
+      EXPECT_FALSE(parameter.title.empty()) << where;
+      EXPECT_FALSE(parameter.description.empty()) << where;
+      switch (parameter.type) {
+        case ParameterType::kInteger:
+          EXPECT_TRUE(parameter.minValue.has_value()) << where;
+          EXPECT_TRUE(parameter.maxValue.has_value()) << where;
+          break;
+        case ParameterType::kEnum:
+          EXPECT_FALSE(parameter.options.empty()) << where;
+          break;
+        case ParameterType::kByteArray:
+          EXPECT_TRUE(parameter.length.has_value()) << where;
+          break;
+        case ParameterType::kBoolean:
+          break;
+      }
+    }
+  }
+}
+
+TEST(ProcedureCatalogue, ParameterNamesAreUniqueWithinAProcedure) {
+  // They are the keys of one request object, so a duplicate would make one of them unreachable.
+  for (const auto& entry : procedureCatalogue()) {
+    std::vector<std::string> names;
+    for (const auto& parameter : entry.descriptor.parameters) {
+      names.push_back(parameter.name);
+    }
+    std::ranges::sort(names);
+    EXPECT_EQ(std::ranges::unique(names).begin(), names.end()) << entry.descriptor.name;
   }
 }
 

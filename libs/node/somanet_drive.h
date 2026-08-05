@@ -118,6 +118,66 @@ constexpr bool requiresBrakeReleased(CommutationOffsetMethod method) {
   return method != CommutationOffsetMethod::kStationary;
 }
 
+/// @brief Which of a drive's two encoders a command addresses. The enum value @b is the ordinal the
+///        firmware expects.
+///
+/// The ordinal selects a *configured slot*, not a kind of encoder: encoder 1 is whatever 0x2110
+/// configures and encoder 2 whatever 0x2112 does. A command addressed at an unconfigured slot — or
+/// at one holding an encoder whose service does not support the command — is refused by the drive
+/// rather than misapplied to the other one.
+enum class EncoderOrdinal : uint8_t {
+  kEncoder1 = 1,  ///< The encoder configured in 0x2110.
+  kEncoder2 = 2,  ///< The encoder configured in 0x2112.
+};
+
+/// @brief Name of an encoder ordinal, as a message should render it. Never returns @c nullptr.
+constexpr std::string_view toString(EncoderOrdinal encoder) {
+  switch (encoder) {
+    case EncoderOrdinal::kEncoder1:
+      return "encoder 1";
+    case EncoderOrdinal::kEncoder2:
+      return "encoder 2";
+  }
+  return "unknown encoder";
+}
+
+/// @brief The faults encoder register communication (command 0) reports as its command-specific OS
+///        error code.
+///
+/// Command-specific codes count up from 0 and mean nothing outside their own command — general
+/// codes (@c OsCommandError) count down from 254 — so this table is only valid for command 0.
+enum class EncoderRegisterFault : uint8_t {
+  kInvalidResponse = 0,     ///< The register transaction failed inside the encoder service.
+  kRegisterNotAllowed = 1,  ///< The register cannot be accessed while the firmware is using it.
+};
+
+/// @brief Name of an encoder register fault, as the console and logs should render it. Never
+///        @c nullptr.
+constexpr std::string_view toString(EncoderRegisterFault fault) {
+  switch (fault) {
+    case EncoderRegisterFault::kInvalidResponse:
+      return "invalid response";
+    case EncoderRegisterFault::kRegisterNotAllowed:
+      return "register not allowed";
+  }
+  return "unknown";
+}
+
+/// @brief What an encoder register fault means, for a message a user has to act on. Never
+///        @c nullptr.
+constexpr std::string_view describe(EncoderRegisterFault fault) {
+  switch (fault) {
+    case EncoderRegisterFault::kInvalidResponse:
+      return "the register communication transaction failed internally, which a BiSS clock "
+             "frequency set too high can cause";
+    case EncoderRegisterFault::kRegisterNotAllowed:
+      return "the register cannot be accessed at the moment, which happens when the firmware is "
+             "itself using it — an iC-MU I2C register while iC-PVL registers are being monitored, "
+             "say";
+  }
+  return "unknown fault";
+}
+
 /// @brief Sub-entries of 0x2004 (brake options). The enum value @b is the subindex.
 enum BrakeOption : uint8_t {
   kBrakePullVoltage = 1,      ///< UNSIGNED32, mV — voltage that disengages the brake.
@@ -186,6 +246,7 @@ constexpr std::string_view toString(BrakeReleaseStrategy strategy) {
 /// Only the commands this codebase issues are listed; the firmware implements more. The numbering
 /// is the firmware's, so gaps are real rather than reserved space.
 enum class OsCommandId : uint8_t {
+  kEncoderRegisterCommunication = 0,  ///< Reads or writes one register of a BiSS encoder.
   kMotorPhaseOrderDetection = 4,      ///< Detects the motor phase order. Rotates the rotor.
   kCommutationOffsetMeasurement = 5,  ///< Measures the commutation angle offset; see
                                       ///< somanet::CommutationOffsetMethod.
@@ -436,6 +497,23 @@ struct BrakeState {
 };
 void to_json(nlohmann::json& j, const BrakeState& state);
 
+/// @brief What one encoder register access did — the result of both a read and a write, since the
+///        drive answers a write by echoing back the register's value.
+///
+/// @c value is optional because one access does not produce one: the iC-MU soft reset (writing
+/// 0x07 to register 0x75) restarts the chip, so it is acknowledged without a response. Reporting
+/// that as a value of 0 would be a reading nobody took.
+struct EncoderRegisterResult {
+  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder answered.
+  uint8_t registerAddress = 0;                                          ///< The register accessed.
+  bool wrote = false;            ///< Whether this was a write; false for a read.
+  std::optional<uint8_t> value;  ///< What the register holds, when the drive reported it.
+
+  /// @brief One line describing the access, ready to put in front of a user.
+  std::string describe() const;
+};
+void to_json(nlohmann::json& j, const EncoderRegisterResult& result);
+
 /// @brief What open phase detection found.
 ///
 /// The command's verdict is inverted relative to every other OS command, and that is the firmware's
@@ -656,6 +734,53 @@ class SomanetDrive : public Cia402Drive {
   std::expected<void, std::string> setOperationMode(somanet::OperationMode mode);
 
   // --- Typed OS commands -----------------------------------------------------------------------
+
+  /// @brief Reads one register of an encoder (OS command 0, read direction).
+  ///
+  /// The register communication the encoder's own service performs on the master's behalf —
+  /// **only BiSS implements it today**, which is the command's one restriction along with the
+  /// addressed encoder actually being configured. Both are enforced by the drive refusing the
+  /// command, so a non-BiSS or unconfigured slot comes back as an error rather than a bad reading.
+  ///
+  /// Unlike the motor measurements this needs **no preparation at all**: no diagnostics mode, no
+  /// Operation Enabled, no brake, and the shaft does not move. It needs only an active mailbox, so
+  /// it works from PRE-OP up and can be run on a drive that is exchanging process data without
+  /// disturbing it.
+  ///
+  /// A refusal is an error and never a finding: this command either performs the transaction or
+  /// does not. See @c somanet::EncoderRegisterFault for what its own error codes mean.
+  ///
+  /// @param encoder          Which configured encoder to address.
+  /// @param registerAddress  The register to read.
+  /// @param config           Timing and cancellation. The default is sized for this command.
+  /// @return What the register holds, or why it could not be read.
+  std::expected<EncoderRegisterResult, std::string> readEncoderRegister(
+      somanet::EncoderOrdinal encoder, uint8_t registerAddress,
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
+                                       .pollInterval = std::chrono::milliseconds(20)});
+
+  /// @brief Writes one register of an encoder (OS command 0, write direction).
+  ///
+  /// The counterpart of @c readEncoderRegister in every respect — same BiSS-only restriction, same
+  /// absence of any preparation — and the drive answers it the same way, by reporting the
+  /// register's value, so a write confirms itself.
+  ///
+  /// **A write reconfigures the encoder, and nothing here validates what is written.** The register
+  /// map belongs to the encoder chip, not to this firmware: a value that means one thing on an
+  /// iC-MU means another elsewhere, and a wrong one can leave an encoder unable to report position.
+  /// The one exception the firmware documents is the iC-MU soft reset — 0x07 into register 0x75 —
+  /// which restarts the chip and is therefore acknowledged *without* a value (see
+  /// @c EncoderRegisterResult::value).
+  ///
+  /// @param encoder          Which configured encoder to address.
+  /// @param registerAddress  The register to write.
+  /// @param value            The byte to write into it.
+  /// @param config           Timing and cancellation. The default is sized for this command.
+  /// @return What the register holds afterwards, or why it could not be written.
+  std::expected<EncoderRegisterResult, std::string> writeEncoderRegister(
+      somanet::EncoderOrdinal encoder, uint8_t registerAddress, uint8_t value,
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
+                                       .pollInterval = std::chrono::milliseconds(20)});
 
   /// @brief Runs open phase detection (OS command 6) and decodes its verdict.
   ///

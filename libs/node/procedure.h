@@ -143,6 +143,107 @@ void to_json(nlohmann::json& j, const ProcedureSnapshot& snapshot);
 /// is the whole point of the accumulating-snapshot model.
 ProcedureSnapshot idleSnapshot(std::vector<ProgressStep> steps);
 
+/// @brief What kind of value a procedure parameter takes — the client's cue for which control to
+///        render, and the only vocabulary a generic form has to understand.
+///
+/// Deliberately a short closed list rather than a JSON Schema fragment: a client renders a control
+/// per kind, and every kind here is one a procedure actually asks for. A new kind is added when a
+/// procedure needs it, which keeps the renderer as small as the set of things procedures take.
+enum class ParameterType : uint8_t {
+  kInteger,    ///< A whole number, bounded by @c minValue / @c maxValue.
+  kBoolean,    ///< A checkbox.
+  kEnum,       ///< One of @c options — a value the client picks rather than types.
+  kByteArray,  ///< Exactly @c length byte values (the raw OS command's request bytes).
+};
+
+/// @brief Human-readable name of a parameter type (for JSON). Never returns @c nullptr.
+constexpr std::string_view toString(ParameterType type) {
+  switch (type) {
+    case ParameterType::kInteger:
+      return "integer";
+    case ParameterType::kBoolean:
+      return "boolean";
+    case ParameterType::kEnum:
+      return "enum";
+    case ParameterType::kByteArray:
+      return "byteArray";
+  }
+  return "unknown";
+}
+
+/// @brief One choice of a @c kEnum parameter: the value that goes on the wire, and its label.
+struct ParameterOption {
+  nlohmann::json value;  ///< What the request body carries when this option is chosen.
+  std::string title;     ///< What the user picks, e.g. "Encoder 1".
+};
+void to_json(nlohmann::json& j, const ParameterOption& option);
+
+/// @brief One named parameter a procedure accepts — enough for a client to render a field for it
+///        and for a user to know what to put in.
+///
+/// **Descriptive, not authoritative.** The server validates every request in the procedure's own
+/// parse function whatever a client sends; this is what lets a client build a sensible form and
+/// catch a mistake before a request goes out. The two live next to each other (a
+/// @c parseXxxRequest beside the @c xxxParameters that describes it) precisely so they cannot
+/// drift.
+///
+/// **A parameter with a default is optional; one without is required.** That is the whole rule —
+/// there is no separate required flag to contradict the default, and a body that omits an optional
+/// parameter gets exactly what the descriptor advertised.
+///
+/// The three type-specific fields apply only where their comments say so, and are absent from the
+/// JSON otherwise.
+///
+/// @c name identifies and @c title displays, exactly as on the @c ProcedureDescriptor this is
+/// nested in — the two arrive in the same response, so one rule covers both. The value fields are
+/// named as @c DeviceParameter names its own (@c defaultValue, @c minValue, @c maxValue); there is
+/// no current @c value, because a parameter description says what a request *may* carry, never what
+/// one did.
+struct ProcedureParameter {
+  std::string name;         ///< The key in the request body, e.g. "registerAddress".
+  std::string title;        ///< Short label, e.g. "Register address".
+  std::string description;  ///< What it does and what a sensible value is.
+  ParameterType type = ParameterType::kInteger;
+
+  /// What the procedure uses when the request omits this parameter; null makes it required.
+  nlohmann::json defaultValue;
+
+  std::optional<int64_t> minValue;       ///< @c kInteger only — smallest accepted value.
+  std::optional<int64_t> maxValue;       ///< @c kInteger only — largest accepted value.
+  std::optional<size_t> length;          ///< @c kByteArray only — the exact number of bytes.
+  std::vector<ParameterOption> options;  ///< @c kEnum only — the values that may be chosen.
+
+  /// @brief Whether a request must carry this parameter — true exactly when it has no default.
+  bool required() const { return defaultValue.is_null(); }
+};
+void to_json(nlohmann::json& j, const ProcedureParameter& parameter);
+
+/// @brief A whole-number parameter accepting @p minValue to @p maxValue inclusive.
+///
+/// One factory per type, rather than a braced aggregate at each call site, because the fields are
+/// type-specific: only an integer has bounds, only an enum has options, only a byte array has a
+/// length. A factory makes the combination that applies the only one that can be written.
+///
+/// @param defaultValue  What an omitting request gets; pass @c nullptr to make it required.
+ProcedureParameter integerParameter(std::string name, std::string title, std::string description,
+                                    nlohmann::json defaultValue, int64_t minValue,
+                                    int64_t maxValue);
+
+/// @brief A true/false parameter. @p defaultValue as in @c integerParameter.
+ProcedureParameter booleanParameter(std::string name, std::string title, std::string description,
+                                    nlohmann::json defaultValue);
+
+/// @brief A parameter whose value is one of @p options. @p defaultValue as in @c integerParameter,
+///        and it should be one of the option values.
+ProcedureParameter enumParameter(std::string name, std::string title, std::string description,
+                                 nlohmann::json defaultValue, std::vector<ParameterOption> options);
+
+/// @brief A parameter taking exactly @p length byte values.
+///
+/// Always required: a default set of command bytes would be a command nobody asked to run.
+ProcedureParameter byteArrayParameter(std::string name, std::string title, std::string description,
+                                      size_t length);
+
 /// @brief What a procedure *is*, independent of any run — the half of the catalogue a client needs
 ///        to render a control for it.
 ///
@@ -151,11 +252,9 @@ ProcedureSnapshot idleSnapshot(std::vector<ProgressStep> steps);
 /// it per client is how it goes stale. A client renders whatever the catalogue reports, so it stays
 /// in step with the server's procedure set without hard-coding an entry per procedure.
 ///
-/// What it deliberately does *not* carry is presentation or parameters. Formatting a step's value
-/// is the client's business (see @c ProgressStep), and a parameter schema waits until a procedure
-/// with *named* parameters shows what one actually needs. The only procedure taking parameters
-/// today asks for raw command bytes, which no schema would describe usefully — so it is the wrong
-/// shape to design against, not a lesser case.
+/// What it deliberately does *not* carry is presentation. Formatting a step's value is the client's
+/// business (see @c ProgressStep) — whether 0.123 renders as "123 mΩ" is a decision the server has
+/// no business making.
 struct ProcedureDescriptor {
   std::string name;   ///< Identifier: the URL segment, and the key its snapshot is retained under.
   std::string title;  ///< Short human-readable name, e.g. "OS command".
@@ -163,6 +262,11 @@ struct ProcedureDescriptor {
   std::vector<std::string> caveats;  ///< What a user must know before running it; may be empty.
   bool movesMotor = false;           ///< True if running it can move the shaft.
   bool requiresEnabled = false;      ///< True if the drive must be enabled first.
+
+  /// What the request body may carry, in the order a client should present it; empty for a
+  /// procedure that takes none (most of them — a procedure's timings are properties of the command
+  /// it issues, not a caller's choice).
+  std::vector<ProcedureParameter> parameters;
 
   /// The ordered step template, all idle — both what a run is seeded with and what an idle snapshot
   /// is rendered from.

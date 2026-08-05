@@ -24,6 +24,18 @@ constexpr auto kMaxTimeout = std::chrono::minutes(10);
 constexpr auto kMinPollInterval = std::chrono::milliseconds(1);
 constexpr auto kMaxPollInterval = std::chrono::seconds(1);
 
+// What an encoder register access is sized for: a millisecond-scale exchange between the drive and
+// its encoder, so the ceiling is generous and the poll fine. The same figures are the defaults on
+// SomanetDrive::readEncoderRegister — spelled out again here because this call also passes a stop
+// token, which replaces the whole default config rather than adding to it.
+constexpr auto kEncoderRegisterTimeout = std::chrono::seconds(5);
+constexpr auto kEncoderRegisterPollInterval = std::chrono::milliseconds(20);
+
+// The inclusive bounds of every byte-valued parameter, named once so the validation and the
+// parameter description cannot disagree about them.
+constexpr int64_t kMinByte = 0;
+constexpr int64_t kMaxByte = 0xFF;
+
 // Reads an optional millisecond field, defaulting to what the request already holds.
 std::expected<std::chrono::milliseconds, std::string> readMillis(const nlohmann::json& body,
                                                                  const char* field,
@@ -44,6 +56,46 @@ std::expected<std::chrono::milliseconds, std::string> readMillis(const nlohmann:
         std::format("'{}' must be between {} and {} ms", field, min.count(), max.count()));
   }
   return value;
+}
+
+// Reads a byte-valued field. A @p fallback of nullopt makes the field required, which is the one
+// case a client cannot recover from by guessing: there is no register address worth defaulting to.
+std::expected<uint8_t, std::string> readByte(const nlohmann::json& body, const char* field,
+                                             std::optional<uint8_t> fallback) {
+  auto it = body.find(field);
+  if (it == body.end() || it->is_null()) {
+    if (fallback) {
+      return *fallback;
+    }
+    return std::unexpected(std::format("'{}' is required", field));
+  }
+  // is_number_integer accepts both signed and unsigned: a JSON *document* parses 117 as unsigned,
+  // but a body built in C++ from an int literal is signed, and rejecting that would be an accident
+  // of how the object was made rather than anything about the value. The range check below is what
+  // actually decides, and it rejects a negative either way.
+  if (!it->is_number_integer()) {
+    return std::unexpected(
+        std::format("'{}' must be a byte value ({}-{})", field, kMinByte, kMaxByte));
+  }
+  const int64_t raw = it->get<int64_t>();
+  if (raw < kMinByte || raw > kMaxByte) {
+    return std::unexpected(
+        std::format("'{}' must be a byte value ({}-{}), got {}", field, kMinByte, kMaxByte, raw));
+  }
+  return static_cast<uint8_t>(raw);
+}
+
+// Reads an optional boolean field, defaulting to what the request already holds.
+std::expected<bool, std::string> readBool(const nlohmann::json& body, const char* field,
+                                          bool fallback) {
+  auto it = body.find(field);
+  if (it == body.end() || it->is_null()) {
+    return fallback;
+  }
+  if (!it->is_boolean()) {
+    return std::unexpected(std::format("'{}' must be true or false", field));
+  }
+  return it->get<bool>();
 }
 
 // A step template from ids in order, all idle.
@@ -369,6 +421,27 @@ std::expected<OsCommandRequest, std::string> parseOsCommandRequest(const nlohman
   return request;
 }
 
+std::vector<ProcedureParameter> osCommandParameters() {
+  const OsCommandRequest defaults;
+  return {
+      byteArrayParameter("command", "Command bytes",
+                         "The request written to 0x1023:01. Byte 0 is the OS command ID; bytes 1-7 "
+                         "are that command's parameters.",
+                         kOsCommandSize),
+      integerParameter("timeoutMs", "Timeout (ms)",
+                       "Ceiling on the whole command. Reaching it aborts the command on the drive, "
+                       "so size it for the command being run — milliseconds for a register read, "
+                       "tens of seconds for a measurement.",
+                       defaults.timeout.count(), kMinTimeout.count(),
+                       std::chrono::duration_cast<std::chrono::milliseconds>(kMaxTimeout).count()),
+      integerParameter(
+          "pollIntervalMs", "Poll interval (ms)",
+          "How long to wait between reads of the drive's response object while the command runs.",
+          defaults.pollInterval.count(), kMinPollInterval.count(),
+          std::chrono::duration_cast<std::chrono::milliseconds>(kMaxPollInterval).count()),
+  };
+}
+
 void to_json(nlohmann::json& j, const OsCommandResult& result) {
   j = nlohmann::json{{"status", result.status}, {"data", result.data}};
   if (result.errorCode) {
@@ -416,6 +489,103 @@ std::expected<void, std::string> runOsCommandProcedure(Device& device, ProgressR
   reporter.succeed(kOsCommandStep, OsCommandResult{.status = static_cast<uint8_t>(response->status),
                                                    .data = response->data,
                                                    .errorCode = response->errorCode});
+  return {};
+}
+
+std::expected<EncoderRegisterRequest, std::string> parseEncoderRegisterRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  EncoderRegisterRequest request;
+
+  auto encoder = readByte(body, "encoder", static_cast<uint8_t>(request.encoder));
+  if (!encoder) {
+    return std::unexpected(encoder.error());
+  }
+  // Only the two configured slots exist. A third ordinal is rejected rather than passed through:
+  // the drive would refuse it anyway, and refusing here says which values are real.
+  if (*encoder != static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder1) &&
+      *encoder != static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder2)) {
+    return std::unexpected(std::format("'encoder' must be 1 or 2, got {}", *encoder));
+  }
+  request.encoder = static_cast<somanet::EncoderOrdinal>(*encoder);
+
+  auto write = readBool(body, "write", request.write);
+  if (!write) {
+    return std::unexpected(write.error());
+  }
+  request.write = *write;
+
+  auto registerAddress = readByte(body, "registerAddress", std::nullopt);
+  if (!registerAddress) {
+    return std::unexpected(registerAddress.error());
+  }
+  request.registerAddress = *registerAddress;
+
+  auto value = readByte(body, "value", request.value);
+  if (!value) {
+    return std::unexpected(value.error());
+  }
+  request.value = *value;
+  return request;
+}
+
+std::vector<ProcedureParameter> encoderRegisterParameters() {
+  const EncoderRegisterRequest defaults;
+  return {
+      enumParameter(
+          "encoder", "Encoder",
+          "Which of the drive's encoders to address. Encoder 1 is whatever 0x2110 configures and "
+          "encoder 2 whatever 0x2112 does, so the ordinal picks a configured slot rather than a "
+          "kind of encoder.",
+          static_cast<uint8_t>(defaults.encoder),
+          {
+              ParameterOption{.value = static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder1),
+                              .title = "Encoder 1"},
+              ParameterOption{.value = static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder2),
+                              .title = "Encoder 2"},
+          }),
+      booleanParameter("write", "Write",
+                       "Off reads the register; on writes the value into it. Either way the drive "
+                       "reports what the register holds afterwards, so a write confirms itself.",
+                       defaults.write),
+      integerParameter("registerAddress", "Register address",
+                       "The register to access. Required — there is no register worth defaulting "
+                       "to, and the map belongs to the encoder chip rather than to this firmware.",
+                       nullptr, kMinByte, kMaxByte),
+      integerParameter("value", "Value",
+                       "The byte to write into the register. Ignored when "
+                       "reading.",
+                       defaults.value, kMinByte, kMaxByte),
+  };
+}
+
+std::vector<ProgressStep> encoderRegisterSteps() { return stepsFrom({kEncoderRegisterStep}); }
+
+std::expected<void, std::string> runEncoderRegisterProcedure(
+    Device& device, ProgressReporter& reporter, std::stop_token stop,
+    const EncoderRegisterRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    // Before the step starts: the device turning out not to be a SOMANET drive is not the access
+    // failing, so nothing is reported against the step.
+    return std::unexpected(drive.error());
+  }
+
+  reporter.start(kEncoderRegisterStep);
+  const OsCommandConfig config{.timeout = kEncoderRegisterTimeout,
+                               .pollInterval = kEncoderRegisterPollInterval,
+                               .stop = std::move(stop)};
+  auto result = request.write
+                    ? drive->writeEncoderRegister(request.encoder, request.registerAddress,
+                                                  request.value, config)
+                    : drive->readEncoderRegister(request.encoder, request.registerAddress, config);
+  if (!result) {
+    reporter.fail(kEncoderRegisterStep, result.error());
+    return std::unexpected(result.error());
+  }
+  reporter.succeed(kEncoderRegisterStep, *result);
   return {};
 }
 

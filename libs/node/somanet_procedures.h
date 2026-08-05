@@ -155,6 +155,56 @@ std::expected<void, std::string> runEncoderRegisterProcedure(Device& device,
                                                              std::stop_token stop,
                                                              const EncoderRegisterRequest& request);
 
+/// @brief Procedure name for setting an iC-MU calibration mode, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kIcMuCalibrationModeProcedure = "ic-mu-calibration-mode";
+
+/// @brief The single step setting an iC-MU calibration mode reports against.
+inline constexpr std::string_view kIcMuCalibrationModeStep = "set-mode";
+
+/// @brief What one iC-MU calibration mode change was asked to do.
+struct IcMuCalibrationModeRequest {
+  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
+
+  /// Which mode to put it in. Has no default in the request a client sends — the value here is
+  /// only what an unset struct holds — because the mode *is* the instruction, and defaulting it
+  /// would let a run that named nothing change how an encoder is read.
+  somanet::IcMuCalibrationMode mode{somanet::IcMuCalibrationMode::kStandard};
+};
+
+/// @brief Parses and validates a client's iC-MU calibration mode request body.
+///
+/// Accepts `{"encoder": 1, "mode": "configuration"}` — or `raw`, or `standard`. @c mode is
+/// required; @c encoder defaults to encoder 1.
+///
+/// @param body  Parsed request JSON.
+/// @return The validated request, or a message naming what is wrong with it.
+std::expected<IcMuCalibrationModeRequest, std::string> parseIcMuCalibrationModeRequest(
+    const nlohmann::json& body);
+
+/// @brief What setting an iC-MU calibration mode accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> icMuCalibrationModeParameters();
+
+/// @brief The iC-MU calibration mode procedure's step template — one step, idle.
+std::vector<ProgressStep> icMuCalibrationModeSteps();
+
+/// @brief Sets an iC-MU encoder's calibration mode as a procedure body.
+///
+/// Prepares nothing and moves nothing, like @c runEncoderRegisterProcedure — the command needs
+/// only an active mailbox — but it differs from every other procedure here in one way worth
+/// stating plainly: **it has no restore.** Configuration and raw are modes an encoder is left in,
+/// so a run that puts one there has changed how the drive reads position until another run puts it
+/// back to standard.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; passed into the command so an in-flight change is aborted.
+/// @param request  Which encoder, and which mode to put it in.
+/// @return Void once the drive applied the mode, otherwise why it did not.
+std::expected<void, std::string> runIcMuCalibrationModeProcedure(
+    Device& device, ProgressReporter& reporter, std::stop_token stop,
+    const IcMuCalibrationModeRequest& request);
+
 /// @brief The step ids shared by every procedure that prepares a drive, measures, and puts it back.
 ///
 /// The preparation and its undoing are the *same work* in each of them — SOMANET's diagnostics

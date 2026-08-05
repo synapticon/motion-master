@@ -184,6 +184,15 @@ export default function ProcedureParameters({
                 onChange={e => onChange(parameter.name, e.target.value)}
                 disabled={disabled}
               >
+                {/* A required enum starts with nothing chosen, and a select cannot show "nothing" —
+                    left to itself it would display the first option while holding no value, so the
+                    user would see a choice they never made and a Run button disabled for no visible
+                    reason. The placeholder is that empty state, made visible. */}
+                {parameter.required && (
+                  <option value="" disabled>
+                    Select…
+                  </option>
+                )}
                 {(parameter.options ?? []).map(option => (
                   <option key={String(option.value)} value={String(option.value)}>
                     {option.title}

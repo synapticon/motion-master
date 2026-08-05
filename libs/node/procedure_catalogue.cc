@@ -179,6 +179,48 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor icMuCalibrationMode;
+  icMuCalibrationMode.name = std::string(kIcMuCalibrationModeProcedure);
+  icMuCalibrationMode.title = "iC-MU calibration mode";
+  icMuCalibrationMode.description =
+      "Sets how the BiSS service clocks an iC-MU encoder — the chip behind a Circulo's internal "
+      "encoder. Standard is normal operation. Configuration keeps the encoder clocked but uses "
+      "only the register-communication bits, so position stops updating and no CRC fault is "
+      "raised, which is what makes it possible to change the encoder's configuration registers "
+      "with Encoder register communication. Raw clocks an encoder already configured for raw "
+      "output and averages that data into 0x2704. Calibrating an encoder means moving between "
+      "these modes, not setting one switch.";
+  icMuCalibrationMode.caveats = {
+      "There is no restore: the encoder stays in the mode this sets until another run puts it back "
+      "to standard. Leaving one in configuration mode leaves the drive without a position update.",
+      "In configuration mode the encoder's position is not updated and the BiSS CRC error is "
+      "suppressed, so the drive will not report a problem it would normally fault on.",
+      "Entering configuration mode saves the current position, and entering raw mode counts from "
+      "that saved position because raw data is relative — so do not move the motor while in "
+      "configuration mode if raw mode is to follow.",
+      "The command works only on a configured Circulo internal encoder. Anything else is refused "
+      "by the drive as OS error 251 (\"command not allowed\").",
+      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  };
+  icMuCalibrationMode.movesMotor = false;
+  icMuCalibrationMode.requiresEnabled = false;
+  icMuCalibrationMode.parameters = icMuCalibrationModeParameters();
+  icMuCalibrationMode.steps = icMuCalibrationModeSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(icMuCalibrationMode),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseIcMuCalibrationModeRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runIcMuCalibrationModeProcedure(device, reporter, std::move(stop), spec);
+        };
+      },
+  });
+
   ProcedureDescriptor commissioning;
   commissioning.name = std::string(kOffsetDetectionProcedure);
   commissioning.title = "Offset detection";

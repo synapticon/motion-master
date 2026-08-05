@@ -141,6 +141,43 @@ constexpr std::string_view toString(EncoderOrdinal encoder) {
   return "unknown encoder";
 }
 
+/// @brief How the BiSS service clocks and interprets an iC-MU encoder (OS command 1). The enum
+///        value @b is the "mode enable" field the firmware expects.
+///
+/// The iC-MU is the chip behind a Circulo's internal encoder, and calibrating one means moving
+/// between these three modes rather than setting a single "calibration" switch.
+enum class IcMuCalibrationMode : uint8_t {
+  /// The service still clocks the encoder but uses only the register-communication bits and
+  /// discards the rest, so **position stops updating** and the BiSS CRC error is not raised. It is
+  /// what makes it possible to change the encoder's configuration registers without the drive
+  /// faulting on the malformed frames that produces.
+  kConfiguration = 0,
+
+  /// The service clocks an encoder already configured for raw output, and averages the raw data
+  /// into 0x2704 (user MISO) alongside the normal position calculation.
+  kRaw = 1,
+
+  /// Normal clocking — the mode an encoder runs in when nothing is being calibrated.
+  kStandard = 2,
+};
+
+/// @brief Name of an iC-MU calibration mode (for logging / JSON). Never returns @c nullptr.
+constexpr std::string_view toString(IcMuCalibrationMode mode) {
+  switch (mode) {
+    case IcMuCalibrationMode::kConfiguration:
+      return "configuration";
+    case IcMuCalibrationMode::kRaw:
+      return "raw";
+    case IcMuCalibrationMode::kStandard:
+      return "standard";
+  }
+  return "unknown";
+}
+
+/// @brief Parses a mode token ("configuration" / "raw" / "standard") — the inverse of @c toString.
+///        Returns @c std::nullopt for any other token.
+std::optional<IcMuCalibrationMode> parseIcMuCalibrationMode(std::string_view token);
+
 /// @brief The faults encoder register communication (command 0) reports as its command-specific OS
 ///        error code.
 ///
@@ -247,6 +284,7 @@ constexpr std::string_view toString(BrakeReleaseStrategy strategy) {
 /// is the firmware's, so gaps are real rather than reserved space.
 enum class OsCommandId : uint8_t {
   kEncoderRegisterCommunication = 0,  ///< Reads or writes one register of a BiSS encoder.
+  kIcMuCalibrationMode = 1,           ///< Sets how the BiSS service clocks an iC-MU encoder.
   kMotorPhaseOrderDetection = 4,      ///< Detects the motor phase order. Rotates the rotor.
   kCommutationOffsetMeasurement = 5,  ///< Measures the commutation angle offset; see
                                       ///< somanet::CommutationOffsetMethod.
@@ -779,6 +817,34 @@ class SomanetDrive : public Cia402Drive {
   /// @return What the register holds afterwards, or why it could not be written.
   std::expected<EncoderRegisterResult, std::string> writeEncoderRegister(
       somanet::EncoderOrdinal encoder, uint8_t registerAddress, uint8_t value,
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
+                                       .pollInterval = std::chrono::milliseconds(20)});
+
+  /// @brief Sets an iC-MU encoder's calibration mode (OS command 1).
+  ///
+  /// Restricted to a **Circulo internal encoder** — narrower than
+  /// @c readEncoderRegister's BiSS-only rule — and to a configured slot; the drive refuses
+  /// anything else rather than misapplying it.
+  ///
+  /// Like the register accesses this prepares nothing and moves nothing, needing only an active
+  /// mailbox. Unlike them it **leaves the encoder in the mode it set**: there is no restoring
+  /// counterpart, so an encoder put into @c kConfiguration or @c kRaw stays there until something
+  /// puts it back to @c kStandard.
+  ///
+  /// Two behaviours of the firmware worth knowing before sequencing calls, both of which make the
+  /// order matter rather than being incidental: entering @c kConfiguration **saves the current
+  /// position**, and entering @c kRaw uses that saved position as the starting point (raw data is
+  /// relative) — so the motor must not move while in configuration mode if raw mode is to follow.
+  ///
+  /// The command reports nothing on success, so there is no value to return; a mode value the
+  /// sensor service does not recognise comes back as an error.
+  ///
+  /// @param encoder  Which configured encoder to address.
+  /// @param mode     The mode to put it in.
+  /// @param config   Timing and cancellation. The default is sized for this command.
+  /// @return Void once the drive applied the mode, otherwise why it did not.
+  std::expected<void, std::string> setIcMuCalibrationMode(
+      somanet::EncoderOrdinal encoder, somanet::IcMuCalibrationMode mode,
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
                                        .pollInterval = std::chrono::milliseconds(20)});
 

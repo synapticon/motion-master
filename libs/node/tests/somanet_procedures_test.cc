@@ -37,6 +37,9 @@ using mm::node::Device;
 using mm::node::encoderRegisterParameters;
 using mm::node::EncoderRegisterRequest;
 using mm::node::encoderRegisterSteps;
+using mm::node::icMuCalibrationModeParameters;
+using mm::node::IcMuCalibrationModeRequest;
+using mm::node::icMuCalibrationModeSteps;
 using mm::node::kEncoderRegisterStep;
 using mm::node::kOsCommand;
 using mm::node::kOsCommandMode;
@@ -48,6 +51,7 @@ using mm::node::openPhaseDetectionSteps;
 using mm::node::OsCommandRequest;
 using mm::node::osCommandSteps;
 using mm::node::parseEncoderRegisterRequest;
+using mm::node::parseIcMuCalibrationModeRequest;
 using mm::node::phaseInductanceMeasurementSteps;
 using mm::node::phaseResistanceMeasurementSteps;
 using mm::node::polePairDetectionSteps;
@@ -55,6 +59,7 @@ using mm::node::ProgressReporter;
 using mm::node::ProgressStatus;
 using mm::node::runCommutationOffsetDetectionProcedure;
 using mm::node::runEncoderRegisterProcedure;
+using mm::node::runIcMuCalibrationModeProcedure;
 using mm::node::runMotorPhaseOrderDetectionProcedure;
 using mm::node::runOffsetDetectionProcedure;
 using mm::node::runOpenPhaseDetectionProcedure;
@@ -491,6 +496,88 @@ TEST(RunEncoderRegisterProcedure, FailsTheStepWhenTheDriveRefusesTheCommand) {
   driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};
   auto result = runEncoderRegisterProcedure(device, reporter, std::stop_token{},
                                             EncoderRegisterRequest{.registerAddress = 0x11});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
+  EXPECT_EQ(reporter.steps()[0].status, ProgressStatus::kFailed);
+}
+
+// --- iC-MU calibration mode procedure ------------------------------------------------------------
+
+TEST(ParseIcMuCalibrationModeRequest, RequiresTheMode) {
+  // The mode is the instruction: a run that named none would change how an encoder is read without
+  // anyone saying which way.
+  auto request = parseIcMuCalibrationModeRequest(nlohmann::json::object());
+  ASSERT_FALSE(request.has_value());
+  EXPECT_NE(request.error().find("'mode' is required"), std::string::npos) << request.error();
+}
+
+TEST(ParseIcMuCalibrationModeRequest, DefaultsTheEncoderButNotTheMode) {
+  auto request = parseIcMuCalibrationModeRequest(nlohmann::json{{"mode", "configuration"}});
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->encoder, somanet::EncoderOrdinal::kEncoder1);
+  EXPECT_EQ(request->mode, somanet::IcMuCalibrationMode::kConfiguration);
+}
+
+TEST(ParseIcMuCalibrationModeRequest, RejectsAnUnknownMode) {
+  auto request = parseIcMuCalibrationModeRequest(nlohmann::json{{"mode", "calibration"}});
+  ASSERT_FALSE(request.has_value());
+  EXPECT_NE(request.error().find("must be one of"), std::string::npos) << request.error();
+}
+
+TEST(ParseIcMuCalibrationModeRequest, RejectsAnOrdinalThatIsNeitherSlot) {
+  auto request = parseIcMuCalibrationModeRequest(nlohmann::json{{"mode", "raw"}, {"encoder", 3}});
+  ASSERT_FALSE(request.has_value());
+  EXPECT_NE(request.error().find("must be 1 or 2"), std::string::npos) << request.error();
+}
+
+TEST(IcMuCalibrationModeParameters, DescribeExactlyWhatTheParserAccepts) {
+  const auto parameters = icMuCalibrationModeParameters();
+  ASSERT_EQ(parameters.size(), 2u);
+  EXPECT_EQ(parameters[0].name, "encoder");
+  EXPECT_FALSE(parameters[0].required());
+  EXPECT_EQ(parameters[1].name, "mode");
+  EXPECT_TRUE(parameters[1].required());
+  // Every offered mode must be one the parser knows, or a client could present a choice that 400s.
+  ASSERT_EQ(parameters[1].options.size(), 3u);
+  for (const auto& option : parameters[1].options) {
+    auto request = parseIcMuCalibrationModeRequest(nlohmann::json{{"mode", option.value}});
+    EXPECT_TRUE(request.has_value()) << option.value.dump();
+  }
+}
+
+TEST(RunIcMuCalibrationModeProcedure, RecordsWhichEncoderIsInWhichMode) {
+  // The command answers with nothing, so the step has to carry what was asked for — there is no
+  // restore, so a snapshot read later is the only record of where the encoder was left.
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(icMuCalibrationModeSteps());
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = runIcMuCalibrationModeProcedure(
+      device, reporter, std::stop_token{},
+      IcMuCalibrationModeRequest{.encoder = somanet::EncoderOrdinal::kEncoder2,
+                                 .mode = somanet::IcMuCalibrationMode::kRaw});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto steps = reporter.steps();
+  ASSERT_EQ(steps.size(), 1u);
+  EXPECT_EQ(steps[0].status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(steps[0].value["encoder"], 2);
+  EXPECT_EQ(steps[0].value["mode"], "raw");
+  // Mode 1 shifted up three bits, plus ordinal 2.
+  EXPECT_EQ(driver.store[OsCommandFakeDriver::key(kOsCommand, 1)],
+            (std::vector<uint8_t>{1, 10, 0, 0, 0, 0, 0, 0}));
+}
+
+TEST(RunIcMuCalibrationModeProcedure, FailsTheStepWhenTheDriveRefusesTheCommand) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(icMuCalibrationModeSteps());
+
+  driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};
+  auto result = runIcMuCalibrationModeProcedure(
+      device, reporter, std::stop_token{},
+      IcMuCalibrationModeRequest{.mode = somanet::IcMuCalibrationMode::kStandard});
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
   EXPECT_EQ(reporter.steps()[0].status, ProgressStatus::kFailed);

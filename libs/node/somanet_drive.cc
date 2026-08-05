@@ -151,6 +151,10 @@ constexpr size_t kEncoderRegisterValueByte = 4;
 constexpr uint8_t kEncoderRegisterRead = 0;
 constexpr uint8_t kEncoderRegisterWrite = 1;
 
+// iC-MU calibration mode (command 1) packs its mode above the encoder ordinal in the same byte the
+// ordinal occupies alone in command 0 — bits 0-2 the ordinal, bits 3-4 the mode.
+constexpr unsigned kIcMuModeShift = 3;
+
 // Reads or writes one encoder register — the shared body of readEncoderRegister and
 // writeEncoderRegister, which differ only in the direction bit and in whether the value byte is
 // used. The drive answers both the same way, by reporting what the register holds.
@@ -219,6 +223,23 @@ std::expected<EncoderRegisterResult, std::string> accessEncoderRegister(
 }
 
 }  // namespace
+
+namespace somanet {
+
+std::optional<IcMuCalibrationMode> parseIcMuCalibrationMode(std::string_view token) {
+  if (token == toString(IcMuCalibrationMode::kConfiguration)) {
+    return IcMuCalibrationMode::kConfiguration;
+  }
+  if (token == toString(IcMuCalibrationMode::kRaw)) {
+    return IcMuCalibrationMode::kRaw;
+  }
+  if (token == toString(IcMuCalibrationMode::kStandard)) {
+    return IcMuCalibrationMode::kStandard;
+  }
+  return std::nullopt;
+}
+
+}  // namespace somanet
 
 std::optional<std::string_view> osCommandErrorName(uint8_t code) {
   switch (static_cast<OsCommandError>(code)) {
@@ -471,6 +492,44 @@ std::expected<BrakeState, std::string> SomanetDrive::engageBrake(std::chrono::mi
   std::this_thread::sleep_for(settle);
 
   return brakeState();
+}
+
+std::expected<void, std::string> SomanetDrive::setIcMuCalibrationMode(
+    somanet::EncoderOrdinal encoder, somanet::IcMuCalibrationMode mode,
+    const OsCommandConfig& config) {
+  const std::string what =
+      std::format("setting {} to {} mode", somanet::toString(encoder), somanet::toString(mode));
+
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(somanet::OsCommandId::kIcMuCalibrationMode);
+  // One byte carries both fields: the ordinal in bits 0-2 and the mode above it in bits 3-4.
+  command[kEncoderOrdinalByte] = static_cast<uint8_t>(
+      (static_cast<uint8_t>(mode) << kIcMuModeShift) | static_cast<uint8_t>(encoder));
+
+  auto response = runOsCommand(command, config);
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+
+  if (response->failed()) {
+    if (!response->errorCode) {
+      // Status 2, the only failure this command reports itself: the sensor service did not
+      // recognise the mode. It cannot be reached through this typed surface — the enum is closed —
+      // so it means the firmware and this build disagree about the mode numbering.
+      return std::unexpected(
+          std::format("{} failed: the sensor service did not accept the mode value", what));
+    }
+    // The specification gives this command no command-specific codes at all, so anything here is a
+    // general one — and a code that is not general either is reported as the number rather than
+    // decoded against a table that does not exist.
+    const uint8_t code = *response->errorCode;
+    if (auto general = osCommandErrorName(code)) {
+      return std::unexpected(
+          std::format("{} was not performed: {} (OS error {})", what, *general, code));
+    }
+    return std::unexpected(std::format("{} failed with OS error {}", what, code));
+  }
+  return {};
 }
 
 std::string EncoderRegisterResult::describe() const {

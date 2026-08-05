@@ -85,6 +85,40 @@ std::expected<uint8_t, std::string> readByte(const nlohmann::json& body, const c
   return static_cast<uint8_t>(raw);
 }
 
+// Reads the "encoder" field, which both encoder commands take and describe identically — the
+// ordinal picks one of the drive's two configured slots and nothing else.
+std::expected<somanet::EncoderOrdinal, std::string> readEncoderOrdinal(
+    const nlohmann::json& body, somanet::EncoderOrdinal fallback) {
+  auto ordinal = readByte(body, "encoder", static_cast<uint8_t>(fallback));
+  if (!ordinal) {
+    return std::unexpected(ordinal.error());
+  }
+  // Only the two configured slots exist. A third ordinal is rejected rather than passed through:
+  // the drive would refuse it anyway, and refusing here says which values are real.
+  if (*ordinal != static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder1) &&
+      *ordinal != static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder2)) {
+    return std::unexpected(std::format("'encoder' must be 1 or 2, got {}", *ordinal));
+  }
+  return static_cast<somanet::EncoderOrdinal>(*ordinal);
+}
+
+// The "encoder" parameter as every encoder command advertises it — one description, so two
+// procedures cannot end up explaining the same field differently.
+ProcedureParameter encoderParameter(somanet::EncoderOrdinal defaultValue) {
+  return enumParameter(
+      "encoder", "Encoder",
+      "Which of the drive's encoders to address. Encoder 1 is whatever 0x2110 configures and "
+      "encoder 2 whatever 0x2112 does, so the ordinal picks a configured slot rather than a kind "
+      "of encoder.",
+      static_cast<uint8_t>(defaultValue),
+      {
+          ParameterOption{.value = static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder1),
+                          .title = "Encoder 1"},
+          ParameterOption{.value = static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder2),
+                          .title = "Encoder 2"},
+      });
+}
+
 // Reads an optional boolean field, defaulting to what the request already holds.
 std::expected<bool, std::string> readBool(const nlohmann::json& body, const char* field,
                                           bool fallback) {
@@ -487,17 +521,11 @@ std::expected<EncoderRegisterRequest, std::string> parseEncoderRegisterRequest(
   }
   EncoderRegisterRequest request;
 
-  auto encoder = readByte(body, "encoder", static_cast<uint8_t>(request.encoder));
+  auto encoder = readEncoderOrdinal(body, request.encoder);
   if (!encoder) {
     return std::unexpected(encoder.error());
   }
-  // Only the two configured slots exist. A third ordinal is rejected rather than passed through:
-  // the drive would refuse it anyway, and refusing here says which values are real.
-  if (*encoder != static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder1) &&
-      *encoder != static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder2)) {
-    return std::unexpected(std::format("'encoder' must be 1 or 2, got {}", *encoder));
-  }
-  request.encoder = static_cast<somanet::EncoderOrdinal>(*encoder);
+  request.encoder = *encoder;
 
   auto write = readBool(body, "write", request.write);
   if (!write) {
@@ -522,18 +550,7 @@ std::expected<EncoderRegisterRequest, std::string> parseEncoderRegisterRequest(
 std::vector<ProcedureParameter> encoderRegisterParameters() {
   const EncoderRegisterRequest defaults;
   return {
-      enumParameter(
-          "encoder", "Encoder",
-          "Which of the drive's encoders to address. Encoder 1 is whatever 0x2110 configures and "
-          "encoder 2 whatever 0x2112 does, so the ordinal picks a configured slot rather than a "
-          "kind of encoder.",
-          static_cast<uint8_t>(defaults.encoder),
-          {
-              ParameterOption{.value = static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder1),
-                              .title = "Encoder 1"},
-              ParameterOption{.value = static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder2),
-                              .title = "Encoder 2"},
-          }),
+      encoderParameter(defaults.encoder),
       booleanParameter("write", "Write",
                        "Off reads the register; on writes the value into it. Either way the drive "
                        "reports what the register holds afterwards, so a write confirms itself.",
@@ -574,6 +591,91 @@ std::expected<void, std::string> runEncoderRegisterProcedure(
     return std::unexpected(result.error());
   }
   reporter.succeed(kEncoderRegisterStep, *result);
+  return {};
+}
+
+std::expected<IcMuCalibrationModeRequest, std::string> parseIcMuCalibrationModeRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  IcMuCalibrationModeRequest request;
+
+  auto encoder = readEncoderOrdinal(body, request.encoder);
+  if (!encoder) {
+    return std::unexpected(encoder.error());
+  }
+  request.encoder = *encoder;
+
+  auto mode = body.find("mode");
+  if (mode == body.end() || mode->is_null()) {
+    return std::unexpected("'mode' is required");
+  }
+  if (!mode->is_string()) {
+    return std::unexpected("'mode' must be a string");
+  }
+  auto parsed = somanet::parseIcMuCalibrationMode(mode->get<std::string>());
+  if (!parsed) {
+    return std::unexpected(
+        std::format("'mode' must be one of {}, {} or {}",
+                    somanet::toString(somanet::IcMuCalibrationMode::kConfiguration),
+                    somanet::toString(somanet::IcMuCalibrationMode::kRaw),
+                    somanet::toString(somanet::IcMuCalibrationMode::kStandard)));
+  }
+  request.mode = *parsed;
+  return request;
+}
+
+std::vector<ProcedureParameter> icMuCalibrationModeParameters() {
+  const IcMuCalibrationModeRequest defaults;
+  return {
+      encoderParameter(defaults.encoder),
+      enumParameter(
+          "mode", "Mode",
+          "Which mode to put the encoder in. Standard is normal operation; configuration stops "
+          "position updating so the encoder's registers can be changed without a CRC fault; raw "
+          "additionally averages the raw data into 0x2704. Required — the mode is the instruction.",
+          nullptr,
+          {
+              ParameterOption{.value = std::string(
+                                  somanet::toString(somanet::IcMuCalibrationMode::kConfiguration)),
+                              .title = "Configuration"},
+              ParameterOption{
+                  .value = std::string(somanet::toString(somanet::IcMuCalibrationMode::kRaw)),
+                  .title = "Raw"},
+              ParameterOption{
+                  .value = std::string(somanet::toString(somanet::IcMuCalibrationMode::kStandard)),
+                  .title = "Standard"},
+          }),
+  };
+}
+
+std::vector<ProgressStep> icMuCalibrationModeSteps() {
+  return stepsFrom({kIcMuCalibrationModeStep});
+}
+
+std::expected<void, std::string> runIcMuCalibrationModeProcedure(
+    Device& device, ProgressReporter& reporter, std::stop_token stop,
+    const IcMuCalibrationModeRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+
+  reporter.start(kIcMuCalibrationModeStep);
+  auto result = drive->setIcMuCalibrationMode(request.encoder, request.mode,
+                                              {.timeout = kEncoderRegisterTimeout,
+                                               .pollInterval = kEncoderRegisterPollInterval,
+                                               .stop = std::move(stop)});
+  if (!result) {
+    reporter.fail(kIcMuCalibrationModeStep, result.error());
+    return std::unexpected(result.error());
+  }
+  // The command reports nothing, so the step records what was asked for: a snapshot read later has
+  // to say which encoder is now in which mode, since nothing here restores it.
+  reporter.succeed(kIcMuCalibrationModeStep,
+                   nlohmann::json{{"encoder", static_cast<uint8_t>(request.encoder)},
+                                  {"mode", somanet::toString(request.mode)}});
   return {};
 }
 

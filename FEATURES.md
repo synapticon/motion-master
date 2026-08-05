@@ -149,12 +149,16 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
   parameter selecting all / communication / application / manufacturer).
 - **SOMANET procedures** — the raw **OS command** (`0x1023`/`0x1024`, request bytes passed
   through as given), **encoder register communication** (read or write one BiSS encoder
-  register), the motor measurements (**open phase detection**, **pole pair detection**,
-  **phase resistance**, **phase inductance**), **motor phase order detection**, **commutation
-  offset detection**, and **offset detection** — the whole commissioning sequence in one
-  prepared session. Each prepares the drive itself (diagnostics mode, Operation Enabled, and
-  the brake where its command requires it) and restores everything on every path out,
-  including a failure or a cancellation.
+  register), **iC-MU calibration mode** (how the BiSS service clocks a Circulo's internal
+  encoder: standard, configuration or raw), the motor measurements (**open phase detection**,
+  **pole pair detection**, **phase resistance**, **phase inductance**), **motor phase order
+  detection**, **commutation offset detection**, and **offset detection** — the whole
+  commissioning sequence in one prepared session. The measurement procedures prepare the drive
+  themselves (diagnostics mode, Operation Enabled, and the brake where its command requires it)
+  and restore everything on every path out, including a failure or a cancellation. The two
+  encoder procedures prepare nothing, because their commands need nothing prepared; iC-MU
+  calibration mode is the one procedure that **leaves** the drive changed, since the mode it
+  sets is a mode the encoder stays in.
 
 ## Monitoring (Live Telemetry)
 

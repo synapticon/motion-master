@@ -772,6 +772,102 @@ TEST(ReadEncoderRegister, AFailureWithoutACodeNamesWhatCanCauseIt) {
   EXPECT_NE(result.error().find("BiSS clock frequency"), std::string::npos) << result.error();
 }
 
+// --- iC-MU calibration mode (OS command 1) ------------------------------------------------------
+
+TEST(SetIcMuCalibrationMode, PacksTheModeAboveTheEncoderOrdinal) {
+  // The specification's own example: encoder 1 into raw mode is byte 1 = 9 — the mode (1) shifted
+  // up three bits over the ordinal (1). Packing them into one byte is what makes this worth
+  // pinning: a mode written beside the ordinal instead of above it would silently select
+  // encoder 9.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive
+                  ->setIcMuCalibrationMode(somanet::EncoderOrdinal::kEncoder1,
+                                           somanet::IcMuCalibrationMode::kRaw,
+                                           {.pollInterval = kNoDelay})
+                  .has_value());
+  EXPECT_EQ(driver.lastCommand, (std::vector<uint8_t>{1, 9, 0, 0, 0, 0, 0, 0}));
+}
+
+TEST(SetIcMuCalibrationMode, PacksConfigurationModeOnEncoderOne) {
+  // The other half of the specification's example: configuration mode is 0, so byte 1 is the bare
+  // ordinal.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive
+                  ->setIcMuCalibrationMode(somanet::EncoderOrdinal::kEncoder1,
+                                           somanet::IcMuCalibrationMode::kConfiguration,
+                                           {.pollInterval = kNoDelay})
+                  .has_value());
+  EXPECT_EQ(driver.lastCommand, (std::vector<uint8_t>{1, 1, 0, 0, 0, 0, 0, 0}));
+}
+
+TEST(SetIcMuCalibrationMode, PacksStandardModeOnEncoderTwo) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive
+                  ->setIcMuCalibrationMode(somanet::EncoderOrdinal::kEncoder2,
+                                           somanet::IcMuCalibrationMode::kStandard,
+                                           {.pollInterval = kNoDelay})
+                  .has_value());
+  // Mode 2 shifted up three bits is 16, plus ordinal 2.
+  EXPECT_EQ(driver.lastCommand, (std::vector<uint8_t>{1, 18, 0, 0, 0, 0, 0, 0}));
+}
+
+TEST(SetIcMuCalibrationMode, AGeneralOsErrorNamesItself) {
+  // What a non-Circulo or unconfigured encoder produces — this command's only failures are general
+  // codes, since the specification gives it none of its own.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};
+  auto result =
+      drive->setIcMuCalibrationMode(somanet::EncoderOrdinal::kEncoder1,
+                                    somanet::IcMuCalibrationMode::kRaw, {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("raw"), std::string::npos) << result.error();
+}
+
+TEST(SetIcMuCalibrationMode, AFailureWithoutACodeNamesTheSensorService) {
+  // Status 2 is this command's own failure: the sensor service did not accept the mode value.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{2, 0, 0, 0, 0, 0, 0, 0}};
+  auto result =
+      drive->setIcMuCalibrationMode(somanet::EncoderOrdinal::kEncoder1,
+                                    somanet::IcMuCalibrationMode::kRaw, {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("sensor service"), std::string::npos) << result.error();
+}
+
+TEST(ParseIcMuCalibrationMode, RoundTripsEveryMode) {
+  for (auto mode : {somanet::IcMuCalibrationMode::kConfiguration,
+                    somanet::IcMuCalibrationMode::kRaw, somanet::IcMuCalibrationMode::kStandard}) {
+    auto parsed = somanet::parseIcMuCalibrationMode(somanet::toString(mode));
+    ASSERT_TRUE(parsed.has_value()) << somanet::toString(mode);
+    EXPECT_EQ(*parsed, mode);
+  }
+  EXPECT_FALSE(somanet::parseIcMuCalibrationMode("calibration").has_value());
+}
+
 // --- Open phase detection (OS command 6) --------------------------------------------------------
 
 TEST(RunOpenPhaseDetection, ASuccessfulCommandMeansNoPhaseIsOpen) {

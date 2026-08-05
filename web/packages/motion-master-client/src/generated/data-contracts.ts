@@ -595,7 +595,7 @@ export interface ProcedureRequest {
    */
   pollIntervalMs?: number;
   /**
-   * `encoder-register-communication` only: which of the drive's encoders to address. Encoder 1 is whatever 0x2110 configures and encoder 2 whatever 0x2112 does, so the ordinal picks a configured slot rather than a kind of encoder.
+   * `encoder-register-communication` and `ic-mu-calibration-mode`: which of the drive's encoders to address. Encoder 1 is whatever 0x2110 configures and encoder 2 whatever 0x2112 does, so the ordinal picks a configured slot rather than a kind of encoder.
    * @default 1
    * @example 1
    */
@@ -620,6 +620,11 @@ export interface ProcedureRequest {
    * @example 7
    */
   value?: number;
+  /**
+   * `ic-mu-calibration-mode` only, and required for it: how the BiSS service should clock the encoder. `standard` is normal operation; `configuration` keeps the encoder clocked but uses only the register-communication bits, so position stops updating and no CRC fault is raised; `raw` clocks an encoder already configured for raw output and averages that data into 0x2704. There is no default — the mode is the instruction.
+   * @example "configuration"
+   */
+  mode?: "configuration" | "raw" | "standard";
   /**
    * `restore-default-parameters` only: which group of defaults to restore — all (0x1011:01), communication (0x1011:02), application (0x1011:03), or manufacturer (0x1011:04).
    * @default "all"

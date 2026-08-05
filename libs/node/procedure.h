@@ -143,6 +143,12 @@ void to_json(nlohmann::json& j, const ProcedureSnapshot& snapshot);
 /// is the whole point of the accumulating-snapshot model.
 ProcedureSnapshot idleSnapshot(std::vector<ProgressStep> steps);
 
+/// @brief A procedure's step template: the given ids, in order, all idle.
+///
+/// Every procedure declares its steps this way, which is why it lives here rather than beside any
+/// one family of them.
+std::vector<ProgressStep> stepsFrom(std::initializer_list<std::string_view> ids);
+
 /// @brief What kind of value a procedure parameter takes — the client's cue for which control to
 ///        render, and the only vocabulary a generic form has to understand.
 ///

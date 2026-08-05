@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <expected>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -66,6 +67,22 @@ enum class RestoreGroup : uint8_t {
 ///        into a @c RestoreGroup. Returns @c std::nullopt for any other token.
 std::optional<RestoreGroup> parseRestoreGroup(std::string_view token);
 
+/// @brief The token naming @p group — the inverse of @c parseRestoreGroup, and the form the group
+///        takes on the wire. Never returns @c nullptr.
+constexpr std::string_view toString(RestoreGroup group) {
+  switch (group) {
+    case RestoreGroup::kAll:
+      return "all";
+    case RestoreGroup::kCommunication:
+      return "communication";
+    case RestoreGroup::kApplication:
+      return "application";
+    case RestoreGroup::kManufacturer:
+      return "manufacturer";
+  }
+  return "unknown";
+}
+
 /// @brief Timing for the store-parameters confirmation walk (@c ProfileDevice::runStoreParameters).
 ///
 /// After the "save" signature is written, the procedure waits @c settle for the device to begin the
@@ -77,6 +94,13 @@ struct StoreParametersConfig {
   uint32_t retries = 10;                    ///< Maximum confirmation polls after the first.
   std::chrono::milliseconds interval{500};  ///< Delay between confirmation polls.
   std::chrono::milliseconds settle{1000};   ///< Wait after the write before the first poll.
+
+  /// @brief Abandons the confirmation wait; default never stops.
+  ///
+  /// It stops the *waiting*, not the store: the "save" signature has already been written and the
+  /// device is already writing to flash, so a cancelled call reports that the store was not
+  /// confirmed rather than that it did not happen.
+  std::stop_token stop{};
 };
 
 /// @brief Retry/timing for the restore-default-parameters confirmation walk
@@ -89,6 +113,7 @@ struct RestoreDefaultParametersConfig {
   uint32_t retries = 10;                    ///< Maximum confirmation polls after the first.
   std::chrono::milliseconds interval{500};  ///< Delay between confirmation polls.
   std::chrono::milliseconds settle{1000};   ///< Wait after the write before the first poll.
+  std::stop_token stop{};                   ///< Abandons the wait, not the restore (see above).
 };
 
 /// @brief Root of the drive-profile view hierarchy — a concrete, instantiable, borrowed view over

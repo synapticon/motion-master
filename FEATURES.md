@@ -88,12 +88,10 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
   via FoE (`GET`/`PUT /api/devices/{slavePosition}/files/{filename}`).
 - **ESC register access** — read and write raw bytes from/to an ESC register
   (`GET`/`POST /api/devices/{slavePosition}/registers/{address}`).
-- **Parameter persistence** — command a device to save its current parameters to
-  non-volatile memory (`POST /api/devices/{slavePosition}/store-parameters`, the CANopen
-  "store parameters" object `0x1010:01`) or to restore a selected group of defaults
-  (`POST /api/devices/{slavePosition}/restore-default-parameters`, object `0x1011`). Both
-  write the CANopen signature, then poll the object until the device confirms completion, so
-  the call returns only once the drive reports the write finished.
+- **Parameter persistence** — saving parameters to non-volatile memory (`0x1010`) and
+  restoring a group of defaults (`0x1011`) are **procedures**, not requests of their own: both
+  write a CANopen signature and then poll the device until it confirms, which takes seconds.
+  See *Procedures* below.
 - **SII / EEPROM** — read a device's SII image, write a raw SII image
   (`GET`/`PUT /api/devices/{slavePosition}/sii`), and parse a raw SII image offline
   (`POST /api/sii/parse`).
@@ -129,6 +127,34 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
   one slot per axis, so a single-axis move and a coordinated multi-axis program share one
   mechanism. Skips are absorbed by a per-trajectory policy (preserve shape, or preserve
   wall-clock timing).
+
+## Procedures
+
+- **One shape for every operation that takes time** — `POST`/`GET`/`DELETE` on
+  `/api/devices/{slavePosition}/procedures/{procedureName}` start a run, report how it is
+  going, and cancel it. A run happens on its own thread, so the API stays responsive and the
+  drive keeps cycling; one procedure runs per device at a time. Progress is **polled, not
+  streamed**: each `GET` returns the whole accumulated run, so a step that starts and finishes
+  between two polls is still reported with its result, and the result is retained after the
+  run ends.
+- **The catalogue is served, not hard-coded in clients** — `GET
+  /api/devices/{slavePosition}/procedures` lists what a device supports, each entry carrying
+  its title, description, caveats, whether it can move the shaft, whether the drive must be
+  enabled, the steps it reports against, and the **parameters it accepts** (name, type,
+  default, bounds or choices, and whether it is required). That is enough to render a control
+  and a form for any procedure without knowing it by name. The list is per device: a
+  procedure is offered only where it applies.
+- **Generic CANopen procedures**, offered on any device with a CoE mailbox: **store
+  parameters** (`0x1010`) and **restore default parameters** (`0x1011`, with a `group`
+  parameter selecting all / communication / application / manufacturer).
+- **SOMANET procedures** — the raw **OS command** (`0x1023`/`0x1024`, request bytes passed
+  through as given), **encoder register communication** (read or write one BiSS encoder
+  register), the motor measurements (**open phase detection**, **pole pair detection**,
+  **phase resistance**, **phase inductance**), **motor phase order detection**, **commutation
+  offset detection**, and **offset detection** — the whole commissioning sequence in one
+  prepared session. Each prepares the drive itself (diagnostics mode, Operation Enabled, and
+  the brake where its command requires it) and restores everything on every path out,
+  including a failure or a cancellation.
 
 ## Monitoring (Live Telemetry)
 

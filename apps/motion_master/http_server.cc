@@ -43,7 +43,6 @@
 #include "node/pdo_mapping.h"
 #include "node/procedure_catalogue.h"
 #include "node/procedure_manager.h"
-#include "node/profile_control.h"
 #include "node/somanet_control.h"
 #include "swagger_spec.h"
 
@@ -135,9 +134,9 @@ void handleBrakeCommand(Res* res, Req* req, mm::node::DeviceManager& deviceManag
     sendStatus(res, "404 Not Found", corsOrigin);
     return;
   }
-  // Synchronous and timed like store-parameters: this blocks the HTTP thread for the pull time
-  // while the WebSocket (own loop) and the RT loop run on. The wire time is most of the round trip
-  // here, since the call is mostly that deliberate wait.
+  // Synchronous and timed, like the CiA402 command and FoE handlers: this blocks the HTTP thread
+  // for the pull time while the WebSocket (own loop) and the RT loop run on. The wire time is most
+  // of the round trip here, since the call is mostly that deliberate wait.
   sendTimedJson(res, corsOrigin, "409 Conflict", [&] {
     return release ? mm::node::releaseBrake(deviceManager, pos, settle)
                    : mm::node::engageBrake(deviceManager, pos, settle);
@@ -1249,118 +1248,6 @@ void HttpServer::run() {
               sendStatus(res, "204 No Content", config_.corsOrigin);
             });
           })
-      .post(
-          "/api/devices/:slavePosition/store-parameters",
-          [this](auto* res, auto* req) {
-            uint16_t pos{};
-            auto posParam = req->getParameter("slavePosition");
-            auto [p, ec] = std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-            if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-              sendStatus(res, "400 Bad Request", config_.corsOrigin);
-              return;
-            }
-            // Optional retry tuning; absent → the node-layer defaults (see StoreParametersConfig:
-            // 10 polls, 500 ms apart). The initial settle keeps its default (not exposed here).
-            mm::node::StoreParametersConfig storeConfig;
-            if (auto q = req->getQuery("retries"); !q.empty()) {
-              auto [qp, qec] = std::from_chars(q.data(), q.data() + q.size(), storeConfig.retries);
-              if (qec != std::errc() || qp != q.data() + q.size()) {
-                sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                return;
-              }
-            }
-            if (auto q = req->getQuery("interval"); !q.empty()) {
-              uint32_t intervalMs = 0;
-              auto [qp, qec] = std::from_chars(q.data(), q.data() + q.size(), intervalMs);
-              if (qec != std::errc() || qp != q.data() + q.size()) {
-                sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                return;
-              }
-              storeConfig.interval = std::chrono::milliseconds(intervalMs);
-            }
-            if (!deviceManager_.findDevice(pos)) {
-              sendStatus(res, "404 Not Found", config_.corsOrigin);
-              return;
-            }
-            // Synchronous, like the CiA402 command / FoE handlers: blocks this HTTP thread for
-            // the store's few seconds while the WebSocket (separate port/loop) and RT loop run
-            // on. Time the store itself and report it via X-Wire-Us — the store waits out its
-            // whole settle + confirm-poll budget, so the server-measured duration is most of the
-            // client's round-trip; the readout lets the UI separate device time from transport.
-            const auto t0 = std::chrono::steady_clock::now();
-            auto r = mm::node::runStoreParameters(deviceManager_, pos, storeConfig);
-            const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::steady_clock::now() - t0);
-            if (!r) {
-              sendError(res, "409 Conflict", config_.corsOrigin, r.error(), wireUs);
-              return;
-            }
-            mm::api::setWireTime(
-                mm::api::setCorsOrigin(res->writeStatus("204 No Content"), config_.corsOrigin),
-                wireUs)
-                ->end();
-          })
-      .post("/api/devices/:slavePosition/restore-default-parameters",
-            [this](auto* res, auto* req) {
-              uint16_t pos{};
-              auto posParam = req->getParameter("slavePosition");
-              auto [p, ec] =
-                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-              if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-                sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                return;
-              }
-              // Which group of defaults to restore; absent → "all" (0x1011:01).
-              auto group = mm::node::RestoreGroup::kAll;
-              if (auto q = req->getQuery("group"); !q.empty()) {
-                auto parsed = mm::node::parseRestoreGroup(q);
-                if (!parsed) {
-                  sendError(res, "400 Bad Request", config_.corsOrigin,
-                            "invalid group: use all, communication, application, or manufacturer");
-                  return;
-                }
-                group = *parsed;
-              }
-              // Optional retry tuning; absent → the node-layer defaults
-              // (RestoreDefaultParametersConfig: 10 polls, 500 ms apart). The initial settle keeps
-              // its default (not exposed here).
-              mm::node::RestoreDefaultParametersConfig restoreConfig;
-              if (auto q = req->getQuery("retries"); !q.empty()) {
-                auto [qp, qec] =
-                    std::from_chars(q.data(), q.data() + q.size(), restoreConfig.retries);
-                if (qec != std::errc() || qp != q.data() + q.size()) {
-                  sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                  return;
-                }
-              }
-              if (auto q = req->getQuery("interval"); !q.empty()) {
-                uint32_t intervalMs = 0;
-                auto [qp, qec] = std::from_chars(q.data(), q.data() + q.size(), intervalMs);
-                if (qec != std::errc() || qp != q.data() + q.size()) {
-                  sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                  return;
-                }
-                restoreConfig.interval = std::chrono::milliseconds(intervalMs);
-              }
-              if (!deviceManager_.findDevice(pos)) {
-                sendStatus(res, "404 Not Found", config_.corsOrigin);
-                return;
-              }
-              // Synchronous + timed, exactly like store-parameters above.
-              const auto t0 = std::chrono::steady_clock::now();
-              auto r =
-                  mm::node::runRestoreDefaultParameters(deviceManager_, pos, group, restoreConfig);
-              const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                  std::chrono::steady_clock::now() - t0);
-              if (!r) {
-                sendError(res, "409 Conflict", config_.corsOrigin, r.error(), wireUs);
-                return;
-              }
-              mm::api::setWireTime(
-                  mm::api::setCorsOrigin(res->writeStatus("204 No Content"), config_.corsOrigin),
-                  wireUs)
-                  ->end();
-            })
       // --- brake ----------------------------------------------------------------------------
       //
       // GET reports the brake, POST release/engage command it. Two verbs rather than one

@@ -19,7 +19,7 @@ namespace mm::node {
 /// @file
 /// @brief SOMANET procedure bodies — the work a @c ProcedureManager run performs.
 ///
-/// Distinct from @c cia402_control.h / @c profile_control.h in shape as well as content: a control
+/// Distinct from @c cia402_control.h in shape as well as content: a control
 /// function is addressed by bus position and borrows the device itself, while a procedure body
 /// receives a @c Device& already borrowed by the manager, plus the reporter to record progress on
 /// and the token to check for cancellation. Bodies bind whatever profile view they need, which is

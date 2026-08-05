@@ -13,8 +13,8 @@ add_library(
   procedure.cc
   procedure_catalogue.cc
   procedure_manager.cc
-  profile_control.cc
   profile_device.cc
+  profile_procedures.cc
   process_data_dump.cc
   process_data_ring.cc
   process_image.cc

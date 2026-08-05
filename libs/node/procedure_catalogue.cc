@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "node/profile_procedures.h"
 #include "node/somanet_procedures.h"
 #include "node/synapticon.h"
 
@@ -18,6 +19,75 @@ namespace {
 // Every entry the server knows. Built once, never mutated: a caller may hold the reference.
 std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   std::vector<ProcedureCatalogueEntry> entries;
+
+  // The generic CiA301 procedures come first, and their applicability is the widest in the table:
+  // every CoE device carries the non-volatile storage objects, whatever profile it implements, so
+  // these are offered on a third-party slave as readily as on a drive. CoE support comes from the
+  // slave's EEPROM capability bits and is known as soon as the device is, which is what an
+  // `applies` predicate is allowed to consult.
+  ProcedureDescriptor storeParameters;
+  storeParameters.name = std::string(kStoreParametersProcedure);
+  storeParameters.title = "Store parameters";
+  storeParameters.description =
+      "Persists the device's current parameter values to non-volatile memory — the CoE 0x1010 "
+      "\"store parameters\" object — so the changes you have made survive a power cycle. The "
+      "\"save\" signature is written and the device is then polled until it reports the save "
+      "complete, which usually takes about a second while it writes to flash.";
+  storeParameters.caveats = {
+      "It stores what the device currently holds, which includes anything written since the last "
+      "store — there is no selecting what to keep.",
+      "Cancelling stops the wait, not the store: the command has already been written, so the "
+      "device may complete it anyway.",
+      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  };
+  storeParameters.movesMotor = false;
+  storeParameters.requiresEnabled = false;
+  storeParameters.steps = storeParametersSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(storeParameters),
+      .applies = [](Device& device) { return device.supportsCoe(); },
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runStoreParametersProcedure(device, reporter, std::move(stop));
+        };
+      },
+  });
+
+  ProcedureDescriptor restoreDefaults;
+  restoreDefaults.name = std::string(kRestoreDefaultParametersProcedure);
+  restoreDefaults.title = "Restore default parameters";
+  restoreDefaults.description =
+      "Restores the device's default parameters — the CoE 0x1011 \"restore default parameters\" "
+      "object — for the selected group. The \"load\" signature is written and the device is then "
+      "polled until it reports the restore complete.";
+  restoreDefaults.caveats = {
+      "Destructive: the selected group's live values are overwritten with the device's defaults, "
+      "so anything you have not stored is gone. Run Store parameters first if you want to keep it.",
+      "The defaults are restored into volatile memory. They become permanent only if a store "
+      "follows, and some devices apply them only after a reset or power cycle.",
+      "Cancelling stops the wait, not the restore: the command has already been written, so the "
+      "device may complete it anyway.",
+      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  };
+  restoreDefaults.movesMotor = false;
+  restoreDefaults.requiresEnabled = false;
+  restoreDefaults.parameters = restoreDefaultParametersParameters();
+  restoreDefaults.steps = restoreDefaultParametersSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(restoreDefaults),
+      .applies = [](Device& device) { return device.supportsCoe(); },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseRestoreDefaultParametersRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runRestoreDefaultParametersProcedure(device, reporter, std::move(stop), spec);
+        };
+      },
+  });
 
   ProcedureDescriptor osCommand;
   osCommand.name = std::string(kOsCommandProcedure);

@@ -73,6 +73,17 @@ void to_json(nlohmann::json& j, const ProgressStep& step) {
   }
 }
 
+std::vector<ProgressStep> stepsFrom(std::initializer_list<std::string_view> ids) {
+  std::vector<ProgressStep> steps;
+  steps.reserve(ids.size());
+  for (auto id : ids) {
+    ProgressStep step;
+    step.id = std::string(id);
+    steps.push_back(std::move(step));
+  }
+  return steps;
+}
+
 ProcedureSnapshot idleSnapshot(std::vector<ProgressStep> steps) {
   ProcedureSnapshot snapshot;
   snapshot.steps = std::move(steps);

@@ -98,18 +98,6 @@ std::expected<bool, std::string> readBool(const nlohmann::json& body, const char
   return it->get<bool>();
 }
 
-// A step template from ids in order, all idle.
-std::vector<ProgressStep> stepsFrom(std::initializer_list<std::string_view> ids) {
-  std::vector<ProgressStep> steps;
-  steps.reserve(ids.size());
-  for (auto id : ids) {
-    ProgressStep step;
-    step.id = std::string(id);
-    steps.push_back(std::move(step));
-  }
-  return steps;
-}
-
 // Puts back everything a diagnostics-mode procedure changed, on every path out of the body — an
 // early return, a failure, a cancellation — because a procedure that leaves the brake released and
 // the drive in diagnostics mode has left the machine in a worse state than it found it.

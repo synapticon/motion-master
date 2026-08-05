@@ -3,6 +3,7 @@
 #include <chrono>
 #include <format>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -31,9 +32,21 @@ constexpr uint32_t kCommandComplete = 1;
 // until it reads back @c kCommandComplete, retrying a poll that isn't done yet — a value mismatch
 // or a transient mailbox read error while the device is busy, both handled alike — up to @p retries
 // times, @p interval apart. @p label names the operation for the failure message.
+//
+// @p stop abandons the *wait*, which is all it can abandon: the signature has already been written
+// and the device is already acting on it. It is checked between sleeps, so a cancel lands within
+// one settle or interval rather than at the end of the whole budget.
 std::expected<void, std::string> runSignatureConfirmCommand(
     Device& device, uint16_t index, uint8_t subindex, uint32_t signature, uint32_t retries,
-    std::chrono::milliseconds interval, std::chrono::milliseconds settle, std::string_view label) {
+    std::chrono::milliseconds interval, std::chrono::milliseconds settle, std::stop_token stop,
+    std::string_view label) {
+  const auto cancelled = [label]() {
+    return std::unexpected(std::format(
+        "{} was cancelled while waiting for the device to confirm it — the command was already "
+        "written, so the device may still complete it",
+        label));
+  };
+
   if (auto r = device.writeValue(index, subindex, signature); !r) {
     return r;
   }
@@ -42,6 +55,9 @@ std::expected<void, std::string> runSignatureConfirmCommand(
   std::this_thread::sleep_for(settle);
   std::string lastError;
   for (uint32_t attempt = 0;; ++attempt) {
+    if (stop.stop_requested()) {
+      return cancelled();
+    }
     if (auto value = device.readValue<uint32_t>(index, subindex)) {
       if (*value == kCommandComplete) {
         return {};
@@ -120,7 +136,7 @@ std::expected<void, std::string> ProfileDevice::setStoreParameters(uint32_t sign
 std::expected<void, std::string> ProfileDevice::runStoreParameters(
     const StoreParametersConfig& config) {
   return runSignatureConfirmCommand(device_, kStoreParameters, 1, kStoreParametersSignature,
-                                    config.retries, config.interval, config.settle,
+                                    config.retries, config.interval, config.settle, config.stop,
                                     "store parameters");
 }
 
@@ -173,7 +189,7 @@ std::expected<void, std::string> ProfileDevice::runRestoreDefaultParameters(
   // The group enum value *is* the 0x1011 sub-entry (kAll=1 … kManufacturer=4).
   return runSignatureConfirmCommand(device_, kRestoreDefaultParameters, static_cast<uint8_t>(group),
                                     kRestoreParametersSignature, config.retries, config.interval,
-                                    config.settle, "restore default parameters");
+                                    config.settle, config.stop, "restore default parameters");
 }
 
 std::optional<RestoreGroup> parseRestoreGroup(std::string_view token) {

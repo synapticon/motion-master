@@ -620,6 +620,12 @@ export interface ProcedureRequest {
    * @example 7
    */
   value?: number;
+  /**
+   * `restore-default-parameters` only: which group of defaults to restore — all (0x1011:01), communication (0x1011:02), application (0x1011:03), or manufacturer (0x1011:04).
+   * @default "all"
+   * @example "all"
+   */
+  group?: "all" | "communication" | "application" | "manufacturer";
   [key: string]: any;
 }
 

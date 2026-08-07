@@ -97,13 +97,13 @@ std::expected<void, std::string> Device::writeSdo(uint16_t index, uint8_t subind
   return driver_.writeSdo(slavePosition_, index, subindex, data);
 }
 
-std::expected<std::vector<uint8_t>, std::string> Device::readFile(
+std::expected<std::vector<uint8_t>, mm::comm::FoeError> Device::readFile(
     const std::string& filename) const {
   return driver_.readFile(slavePosition_, filename);
 }
 
-std::expected<void, std::string> Device::writeFile(const std::string& filename,
-                                                   std::span<const uint8_t> data) const {
+std::expected<void, mm::comm::FoeError> Device::writeFile(const std::string& filename,
+                                                          std::span<const uint8_t> data) const {
   return driver_.writeFile(slavePosition_, filename, data);
 }
 

@@ -67,11 +67,12 @@ class CountingFakeDriver : public FieldbusDriver {
       const std::vector<uint16_t>& positions) override {
     return std::vector<SlaveStateRaw>(positions.size(), SlaveStateRaw{});
   }
-  std::expected<std::vector<uint8_t>, std::string> readFile(uint16_t, const std::string&) override {
+  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
+                                                                   const std::string&) override {
     return std::vector<uint8_t>{};
   }
-  std::expected<void, std::string> writeFile(uint16_t, const std::string&,
-                                             std::span<const uint8_t>) override {
+  std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string&,
+                                                    std::span<const uint8_t>) override {
     return {};
   }
   std::expected<void, std::string> readRegister(uint16_t, uint16_t, std::span<uint8_t>) override {
@@ -423,6 +424,104 @@ TEST(ProcedureManagerDestruction, CancelsAndJoinsRunningProcedures) {
   }
 
   EXPECT_TRUE(observedStop.load()) << "the destructor must request cancellation before joining";
+}
+
+// ── The second body shape ──────────────────────────────────────────────────────────────────────
+
+// The whole reason BusProcedureBody exists. transitionToState takes the bus lock exclusively, and a
+// borrowing body already holds it shared with no way to upgrade — so the same call from a
+// ProcedureBody would deadlock the run against itself and this test would hang rather than fail.
+// What the transition *returns* is beside the point (the fake driver reports no meaningful AL
+// state); that the call returns at all is the property under test.
+TEST(ProcedureManagerBusBody, CanChangeAlStateWithoutDeadlocking) {
+  Bus bus;
+  ProcedureManager manager(bus.dm);
+
+  std::atomic<bool> transitioned{false};
+  auto started = manager.start(
+      1, "flash", oneStep(),
+      [&transitioned](DeviceManager& deviceManager, uint16_t position, ProgressReporter& reporter,
+                      std::stop_token) -> std::expected<void, std::string> {
+        reporter.start("work");
+        // Borrow for one step, then let go before changing state — the pattern a firmware install
+        // follows around each FoE write.
+        auto borrowed = deviceManager.withDevice(
+            position, [](Device&) -> std::expected<void, std::string> { return {}; });
+        if (!borrowed) {
+          return std::unexpected(borrowed.error());
+        }
+        auto transition = deviceManager.transitionToState({position}, EtherCatState::Init,
+                                                          std::chrono::milliseconds(50));
+        transitioned.store(true);
+        // Recorded rather than asserted on: the fake driver reports no meaningful AL state, so the
+        // transition may well be refused. Reaching this line at all is the property under test.
+        reporter.succeed("work", transition.has_value() ? "transitioned" : transition.error());
+        return {};
+      });
+  ASSERT_TRUE(started.has_value()) << started.error();
+  EXPECT_EQ(awaitCompletion(manager, 1, "flash"), ProcedureStatus::kSucceeded);
+  EXPECT_TRUE(transitioned.load());
+}
+
+TEST(ProcedureManagerBusBody, ReceivesTheAddressedPosition) {
+  Bus bus;
+  ProcedureManager manager(bus.dm);
+
+  std::atomic<uint16_t> sawPosition{0};
+  ASSERT_TRUE(manager
+                  .start(2, "flash", oneStep(),
+                         [&sawPosition](DeviceManager&, uint16_t position, ProgressReporter&,
+                                        std::stop_token) -> std::expected<void, std::string> {
+                           sawPosition.store(position);
+                           return {};
+                         })
+                  .has_value());
+  EXPECT_EQ(awaitCompletion(manager, 2, "flash"), ProcedureStatus::kSucceeded);
+  EXPECT_EQ(sawPosition.load(), 2);
+}
+
+// A bus body holds no lock between steps, so unlike every borrowing procedure a scan() *can* land
+// while it runs. The retained entry must survive that: dropping it would release the last reference
+// the map holds to a Run whose jthread the running thread is executing on, and the thread would
+// then destroy and join itself on the way out. It is collected on a later sweep instead.
+TEST(ProcedureManagerBusBody, SurvivesARescanWhileRunningAndIsCollectedAfterwards) {
+  Bus bus;
+  Gate gate;
+  ProcedureManager manager(bus.dm);
+
+  std::atomic<bool> finished{false};
+  ASSERT_TRUE(manager
+                  .start(1, "flash", oneStep(),
+                         [&](DeviceManager&, uint16_t, ProgressReporter&,
+                             std::stop_token stop) -> std::expected<void, std::string> {
+                           gate.markEntered();
+                           gate.waitUntilOpen(stop);
+                           finished.store(true);
+                           return {};
+                         })
+                  .has_value());
+  gate.waitUntilEntered();
+
+  ASSERT_TRUE(bus.dm.scan().has_value());
+  EXPECT_TRUE(manager.snapshot(1, "flash").has_value())
+      << "a running run must not be discarded by the rescan that overtakes it";
+
+  gate.open();
+  for (int attempt = 0; attempt < 2000 && !finished.load(); ++attempt) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ASSERT_TRUE(finished.load());
+
+  // Now that it has ended, a later sweep collects it: its result belongs to a device set that no
+  // longer exists, which is exactly what the discard rule is for.
+  for (int attempt = 0; attempt < 2000; ++attempt) {
+    if (!manager.snapshot(1, "flash").has_value()) {
+      SUCCEED();
+      return;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  ADD_FAILURE() << "the stale run was never collected";
 }
 
 }  // namespace

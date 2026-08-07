@@ -6,6 +6,10 @@
     "cli11",
     "curl",
     "gtest",
+    {
+      "name": "libzip",
+      "default-features": false
+    },
     "neargye-semver",
     "nlohmann-json",
     "openssl",

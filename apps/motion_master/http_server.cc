@@ -39,6 +39,7 @@
 #include "node/cia402_drive.h"
 #include "node/device_manager.h"
 #include "node/device_parameter.h"
+#include "node/firmware_package.h"
 #include "node/monitoring_manager.h"
 #include "node/pdo_mapping.h"
 #include "node/procedure_catalogue.h"
@@ -832,6 +833,32 @@ void HttpServer::run() {
                 sendJson(res, config_.corsOrigin, nlohmann::json(*parsed));
               });
             })
+      .get("/api/firmware-package-name",
+           [this](auto* res, auto* req) {
+             // Bus-independent utility alongside /api/sii/parse and /api/esi/parse: decode a
+             // SOMANET firmware package filename into its five fields (Hardware description
+             // specification §3.4.2) and, where the descriptor is the numeric kind, its product id,
+             // version, key and fieldbus. A GET with a query rather than a POST with a body —
+             // unlike its two siblings there is no file to upload, only a short string, so this is
+             // a plain cacheable read that is trivial to curl.
+             //
+             // The same decoder the firmware installation procedure uses to decide whether a
+             // package can be cached, so what this reports is what that will do.
+             const std::string filename{req->getQuery("filename")};
+             if (filename.empty()) {
+               sendError(res, "400 Bad Request", config_.corsOrigin,
+                         "a 'filename' query parameter is required");
+               return;
+             }
+             auto name = mm::node::parseFirmwarePackageName(filename);
+             if (!name) {
+               // The grammar it missed, not a bare rejection: this is a tool whose whole job is to
+               // say what a name means, so "why not" is the useful half of a negative answer.
+               sendError(res, "400 Bad Request", config_.corsOrigin, name.error());
+               return;
+             }
+             sendJson(res, config_.corsOrigin, nlohmann::json(*name));
+           })
       .post("/api/esi/parse",
             [this](auto* res, auto* req) {
               // Bus-independent utility, the ESI counterpart of /api/sii/parse: decode a vendor's
@@ -1595,7 +1622,8 @@ void HttpServer::run() {
              const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
                  std::chrono::steady_clock::now() - t0);
              if (!r) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error(), wireUs);
+               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error().message,
+                         wireUs);
                return;
              }
              setWireTime(res, wireUs);
@@ -1635,7 +1663,8 @@ void HttpServer::run() {
                const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
                    std::chrono::steady_clock::now() - t0);
                if (!r) {
-                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error(), wireUs);
+                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error().message,
+                           wireUs);
                  return;
                }
                setWireTime(res, wireUs);

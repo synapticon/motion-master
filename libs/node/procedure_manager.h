@@ -36,6 +36,31 @@ namespace mm::node {
 using ProcedureBody =
     std::function<std::expected<void, std::string>(Device&, ProgressReporter&, std::stop_token)>;
 
+/// @brief The other body shape: a procedure that must change the device's AL state, and so cannot
+///        be handed a borrowed device at all.
+///
+/// A @c ProcedureBody runs inside @c DeviceManager::withDevice, which holds the bus lock **shared**
+/// for the run's whole duration. @c transitionToState needs it **exclusively**, and
+/// @c std::shared_mutex has no upgrade — so a borrowing body that tried to change state would
+/// deadlock against itself. That is harmless for the SDO and mailbox procedures (they never change
+/// state) and fatal for firmware installation, which *is* its state transitions: BOOT, write the
+/// files, back to PRE-OP.
+///
+/// So this body is spawned holding **nothing**. It is handed the manager and a position and borrows
+/// per *step* — a @c withDevice around each transfer — transitioning in between, when it holds no
+/// lock. Everything else is identical: same thread, same busy token, same snapshot, same
+/// cancellation.
+///
+/// Two consequences the body must live with, both following from holding nothing:
+///   - **A rescan can interleave.** The next borrow then fails with "device not found" and the run
+///     ends cleanly, which is the right outcome — but it means a body must re-resolve per step and
+///     never cache a @c Device&.
+///   - **Nothing blocks a concurrent @c scan().** The busy token cannot prevent one without
+///     @c DeviceManager consulting this class, which would cost it its profile-ignorance. Flashing
+///     fails safely if it happens, so this is an accepted trade rather than an oversight.
+using BusProcedureBody = std::function<std::expected<void, std::string>(
+    DeviceManager&, uint16_t devicePosition, ProgressReporter&, std::stop_token)>;
+
 /// @brief Why a procedure operation could not be performed. A caller must branch on this — an HTTP
 ///        handler maps each kind to a different status — which is what earns a structured error
 ///        here rather than the usual @c std::string (see CLAUDE.md's no-exceptions mandate, and
@@ -95,9 +120,11 @@ inline std::ostream& operator<<(std::ostream& os, const ProcedureError& e) {
 /// @c scan / @c reset, and a retained measurement rendered against a *different* physical drive is
 /// worse than no measurement at all. The rebuild is noticed by watching
 /// @c DeviceManager::topologyGeneration rather than by being told, which is what keeps
-/// @c DeviceManager unaware that procedures exist. This is safe to do lazily because a rescan
-/// **cannot overlap a running procedure**: the body runs inside @c withDevice, which holds the bus
-/// lock shared for its whole duration, and @c scan needs it exclusively.
+/// @c DeviceManager unaware that procedures exist. A rescan cannot overlap a *borrowing* run (the
+/// body holds the bus lock shared for its whole duration and @c scan needs it exclusively) but it
+/// can overlap a @c BusProcedureBody, which holds nothing between steps — so the sweep leaves a
+/// still-running entry alone and collects it later. See @c discardIfRescanned, where that is a
+/// correctness requirement rather than a nicety.
 ///
 /// Thread-safe; @c start, @c snapshot and @c cancel may be called from any non-RT thread.
 class ProcedureManager {
@@ -126,6 +153,16 @@ class ProcedureManager {
   std::expected<void, ProcedureError> start(uint16_t devicePosition, std::string name,
                                             std::vector<ProgressStep> steps, ProcedureBody body);
 
+  /// @brief Starts @p name on @p devicePosition with a body that borrows per step instead of for
+  ///        the whole run — the shape a procedure needs in order to change AL state.
+  ///
+  /// Identical to the overload above in every respect a caller can observe (busy token, snapshot,
+  /// @c runCount, cancellation, the unknown-device check); the only difference is that nothing is
+  /// borrowed before the body is entered, so the body may call @c transitionToState. See
+  /// @c BusProcedureBody for why that distinction has to exist at all.
+  std::expected<void, ProcedureError> start(uint16_t devicePosition, std::string name,
+                                            std::vector<ProgressStep> steps, BusProcedureBody body);
+
   /// @brief The current or last-known state of @p name on @p devicePosition.
   ///
   /// @return The snapshot, or @c std::nullopt if that procedure has never run on that device since
@@ -153,6 +190,9 @@ class ProcedureManager {
     std::shared_ptr<ProgressReporter> reporter;  ///< Set once at start; never reassigned.
     uint32_t runCount = 0;                       ///< Set once at start, under the manager's mutex.
     int64_t startedAt = 0;                       ///< Set once at start, under the manager's mutex.
+    /// The device-set generation this run was started against. A retained snapshot is meaningless
+    /// once the set has been rebuilt (positions may remap), so this is what marks it collectable.
+    uint64_t topologyGeneration = 0;
     std::atomic<ProcedureStatus> status{ProcedureStatus::kRunning};
     std::atomic<int64_t> finishedAt{0};  ///< Epoch ms; 0 while running.
     std::atomic<bool> running{true};     ///< Cleared last, once the outcome is recorded.
@@ -187,16 +227,34 @@ class ProcedureManager {
 
   using Key = std::pair<uint16_t, std::string>;
 
-  /// Drops every retained snapshot if the device set has been rebuilt since the last check.
+  /// A run's work with its borrowing already folded in, so the thread body is identical for both
+  /// public @c start overloads and only the wrapper differs.
+  using ResolvedWork =
+      std::function<std::expected<void, std::string>(ProgressReporter&, std::stop_token)>;
+
+  /// The shared half of both @c start overloads: the busy check, the unknown-device check, the run
+  /// bookkeeping and the thread. The manager's mutex must NOT be held.
+  std::expected<void, ProcedureError> startRun(uint16_t devicePosition, std::string name,
+                                               std::vector<ProgressStep> steps, ResolvedWork work);
+
+  /// Drops every retained snapshot belonging to a superseded device set.
   /// The manager's mutex must be held. Const, and the state it clears is mutable, because this is
   /// lazy invalidation of results that a rescan already made meaningless — a poll has to honour it
   /// just as a start does, or a client reading after a rescan would be handed another drive's
   /// measurement.
+  ///
+  /// **A still-running run is never dropped**, and that is a correctness requirement rather than a
+  /// courtesy. A running thread holds a @c shared_ptr to its own @c Run, which owns the
+  /// @c std::jthread it is executing on; if the map released the last *other* reference, the thread
+  /// would destroy its own jthread as it exited and self-join. A @c BusProcedureBody makes this
+  /// reachable — it holds no bus lock between steps, so a @c scan() can land mid-run, which a
+  /// borrowing body cannot allow. Such a run is collected by a later pass instead, which is why the
+  /// sweep runs on every call and compares each run's own generation rather than firing once on a
+  /// change.
   void discardIfRescanned() const;
 
   DeviceManager& deviceManager_;
-  mutable std::mutex mutex_;                          ///< Guards runs_ and topologyGeneration_.
-  mutable uint64_t topologyGeneration_ = 0;           ///< Last observed device-set generation.
+  mutable std::mutex mutex_;                          ///< Guards runs_.
   mutable std::map<Key, std::shared_ptr<Run>> runs_;  ///< Latest run per (device, procedure).
 };
 

@@ -7,6 +7,7 @@ add_executable(
   device_parameter_test.cc
   device_test.cc
   device_manager_test.cc
+  firmware_package_test.cc
   monitoring_test.cc
   monitoring_manager_test.cc
   parameter_cache_test.cc
@@ -23,6 +24,11 @@ add_executable(
   somanet_procedures_test.cc)
 
 target_link_libraries(mm_node_tests PRIVATE mm::node GTest::gtest GTest::gtest_main)
+
+# The firmware package fixtures are read from the source tree rather than copied into the build
+# directory, matching how mm_etg_tests reaches its ESI fixture.
+target_compile_definitions(mm_node_tests
+                           PRIVATE MM_NODE_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 
 # GCC 12–14 emit false-positive -Warray-bounds / -Wstringop-overflow inside libstdc++
 # <bits/stl_algobase.h> when test code is inlined at -O3 (release builds). Suppress for GCC on these

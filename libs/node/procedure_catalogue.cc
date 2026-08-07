@@ -548,6 +548,55 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor firmware;
+  firmware.name = std::string(kFirmwareInstallationProcedure);
+  firmware.title = "Firmware installation";
+  firmware.description =
+      "Installs a SOMANET firmware package. The device is taken to BOOT, where its bootloader "
+      "accepts the package's application and communication binaries over FoE and its SII image "
+      "into the EEPROM, and is then returned to the state you choose. PRE-OP is the default and is "
+      "the confirmation that it worked: the bootloader hands over to the newly written firmware on "
+      "that transition, so reaching PRE-OP means the new firmware booted and answered. The "
+      "descriptive extras a package carries — the ESI and the stack image — are skipped by default "
+      "and can be un-skipped by editing the list.";
+  firmware.caveats = {
+      "The device stops exchanging process data for the whole installation, so anything it was "
+      "driving is uncontrolled from the moment it leaves OP. Other devices on the bus keep "
+      "running, but the bus is briefly re-mapped when this one rejoins.",
+      "Cancelling does not undo anything, and between two files it leaves the device part-flashed. "
+      "A transfer already under way finishes regardless — cancellation is noticed between files.",
+      "If the package writes an SII, that part does need a power cycle: the ESC reads its EEPROM "
+      "at reset, unlike the firmware, which loads on the transition out of BOOT.",
+      "Choose BOOT as the final state when no application will be present — after erasing one, or "
+      "between two installs — because a PRE-OP transition then has nothing to hand over to and the "
+      "drive answers AL status 0x0014, \"No valid firmware\".",
+      "Nothing here checks that the package matches the device. A package built for other hardware "
+      "is written as readily as the right one.",
+  };
+  firmware.movesMotor = false;
+  firmware.requiresEnabled = false;
+  firmware.parameters = firmwareInstallationParameters();
+  firmware.steps = firmwareInstallationSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(firmware),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureWork, std::string> {
+        auto spec = parseFirmwareInstallationRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        // The only BusProcedureBody in the table: this one changes AL state, so it is handed the
+        // manager and borrows per step rather than being given a device for the whole run.
+        return BusProcedureBody{
+            [spec = std::move(*spec)](DeviceManager& deviceManager, uint16_t devicePosition,
+                                      ProgressReporter& reporter, std::stop_token stop) {
+              return runFirmwareInstallationProcedure(deviceManager, devicePosition, reporter,
+                                                      std::move(stop), spec);
+            }};
+      },
+  });
+
   return entries;
 }
 
@@ -658,9 +707,15 @@ std::expected<ProcedureSnapshot, ProcedureError> startProcedure(DeviceManager& d
         ProcedureError{.kind = ProcedureError::Kind::kInvalidRequest, .message = body.error()});
   }
   const auto& descriptor = (*entry)->descriptor;
-  if (auto started = procedureManager.start(devicePosition, descriptor.name, descriptor.steps,
-                                            std::move(*body));
-      !started) {
+  // One visit picks the ProcedureManager::start overload matching the shape the entry produced.
+  // The two body types differ in arity, so neither converts to the other and the overload is exact.
+  auto started = std::visit(
+      [&](auto&& work) {
+        return procedureManager.start(devicePosition, descriptor.name, descriptor.steps,
+                                      std::forward<decltype(work)>(work));
+      },
+      std::move(*body));
+  if (!started) {
     return std::unexpected(started.error());
   }
   return snapshotOrIdle(procedureManager, devicePosition, descriptor);

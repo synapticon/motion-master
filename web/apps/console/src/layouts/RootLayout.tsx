@@ -497,6 +497,7 @@ export default function RootLayout() {
             <SidebarGroup label="Tools" defaultOpen={false}>
               <NavItem to="/tools/esi" label="ESI" />
               <NavItem to="/tools/sii" label="SII" />
+              <NavItem to="/tools/utilities" label="Utilities" />
             </SidebarGroup>
           )}
 

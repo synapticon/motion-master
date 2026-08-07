@@ -13,6 +13,8 @@
 #include <string_view>
 #include <vector>
 
+#include "comm/foe_error.h"
+
 namespace mm::comm {
 
 /// @brief Maximum size in bytes of the combined process-data image (all outputs + all inputs).
@@ -664,9 +666,12 @@ class FieldbusDriver {
   ///
   /// @param slavePosition  1-based slave position on the bus.
   /// @param filename       FoE filename as recognised by the slave firmware.
-  /// @return File bytes on success, or an error string if the transfer fails.
-  virtual std::expected<std::vector<uint8_t>, std::string> readFile(
-      uint16_t slavePosition, const std::string& filename) = 0;
+  /// @return File bytes on success, or a @c FoeError. This is the one driver operation whose error
+  ///         is structured rather than a plain string, because callers branch on it — see
+  ///         @c comm/foe_error.h. It still streams and carries @c .message, so a caller that only
+  ///         forwards the failure reads unchanged.
+  virtual std::expected<std::vector<uint8_t>, FoeError> readFile(uint16_t slavePosition,
+                                                                 const std::string& filename) = 0;
 
   /// @brief Writes a file to the slave via File over EtherCAT (FoE).
   ///
@@ -679,10 +684,10 @@ class FieldbusDriver {
   /// @param slavePosition  1-based slave position on the bus.
   /// @param filename       FoE filename as recognised by the slave firmware.
   /// @param data           File bytes to write.
-  /// @return Void on success, or an error string if the transfer fails.
-  virtual std::expected<void, std::string> writeFile(uint16_t slavePosition,
-                                                     const std::string& filename,
-                                                     std::span<const uint8_t> data) = 0;
+  /// @return Void on success, or a @c FoeError (see @c readFile on why this one is structured).
+  virtual std::expected<void, FoeError> writeFile(uint16_t slavePosition,
+                                                  const std::string& filename,
+                                                  std::span<const uint8_t> data) = 0;
 
   /// @brief Reads bytes from an ESC register via a Configured-Address Read (FPRD) datagram.
   ///

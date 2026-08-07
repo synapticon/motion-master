@@ -173,16 +173,20 @@ class Device {
   /// @brief Reads a file from this device via File over EtherCAT (FoE).
   ///
   /// @param filename  FoE filename as recognised by the slave firmware.
-  /// @return File bytes on success, or an error string if the transfer fails.
-  std::expected<std::vector<uint8_t>, std::string> readFile(const std::string& filename) const;
+  /// @return File bytes on success, or a @c mm::comm::FoeError — the one structured error on this
+  ///         class, because FoE callers branch on the failure (retry a transient one, treat a
+  ///         missing file as nothing to do). It keeps a string face, so a caller that only forwards
+  ///         the reason uses @c .error().message and is otherwise unaffected.
+  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
+      const std::string& filename) const;
 
   /// @brief Writes a file to this device via File over EtherCAT (FoE).
   ///
   /// @param filename  FoE filename as recognised by the slave firmware.
   /// @param data      File bytes to write.
-  /// @return Void on success, or an error string if the transfer fails.
-  std::expected<void, std::string> writeFile(const std::string& filename,
-                                             std::span<const uint8_t> data) const;
+  /// @return Void on success, or a @c mm::comm::FoeError (see @c readFile).
+  std::expected<void, mm::comm::FoeError> writeFile(const std::string& filename,
+                                                    std::span<const uint8_t> data) const;
 
   /// @brief Reads bytes from an ESC register on this device.
   ///

@@ -190,6 +190,39 @@ ProcedureParameter byteArrayParameter(std::string name, std::string title, std::
   return parameter;
 }
 
+ProcedureParameter stringParameter(std::string name, std::string title, std::string description,
+                                   nlohmann::json defaultValue) {
+  ProcedureParameter parameter;
+  parameter.name = std::move(name);
+  parameter.title = std::move(title);
+  parameter.description = std::move(description);
+  parameter.type = ParameterType::kString;
+  parameter.defaultValue = std::move(defaultValue);
+  return parameter;
+}
+
+ProcedureParameter stringArrayParameter(std::string name, std::string title,
+                                        std::string description, nlohmann::json defaultValue) {
+  ProcedureParameter parameter;
+  parameter.name = std::move(name);
+  parameter.title = std::move(title);
+  parameter.description = std::move(description);
+  parameter.type = ParameterType::kStringArray;
+  parameter.defaultValue = std::move(defaultValue);
+  return parameter;
+}
+
+ProcedureParameter fileParameter(std::string name, std::string title, std::string description,
+                                 nlohmann::json defaultValue) {
+  ProcedureParameter parameter;
+  parameter.name = std::move(name);
+  parameter.title = std::move(title);
+  parameter.description = std::move(description);
+  parameter.type = ParameterType::kFile;
+  parameter.defaultValue = std::move(defaultValue);
+  return parameter;
+}
+
 void to_json(nlohmann::json& j, const ProcedureDescriptor& descriptor) {
   // The template is emitted as bare step ids, not as ProgressSteps: every entry would carry
   // status "idle" and no value, which says nothing a client can use. Live per-step status belongs

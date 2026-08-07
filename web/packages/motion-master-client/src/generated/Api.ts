@@ -20,6 +20,7 @@ import {
   DeviceParameter,
   EscRegister,
   EsiParseResult,
+  FirmwarePackageName,
   FoeErrorCode,
   GameLoopHealth,
   HrdRecording,
@@ -1411,6 +1412,30 @@ export class Api<
       path: `/api/sii/parse`,
       method: "POST",
       body: data,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Breaks a firmware package filename into the five fields the SOMANET naming convention defines (Hardware description specification §3.4.2) — `package_<hardware>_<fullFirmwareDescriptor>_<software>_v<version>.zip` — and, where the descriptor is the numeric `<id>-<version>[-<key>[-<fieldbus>]]` kind, decodes it further. The specification allows a descriptor that is not (its own example `Branded-Drive-Elite` carries `MyProduct-v25-key3-ecat`), so those four fields are omitted rather than guessed. Bus-independent, like `/api/sii/parse` and `/api/esi/parse`, but a `GET` with a query because there is no file to upload — only a short string. This is the same decoder firmware installation uses to decide whether a package can be cached, so what it reports is what that will do.
+   *
+   * @name GetFirmwarePackageName
+   * @summary Decode a SOMANET firmware package filename
+   * @request GET:/api/firmware-package-name
+   */
+  getFirmwarePackageName = (
+    query: {
+      /**
+       * The package filename, with no directory part.
+       * @example "package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip"
+       */
+      filename: string;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<FirmwarePackageName, void>({
+      path: `/api/firmware-package-name`,
+      method: "GET",
+      query: query,
       format: "json",
       ...params,
     });

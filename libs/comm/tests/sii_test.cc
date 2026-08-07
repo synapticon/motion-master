@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 #include <vector>
 
 namespace mm::comm {
@@ -164,6 +165,60 @@ TEST(SiiResolveCategoryTest, MapsKnownAndRangeValues) {
   EXPECT_EQ(resolveSiiCategoryType(0x3003), SiiCategoryType::VendorSpecific);
   EXPECT_EQ(resolveSiiCategoryType(0xFFFF), SiiCategoryType::End);
   EXPECT_FALSE(resolveSiiCategoryType(0x0205).has_value());  // Unrecognised fixed value.
+}
+
+// The image a firmware package ships as `somanet_cia402.sii` is byte-identical to this fixture, so
+// the validator is pinned against the same real EEPROM contents the parser is.
+TEST(SiiValidateTest, AcceptsARealImage) {
+  auto result = validateSiiImage(kIntegroSii);
+  EXPECT_TRUE(result.has_value()) << result.error();
+}
+
+TEST(SiiValidateTest, RejectsAnOddLength) {
+  std::vector<uint8_t> image(kIntegroSii.begin(), kIntegroSii.end());
+  image.pop_back();
+  EXPECT_FALSE(validateSiiImage(image));
+}
+
+TEST(SiiValidateTest, RejectsAnImageTooShortToHoldACategory) {
+  // The fixed header alone (0x40 words): well-formed as far as it goes, but there is no first
+  // category header to start the walk from.
+  std::vector<uint8_t> image(kIntegroSii.begin(), kIntegroSii.begin() + 128);
+  EXPECT_FALSE(validateSiiImage(image));
+}
+
+TEST(SiiValidateTest, RejectsACorruptedChecksum) {
+  std::vector<uint8_t> image(kIntegroSii.begin(), kIntegroSii.end());
+  image[14] ^= 0xFF;
+  auto result = validateSiiImage(image);
+  ASSERT_FALSE(result);
+  EXPECT_NE(result.error().find("checksum"), std::string::npos) << result.error();
+}
+
+// A flipped bit anywhere in words 0-6 must be caught even though the checksum byte is untouched —
+// that is the point of the CRC covering the identity fields.
+TEST(SiiValidateTest, RejectsAFlippedHeaderBit) {
+  std::vector<uint8_t> image(kIntegroSii.begin(), kIntegroSii.end());
+  image[2] ^= 0x01;
+  EXPECT_FALSE(validateSiiImage(image));
+}
+
+TEST(SiiValidateTest, RejectsATruncatedCategorySection) {
+  // Drop the trailing end marker: the walk then runs off the end with nothing terminating it.
+  std::vector<uint8_t> image(kIntegroSii.begin(), kIntegroSii.end() - 2);
+  auto result = validateSiiImage(image);
+  ASSERT_FALSE(result);
+  EXPECT_NE(result.error().find("end marker"), std::string::npos) << result.error();
+}
+
+TEST(SiiValidateTest, RejectsACategoryClaimingMoreWordsThanTheImageHolds) {
+  std::vector<uint8_t> image(kIntegroSii.begin(), kIntegroSii.end());
+  // Word 0x41 is the size of the first category (STRINGS); inflate it past the image.
+  image[0x41 * 2] = 0xFF;
+  image[0x41 * 2 + 1] = 0x00;
+  auto result = validateSiiImage(image);
+  ASSERT_FALSE(result);
+  EXPECT_NE(result.error().find("runs past"), std::string::npos) << result.error();
 }
 
 }  // namespace

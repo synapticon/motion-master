@@ -155,12 +155,13 @@ class SdoFakeDriver : public FieldbusDriver {
     return ods;
   }
 
-  std::expected<std::vector<uint8_t>, std::string> readFile(uint16_t, const std::string&) override {
+  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
+                                                                   const std::string&) override {
     return std::vector<uint8_t>{};
   }
 
-  std::expected<void, std::string> writeFile(uint16_t, const std::string&,
-                                             std::span<const uint8_t>) override {
+  std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string&,
+                                                    std::span<const uint8_t>) override {
     return {};
   }
 

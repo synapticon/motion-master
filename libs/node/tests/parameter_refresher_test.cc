@@ -111,11 +111,12 @@ class FakeDriver : public FieldbusDriver {
                                             std::span<const uint8_t>) override {
     return {};
   }
-  std::expected<std::vector<uint8_t>, std::string> readFile(uint16_t, const std::string&) override {
+  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
+                                                                   const std::string&) override {
     return std::vector<uint8_t>{};
   }
-  std::expected<void, std::string> writeFile(uint16_t, const std::string&,
-                                             std::span<const uint8_t>) override {
+  std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string&,
+                                                    std::span<const uint8_t>) override {
     return {};
   }
   std::expected<void, std::string> readRegister(uint16_t, uint16_t, std::span<uint8_t>) override {

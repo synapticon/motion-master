@@ -22,6 +22,7 @@ import MetaObjectDataTypesPage from './pages/MetaObjectDataTypesPage'
 import MetaSdoAbortCodesPage from './pages/MetaSdoAbortCodesPage'
 import ToolsEsiPage from './pages/ToolsEsiPage'
 import ToolsSiiPage from './pages/ToolsSiiPage'
+import ToolsUtilitiesPage from './pages/ToolsUtilitiesPage'
 import StorageUserCachePage from './pages/StorageUserCachePage'
 import DeviceEthercatStatePage from './pages/DeviceEthercatStatePage'
 import DeviceObjectDictionaryPage from './pages/DeviceObjectDictionaryPage'
@@ -74,6 +75,7 @@ export default function App() {
         <Route path="tools">
           <Route path="esi" element={<ToolsEsiPage />} />
           <Route path="sii" element={<ToolsSiiPage />} />
+          <Route path="utilities" element={<ToolsUtilitiesPage />} />
         </Route>
         <Route path="devices/:deviceId">
           <Route path="ethercat-state" element={<DeviceEthercatStatePage />} />

@@ -89,11 +89,12 @@ class IdentityFakeDriver : public FieldbusDriver {
       const std::vector<uint16_t>& positions) override {
     return std::vector<SlaveStateRaw>(positions.size(), SlaveStateRaw{});
   }
-  std::expected<std::vector<uint8_t>, std::string> readFile(uint16_t, const std::string&) override {
+  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
+                                                                   const std::string&) override {
     return std::vector<uint8_t>{};
   }
-  std::expected<void, std::string> writeFile(uint16_t, const std::string&,
-                                             std::span<const uint8_t>) override {
+  std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string&,
+                                                    std::span<const uint8_t>) override {
     return {};
   }
   std::expected<void, std::string> readRegister(uint16_t, uint16_t, std::span<uint8_t>) override {
@@ -271,16 +272,17 @@ class OsCommandFakeDriver : public FieldbusDriver {
   // firmware serves like any other file and which a test therefore programs like any other.
   std::map<std::string, std::vector<uint8_t>> files;
 
-  std::expected<std::vector<uint8_t>, std::string> readFile(uint16_t,
-                                                            const std::string& name) override {
+  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
+      uint16_t, const std::string& name) override {
     auto it = files.find(name);
     if (it == files.end()) {
-      return std::unexpected(std::format("FoE read of '{}' failed: file not found", name));
+      return std::unexpected(
+          mm::comm::makeFoeError(mm::comm::FoeErrorKind::FileNotFound, "FOEread", 1, name));
     }
     return it->second;
   }
-  std::expected<void, std::string> writeFile(uint16_t, const std::string&,
-                                             std::span<const uint8_t>) override {
+  std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string&,
+                                                    std::span<const uint8_t>) override {
     return {};
   }
   std::expected<void, std::string> readRegister(uint16_t, uint16_t, std::span<uint8_t>) override {

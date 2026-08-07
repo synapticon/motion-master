@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <format>
 #include <string>
 #include <utility>
 #include <vector>
@@ -283,6 +284,72 @@ std::expected<SlaveInformationInterface, std::string> parseSii(std::span<const u
   }
 
   return sii;
+}
+
+std::expected<void, std::string> validateSiiImage(std::span<const uint8_t> buffer) {
+  // The checksum byte lives at offset 14, covering the 14 bytes before it; the category section
+  // starts at word 0x40, so an image must hold at least that word's header to be walkable.
+  constexpr size_t kChecksumOffset = 14;
+  constexpr size_t kCategoryStartWord = 0x40;
+  constexpr size_t kMinWords = kCategoryStartWord + 1;
+  constexpr uint16_t kEndMarker = 0xFFFF;
+
+  if (buffer.size() % 2 != 0) {
+    return std::unexpected(std::string("SII image has an odd length (") +
+                           std::to_string(buffer.size()) +
+                           " bytes) — the EEPROM is addressed in 16-bit words");
+  }
+  const size_t words = buffer.size() / 2;
+  if (words < kMinWords) {
+    return std::unexpected(std::string("SII image too small: ") + std::to_string(words) +
+                           " words (need at least " + std::to_string(kMinWords) +
+                           " for the fixed header and the first category)");
+  }
+
+  // ETG CRC-8: polynomial x^8 + x^2 + x + 1, initial value 0xFF, no final XOR.
+  uint8_t crc = 0xFF;
+  for (size_t i = 0; i < kChecksumOffset; ++i) {
+    crc ^= buffer[i];
+    for (int bit = 0; bit < 8; ++bit) {
+      crc = static_cast<uint8_t>((crc & 0x80) != 0 ? (crc << 1) ^ 0x07 : crc << 1);
+    }
+  }
+  if (crc != buffer[kChecksumOffset]) {
+    return std::unexpected(std::string("SII checksum mismatch: the image carries 0x") +
+                           std::format("{:02X}", buffer[kChecksumOffset]) +
+                           " but words 0-6 hash to 0x" + std::format("{:02X}", crc));
+  }
+
+  // Walk the category chain. Each entry is a type word, a size word (in words), then that many
+  // payload words. Every step is bounds-checked against the image, so a size field inflated by
+  // corruption is caught here rather than read past the end.
+  for (size_t word = kCategoryStartWord;;) {
+    if (word >= words) {
+      return std::unexpected(
+          "SII category chain runs past the end of the image without an end marker");
+    }
+    const uint16_t type = static_cast<uint16_t>(buffer[word * 2] | (buffer[word * 2 + 1] << 8));
+    if (type == kEndMarker) {
+      return {};
+    }
+    // Only a real category has a size word; the end marker above is a lone word, and on a
+    // well-formed image it is routinely the very last one (it is in the Circulo fixture), so
+    // demanding a size word before checking for the marker would reject a valid image.
+    if (word + 1 >= words) {
+      return std::unexpected(std::string("SII category at word 0x") + std::format("{:04X}", word) +
+                             " has no size word — the image ends mid-header");
+    }
+    const size_t sizeWord = word + 1;
+    const uint16_t size =
+        static_cast<uint16_t>(buffer[sizeWord * 2] | (buffer[sizeWord * 2 + 1] << 8));
+    const size_t next = word + 2 + size;
+    if (next <= word || next > words) {
+      return std::unexpected(std::string("SII category at word 0x") + std::format("{:04X}", word) +
+                             " declares " + std::to_string(size) + " words, which runs past the " +
+                             std::to_string(words) + "-word image");
+    }
+    word = next;
+  }
 }
 
 void to_json(nlohmann::json& j, const SiiInfo& v) {

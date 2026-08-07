@@ -39,24 +39,52 @@ ProcedureManager::~ProcedureManager() {
 
 void ProcedureManager::discardIfRescanned() const {
   const uint64_t generation = deviceManager_.topologyGeneration();
-  if (generation == topologyGeneration_) {
-    return;
+  const size_t before = runs_.size();
+  // Sweep on every call, keyed on each run's own generation, rather than firing once when the
+  // generation changes: a run that was still going at the moment of the rescan must be left alone
+  // (see the header — dropping it would have its thread self-join), so the collection of that entry
+  // has to be able to happen on a later pass.
+  std::erase_if(runs_, [generation](const auto& entry) {
+    return entry.second->topologyGeneration != generation && !entry.second->running.load();
+  });
+  if (runs_.size() != before) {
+    spdlog::debug("Device set rebuilt; discarded {} retained procedure snapshot(s)",
+                  before - runs_.size());
   }
-  topologyGeneration_ = generation;
-  if (runs_.empty()) {
-    return;
-  }
-  // Every retained run is finished: a body executes inside withDevice, which holds the bus lock
-  // shared, and the scan that bumped the generation needed it exclusively — so it cannot have
-  // overlapped one. Clearing therefore joins only threads that have already returned.
-  spdlog::debug("Device set rebuilt; discarding {} retained procedure snapshot(s)", runs_.size());
-  runs_.clear();
 }
 
 std::expected<void, ProcedureError> ProcedureManager::start(uint16_t devicePosition,
                                                             std::string name,
                                                             std::vector<ProgressStep> steps,
                                                             ProcedureBody body) {
+  // Borrowed for the run's whole duration: the body is handed a Device& that stays valid
+  // throughout, at the cost of holding the bus lock shared and so being unable to change AL state.
+  return startRun(devicePosition, std::move(name), std::move(steps),
+                  [this, devicePosition, body = std::move(body)](ProgressReporter& reporter,
+                                                                 std::stop_token stop) {
+                    return deviceManager_.withDevice(devicePosition, [&](Device& device) {
+                      return body(device, reporter, stop);
+                    });
+                  });
+}
+
+std::expected<void, ProcedureError> ProcedureManager::start(uint16_t devicePosition,
+                                                            std::string name,
+                                                            std::vector<ProgressStep> steps,
+                                                            BusProcedureBody body) {
+  // Nothing borrowed: the body takes the manager and borrows per step, which is what lets it call
+  // transitionToState in between.
+  return startRun(devicePosition, std::move(name), std::move(steps),
+                  [this, devicePosition, body = std::move(body)](ProgressReporter& reporter,
+                                                                 std::stop_token stop) {
+                    return body(deviceManager_, devicePosition, reporter, stop);
+                  });
+}
+
+std::expected<void, ProcedureError> ProcedureManager::startRun(uint16_t devicePosition,
+                                                               std::string name,
+                                                               std::vector<ProgressStep> steps,
+                                                               ResolvedWork work) {
   const std::lock_guard lock(mutex_);
   discardIfRescanned();
 
@@ -85,33 +113,32 @@ std::expected<void, ProcedureError> ProcedureManager::start(uint16_t devicePosit
   run->reporter = std::make_shared<ProgressReporter>(std::move(steps));
   run->runCount = runCount;
   run->startedAt = nowMs();
+  run->topologyGeneration = deviceManager_.topologyGeneration();
 
   // Replacing the entry drops the previous run, joining its thread — already finished, since the
   // busy check above passed.
   runs_[key] = run;
 
-  run->thread =
-      std::jthread([this, run, devicePosition, body = std::move(body)](std::stop_token stop) {
-        auto result = deviceManager_.withDevice(
-            devicePosition, [&](Device& device) { return body(device, *run->reporter, stop); });
+  run->thread = std::jthread([run, work = std::move(work)](std::stop_token stop) {
+    auto result = work(*run->reporter, stop);
 
-        if (!result) {
-          run->setError(result.error());
-        }
-        run->finishedAt.store(nowMs());
-        if (result) {
-          run->status.store(ProcedureStatus::kSucceeded);
-        } else if (stop.stop_requested()) {
-          // A stop was asked for and the body did not complete: report why it ended, not the error
-          // it ended with — "I stopped it" is the useful distinction, and the failing step still
-          // records whatever the drive last said.
-          run->status.store(ProcedureStatus::kCancelled);
-        } else {
-          run->status.store(ProcedureStatus::kFailed);
-        }
-        // Last, so a poller that sees the run finished also sees its outcome.
-        run->running.store(false);
-      });
+    if (!result) {
+      run->setError(result.error());
+    }
+    run->finishedAt.store(nowMs());
+    if (result) {
+      run->status.store(ProcedureStatus::kSucceeded);
+    } else if (stop.stop_requested()) {
+      // A stop was asked for and the body did not complete: report why it ended, not the error it
+      // ended with — "I stopped it" is the useful distinction, and the failing step still records
+      // whatever the drive last said.
+      run->status.store(ProcedureStatus::kCancelled);
+    } else {
+      run->status.store(ProcedureStatus::kFailed);
+    }
+    // Last, so a poller that sees the run finished also sees its outcome.
+    run->running.store(false);
+  });
 
   return {};
 }

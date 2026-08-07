@@ -1,9 +1,42 @@
+import { useState } from 'react'
 import type { ProcedureParameter } from '@synapticon/motion-master-client'
+import FilePickerButton from './FilePickerButton'
 
 // One shared control height for every interactive control, matching the device pages: this theme's
 // spacing scale is geometric (h-9 = 6rem = 96px!), so the height has to be explicit px.
 const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm w-full bg-white'
+const areaCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white font-mono'
 const labelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display block'
+
+/**
+ * Reads a file as base64, which is how a `file` parameter travels: JSON has no binary type, so the
+ * bytes ride in a string.
+ *
+ * Via a data URL rather than `btoa(String.fromCharCode(...bytes))`, which spreads the whole file
+ * into an argument list and blows the call stack somewhere around a hundred kilobytes — a firmware
+ * package is several times that.
+ */
+function readAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onerror = () => reject(reader.error ?? new Error('could not read the file'))
+    reader.onload = () => {
+      const result = String(reader.result)
+      resolve(result.slice(result.indexOf(',') + 1))
+    }
+    reader.readAsDataURL(file)
+  })
+}
+
+function formatBytes(count: number): string {
+  if (count < 1024) {
+    return `${count} B`
+  }
+  if (count < 1024 * 1024) {
+    return `${(count / 1024).toFixed(0)} KB`
+  }
+  return `${(count / (1024 * 1024)).toFixed(1)} MB`
+}
 
 /**
  * What the fields currently hold. Strings and booleans rather than parsed values, because a
@@ -19,6 +52,11 @@ export function initialParameterValues(parameters: ProcedureParameter[]): Parame
       values[parameter.name] = parameter.defaultValue === true
     } else if (parameter.defaultValue === undefined || parameter.defaultValue === null) {
       values[parameter.name] = ''
+    } else if (parameter.type === 'stringArray') {
+      // One entry per line, which is how the textarea shows it. String(['a','b']) would join with
+      // commas and read as a single entry containing one.
+      const entries = Array.isArray(parameter.defaultValue) ? parameter.defaultValue : []
+      values[parameter.name] = entries.map(String).join('\n')
     } else {
       values[parameter.name] = String(parameter.defaultValue)
     }
@@ -62,6 +100,18 @@ export function parseParameterValues(
       continue
     }
 
+    if (parameter.type === 'stringArray') {
+      // Deliberately ahead of the empty check: for a list, empty is an answer rather than an
+      // absence. "Skip nothing" has to reach the server as [], not as an omitted field that the
+      // server then fills with its own default — which is the opposite of what was asked for.
+      const text = typeof raw === 'string' ? raw : ''
+      body[parameter.name] = text
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+      continue
+    }
+
     const text = typeof raw === 'string' ? raw.trim() : ''
     if (text === '') {
       // Only a required field blocks: an optional one left empty means "use the default", which is
@@ -91,6 +141,13 @@ export function parseParameterValues(
       if (bytes.length === length) {
         body[parameter.name] = bytes
       }
+      continue
+    }
+
+    // Already base64 by the time it is in the field, and free text needs no interpretation, so both
+    // go on the wire as they stand.
+    if (parameter.type === 'file' || parameter.type === 'string') {
+      body[parameter.name] = text
       continue
     }
 
@@ -136,13 +193,40 @@ export default function ProcedureParameters({
   errors,
   disabled,
   onChange,
+  onFilePicked,
 }: {
   parameters: ProcedureParameter[]
   values: ParameterValues
   errors: Record<string, string>
   disabled: boolean
   onChange: (name: string, value: string | boolean) => void
+  /**
+   * Called when a `file` parameter's picker returns, in addition to the base64 reaching `onChange`.
+   * A file parameter carries only bytes, so the name of the file the user chose is otherwise lost —
+   * this is how a page that has somewhere to put it gets to keep it.
+   */
+  onFilePicked?: (parameter: ProcedureParameter, file: File) => void
 }) {
+  // What the user picked, for display only — the value that matters is the base64 in `values`, and
+  // "package_….zip, 594 KB" is not derivable from it. Keyed by parameter name.
+  const [picked, setPicked] = useState<Record<string, { name: string; size: number }>>({})
+  const [fileErrors, setFileErrors] = useState<Record<string, string>>({})
+
+  async function pickFile(parameter: ProcedureParameter, file: File) {
+    try {
+      const base64 = await readAsBase64(file)
+      onChange(parameter.name, base64)
+      setPicked(previous => ({ ...previous, [parameter.name]: { name: file.name, size: file.size } }))
+      setFileErrors(previous => ({ ...previous, [parameter.name]: '' }))
+      onFilePicked?.(parameter, file)
+    } catch (error) {
+      setFileErrors(previous => ({
+        ...previous,
+        [parameter.name]: error instanceof Error ? error.message : 'could not read the file',
+      }))
+    }
+  }
+
   if (parameters.length === 0) {
     return null
   }
@@ -176,6 +260,35 @@ export default function ProcedureParameters({
                 />
                 <span className={labelCls}>{parameter.title}</span>
               </label>
+            ) : parameter.type === 'file' ? (
+              <div className="flex items-center gap-3">
+                <FilePickerButton
+                  accept=".zip,application/zip"
+                  disabled={disabled}
+                  className="h-[38px]"
+                  onFile={file => void pickFile(parameter, file)}
+                >
+                  Choose file…
+                </FilePickerButton>
+                {picked[parameter.name] ? (
+                  <span className="text-xs text-grey-700 font-mono truncate">
+                    {picked[parameter.name].name}
+                    <span className="text-grey-400"> · {formatBytes(picked[parameter.name].size)}</span>
+                  </span>
+                ) : (
+                  <span className="text-xs text-grey-400">No file chosen</span>
+                )}
+              </div>
+            ) : parameter.type === 'stringArray' ? (
+              <textarea
+                id={id}
+                className={areaCls}
+                rows={4}
+                spellCheck={false}
+                value={typeof value === 'string' ? value : ''}
+                onChange={e => onChange(parameter.name, e.target.value)}
+                disabled={disabled}
+              />
             ) : parameter.type === 'enum' ? (
               <select
                 id={id}
@@ -235,7 +348,18 @@ export default function ProcedureParameters({
                   </span>
                 </>
               )}
+              {parameter.type === 'stringArray' && (
+                <>
+                  {' '}
+                  <span className="text-grey-400">
+                    One per line. Leave empty for none — an empty list is an answer, not an omission.
+                  </span>
+                </>
+              )}
             </p>
+            {fileErrors[parameter.name] && (
+              <p className="text-status-bad text-xs">{fileErrors[parameter.name]}</p>
+            )}
             {error && <p className="text-status-bad text-xs">{error}</p>}
           </div>
         )

@@ -57,6 +57,8 @@ syntaxError:*/esi_somanet_test.cc
 syntaxError:*/esi_test.cc
 syntaxError:*/esi_unit_test.cc
 syntaxError:*/user_cache_test.cc
+syntaxError:*/base64_test.cc
+syntaxError:*/firmware_package_test.cc
 
 // The ESI parser builds vectors by appending inside a range-for over an XML child range or a
 // parsed collection. cppcheck suggests std::transform/std::copy_if for each; rewriting them would
@@ -112,3 +114,16 @@ variableScope:*/procedure_manager.cc
 // optional<ModeRestorer> constructed inside the poll loop — worse code for a tool artefact.
 unreadVariable:*/somanet_drive.cc
 
+// The firmware installation procedure builds two lists by appending in a loop: the default skip
+// list, and the manifest's array of extra-file names. Same shape as the procedure.cc and
+// somanet_drive.cc entries above — a std::transform over a std::back_inserter, one of them into a
+// nlohmann::json array, is obscure rather than clearer. The loops stay.
+useStlAlgorithm:*/somanet_procedures.cc
+
+// The firmware installation procedure borrows a device per step to perform one FoE transfer or an
+// EEPROM write. Those Device methods are const (they mutate the drive, not the object), so cppcheck
+// suggests a const Device& — but a lambda that flashes firmware announcing itself as taking a
+// const device reads as exactly backwards, and it would differ from every sibling lambda in the
+// file for a reason that is an artefact of where const sits on the wrapper. Same reasoning as the
+// cia402_control.cc and somanet_control.cc entries above.
+constParameterReference:*/somanet_procedures.cc

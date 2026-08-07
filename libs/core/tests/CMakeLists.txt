@@ -2,6 +2,7 @@ find_package(GTest CONFIG REQUIRED)
 
 add_executable(
   mm_core_tests
+  base64_test.cc
   version_test.cc
   util_test.cc
   system_info_test.cc

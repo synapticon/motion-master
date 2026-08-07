@@ -1,8 +1,10 @@
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <stop_token>
@@ -10,8 +12,12 @@
 #include <string_view>
 #include <vector>
 
+#include "comm/fieldbus_driver.h"
 #include "node/device.h"
+#include "node/device_manager.h"
+#include "node/firmware_package.h"
 #include "node/procedure.h"
+#include "node/procedure_manager.h"
 #include "node/somanet_drive.h"
 
 namespace mm::node {
@@ -573,5 +579,125 @@ std::vector<ProgressStep> phaseInductanceMeasurementSteps();
 std::expected<void, std::string> runPhaseInductanceMeasurementProcedure(Device& device,
                                                                         ProgressReporter& reporter,
                                                                         std::stop_token stop);
+
+// ── Firmware installation ──────────────────────────────────────────────────────────────────────
+//
+// The one procedure here written against BusProcedureBody rather than ProcedureBody. Installing
+// firmware *is* a sequence of AL state transitions, and a body holding the bus lock shared for
+// its whole run cannot make them — see BusProcedureBody.
+
+/// @file
+/// @brief Firmware installation, the one procedure that changes AL state.
+///
+/// It is written against @c BusProcedureBody rather than @c ProcedureBody, and that is not a detail
+/// of taste: installing firmware *is* a sequence of state transitions (BOOT, write, back), and a
+/// body holding the bus lock shared for its whole run cannot make them. See @c BusProcedureBody.
+
+/// @brief Procedure name, as it appears in its URL and its snapshot key.
+inline constexpr std::string_view kFirmwareInstallationProcedure = "firmware-installation";
+
+/// @brief Where an install leaves the device, as an AL state.
+///
+/// Deliberately @c mm::comm::EtherCatState rather than a firmware-specific enum, and deliberately
+/// the same integer encoding the rest of the API uses (@c POST @c /api/devices/state, and the
+/// @c alState every state read reports): one concept, one spelling. A parallel vocabulary here
+/// would mean a client holding two ways to say PRE-OP.
+///
+/// **Any AL state is accepted**, and the two worth knowing about are the ends:
+///   - @c PreOp is the default and the one that confirms the install. The SOMANET bootloader hands
+///     over to the newly written application on the transition out of BOOT, so **reaching PRE-OP is
+///     the new firmware booting and answering**. When no valid application is present the drive
+///     reports AL status 0x0014 ("No valid firmware") and falls back to INIT — a precise, decodable
+///     failure rather than a hang.
+///   - @c Boot leaves the device in the bootloader, which is **the right choice when no application
+///     will be present**: after erasing one, or between two installs, a PRE-OP transition has
+///     nothing to hand over to and would report a failure for an operation that succeeded.
+///
+/// SAFE-OP and OP climb through PRE-OP and re-map the whole bus on the way, briefly pausing every
+/// other device. That is a real cost but not a reason to withhold them — the same re-map happens
+/// when a caller reaches those states with @c POST @c /api/devices/state a moment later, so
+/// refusing would only split one operation into two.
+///
+/// The device's state *before* the install is deliberately not restored: it described a device
+/// running the old firmware, and it is a snapshot nothing protects, since the body holds no lock
+/// between steps.
+
+/// @brief One validated firmware installation request.
+///
+/// The package arrives as bytes, however it was named: @c parseFirmwareInstallationRequest resolves
+/// either the inline upload or a previously cached package into @c package, so the body never has
+/// to know which route the caller took.
+struct FirmwareInstallationRequest {
+  std::vector<uint8_t> package;  ///< The package zip's bytes.
+  std::string filename;          ///< As supplied; empty when the caller gave none.
+  /// The decoded filename, present only when @c filename parses as a SOMANET package name. Its
+  /// absence is what makes a package uncacheable — see @c cachePackage.
+  std::optional<FirmwarePackageName> name;
+  std::vector<std::string> skipFiles;  ///< Entries not to write; defaults per the descriptor.
+  bool cachePackage = true;            ///< Keep a copy under @c firmwareCacheDir when named.
+  mm::comm::EtherCatState finalState = mm::comm::EtherCatState::PreOp;
+
+  /// How long to wait after entering BOOT before the first file transfer.
+  ///
+  /// Deliberately **not** advertised on the descriptor: it is a property of how long a SOMANET
+  /// bootloader takes to start servicing file operations, not a choice a user should be asked to
+  /// make, and the default is the figure that works. It is a field rather than a constant so a test
+  /// can set it to zero — waiting two seconds per case would dominate the suite — and so a device
+  /// that needs longer can be accommodated without a new release.
+  std::chrono::milliseconds bootWarmUp{2000};
+};
+
+/// @brief Where installed packages are kept: a @c firmwares subdirectory of the per-user cache.
+///
+/// That places it under the same root @c /api/user-cache serves, so a cached package is listable,
+/// downloadable and deletable through the API and the Console with no endpoint of its own.
+std::filesystem::path firmwareCacheDir();
+
+/// @brief What the procedure accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> firmwareInstallationParameters();
+
+/// @brief The procedure's step template, in order.
+std::vector<ProgressStep> firmwareInstallationSteps();
+
+/// @brief Parses and validates a client's installation request.
+///
+/// Accepts `{"packageContent": "<base64 zip>", "packageFilename": "package_….zip",
+/// "skipFiles": [...], "cachePackage": true, "finalState": "preop"}`. Every field is optional
+/// except that **one of @c packageContent or @c packageFilename must resolve to a package**:
+/// @c packageContent wins when both are given, and a lone @c packageFilename is looked up in
+/// @c firmwareCacheDir, so re-installing a package already on the server costs no upload.
+///
+/// Resolving the bytes here rather than in the body is deliberate: "the package you named is not
+/// cached" is a bad request, answerable immediately, not a run that starts and then fails.
+///
+/// @param body  Parsed request JSON.
+/// @return The validated request, or a message naming what is wrong with it.
+std::expected<FirmwareInstallationRequest, std::string> parseFirmwareInstallationRequest(
+    const nlohmann::json& body);
+
+/// @brief Installs @p request's package on the device at @p devicePosition.
+///
+/// Takes the device to BOOT, writes what the package holds, and leaves it in
+/// @c request.finalState. Borrows the device per step and holds nothing in between, which is what
+/// lets it transition — and which means a rescan can interleave; the next borrow then fails and the
+/// run ends cleanly.
+///
+/// The steps and their failure policy, which is not uniform on purpose:
+///   - @c package, @c cache — offline; a package that will not open fails before anything is
+///     touched on the bus.
+///   - @c boot — fatal. Nothing can be written without it.
+///   - @c extra-files — **best effort**. These are descriptive files (an ESI, a picture); a failure
+///     is recorded in the step's value and the install continues, because aborting a firmware
+///     update over a picture would be worse than not having the picture.
+///   - @c sii, @c app-firmware, @c com-firmware — fatal. These are the firmware.
+///   - @c final-state — fatal, but reported so it cannot be confused with a write failure: the
+///     bytes are on the drive either way, and which of the two happened changes what a user does
+///     next.
+///
+/// Whatever went wrong, the device is not left in BOOT unless that is what was asked for: a failure
+/// after entering BOOT still attempts the final transition on the way out.
+std::expected<void, std::string> runFirmwareInstallationProcedure(
+    DeviceManager& deviceManager, uint16_t devicePosition, ProgressReporter& reporter,
+    std::stop_token stop, const FirmwareInstallationRequest& request);
 
 }  // namespace mm::node

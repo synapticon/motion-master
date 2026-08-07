@@ -5,6 +5,7 @@ add_library(
   device.cc
   device_manager.cc
   device_parameter.cc
+  firmware_package.cc
   monitoring.cc
   monitoring_manager.cc
   parameter_cache.cc
@@ -27,7 +28,11 @@ target_include_directories(node PUBLIC ${CMAKE_SOURCE_DIR}/libs)
 
 find_package(nlohmann_json CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
+find_package(libzip CONFIG REQUIRED)
 
-target_link_libraries(node PUBLIC mm::comm nlohmann_json::nlohmann_json spdlog::spdlog)
+# libzip is an implementation detail of firmware_package.cc — no libzip type appears in a node
+# header — but a static library still propagates the link requirement to whoever links node.
+target_link_libraries(node PUBLIC mm::comm nlohmann_json::nlohmann_json spdlog::spdlog
+                      PRIVATE libzip::zip)
 
 add_subdirectory(tests)

@@ -2304,6 +2304,42 @@ paths:
                 $ref: "#/components/schemas/SlaveInformationInterface"
         "400":
           description: The body is not a valid SII image (e.g. shorter than the 128-byte header)
+  /api/firmware-package-name:
+    get:
+      summary: Decode a SOMANET firmware package filename
+      operationId: getFirmwarePackageName
+      description: >
+        Breaks a firmware package filename into the five fields the SOMANET naming convention
+        defines (Hardware description specification §3.4.2) —
+        `package_<hardware>_<fullFirmwareDescriptor>_<software>_v<version>.zip` — and, where the
+        descriptor is the numeric `<id>-<version>[-<key>[-<fieldbus>]]` kind, decodes it further.
+        The specification allows a descriptor that is not (its own example `Branded-Drive-Elite`
+        carries `MyProduct-v25-key3-ecat`), so those four fields are omitted rather than guessed.
+
+
+        Bus-independent, like `/api/sii/parse` and `/api/esi/parse`, but a `GET` with a query
+        because there is no file to upload — only a short string. This is the same decoder firmware
+        installation uses to decide whether a package can be cached, so what it reports is what that
+        will do.
+      parameters:
+        - name: filename
+          in: query
+          required: true
+          schema:
+            type: string
+          description: The package filename, with no directory part.
+          example: package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip
+      responses:
+        "200":
+          description: The decoded fields
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FirmwarePackageName"
+        "400":
+          description: >
+            No `filename` was given, or it is not a SOMANET firmware package name. The `error`
+            message names the part of the grammar it missed.
   /api/esi/parse:
     post:
       summary: Parse an EtherCAT Slave Information (ESI) file
@@ -3928,8 +3964,11 @@ components:
           description: What it does and what a sensible value is.
         type:
           type: string
-          enum: [integer, boolean, enum, byteArray]
-          description: Which kind of control to render.
+          enum: [integer, boolean, enum, byteArray, string, stringArray, file]
+          description: >
+            Which kind of control to render. `file` carries a whole file as a base64 string, so a
+            client renders a file picker and encodes what it reads; `stringArray` is an editable
+            list of free-text values.
           example: integer
         required:
           type: boolean
@@ -3957,6 +3996,51 @@ components:
           items: { $ref: "#/components/schemas/ParameterOption" }
           description: "`enum` only: the values that may be chosen."
       required: [name, title, description, type, required]
+    FirmwarePackageName:
+      type: object
+      description: >
+        A SOMANET firmware package filename broken into its fields. The four decoded-descriptor
+        properties are absent — not null — when the full firmware descriptor is not the numeric
+        kind, which the naming specification explicitly allows.
+      required: [description, hardwareName, firmwareId, firmwareName, firmwareVersion]
+      properties:
+        description:
+          type: string
+          description: The format description; always `package` for a firmware bundle.
+          example: package
+        hardwareName:
+          type: string
+          description: Human-readable hardware name.
+          example: SOMANET-Circulo-7
+        firmwareId:
+          type: string
+          description: The full firmware descriptor, verbatim.
+          example: 8500-04-2332
+        firmwareName:
+          type: string
+          description: Software name.
+          example: motion-drive
+        firmwareVersion:
+          type: string
+          description: Software version, including the leading `v`.
+          example: v5.6.10
+        productId:
+          type: integer
+          description: Product id from the descriptor.
+          example: 8500
+        productVersion:
+          type: integer
+          description: Product version from the descriptor.
+          example: 4
+        keyId:
+          type: integer
+          description: Firmware encryption key id from the descriptor.
+          example: 2332
+        fieldbusProtocol:
+          type: integer
+          description: >
+            Fieldbus protocol from the descriptor, decoded as hexadecimal. 1 is EtherCAT.
+          example: 1
     ProcedureListing:
       type: object
       description: >
@@ -4071,6 +4155,57 @@ components:
             (0x1011:01), communication (0x1011:02), application (0x1011:03), or manufacturer
             (0x1011:04).
           example: all
+        packageContent:
+          type: string
+          description: >
+            `firmware-installation`: the .zip firmware package, base64-encoded into this JSON
+            string. One of this or a `packageFilename` naming an already-cached package must be
+            present; this wins when both are given. To avoid base64 entirely, `PUT` the raw bytes to
+            `/api/user-cache/firmwares/<name>.zip` first and then send only `packageFilename` — the
+            firmware cache is that directory.
+            (Deliberately not `format: byte`: that is the correct OpenAPI spelling for base64, but
+            generators map it to a binary type — `Blob` in TypeScript — which is not what goes on
+            the wire here and would serialise to `{}`.)
+        packageFilename:
+          type: string
+          description: >
+            `firmware-installation`: the package's filename. Optional — it names the package for
+            caching and identifies a cached one to re-install without uploading it again. A name
+            outside the SOMANET convention still installs, it is just not cached.
+          example: package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip
+        skipFiles:
+          type: array
+          items: { type: string }
+          default: ["SOMANET_CiA_402.xml.zip", "stack_image.svg.zip"]
+          description: >
+            `firmware-installation`: entries inside the package that are not written to the device.
+            An explicit list replaces the defaults wholesale rather than adding to them, so `[]`
+            means "write everything the package holds". Any entry can be named, including the SII
+            and the firmware binaries.
+        cachePackage:
+          type: boolean
+          default: true
+          description: >
+            `firmware-installation`: keep a copy of the package on the server so it can be
+            re-installed without uploading it again. Only possible when a filename is given and it
+            follows the SOMANET package naming convention.
+        finalState:
+          type: integer
+          enum: [1, 2, 3, 4, 8]
+          default: 2
+          description: >
+            `firmware-installation`: where the device is left, as an AL state number — the same
+            ETG.1000.6 encoding `POST /api/devices/state` takes and `alState` reports, so a client
+            holds one way to name a state rather than two. `2` (PRE-OP) is the default and the
+            confirmation that the install worked: the bootloader hands over to the newly written
+            firmware on that transition, so reaching PRE-OP means the new firmware booted. No power
+            cycle is needed for the firmware (an SII written from the package does need one — the
+            ESC reads its EEPROM at reset). Choose `3` (BOOT) when no application will be present,
+            after erasing one or between two installs, since a PRE-OP transition then has nothing to
+            hand over to and the drive answers AL status `0x0014`, "No valid firmware". `4` and `8`
+            climb through PRE-OP and re-map the whole bus on the way, briefly pausing every other
+            device. The state the device was in beforehand is not restored.
+          example: 2
     OutputStageResult:
       type: object
       required: [slavePosition, index, subindex, staged, error]

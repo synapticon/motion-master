@@ -351,6 +351,20 @@ function ProcedureDetail({
           errors={errors}
           disabled={running}
           onChange={(name, value) => setValues(previous => ({ ...previous, [name]: value }))}
+          // The one procedure-specific line on this page, and the honest cost of keeping a file
+          // parameter to bytes alone: the name of the file the user chose would otherwise be
+          // discarded, and for firmware installation that name is what decides whether the package
+          // is cached and what it is cached as. Filling its sibling beats asking someone to retype
+          // a filename their own file picker already knew. Only overwrites an empty field, so a
+          // name typed on purpose survives picking a file.
+          onFilePicked={(parameter, file) => {
+            if (parameter.name !== 'packageContent') {
+              return
+            }
+            setValues(previous =>
+              previous.packageFilename ? previous : { ...previous, packageFilename: file.name },
+            )
+          }}
         />
 
         {/* Run / Cancel, with the elapsed or last-run duration beside the button that produced it. */}

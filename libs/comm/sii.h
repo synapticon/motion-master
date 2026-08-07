@@ -189,6 +189,29 @@ std::optional<SiiCategoryType> resolveSiiCategoryType(uint16_t value);
 /// @return The parsed structure, or an error string if @p buffer is shorter than the fixed header.
 std::expected<SlaveInformationInterface, std::string> parseSii(std::span<const uint8_t> buffer);
 
+/// @brief Checks that a raw SII image is structurally sound enough to be written to an EEPROM.
+///
+/// This is the guard in front of @c FieldbusDriver::writeSii, and it exists because that write is
+/// the most destructive operation in the stack: a malformed image leaves the slave unidentifiable
+/// until it is re-flashed, and the ESC only reloads the EEPROM on a power cycle, so the damage is
+/// discovered after the point where it could have been undone. Validation is therefore not a
+/// nicety — it is the difference between rejecting a bad file and bricking a drive.
+///
+/// Deliberately structural rather than semantic: it does not judge whether the vendor ID or the PDO
+/// defaults are *right* for the device, only that the bytes are a well-formed SII image.
+///
+/// Four checks, in the order a corrupt file usually fails them:
+///   - a whole number of 16-bit words, since the EEPROM is word-addressed;
+///   - at least 0x41 words, so the fixed header and the first category header are present;
+///   - the ETG CRC-8 (polynomial 0x07, initial value 0xFF) over words 0-6 matches the checksum byte
+///     at offset 14 — the image's own integrity check, and the one the ESC itself verifies;
+///   - the category chain from word 0x40 reaches the 0xFFFF end marker without any category
+///     claiming more words than the image holds.
+///
+/// @param buffer  Raw SII image.
+/// @return Void when the image passes, or a message naming the check that failed.
+std::expected<void, std::string> validateSiiImage(std::span<const uint8_t> buffer);
+
 void to_json(nlohmann::json& j, const SiiInfo& v);
 void to_json(nlohmann::json& j, const SiiCategoryGeneral& v);
 void to_json(nlohmann::json& j, const SiiCategorySyncManagerElement& v);

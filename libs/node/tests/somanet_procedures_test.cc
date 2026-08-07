@@ -5,10 +5,14 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstdlib>
 #include <expected>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <functional>
 #include <map>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <ranges>
@@ -20,8 +24,10 @@
 
 #include "comm/fieldbus_driver.h"
 #include "comm/object_data_types.h"
+#include "core/base64.h"
 #include "node/cia402.h"
 #include "node/device.h"
+#include "node/device_manager.h"
 #include "node/procedure.h"
 #include "node/synapticon.h"
 
@@ -269,11 +275,12 @@ class OsCommandFakeDriver : public FieldbusDriver {
       const std::vector<uint16_t>& positions) override {
     return std::vector<SlaveStateRaw>(positions.size(), SlaveStateRaw{});
   }
-  std::expected<std::vector<uint8_t>, std::string> readFile(uint16_t, const std::string&) override {
+  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
+                                                                   const std::string&) override {
     return std::vector<uint8_t>{};
   }
-  std::expected<void, std::string> writeFile(uint16_t, const std::string&,
-                                             std::span<const uint8_t>) override {
+  std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string&,
+                                                    std::span<const uint8_t>) override {
     return {};
   }
   std::expected<void, std::string> readRegister(uint16_t, uint16_t, std::span<uint8_t>) override {
@@ -1460,6 +1467,526 @@ TEST(RunOpenPhaseDetectionProcedure, FailsTheDeviceCheckBeforeAnyStepRuns) {
   for (const auto& step : reporter.steps()) {
     EXPECT_EQ(step.status, ProgressStatus::kIdle) << step.id;
   }
+}
+
+// ── Firmware installation ──────────────────────────────────────────────────────────────────────
+
+using mm::node::firmwareInstallationParameters;
+using mm::node::firmwareInstallationSteps;
+using mm::node::kDefaultSkippedFirmwareFiles;
+using mm::node::parseFirmwareInstallationRequest;
+
+constexpr std::string_view kCirculoPackageName =
+    "package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip";
+
+// The real package, base64-encoded exactly as a client would send it in the request body.
+std::string circuloPackageBase64() {
+  const std::filesystem::path path =
+      std::filesystem::path(MM_NODE_TEST_DATA_DIR) / kCirculoPackageName;
+  std::ifstream in(path, std::ios::binary);
+  EXPECT_TRUE(in) << "missing test fixture: " << path;
+  const std::vector<uint8_t> bytes{std::istreambuf_iterator<char>(in),
+                                   std::istreambuf_iterator<char>()};
+  return mm::core::base64Encode(bytes);
+}
+
+nlohmann::json requestWithPackage() {
+  return nlohmann::json{{"packageContent", circuloPackageBase64()},
+                        {"packageFilename", std::string(kCirculoPackageName)}};
+}
+
+TEST(FirmwareInstallationRequest, AcceptsAnInlinePackage) {
+  auto request = parseFirmwareInstallationRequest(requestWithPackage());
+  ASSERT_TRUE(request) << request.error();
+  // Round-tripped through base64 and back to the exact zip.
+  EXPECT_EQ(request->package.size(), 608513u);
+  EXPECT_EQ(request->package[0], 'P');
+  EXPECT_EQ(request->package[1], 'K');
+  ASSERT_TRUE(request->name.has_value());
+  EXPECT_EQ(request->name->firmwareVersion, "v5.6.10");
+}
+
+TEST(FirmwareInstallationRequest, DefaultsMatchTheDescriptor) {
+  auto request = parseFirmwareInstallationRequest(requestWithPackage());
+  ASSERT_TRUE(request) << request.error();
+  EXPECT_TRUE(request->cachePackage);
+  EXPECT_EQ(request->finalState, EtherCatState::PreOp);
+  ASSERT_EQ(request->skipFiles.size(), kDefaultSkippedFirmwareFiles.size());
+  EXPECT_EQ(request->skipFiles[0], "SOMANET_CiA_402.xml.zip");
+  EXPECT_EQ(request->skipFiles[1], "stack_image.svg.zip");
+}
+
+// An explicit list replaces the defaults wholesale rather than adding to them — including an empty
+// list, which is the only way to say "write everything the package holds".
+TEST(FirmwareInstallationRequest, AnExplicitSkipListReplacesTheDefaults) {
+  nlohmann::json body = requestWithPackage();
+  body["skipFiles"] = nlohmann::json::array();
+  auto request = parseFirmwareInstallationRequest(body);
+  ASSERT_TRUE(request) << request.error();
+  EXPECT_TRUE(request->skipFiles.empty());
+}
+
+// The AL state numbers POST /api/devices/state uses, not a vocabulary of this procedure's own.
+TEST(FirmwareInstallationRequest, ReadsEveryFinalState) {
+  for (const auto state : {EtherCatState::Init, EtherCatState::PreOp, EtherCatState::Boot,
+                           EtherCatState::SafeOp, EtherCatState::Op}) {
+    nlohmann::json body = requestWithPackage();
+    body["finalState"] = static_cast<unsigned>(state);
+    auto request = parseFirmwareInstallationRequest(body);
+    ASSERT_TRUE(request) << request.error();
+    EXPECT_EQ(request->finalState, state) << mm::comm::toString(state);
+  }
+}
+
+TEST(FirmwareInstallationRequest, RejectsAFinalStateThatIsNotAnAlState) {
+  for (const unsigned value : {0u, 5u, 9u, 255u}) {
+    nlohmann::json body = requestWithPackage();
+    body["finalState"] = value;
+    EXPECT_FALSE(parseFirmwareInstallationRequest(body)) << value;
+  }
+  nlohmann::json body = requestWithPackage();
+  body["finalState"] = "preop";  // AL state is a number everywhere in this API, never a name.
+  EXPECT_FALSE(parseFirmwareInstallationRequest(body));
+}
+
+// A name outside the convention is not an error: the bytes install, the package just is not cached.
+TEST(FirmwareInstallationRequest, AcceptsAnUnrecognisedFilename) {
+  nlohmann::json body = requestWithPackage();
+  body["packageFilename"] = "my-firmware.zip";
+  auto request = parseFirmwareInstallationRequest(body);
+  ASSERT_TRUE(request) << request.error();
+  EXPECT_FALSE(request->name.has_value());
+  EXPECT_FALSE(request->package.empty());
+}
+
+TEST(FirmwareInstallationRequest, RejectsARequestWithNoPackageAtAll) {
+  auto request = parseFirmwareInstallationRequest(nlohmann::json::object());
+  ASSERT_FALSE(request);
+  EXPECT_NE(request.error().find("packageContent"), std::string::npos) << request.error();
+}
+
+TEST(FirmwareInstallationRequest, RejectsContentThatIsNotBase64) {
+  auto request =
+      parseFirmwareInstallationRequest(nlohmann::json{{"packageContent", "not base64 at all!!"}});
+  ASSERT_FALSE(request);
+  EXPECT_NE(request.error().find("base64"), std::string::npos) << request.error();
+}
+
+TEST(FirmwareInstallationRequest, RejectsWrongFieldTypes) {
+  nlohmann::json body = requestWithPackage();
+  body["skipFiles"] = "SOMANET_CiA_402.xml.zip";
+  EXPECT_FALSE(parseFirmwareInstallationRequest(body));
+
+  body = requestWithPackage();
+  body["cachePackage"] = "yes";
+  EXPECT_FALSE(parseFirmwareInstallationRequest(body));
+}
+
+TEST(FirmwareInstallationDescriptor, StepsAndParametersLineUp) {
+  const auto steps = firmwareInstallationSteps();
+  ASSERT_EQ(steps.size(), 8u);
+  EXPECT_EQ(steps.front().id, "package");
+  EXPECT_EQ(steps.back().id, "final-state");
+
+  // Every parameter the parser reads is advertised, so a client's form covers the whole request.
+  std::vector<std::string> names;
+  for (const auto& parameter : firmwareInstallationParameters()) {
+    names.push_back(parameter.name);
+  }
+  EXPECT_NE(std::ranges::find(names, "packageContent"), names.end());
+  EXPECT_NE(std::ranges::find(names, "packageFilename"), names.end());
+  EXPECT_NE(std::ranges::find(names, "skipFiles"), names.end());
+  EXPECT_NE(std::ranges::find(names, "cachePackage"), names.end());
+  EXPECT_NE(std::ranges::find(names, "finalState"), names.end());
+}
+
+// ── Firmware installation: the whole body ──────────────────────────────────────────────────────
+
+using mm::comm::FieldbusDriver;
+using mm::node::DeviceManager;
+using mm::node::firmwareCacheDir;
+using mm::node::FirmwareInstallationRequest;
+using mm::node::parseFirmwarePackageName;
+using mm::node::runFirmwareInstallationProcedure;
+
+// Driver double that models the two things the firmware body actually depends on and nothing else:
+// an AL state that transitions really change, and a record of every FoE and EEPROM write. The other
+// fakes in this file cannot be reused because their transitionToState is a no-op, which the body's
+// own state read-back would reject at the very first step.
+class FirmwareFakeDriver : public FieldbusDriver {
+ public:
+  std::map<std::string, std::vector<uint8_t>>
+      written;                       ///< FoE writes, by the name sent on the wire.
+  std::vector<std::string> removed;  ///< Targets of the fs-remove= pseudo-file.
+  std::vector<uint8_t> siiWritten;   ///< Last EEPROM image written.
+  std::vector<uint16_t> commanded;   ///< Every AL state commanded, in order.
+
+  /// Programmed failures, keyed by the name as sent over FoE.
+  std::map<std::string, int> transientFailures;  ///< Fails this many times, then succeeds.
+  std::string permanentFailure;                  ///< Always fails, permanently.
+
+  std::expected<void, std::string> init() override { return {}; }
+  std::expected<int, std::string> scan() override { return 1; }
+  SlaveInfo slaveInfo(uint16_t) const override {
+    SlaveInfo info{};
+    info.vendorId = mm::node::kSynapticonVendorId;
+    return info;
+  }
+  uint16_t slaveState(uint16_t) const override { return alStatus_; }
+  std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
+      const std::vector<uint16_t>& positions) override {
+    return std::vector<SlaveStateRaw>(positions.size(), SlaveStateRaw{alStatus_, 0});
+  }
+  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>,
+                         EtherCatState target, std::chrono::steady_clock::duration,
+                         std::chrono::steady_clock::duration, std::function<void()>,
+                         std::function<bool()>) override {
+    alStatus_ = static_cast<uint16_t>(target);
+    commanded.push_back(alStatus_);
+  }
+
+  std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string& name,
+                                                    std::span<const uint8_t> data) override {
+    if (name == permanentFailure) {
+      return std::unexpected(
+          mm::comm::makeFoeError(mm::comm::FoeErrorKind::BufferTooSmall, "FOEwrite", 1, name));
+    }
+    if (auto it = transientFailures.find(name); it != transientFailures.end() && it->second > 0) {
+      --it->second;
+      return std::unexpected(
+          mm::comm::makeFoeError(mm::comm::FoeErrorKind::PacketMismatch, "FOEwrite", 1, name));
+    }
+    written[name] = std::vector<uint8_t>(data.begin(), data.end());
+    return {};
+  }
+  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
+      uint16_t, const std::string& name) override {
+    constexpr std::string_view kRemove = "fs-remove=";
+    if (name.starts_with(kRemove)) {
+      removed.push_back(name.substr(kRemove.size()));
+      return std::vector<uint8_t>{};
+    }
+    return std::unexpected(
+        mm::comm::makeFoeError(mm::comm::FoeErrorKind::FileNotFound, "FOEread", 1, name));
+  }
+  std::expected<void, std::string> writeSii(uint16_t, std::span<const uint8_t> data) override {
+    siiWritten.assign(data.begin(), data.end());
+    return {};
+  }
+
+  // --- unused stubs ---------------------------------------------------------
+  std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
+    return std::vector<OdEntry>{};
+  }
+  std::expected<void, std::string> configureProcessData() override { return {}; }
+  mm::comm::PdoLayout processDataLayout() override { return {}; }
+  int exchangeProcessData(std::span<const uint8_t>, std::span<uint8_t>) override { return 0; }
+  void stop() override {}
+  std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t, uint8_t) override {
+    return std::vector<uint8_t>{};
+  }
+  std::expected<void, std::string> writeSdo(uint16_t, uint16_t, uint8_t,
+                                            std::span<const uint8_t>) override {
+    return {};
+  }
+  std::expected<void, std::string> readRegister(uint16_t, uint16_t, std::span<uint8_t>) override {
+    return {};
+  }
+  std::expected<void, std::string> writeRegister(uint16_t, uint16_t,
+                                                 std::span<const uint8_t>) override {
+    return {};
+  }
+
+ private:
+  uint16_t alStatus_ = static_cast<uint16_t>(EtherCatState::PreOp);
+};
+
+/// Points mm::core::userCacheDir (and so firmwareCacheDir) at a throwaway directory, so a test that
+/// exercises caching cannot write into the developer's real cache. Restores the variable on the way
+/// out, whatever the test did.
+class CacheRedirect {
+ public:
+  CacheRedirect() {
+    root_ = std::filesystem::temp_directory_path() /
+            std::format("mm-firmware-test-{}", static_cast<const void*>(this));
+    std::filesystem::create_directories(root_);
+    if (const char* previous = std::getenv(kVar)) {
+      previous_ = previous;
+    }
+    setVar(root_.string());
+  }
+  ~CacheRedirect() {
+    if (previous_) {
+      setVar(*previous_);
+    } else {
+#ifdef _WIN32
+      _putenv_s(kVar, "");
+#else
+      unsetenv(kVar);
+#endif
+    }
+    std::error_code ec;
+    std::filesystem::remove_all(root_, ec);
+  }
+  CacheRedirect(const CacheRedirect&) = delete;
+  CacheRedirect& operator=(const CacheRedirect&) = delete;
+
+ private:
+  // Whichever variable userCacheDir consults on this platform.
+#ifdef _WIN32
+  static constexpr const char* kVar = "LOCALAPPDATA";
+#elif defined(__APPLE__)
+  static constexpr const char* kVar = "HOME";
+#else
+  static constexpr const char* kVar = "XDG_CACHE_HOME";
+#endif
+  static void setVar(const std::string& value) {
+#ifdef _WIN32
+    _putenv_s(kVar, value.c_str());
+#else
+    setenv(kVar, value.c_str(), 1);
+#endif
+  }
+  std::filesystem::path root_;
+  std::optional<std::string> previous_;
+};
+
+struct FirmwareBus {
+  FirmwareFakeDriver* driver = nullptr;
+  DeviceManager dm;
+
+  FirmwareBus() {
+    auto owned = std::make_unique<FirmwareFakeDriver>();
+    driver = owned.get();
+    EXPECT_TRUE(dm.init(std::move(owned)).has_value());
+    EXPECT_TRUE(dm.scan().has_value());
+  }
+};
+
+std::vector<uint8_t> circuloPackageBytes() {
+  const std::filesystem::path path =
+      std::filesystem::path(MM_NODE_TEST_DATA_DIR) / kCirculoPackageName;
+  std::ifstream in(path, std::ios::binary);
+  EXPECT_TRUE(in) << "missing test fixture: " << path;
+  return {std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
+}
+
+FirmwareInstallationRequest installRequest() {
+  FirmwareInstallationRequest request;
+  request.package = circuloPackageBytes();
+  request.filename = std::string(kCirculoPackageName);
+  request.name = parseFirmwarePackageName(kCirculoPackageName).value();
+  for (std::string_view name : kDefaultSkippedFirmwareFiles) {
+    request.skipFiles.emplace_back(name);
+  }
+  request.cachePackage = false;  // Redirected explicitly by the one test that wants it.
+  request.bootWarmUp = std::chrono::milliseconds::zero();
+  return request;
+}
+
+mm::node::ProgressStep stepNamed(const std::vector<mm::node::ProgressStep>& steps,
+                                 std::string_view id) {
+  for (const auto& step : steps) {
+    if (step.id == id) {
+      return step;
+    }
+  }
+  ADD_FAILURE() << "no step '" << id << "'";
+  return {};
+}
+
+TEST(FirmwareInstallationBody, WritesThePackageAndReturnsToPreOp) {
+  FirmwareBus bus;
+  ProgressReporter reporter(mm::node::firmwareInstallationSteps());
+  std::stop_source source;
+
+  auto result =
+      runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), installRequest());
+  ASSERT_TRUE(result) << result.error();
+
+  // The bootloader is addressed by the short constant name, never the package's own long one.
+  ASSERT_TRUE(bus.driver->written.contains("app_firmware.bin"));
+  EXPECT_EQ(bus.driver->written["app_firmware.bin"].size(), 397312u);
+  EXPECT_FALSE(bus.driver->written.contains("app_8500-04_motion-drive_v5.6.10_2332.bin"));
+  EXPECT_FALSE(bus.driver->written.contains("com_firmware.bin"));  // None in this package.
+
+  EXPECT_EQ(bus.driver->siiWritten.size(), 252u);
+  // The two default-skipped extras are never written, and so never removed either.
+  EXPECT_TRUE(bus.driver->removed.empty());
+  EXPECT_EQ(bus.driver->written.size(), 1u);
+
+  // INIT and BOOT on the way in, INIT and PRE-OP on the way out — BOOT is only ever paired with
+  // INIT, which is what the AL state machine allows.
+  EXPECT_EQ(bus.driver->commanded,
+            (std::vector<uint16_t>{static_cast<uint16_t>(EtherCatState::Init),
+                                   static_cast<uint16_t>(EtherCatState::Boot),
+                                   static_cast<uint16_t>(EtherCatState::Init),
+                                   static_cast<uint16_t>(EtherCatState::PreOp)}));
+
+  for (const auto& step : reporter.steps()) {
+    EXPECT_EQ(step.status, ProgressStatus::kSucceeded) << step.id;
+  }
+}
+
+TEST(FirmwareInstallationBody, StaysInBootWhenAsked) {
+  FirmwareBus bus;
+  ProgressReporter reporter(mm::node::firmwareInstallationSteps());
+  std::stop_source source;
+
+  auto request = installRequest();
+  request.finalState = EtherCatState::Boot;
+  auto result = runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), request);
+  ASSERT_TRUE(result) << result.error();
+
+  EXPECT_EQ(bus.driver->commanded.back(), static_cast<uint16_t>(EtherCatState::Boot));
+  EXPECT_EQ(stepNamed(reporter.steps(), "final-state").status, ProgressStatus::kSucceeded);
+}
+
+TEST(FirmwareInstallationBody, RetriesATransientFoeFailure) {
+  FirmwareBus bus;
+  bus.driver->transientFailures["app_firmware.bin"] = 3;
+  ProgressReporter reporter(mm::node::firmwareInstallationSteps());
+  std::stop_source source;
+
+  auto result =
+      runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), installRequest());
+  ASSERT_TRUE(result) << result.error();
+  EXPECT_TRUE(bus.driver->written.contains("app_firmware.bin"));
+}
+
+// A permanent failure must not be retried into and must not leave the device in the bootloader.
+TEST(FirmwareInstallationBody, AbortsOnAPermanentFoeFailureButStillLeavesBoot) {
+  FirmwareBus bus;
+  bus.driver->permanentFailure = "app_firmware.bin";
+  ProgressReporter reporter(mm::node::firmwareInstallationSteps());
+  std::stop_source source;
+
+  auto result =
+      runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), installRequest());
+  ASSERT_FALSE(result);
+  EXPECT_EQ(stepNamed(reporter.steps(), "app-firmware").status, ProgressStatus::kFailed);
+  EXPECT_EQ(bus.driver->commanded.back(), static_cast<uint16_t>(EtherCatState::PreOp))
+      << "a failed install must not strand the device in BOOT";
+}
+
+// The descriptive extras are best effort: one that cannot be written is recorded and the firmware
+// is installed anyway.
+TEST(FirmwareInstallationBody, CarriesOnWhenAnExtraFileCannotBeWritten) {
+  FirmwareBus bus;
+  bus.driver->permanentFailure = "stack_image.svg.zip";
+  ProgressReporter reporter(mm::node::firmwareInstallationSteps());
+  std::stop_source source;
+
+  auto request = installRequest();
+  request.skipFiles.clear();  // Write everything, so the extras path runs at all.
+  auto result = runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), request);
+  ASSERT_TRUE(result) << result.error();
+
+  const auto extras = stepNamed(reporter.steps(), "extra-files");
+  EXPECT_EQ(extras.status, ProgressStatus::kSucceeded);
+  EXPECT_NE(extras.value["stack_image.svg.zip"].get<std::string>().find("not written"),
+            std::string::npos)
+      << extras.value.dump();
+  EXPECT_EQ(extras.value["SOMANET_CiA_402.xml.zip"], "written");
+  // Each extra is removed before being rewritten, so a rewrite cannot mix with what was there.
+  EXPECT_EQ(bus.driver->removed.size(), 2u);
+  EXPECT_TRUE(bus.driver->written.contains("app_firmware.bin"));
+}
+
+TEST(FirmwareInstallationBody, CachesThePackageUnderItsName) {
+  const CacheRedirect redirect;
+  FirmwareBus bus;
+  ProgressReporter reporter(mm::node::firmwareInstallationSteps());
+  std::stop_source source;
+
+  auto request = installRequest();
+  request.cachePackage = true;
+  auto result = runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), request);
+  ASSERT_TRUE(result) << result.error();
+
+  const std::filesystem::path cached = firmwareCacheDir() / kCirculoPackageName;
+  ASSERT_TRUE(std::filesystem::exists(cached)) << cached;
+  EXPECT_EQ(std::filesystem::file_size(cached), 608513u);
+  EXPECT_EQ(stepNamed(reporter.steps(), "cache").value, cached.string());
+}
+
+TEST(FirmwareInstallationBody, DoesNotCacheAPackageWithAnUnrecognisedName) {
+  const CacheRedirect redirect;
+  FirmwareBus bus;
+  ProgressReporter reporter(mm::node::firmwareInstallationSteps());
+  std::stop_source source;
+
+  auto request = installRequest();
+  request.cachePackage = true;
+  request.filename = "my-firmware.zip";
+  request.name.reset();
+  auto result = runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), request);
+  ASSERT_TRUE(result) << result.error();
+
+  EXPECT_FALSE(std::filesystem::exists(firmwareCacheDir() / "my-firmware.zip"));
+  EXPECT_NE(stepNamed(reporter.steps(), "cache").value.get<std::string>().find("not cached"),
+            std::string::npos);
+}
+
+// A package already in the cache installs under whatever it is called. The SOMANET naming rule
+// governs whether a package is *written* to the cache, never whether one can be read back — a file
+// uploaded straight to `firmwares/` through /api/user-cache is named by whoever uploaded it.
+TEST(FirmwareInstallationRequest, InstallsACachedPackageWithAnyName) {
+  const CacheRedirect redirect;
+  std::filesystem::create_directories(firmwareCacheDir());
+  {
+    std::ofstream out(firmwareCacheDir() / "my-firmware.zip", std::ios::binary);
+    const auto bytes = circuloPackageBytes();
+    out.write(reinterpret_cast<const char*>(bytes.data()),
+              static_cast<std::streamsize>(bytes.size()));
+  }
+
+  auto request =
+      parseFirmwareInstallationRequest(nlohmann::json{{"packageFilename", "my-firmware.zip"}});
+  ASSERT_TRUE(request) << request.error();
+  EXPECT_EQ(request->package.size(), 608513u);
+  EXPECT_FALSE(request->name.has_value());
+}
+
+TEST(FirmwareInstallationRequest, ReportsAPackageThatIsNotCached) {
+  const CacheRedirect redirect;
+  auto request =
+      parseFirmwareInstallationRequest(nlohmann::json{{"packageFilename", "absent.zip"}});
+  ASSERT_FALSE(request);
+  EXPECT_NE(request.error().find("firmware cache"), std::string::npos) << request.error();
+}
+
+// The API is unauthenticated and the filename is joined onto a server path, so a name that escapes
+// the cache directory must be refused. Note the third case: it *is* a well-formed SOMANET package
+// name — five underscore-separated fields — which is exactly why the grammar cannot be the guard.
+TEST(FirmwareInstallationRequest, RefusesAFilenameThatEscapesTheCache) {
+  const CacheRedirect redirect;
+  for (const std::string name : {"../escape.zip", "sub/dir.zip", "..\\escape.zip",
+                                 "package_../../etc_8500-04_motion-drive_v1.0.zip"}) {
+    auto request = parseFirmwareInstallationRequest(nlohmann::json{{"packageFilename", name}});
+    EXPECT_FALSE(request) << "accepted '" << name << "'";
+  }
+}
+
+// The same filename on the *write* path: caching must not put request-controlled bytes outside the
+// cache directory, and the install itself carries on regardless since caching is best effort.
+TEST(FirmwareInstallationBody, RefusesToCacheUnderAnEscapingName) {
+  const CacheRedirect redirect;
+  FirmwareBus bus;
+  ProgressReporter reporter(mm::node::firmwareInstallationSteps());
+  std::stop_source source;
+
+  auto request = installRequest();
+  request.cachePackage = true;
+  request.filename = "package_../../pwned_8500-04_motion-drive_v1.0.zip";
+  request.name = parseFirmwarePackageName(request.filename).value();
+  auto result = runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), request);
+  ASSERT_TRUE(result) << result.error();
+
+  EXPECT_NE(stepNamed(reporter.steps(), "cache").value.get<std::string>().find("not cached"),
+            std::string::npos);
+  EXPECT_FALSE(std::filesystem::exists(firmwareCacheDir().parent_path().parent_path() / "pwned"));
+  EXPECT_TRUE(bus.driver->written.contains("app_firmware.bin"));
 }
 
 }  // namespace

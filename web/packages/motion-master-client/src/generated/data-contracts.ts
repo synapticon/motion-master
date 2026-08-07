@@ -579,10 +579,17 @@ export interface ProcedureParameter {
   /** What it does and what a sensible value is. */
   description: string;
   /**
-   * Which kind of control to render.
+   * Which kind of control to render. `file` carries a whole file as a base64 string, so a client renders a file picker and encodes what it reads; `stringArray` is an editable list of free-text values.
    * @example "integer"
    */
-  type: "integer" | "boolean" | "enum" | "byteArray";
+  type:
+    | "integer"
+    | "boolean"
+    | "enum"
+    | "byteArray"
+    | "string"
+    | "stringArray"
+    | "file";
   /**
    * Whether a request must carry it — true exactly when there is no `defaultValue`. Reported rather than left to be derived, so a client need not know the rule.
    * @example true
@@ -610,6 +617,55 @@ export interface ProcedureParameter {
   length?: number;
   /** `enum` only: the values that may be chosen. */
   options?: ParameterOption[];
+}
+
+/** A SOMANET firmware package filename broken into its fields. The four decoded-descriptor properties are absent — not null — when the full firmware descriptor is not the numeric kind, which the naming specification explicitly allows. */
+export interface FirmwarePackageName {
+  /**
+   * The format description; always `package` for a firmware bundle.
+   * @example "package"
+   */
+  description: string;
+  /**
+   * Human-readable hardware name.
+   * @example "SOMANET-Circulo-7"
+   */
+  hardwareName: string;
+  /**
+   * The full firmware descriptor, verbatim.
+   * @example "8500-04-2332"
+   */
+  firmwareId: string;
+  /**
+   * Software name.
+   * @example "motion-drive"
+   */
+  firmwareName: string;
+  /**
+   * Software version, including the leading `v`.
+   * @example "v5.6.10"
+   */
+  firmwareVersion: string;
+  /**
+   * Product id from the descriptor.
+   * @example 8500
+   */
+  productId?: number;
+  /**
+   * Product version from the descriptor.
+   * @example 4
+   */
+  productVersion?: number;
+  /**
+   * Firmware encryption key id from the descriptor.
+   * @example 2332
+   */
+  keyId?: number;
+  /**
+   * Fieldbus protocol from the descriptor, decoded as hexadecimal. 1 is EtherCAT.
+   * @example 1
+   */
+  fieldbusProtocol?: number;
 }
 
 /** One procedure paired with how its last run on this device went — an entry of `GET /api/devices/{slavePosition}/procedures`. The pairing is what lets a page render in a single request instead of one per procedure. */
@@ -693,6 +749,29 @@ export interface ProcedureRequest {
    * @example "all"
    */
   group?: "all" | "communication" | "application" | "manufacturer";
+  /** `firmware-installation`: the .zip firmware package, base64-encoded into this JSON string. One of this or a `packageFilename` naming an already-cached package must be present; this wins when both are given. To avoid base64 entirely, `PUT` the raw bytes to `/api/user-cache/firmwares/<name>.zip` first and then send only `packageFilename` — the firmware cache is that directory. (Deliberately not `format: byte`: that is the correct OpenAPI spelling for base64, but generators map it to a binary type — `Blob` in TypeScript — which is not what goes on the wire here and would serialise to `{}`.) */
+  packageContent?: string;
+  /**
+   * `firmware-installation`: the package's filename. Optional — it names the package for caching and identifies a cached one to re-install without uploading it again. A name outside the SOMANET convention still installs, it is just not cached.
+   * @example "package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip"
+   */
+  packageFilename?: string;
+  /**
+   * `firmware-installation`: entries inside the package that are not written to the device. An explicit list replaces the defaults wholesale rather than adding to them, so `[]` means "write everything the package holds". Any entry can be named, including the SII and the firmware binaries.
+   * @default ["SOMANET_CiA_402.xml.zip","stack_image.svg.zip"]
+   */
+  skipFiles?: string[];
+  /**
+   * `firmware-installation`: keep a copy of the package on the server so it can be re-installed without uploading it again. Only possible when a filename is given and it follows the SOMANET package naming convention.
+   * @default true
+   */
+  cachePackage?: boolean;
+  /**
+   * `firmware-installation`: where the device is left, as an AL state number — the same ETG.1000.6 encoding `POST /api/devices/state` takes and `alState` reports, so a client holds one way to name a state rather than two. `2` (PRE-OP) is the default and the confirmation that the install worked: the bootloader hands over to the newly written firmware on that transition, so reaching PRE-OP means the new firmware booted. No power cycle is needed for the firmware (an SII written from the package does need one — the ESC reads its EEPROM at reset). Choose `3` (BOOT) when no application will be present, after erasing one or between two installs, since a PRE-OP transition then has nothing to hand over to and the drive answers AL status `0x0014`, "No valid firmware". `4` and `8` climb through PRE-OP and re-map the whole bus on the way, briefly pausing every other device. The state the device was in beforehand is not restored.
+   * @default 2
+   * @example 2
+   */
+  finalState?: 1 | 2 | 3 | 4 | 8;
   [key: string]: any;
 }
 

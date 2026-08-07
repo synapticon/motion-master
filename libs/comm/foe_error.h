@@ -1,20 +1,27 @@
 #pragma once
 
-// ── Currently unused: a reference implementation, not yet wired into any surface. ──────────────
+// ── The error type of FieldbusDriver::readFile / writeFile. ────────────────────────────────────
 //
-// Today every FieldbusDriver operation — readFile/writeFile included — reports failure as
-// std::expected<T, std::string>. That is the deliberate default (see CLAUDE.md, the no-exceptions
-// mandate): std::string is right everywhere a caller only logs, forwards, or shows the error, which
-// is every FoE caller in the tree right now (the HTTP handlers just put the text in a 500 body).
+// Every other FieldbusDriver operation reports failure as std::expected<T, std::string>. That is
+// the deliberate default (see CLAUDE.md, the no-exceptions mandate): std::string is right
+// everywhere a caller only logs, forwards, or shows the error. FoE is the one surface that has
+// earned more, and this header stood ready — deliberately unused — from 2026-07-17 until the
+// caller it was written for arrived.
 //
-// This header exists so the *promotion path* is concrete rather than hypothetical. The moment a
-// caller must **branch** on why a FoE transfer failed — the canonical case is a firmware flasher
-// that retries a transient failure (packet desync, or a slave still warming up after BOOT) but
-// aborts immediately on a permanent one (no such file, undersized buffer) — string-matching the
-// message to decide control flow is the smell that says that surface has earned a structured error.
-// At that point readFile/writeFile change their error type from std::string to FoeError; because
-// FoeError keeps a string face (operator<<, .message, .what()), the forwarding callers that only
-// display it change by at most one word (.error() → .error().message) and nothing ripples further.
+// That caller is the firmware installation procedure (libs/node/firmware_procedures.cc), which
+// branches on the error twice, and neither branch can be written against a string without matching
+// on its wording:
+//   • It retries a Transient failure (a packet desync, or a bootloader still warming up after the
+//     device entered BOOT) and aborts immediately on a Permanent one (no such file, undersized
+//     buffer) — the exact distinction the `retry` tag carries.
+//   • It removes a file before rewriting it, and FileNotFound means the removal already had
+//     nothing to do — a success, not a failure.
+// String-matching a message to decide either is the smell that says a surface has earned a
+// structured error.
+//
+// Because FoeError keeps a string face (operator<<, .message, .what()), the forwarding callers that
+// only display it changed by one word (.error() → .error().message) and nothing rippled further —
+// which was the point of shaping it this way before there was a caller.
 //
 // This is the same design split the wider ecosystem settled on, and the mandate is a deliberate
 // pick of one side of it:

@@ -144,12 +144,12 @@ class SoemFieldbusDriver : public FieldbusDriver {
                                             std::span<const uint8_t> data) override;
 
   /// @copydoc FieldbusDriver::readFile
-  std::expected<std::vector<uint8_t>, std::string> readFile(uint16_t slavePosition,
-                                                            const std::string& filename) override;
+  std::expected<std::vector<uint8_t>, FoeError> readFile(uint16_t slavePosition,
+                                                         const std::string& filename) override;
 
   /// @copydoc FieldbusDriver::writeFile
-  std::expected<void, std::string> writeFile(uint16_t slavePosition, const std::string& filename,
-                                             std::span<const uint8_t> data) override;
+  std::expected<void, FoeError> writeFile(uint16_t slavePosition, const std::string& filename,
+                                          std::span<const uint8_t> data) override;
 
   /// @brief Reads bytes from an ESC register via FPRD.
   /// @param slavePosition  1-based slave position on the bus.

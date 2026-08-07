@@ -156,10 +156,13 @@ std::vector<ProgressStep> stepsFrom(std::initializer_list<std::string_view> ids)
 /// per kind, and every kind here is one a procedure actually asks for. A new kind is added when a
 /// procedure needs it, which keeps the renderer as small as the set of things procedures take.
 enum class ParameterType : uint8_t {
-  kInteger,    ///< A whole number, bounded by @c minValue / @c maxValue.
-  kBoolean,    ///< A checkbox.
-  kEnum,       ///< One of @c options — a value the client picks rather than types.
-  kByteArray,  ///< Exactly @c length byte values (the raw OS command's request bytes).
+  kInteger,      ///< A whole number, bounded by @c minValue / @c maxValue.
+  kBoolean,      ///< A checkbox.
+  kEnum,         ///< One of @c options — a value the client picks rather than types.
+  kByteArray,    ///< Exactly @c length byte values (the raw OS command's request bytes).
+  kString,       ///< Free text — a filename, a label.
+  kStringArray,  ///< A list of free-text values the user edits as a list.
+  kFile,         ///< A file's contents, base64-encoded; a client renders a file picker.
 };
 
 /// @brief Human-readable name of a parameter type (for JSON). Never returns @c nullptr.
@@ -173,6 +176,12 @@ constexpr std::string_view toString(ParameterType type) {
       return "enum";
     case ParameterType::kByteArray:
       return "byteArray";
+    case ParameterType::kString:
+      return "string";
+    case ParameterType::kStringArray:
+      return "stringArray";
+    case ParameterType::kFile:
+      return "file";
   }
   return "unknown";
 }
@@ -249,6 +258,31 @@ ProcedureParameter enumParameter(std::string name, std::string title, std::strin
 /// Always required: a default set of command bytes would be a command nobody asked to run.
 ProcedureParameter byteArrayParameter(std::string name, std::string title, std::string description,
                                       size_t length);
+
+/// @brief A free-text parameter. @p defaultValue as in @c integerParameter.
+ProcedureParameter stringParameter(std::string name, std::string title, std::string description,
+                                   nlohmann::json defaultValue);
+
+/// @brief A parameter taking a list of strings, which the client renders as an editable list.
+///
+/// @param defaultValue  A JSON array used when the request omits the parameter; pass @c nullptr to
+///                      make it required. An **empty array is a meaningful default** and not the
+///                      same as no default — "skip nothing" is a real answer — so a caller that
+///                      wants the parameter optional-with-nothing-selected passes
+///                      @c nlohmann::json::array().
+ProcedureParameter stringArrayParameter(std::string name, std::string title,
+                                        std::string description, nlohmann::json defaultValue);
+
+/// @brief A parameter carrying a whole file, base64-encoded in a JSON string.
+///
+/// The transport is base64 because JSON has no binary type and a procedure's parameters travel in
+/// its request body. Decode with @c mm::core::base64Decode.
+///
+/// @param defaultValue  As in @c integerParameter; a file parameter is normally required, but one
+///                      that has an alternative source (a package already on the server, named by
+///                      another parameter) is optional.
+ProcedureParameter fileParameter(std::string name, std::string title, std::string description,
+                                 nlohmann::json defaultValue);
 
 /// @brief What a procedure *is*, independent of any run — the half of the catalogue a client needs
 ///        to render a control for it.

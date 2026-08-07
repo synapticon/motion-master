@@ -836,7 +836,7 @@ std::expected<std::vector<DeviceFile>, std::string> SomanetDrive::readFileList()
   auto listing = device().readFile(std::string(kFileListName));
   if (!listing) {
     return std::unexpected(std::format("reading the device file list ('{}') failed: {}",
-                                       kFileListName, listing.error()));
+                                       kFileListName, listing.error().message));
   }
   return parseDeviceFileList(std::string(listing->begin(), listing->end()));
 }
@@ -871,8 +871,8 @@ std::expected<HrdRecording, std::string> SomanetDrive::readHrdRecording(
     // missing middle file does not cost its own samples but misaligns every sample after it — a
     // recording that decodes to plausible nonsense. A failure here is worth a retry, not a graph.
     if (!content) {
-      return std::unexpected(
-          std::format("reading '{}' of the recording failed: {}", file.name, content.error()));
+      return std::unexpected(std::format("reading '{}' of the recording failed: {}", file.name,
+                                         content.error().message));
     }
     bytes.insert(bytes.end(), content->begin(), content->end());
     recording.files.push_back(file);

@@ -2,15 +2,30 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cstdint>
+#include <expected>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <initializer_list>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
+#include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
+
+#include "comm/al_status_codes.h"
+#include "comm/foe_error.h"
+#include "comm/sii.h"
+#include "core/base64.h"
+#include "core/platform.h"
+#include "core/user_cache.h"
 
 namespace mm::node {
 
@@ -413,6 +428,283 @@ std::expected<void, std::string> runMeasurementProcedure(Device& device, Progres
   }
   reporter.succeed(spec.step, *result);
   return {};
+}
+
+// ── Firmware installation helpers ──────────────────────────────────────────────────────────────
+
+using mm::comm::EtherCatState;
+using mm::comm::FoeError;
+using mm::comm::Retry;
+
+/// The result of borrowing a device to perform one FoE transfer: the **outer** error is the borrow
+/// itself (a string, which is what @c withDevice requires so it can report "device not found"), and
+/// the **inner** one is the transfer. Nesting them keeps the FoE error kind intact across the
+/// borrow, which is the whole reason this procedure can tell a transient failure worth retrying
+/// from a permanent one worth aborting on.
+template <typename T>
+using Borrowed = std::expected<std::expected<T, FoeError>, std::string>;
+
+constexpr std::string_view kPackageStep = "package";
+constexpr std::string_view kCacheStep = "cache";
+constexpr std::string_view kBootStep = "boot";
+constexpr std::string_view kExtraFilesStep = "extra-files";
+constexpr std::string_view kSiiStep = "sii";
+constexpr std::string_view kAppFirmwareStep = "app-firmware";
+constexpr std::string_view kComFirmwareStep = "com-firmware";
+constexpr std::string_view kFinalStateStep = "final-state";
+
+/// The names the bootloader is written under, regardless of what the package calls them.
+///
+/// Not a simplification: the bootloader has a fixed idea of the firmware filenames it accepts, and
+/// a package's real name ("app_8500-04_motion-drive_v5.6.10_2332.bin") is both long and variable.
+/// Sending the short constant name avoids filename-length handling in the bootloader entirely.
+constexpr std::string_view kAppFirmwareFoeName = "app_firmware.bin";
+constexpr std::string_view kComFirmwareFoeName = "com_firmware.bin";
+
+/// FoE read of this pseudo-file, with the target appended, deletes a file from the drive's flash.
+constexpr std::string_view kRemoveFilePrefix = "fs-remove=";
+
+/// Ceiling on an ordinary AL transition, which is a mailbox round trip and a slave acknowledgement.
+constexpr auto kStateTimeout = std::chrono::seconds(10);
+
+/// Ceiling on the transition out of BOOT. Far longer than an ordinary one because it is not an
+/// ordinary one: the SOMANET bootloader hands over to the application by **restarting the device**,
+/// so this has to cover a reboot, plus the drive's own internal timeout for deciding no valid
+/// application started (after which it answers AL status 0x0014 rather than nothing).
+constexpr auto kBootExitTimeout = std::chrono::seconds(30);
+
+/// How many times a transient FoE failure is re-issued before giving up, and the pause between
+/// attempts. Only kinds that @c FoeError classifies as transient are retried; a missing file or an
+/// undersized buffer will fail identically however many times it is asked.
+constexpr int kFoeAttempts = 5;
+constexpr auto kFoeRetryDelay = std::chrono::milliseconds(100);
+
+/// Sleeps, but notices a cancellation. std::this_thread::sleep_for cannot be interrupted, and
+/// request_stop does not wake a plain condition_variable, so this checks in slices instead.
+/// @return false if the sleep was cut short by a stop request.
+bool sleepUnlessStopped(std::chrono::milliseconds duration, const std::stop_token& stop) {
+  constexpr auto kSlice = std::chrono::milliseconds(50);
+  auto remaining = duration;
+  while (remaining > std::chrono::milliseconds::zero()) {
+    if (stop.stop_requested()) {
+      return false;
+    }
+    const auto slice = std::min(kSlice, remaining);
+    std::this_thread::sleep_for(slice);
+    remaining -= slice;
+  }
+  return !stop.stop_requested();
+}
+
+std::string cancelled(std::string_view what) {
+  return std::format("firmware installation was cancelled {}", what);
+}
+
+/// Writes one file over FoE, re-issuing transient failures.
+///
+/// The device is borrowed per attempt rather than once around the loop: the borrow must not be held
+/// across the back-off sleep, and re-resolving is also what makes an interleaved rescan surface as
+/// a clean "device not found" instead of a stale reference.
+std::expected<void, std::string> writeFileWithRetry(DeviceManager& deviceManager,
+                                                    uint16_t devicePosition,
+                                                    const std::string& filename,
+                                                    std::span<const uint8_t> content,
+                                                    const std::stop_token& stop) {
+  std::string lastError;
+  for (int attempt = 1; attempt <= kFoeAttempts; ++attempt) {
+    if (stop.stop_requested()) {
+      return std::unexpected(cancelled(std::format("before writing '{}'", filename)));
+    }
+    auto written = deviceManager.withDevice(devicePosition, [&](Device& device) -> Borrowed<void> {
+      return device.writeFile(filename, content);
+    });
+    // The outer expected reports a borrow failure (a string); the inner one the transfer itself.
+    if (!written) {
+      return std::unexpected(written.error());
+    }
+    if (*written) {
+      return {};
+    }
+    const FoeError& error = written->error();
+    lastError = error.message;
+    if (error.retry == Retry::Permanent) {
+      return std::unexpected(lastError);
+    }
+    spdlog::warn("FoE write of '{}' failed ({}); attempt {} of {}", filename, lastError, attempt,
+                 kFoeAttempts);
+    if (attempt < kFoeAttempts && !sleepUnlessStopped(kFoeRetryDelay, stop)) {
+      return std::unexpected(cancelled(std::format("while writing '{}'", filename)));
+    }
+  }
+  return std::unexpected(std::format("{} (gave up after {} attempts)", lastError, kFoeAttempts));
+}
+
+/// Deletes a file from the drive's flash, treating "there was no such file" as success.
+///
+/// Removal is issued as an FoE *read* of a pseudo-file, which is why this branches on the error
+/// kind rather than the message: a @c FileNotFound means the removal had nothing to do, which is
+/// precisely the outcome the caller wanted.
+std::expected<void, std::string> removeFile(DeviceManager& deviceManager, uint16_t devicePosition,
+                                            const std::string& filename) {
+  auto removed = deviceManager.withDevice(
+      devicePosition, [&](Device& device) -> Borrowed<std::vector<uint8_t>> {
+        return device.readFile(std::string(kRemoveFilePrefix) + filename);
+      });
+  if (!removed) {
+    return std::unexpected(removed.error());
+  }
+  if (*removed || removed->error().kind == mm::comm::FoeErrorKind::FileNotFound) {
+    return {};
+  }
+  return std::unexpected(removed->error().message);
+}
+
+std::expected<void, std::string> transitionTo(DeviceManager& deviceManager, uint16_t devicePosition,
+                                              EtherCatState target,
+                                              std::chrono::steady_clock::duration timeout) {
+  auto states = deviceManager.transitionToState({devicePosition}, target, timeout);
+  if (!states) {
+    return std::unexpected(states.error());
+  }
+  if (states->empty()) {
+    return std::unexpected(std::format("no state reported for device {}", devicePosition));
+  }
+  const auto& reached = states->front();
+  if (reached.alState != static_cast<uint16_t>(target)) {
+    // The AL status code is what makes this diagnosable rather than merely disappointing: a device
+    // with no application answers a PRE-OP request with 0x0014, "No valid firmware", which says
+    // exactly what happened instead of "it did not get there".
+    std::string detail =
+        std::format("the device reported {} rather than {}",
+                    toString(static_cast<EtherCatState>(reached.alState)), toString(target));
+    if (reached.alStatusCode != 0) {
+      detail += std::format(" (AL status 0x{:04X}: {})", reached.alStatusCode,
+                            mm::comm::alStatusCodeName(reached.alStatusCode));
+    }
+    return std::unexpected(detail);
+  }
+  return {};
+}
+
+/// Takes the device to BOOT. INIT first because the AL state machine only allows BOOT paired with
+/// INIT — a drive in OP cannot jump straight there.
+std::expected<void, std::string> enterBoot(DeviceManager& deviceManager, uint16_t devicePosition,
+                                           std::chrono::milliseconds warmUp,
+                                           const std::stop_token& stop) {
+  if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::Init, kStateTimeout);
+      !r) {
+    return std::unexpected(std::format("could not reach INIT: {}", r.error()));
+  }
+  if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::Boot, kStateTimeout);
+      !r) {
+    return std::unexpected(std::format("could not reach BOOT: {}", r.error()));
+  }
+  // A freshly entered bootloader takes a moment before it services file operations. Issuing the
+  // first FoE request too early fails *and* desynchronises the mailbox, so this is a wait rather
+  // than something to retry into. The driver's mailbox drain recovers from that state now, but
+  // waiting first is what avoids paying for it.
+  if (!sleepUnlessStopped(warmUp, stop)) {
+    return std::unexpected(cancelled("while the bootloader started"));
+  }
+  return {};
+}
+
+/// Leaves BOOT for @p finalState, one legal AL step at a time.
+///
+/// The state machine only pairs BOOT with INIT and only climbs one step at a time, so the walk is
+/// fixed: INIT, then PRE-OP, then SAFE-OP, then OP, stopping wherever it was asked to.
+std::expected<void, std::string> leaveBoot(DeviceManager& deviceManager, uint16_t devicePosition,
+                                           EtherCatState finalState) {
+  if (finalState == EtherCatState::Boot) {
+    return {};
+  }
+  if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::Init, kStateTimeout);
+      !r) {
+    return std::unexpected(std::format("could not reach INIT: {}", r.error()));
+  }
+  if (finalState == EtherCatState::Init) {
+    return {};
+  }
+  // The long one: this transition restarts the device into the firmware just written.
+  if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::PreOp, kBootExitTimeout);
+      !r) {
+    return std::unexpected(std::format("could not reach PRE-OP: {}", r.error()));
+  }
+  if (finalState == EtherCatState::PreOp) {
+    return {};
+  }
+  // Climbing further re-maps the whole bus, which DeviceManager handles — including re-reading this
+  // device's PDO mapping, which the firmware just written may well have changed.
+  if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::SafeOp, kStateTimeout);
+      !r) {
+    return std::unexpected(std::format("could not reach SAFE-OP: {}", r.error()));
+  }
+  if (finalState == EtherCatState::SafeOp) {
+    return {};
+  }
+  if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::Op, kStateTimeout); !r) {
+    return std::unexpected(std::format("could not reach OP: {}", r.error()));
+  }
+  return {};
+}
+
+std::expected<EtherCatState, std::string> parseFinalState(const nlohmann::json& value) {
+  if (!value.is_number_unsigned()) {
+    return std::unexpected(
+        "'finalState' must be an AL state number — the same encoding POST /api/devices/state uses");
+  }
+  constexpr std::array<EtherCatState, 5> kStates = {EtherCatState::Init, EtherCatState::PreOp,
+                                                    EtherCatState::Boot, EtherCatState::SafeOp,
+                                                    EtherCatState::Op};
+  const auto requested = static_cast<EtherCatState>(value.get<uint16_t>());
+  if (std::ranges::find(kStates, requested) == kStates.end()) {
+    return std::unexpected(
+        std::format("'finalState' must be 1 (INIT), 2 (PRE-OP), 3 (BOOT), 4 (SAFE-OP) or 8 (OP)"));
+  }
+  return requested;
+}
+
+std::vector<std::string> defaultSkipFiles() {
+  std::vector<std::string> files;
+  files.reserve(kDefaultSkippedFirmwareFiles.size());
+  for (std::string_view name : kDefaultSkippedFirmwareFiles) {
+    files.emplace_back(name);
+  }
+  return files;
+}
+
+/// Resolves a client-supplied package filename to its place in the firmware cache.
+///
+/// This is the only thing standing between a caller and the rest of the filesystem, and the API in
+/// front of it is unauthenticated — so it matters that the SOMANET name grammar is **not** a
+/// substitute for it: `package_../../x_b_c_v1.zip` splits into five perfectly legal
+/// underscore-separated fields. @c UserCache::resolve does the platform-specific half (absolute
+/// paths, drive letters, `..` spelled with trailing dots or spaces, Windows device names) and is
+/// already audited for exactly this; the separator check on top keeps the cache flat, since a
+/// package is one file and never a tree.
+std::expected<std::filesystem::path, std::string> resolveCachedPackage(std::string_view filename) {
+  if (filename.find('/') != std::string_view::npos ||
+      filename.find('\\') != std::string_view::npos) {
+    return std::unexpected(std::format(
+        "'{}' is not a plain filename — a firmware package is cached by name, not by path",
+        filename));
+  }
+  return mm::core::UserCache(firmwareCacheDir()).resolve(filename);
+}
+
+std::expected<std::vector<uint8_t>, std::string> readCachedPackage(
+    const std::filesystem::path& path) {
+  std::error_code ec;
+  if (!std::filesystem::exists(path, ec) || ec) {
+    return std::unexpected(
+        std::format("no package content was given and '{}' is not in the firmware cache",
+                    path.filename().string()));
+  }
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    return std::unexpected(std::format("could not read the cached package '{}'", path.string()));
+  }
+  return std::vector<uint8_t>{std::istreambuf_iterator<char>(in), std::istreambuf_iterator<char>()};
 }
 
 }  // namespace
@@ -1138,6 +1430,367 @@ std::expected<void, std::string> runPhaseInductanceMeasurementProcedure(Device& 
                                  [](SomanetDrive& drive, const OsCommandConfig& config) {
                                    return drive.runPhaseInductanceMeasurement(config);
                                  });
+}
+
+std::filesystem::path firmwareCacheDir() { return mm::core::userCacheDir() / "firmwares"; }
+
+std::vector<ProcedureParameter> firmwareInstallationParameters() {
+  // Built from the same helper the parser defaults to, so the advertised default and the applied
+  // one cannot drift.
+  const nlohmann::json skipDefault = defaultSkipFiles();
+  return {
+      fileParameter(
+          "packageContent", "Firmware package",
+          "The .zip firmware package, base64-encoded. May be omitted when 'packageFilename' names "
+          "a package already in the firmware cache — which is how a package is re-installed "
+          "without uploading it again, and also the way to avoid base64 entirely: PUT the raw "
+          "bytes to /api/user-cache/firmwares/<name>.zip first, then start this with only the "
+          "filename.",
+          nullptr),
+      stringParameter("packageFilename", "Package filename",
+                      "The package's filename, e.g. "
+                      "package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip. Optional: "
+                      "it names the package for caching and identifies a cached one to re-install. "
+                      "A name that does not follow the SOMANET convention still installs, it is "
+                      "just not cached.",
+                      ""),
+      stringArrayParameter(
+          "skipFiles", "Files to skip",
+          "Entries inside the package that are not written to the device. The defaults are the ESI "
+          "and the stack image, which are descriptive extras nothing on the drive reads and which "
+          "are slow to write. Any entry can be listed, including the SII and the firmware binaries "
+          "themselves.",
+          std::move(skipDefault)),
+      booleanParameter("cachePackage", "Cache the package",
+                       "Keep a copy of the package on the server so it can be re-installed without "
+                       "uploading it again. Only possible when a filename is given and it follows "
+                       "the SOMANET package naming convention.",
+                       true),
+      enumParameter(
+          "finalState", "Final state",
+          "Where the device is left. PRE-OP is the confirmation that the install worked: the "
+          "bootloader hands over to the newly written firmware on this transition, so reaching it "
+          "means the new firmware booted. Choose BOOT when no application will be present — after "
+          "erasing one, or between two installs — since there is then nothing to hand over to. "
+          "SAFE-OP and OP climb through PRE-OP and re-map the whole bus on the way, briefly "
+          "pausing "
+          "every other device. The values are AL state numbers, the same encoding "
+          "POST /api/devices/state takes.",
+          // Unsigned literals on purpose: nlohmann stores a non-negative integer built from a C++
+          // `int` as *signed*, and the validator checks is_number_unsigned() because that is what a
+          // parsed request carries. A signed default would be a value the descriptor advertises and
+          // the server then rejects.
+          static_cast<unsigned>(EtherCatState::PreOp),
+          {
+              ParameterOption{static_cast<unsigned>(EtherCatState::PreOp),
+                              "PRE-OP — loads and confirms the new firmware"},
+              ParameterOption{static_cast<unsigned>(EtherCatState::Init),
+                              "INIT — still on the bootloader"},
+              ParameterOption{static_cast<unsigned>(EtherCatState::Boot),
+                              "BOOT — stay in the bootloader"},
+              ParameterOption{static_cast<unsigned>(EtherCatState::SafeOp),
+                              "SAFE-OP — re-maps the bus and resumes inputs"},
+              ParameterOption{static_cast<unsigned>(EtherCatState::Op),
+                              "OP — re-maps the bus and resumes full exchange"},
+          }),
+  };
+}
+
+std::vector<ProgressStep> firmwareInstallationSteps() {
+  return stepsFrom({kPackageStep, kCacheStep, kBootStep, kExtraFilesStep, kSiiStep,
+                    kAppFirmwareStep, kComFirmwareStep, kFinalStateStep});
+}
+
+std::expected<FirmwareInstallationRequest, std::string> parseFirmwareInstallationRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+
+  FirmwareInstallationRequest request;
+  request.skipFiles = defaultSkipFiles();
+
+  if (auto filename = body.find("packageFilename"); filename != body.end()) {
+    if (!filename->is_string()) {
+      return std::unexpected("'packageFilename' must be a string");
+    }
+    request.filename = filename->get<std::string>();
+  }
+  if (auto skip = body.find("skipFiles"); skip != body.end()) {
+    if (!skip->is_array()) {
+      return std::unexpected("'skipFiles' must be an array of entry names");
+    }
+    request.skipFiles.clear();
+    for (const auto& name : *skip) {
+      if (!name.is_string()) {
+        return std::unexpected("every entry of 'skipFiles' must be a string");
+      }
+      request.skipFiles.push_back(name.get<std::string>());
+    }
+  }
+  if (auto cache = body.find("cachePackage"); cache != body.end()) {
+    if (!cache->is_boolean()) {
+      return std::unexpected("'cachePackage' must be true or false");
+    }
+    request.cachePackage = cache->get<bool>();
+  }
+  if (auto finalState = body.find("finalState"); finalState != body.end()) {
+    auto parsed = parseFinalState(*finalState);
+    if (!parsed) {
+      return std::unexpected(parsed.error());
+    }
+    request.finalState = *parsed;
+  }
+
+  // Decoded before the bytes are resolved, because a cached package is addressed by it — and
+  // because a name that does not parse is not an error, only a package that will not be cached.
+  if (!request.filename.empty()) {
+    if (auto name = parseFirmwarePackageName(request.filename)) {
+      request.name = std::move(*name);
+    } else {
+      spdlog::debug("firmware package name not recognised, it will not be cached: {}",
+                    name.error());
+    }
+  }
+
+  auto content = body.find("packageContent");
+  const bool hasContent = content != body.end() && !content->is_null();
+  if (hasContent) {
+    if (!content->is_string()) {
+      return std::unexpected("'packageContent' must be a base64-encoded string");
+    }
+    auto decoded = mm::core::base64Decode(content->get<std::string>());
+    if (!decoded) {
+      return std::unexpected(
+          std::format("'packageContent' is not valid base64: {}", decoded.error()));
+    }
+    request.package = std::move(*decoded);
+  } else {
+    if (request.filename.empty()) {
+      return std::unexpected(
+          "the request must carry 'packageContent', or a 'packageFilename' naming a package "
+          "already in the firmware cache");
+    }
+    // Deliberately not gated on the name parsing. Whether a name follows the SOMANET convention
+    // decides whether a package is *written* to the cache; a package already there — put there by
+    // an earlier install or uploaded straight to `firmwares/` through /api/user-cache — is read
+    // back under whatever it is called.
+    auto path = resolveCachedPackage(request.filename);
+    if (!path) {
+      return std::unexpected(path.error());
+    }
+    auto cached = readCachedPackage(*path);
+    if (!cached) {
+      return std::unexpected(cached.error());
+    }
+    request.package = std::move(*cached);
+  }
+  if (request.package.empty()) {
+    return std::unexpected("the firmware package is empty");
+  }
+  return request;
+}
+
+std::expected<void, std::string> runFirmwareInstallationProcedure(
+    DeviceManager& deviceManager, uint16_t devicePosition, ProgressReporter& reporter,
+    std::stop_token stop, const FirmwareInstallationRequest& request) {
+  // ── package ────────────────────────────────────────────────────────────────────────────────
+  reporter.start(kPackageStep);
+  auto package = openFirmwarePackage(request.package, request.skipFiles);
+  if (!package) {
+    reporter.fail(kPackageStep, package.error());
+    return std::unexpected(package.error());
+  }
+  if (package->sii) {
+    // Checked before anything is written, because an EEPROM write is the one operation here that
+    // can leave a device unidentifiable, and a malformed image is discovered only after a power
+    // cycle — long past the point where it could have been declined.
+    if (auto valid = mm::comm::validateSiiImage(package->sii->content); !valid) {
+      const std::string reason = std::format("the package's '{}' is not a valid SII image: {}",
+                                             package->sii->name, valid.error());
+      reporter.fail(kPackageStep, reason);
+      return std::unexpected(reason);
+    }
+  }
+  {
+    nlohmann::json manifest{
+        {"filename", request.filename},
+        {"appBinary", package->appBinary ? nlohmann::json(package->appBinary->name) : nullptr},
+        {"comBinary", package->comBinary ? nlohmann::json(package->comBinary->name) : nullptr},
+        {"sii", package->sii ? nlohmann::json(package->sii->name) : nullptr},
+        {"skipped", package->skipped},
+        {"finalState", toString(request.finalState)},
+    };
+    auto extras = nlohmann::json::array();
+    for (const auto& extra : package->extras) {
+      extras.push_back(extra.name);
+    }
+    manifest["extras"] = std::move(extras);
+    if (request.name) {
+      manifest["firmwareVersion"] = request.name->firmwareVersion;
+      manifest["firmwareId"] = request.name->firmwareId;
+    }
+    reporter.succeed(kPackageStep, std::move(manifest));
+  }
+
+  const bool writesAnything =
+      package->appBinary || package->comBinary || package->sii || !package->extras.empty();
+  if (!writesAnything) {
+    const std::string reason = "every entry in the package is in the skip list — nothing to write";
+    reporter.fail(kPackageStep, reason);
+    return std::unexpected(reason);
+  }
+
+  // ── cache ──────────────────────────────────────────────────────────────────────────────────
+  reporter.start(kCacheStep);
+  if (!request.cachePackage) {
+    reporter.succeed(kCacheStep, "not cached: caching was not requested");
+  } else if (!request.name) {
+    reporter.succeed(kCacheStep,
+                     request.filename.empty()
+                         ? "not cached: no filename was given"
+                         : std::format("not cached: '{}' is not a SOMANET firmware package name",
+                                       request.filename));
+  } else if (auto path = resolveCachedPackage(request.filename); !path) {
+    // Resolved rather than joined, because this one *writes*: the filename comes from an
+    // unauthenticated request, and a name that escapes the cache directory would put
+    // attacker-chosen bytes at an attacker-chosen path. A name that parses as a SOMANET package can
+    // still do that — the underscore grammar happily accepts `..` in a field — so the check is
+    // separate from it.
+    reporter.succeed(kCacheStep, std::format("not cached: {}", path.error()));
+  } else {
+    std::error_code ec;
+    std::filesystem::create_directories(path->parent_path(), ec);
+    std::ofstream out(*path, std::ios::binary | std::ios::trunc);
+    if (ec || !out ||
+        !out.write(reinterpret_cast<const char*>(request.package.data()),
+                   static_cast<std::streamsize>(request.package.size()))) {
+      // Best effort by design: a full or read-only cache directory has nothing to do with whether
+      // the firmware can be installed, so this records the miss and carries on.
+      reporter.succeed(kCacheStep, std::format("not cached: could not write '{}'", path->string()));
+    } else {
+      reporter.succeed(kCacheStep, path->string());
+    }
+  }
+
+  if (stop.stop_requested()) {
+    return std::unexpected(cancelled("before the device was touched"));
+  }
+
+  // ── boot ───────────────────────────────────────────────────────────────────────────────────
+  reporter.start(kBootStep);
+  if (auto entered = enterBoot(deviceManager, devicePosition, request.bootWarmUp, stop); !entered) {
+    reporter.fail(kBootStep, entered.error());
+    return std::unexpected(entered.error());
+  }
+  reporter.succeed(kBootStep);
+
+  // From here on the device is in BOOT, so every exit runs through this: whatever happened, the
+  // device is taken to the requested final state rather than left in the bootloader by accident.
+  std::optional<std::string> failure;
+  auto finish = [&]() -> std::expected<void, std::string> {
+    reporter.start(kFinalStateStep);
+    auto left = leaveBoot(deviceManager, devicePosition, request.finalState);
+    if (!left) {
+      // Worded so it cannot be mistaken for a write failure: the bytes are already on the drive.
+      const std::string reason =
+          failure ? std::format("the install did not complete, and the device was left in BOOT: {}",
+                                left.error())
+                  : std::format("the firmware was written; the device did not reach {}: {}",
+                                toString(request.finalState), left.error());
+      reporter.fail(kFinalStateStep, reason);
+      return std::unexpected(failure.value_or(reason));
+    }
+    reporter.succeed(kFinalStateStep, std::string(toString(request.finalState)));
+    if (failure) {
+      return std::unexpected(*failure);
+    }
+    return {};
+  };
+
+  // ── extra-files ────────────────────────────────────────────────────────────────────────────
+  reporter.start(kExtraFilesStep);
+  if (package->extras.empty()) {
+    reporter.succeed(kExtraFilesStep, "no extra files to write");
+  } else {
+    auto results = nlohmann::json::object();
+    for (const auto& extra : package->extras) {
+      if (stop.stop_requested()) {
+        failure = cancelled(std::format("before writing '{}'", extra.name));
+        reporter.fail(kExtraFilesStep, *failure);
+        return finish();
+      }
+      // Removed first so a rewrite cannot mix with whatever was there before.
+      if (auto removed = removeFile(deviceManager, devicePosition, extra.name); !removed) {
+        results[extra.name] = std::format("not removed: {}", removed.error());
+      }
+      auto written =
+          writeFileWithRetry(deviceManager, devicePosition, extra.name, extra.content, stop);
+      // Best effort: these are descriptive extras, and aborting a firmware update over a picture
+      // would be a worse outcome than not having the picture.
+      results[extra.name] = written ? "written" : std::format("not written: {}", written.error());
+      if (!written) {
+        spdlog::warn("device {}: could not write '{}' ({}); continuing the installation",
+                     devicePosition, extra.name, written.error());
+      }
+    }
+    reporter.succeed(kExtraFilesStep, std::move(results));
+  }
+
+  // ── sii ────────────────────────────────────────────────────────────────────────────────────
+  reporter.start(kSiiStep);
+  if (!package->sii) {
+    reporter.succeed(kSiiStep, "the package carries no SII image");
+  } else {
+    auto written = deviceManager.withDevice(
+        devicePosition, [&](Device& device) -> std::expected<void, std::string> {
+          return device.writeSii(package->sii->content);
+        });
+    if (!written) {
+      failure = std::format("writing the SII failed: {}", written.error());
+      reporter.fail(kSiiStep, *failure);
+      return finish();
+    }
+    // Unlike the firmware, an EEPROM change is not adopted by leaving BOOT: the ESC reads its
+    // EEPROM at reset, so this one really does need a power cycle.
+    reporter.succeed(kSiiStep,
+                     std::format("{} written — power-cycle the device for it to take effect",
+                                 package->sii->name));
+  }
+
+  // ── app-firmware / com-firmware ────────────────────────────────────────────────────────────
+  // The two binaries differ only in which step they report against and what the bootloader calls
+  // them, so one closure covers both. It returns false when the run must stop, which the caller
+  // turns into the common exit — `failure` is already set by then.
+  auto writeBinary = [&](std::string_view step, const std::optional<FirmwarePackageFile>& binary,
+                         std::string_view foeName, std::string_view absent) {
+    reporter.start(step);
+    if (!binary) {
+      reporter.succeed(step, std::string(absent));
+      return true;
+    }
+    auto written = writeFileWithRetry(deviceManager, devicePosition, std::string(foeName),
+                                      binary->content, stop);
+    if (!written) {
+      failure = std::format("writing {} failed: {}", binary->name, written.error());
+      reporter.fail(step, *failure);
+      return false;
+    }
+    reporter.succeed(step, std::format("{} written as {} ({} bytes)", binary->name, foeName,
+                                       binary->content.size()));
+    return true;
+  };
+
+  if (!writeBinary(kAppFirmwareStep, package->appBinary, kAppFirmwareFoeName,
+                   "the package carries no application firmware, or it was skipped")) {
+    return finish();
+  }
+  if (!writeBinary(kComFirmwareStep, package->comBinary, kComFirmwareFoeName,
+                   "the package carries no COM firmware")) {
+    return finish();
+  }
+
+  return finish();
 }
 
 }  // namespace mm::node

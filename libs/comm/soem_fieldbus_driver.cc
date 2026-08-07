@@ -66,8 +66,9 @@ std::expected<int, std::string> SoemFieldbusDriver::scan() {
   bootMailboxSlaves_.clear();
   // Take full manual control of AL state transitions. With the default (0), SOEM's config/map
   // helpers auto-request state changes (e.g. driving slaves toward PRE-OP) as a side effect. In
-  // Motion Master, AL state is the user's job (POST /api/state → DeviceManager::transitionToState),
-  // so we never want SOEM moving slaves on its own — every ecx_writestate is issued explicitly.
+  // Motion Master, AL state is the user's job (POST /api/devices/state →
+  // DeviceManager::transitionToState), so we never want SOEM moving slaves on its own — every
+  // ecx_writestate is issued explicitly.
   ctx_->manualstatechange = 1;
   // ecx_config_init returns the broadcast-read working counter: > 0 is the slave count; a
   // non-positive value means no slaves answered. Negative values are SOEM transport codes
@@ -788,21 +789,65 @@ int retrySdoInfo(F&& call) {
   return result;
 }
 
-// Decodes an ecx_FOEread/ecx_FOEwrite failure return value into a human-readable suffix. SOEM
-// reports the FoE error kind as a negated ec_err_type in the return value (not via the error
-// list, and without the wire error code), so we classify from -wkc.
-std::string foeErrorDetail(int wkc) {
+// Decodes an ecx_FOEread/ecx_FOEwrite failure return value into a FoeError. SOEM reports the FoE
+// error kind as a negated ec_err_type in the return value (not via the error list, and without the
+// wire error code), so we classify from -wkc. This SOEM-specific decode stays here, beside the
+// include that defines those constants; the transport-agnostic vocabulary it maps onto lives in
+// comm/foe_error.h, so a future SPoE driver maps its own codes to the same kinds.
+FoeError foeError(int wkc, std::string_view op, uint16_t slave, std::string_view filename) {
   switch (-wkc) {
     case EC_ERR_TYPE_FOE_FILE_NOTFOUND:
-      return " (file not found)";
+      return makeFoeError(FoeErrorKind::FileNotFound, op, slave, filename);
     case EC_ERR_TYPE_FOE_BUF2SMALL:
-      return " (buffer too small)";
+      return makeFoeError(FoeErrorKind::BufferTooSmall, op, slave, filename);
     case EC_ERR_TYPE_FOE_PACKETNUMBER:
-      return " (packet number mismatch)";
+      return makeFoeError(FoeErrorKind::PacketMismatch, op, slave, filename);
     case EC_ERR_TYPE_FOE_ERROR:
-      return " (FoE error)";
+      return makeFoeError(FoeErrorKind::Protocol, op, slave, filename);
     default:
-      return std::format(" (wkc {})", wkc);
+      break;
+  }
+  // Zero is the working counter proper: the slave answered nothing at all. Any other unmapped
+  // value is an ec_err_type this driver does not classify; it keeps the raw number in the message
+  // so an unrecognised code is still diagnosable, and the transient default so a caller retries it.
+  if (wkc == 0) {
+    return makeFoeError(FoeErrorKind::NoResponse, op, slave, filename);
+  }
+  FoeError error = makeFoeError(FoeErrorKind::Protocol, op, slave, filename);
+  error.message =
+      std::format("{} slave {} '{}' failed (FoE error, wkc {})", op, slave, filename, wkc);
+  return error;
+}
+
+// Discards whatever is sitting in a slave's read mailbox, ignoring the contents.
+//
+// An FoE transaction that timed out — most often a bootloader that had not finished coming up when
+// the first request after entering BOOT arrived — leaves the mailbox out of sync: the late reply
+// is still queued, so every subsequent request reads the *previous* answer and fails. That state
+// survives a Motion Master restart, which historically left a power cycle as the only recovery.
+// Reading the mailbox out with a zero timeout before each transfer makes that wedge self-healing.
+// The cost of doing it every time is one FPRD datagram: with a zero timeout ecx_mbxreceive checks
+// the sync-manager status once and returns without touching the mailbox when nothing is waiting.
+// Against an FoE transfer — a multi-packet mailbox exchange, or a 700 ms EC_TIMEOUTRXM stall when
+// it fails — that is well under a percent. It lives here rather than in the one caller that
+// provoked it (firmware installation) because a wedge poisons *every* FoE caller, not just the one
+// that caused it, so recovery belongs at the entry point they all share.
+//
+// Ownership: ecx_mbxreceive allocates from the context's mailbox pool and transfers the buffer to
+// the caller on success, so each drained message must be dropped back. This holds because Motion
+// Master never enables the cyclic mailbox handler (ecx_slavembxcyclic), whose path assigns a
+// non-pool buffer instead. The count is bounded so a slave streaming messages cannot spin here.
+void drainMailbox(ecx_contextt* ctx, uint16_t slavePosition) {
+  constexpr int kMaxDrained = 8;
+  for (int i = 0; i < kMaxDrained; ++i) {
+    ec_mbxbuft* mbx = nullptr;
+    if (ecx_mbxreceive(ctx, slavePosition, &mbx, 0) <= 0) {
+      return;
+    }
+    spdlog::debug("drained a stale mailbox message from slave {}", slavePosition);
+    if (mbx != nullptr) {
+      ecx_dropmbx(ctx, mbx);
+    }
   }
 }
 
@@ -958,13 +1003,15 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSii(uint16_t slavePosi
   return {};
 }
 
-std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
+std::expected<std::vector<uint8_t>, FoeError> SoemFieldbusDriver::readFile(
     uint16_t slavePosition, const std::string& filename) {
   std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
-    return std::unexpected("no driver — call init() first");
+    return std::unexpected(
+        FoeError{FoeErrorKind::Protocol, Retry::Permanent, "no driver — call init() first"});
   }
   spdlog::debug("FOEread slave {} '{}'", slavePosition, filename);
+  drainMailbox(ctx_.get(), slavePosition);
   // 10 MiB receive buffer: a conservative upper bound covering any file a SOMANET drive serves over
   // FoE. FoE has no size-ahead handshake, so ecx_FOEread fills this buffer and reports the actual
   // length back through `size` (in/out, like SDO's psize).
@@ -981,33 +1028,33 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readFile(
     // SOEM signals the FoE error kind through the negated return value, not the error list: the
     // FoE path never calls ecx_pusherror, so ecx_poperror would return nothing here. It also
     // discards the wire error code (0x800x), keeping only file-not-found vs. generic. Decode -wkc.
-    std::string msg = std::format("FOEread slave {} '{}' failed", slavePosition, filename);
-    msg += foeErrorDetail(wkc);
-    spdlog::debug("{}", msg);
-    return std::unexpected(msg);
+    FoeError error = foeError(wkc, "FOEread", slavePosition, filename);
+    spdlog::debug("{}", error.message);
+    return std::unexpected(std::move(error));
   }
   data.resize(size);
   spdlog::debug("FOEread slave {} '{}' ok ({} bytes)", slavePosition, filename, data.size());
   return data;
 }
 
-std::expected<void, std::string> SoemFieldbusDriver::writeFile(uint16_t slavePosition,
-                                                               const std::string& filename,
-                                                               std::span<const uint8_t> data) {
+std::expected<void, FoeError> SoemFieldbusDriver::writeFile(uint16_t slavePosition,
+                                                            const std::string& filename,
+                                                            std::span<const uint8_t> data) {
   std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
-    return std::unexpected("no driver — call init() first");
+    return std::unexpected(
+        FoeError{FoeErrorKind::Protocol, Retry::Permanent, "no driver — call init() first"});
   }
   spdlog::debug("FOEwrite slave {} '{}' ({} bytes)", slavePosition, filename, data.size());
+  drainMailbox(ctx_.get(), slavePosition);
   std::string name = filename;  // ecx_FOEwrite takes non-const char*
   int wkc = ecx_FOEwrite(ctx_.get(), slavePosition, name.data(), 0, static_cast<int>(data.size()),
                          const_cast<uint8_t*>(data.data()), EC_TIMEOUTRXM);
   if (wkc <= 0) {
     // See readFile: the FoE error kind is in the negated return value, not the error list.
-    std::string msg = std::format("FOEwrite slave {} '{}' failed", slavePosition, filename);
-    msg += foeErrorDetail(wkc);
-    spdlog::debug("{}", msg);
-    return std::unexpected(msg);
+    FoeError error = foeError(wkc, "FOEwrite", slavePosition, filename);
+    spdlog::debug("{}", error.message);
+    return std::unexpected(std::move(error));
   }
   spdlog::debug("FOEwrite slave {} '{}' ok", slavePosition, filename);
   return {};

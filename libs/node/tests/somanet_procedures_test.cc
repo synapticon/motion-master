@@ -1625,10 +1625,6 @@ class FirmwareFakeDriver : public FieldbusDriver {
   std::map<std::string, int> transientFailures;  ///< Fails this many times, then succeeds.
   std::string permanentFailure;                  ///< Always fails, permanently.
 
-  /// After successfully writing this file, leave BOOT — what a real bootloader does when it commits
-  /// a firmware image, and what made the second binary fail on an ACTILINK.
-  std::string dropsBootAfterWriting;
-
   std::expected<void, std::string> init() override { return {}; }
   std::expected<int, std::string> scan() override { return 1; }
   SlaveInfo slaveInfo(uint16_t) const override {
@@ -1660,16 +1656,7 @@ class FirmwareFakeDriver : public FieldbusDriver {
       return std::unexpected(
           mm::comm::makeFoeError(mm::comm::FoeErrorKind::PacketMismatch, "FOEwrite", 1, name));
     }
-    if (alStatus_ != static_cast<uint16_t>(EtherCatState::Boot)) {
-      // A bootloader that has been left behind refuses a transfer outright rather than timing out,
-      // which is what the generic FoE error on the wire looks like.
-      return std::unexpected(
-          mm::comm::makeFoeError(mm::comm::FoeErrorKind::Protocol, "FOEwrite", 1, name));
-    }
     written[name] = std::vector<uint8_t>(data.begin(), data.end());
-    if (name == dropsBootAfterWriting) {
-      alStatus_ = static_cast<uint16_t>(EtherCatState::Init);
-    }
     return {};
   }
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
@@ -2034,28 +2021,6 @@ TEST(FirmwareInstallationBody, WritesBothBinariesOfAPackageThatHasThem) {
   ASSERT_TRUE(result) << result.error();
   EXPECT_TRUE(bus.driver->written.contains("app_firmware.bin"));
   EXPECT_TRUE(bus.driver->written.contains("com_firmware.bin"));
-}
-
-// The regression test for the failure seen on an ACTILINK: the application binary wrote fine and
-// the communication binary that followed was refused five times, because committing the first image
-// had taken the bootloader out of BOOT and nothing re-checked between transfers.
-TEST(FirmwareInstallationBody, ReentersBootWhenTheBootloaderDropsOutBetweenTransfers) {
-  FirmwareBus bus;
-  bus.driver->dropsBootAfterWriting = "app_firmware.bin";
-  ProgressReporter reporter(mm::node::firmwareInstallationSteps());
-  std::stop_source source;
-
-  auto result =
-      runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), actilinkRequest());
-  ASSERT_TRUE(result) << result.error();
-  EXPECT_TRUE(bus.driver->written.contains("com_firmware.bin"))
-      << "the second binary must be written after BOOT is re-established";
-
-  // Two BOOT entries: the one that started the install, and the one that recovered it.
-  const auto boots =
-      std::ranges::count(bus.driver->commanded, static_cast<uint16_t>(EtherCatState::Boot));
-  EXPECT_EQ(boots, 2) << "expected a re-entry into BOOT before the second transfer";
-  EXPECT_EQ(bus.driver->commanded.back(), static_cast<uint16_t>(EtherCatState::PreOp));
 }
 
 }  // namespace

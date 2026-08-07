@@ -505,28 +505,15 @@ std::string cancelled(std::string_view what) {
 /// The device is borrowed per attempt rather than once around the loop: the borrow must not be held
 /// across the back-off sleep, and re-resolving is also what makes an interleaved rescan surface as
 /// a clean "device not found" instead of a stale reference.
-// Defined below, next to the AL transitions it uses; declared here because every transfer runs it.
-std::expected<void, std::string> ensureBootReady(DeviceManager& deviceManager,
-                                                 uint16_t devicePosition,
-                                                 std::chrono::milliseconds warmUp,
-                                                 const std::stop_token& stop);
-
 std::expected<void, std::string> writeFileWithRetry(DeviceManager& deviceManager,
                                                     uint16_t devicePosition,
                                                     const std::string& filename,
                                                     std::span<const uint8_t> content,
-                                                    std::chrono::milliseconds warmUp,
                                                     const std::stop_token& stop) {
   std::string lastError;
   for (int attempt = 1; attempt <= kFoeAttempts; ++attempt) {
     if (stop.stop_requested()) {
       return std::unexpected(cancelled(std::format("before writing '{}'", filename)));
-    }
-    // Checked on every attempt, not only the first: the point of retrying a transient failure is
-    // that the device may have moved, and hammering the same request at a bootloader that has left
-    // BOOT can only fail the same way five times.
-    if (auto ready = ensureBootReady(deviceManager, devicePosition, warmUp, stop); !ready) {
-      return std::unexpected(ready.error());
     }
     auto written = deviceManager.withDevice(devicePosition, [&](Device& device) -> Borrowed<void> {
       return device.writeFile(filename, content);
@@ -620,38 +607,6 @@ std::expected<void, std::string> enterBoot(DeviceManager& deviceManager, uint16_
     return std::unexpected(cancelled("while the bootloader started"));
   }
   return {};
-}
-
-/// Makes sure the device is in BOOT and ready for a file transfer, re-entering if it is not.
-///
-/// **Run before every transfer, not only before the first**, because the bootloader does not
-/// reliably stay put between them: committing a firmware image restarts or busies it, and the next
-/// write is then refused with a generic FoE error within a second rather than timing out. Observed
-/// on an ACTILINK — the application binary wrote in 11.5 s and the communication binary that
-/// followed it failed immediately, five times over, because nothing re-checked the state in
-/// between. The previous generation guarded exactly this, once per binary, and the guard was lost
-/// in the rewrite.
-///
-/// The common case costs one AL status read (valid in any state) and nothing else; only a device
-/// that has actually left BOOT pays the transition and the warm-up.
-std::expected<void, std::string> ensureBootReady(DeviceManager& deviceManager,
-                                                 uint16_t devicePosition,
-                                                 std::chrono::milliseconds warmUp,
-                                                 const std::stop_token& stop) {
-  auto states = deviceManager.deviceStates({devicePosition});
-  if (!states) {
-    return std::unexpected(states.error());
-  }
-  if (states->empty()) {
-    return std::unexpected(std::format("no state reported for device {}", devicePosition));
-  }
-  const auto current = static_cast<EtherCatState>(states->front().alState);
-  if (current == EtherCatState::Boot && !states->front().error) {
-    return {};
-  }
-  spdlog::info("device {} is in {}{} rather than BOOT; re-entering before the next transfer",
-               devicePosition, toString(current), states->front().error ? " with an error" : "");
-  return enterBoot(deviceManager, devicePosition, warmUp, stop);
 }
 
 /// Leaves BOOT for @p finalState, one legal AL step at a time.
@@ -1769,8 +1724,8 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
       if (auto removed = removeFile(deviceManager, devicePosition, extra.name); !removed) {
         results[extra.name] = std::format("not removed: {}", removed.error());
       }
-      auto written = writeFileWithRetry(deviceManager, devicePosition, extra.name, extra.content,
-                                        request.bootWarmUp, stop);
+      auto written =
+          writeFileWithRetry(deviceManager, devicePosition, extra.name, extra.content, stop);
       // Best effort: these are descriptive extras, and aborting a firmware update over a picture
       // would be a worse outcome than not having the picture.
       results[extra.name] = written ? "written" : std::format("not written: {}", written.error());
@@ -1815,7 +1770,7 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
       return true;
     }
     auto written = writeFileWithRetry(deviceManager, devicePosition, std::string(foeName),
-                                      binary->content, request.bootWarmUp, stop);
+                                      binary->content, stop);
     if (!written) {
       failure = std::format("writing {} failed: {}", binary->name, written.error());
       reporter.fail(step, *failure);

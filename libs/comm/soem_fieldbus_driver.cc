@@ -817,8 +817,19 @@ FoeError foeError(int wkc, std::string_view op, uint16_t slave, std::string_view
       return makeFoeError(FoeErrorKind::BufferTooSmall, op, slave, filename);
     case EC_ERR_TYPE_FOE_PACKETNUMBER:
       return makeFoeError(FoeErrorKind::PacketMismatch, op, slave, filename);
-    case EC_ERR_TYPE_FOE_ERROR:
-      return makeFoeError(FoeErrorKind::Protocol, op, slave, filename);
+    case EC_ERR_TYPE_FOE_ERROR: {
+      // Ambiguous, and saying so is the point: EC_TIMEOUT is -5 and EC_ERR_TYPE_FOE_ERROR is 5, so
+      // a -5 return means *either* the slave answered with an FoE Error packet or it never answered
+      // at all, and nothing in the return distinguishes them. Reporting only the first cost a round
+      // of misdiagnosis on a firmware install that was in fact timing out. The wall time tells them
+      // apart: a refusal is immediate, a timeout takes the full FoE timeout.
+      FoeError error = makeFoeError(FoeErrorKind::Protocol, op, slave, filename);
+      error.message = std::format(
+          "{} slave {} '{}' failed (FoE error, or no response — SOEM "
+          "returns the same code for both)",
+          op, slave, filename);
+      return error;
+    }
     default:
       break;
   }

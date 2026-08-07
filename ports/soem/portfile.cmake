@@ -47,6 +47,59 @@ vcpkg_replace_string(
 # reach the API. Cost is only stack: the ec_ODlistt / ec_OElistt locals in
 # SoemFieldbusDriver::readObjectDictionary hold EC_MAXODLIST/EC_MAXOELIST rows
 # of EC_MAXNAME+1 bytes (~100 KB total at 80), trivial on the non-RT HTTP thread.
+# SOEM 2.0's FoE write path mishandles an FOE_BUSY reply from the slave, which a bootloader sends
+# while it erases or programs flash — exactly what happens partway through a firmware image.
+#
+# Two defects, both introduced by the 1.x -> 2.0 refactor from a stack mailbox buffer to a pooled
+# one, which converted the FOE_ACK branch and missed FOE_BUSY:
+#
+#  1. The resend writes its packet through `FOEp`, which still points at the buffer handed to the
+#     previous ecx_mbxsend, and then calls `ecx_mbxsend(context, slave, (ec_mbxbuft *)&MbxOut, ...)`.
+#     `MbxOut` is NULL by then, so `&MbxOut` is the address of a stack pointer variable cast to a
+#     mailbox — the slave is sent garbage rather than the packet, and the transfer stalls until the
+#     caller's timeout. In 1.x `MbxOut` was itself the buffer, so `&MbxOut` was correct there.
+#     Fixed by mirroring the FOE_ACK branch: take a fresh mailbox, point FOEp at it, send it.
+#
+#  2. A BUSY arriving before any data packet ("otherwise ignore") leaves `worktodo` FALSE, so the
+#     loop exits and ecx_FOEwrite returns the positive work counter from the receive — reporting
+#     **success for a transfer that wrote nothing**. For a firmware flasher that is the worst
+#     possible failure mode. Fixed by looping to wait for the slave's next message, which is what
+#     "ignore" was meant to mean.
+#
+# Observed on a SOMANET ACTILINK: the application binary writes fine (its packets are acknowledged
+# without a pause) while the communication binary written straight after it never completes, failing
+# at whatever timeout the caller sets. The previous-generation master, on SOEM 1.x, writes the same
+# file to the same drive in ~3.5 s.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_foe.c"
+"                           dofinalzero = TRUE;
+                        }
+                        FOEp->MbxHeader.length = htoes((uint16)(0x0006 + segmentdata));"
+"                           dofinalzero = TRUE;
+                        }
+                        MbxOut = ecx_getmbx(context);
+                        ec_clearmbx(MbxOut);
+                        FOEp = (ec_FOEt *)MbxOut;
+                        FOEp->MbxHeader.length = htoes((uint16)(0x0006 + segmentdata));")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_foe.c"
+"wkc = ecx_mbxsend(context, slave, (ec_mbxbuft *)&MbxOut, EC_TIMEOUTTXM);"
+"wkc = ecx_mbxsend(context, slave, MbxOut, EC_TIMEOUTTXM);
+                        MbxOut = NULL;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_foe.c"
+"                  /* resend if data has been send before */
+                  /* otherwise ignore */
+                  if (sendpacket)"
+"                  /* resend if data has been send before */
+                  /* otherwise keep waiting for the slave's next message: falling through would
+                     return the receive's work counter and report success for a transfer that
+                     never sent a byte */
+                  worktodo = TRUE;
+                  if (sendpacket)")
+
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS

@@ -66,10 +66,22 @@ vcpkg_replace_string(
 #     possible failure mode. Fixed by looping to wait for the slave's next message, which is what
 #     "ignore" was meant to mean.
 #
-# Observed on a SOMANET ACTILINK: the application binary writes fine (its packets are acknowledged
-# without a pause) while the communication binary written straight after it never completes, failing
-# at whatever timeout the caller sets. The previous-generation master, on SOEM 1.x, writes the same
-# file to the same drive in ~3.5 s.
+# Verified by reading both versions rather than inferred. SOEM 1.x declares `ec_mbxbuft MbxIn,
+# MbxOut;` — stack buffers — so `(ec_mbxbuft *)&MbxOut` is correct there and `FOEp` stays valid
+# because the buffer is reused rather than handed off. 2.0 made them pooled pointers and converted
+# only the neighbouring branch.
+#
+# That this path matters on SOMANET hardware is not a guess either: the previous-generation master's
+# vendored SOEM 1.x carries a local fix to this same BUSY branch, marked with two references to
+# https://github.com/OpenEtherCATsociety/SOEM/pull/627 — someone had to make the BUSY resend work
+# before firmware writes would succeed on these drives. Observed here as an ACTILINK whose
+# application binary writes fine (its packets are acknowledged without a pause) while the
+# communication binary written straight after it never completes, failing at whatever timeout the
+# caller sets; the previous generation writes the same file to the same drive in ~3.5 s.
+#
+# One deliberate deviation from 1.x: it has defect (2) as well (a BUSY before any data returns
+# success having written nothing), and we fix it rather than matching. Waiting for the slave's next
+# message is strictly safer than reporting a firmware write that never happened.
 vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_foe.c"
 "                           dofinalzero = TRUE;

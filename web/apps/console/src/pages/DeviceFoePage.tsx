@@ -5,7 +5,7 @@ import DevicePageHeader from '../components/DevicePageHeader'
 import HexViewer from '../components/HexViewer'
 import { useConnection } from '../contexts/ConnectionContext'
 import { downloadBytes } from '../utils/download'
-import { parseSomanetFileList, wireTimeMs, type SomanetFile } from '@synapticon/motion-master-client'
+import { wireTimeMs, type DeviceFile } from '@synapticon/motion-master-client'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
@@ -13,6 +13,26 @@ const btnCls =
   'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
 const btnOutlineCls =
   'border border-grey-300 text-grey-700 px-4 py-2 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
+
+// Surfaces the node layer's error string from a failed request (matching the other device pages).
+// The generated client rejects with its response object rather than an Error, so the listing below
+// would otherwise report "Unknown error" for every 409 the server explains.
+function apiError(err: unknown): string {
+  if (err && typeof err === 'object') {
+    if ('error' in err) {
+      const inner = (err as { error: unknown }).error
+      if (inner && typeof inner === 'object' && 'error' in inner) {
+        return String((inner as { error: unknown }).error)
+      }
+      if (typeof inner === 'string') return inner
+    }
+    if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
+      return `HTTP ${(err as { status: number }).status}`
+    }
+  }
+  if (err instanceof Error) return err.message
+  return 'Unknown error'
+}
 
 // Reading this FoE pseudo-command unlocks the drive's filesystem for writing.
 // DD1317 is the fixed unlock key the firmware expects.
@@ -153,7 +173,7 @@ export default function DeviceFoePage() {
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'bytes' | 'text' | 'json'>('bytes')
 
-  const [files, setFiles] = useState<SomanetFile[] | null>(null)
+  const [files, setFiles] = useState<DeviceFile[] | null>(null)
   const [listing, setListing] = useState(false)
   const [listError, setListError] = useState<string | null>(null)
   const [removing, setRemoving] = useState<string | null>(null)
@@ -227,12 +247,13 @@ export default function DeviceFoePage() {
     setListing(true)
     setListError(null)
     try {
-      const { bytes } = await readRaw('fs-getlist')
-      const text = new TextDecoder('utf-8').decode(bytes)
-      setFiles(parseSomanetFileList(text))
+      // The server reads and parses the drive's `fs-getlist` pseudo-file; the listing format is
+      // firmware knowledge and belongs in one place, not in every client that wants a file list.
+      const { data } = await api.listDeviceFiles(slavePosition)
+      setFiles(data.files)
     } catch (err) {
       setFiles(null)
-      setListError(err instanceof Error ? err.message : 'Unknown error')
+      setListError(apiError(err))
     } finally {
       setListing(false)
     }
@@ -509,7 +530,9 @@ export default function DeviceFoePage() {
                           <td className="px-4 py-2 font-mono text-grey-500">{i + 1}</td>
                           <td className="px-4 py-2 font-mono">{file.name}</td>
                           <td className="px-4 py-2 font-mono text-grey-600 whitespace-nowrap">
-                            {file.size === null ? '—' : `${file.size.toLocaleString()} B`}
+                            {file.byteCount === undefined
+                              ? '—'
+                              : `${file.byteCount.toLocaleString()} B`}
                           </td>
                           <td className="px-4 py-2">
                             <div className="flex gap-4">

@@ -17,6 +17,5 @@ export * from './client'
 export * from './lan';
 export * from './hex'
 export * from './sdo'
-export * from './somanet'
 export * from './mmpd'
 export * from './wire-time'

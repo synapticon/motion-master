@@ -426,6 +426,56 @@ export interface ProcedureSnapshot {
   error?: string;
 }
 
+/** One file stored on a device, as its file list reports it. */
+export interface DeviceFile {
+  /**
+   * Filename as FoE addresses it.
+   * @example "hr_data0.bin"
+   */
+  name: string;
+  /**
+   * Size the device reported. Absent when it reported the name without one — the size is what the listing claims, not what a read returned.
+   * @example 8032
+   */
+  byteCount?: number;
+}
+
+/** One high-rate data recording, read back from a drive's files and decoded. */
+export interface HrdRecording {
+  /**
+   * Which layout the files were decoded as — echoes the request.
+   * @example "encoder-raw"
+   */
+  data: "encoder-raw" | "system-identification";
+  /** The files it was read from, in order. A recording that came back shorter than expected can be told from one that was never made by what is listed here. */
+  files: DeviceFile[];
+  /**
+   * Total bytes read across those files.
+   * @example 20000
+   */
+  byteCount: number;
+  /**
+   * Bytes past the last whole sample. The drive allocates its files in fixed-size blocks, so this is the last block's padding rather than data that failed to decode.
+   * @example 0
+   */
+  trailingBytes: number;
+  /**
+   * How many samples were decoded.
+   * @example 5000
+   */
+  sampleCount: number;
+  /**
+   * What each value of a row is, in order. For `encoder-raw`: `raw` (the 32-bit word the encoder reported), `masterCount` (its low 14 bits) and `noniusCount` (the next 14) — the raw word is kept because the firmware specification describes only bits 0-27 and says nothing about the top four. For `system-identification`: `velocityRpm` (converted out of the file's Q15 fixed point) and `torquePermil` (per mille of rated torque).
+   * @example ["raw","masterCount","noniusCount"]
+   */
+  columns: string[];
+  /**
+   * One row per sample, positional in the order `columns` gives — a full recording is up to ten thousand rows, so the names travel once beside them rather than on every row.
+   * @example [[4661,4661,0],[4662,4662,0]]
+   */
+  samples: number[][];
+}
+
 /** A drive's brake configuration and current state — the parts of object 0x2004 that decide what commanding the brake will actually do. Returned by every brake endpoint, so the outcome of a release or engage arrives in the same shape as a plain read. */
 export interface BrakeState {
   /**
@@ -620,6 +670,18 @@ export interface ProcedureRequest {
    * @example 7
    */
   value?: number;
+  /**
+   * `hrd-streaming` only, and required for it: which signal to record. Also decides how the recording decodes when it is read back from `/api/devices/{slavePosition}/hrd`.
+   * @example "encoder-raw"
+   */
+  data?: "encoder-raw" | "system-identification";
+  /**
+   * `hrd-streaming` only, and required for it: how long to record. The drive samples once per millisecond into at most five 8032-byte files, so the real ceiling depends on the sample size — 10000 ms for `encoder-raw`, but only 6000 ms for `system-identification`, which the drive itself does not enforce.
+   * @min 1
+   * @max 10000
+   * @example 5000
+   */
+  durationMs?: number;
   /**
    * `ic-mu-calibration-mode` only, and required for it: how the BiSS service should clock the encoder. `standard` is normal operation; `configuration` keeps the encoder clocked but uses only the register-communication bits, so position stops updating and no CRC fault is raised; `raw` clocks an encoder already configured for raw output and averages that data into 0x2704. There is no default — the mode is the instruction.
    * @example "configuration"

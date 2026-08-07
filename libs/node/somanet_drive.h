@@ -6,9 +6,11 @@
 #include <expected>
 #include <nlohmann/json_fwd.hpp>
 #include <optional>
+#include <span>
 #include <stop_token>
 #include <string>
 #include <string_view>
+#include <variant>
 #include <vector>
 
 #include "node/cia402_drive.h"
@@ -215,6 +217,108 @@ constexpr std::string_view describe(EncoderRegisterFault fault) {
   return "unknown fault";
 }
 
+/// @brief Which signal a high-rate data (HRD) stream records — OS command 3's data index. The enum
+///        value @b is the index the firmware expects.
+///
+/// The two formats differ in what a sample *is*, so the choice made when a stream is configured
+/// also decides how its files decode. Nothing on the drive records which one was used, which is
+/// why reading a recording back takes the same enum as configuring it did.
+enum class HrdData : uint8_t {
+  /// The raw position word an iC-MU encoder reports, once per millisecond. **Records zeros unless
+  /// the encoder was first put into raw mode** (@c IcMuCalibrationMode::kRaw, OS command 1) — the
+  /// firmware streams whatever the encoder is currently clocked for.
+  kEncoderRawData = 0,
+
+  /// The velocity and torque actual values, once per millisecond. **Records the response to a
+  /// system identification run** (OS command 15), which has to be configured and started first;
+  /// on its own this streams a drive that is not being excited.
+  kSystemIdentificationData = 1,
+};
+
+/// @brief Name of an HRD data selection, as it appears on the wire. Never returns @c nullptr.
+constexpr std::string_view toString(HrdData data) {
+  switch (data) {
+    case HrdData::kEncoderRawData:
+      return "encoder-raw";
+    case HrdData::kSystemIdentificationData:
+      return "system-identification";
+  }
+  return "unknown";
+}
+
+/// @brief Parses an HRD data token ("encoder-raw" / "system-identification") — the inverse of
+///        @c toString. Returns @c std::nullopt for any other token.
+std::optional<HrdData> parseHrdData(std::string_view token);
+
+/// @brief How many bytes one recorded sample of @p data occupies in the drive's files.
+///
+/// Four for a raw encoder word, six for a velocity/torque pair. The firmware writes one sample per
+/// millisecond of the configured duration, so this is also what turns a duration into a size.
+constexpr size_t hrdSampleSize(HrdData data) { return data == HrdData::kEncoderRawData ? 4 : 6; }
+
+/// @brief The longest stream the firmware can record for @p data.
+///
+/// **Two different limits, and only the larger one is enforced by the drive.** The recording is
+/// held in at most five 8032-byte files, so the ceiling is whatever fills them: 10000 ms of 4-byte
+/// samples, or 6000 ms of 6-byte ones. The firmware rejects a duration above 10000 ms outright
+/// (@c HrdStreamFault::kDuration) but accepts an over-long system identification stream and then
+/// silently truncates it mid-sample, so the 6000 ms limit has to be applied by the caller.
+constexpr std::chrono::milliseconds maxHrdStreamDuration(HrdData data) {
+  return data == HrdData::kEncoderRawData ? std::chrono::milliseconds(10000)
+                                          : std::chrono::milliseconds(6000);
+}
+
+/// @brief The faults HRD streaming (command 3) reports as its command-specific OS error code.
+///
+/// Command-specific codes count up from 0 and mean nothing outside their own command — general
+/// codes (@c OsCommandError) count down from 254 — so this table is only valid for command 3.
+enum class HrdStreamFault : uint8_t {
+  kInitialization = 0,  ///< The command could not initialise.
+  kStreaming = 1,       ///< Something failed while the stream was running.
+  kDuration = 2,        ///< The requested duration is above the firmware's 10000 ms ceiling.
+  kDataIndex = 3,       ///< The requested data index is not one the firmware knows.
+  kAction = 4,          ///< The requested action is neither configure nor start.
+};
+
+/// @brief Name of an HRD streaming fault, as the console and logs should render it. Never
+///        @c nullptr.
+constexpr std::string_view toString(HrdStreamFault fault) {
+  switch (fault) {
+    case HrdStreamFault::kInitialization:
+      return "initialization error";
+    case HrdStreamFault::kStreaming:
+      return "streaming error";
+    case HrdStreamFault::kDuration:
+      return "duration value";
+    case HrdStreamFault::kDataIndex:
+      return "data index value";
+    case HrdStreamFault::kAction:
+      return "action value";
+  }
+  return "unknown";
+}
+
+/// @brief What an HRD streaming fault means, for a message a user has to act on. Never
+///        @c nullptr.
+constexpr std::string_view describe(HrdStreamFault fault) {
+  switch (fault) {
+    case HrdStreamFault::kInitialization:
+      return "the drive could not start the recording";
+    case HrdStreamFault::kStreaming:
+      return "the recording failed part way through, so whatever reached the drive's files is "
+             "incomplete";
+    case HrdStreamFault::kDuration:
+      return "the requested duration is longer than the 10000 ms the firmware allows";
+    case HrdStreamFault::kDataIndex:
+      return "the drive does not know the requested data index, which means this firmware records "
+             "a different set of signals than this build expects";
+    case HrdStreamFault::kAction:
+      return "the drive does not know the requested action, which means this firmware drives HRD "
+             "streaming differently than this build expects";
+  }
+  return "unknown fault";
+}
+
 /// @brief Sub-entries of 0x2004 (brake options). The enum value @b is the subindex.
 enum BrakeOption : uint8_t {
   kBrakePullVoltage = 1,      ///< UNSIGNED32, mV — voltage that disengages the brake.
@@ -285,6 +389,7 @@ constexpr std::string_view toString(BrakeReleaseStrategy strategy) {
 enum class OsCommandId : uint8_t {
   kEncoderRegisterCommunication = 0,  ///< Reads or writes one register of a BiSS encoder.
   kIcMuCalibrationMode = 1,           ///< Sets how the BiSS service clocks an iC-MU encoder.
+  kHrdStreaming = 3,                  ///< Records a signal into the drive's high-rate data files.
   kMotorPhaseOrderDetection = 4,      ///< Detects the motor phase order. Rotates the rotor.
   kCommutationOffsetMeasurement = 5,  ///< Measures the commutation angle offset; see
                                       ///< somanet::CommutationOffsetMethod.
@@ -551,6 +656,96 @@ struct EncoderRegisterResult {
   std::string describe() const;
 };
 void to_json(nlohmann::json& j, const EncoderRegisterResult& result);
+
+/// @brief One file stored on a device, as its file list reports it.
+///
+/// @c byteCount is optional because the size is what the *list* claims, not what a read returned:
+/// a firmware that reports a name without one is still reporting a file that can be read.
+struct DeviceFile {
+  std::string name;                 ///< Filename as FoE addresses it, e.g. "hr_data0.bin".
+  std::optional<size_t> byteCount;  ///< Size the device reported, when it reported one.
+};
+void to_json(nlohmann::json& j, const DeviceFile& file);
+
+/// @brief Parses the body of a @c fs-getlist read into one entry per line.
+///
+/// Pure, so the one place that knows the firmware's listing format is testable without a device.
+/// Each line is `<filename>, size: <bytes>`; a line that does not end that way is taken **whole**
+/// as a filename with no size, rather than dropped — a name is what a caller needs, and a firmware
+/// that formats a line unexpectedly should not make the files around it unreachable. Blank lines
+/// are skipped and CRLF is accepted.
+///
+/// @param text  The pseudo-file's contents.
+/// @return One entry per non-blank line, in the order they appeared.
+std::vector<DeviceFile> parseDeviceFileList(std::string_view text);
+
+/// @brief One sample of @c somanet::HrdData::kEncoderRawData.
+///
+/// @c raw is the word the encoder reported and the two counts are the fields packed inside it —
+/// both are carried because the counts are what a calibration works on, while the raw word is the
+/// only lossless record (the firmware specification describes bits 0-27 and says nothing about the
+/// top four).
+struct HrdEncoderSample {
+  uint32_t raw = 0;          ///< The 32-bit word as the file holds it.
+  uint16_t masterCount = 0;  ///< Bits 0-13: the master track's count.
+  uint16_t noniusCount = 0;  ///< Bits 14-27: the nonius track's count.
+};
+
+/// @brief One sample of @c somanet::HrdData::kSystemIdentificationData.
+struct HrdSystemIdentificationSample {
+  /// The velocity actual value, converted from the file's Q15 fixed point to real RPM.
+  double velocityRpm = 0.0;
+
+  /// The torque actual value, in per mille of rated torque — the file's own unit.
+  int16_t torquePermil = 0;
+};
+
+/// @brief A decoded recording's samples: exactly one vector, whichever the data selection implies.
+///
+/// A variant rather than two vectors with one left empty, so a recording cannot claim to be encoder
+/// data while carrying velocity samples.
+using HrdSamples =
+    std::variant<std::vector<HrdEncoderSample>, std::vector<HrdSystemIdentificationSample>>;
+
+/// @brief One high-rate data recording, read back from the drive's files and decoded.
+///
+/// @c files is what was read, in order, so a recording that came back short can be told from one
+/// that was never made. @c trailingBytes is the bytes past the last whole sample: the firmware
+/// allocates its files in fixed-size blocks, so a recording that does not fill the last block
+/// leaves padding behind, and a non-zero value here is that padding rather than lost data.
+struct HrdRecording {
+  somanet::HrdData data{somanet::HrdData::kEncoderRawData};  ///< Which signal this recorded.
+  std::vector<DeviceFile> files;  ///< The files it was read from, in order.
+  size_t byteCount = 0;           ///< Total bytes read across them.
+  size_t trailingBytes = 0;       ///< Bytes past the last whole sample; padding, not data.
+  HrdSamples samples;             ///< The decoded samples.
+
+  /// @brief How many samples were decoded, whichever format they are in.
+  size_t sampleCount() const;
+};
+void to_json(nlohmann::json& j, const HrdRecording& recording);
+
+/// @brief The column names of one decoded sample of @p data, in the order a row carries them.
+///
+/// The rows go on the wire positionally — a 10 s recording is ten thousand of them — so the names
+/// travel once, beside the rows, exactly as the monitoring protocol ships its parameter order once.
+std::vector<std::string_view> hrdColumns(somanet::HrdData data);
+
+/// @brief Decodes the concatenated contents of a recording's files into samples.
+///
+/// Pure: the transform from bytes to samples, with no device involved, which is what makes the
+/// firmware's two on-disk layouts testable without one. **Little-endian**, unlike the OS command
+/// payloads that configure the stream — these are words the firmware wrote to a file rather than
+/// bytes it packed into a CoE object.
+///
+/// A trailing partial sample is ignored rather than rejected: the drive's files are fixed-size
+/// blocks, so a recording that does not fill the last one ends in padding. The caller learns how
+/// much was left over from @c bytes.size() % somanet::hrdSampleSize.
+///
+/// @param bytes  Every file's contents, concatenated in file order.
+/// @param data   Which layout to read them as — the same selection the stream was configured with.
+/// @return The decoded samples, in the alternative @p data implies.
+HrdSamples decodeHrdSamples(std::span<const uint8_t> bytes, somanet::HrdData data);
 
 /// @brief What open phase detection found.
 ///
@@ -847,6 +1042,88 @@ class SomanetDrive : public Cia402Drive {
       somanet::EncoderOrdinal encoder, somanet::IcMuCalibrationMode mode,
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
                                        .pollInterval = std::chrono::milliseconds(20)});
+
+  /// @brief Configures a high-rate data stream (OS command 3, configure action).
+  ///
+  /// Chooses what the next recording captures and for how long, and **deletes every HRD file
+  /// already on the drive** — which is the slow part: the firmware specification allows up to
+  /// around 5 seconds for it in the worst case, so the default timeout is sized for that and not
+  /// for a mailbox exchange.
+  ///
+  /// Configuring does not record anything; @c startHrdStream does. They are separate commands
+  /// precisely so a recording can be armed once and triggered when the machine is ready.
+  ///
+  /// @p duration is validated against @c somanet::maxHrdStreamDuration before anything is sent,
+  /// because the two limits are not enforced alike: the drive rejects anything above 10000 ms, but
+  /// accepts an over-long system identification stream and then overruns its five files, truncating
+  /// the recording mid-sample. Refusing it here is the difference between an error and a file of
+  /// plausible-looking data with a corrupt tail.
+  ///
+  /// Needs no preparation — no diagnostics mode, no Operation Enabled, no brake, and nothing moves
+  /// — only an active mailbox. What the *data* is worth does depend on preparation elsewhere: see
+  /// @c somanet::HrdData, whose two selections each require another command to have run first.
+  ///
+  /// @param data      Which signal the recording should capture.
+  /// @param duration  How long to record for; at most @c somanet::maxHrdStreamDuration(data).
+  /// @param config    Timing and cancellation. The default allows for the file deletion.
+  /// @return Void once the drive accepted the configuration, otherwise why it did not.
+  std::expected<void, std::string> configureHrdStream(
+      somanet::HrdData data, std::chrono::milliseconds duration,
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(10),
+                                       .pollInterval = std::chrono::milliseconds(100)});
+
+  /// @brief Starts the configured high-rate data stream and waits for it to finish (OS command 3,
+  ///        start action).
+  ///
+  /// **Blocks for the whole configured duration** — up to ten seconds — because the drive holds the
+  /// command in progress until the recording is complete, reporting its percentage as it goes. So
+  /// @c config.timeout has to exceed the duration that was configured, and there is nothing in the
+  /// start request that says what that duration is: the caller is the only one that knows, which is
+  /// why this takes no arguments but needs its config sized deliberately.
+  ///
+  /// Cancelling through @c config.stop aborts the recording on the drive like any other OS command.
+  /// Whatever had been written stays in the files, so a cancelled recording is a short one rather
+  /// than none.
+  ///
+  /// @param config  Timing and cancellation. **Has no useful default** — size the timeout from the
+  ///                duration that was configured.
+  /// @return Void once the recording finished, otherwise why it did not.
+  std::expected<void, std::string> startHrdStream(const OsCommandConfig& config);
+
+  /// @brief Reads the drive's high-rate data files back and decodes them (FoE, no OS command).
+  ///
+  /// Discovers the files from the device's own file list rather than guessing at their names, so a
+  /// firmware that splits a recording across five files and one that keeps it in a single file are
+  /// both read whole, and a device with no recording on it says so immediately instead of being
+  /// probed for files that are not there.
+  ///
+  /// The files are concatenated in numeric order and decoded as one stream — a sample may straddle
+  /// a file boundary, since the firmware chunks a byte stream rather than padding each file to a
+  /// whole number of samples.
+  ///
+  /// @p data must be the selection the recording was made with. **Nothing on the drive records
+  /// it**, so passing the other one silently reinterprets the bytes; the procedure that made the
+  /// recording reports what it configured for exactly this reason.
+  ///
+  /// Blocks for the transfer — five 8 KB FoE reads plus the list — on the calling thread. Requires
+  /// an active mailbox.
+  ///
+  /// @param data  Which layout the files hold.
+  /// @return The decoded recording, or an error if the list or a read failed.
+  std::expected<HrdRecording, std::string> readHrdRecording(somanet::HrdData data) const;
+
+  /// @brief Reads the list of files stored on the device (FoE read of "fs-getlist").
+  ///
+  /// Synapticon firmware serves its directory as a pseudo-file rather than through any standard
+  /// service: reading the name @c fs-getlist over FoE returns one line per entry. That makes this a
+  /// vendor operation despite looking like a filesystem primitive, which is why it lives here and
+  /// not on @c Device beside @c readFile.
+  ///
+  /// The listing is what makes @c readHrdRecording possible without guessing at filenames, and it
+  /// is the answer to "what else is on this drive" for firmware, logs and the ESI.
+  ///
+  /// @return Every file the device reported, in the order it reported them.
+  std::expected<std::vector<DeviceFile>, std::string> readFileList() const;
 
   /// @brief Runs open phase detection (OS command 6) and decodes its verdict.
   ///

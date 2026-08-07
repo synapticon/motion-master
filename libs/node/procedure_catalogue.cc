@@ -221,6 +221,50 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor hrdStreaming;
+  hrdStreaming.name = std::string(kHrdStreamingProcedure);
+  hrdStreaming.title = "HRD streaming";
+  hrdStreaming.description =
+      "Records one signal into the drive's high-rate data files, one sample every millisecond. "
+      "Encoder raw data captures the position word an iC-MU encoder reports; system identification "
+      "data captures the velocity and torque actual values. Arming the recording deletes the "
+      "previous one, and recording occupies the whole requested duration. The recording stays on "
+      "the drive — read it back from the device's HRD endpoint, which needs the same data "
+      "selection to decode it.";
+  hrdStreaming.caveats = {
+      "Arming a recording deletes every high-rate data file already on the drive, so the previous "
+      "recording is gone the moment this starts — read one back before recording the next.",
+      "Encoder raw data records zeros unless the encoder was put into raw mode first with iC-MU "
+      "calibration mode. The drive streams whatever the encoder is currently clocked for and "
+      "reports no problem.",
+      "System identification data records an unexcited drive unless a system identification run "
+      "was configured and started first.",
+      "The duration limit depends on the data: 10000 ms for encoder raw, but only 6000 ms for "
+      "system identification. The drive enforces only the first, so an over-long system "
+      "identification recording would be truncated mid-sample rather than refused.",
+      "Cancelling stops the recording on the drive but does not remove what was already written, "
+      "so the files hold a shorter recording rather than none.",
+      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  };
+  hrdStreaming.movesMotor = false;
+  hrdStreaming.requiresEnabled = false;
+  hrdStreaming.parameters = hrdStreamingParameters();
+  hrdStreaming.steps = hrdStreamingSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(hrdStreaming),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseHrdStreamingRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runHrdStreamingProcedure(device, reporter, std::move(stop), spec);
+        };
+      },
+  });
+
   ProcedureDescriptor commissioning;
   commissioning.name = std::string(kOffsetDetectionProcedure);
   commissioning.title = "Offset detection";

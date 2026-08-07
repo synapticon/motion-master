@@ -2,15 +2,19 @@
 
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <bit>
+#include <charconv>
 #include <format>
 #include <iterator>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "core/util.h"
@@ -222,9 +226,108 @@ std::expected<EncoderRegisterResult, std::string> accessEncoderRegister(
   return result;
 }
 
+// Byte layout of the HRD streaming request (command 3). The drive reads the data index and the
+// duration only for the configure action; a start request is the ID and the action alone.
+constexpr size_t kHrdActionByte = 1;
+constexpr size_t kHrdDataIndexByte = 2;
+constexpr size_t kHrdDurationMsbByte = 3;
+constexpr size_t kHrdDurationLsbByte = 4;
+
+constexpr uint8_t kHrdConfigureAction = 0;
+constexpr uint8_t kHrdStartAction = 1;
+
+// The two 14-bit tracks packed into one raw encoder sample: master in bits 0-13, nonius above it.
+constexpr uint32_t kHrdTrackMask = 0x3FFF;
+constexpr unsigned kHrdNoniusShift = 14;
+
+// Fractional bits of the Q15 fixed-point velocity in a system identification sample.
+constexpr unsigned kHrdVelocityFractionalBits = 15;
+
+// The pseudo-file Synapticon firmware serves its directory as. Not a file on the device — reading
+// this name runs a listing.
+constexpr std::string_view kFileListName = "fs-getlist";
+
+// Names a failed HRD streaming response. Shared by both actions because the drive answers them from
+// the same error table, and a configure that fails for a reason a start could also fail for should
+// not read differently.
+std::string describeHrdFailure(const OsCommandResponse& response, std::string_view what) {
+  if (!response.errorCode) {
+    // Status 2: failed with no code. Nothing more can be said than that it did not happen.
+    return std::format("{} failed and the drive reported no error code", what);
+  }
+  const uint8_t code = *response.errorCode;
+  if (auto general = osCommandErrorName(code)) {
+    return std::format("{} was not performed: {} (OS error {})", what, *general, code);
+  }
+  if (code <= static_cast<uint8_t>(somanet::HrdStreamFault::kAction)) {
+    const auto fault = static_cast<somanet::HrdStreamFault>(code);
+    return std::format("{} failed: {} — {}", what, somanet::toString(fault),
+                       somanet::describe(fault));
+  }
+  // A command-specific code this build does not name. Report the number rather than guessing, so a
+  // firmware that grows the table stays actionable.
+  return std::format("{} failed with OS error {} (command-specific)", what, code);
+}
+
+// The recording index of an HRD file, or nullopt when @p name is not one. The number is what orders
+// them, and it has to be read as a number: a lexicographic sort of the names would put a tenth file
+// before the second, silently reassembling the stream out of order.
+std::optional<uint32_t> hrdFileIndex(std::string_view name) {
+  constexpr std::string_view kPrefix = "hr_data";
+  constexpr std::string_view kSuffix = ".bin";
+  if (!name.starts_with(kPrefix) || !name.ends_with(kSuffix)) {
+    return std::nullopt;
+  }
+  const auto digits = name.substr(kPrefix.size(), name.size() - kPrefix.size() - kSuffix.size());
+  if (digits.empty()) {
+    return std::nullopt;
+  }
+  uint32_t index = 0;
+  const auto* end = digits.data() + digits.size();
+  auto [p, ec] = std::from_chars(digits.data(), end, index);
+  if (ec != std::errc() || p != end) {
+    return std::nullopt;
+  }
+  return index;
+}
+
+// Reads the `, size: <bytes>` suffix of a file list line, or nullopt when @p tail is not one.
+std::optional<size_t> parseFileSizeSuffix(std::string_view tail) {
+  constexpr std::string_view kSizeLabel = "size:";
+  const auto skipSpace = [](std::string_view text) {
+    const auto at = text.find_first_not_of(" \t");
+    return at == std::string_view::npos ? std::string_view{} : text.substr(at);
+  };
+  tail = skipSpace(tail);
+  if (!tail.starts_with(kSizeLabel)) {
+    return std::nullopt;
+  }
+  tail = skipSpace(tail.substr(kSizeLabel.size()));
+  size_t size = 0;
+  auto [p, ec] = std::from_chars(tail.data(), tail.data() + tail.size(), size);
+  if (ec != std::errc()) {
+    return std::nullopt;
+  }
+  // Anything but trailing space after the digits means the line is not a size line after all.
+  if (!skipSpace(std::string_view(p, static_cast<size_t>(tail.data() + tail.size() - p))).empty()) {
+    return std::nullopt;
+  }
+  return size;
+}
+
 }  // namespace
 
 namespace somanet {
+
+std::optional<HrdData> parseHrdData(std::string_view token) {
+  if (token == toString(HrdData::kEncoderRawData)) {
+    return HrdData::kEncoderRawData;
+  }
+  if (token == toString(HrdData::kSystemIdentificationData)) {
+    return HrdData::kSystemIdentificationData;
+  }
+  return std::nullopt;
+}
 
 std::optional<IcMuCalibrationMode> parseIcMuCalibrationMode(std::string_view token) {
   if (token == toString(IcMuCalibrationMode::kConfiguration)) {
@@ -530,6 +633,224 @@ std::expected<void, std::string> SomanetDrive::setIcMuCalibrationMode(
     return std::unexpected(std::format("{} failed with OS error {}", what, code));
   }
   return {};
+}
+
+std::vector<DeviceFile> parseDeviceFileList(std::string_view text) {
+  std::vector<DeviceFile> files;
+  while (!text.empty()) {
+    const auto newline = text.find('\n');
+    std::string_view line = text.substr(0, newline);
+    text = newline == std::string_view::npos ? std::string_view{} : text.substr(newline + 1);
+
+    // The firmware's own line endings are not specified anywhere, so both are accepted.
+    if (line.ends_with('\r')) {
+      line.remove_suffix(1);
+    }
+    const auto first = line.find_first_not_of(" \t");
+    if (first == std::string_view::npos) {
+      continue;
+    }
+    line = line.substr(first, line.find_last_not_of(" \t") - first + 1);
+
+    // The size follows the *first* comma whose remainder is a size — not simply the first comma,
+    // because a filename may contain one and only the tail says which comma was the separator.
+    DeviceFile file{.name = std::string(line), .byteCount = std::nullopt};
+    for (size_t comma = line.find(','); comma != std::string_view::npos;
+         comma = line.find(',', comma + 1)) {
+      if (auto size = parseFileSizeSuffix(line.substr(comma + 1))) {
+        auto name = line.substr(0, comma);
+        if (const auto last = name.find_last_not_of(" \t"); last != std::string_view::npos) {
+          name = name.substr(0, last + 1);
+        }
+        file = DeviceFile{.name = std::string(name), .byteCount = *size};
+        break;
+      }
+    }
+    files.push_back(std::move(file));
+  }
+  return files;
+}
+
+void to_json(nlohmann::json& j, const DeviceFile& file) {
+  j = nlohmann::json{{"name", file.name}};
+  // Omitted rather than null when the device reported no size, following the convention every
+  // optional on this surface follows: a null would read as "zero bytes" to a client that only
+  // checks for the key.
+  if (file.byteCount) {
+    j["byteCount"] = *file.byteCount;
+  }
+}
+
+std::vector<std::string_view> hrdColumns(somanet::HrdData data) {
+  if (data == somanet::HrdData::kEncoderRawData) {
+    return {"raw", "masterCount", "noniusCount"};
+  }
+  return {"velocityRpm", "torquePermil"};
+}
+
+size_t HrdRecording::sampleCount() const {
+  if (const auto* encoder = std::get_if<std::vector<HrdEncoderSample>>(&samples)) {
+    return encoder->size();
+  }
+  return std::get<std::vector<HrdSystemIdentificationSample>>(samples).size();
+}
+
+void to_json(nlohmann::json& j, const HrdRecording& recording) {
+  j = nlohmann::json{
+      {"data", somanet::toString(recording.data)}, {"files", recording.files},
+      {"byteCount", recording.byteCount},          {"trailingBytes", recording.trailingBytes},
+      {"sampleCount", recording.sampleCount()},    {"columns", hrdColumns(recording.data)}};
+
+  auto& rows = j["samples"] = nlohmann::json::array();
+  if (const auto* encoder = std::get_if<std::vector<HrdEncoderSample>>(&recording.samples)) {
+    for (const auto& sample : *encoder) {
+      rows.push_back({sample.raw, sample.masterCount, sample.noniusCount});
+    }
+    return;
+  }
+  for (const auto& sample :
+       std::get<std::vector<HrdSystemIdentificationSample>>(recording.samples)) {
+    rows.push_back({sample.velocityRpm, sample.torquePermil});
+  }
+}
+
+HrdSamples decodeHrdSamples(std::span<const uint8_t> bytes, somanet::HrdData data) {
+  const size_t sampleSize = somanet::hrdSampleSize(data);
+  const size_t count = bytes.size() / sampleSize;
+
+  if (data == somanet::HrdData::kEncoderRawData) {
+    std::vector<HrdEncoderSample> samples;
+    samples.reserve(count);
+    for (size_t i = 0; i < count; ++i) {
+      const uint8_t* at = bytes.data() + i * sampleSize;
+      const uint32_t raw = static_cast<uint32_t>(at[0]) | (static_cast<uint32_t>(at[1]) << 8) |
+                           (static_cast<uint32_t>(at[2]) << 16) |
+                           (static_cast<uint32_t>(at[3]) << 24);
+      samples.push_back(HrdEncoderSample{
+          .raw = raw,
+          .masterCount = static_cast<uint16_t>(raw & kHrdTrackMask),
+          .noniusCount = static_cast<uint16_t>((raw >> kHrdNoniusShift) & kHrdTrackMask)});
+    }
+    return samples;
+  }
+
+  std::vector<HrdSystemIdentificationSample> samples;
+  samples.reserve(count);
+  for (size_t i = 0; i < count; ++i) {
+    const uint8_t* at = bytes.data() + i * sampleSize;
+    const uint32_t velocityBits =
+        static_cast<uint32_t>(at[0]) | (static_cast<uint32_t>(at[1]) << 8) |
+        (static_cast<uint32_t>(at[2]) << 16) | (static_cast<uint32_t>(at[3]) << 24);
+    const uint16_t torqueBits =
+        static_cast<uint16_t>(static_cast<uint16_t>(at[4]) | (static_cast<uint16_t>(at[5]) << 8));
+    samples.push_back(HrdSystemIdentificationSample{
+        .velocityRpm = static_cast<double>(static_cast<int32_t>(velocityBits)) /
+                       static_cast<double>(1U << kHrdVelocityFractionalBits),
+        .torquePermil = static_cast<int16_t>(torqueBits)});
+  }
+  return samples;
+}
+
+std::expected<void, std::string> SomanetDrive::configureHrdStream(
+    somanet::HrdData data, std::chrono::milliseconds duration, const OsCommandConfig& config) {
+  const std::string what =
+      std::format("configuring a {} ms {} recording", duration.count(), somanet::toString(data));
+
+  // Refused here rather than sent: the drive rejects a duration over 10000 ms but *accepts* an
+  // over-long system identification stream, then overruns its five files and truncates the
+  // recording mid-sample. See somanet::maxHrdStreamDuration.
+  const auto maxDuration = somanet::maxHrdStreamDuration(data);
+  if (duration <= std::chrono::milliseconds::zero() || duration > maxDuration) {
+    return std::unexpected(std::format("{} is not possible: {} can be recorded for 1 to {} ms",
+                                       what, somanet::toString(data), maxDuration.count()));
+  }
+
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(somanet::OsCommandId::kHrdStreaming);
+  command[kHrdActionByte] = kHrdConfigureAction;
+  command[kHrdDataIndexByte] = static_cast<uint8_t>(data);
+  // Big-endian, like every other multi-byte OS command payload — and safe to narrow because the
+  // check above bounds the duration well inside 16 bits.
+  const auto milliseconds = static_cast<uint16_t>(duration.count());
+  command[kHrdDurationMsbByte] = static_cast<uint8_t>(milliseconds >> 8);
+  command[kHrdDurationLsbByte] = static_cast<uint8_t>(milliseconds & 0xFF);
+
+  auto response = runOsCommand(command, config);
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+  if (response->failed()) {
+    return std::unexpected(describeHrdFailure(*response, what));
+  }
+  return {};
+}
+
+std::expected<void, std::string> SomanetDrive::startHrdStream(const OsCommandConfig& config) {
+  constexpr std::string_view kWhat = "recording the configured HRD stream";
+
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(somanet::OsCommandId::kHrdStreaming);
+  command[kHrdActionByte] = kHrdStartAction;
+
+  auto response = runOsCommand(command, config);
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+  if (response->failed()) {
+    return std::unexpected(describeHrdFailure(*response, kWhat));
+  }
+  return {};
+}
+
+std::expected<std::vector<DeviceFile>, std::string> SomanetDrive::readFileList() const {
+  auto listing = device().readFile(std::string(kFileListName));
+  if (!listing) {
+    return std::unexpected(std::format("reading the device file list ('{}') failed: {}",
+                                       kFileListName, listing.error()));
+  }
+  return parseDeviceFileList(std::string(listing->begin(), listing->end()));
+}
+
+std::expected<HrdRecording, std::string> SomanetDrive::readHrdRecording(
+    somanet::HrdData data) const {
+  auto listing = readFileList();
+  if (!listing) {
+    return std::unexpected(listing.error());
+  }
+
+  std::vector<std::pair<uint32_t, DeviceFile>> recorded;
+  for (auto& file : *listing) {
+    if (auto index = hrdFileIndex(file.name)) {
+      recorded.emplace_back(*index, file);
+    }
+  }
+  if (recorded.empty()) {
+    return std::unexpected(
+        "the device holds no high-rate data recording (it lists no hr_data<n>.bin file) — record "
+        "one before reading it back");
+  }
+  std::ranges::sort(recorded, {}, &std::pair<uint32_t, DeviceFile>::first);
+
+  HrdRecording recording;
+  recording.data = data;
+  std::vector<uint8_t> bytes;
+  for (const auto& [index, file] : recorded) {
+    auto content = device().readFile(file.name);
+    // Fatal rather than skipped: the files are one byte stream chunked at a fixed size, so a
+    // missing middle file does not cost its own samples but misaligns every sample after it — a
+    // recording that decodes to plausible nonsense. A failure here is worth a retry, not a graph.
+    if (!content) {
+      return std::unexpected(
+          std::format("reading '{}' of the recording failed: {}", file.name, content.error()));
+    }
+    bytes.insert(bytes.end(), content->begin(), content->end());
+    recording.files.push_back(file);
+  }
+
+  recording.byteCount = bytes.size();
+  recording.trailingBytes = bytes.size() % somanet::hrdSampleSize(data);
+  recording.samples = decodeHrdSamples(bytes, data);
+  return recording;
 }
 
 std::string EncoderRegisterResult::describe() const {

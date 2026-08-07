@@ -205,6 +205,78 @@ std::expected<void, std::string> runIcMuCalibrationModeProcedure(
     Device& device, ProgressReporter& reporter, std::stop_token stop,
     const IcMuCalibrationModeRequest& request);
 
+/// @brief Procedure name for recording a high-rate data stream, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kHrdStreamingProcedure = "hrd-streaming";
+
+/// @brief The step that arms the recording — chooses the signal and the duration, and clears the
+///        files the last recording left behind.
+inline constexpr std::string_view kHrdConfigureStep = "configure-stream";
+
+/// @brief The step that records. Occupies the whole configured duration.
+inline constexpr std::string_view kHrdRecordStep = "record";
+
+/// @brief What one high-rate data recording was asked to capture.
+struct HrdStreamingRequest {
+  /// Which signal to record. No default a client can rely on — the value here is only what an unset
+  /// struct holds — because it decides both what is captured and how the files decode afterwards.
+  somanet::HrdData data{somanet::HrdData::kEncoderRawData};
+
+  /// How long to record for. Required, and bounded by @c somanet::maxHrdStreamDuration for the
+  /// chosen @c data rather than by one shared ceiling.
+  std::chrono::milliseconds duration{};
+};
+
+/// @brief Parses and validates a client's HRD streaming request body.
+///
+/// Accepts `{"data": "encoder-raw", "durationMs": 5000}` — or `system-identification`. Both fields
+/// are required, and the duration is checked against the limit for the chosen data, which is
+/// **6000 ms for system identification and 10000 ms for encoder raw**. That per-format check is the
+/// reason this parse exists rather than a bare range: the firmware only rejects durations over
+/// 10000 ms, and quietly truncates an over-long system identification recording instead.
+///
+/// @param body  Parsed request JSON.
+/// @return The validated request, or a message naming what is wrong with it.
+std::expected<HrdStreamingRequest, std::string> parseHrdStreamingRequest(
+    const nlohmann::json& body);
+
+/// @brief What HRD streaming accepts, as its descriptor advertises it.
+///
+/// The advertised duration range is the wider of the two formats, since a descriptor carries one
+/// set of bounds per parameter; the parse applies the narrower one once the format is known.
+std::vector<ProcedureParameter> hrdStreamingParameters();
+
+/// @brief The HRD streaming procedure's step template — configure, then record.
+std::vector<ProgressStep> hrdStreamingSteps();
+
+/// @brief Records one high-rate data stream as a procedure body.
+///
+/// Two steps because the firmware has two commands: configuring arms the recording and deletes the
+/// files of the previous one (seconds of work on its own), and starting it records for the whole
+/// requested duration. Splitting them in the report is what makes a run that failed to arm
+/// distinguishable from one that failed while recording.
+///
+/// Prepares nothing and moves nothing, like @c runEncoderRegisterProcedure — but **what the
+/// recording is worth depends on preparation this procedure does not do**: encoder raw data records
+/// zeros unless the encoder was first put into raw mode (@c runIcMuCalibrationModeProcedure), and
+/// system identification data records an unexcited drive unless a system identification run was
+/// configured and started first. See @c somanet::HrdData.
+///
+/// **The recording is left on the drive.** This body does not read it back — the files are read
+/// through @c readHrdRecording, which needs the same @c data selection to decode them, and the
+/// configure step reports what was used so a client that polled the run knows what to ask for.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; passed into both commands, so cancelling during the
+///                 recording aborts it on the drive and leaves a short recording behind.
+/// @param request  Which signal to record, and for how long.
+/// @return Void once the recording finished, otherwise why it did not.
+std::expected<void, std::string> runHrdStreamingProcedure(Device& device,
+                                                          ProgressReporter& reporter,
+                                                          std::stop_token stop,
+                                                          const HrdStreamingRequest& request);
+
 /// @brief The step ids shared by every procedure that prepares a drive, measures, and puts it back.
 ///
 /// The preparation and its undoing are the *same work* in each of them — SOMANET's diagnostics

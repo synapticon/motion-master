@@ -74,6 +74,12 @@ useStlAlgorithm:*/esi_request.cc
 useStlAlgorithm:*/procedure.cc
 useStlAlgorithm:*/procedure_catalogue.cc
 
+// HrdRecording's to_json is the same shape as the first of those: one row appended to a
+// nlohmann::json array per decoded sample, once per format. A std::transform over a
+// std::back_inserter into a json array is obscure rather than clearer, and here it would also have
+// to be written twice for the two sample types. The loops stay.
+useStlAlgorithm:*/somanet_drive.cc
+
 // A catalogue entry's `applies` predicate is a std::function<bool(Device&)>. The one entry there is
 // today only reads the vendor ID, so cppcheck suggests a const Device& — but the signature is
 // deliberately non-const, because a predicate that binds a profile view to decide applicability

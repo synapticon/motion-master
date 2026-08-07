@@ -45,7 +45,8 @@ info:
     - **ESC registers** — `GET`/`PUT …/registers/{address}` read and write raw
       EtherCAT Slave Controller register bytes.
     - **Files (FoE)** — `GET`/`PUT …/files/{filename}` transfer files to and from
-      the device over File-over-EtherCAT (firmware, configuration, logs).
+      the device over File-over-EtherCAT (firmware, configuration, logs), and
+      `GET …/files` lists what a SOMANET drive holds.
     - **SII (EEPROM)** — `GET …/sii` reads the Slave Information Interface, returning
       the parsed structure or the raw EEPROM bytes per the `Accept` header.
 
@@ -1719,6 +1720,62 @@ paths:
           description: No device at that slavePosition
         "409":
           description: The device is not a SOMANET drive, or a read failed
+  /api/devices/{slavePosition}/hrd:
+    get:
+      summary: Read back a drive's high-rate data recording
+      description: >
+        Reads the files the `hrd-streaming` procedure recorded, concatenates them in order and
+        decodes them into samples. Run that procedure first; this endpoint only reads what is
+        already on the drive.
+
+
+        **`data` is required and must match what was recorded.** Nothing on the drive says which
+        signal its files hold, so the wrong selection reinterprets the same bytes as a different
+        layout and returns plausible nonsense. The procedure's `configure-stream` step reports the
+        selection it used for exactly this reason.
+
+
+        Samples travel positionally — `columns` names the fields of each row, once, the way a
+        monitoring topic ships its parameter order once — because a full recording is up to ten
+        thousand rows. `trailingBytes` is what was left over past the last whole sample: the drive
+        allocates its files in fixed-size blocks, so a recording that does not fill the last block
+        ends in padding rather than data.
+
+
+        Blocks for the transfer, which is up to five 8 KB FoE reads plus the listing.
+      operationId: readHrdRecording
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: data
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [encoder-raw, system-identification]
+          description: >
+            Which layout the files hold — the same selection the recording was made with.
+          example: encoder-raw
+      responses:
+        "200":
+          description: The decoded recording
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HrdRecording" }
+        "400":
+          description: slavePosition is invalid, or `data` is missing or not a known selection
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: >
+            The device is not a SOMANET drive, holds no recording, or a file could not be read
   /api/devices/{slavePosition}/brake/release:
     post:
       summary: Release (disengage) a drive's brake
@@ -1951,6 +2008,50 @@ paths:
           description: No device at the given bus position
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
+  /api/devices/{slavePosition}/files:
+    get:
+      summary: List the files stored on a device
+      description: >
+        Lists what the device holds — firmware images, the ESI, logs, configuration and any
+        high-rate data recording — with the size it reports for each.
+
+
+        **Vendor-specific despite reading like a filesystem listing.** EtherCAT defines no directory
+        service, so SOMANET firmware serves its own as a pseudo-file (`fs-getlist`) read over FoE. A
+        device that is not a SOMANET drive is refused rather than probed.
+
+
+        `byteCount` is absent when the device reported a name without a size, which is a formatting
+        quirk of one entry rather than a reason to hide the file.
+      operationId: listDeviceFiles
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The files the device reported, in the order it reported them
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [files]
+                properties:
+                  files:
+                    type: array
+                    items: { $ref: "#/components/schemas/DeviceFile" }
+        "400":
+          description: slavePosition is invalid
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: The device is not a SOMANET drive, or the listing could not be read
   /api/devices/{slavePosition}/files/{filename}:
     get:
       summary: Read a file from a device via FoE (File over EtherCAT)
@@ -3601,6 +3702,71 @@ components:
             Why the run failed when no step captured it — a failure belonging to no step, such as
             the device not being the kind the procedure needs. Absent otherwise.
       required: [status, runCount, steps]
+    DeviceFile:
+      type: object
+      required: [name]
+      description: One file stored on a device, as its file list reports it.
+      properties:
+        name:
+          type: string
+          description: Filename as FoE addresses it.
+          example: hr_data0.bin
+        byteCount:
+          type: integer
+          description: >
+            Size the device reported. Absent when it reported the name without one — the size is
+            what the listing claims, not what a read returned.
+          example: 8032
+    HrdRecording:
+      type: object
+      required: [data, files, byteCount, trailingBytes, sampleCount, columns, samples]
+      description: >
+        One high-rate data recording, read back from a drive's files and decoded.
+      properties:
+        data:
+          type: string
+          enum: [encoder-raw, system-identification]
+          description: Which layout the files were decoded as — echoes the request.
+          example: encoder-raw
+        files:
+          type: array
+          items: { $ref: "#/components/schemas/DeviceFile" }
+          description: >
+            The files it was read from, in order. A recording that came back shorter than expected
+            can be told from one that was never made by what is listed here.
+        byteCount:
+          type: integer
+          description: Total bytes read across those files.
+          example: 20000
+        trailingBytes:
+          type: integer
+          description: >
+            Bytes past the last whole sample. The drive allocates its files in fixed-size blocks, so
+            this is the last block's padding rather than data that failed to decode.
+          example: 0
+        sampleCount:
+          type: integer
+          description: How many samples were decoded.
+          example: 5000
+        columns:
+          type: array
+          items: { type: string }
+          description: >
+            What each value of a row is, in order. For `encoder-raw`: `raw` (the 32-bit word the
+            encoder reported), `masterCount` (its low 14 bits) and `noniusCount` (the next 14) — the
+            raw word is kept because the firmware specification describes only bits 0-27 and says
+            nothing about the top four. For `system-identification`: `velocityRpm` (converted out of
+            the file's Q15 fixed point) and `torquePermil` (per mille of rated torque).
+          example: [raw, masterCount, noniusCount]
+        samples:
+          type: array
+          description: >
+            One row per sample, positional in the order `columns` gives — a full recording is up to
+            ten thousand rows, so the names travel once beside them rather than on every row.
+          items:
+            type: array
+            items: { type: number }
+          example: [[4661, 4661, 0], [4662, 4662, 0]]
     BrakeState:
       type: object
       description: >
@@ -3841,6 +4007,23 @@ components:
             `encoder-register-communication` only: the byte to write into the register. Ignored when
             reading.
           example: 7
+        data:
+          type: string
+          enum: [encoder-raw, system-identification]
+          description: >
+            `hrd-streaming` only, and required for it: which signal to record. Also decides how the
+            recording decodes when it is read back from `/api/devices/{slavePosition}/hrd`.
+          example: encoder-raw
+        durationMs:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: >
+            `hrd-streaming` only, and required for it: how long to record. The drive samples once
+            per millisecond into at most five 8032-byte files, so the real ceiling depends on the
+            sample size — 10000 ms for `encoder-raw`, but only 6000 ms for `system-identification`,
+            which the drive itself does not enforce.
+          example: 5000
         mode:
           type: string
           enum: [configuration, raw, standard]

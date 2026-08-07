@@ -37,6 +37,9 @@ using mm::node::Device;
 using mm::node::encoderRegisterParameters;
 using mm::node::EncoderRegisterRequest;
 using mm::node::encoderRegisterSteps;
+using mm::node::hrdStreamingParameters;
+using mm::node::HrdStreamingRequest;
+using mm::node::hrdStreamingSteps;
 using mm::node::icMuCalibrationModeParameters;
 using mm::node::IcMuCalibrationModeRequest;
 using mm::node::icMuCalibrationModeSteps;
@@ -51,6 +54,7 @@ using mm::node::openPhaseDetectionSteps;
 using mm::node::OsCommandRequest;
 using mm::node::osCommandSteps;
 using mm::node::parseEncoderRegisterRequest;
+using mm::node::parseHrdStreamingRequest;
 using mm::node::parseIcMuCalibrationModeRequest;
 using mm::node::phaseInductanceMeasurementSteps;
 using mm::node::phaseResistanceMeasurementSteps;
@@ -59,6 +63,7 @@ using mm::node::ProgressReporter;
 using mm::node::ProgressStatus;
 using mm::node::runCommutationOffsetDetectionProcedure;
 using mm::node::runEncoderRegisterProcedure;
+using mm::node::runHrdStreamingProcedure;
 using mm::node::runIcMuCalibrationModeProcedure;
 using mm::node::runMotorPhaseOrderDetectionProcedure;
 using mm::node::runOffsetDetectionProcedure;
@@ -581,6 +586,102 @@ TEST(RunIcMuCalibrationModeProcedure, FailsTheStepWhenTheDriveRefusesTheCommand)
   ASSERT_FALSE(result.has_value());
   EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
   EXPECT_EQ(reporter.steps()[0].status, ProgressStatus::kFailed);
+}
+
+// --- HRD streaming procedure ---------------------------------------------------------------------
+
+TEST(ParseHrdStreamingRequest, RequiresBothFields) {
+  auto noData = parseHrdStreamingRequest(nlohmann::json{{"durationMs", 1000}});
+  ASSERT_FALSE(noData.has_value());
+  EXPECT_NE(noData.error().find("'data' is required"), std::string::npos) << noData.error();
+
+  auto noDuration = parseHrdStreamingRequest(nlohmann::json{{"data", "encoder-raw"}});
+  ASSERT_FALSE(noDuration.has_value());
+  EXPECT_NE(noDuration.error().find("'durationMs' is required"), std::string::npos)
+      << noDuration.error();
+}
+
+TEST(ParseHrdStreamingRequest, RejectsAnUnknownData) {
+  auto request =
+      parseHrdStreamingRequest(nlohmann::json{{"data", "encoder"}, {"durationMs", 1000}});
+  ASSERT_FALSE(request.has_value());
+  EXPECT_NE(request.error().find("must be one of"), std::string::npos) << request.error();
+}
+
+TEST(ParseHrdStreamingRequest, BoundsTheDurationByTheChosenData) {
+  // The same duration is valid for one selection and not the other, which is the whole reason this
+  // check cannot be a fixed range on the parameter: 7000 ms of 4-byte samples fits the drive's five
+  // files, 7000 ms of 6-byte samples does not.
+  auto encoder =
+      parseHrdStreamingRequest(nlohmann::json{{"data", "encoder-raw"}, {"durationMs", 7000}});
+  ASSERT_TRUE(encoder.has_value()) << encoder.error();
+  EXPECT_EQ(encoder->duration, std::chrono::milliseconds(7000));
+
+  auto system = parseHrdStreamingRequest(
+      nlohmann::json{{"data", "system-identification"}, {"durationMs", 7000}});
+  ASSERT_FALSE(system.has_value());
+  EXPECT_NE(system.error().find("6000"), std::string::npos) << system.error();
+}
+
+TEST(HrdStreamingParameters, DescribeExactlyWhatTheParserAccepts) {
+  const auto parameters = hrdStreamingParameters();
+  ASSERT_EQ(parameters.size(), 2u);
+  EXPECT_EQ(parameters[0].name, "data");
+  EXPECT_TRUE(parameters[0].required());
+  EXPECT_EQ(parameters[1].name, "durationMs");
+  EXPECT_TRUE(parameters[1].required());
+  // Every offered selection must be one the parser knows, or a client could present a choice that
+  // 400s. The advertised ceiling is the wider format's, since a descriptor carries one range.
+  ASSERT_EQ(parameters[0].options.size(), 2u);
+  for (const auto& option : parameters[0].options) {
+    auto request =
+        parseHrdStreamingRequest(nlohmann::json{{"data", option.value}, {"durationMs", 1000}});
+    EXPECT_TRUE(request.has_value()) << option.value.dump();
+  }
+  EXPECT_EQ(parameters[1].maxValue, 10000);
+}
+
+TEST(RunHrdStreamingProcedure, ConfiguresThenRecordsAndSaysWhatToReadBack) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(hrdStreamingSteps());
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  auto result =
+      runHrdStreamingProcedure(device, reporter, std::stop_token{},
+                               HrdStreamingRequest{.data = somanet::HrdData::kEncoderRawData,
+                                                   .duration = std::chrono::milliseconds(1000)});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto steps = reporter.steps();
+  ASSERT_EQ(steps.size(), 2u);
+  EXPECT_EQ(steps[0].status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(steps[1].status, ProgressStatus::kSucceeded);
+  // Nothing on the drive records which signal its files hold, so the run has to — reading the
+  // recording back takes this same selection.
+  EXPECT_EQ(steps[0].value["data"], "encoder-raw");
+  EXPECT_EQ(steps[0].value["durationMs"], 1000);
+  EXPECT_EQ(driver.commandWrites, 2);
+}
+
+TEST(RunHrdStreamingProcedure, DoesNotRecordWhenArmingFailed) {
+  // A configure that failed leaves the previous recording's files in place and nothing armed, so
+  // starting anyway would record under whatever the last run configured.
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(hrdStreamingSteps());
+
+  driver.responses = {{3, 0, 0, 0, 0, 0, 0, 0}};
+  auto result =
+      runHrdStreamingProcedure(device, reporter, std::stop_token{},
+                               HrdStreamingRequest{.data = somanet::HrdData::kEncoderRawData,
+                                                   .duration = std::chrono::milliseconds(1000)});
+  ASSERT_FALSE(result.has_value());
+
+  const auto steps = reporter.steps();
+  EXPECT_EQ(steps[0].status, ProgressStatus::kFailed);
+  EXPECT_EQ(steps[1].status, ProgressStatus::kIdle);
+  EXPECT_EQ(driver.commandWrites, 1);
 }
 
 // --- Open phase detection procedure --------------------------------------------------------------

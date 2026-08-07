@@ -1284,6 +1284,41 @@ void HttpServer::run() {
             [this](auto* res, auto* req) {
               handleBrakeCommand(res, req, deviceManager_, config_.corsOrigin, /*release=*/false);
             })
+      // --- high-rate data ---------------------------------------------------------------------
+      //
+      // Reads back what the `hrd-streaming` procedure recorded. Separate from the procedure, not
+      // its final step, for two reasons: a recording is worth reading more than once, and a run's
+      // snapshot — re-sent whole on every poll and retained until a rescan — is no place for ten
+      // thousand samples. `data` says how to decode the files, and is required because nothing on
+      // the drive records which signal was streamed into them.
+      .get("/api/devices/:slavePosition/hrd",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p, ec] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
+               return;
+             }
+             auto dataParam = req->getQuery("data");
+             auto data = mm::node::somanet::parseHrdData(dataParam);
+             if (!data) {
+               sendError(res, "400 Bad Request", config_.corsOrigin,
+                         std::format("'data' must be one of {} or {}",
+                                     mm::node::somanet::toString(
+                                         mm::node::somanet::HrdData::kEncoderRawData),
+                                     mm::node::somanet::toString(
+                                         mm::node::somanet::HrdData::kSystemIdentificationData)));
+               return;
+             }
+             if (!deviceManager_.findDevice(pos)) {
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
+               return;
+             }
+             sendTimedJson(res, config_.corsOrigin, "409 Conflict",
+                           [&] { return mm::node::readHrdRecording(deviceManager_, pos, *data); });
+           })
       // --- procedures -----------------------------------------------------------------------
       //
       // One resource per (device, procedure), addressed by name, with three verbs — POST starts a
@@ -1487,6 +1522,32 @@ void HttpServer::run() {
                setWireTime(res, wireUs);
                sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
              });
+           })
+      // The collection beside the FoE file resource below. SOMANET firmware has no standard listing
+      // service — it serves its directory as a pseudo-file read over FoE — so this is a vendor
+      // operation, and a device that is not a SOMANET drive is refused rather than probed.
+      .get("/api/devices/:slavePosition/files",
+           [this](auto* res, auto* req) {
+             uint16_t pos{};
+             auto posParam = req->getParameter("slavePosition");
+             auto [p, ec] =
+                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+               sendStatus(res, "400 Bad Request", config_.corsOrigin);
+               return;
+             }
+             if (!deviceManager_.findDevice(pos)) {
+               sendStatus(res, "404 Not Found", config_.corsOrigin);
+               return;
+             }
+             sendTimedJson(res, config_.corsOrigin, "409 Conflict",
+                           [&]() -> std::expected<nlohmann::json, std::string> {
+                             auto files = mm::node::readFileList(deviceManager_, pos);
+                             if (!files) {
+                               return std::unexpected(files.error());
+                             }
+                             return nlohmann::json{{"files", *files}};
+                           });
            })
       .get("/api/devices/:slavePosition/files/:filename",
            [this](auto* res, auto* req) {

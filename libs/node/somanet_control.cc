@@ -46,4 +46,17 @@ std::expected<BrakeState, std::string> engageBrake(DeviceManager& deviceManager,
                           [settle](SomanetDrive& drive) { return drive.engageBrake(settle); });
 }
 
+std::expected<std::vector<DeviceFile>, std::string> readFileList(DeviceManager& deviceManager,
+                                                                 uint16_t slavePosition) {
+  return withSomanetDrive(deviceManager, slavePosition,
+                          [](SomanetDrive& drive) { return drive.readFileList(); });
+}
+
+std::expected<HrdRecording, std::string> readHrdRecording(DeviceManager& deviceManager,
+                                                          uint16_t slavePosition,
+                                                          somanet::HrdData data) {
+  return withSomanetDrive(deviceManager, slavePosition,
+                          [data](SomanetDrive& drive) { return drive.readHrdRecording(data); });
+}
+
 }  // namespace mm::node

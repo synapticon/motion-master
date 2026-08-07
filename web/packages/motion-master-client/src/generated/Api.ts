@@ -16,11 +16,13 @@ import {
   Cia402Status,
   DcSyncStatus,
   DeviceDiagnostics,
+  DeviceFile,
   DeviceParameter,
   EscRegister,
   EsiParseResult,
   FoeErrorCode,
   GameLoopHealth,
+  HrdRecording,
   MailboxErrorCode,
   Monitoring,
   ObjectDataTypeInfo,
@@ -1118,6 +1120,31 @@ export class Api<
       ...params,
     });
   /**
+   * @description Reads the files the `hrd-streaming` procedure recorded, concatenates them in order and decodes them into samples. Run that procedure first; this endpoint only reads what is already on the drive. **`data` is required and must match what was recorded.** Nothing on the drive says which signal its files hold, so the wrong selection reinterprets the same bytes as a different layout and returns plausible nonsense. The procedure's `configure-stream` step reports the selection it used for exactly this reason. Samples travel positionally — `columns` names the fields of each row, once, the way a monitoring topic ships its parameter order once — because a full recording is up to ten thousand rows. `trailingBytes` is what was left over past the last whole sample: the drive allocates its files in fixed-size blocks, so a recording that does not fill the last block ends in padding rather than data. Blocks for the transfer, which is up to five 8 KB FoE reads plus the listing.
+   *
+   * @name ReadHrdRecording
+   * @summary Read back a drive's high-rate data recording
+   * @request GET:/api/devices/{slavePosition}/hrd
+   */
+  readHrdRecording = (
+    slavePosition: number,
+    query: {
+      /**
+       * Which layout the files hold — the same selection the recording was made with.
+       * @example "encoder-raw"
+       */
+      data: "encoder-raw" | "system-identification";
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<HrdRecording, void>({
+      path: `/api/devices/${slavePosition}/hrd`,
+      method: "GET",
+      query: query,
+      format: "json",
+      ...params,
+    });
+  /**
    * @description Writes "disengaged" to the brake state object (0x2004:07) and waits the drive's pull time (0x2004:03) plus `settle` before answering, because the firmware blocks motion — and motion-related OS commands — until the pull time expires. Answers with the brake state read back. **The release only actually happens while the drive is in OP ENABLED.** In any other state the write merely energises the brake output (phase D). Note also that entering OP ENABLED releases the brake automatically in normal operation but **not** in diagnostics mode, where the master owns the brake — which is why a diagnostics procedure has to call this. **On a pin brake this moves the shaft**: the controller raises current progressively until the load has lifted off the pin by the minimum displacement (0x2004:08), reversing direction if it reaches the current ceiling (0x2004:09, a percentage of rated current) first. Check `releaseMovesShaft` on `GET .../brake`. Brake release is open-loop — nothing confirms the brake let go — so the wait is the only margin there is. A brake whose release strategy is `manualOutputVoltage` is left alone and the returned state says so; that is not an error. **A released brake stays released**: nothing re-engages it for you, so on a vertical or loaded axis engage it again when you are done.
    *
    * @name ReleaseBrake
@@ -1242,6 +1269,25 @@ export class Api<
       method: "PUT",
       body: data,
       type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Lists what the device holds — firmware images, the ESI, logs, configuration and any high-rate data recording — with the size it reports for each. **Vendor-specific despite reading like a filesystem listing.** EtherCAT defines no directory service, so SOMANET firmware serves its own as a pseudo-file (`fs-getlist`) read over FoE. A device that is not a SOMANET drive is refused rather than probed. `byteCount` is absent when the device reported a name without a size, which is a formatting quirk of one entry rather than a reason to hide the file.
+   *
+   * @name ListDeviceFiles
+   * @summary List the files stored on a device
+   * @request GET:/api/devices/{slavePosition}/files
+   */
+  listDeviceFiles = (slavePosition: number, params: RequestParams = {}) =>
+    this.request<
+      {
+        files: DeviceFile[];
+      },
+      void
+    >({
+      path: `/api/devices/${slavePosition}/files`,
+      method: "GET",
       format: "json",
       ...params,
     });

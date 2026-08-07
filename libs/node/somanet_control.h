@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <expected>
 #include <string>
+#include <vector>
 
 #include "node/device_manager.h"
 #include "node/somanet_drive.h"
@@ -60,5 +61,31 @@ std::expected<BrakeState, std::string> releaseBrake(DeviceManager& deviceManager
 std::expected<BrakeState, std::string> engageBrake(DeviceManager& deviceManager,
                                                    uint16_t slavePosition,
                                                    std::chrono::milliseconds settle);
+
+/// @brief Reads the list of files stored on a device (FoE read of "fs-getlist").
+///
+/// Thin forward to @c SomanetDrive::readFileList. Vendor-specific despite reading like a filesystem
+/// primitive: the listing is a pseudo-file Synapticon firmware serves, not a standard service, so a
+/// device that is not a SOMANET drive is refused rather than asked.
+///
+/// @param deviceManager  Owner of the device set; lends locked access for the call.
+/// @param slavePosition  1-based bus position of the target device.
+/// @return The files the device reported, or why the listing could not be read.
+std::expected<std::vector<DeviceFile>, std::string> readFileList(DeviceManager& deviceManager,
+                                                                 uint16_t slavePosition);
+
+/// @brief Reads a drive's high-rate data recording back and decodes it.
+///
+/// Thin forward to @c SomanetDrive::readHrdRecording. Blocks for the transfer — up to five 8 KB FoE
+/// reads plus the listing — which is why it is not the tail of the recording procedure: a recording
+/// is worth reading more than once, and a run's snapshot is no place to keep ten thousand samples.
+///
+/// @param deviceManager  Owner of the device set; lends locked access for the call.
+/// @param slavePosition  1-based bus position of the target device.
+/// @param data           Which layout the files hold — the selection the recording was made with.
+/// @return The decoded recording, or why it could not be read.
+std::expected<HrdRecording, std::string> readHrdRecording(DeviceManager& deviceManager,
+                                                          uint16_t slavePosition,
+                                                          somanet::HrdData data);
 
 }  // namespace mm::node

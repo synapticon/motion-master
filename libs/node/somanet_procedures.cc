@@ -31,6 +31,15 @@ constexpr auto kMaxPollInterval = std::chrono::seconds(1);
 constexpr auto kEncoderRegisterTimeout = std::chrono::seconds(5);
 constexpr auto kEncoderRegisterPollInterval = std::chrono::milliseconds(20);
 
+// What HRD streaming is sized for. Configuring is dominated by deleting the previous recording's
+// files, which the firmware specification allows around 5 s for in the worst case. Recording
+// occupies the whole requested duration, so its ceiling is that duration plus this margin for the
+// poll cadence and the drive's wrap-up. The poll is coarse on purpose: a command that runs for
+// seconds polled every 20 ms would be hundreds of mailbox reads answering "still going".
+constexpr auto kHrdConfigureTimeout = std::chrono::seconds(10);
+constexpr auto kHrdRecordMargin = std::chrono::seconds(5);
+constexpr auto kHrdPollInterval = std::chrono::milliseconds(100);
+
 // The inclusive bounds of every byte-valued parameter, named once so the validation and the
 // parameter description cannot disagree about them.
 constexpr int64_t kMinByte = 0;
@@ -46,11 +55,14 @@ std::expected<std::chrono::milliseconds, std::string> readMillis(const nlohmann:
   if (it == body.end() || it->is_null()) {
     return fallback;
   }
-  if (!it->is_number_unsigned()) {
+  // is_number_integer accepts signed as well as unsigned, for the reason readByte gives below: a
+  // body built in C++ from an int literal is signed, and rejecting that would be an accident of how
+  // the object was made rather than anything about the value. The range check rejects a negative.
+  if (!it->is_number_integer()) {
     return std::unexpected(
         std::format("'{}' must be a non-negative whole number of milliseconds", field));
   }
-  const std::chrono::milliseconds value{it->get<uint64_t>()};
+  const std::chrono::milliseconds value{it->get<int64_t>()};
   if (value < min || value > max) {
     return std::unexpected(
         std::format("'{}' must be between {} and {} ms", field, min.count(), max.count()));
@@ -676,6 +688,111 @@ std::expected<void, std::string> runIcMuCalibrationModeProcedure(
   reporter.succeed(kIcMuCalibrationModeStep,
                    nlohmann::json{{"encoder", static_cast<uint8_t>(request.encoder)},
                                   {"mode", somanet::toString(request.mode)}});
+  return {};
+}
+
+std::expected<HrdStreamingRequest, std::string> parseHrdStreamingRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  HrdStreamingRequest request;
+
+  auto data = body.find("data");
+  if (data == body.end() || data->is_null()) {
+    return std::unexpected("'data' is required");
+  }
+  if (!data->is_string()) {
+    return std::unexpected("'data' must be a string");
+  }
+  auto parsed = somanet::parseHrdData(data->get<std::string>());
+  if (!parsed) {
+    return std::unexpected(std::format(
+        "'data' must be one of {} or {}", somanet::toString(somanet::HrdData::kEncoderRawData),
+        somanet::toString(somanet::HrdData::kSystemIdentificationData)));
+  }
+  request.data = *parsed;
+
+  auto duration = body.find("durationMs");
+  if (duration == body.end() || duration->is_null()) {
+    return std::unexpected("'durationMs' is required");
+  }
+  // Bounded by the chosen format's own limit, not by one shared ceiling: the drive rejects anything
+  // over 10000 ms itself, but accepts an over-long system identification recording and then
+  // overruns its files. The narrower limit only exists here.
+  auto milliseconds = readMillis(body, "durationMs", request.duration, std::chrono::milliseconds(1),
+                                 somanet::maxHrdStreamDuration(request.data));
+  if (!milliseconds) {
+    return std::unexpected(milliseconds.error());
+  }
+  request.duration = *milliseconds;
+  return request;
+}
+
+std::vector<ProcedureParameter> hrdStreamingParameters() {
+  return {
+      enumParameter(
+          "data", "Data",
+          "Which signal to record. Encoder raw data is the position word an iC-MU encoder reports, "
+          "and records zeros unless the encoder was put into raw mode first. System identification "
+          "data is the velocity and torque actual values, and records an unexcited drive unless a "
+          "system identification run was started first. Required — it also decides how the "
+          "recording decodes when it is read back.",
+          nullptr,
+          {
+              ParameterOption{
+                  .value = std::string(somanet::toString(somanet::HrdData::kEncoderRawData)),
+                  .title = "Encoder raw data"},
+              ParameterOption{.value = std::string(
+                                  somanet::toString(somanet::HrdData::kSystemIdentificationData)),
+                              .title = "System identification data"},
+          }),
+      integerParameter(
+          "durationMs", "Duration (ms)",
+          "How long to record for. The drive samples once per millisecond into at most five "
+          "8032-byte files, so the ceiling is whatever fills them: 10000 ms of encoder raw data, "
+          "but only 6000 ms of system identification data. Required.",
+          nullptr, 1, somanet::maxHrdStreamDuration(somanet::HrdData::kEncoderRawData).count()),
+  };
+}
+
+std::vector<ProgressStep> hrdStreamingSteps() {
+  return stepsFrom({kHrdConfigureStep, kHrdRecordStep});
+}
+
+std::expected<void, std::string> runHrdStreamingProcedure(Device& device,
+                                                          ProgressReporter& reporter,
+                                                          std::stop_token stop,
+                                                          const HrdStreamingRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+
+  reporter.start(kHrdConfigureStep);
+  auto configured = drive->configureHrdStream(
+      request.data, request.duration,
+      {.timeout = kHrdConfigureTimeout, .pollInterval = kHrdPollInterval, .stop = stop});
+  if (!configured) {
+    reporter.fail(kHrdConfigureStep, configured.error());
+    return std::unexpected(configured.error());
+  }
+  // What the recording will hold, reported before it is made rather than after: reading it back
+  // takes this same selection, and nothing on the drive remembers it.
+  reporter.succeed(kHrdConfigureStep, nlohmann::json{{"data", somanet::toString(request.data)},
+                                                     {"durationMs", request.duration.count()}});
+
+  reporter.start(kHrdRecordStep);
+  // The drive holds the command for the whole recording, so the ceiling is the duration plus room
+  // for the poll cadence and the drive's own wrap-up — not a fixed figure.
+  auto recorded = drive->startHrdStream({.timeout = request.duration + kHrdRecordMargin,
+                                         .pollInterval = kHrdPollInterval,
+                                         .stop = std::move(stop)});
+  if (!recorded) {
+    reporter.fail(kHrdRecordStep, recorded.error());
+    return std::unexpected(recorded.error());
+  }
+  reporter.succeed(kHrdRecordStep);
   return {};
 }
 

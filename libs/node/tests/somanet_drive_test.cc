@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <format>
 #include <map>
 #include <span>
 #include <stop_token>
@@ -265,8 +266,18 @@ class OsCommandFakeDriver : public FieldbusDriver {
       const std::vector<uint16_t>& positions) override {
     return std::vector<SlaveStateRaw>(positions.size(), SlaveStateRaw{});
   }
-  std::expected<std::vector<uint8_t>, std::string> readFile(uint16_t, const std::string&) override {
-    return std::vector<uint8_t>{};
+
+  // Files the device "holds", keyed by FoE name — including the fs-getlist pseudo-file, which the
+  // firmware serves like any other file and which a test therefore programs like any other.
+  std::map<std::string, std::vector<uint8_t>> files;
+
+  std::expected<std::vector<uint8_t>, std::string> readFile(uint16_t,
+                                                            const std::string& name) override {
+    auto it = files.find(name);
+    if (it == files.end()) {
+      return std::unexpected(std::format("FoE read of '{}' failed: file not found", name));
+    }
+    return it->second;
   }
   std::expected<void, std::string> writeFile(uint16_t, const std::string&,
                                              std::span<const uint8_t>) override {
@@ -866,6 +877,305 @@ TEST(ParseIcMuCalibrationMode, RoundTripsEveryMode) {
     EXPECT_EQ(*parsed, mode);
   }
   EXPECT_FALSE(somanet::parseIcMuCalibrationMode("calibration").has_value());
+}
+
+// --- HRD streaming (OS command 3) ---------------------------------------------------------------
+
+TEST(ConfigureHrdStream, PacksTheDurationBigEndian) {
+  // The specification's own example: 5 s of encoder raw data is 5000 = 0x1388, MSB in byte 3. The
+  // OS command payload convention is big-endian even though the recorded *files* are little-endian,
+  // so this is the pair of bytes most likely to be written the wrong way round.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive
+                  ->configureHrdStream(somanet::HrdData::kEncoderRawData,
+                                       std::chrono::milliseconds(5000), {.pollInterval = kNoDelay})
+                  .has_value());
+  EXPECT_EQ(driver.lastCommand, (std::vector<uint8_t>{3, 0, 0, 0x13, 0x88, 0, 0, 0}));
+}
+
+TEST(ConfigureHrdStream, CarriesTheDataIndex) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive
+                  ->configureHrdStream(somanet::HrdData::kSystemIdentificationData,
+                                       std::chrono::milliseconds(256), {.pollInterval = kNoDelay})
+                  .has_value());
+  EXPECT_EQ(driver.lastCommand, (std::vector<uint8_t>{3, 0, 1, 0x01, 0x00, 0, 0, 0}));
+}
+
+TEST(ConfigureHrdStream, RefusesAnOverLongSystemIdentificationRecordingWithoutAsking) {
+  // The drive would *accept* this: its own check is the 10000 ms ceiling, and 7000 ms of 6-byte
+  // samples is under it. What it would then do is overrun its five files and truncate the recording
+  // mid-sample, so the narrower limit has to be applied before anything is sent — which is what
+  // this asserts by checking that no command was written at all.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  auto result =
+      drive->configureHrdStream(somanet::HrdData::kSystemIdentificationData,
+                                std::chrono::milliseconds(7000), {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("6000"), std::string::npos) << result.error();
+  EXPECT_EQ(driver.commandWrites, 0);
+}
+
+TEST(ConfigureHrdStream, AcceptsTheSameDurationForEncoderRawData) {
+  // The same 7000 ms is fine for 4-byte samples: the limit is what fills the files, not a figure
+  // the two formats share.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  EXPECT_TRUE(drive
+                  ->configureHrdStream(somanet::HrdData::kEncoderRawData,
+                                       std::chrono::milliseconds(7000), {.pollInterval = kNoDelay})
+                  .has_value());
+}
+
+TEST(ConfigureHrdStream, ADurationFaultNamesItself) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 2, 0, 0, 0, 0, 0}};
+  auto result =
+      drive->configureHrdStream(somanet::HrdData::kEncoderRawData, std::chrono::milliseconds(1000),
+                                {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("duration value"), std::string::npos) << result.error();
+}
+
+TEST(StartHrdStream, SendsTheActionAlone) {
+  // A start request carries no data index and no duration — the drive already has both. Sending
+  // them again would be harmless but would hide which command actually configures a recording.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive->startHrdStream({.pollInterval = kNoDelay}).has_value());
+  EXPECT_EQ(driver.lastCommand, (std::vector<uint8_t>{3, 1, 0, 0, 0, 0, 0, 0}));
+}
+
+TEST(StartHrdStream, AGeneralOsErrorNamesItself) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};
+  auto result = drive->startHrdStream({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
+}
+
+TEST(ParseHrdData, RoundTripsBothSelections) {
+  for (auto data :
+       {somanet::HrdData::kEncoderRawData, somanet::HrdData::kSystemIdentificationData}) {
+    auto parsed = somanet::parseHrdData(somanet::toString(data));
+    ASSERT_TRUE(parsed.has_value()) << somanet::toString(data);
+    EXPECT_EQ(*parsed, data);
+  }
+  EXPECT_FALSE(somanet::parseHrdData("encoder").has_value());
+}
+
+// --- Device file list ---------------------------------------------------------------------------
+
+TEST(ParseDeviceFileList, ReadsNameAndSize) {
+  const auto files =
+      mm::node::parseDeviceFileList("hr_data0.bin, size: 8032\r\nhr_data1.bin, size: 1968\r\n");
+  ASSERT_EQ(files.size(), 2u);
+  EXPECT_EQ(files[0].name, "hr_data0.bin");
+  ASSERT_TRUE(files[0].byteCount.has_value());
+  EXPECT_EQ(*files[0].byteCount, 8032u);
+  EXPECT_EQ(files[1].name, "hr_data1.bin");
+  EXPECT_EQ(*files[1].byteCount, 1968u);
+}
+
+TEST(ParseDeviceFileList, KeepsALineThatCarriesNoSize) {
+  // A name is what a caller needs; a line formatted unexpectedly should not make the file
+  // unreachable, and should not make the files around it unreachable either.
+  const auto files = mm::node::parseDeviceFileList("config.csv\nhr_data0.bin, size: 12\n");
+  ASSERT_EQ(files.size(), 2u);
+  EXPECT_EQ(files[0].name, "config.csv");
+  EXPECT_FALSE(files[0].byteCount.has_value());
+  EXPECT_EQ(files[1].name, "hr_data0.bin");
+  EXPECT_TRUE(files[1].byteCount.has_value());
+}
+
+TEST(ParseDeviceFileList, SkipsBlankLinesAndTrimsSpace) {
+  const auto files = mm::node::parseDeviceFileList("\n  hr_data0.bin ,  size:  40  \n\n");
+  ASSERT_EQ(files.size(), 1u);
+  EXPECT_EQ(files[0].name, "hr_data0.bin");
+  EXPECT_EQ(*files[0].byteCount, 40u);
+}
+
+TEST(ParseDeviceFileList, TakesTheCommaThatActuallySeparatesTheSize) {
+  // A filename may contain a comma, so the separator is the first comma whose *tail* is a size —
+  // splitting on the first comma outright would truncate the name.
+  const auto files = mm::node::parseDeviceFileList("odd,name.bin, size: 7\n");
+  ASSERT_EQ(files.size(), 1u);
+  EXPECT_EQ(files[0].name, "odd,name.bin");
+  EXPECT_EQ(*files[0].byteCount, 7u);
+}
+
+TEST(ReadFileList, ReadsTheListingPseudoFile) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  const std::string listing = "config.csv, size: 10\nhr_data0.bin, size: 4\n";
+  driver.files["fs-getlist"] = std::vector<uint8_t>(listing.begin(), listing.end());
+
+  auto files = drive->readFileList();
+  ASSERT_TRUE(files.has_value()) << files.error();
+  ASSERT_EQ(files->size(), 2u);
+  EXPECT_EQ((*files)[0].name, "config.csv");
+  EXPECT_EQ((*files)[1].name, "hr_data0.bin");
+}
+
+TEST(ReadFileList, ReportsAFailedListing) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  auto files = drive->readFileList();
+  ASSERT_FALSE(files.has_value());
+  EXPECT_NE(files.error().find("fs-getlist"), std::string::npos) << files.error();
+}
+
+// --- HRD recording readback ---------------------------------------------------------------------
+
+TEST(DecodeHrdSamples, ReadsEncoderRawDataLittleEndianAndSplitsTheTracks) {
+  // 0x0AC01234: master is the low 14 bits (0x1234 & 0x3FFF = 0x1234), nonius the next 14
+  // (0x0AC01234 >> 14 & 0x3FFF = 0x2B00). Little-endian in the file, unlike the OS command payload
+  // that configured the recording — this is the byte order the firmware writes, not the one it
+  // parses.
+  const std::vector<uint8_t> bytes{0x34, 0x12, 0xC0, 0x0A};
+  const auto samples = mm::node::decodeHrdSamples(bytes, somanet::HrdData::kEncoderRawData);
+  const auto& encoder = std::get<std::vector<mm::node::HrdEncoderSample>>(samples);
+  ASSERT_EQ(encoder.size(), 1u);
+  EXPECT_EQ(encoder[0].raw, 0x0AC01234u);
+  EXPECT_EQ(encoder[0].masterCount, 0x1234u);
+  EXPECT_EQ(encoder[0].noniusCount, 0x2B00u);
+}
+
+TEST(DecodeHrdSamples, ReadsSystemIdentificationVelocityOutOfQ15) {
+  // 32768 in Q15 is 1 RPM; the torque is a plain little-endian int16. Both signed, so the sample
+  // below is also the check that a negative velocity does not read as a huge positive one.
+  const std::vector<uint8_t> bytes{0x00, 0x80, 0xFF, 0xFF, 0xF6, 0xFF};
+  const auto samples =
+      mm::node::decodeHrdSamples(bytes, somanet::HrdData::kSystemIdentificationData);
+  const auto& system = std::get<std::vector<mm::node::HrdSystemIdentificationSample>>(samples);
+  ASSERT_EQ(system.size(), 1u);
+  EXPECT_DOUBLE_EQ(system[0].velocityRpm, -1.0);
+  EXPECT_EQ(system[0].torquePermil, -10);
+}
+
+TEST(DecodeHrdSamples, IgnoresATrailingPartialSample) {
+  // The drive allocates its files in fixed-size blocks, so a recording that does not fill the last
+  // one ends in padding. Decoding it as a sample would put invented data at the end of every
+  // recording.
+  const std::vector<uint8_t> bytes{1, 0, 0, 0, 2, 0};
+  const auto samples = mm::node::decodeHrdSamples(bytes, somanet::HrdData::kEncoderRawData);
+  EXPECT_EQ(std::get<std::vector<mm::node::HrdEncoderSample>>(samples).size(), 1u);
+}
+
+TEST(ReadHrdRecording, ConcatenatesTheFilesInNumericOrder) {
+  // The listing is deliberately out of order, and a sample deliberately straddles the boundary
+  // between the two files: the firmware chunks one byte stream at a fixed size rather than padding
+  // each file to whole samples, so reassembling in the wrong order does not lose samples — it
+  // silently corrupts every one after the seam.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  const std::string listing = "hr_data1.bin, size: 4\nhr_data0.bin, size: 4\n";
+  driver.files["fs-getlist"] = std::vector<uint8_t>(listing.begin(), listing.end());
+  driver.files["hr_data0.bin"] = {0x01, 0x00, 0x00, 0x00, 0x02, 0x00};
+  driver.files["hr_data1.bin"] = {0x00, 0x00, 0x03, 0x00, 0x00, 0x00};
+
+  auto recording = drive->readHrdRecording(somanet::HrdData::kEncoderRawData);
+  ASSERT_TRUE(recording.has_value()) << recording.error();
+  ASSERT_EQ(recording->files.size(), 2u);
+  EXPECT_EQ(recording->files[0].name, "hr_data0.bin");
+  EXPECT_EQ(recording->files[1].name, "hr_data1.bin");
+  EXPECT_EQ(recording->byteCount, 12u);
+  EXPECT_EQ(recording->trailingBytes, 0u);
+
+  const auto& samples = std::get<std::vector<mm::node::HrdEncoderSample>>(recording->samples);
+  ASSERT_EQ(samples.size(), 3u);
+  EXPECT_EQ(samples[0].raw, 1u);
+  EXPECT_EQ(samples[1].raw, 2u);  // straddles the file boundary
+  EXPECT_EQ(samples[2].raw, 3u);
+}
+
+TEST(ReadHrdRecording, ReportsThePaddingItDidNotDecode) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  const std::string listing = "hr_data0.bin, size: 6\n";
+  driver.files["fs-getlist"] = std::vector<uint8_t>(listing.begin(), listing.end());
+  driver.files["hr_data0.bin"] = {1, 0, 0, 0, 0xFF, 0xFF};
+
+  auto recording = drive->readHrdRecording(somanet::HrdData::kEncoderRawData);
+  ASSERT_TRUE(recording.has_value()) << recording.error();
+  EXPECT_EQ(recording->sampleCount(), 1u);
+  EXPECT_EQ(recording->trailingBytes, 2u);
+}
+
+TEST(ReadHrdRecording, SaysWhenTheDeviceHoldsNoRecording) {
+  // A device that has never recorded lists no hr_data file at all, which is a different thing from
+  // a read that failed — and the message has to say which, because the fix is to record one.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  const std::string listing = "config.csv, size: 10\n";
+  driver.files["fs-getlist"] = std::vector<uint8_t>(listing.begin(), listing.end());
+
+  auto recording = drive->readHrdRecording(somanet::HrdData::kEncoderRawData);
+  ASSERT_FALSE(recording.has_value());
+  EXPECT_NE(recording.error().find("no high-rate data recording"), std::string::npos)
+      << recording.error();
+}
+
+TEST(ReadHrdRecording, FailsRatherThanSkipAFileItCannotRead) {
+  // Skipping a file would misalign every sample after it and still return "success", which is the
+  // one outcome worse than an error: a graph of plausible nonsense.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  const std::string listing = "hr_data0.bin, size: 4\nhr_data1.bin, size: 4\n";
+  driver.files["fs-getlist"] = std::vector<uint8_t>(listing.begin(), listing.end());
+  driver.files["hr_data0.bin"] = {1, 0, 0, 0};
+
+  auto recording = drive->readHrdRecording(somanet::HrdData::kEncoderRawData);
+  ASSERT_FALSE(recording.has_value());
+  EXPECT_NE(recording.error().find("hr_data1.bin"), std::string::npos) << recording.error();
 }
 
 // --- Open phase detection (OS command 6) --------------------------------------------------------

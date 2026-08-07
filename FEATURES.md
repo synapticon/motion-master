@@ -85,7 +85,14 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
 ## Device Services
 
 - **File over EtherCAT (FoE)** — read and write files on a device (firmware, config)
-  via FoE (`GET`/`PUT /api/devices/{slavePosition}/files/{filename}`).
+  via FoE (`GET`/`PUT /api/devices/{slavePosition}/files/{filename}`), and list what a
+  SOMANET drive holds with the size of each (`GET /api/devices/{slavePosition}/files`).
+  EtherCAT defines no directory service, so the listing is the vendor's own `fs-getlist`
+  pseudo-file, read and parsed by the server rather than by each client.
+- **High-rate data (HRD)** — read back and decode what the *HRD streaming* procedure
+  recorded (`GET /api/devices/{slavePosition}/hrd?data=…`): the drive's files concatenated
+  in order and turned into samples, either the encoder's raw position word split into its
+  master and nonius tracks, or velocity in RPM and torque in per mille of rated torque.
 - **ESC register access** — read and write raw bytes from/to an ESC register
   (`GET`/`POST /api/devices/{slavePosition}/registers/{address}`).
 - **Parameter persistence** — saving parameters to non-volatile memory (`0x1010`) and
@@ -150,7 +157,9 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
 - **SOMANET procedures** — the raw **OS command** (`0x1023`/`0x1024`, request bytes passed
   through as given), **encoder register communication** (read or write one BiSS encoder
   register), **iC-MU calibration mode** (how the BiSS service clocks a Circulo's internal
-  encoder: standard, configuration or raw), the motor measurements (**open phase detection**,
+  encoder: standard, configuration or raw), **HRD streaming** (record the encoder's raw
+  position word, or the velocity and torque actual values, at one sample per millisecond),
+  the motor measurements (**open phase detection**,
   **pole pair detection**, **phase resistance**, **phase inductance**), **motor phase order
   detection**, **commutation offset detection**, and **offset detection** — the whole
   commissioning sequence in one prepared session. The measurement procedures prepare the drive

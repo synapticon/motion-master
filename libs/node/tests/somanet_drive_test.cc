@@ -1098,6 +1098,35 @@ TEST(DecodeHrdSamples, IgnoresATrailingPartialSample) {
   EXPECT_EQ(std::get<std::vector<mm::node::HrdEncoderSample>>(samples).size(), 1u);
 }
 
+TEST(HrdRecordingCsv, StartsWithTheColumnNamesAndEndsEveryRow) {
+  mm::node::HrdRecording recording;
+  recording.data = somanet::HrdData::kEncoderRawData;
+  recording.samples = std::vector<mm::node::HrdEncoderSample>{
+      {.raw = 7, .masterCount = 7, .noniusCount = 0},
+      {.raw = 0x4001, .masterCount = 1, .noniusCount = 1},
+  };
+  // The header is the same list the JSON rendering publishes as `columns`, so a consumer reading
+  // either format is reading the same field order.
+  EXPECT_EQ(mm::node::toCsv(recording), "raw,masterCount,noniusCount\n7,7,0\n16385,1,1\n");
+}
+
+TEST(HrdRecordingCsv, WritesVelocityAsADecimal) {
+  mm::node::HrdRecording recording;
+  recording.data = somanet::HrdData::kSystemIdentificationData;
+  recording.samples = std::vector<mm::node::HrdSystemIdentificationSample>{
+      {.velocityRpm = -1.5, .torquePermil = -10},
+  };
+  EXPECT_EQ(mm::node::toCsv(recording), "velocityRpm,torquePermil\n-1.5,-10\n");
+}
+
+TEST(HrdRecordingCsv, IsAHeaderAloneWhenNothingWasRecorded) {
+  // Not an empty file: a consumer that reads the header to learn the columns must still get them.
+  mm::node::HrdRecording recording;
+  recording.data = somanet::HrdData::kSystemIdentificationData;
+  recording.samples = std::vector<mm::node::HrdSystemIdentificationSample>{};
+  EXPECT_EQ(mm::node::toCsv(recording), "velocityRpm,torquePermil\n");
+}
+
 TEST(ReadHrdRecording, ConcatenatesTheFilesInNumericOrder) {
   // The listing is deliberately out of order, and a sample deliberately straddles the boundary
   // between the two files: the firmware chunks one byte stream at a fixed size rather than padding

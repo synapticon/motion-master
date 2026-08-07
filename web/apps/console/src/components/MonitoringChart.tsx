@@ -35,6 +35,27 @@ function formatTicks(splits: number[]): string[] {
   })
 }
 
+/** How the x values read: the legend/cursor label, the hover readout, and the tick labels. */
+export interface XAxis {
+  label: string
+  format: (v: number) => string
+  ticks: (splits: number[]) => string[]
+}
+
+/** x is microseconds elapsed since the first sample — the live monitoring and recorder case. */
+export const ELAPSED_MICROSECONDS: XAxis = {
+  label: 'Elapsed',
+  format: formatMicros,
+  ticks: formatTicks,
+}
+
+/** x is a position in a sequence, with no time in it — a recording read back off a device, say. */
+export const SAMPLE_INDEX: XAxis = {
+  label: 'Sample',
+  format: (v) => v.toLocaleString(),
+  ticks: (splits) => splits.map((v) => v.toLocaleString()),
+}
+
 /// Thin uPlot wrapper for a live time-series. Re-creates the plot when the series set changes and
 /// pushes new data via setData otherwise — so streaming updates never tear down the canvas.
 ///
@@ -48,6 +69,7 @@ export default function MonitoringChart({
   titles = [],
   hidden = [],
   colors = [],
+  xAxis = ELAPSED_MICROSECONDS,
 }: {
   data: uPlot.AlignedData
   labels: string[]
@@ -59,6 +81,9 @@ export default function MonitoringChart({
   /** Optional per-series stroke colour, aligned with `labels`; a blank/undefined entry falls back
    *  to the built-in palette. Changing a colour rebuilds the plot (keyed on content). */
   colors?: (string | undefined)[]
+  /** What the x values mean. Defaults to elapsed microseconds; pass SAMPLE_INDEX for data whose
+   *  x is a position rather than a time, so the ticks do not read as µs. */
+  xAxis?: XAxis
 }) {
   const containerRef = useRef<HTMLDivElement>(null)
   const plotRef = useRef<uPlot | null>(null)
@@ -73,6 +98,8 @@ export default function MonitoringChart({
   hiddenRef.current = hidden
   const colorsRef = useRef(colors)
   colorsRef.current = colors
+  const xAxisRef = useRef(xAxis)
+  xAxisRef.current = xAxis
   // Content keys — a stable string identity for a given set of labels/titles/colors. These, not the
   // array references, drive the effects, so a caller passing a fresh array each render is harmless.
   const labelsKey = JSON.stringify(labels)
@@ -86,8 +113,9 @@ export default function MonitoringChart({
     if (!el) return
 
     const series: uPlot.Series[] = [
-      // x is elapsed microseconds, not a timestamp — format the cursor/legend readout in µs.
-      { label: 'Elapsed', value: (_u, v) => (v == null ? '—' : formatMicros(v)) },
+      // x is never a wall-clock timestamp here — it is elapsed µs or a sample position — so the
+      // cursor/legend readout is formatted by the caller's axis rather than by uPlot's date logic.
+      { label: xAxisRef.current.label, value: (_u, v) => (v == null ? '—' : xAxisRef.current.format(v)) },
       ...labelsRef.current.map((label, i) => ({
         label,
         stroke: colorsRef.current[i] || COLORS[i % COLORS.length],
@@ -100,11 +128,11 @@ export default function MonitoringChart({
       width: el.clientWidth || 600,
       height: HEIGHT,
       series,
-      // time:false — x is relative elapsed microseconds, so uPlot ticks in linear µs (down to the
-      // cycle resolution) instead of clamping to whole-second wall-clock. Tick labels adapt their
-      // unit so they don't overlap; the hover readout (series value above) stays in exact µs.
+      // time:false — x is a relative quantity (elapsed µs, or a sample position), so uPlot ticks it
+      // linearly instead of clamping to whole-second wall-clock. Tick labels adapt so they don't
+      // overlap; the hover readout (series value above) keeps full resolution.
       scales: { x: { time: false } },
-      axes: [{ values: (_u, splits) => formatTicks(splits) }, {}],
+      axes: [{ values: (_u, splits) => xAxisRef.current.ticks(splits) }, {}],
       legend: { live: true },
       cursor: { drag: { x: true, y: false } },
     }
@@ -121,7 +149,9 @@ export default function MonitoringChart({
       plot.destroy()
       plotRef.current = null
     }
-  }, [labelsKey, colorsKey])
+    // xAxis.label joins the rebuild key so a page that switches what x means (and only then) gets a
+    // plot whose legend and ticks agree with its data.
+  }, [labelsKey, colorsKey, xAxis.label])
 
   // Stream new data into the existing plot.
   useEffect(() => {

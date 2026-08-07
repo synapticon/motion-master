@@ -1742,6 +1742,16 @@ paths:
         ends in padding rather than data.
 
 
+        Answers **JSON or CSV**, chosen by the `Accept` header. CSV is the same numbers in the same
+        column order, one header row then one row per sample — a file to open in a spreadsheet
+        rather than JSON to read, which for ten thousand rows is usually what is wanted.
+
+
+        Values are decoded, not raw: `velocityRpm` is converted out of the file's Q15 fixed point
+        (exactly — multiply by 32768 to recover the stored integer), while `torquePermil` and the
+        encoder's `raw` word are the file's own values.
+
+
         Blocks for the transfer, which is up to five 8 KB FoE reads plus the listing.
       operationId: readHrdRecording
       parameters:
@@ -1760,6 +1770,16 @@ paths:
           description: >
             Which layout the files hold — the same selection the recording was made with.
           example: encoder-raw
+        - name: Accept
+          in: header
+          required: false
+          schema:
+            type: string
+            enum: [application/json, text/csv]
+            default: application/json
+          description: >
+            `text/csv` returns the recording as CSV — a header row of column names, then one row
+            per sample. Anything else returns JSON.
       responses:
         "200":
           description: The decoded recording
@@ -1769,6 +1789,13 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/HrdRecording" }
+            text/csv:
+              schema:
+                type: string
+              example: |
+                raw,masterCount,noniusCount
+                16385,1,1
+                16386,2,1
         "400":
           description: slavePosition is invalid, or `data` is missing or not a known selection
         "404":

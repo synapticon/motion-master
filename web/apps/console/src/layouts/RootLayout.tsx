@@ -9,6 +9,7 @@ import { formatHex } from '@synapticon/motion-master-client'
 
 const deviceLinks = [
   { to: 'foe', label: 'FoE' },
+  { to: 'hrd', label: 'HRD' },
   { to: 'parameters', label: 'Parameters' },
   { to: 'pdo-mapping', label: 'PDO Mapping' },
   { to: 'procedures', label: 'Procedures' },

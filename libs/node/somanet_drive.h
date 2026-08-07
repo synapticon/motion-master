@@ -737,6 +737,17 @@ struct HrdRecording {
 };
 void to_json(nlohmann::json& j, const HrdRecording& recording);
 
+/// @brief Renders a recording as CSV: one header row of column names, then one row per sample.
+///
+/// The second representation of the same recording, for the spreadsheet-and-script half of the
+/// audience — a full recording is ten thousand rows, which is a file to open rather than JSON to
+/// read. Beside @c to_json rather than in the HTTP layer, so the two renderings of one type stay
+/// together.
+///
+/// Every row ends in a newline, the header included, so appending or concatenating cannot join two
+/// records onto one line.
+std::string toCsv(const HrdRecording& recording);
+
 /// @brief The column names of one decoded sample of @p data, in the order a row carries them.
 ///
 /// The rows go on the wire positionally — a 10 s recording is ten thousand of them — so the names

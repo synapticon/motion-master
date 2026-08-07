@@ -714,6 +714,36 @@ void to_json(nlohmann::json& j, const HrdRecording& recording) {
   }
 }
 
+std::string toCsv(const HrdRecording& recording) {
+  std::string csv;
+  // A recording is up to ten thousand rows of three numbers; growing the string a row at a time
+  // would reallocate its way there.
+  csv.reserve(recording.sampleCount() * 32 + 64);
+
+  const auto columns = hrdColumns(recording.data);
+  for (size_t i = 0; i < columns.size(); ++i) {
+    csv += i == 0 ? "" : ",";
+    csv += columns[i];
+  }
+  csv += '\n';
+
+  if (const auto* encoder = std::get_if<std::vector<HrdEncoderSample>>(&recording.samples)) {
+    for (const auto& sample : *encoder) {
+      std::format_to(std::back_inserter(csv), "{},{},{}\n", sample.raw, sample.masterCount,
+                     sample.noniusCount);
+    }
+    return csv;
+  }
+  for (const auto& sample :
+       std::get<std::vector<HrdSystemIdentificationSample>>(recording.samples)) {
+    // The velocity is the one non-integer column. Left to std::format's shortest round-trip form
+    // rather than fixed to n decimals: it came out of a Q15 fixed point, so it has an exact short
+    // decimal form and padding it would only add noise.
+    std::format_to(std::back_inserter(csv), "{},{}\n", sample.velocityRpm, sample.torquePermil);
+  }
+  return csv;
+}
+
 HrdSamples decodeHrdSamples(std::span<const uint8_t> bytes, somanet::HrdData data) {
   const size_t sampleSize = somanet::hrdSampleSize(data);
   const size_t count = bytes.size() / sampleSize;

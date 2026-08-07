@@ -89,10 +89,12 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
   SOMANET drive holds with the size of each (`GET /api/devices/{slavePosition}/files`).
   EtherCAT defines no directory service, so the listing is the vendor's own `fs-getlist`
   pseudo-file, read and parsed by the server rather than by each client.
-- **High-rate data (HRD)** — read back and decode what the *HRD streaming* procedure
+- **High resolution data (HRD)** — read back and decode what the *HRD streaming* procedure
   recorded (`GET /api/devices/{slavePosition}/hrd?data=…`): the drive's files concatenated
   in order and turned into samples, either the encoder's raw position word split into its
-  master and nonius tracks, or velocity in RPM and torque in per mille of rated torque.
+  master and nonius tracks, or velocity in RPM (converted out of the drive's Q15 fixed
+  point) and torque in per mille of rated torque. Answers JSON or CSV per the `Accept`
+  header.
 - **ESC register access** — read and write raw bytes from/to an ESC register
   (`GET`/`POST /api/devices/{slavePosition}/registers/{address}`).
 - **Parameter persistence** — saving parameters to non-volatile memory (`0x1010`) and
@@ -205,7 +207,8 @@ A React PWA at `https://motion-master.synapticon.com` provides UI for the above:
 - **Per-device** — Motion (drive the CiA402 state machine, operation mode, and cyclic
   setpoints, watching target vs. actual live — shown only for a CiA402 device in OP, since
   both are required to command motion), EtherCAT State, Parameters, Object Dictionary,
-  PDO Mapping, Registers, SII, FoE.
+  PDO Mapping, Registers, SII, FoE, HRD (read back a high resolution data recording and
+  plot it, or download it as CSV), Procedures.
 - **Process Data / Recorder** — live process-data view and recorder page.
 - **Game Loop** — RT loop health and runtime cycle-period control.
 - **Monitorings** — configure and plot live telemetry.

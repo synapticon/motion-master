@@ -1292,34 +1292,54 @@ void HttpServer::run() {
       // snapshot — re-sent whole on every poll and retained until a rescan — is no place for ten
       // thousand samples. `data` says how to decode the files, and is required because nothing on
       // the drive records which signal was streamed into them.
-      .get("/api/devices/:slavePosition/hrd",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p, ec] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             auto dataParam = req->getQuery("data");
-             auto data = mm::node::somanet::parseHrdData(dataParam);
-             if (!data) {
-               sendError(res, "400 Bad Request", config_.corsOrigin,
-                         std::format("'data' must be one of {} or {}",
-                                     mm::node::somanet::toString(
-                                         mm::node::somanet::HrdData::kEncoderRawData),
-                                     mm::node::somanet::toString(
-                                         mm::node::somanet::HrdData::kSystemIdentificationData)));
-               return;
-             }
-             if (!deviceManager_.findDevice(pos)) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             sendTimedJson(res, config_.corsOrigin, "409 Conflict",
-                           [&] { return mm::node::readHrdRecording(deviceManager_, pos, *data); });
-           })
+      .get(
+          "/api/devices/:slavePosition/hrd",
+          [this](auto* res, auto* req) {
+            uint16_t pos{};
+            auto posParam = req->getParameter("slavePosition");
+            auto [p, ec] = std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
+            if (ec != std::errc() || p != posParam.data() + posParam.size()) {
+              sendStatus(res, "400 Bad Request", config_.corsOrigin);
+              return;
+            }
+            auto dataParam = req->getQuery("data");
+            auto data = mm::node::somanet::parseHrdData(dataParam);
+            if (!data) {
+              sendError(res, "400 Bad Request", config_.corsOrigin,
+                        std::format("'data' must be one of {} or {}",
+                                    mm::node::somanet::toString(
+                                        mm::node::somanet::HrdData::kEncoderRawData),
+                                    mm::node::somanet::toString(
+                                        mm::node::somanet::HrdData::kSystemIdentificationData)));
+              return;
+            }
+            // CSV for the spreadsheet-and-script half of the audience: a full recording is ten
+            // thousand rows, which is a file to open rather than JSON to read. Same read and the
+            // same decode, one rendering or the other — as on the SII endpoint above.
+            const bool wantCsv =
+                req->getHeader("accept").find("text/csv") != std::string_view::npos;
+            if (!deviceManager_.findDevice(pos)) {
+              sendStatus(res, "404 Not Found", config_.corsOrigin);
+              return;
+            }
+            if (!wantCsv) {
+              sendTimedJson(res, config_.corsOrigin, "409 Conflict",
+                            [&] { return mm::node::readHrdRecording(deviceManager_, pos, *data); });
+              return;
+            }
+            // Hand-timed rather than sendTimedJson, because the body is CSV: the wire figure still
+            // rides the same X-Wire-Us header, on the error path too.
+            const auto t0 = std::chrono::steady_clock::now();
+            auto recording = mm::node::readHrdRecording(deviceManager_, pos, *data);
+            const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::steady_clock::now() - t0);
+            if (!recording) {
+              sendError(res, "409 Conflict", config_.corsOrigin, recording.error(), wireUs);
+              return;
+            }
+            setWireTime(res, wireUs);
+            sendBytes(res, config_.corsOrigin, "text/csv", mm::node::toCsv(*recording));
+          })
       // --- procedures -----------------------------------------------------------------------
       //
       // One resource per (device, procedure), addressed by name, with three verbs — POST starts a

@@ -377,7 +377,7 @@ Every script defaults to the **`x64-linux-debug`** preset (`CMAKE_BUILD_TYPE=Deb
 
 Use the release preset for anything timing-sensitive — a debug build is unoptimised, so its per-cycle task times are not representative of what the real-time loop achieves.
 
-For the inner development loop, `./tools/build-dev.sh` builds *and* runs the test suite, stamping capabilities as it goes (`--no-setcap` skips the `sudo`), and `./tools/run-dev.sh` starts the result with CORS opened to the Vite dev server and debug-level logging — see [Running locally](#running-locally).
+For the inner development loop, `./tools/build-dev.sh` builds and stamps capabilities as it goes (`--no-setcap` skips the `sudo`), and `./tools/run-dev.sh` starts the result with CORS opened to the Vite dev server and debug-level logging — see [Running locally](#running-locally). Run `./tools/test.sh` separately when you want the test suite.
 
 On Linux, `./tools/build.sh --setcap` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip` on the binary after linking — you will be prompted for your password. This is the same set the release packages apply, and it has to be re-run after every relink because the capabilities are attached to the file; see [Linux capabilities](#linux-capabilities) for what each one grants.
 
@@ -514,7 +514,7 @@ All scripts default to the `x64-linux-debug` preset. Pass a preset name as the f
 | --- | --- |
 | `./tools/configure.sh` | Run CMake configure |
 | `./tools/build.sh` | Build all targets (`--setcap` also stamps Linux capabilities, needs `sudo`) |
-| `./tools/build-dev.sh` | Build **and** test — the inner development loop; stamps capabilities by default (`--no-setcap` to skip the `sudo`) |
+| `./tools/build-dev.sh` | Build — the inner development loop; stamps capabilities by default (`--no-setcap` to skip the `sudo`) |
 | `./tools/run.sh` | Run the binary with the best available TLS cert (real cert if acme.sh is set up, self-signed otherwise) |
 | `./tools/run-dev.sh` | Run for UI development — CORS opened to the Vite dev server (`http://localhost:5173`) and debug-level logging |
 | `./tools/test.sh` | Run tests |

@@ -39,7 +39,7 @@ All common tasks have wrapper scripts in `tools/`. They default to the `x64-linu
 ./tools/configure.sh              # cmake --preset
 ./tools/build.sh                  # cmake --build --preset (no setcap by default — needs no sudo)
 ./tools/build.sh --setcap         # build, then sudo setcap for raw socket + RT access
-./tools/build-dev.sh              # build (with --setcap) + run the test suite; --no-setcap skips sudo
+./tools/build-dev.sh              # build (with --setcap); --no-setcap skips sudo
 ./tools/run.sh                    # generate a tmp self-signed cert and run the binary
 ./tools/test.sh                   # ctest --output-on-failure
 ./tools/format.sh                 # clang-format all sources

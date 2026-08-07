@@ -158,7 +158,8 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
   through as given), **encoder register communication** (read or write one BiSS encoder
   register), **iC-MU calibration mode** (how the BiSS service clocks a Circulo's internal
   encoder: standard, configuration or raw), **HRD streaming** (record the encoder's raw
-  position word, or the velocity and torque actual values, at one sample per millisecond),
+  position word, or the velocity and torque actual values, one sample per millisecond —
+  the control loop runs faster but the recording is decimated to 1 kHz),
   the motor measurements (**open phase detection**,
   **pole pair detection**, **phase resistance**, **phase inductance**), **motor phase order
   detection**, **commutation offset detection**, and **offset detection** — the whole

@@ -1123,7 +1123,7 @@ export class Api<
    * @description Reads the files the `hrd-streaming` procedure recorded, concatenates them in order and decodes them into samples. Run that procedure first; this endpoint only reads what is already on the drive. **`data` is required and must match what was recorded.** Nothing on the drive says which signal its files hold, so the wrong selection reinterprets the same bytes as a different layout and returns plausible nonsense. The procedure's `configure-stream` step reports the selection it used for exactly this reason. Samples travel positionally — `columns` names the fields of each row, once, the way a monitoring topic ships its parameter order once — because a full recording is up to ten thousand rows. `trailingBytes` is what was left over past the last whole sample: the drive allocates its files in fixed-size blocks, so a recording that does not fill the last block ends in padding rather than data. Blocks for the transfer, which is up to five 8 KB FoE reads plus the listing.
    *
    * @name ReadHrdRecording
-   * @summary Read back a drive's high-rate data recording
+   * @summary Read back a drive's high resolution data recording
    * @request GET:/api/devices/{slavePosition}/hrd
    */
   readHrdRecording = (
@@ -1273,7 +1273,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Lists what the device holds — firmware images, the ESI, logs, configuration and any high-rate data recording — with the size it reports for each. **Vendor-specific despite reading like a filesystem listing.** EtherCAT defines no directory service, so SOMANET firmware serves its own as a pseudo-file (`fs-getlist`) read over FoE. A device that is not a SOMANET drive is refused rather than probed. `byteCount` is absent when the device reported a name without a size, which is a formatting quirk of one entry rather than a reason to hide the file.
+   * @description Lists what the device holds — firmware images, the ESI, logs, configuration and any high resolution data recording — with the size it reports for each. **Vendor-specific despite reading like a filesystem listing.** EtherCAT defines no directory service, so SOMANET firmware serves its own as a pseudo-file (`fs-getlist`) read over FoE. A device that is not a SOMANET drive is refused rather than probed. `byteCount` is absent when the device reported a name without a size, which is a formatting quirk of one entry rather than a reason to hide the file.
    *
    * @name ListDeviceFiles
    * @summary List the files stored on a device

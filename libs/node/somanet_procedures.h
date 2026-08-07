@@ -205,7 +205,8 @@ std::expected<void, std::string> runIcMuCalibrationModeProcedure(
     Device& device, ProgressReporter& reporter, std::stop_token stop,
     const IcMuCalibrationModeRequest& request);
 
-/// @brief Procedure name for recording a high-rate data stream, as it appears in its URL and its
+/// @brief Procedure name for recording a high resolution data stream, as it appears in its URL and
+/// its
 ///        snapshot key.
 inline constexpr std::string_view kHrdStreamingProcedure = "hrd-streaming";
 
@@ -216,7 +217,7 @@ inline constexpr std::string_view kHrdConfigureStep = "configure-stream";
 /// @brief The step that records. Occupies the whole configured duration.
 inline constexpr std::string_view kHrdRecordStep = "record";
 
-/// @brief What one high-rate data recording was asked to capture.
+/// @brief What one high resolution data recording was asked to capture.
 struct HrdStreamingRequest {
   /// Which signal to record. No default a client can rely on — the value here is only what an unset
   /// struct holds — because it decides both what is captured and how the files decode afterwards.
@@ -231,9 +232,9 @@ struct HrdStreamingRequest {
 ///
 /// Accepts `{"data": "encoder-raw", "durationMs": 5000}` — or `system-identification`. Both fields
 /// are required, and the duration is checked against the limit for the chosen data, which is
-/// **6000 ms for system identification and 10000 ms for encoder raw**. That per-format check is the
-/// reason this parse exists rather than a bare range: the firmware only rejects durations over
-/// 10000 ms, and quietly truncates an over-long system identification recording instead.
+/// **6000 ms for system identification and 10000 ms for encoder raw**. The drive applies the same
+/// two limits itself, so checking here only turns a rejected round trip into a 400 that names the
+/// limit for the data actually chosen.
 ///
 /// @param body  Parsed request JSON.
 /// @return The validated request, or a message naming what is wrong with it.
@@ -249,7 +250,7 @@ std::vector<ProcedureParameter> hrdStreamingParameters();
 /// @brief The HRD streaming procedure's step template — configure, then record.
 std::vector<ProgressStep> hrdStreamingSteps();
 
-/// @brief Records one high-rate data stream as a procedure body.
+/// @brief Records one high resolution data stream as a procedure body.
 ///
 /// Two steps because the firmware has two commands: configuring arms the recording and deletes the
 /// files of the previous one (seconds of work on its own), and starting it records for the whole

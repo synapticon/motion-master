@@ -217,21 +217,30 @@ constexpr std::string_view describe(EncoderRegisterFault fault) {
   return "unknown fault";
 }
 
-/// @brief Which signal a high-rate data (HRD) stream records — OS command 3's data index. The enum
-///        value @b is the index the firmware expects.
+/// @brief Which signal a high resolution data (HRD) stream records — OS command 3's data index. The
+///        enum value @b is the index the firmware expects.
 ///
 /// The two formats differ in what a sample *is*, so the choice made when a stream is configured
 /// also decides how its files decode. Nothing on the drive records which one was used, which is
 /// why reading a recording back takes the same enum as configuring it did.
+///
+/// **A recording is 1 kHz even on a drive that samples faster.** The drive control loop runs at
+/// 250, 500 or 1000 µs, but the OS command 3 handler writes one sample per *millisecond* whatever
+/// the loop period is — it divides by its cycles-per-ms, which works because every supported loop
+/// period divides 1000 µs. Do not read a recording's length as the drive's resolution.
+///
+/// Not to be confused with **object 0x20E1, also called high resolution data**, which is a separate
+/// feature this code does not touch: a rolling OD array the drive fills every motion cycle with
+/// position, velocity and phase currents. Same name, different data, different transport.
 enum class HrdData : uint8_t {
-  /// The raw position word an iC-MU encoder reports, once per millisecond. **Records zeros unless
-  /// the encoder was first put into raw mode** (@c IcMuCalibrationMode::kRaw, OS command 1) — the
-  /// firmware streams whatever the encoder is currently clocked for.
+  /// The raw position word an iC-MU encoder reports. **Records zeros unless the encoder was first
+  /// put into raw mode** (@c IcMuCalibrationMode::kRaw, OS command 1) — the firmware streams
+  /// whatever the encoder is currently clocked for.
   kEncoderRawData = 0,
 
-  /// The velocity and torque actual values, once per millisecond. **Records the response to a
-  /// system identification run** (OS command 15), which has to be configured and started first;
-  /// on its own this streams a drive that is not being excited.
+  /// The velocity and torque actual values. **Records the response to a system identification run**
+  /// (OS command 15), which has to be configured and started first; on its own this streams a drive
+  /// that is not being excited.
   kSystemIdentificationData = 1,
 };
 
@@ -256,13 +265,15 @@ std::optional<HrdData> parseHrdData(std::string_view token);
 /// millisecond of the configured duration, so this is also what turns a duration into a size.
 constexpr size_t hrdSampleSize(HrdData data) { return data == HrdData::kEncoderRawData ? 4 : 6; }
 
-/// @brief The longest stream the firmware can record for @p data.
+/// @brief The longest stream the drive will record for @p data.
 ///
-/// **Two different limits, and only the larger one is enforced by the drive.** The recording is
-/// held in at most five 8032-byte files, so the ceiling is whatever fills them: 10000 ms of 4-byte
-/// samples, or 6000 ms of 6-byte ones. The firmware rejects a duration above 10000 ms outright
-/// (@c HrdStreamFault::kDuration) but accepts an over-long system identification stream and then
-/// silently truncates it mid-sample, so the 6000 ms limit has to be applied by the caller.
+/// Two different limits, because the recording is held in at most five 8032-byte files and the
+/// ceiling is whatever fills them: 10000 ms of 4-byte samples, or 6000 ms of 6-byte ones. **The
+/// drive enforces both** — it picks the limit from the data index and answers
+/// @c HrdStreamFault::kDuration — so applying them here only turns a rejected round trip into a
+/// caller error. (The firmware specification's error table describes that code as "larger than
+/// 10000 ms", which reads as though the narrower limit were unchecked; the drive application
+/// checks per data index.)
 constexpr std::chrono::milliseconds maxHrdStreamDuration(HrdData data) {
   return data == HrdData::kEncoderRawData ? std::chrono::milliseconds(10000)
                                           : std::chrono::milliseconds(6000);
@@ -275,8 +286,8 @@ constexpr std::chrono::milliseconds maxHrdStreamDuration(HrdData data) {
 enum class HrdStreamFault : uint8_t {
   kInitialization = 0,  ///< The command could not initialise.
   kStreaming = 1,       ///< Something failed while the stream was running.
-  kDuration = 2,        ///< The requested duration is above the firmware's 10000 ms ceiling.
-  kDataIndex = 3,       ///< The requested data index is not one the firmware knows.
+  kDuration = 2,        ///< The requested duration is above the limit for the chosen data index.
+  kDataIndex = 3,       ///< The requested data index is not one the drive knows.
   kAction = 4,          ///< The requested action is neither configure nor start.
 };
 
@@ -308,12 +319,13 @@ constexpr std::string_view describe(HrdStreamFault fault) {
       return "the recording failed part way through, so whatever reached the drive's files is "
              "incomplete";
     case HrdStreamFault::kDuration:
-      return "the requested duration is longer than the 10000 ms the firmware allows";
+      return "the requested duration is longer than the drive allows for the chosen data, which is "
+             "10000 ms for encoder raw data and 6000 ms for system identification data";
     case HrdStreamFault::kDataIndex:
-      return "the drive does not know the requested data index, which means this firmware records "
-             "a different set of signals than this build expects";
+      return "the drive does not know the requested data index, which means its firmware records a "
+             "different set of signals than this build expects";
     case HrdStreamFault::kAction:
-      return "the drive does not know the requested action, which means this firmware drives HRD "
+      return "the drive does not know the requested action, which means its firmware drives HRD "
              "streaming differently than this build expects";
   }
   return "unknown fault";
@@ -389,8 +401,8 @@ constexpr std::string_view toString(BrakeReleaseStrategy strategy) {
 enum class OsCommandId : uint8_t {
   kEncoderRegisterCommunication = 0,  ///< Reads or writes one register of a BiSS encoder.
   kIcMuCalibrationMode = 1,           ///< Sets how the BiSS service clocks an iC-MU encoder.
-  kHrdStreaming = 3,                  ///< Records a signal into the drive's high-rate data files.
-  kMotorPhaseOrderDetection = 4,      ///< Detects the motor phase order. Rotates the rotor.
+  kHrdStreaming = 3,              ///< Records a signal into the drive's high resolution data files.
+  kMotorPhaseOrderDetection = 4,  ///< Detects the motor phase order. Rotates the rotor.
   kCommutationOffsetMeasurement = 5,  ///< Measures the commutation angle offset; see
                                       ///< somanet::CommutationOffsetMethod.
   kOpenPhaseDetection = 6,            ///< Checks every motor phase and FET leg for an open circuit.
@@ -707,7 +719,7 @@ struct HrdSystemIdentificationSample {
 using HrdSamples =
     std::variant<std::vector<HrdEncoderSample>, std::vector<HrdSystemIdentificationSample>>;
 
-/// @brief One high-rate data recording, read back from the drive's files and decoded.
+/// @brief One high resolution data recording, read back from the drive's files and decoded.
 ///
 /// @c files is what was read, in order, so a recording that came back short can be told from one
 /// that was never made. @c trailingBytes is the bytes past the last whole sample: the firmware
@@ -1043,7 +1055,7 @@ class SomanetDrive : public Cia402Drive {
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
                                        .pollInterval = std::chrono::milliseconds(20)});
 
-  /// @brief Configures a high-rate data stream (OS command 3, configure action).
+  /// @brief Configures a high resolution data stream (OS command 3, configure action).
   ///
   /// Chooses what the next recording captures and for how long, and **deletes every HRD file
   /// already on the drive** — which is the slow part: the firmware specification allows up to
@@ -1053,11 +1065,10 @@ class SomanetDrive : public Cia402Drive {
   /// Configuring does not record anything; @c startHrdStream does. They are separate commands
   /// precisely so a recording can be armed once and triggered when the machine is ready.
   ///
-  /// @p duration is validated against @c somanet::maxHrdStreamDuration before anything is sent,
-  /// because the two limits are not enforced alike: the drive rejects anything above 10000 ms, but
-  /// accepts an over-long system identification stream and then overruns its five files, truncating
-  /// the recording mid-sample. Refusing it here is the difference between an error and a file of
-  /// plausible-looking data with a corrupt tail.
+  /// @p duration is validated against @c somanet::maxHrdStreamDuration before anything is sent. The
+  /// drive checks it too and would answer @c HrdStreamFault::kDuration, so this is a courtesy
+  /// rather than a safety net: it makes an out-of-range duration a caller error instead of a
+  /// round trip, and keeps both limits stated in one place.
   ///
   /// Needs no preparation — no diagnostics mode, no Operation Enabled, no brake, and nothing moves
   /// — only an active mailbox. What the *data* is worth does depend on preparation elsewhere: see
@@ -1072,7 +1083,8 @@ class SomanetDrive : public Cia402Drive {
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(10),
                                        .pollInterval = std::chrono::milliseconds(100)});
 
-  /// @brief Starts the configured high-rate data stream and waits for it to finish (OS command 3,
+  /// @brief Starts the configured high resolution data stream and waits for it to finish (OS
+  /// command 3,
   ///        start action).
   ///
   /// **Blocks for the whole configured duration** — up to ten seconds — because the drive holds the
@@ -1081,16 +1093,20 @@ class SomanetDrive : public Cia402Drive {
   /// start request that says what that duration is: the caller is the only one that knows, which is
   /// why this takes no arguments but needs its config sized deliberately.
   ///
-  /// Cancelling through @c config.stop aborts the recording on the drive like any other OS command.
-  /// Whatever had been written stays in the files, so a cancelled recording is a short one rather
-  /// than none.
+  /// Cancelling through @c config.stop aborts the recording on the drive like any other OS command,
+  /// and the drive's two ways of stopping are **not** equivalent: finishing normally flushes the
+  /// buffers it still holds before closing the stream, while an abort stops immediately and
+  /// **discards whatever is still buffered** (up to 1004 bytes, so roughly 250 encoder samples or
+  /// 167 velocity/torque ones). Everything already written to flash stays, so a cancelled recording
+  /// is a short one rather than none — just short by more than the moment of cancelling.
   ///
   /// @param config  Timing and cancellation. **Has no useful default** — size the timeout from the
   ///                duration that was configured.
   /// @return Void once the recording finished, otherwise why it did not.
   std::expected<void, std::string> startHrdStream(const OsCommandConfig& config);
 
-  /// @brief Reads the drive's high-rate data files back and decodes them (FoE, no OS command).
+  /// @brief Reads the drive's high resolution data files back and decodes them (FoE, no OS
+  /// command).
   ///
   /// Discovers the files from the device's own file list rather than guessing at their names, so a
   /// firmware that splits a recording across five files and one that keeps it in a single file are

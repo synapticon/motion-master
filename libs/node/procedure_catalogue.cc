@@ -225,14 +225,17 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   hrdStreaming.name = std::string(kHrdStreamingProcedure);
   hrdStreaming.title = "HRD streaming";
   hrdStreaming.description =
-      "Records one signal into the drive's high-rate data files, one sample every millisecond. "
+      "Records one signal into the drive's high resolution data files. One sample is written every "
+      "millisecond — the drive's control loop runs faster, up to once every 250 µs, but the "
+      "recording is decimated to 1 kHz whatever the loop period is. "
       "Encoder raw data captures the position word an iC-MU encoder reports; system identification "
       "data captures the velocity and torque actual values. Arming the recording deletes the "
       "previous one, and recording occupies the whole requested duration. The recording stays on "
       "the drive — read it back from the device's HRD endpoint, which needs the same data "
       "selection to decode it.";
   hrdStreaming.caveats = {
-      "Arming a recording deletes every high-rate data file already on the drive, so the previous "
+      "Arming a recording deletes every high resolution data file already on the drive, so the "
+      "previous "
       "recording is gone the moment this starts — read one back before recording the next.",
       "Encoder raw data records zeros unless the encoder was put into raw mode first with iC-MU "
       "calibration mode. The drive streams whatever the encoder is currently clocked for and "
@@ -240,10 +243,10 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "System identification data records an unexcited drive unless a system identification run "
       "was configured and started first.",
       "The duration limit depends on the data: 10000 ms for encoder raw, but only 6000 ms for "
-      "system identification. The drive enforces only the first, so an over-long system "
-      "identification recording would be truncated mid-sample rather than refused.",
-      "Cancelling stops the recording on the drive but does not remove what was already written, "
-      "so the files hold a shorter recording rather than none.",
+      "system identification, since the recording has to fit five 8032-byte files.",
+      "Cancelling stops the recording on the drive and discards whatever it had buffered but not "
+      "yet written — up to about 250 samples. What reached the files stays, so the recording is a "
+      "short one rather than none.",
       "The mailbox must be active, so the device has to be in PRE-OP or above.",
   };
   hrdStreaming.movesMotor = false;

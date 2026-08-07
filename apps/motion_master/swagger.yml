@@ -1722,7 +1722,7 @@ paths:
           description: The device is not a SOMANET drive, or a read failed
   /api/devices/{slavePosition}/hrd:
     get:
-      summary: Read back a drive's high-rate data recording
+      summary: Read back a drive's high resolution data recording
       description: >
         Reads the files the `hrd-streaming` procedure recorded, concatenates them in order and
         decodes them into samples. Run that procedure first; this endpoint only reads what is
@@ -2013,7 +2013,7 @@ paths:
       summary: List the files stored on a device
       description: >
         Lists what the device holds — firmware images, the ESI, logs, configuration and any
-        high-rate data recording — with the size it reports for each.
+        high resolution data recording — with the size it reports for each.
 
 
         **Vendor-specific despite reading like a filesystem listing.** EtherCAT defines no directory
@@ -3721,7 +3721,7 @@ components:
       type: object
       required: [data, files, byteCount, trailingBytes, sampleCount, columns, samples]
       description: >
-        One high-rate data recording, read back from a drive's files and decoded.
+        One high resolution data recording, read back from a drive's files and decoded.
       properties:
         data:
           type: string
@@ -4019,10 +4019,11 @@ components:
           minimum: 1
           maximum: 10000
           description: >
-            `hrd-streaming` only, and required for it: how long to record. The drive samples once
-            per millisecond into at most five 8032-byte files, so the real ceiling depends on the
-            sample size — 10000 ms for `encoder-raw`, but only 6000 ms for `system-identification`,
-            which the drive itself does not enforce.
+            `hrd-streaming` only, and required for it: how long to record. One sample is written
+            every millisecond into at most five 8032-byte files, so the real ceiling depends on the
+            sample size — 10000 ms for `encoder-raw`, but only 6000 ms for `system-identification`.
+            The drive applies both limits; the narrower one is checked here too, so an over-long
+            request is rejected before a run starts rather than failing on its first step.
           example: 5000
         mode:
           type: string

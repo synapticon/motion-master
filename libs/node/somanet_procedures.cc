@@ -717,9 +717,9 @@ std::expected<HrdStreamingRequest, std::string> parseHrdStreamingRequest(
   if (duration == body.end() || duration->is_null()) {
     return std::unexpected("'durationMs' is required");
   }
-  // Bounded by the chosen format's own limit, not by one shared ceiling: the drive rejects anything
-  // over 10000 ms itself, but accepts an over-long system identification recording and then
-  // overruns its files. The narrower limit only exists here.
+  // Bounded by the chosen format's own limit, not by one shared ceiling — the same two limits the
+  // drive applies, checked here so the answer is a 400 naming the limit for the data chosen rather
+  // than a run that fails on its first step.
   auto milliseconds = readMillis(body, "durationMs", request.duration, std::chrono::milliseconds(1),
                                  somanet::maxHrdStreamDuration(request.data));
   if (!milliseconds) {
@@ -749,7 +749,7 @@ std::vector<ProcedureParameter> hrdStreamingParameters() {
           }),
       integerParameter(
           "durationMs", "Duration (ms)",
-          "How long to record for. The drive samples once per millisecond into at most five "
+          "How long to record for. One sample is written every millisecond into at most five "
           "8032-byte files, so the ceiling is whatever fills them: 10000 ms of encoder raw data, "
           "but only 6000 ms of system identification data. Required.",
           nullptr, 1, somanet::maxHrdStreamDuration(somanet::HrdData::kEncoderRawData).count()),

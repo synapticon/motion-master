@@ -1284,7 +1284,8 @@ void HttpServer::run() {
             [this](auto* res, auto* req) {
               handleBrakeCommand(res, req, deviceManager_, config_.corsOrigin, /*release=*/false);
             })
-      // --- high-rate data ---------------------------------------------------------------------
+      // --- high resolution data
+      // ---------------------------------------------------------------------
       //
       // Reads back what the `hrd-streaming` procedure recorded. Separate from the procedure, not
       // its final step, for two reasons: a recording is worth reading more than once, and a run's

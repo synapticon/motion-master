@@ -826,7 +826,8 @@ std::expected<HrdRecording, std::string> SomanetDrive::readHrdRecording(
   }
   if (recorded.empty()) {
     return std::unexpected(
-        "the device holds no high-rate data recording (it lists no hr_data<n>.bin file) — record "
+        "the device holds no high resolution data recording (it lists no hr_data<n>.bin file) — "
+        "record "
         "one before reading it back");
   }
   std::ranges::sort(recorded, {}, &std::pair<uint32_t, DeviceFile>::first);

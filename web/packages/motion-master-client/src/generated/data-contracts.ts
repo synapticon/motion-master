@@ -440,7 +440,7 @@ export interface DeviceFile {
   byteCount?: number;
 }
 
-/** One high-rate data recording, read back from a drive's files and decoded. */
+/** One high resolution data recording, read back from a drive's files and decoded. */
 export interface HrdRecording {
   /**
    * Which layout the files were decoded as — echoes the request.
@@ -676,7 +676,7 @@ export interface ProcedureRequest {
    */
   data?: "encoder-raw" | "system-identification";
   /**
-   * `hrd-streaming` only, and required for it: how long to record. The drive samples once per millisecond into at most five 8032-byte files, so the real ceiling depends on the sample size — 10000 ms for `encoder-raw`, but only 6000 ms for `system-identification`, which the drive itself does not enforce.
+   * `hrd-streaming` only, and required for it: how long to record. One sample is written every millisecond into at most five 8032-byte files, so the real ceiling depends on the sample size — 10000 ms for `encoder-raw`, but only 6000 ms for `system-identification`. The drive applies both limits; the narrower one is checked here too, so an over-long request is rejected before a run starts rather than failing on its first step.
    * @min 1
    * @max 10000
    * @example 5000

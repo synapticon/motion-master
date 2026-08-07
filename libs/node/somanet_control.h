@@ -74,7 +74,7 @@ std::expected<BrakeState, std::string> engageBrake(DeviceManager& deviceManager,
 std::expected<std::vector<DeviceFile>, std::string> readFileList(DeviceManager& deviceManager,
                                                                  uint16_t slavePosition);
 
-/// @brief Reads a drive's high-rate data recording back and decodes it.
+/// @brief Reads a drive's high resolution data recording back and decodes it.
 ///
 /// Thin forward to @c SomanetDrive::readHrdRecording. Blocks for the transfer — up to five 8 KB FoE
 /// reads plus the listing — which is why it is not the tail of the recording procedure: a recording

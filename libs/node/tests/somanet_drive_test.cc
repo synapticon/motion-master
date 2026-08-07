@@ -913,10 +913,10 @@ TEST(ConfigureHrdStream, CarriesTheDataIndex) {
 }
 
 TEST(ConfigureHrdStream, RefusesAnOverLongSystemIdentificationRecordingWithoutAsking) {
-  // The drive would *accept* this: its own check is the 10000 ms ceiling, and 7000 ms of 6-byte
-  // samples is under it. What it would then do is overrun its five files and truncate the recording
-  // mid-sample, so the narrower limit has to be applied before anything is sent — which is what
-  // this asserts by checking that no command was written at all.
+  // 7000 ms of 6-byte samples does not fit the drive's five files. The drive refuses it too, so
+  // what this pins is that the refusal costs no round trip — hence the assertion that no command
+  // was written at all — and that the limit checked is the one for the chosen data rather than the
+  // wider ceiling the other format gets.
   OsCommandFakeDriver driver;
   Device device = makeOsCommandDevice(driver);
   auto drive = createSomanetDrive(device);
@@ -1157,7 +1157,7 @@ TEST(ReadHrdRecording, SaysWhenTheDeviceHoldsNoRecording) {
 
   auto recording = drive->readHrdRecording(somanet::HrdData::kEncoderRawData);
   ASSERT_FALSE(recording.has_value());
-  EXPECT_NE(recording.error().find("no high-rate data recording"), std::string::npos)
+  EXPECT_NE(recording.error().find("no high resolution data recording"), std::string::npos)
       << recording.error();
 }
 

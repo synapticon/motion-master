@@ -906,6 +906,212 @@ void HttpServer::run() {
         });
       });
 
+  // Both brake verbs are the same operation with a different flag, as the pre-Router
+  // handleBrakeCommand was. `settle` is exposed because brake release is open-loop — the firmware
+  // reports no confirmation — so that margin is the only thing between "commanded" and "assume it
+  // let go", and the right value is a property of the machine.
+  auto brakeCommand = [this](const mm::api::Request& req, bool release) -> mm::api::Response {
+    auto position = req.parameterAs<uint16_t>("slavePosition");
+    if (!position) {
+      return mm::api::badRequest("slavePosition must be a number");
+    }
+    auto settle = std::chrono::milliseconds(50);
+    if (req.query("settle")) {
+      auto settleMs = req.queryAs<uint32_t>("settle");
+      if (!settleMs) {
+        return mm::api::badRequest("'settle' must be a number of milliseconds");
+      }
+      settle = std::chrono::milliseconds(*settleMs);
+    }
+    if (deviceManager_.findDevice(*position) == nullptr) {
+      return mm::api::notFound("no device at that bus position");
+    }
+    // Most of the round trip is the deliberate wait, which is what the wire time reports.
+    return mm::api::timed(
+        [&] {
+          return release ? mm::node::releaseBrake(deviceManager_, *position, settle)
+                         : mm::node::engageBrake(deviceManager_, *position, settle);
+        },
+        "409 Conflict");
+  };
+
+  // ── PDO mapping, CiA402 control and the brake ───────────────────────────────────────────────
+  router.get("/api/devices/:slavePosition/pdo-mapping",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               if (deviceManager_.findDevice(*position) == nullptr) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               // Read fresh over SDO, so the mailbox must be live: INIT/BOOT is a 409.
+               return mm::api::timed([&] { return deviceManager_.readDevicePdoMapping(*position); },
+                                     "409 Conflict");
+             });
+
+  router.put("/api/devices/:slavePosition/pdo-mapping",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+               if (body.is_discarded()) {
+                 return mm::api::badRequest("body must be JSON");
+               }
+               auto mapping = parseDevicePdoMapping(body);
+               if (!mapping) {
+                 return mm::api::badRequest(mapping.error());
+               }
+               if (deviceManager_.findDevice(*position) == nullptr) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               // Both the write and the verifying read-back are on the wire, so both are timed.
+               const auto t0 = std::chrono::steady_clock::now();
+               auto elapsed = [&t0] {
+                 return std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::steady_clock::now() - t0);
+               };
+               // A failed write is usually a device-state precondition (not in PRE-OP) or a
+               // rejected/verify-mismatched mapping — a conflict with the device's state rather
+               // than a server fault.
+               if (auto r = deviceManager_.writeDevicePdoMapping(*position, *mapping); !r) {
+                 return mm::api::withWireTime(mm::api::error("409 Conflict", r.error()), elapsed());
+               }
+               // Echo the grouped read-back, whose entries carry the derived bitOffsets the
+               // request did not specify.
+               auto readBack = deviceManager_.readDevicePdoMapping(*position);
+               if (!readBack) {
+                 return mm::api::withWireTime(
+                     mm::api::error("500 Internal Server Error", readBack.error()), elapsed());
+               }
+               return mm::api::withWireTime(mm::api::json(nlohmann::json(*readBack)), elapsed());
+             });
+
+  router.get("/api/devices/:slavePosition/cia402",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               if (deviceManager_.findDevice(*position) == nullptr) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               // A non-CiA402 device (or one whose OD is not yet enumerated) is a 409; the node
+               // layer's message says which, and the device's isCia402 flag lets a client not ask.
+               return mm::api::timed(
+                   [&] { return mm::node::cia402Status(deviceManager_, *position); },
+                   "409 Conflict");
+             });
+
+  router.post("/api/devices/:slavePosition/cia402/mode",
+              [this](const mm::api::Request& req) -> mm::api::Response {
+                auto position = req.parameterAs<uint16_t>("slavePosition");
+                if (!position) {
+                  return mm::api::badRequest("slavePosition must be a number");
+                }
+                const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+                if (body.is_discarded() || !body.contains("mode") || !body["mode"].is_number()) {
+                  return mm::api::badRequest(R"(body must be {"mode": <CiA402 mode number>})");
+                }
+                auto mode = mm::node::cia402::toOperationMode(body["mode"].get<int>());
+                if (!mode) {
+                  return mm::api::badRequest("unknown CiA402 operation mode");
+                }
+                if (deviceManager_.findDevice(*position) == nullptr) {
+                  return mm::api::notFound("no device at that bus position");
+                }
+                auto r = mm::node::setCia402OperationMode(deviceManager_, *position, *mode);
+                if (!r) {
+                  return mm::api::error("409 Conflict", r.error());
+                }
+                return mm::api::json(nlohmann::json(*r));
+              });
+
+  router.post(
+      "/api/devices/:slavePosition/cia402/command",
+      [this](const mm::api::Request& req) -> mm::api::Response {
+        auto position = req.parameterAs<uint16_t>("slavePosition");
+        if (!position) {
+          return mm::api::badRequest("slavePosition must be a number");
+        }
+        const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+        if (body.is_discarded() || !body.contains("command") || !body["command"].is_string()) {
+          return mm::api::badRequest(R"(body must be {"command": "<name>"})");
+        }
+        auto command = mm::node::parseCia402Command(body["command"].get<std::string>());
+        if (!command) {
+          return mm::api::badRequest(
+              "invalid command: use enable, disable, quickStop, or faultReset");
+        }
+        if (deviceManager_.findDevice(*position) == nullptr) {
+          return mm::api::notFound("no device at that bus position");
+        }
+        auto r = mm::node::runCia402Command(deviceManager_, *position, *command);
+        if (!r) {
+          return mm::api::error("409 Conflict", r.error());
+        }
+        return mm::api::json(nlohmann::json(*r));
+      });
+
+  router.post(
+      "/api/devices/:slavePosition/cia402/target",
+      [this](const mm::api::Request& req) -> mm::api::Response {
+        auto position = req.parameterAs<uint16_t>("slavePosition");
+        if (!position) {
+          return mm::api::badRequest("slavePosition must be a number");
+        }
+        const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+        if (body.is_discarded() || !body.contains("target") || !body["target"].is_string() ||
+            !body.contains("value") || !body["value"].is_number_integer()) {
+          return mm::api::badRequest(R"(body must be {"target": "<name>", "value": <integer>})");
+        }
+        auto kind = mm::node::parseCia402TargetKind(body["target"].get<std::string>());
+        if (!kind) {
+          return mm::api::badRequest("invalid target: use position, velocity, or torque");
+        }
+        // Signed: target position/velocity are INT32 and target torque INT16, all of which
+        // take negative setpoints (reverse motion / regenerative torque).
+        const auto value = body["value"].get<int32_t>();
+        if (deviceManager_.findDevice(*position) == nullptr) {
+          return mm::api::notFound("no device at that bus position");
+        }
+        auto r = mm::node::setCia402Target(deviceManager_, *position, *kind, value);
+        if (!r) {
+          return mm::api::error("409 Conflict", r.error());
+        }
+        return mm::api::statusOnly("204 No Content");
+      });
+
+  // GET reports the brake, POST release/engage command it. Two verbs rather than one
+  // PUT {released}: they are not symmetric operations — a release waits out the drive's pull time
+  // because the firmware blocks motion until it expires, an engage waits only a short settle — and
+  // both answer with the state read back, which is also how a caller learns nothing happened (a
+  // brake on release strategy 0 is not the firmware's to drive).
+  router.get("/api/devices/:slavePosition/brake",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               if (deviceManager_.findDevice(*position) == nullptr) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               auto state = mm::node::brakeState(deviceManager_, *position);
+               if (!state) {
+                 return mm::api::error("409 Conflict", state.error());
+               }
+               return mm::api::json(nlohmann::json(*state));
+             });
+
+  router.post("/api/devices/:slavePosition/brake/release",
+              [brakeCommand](const mm::api::Request& req) { return brakeCommand(req, true); });
+  router.post("/api/devices/:slavePosition/brake/engage",
+              [brakeCommand](const mm::api::Request& req) { return brakeCommand(req, false); });
+
+  // ── end of Router registrations ─────────────────────────────────────────────────────────────
+
   // Register the built-in routes as a statement on `app` (not moved), then hand `app` to any
   // registered plug-in modules so they can add their own routes, then finish with the CORS
   // preflight, the catch-all 404, and listen(). All three phases operate on the same `app` object.
@@ -926,295 +1132,6 @@ void HttpServer::run() {
                     "</ul>"
                     "</body></html>");
           })
-      .get("/api/devices/:slavePosition/pdo-mapping",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p1, ec1] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec1 != std::errc() || p1 != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             if (!deviceManager_.findDevice(pos)) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             // Reads fresh over SDO, grouped by mapping object; requires the device's mailbox to be
-             // active (PRE-OP/SAFE-OP/OP), so a device in INIT/BOOT is a 409.
-             sendTimedJson(res, config_.corsOrigin, "409 Conflict",
-                           [&] { return deviceManager_.readDevicePdoMapping(pos); });
-           })
-      .put("/api/devices/:slavePosition/pdo-mapping",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p1, ec1] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             bool posOk = (ec1 == std::errc() && p1 == posParam.data() + posParam.size());
-             auto aborted = std::make_shared<bool>(false);
-             auto body = std::make_shared<std::string>();
-             res->onAborted([aborted]() { *aborted = true; });
-             res->onData([this, res, body, aborted, pos, posOk](std::string_view chunk, bool last) {
-               body->append(chunk);
-               if (!last) {
-                 return;
-               }
-               if (*aborted) {
-                 return;
-               }
-               if (!posOk) {
-                 sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                 return;
-               }
-               mm::node::PdoMapping mapping;
-               try {
-                 auto parsed = parseDevicePdoMapping(nlohmann::json::parse(*body));
-                 if (!parsed) {
-                   sendError(res, "400 Bad Request", config_.corsOrigin, parsed.error());
-                   return;
-                 }
-                 mapping = std::move(*parsed);
-               } catch (const nlohmann::json::exception& e) {
-                 sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
-                 return;
-               }
-               if (!deviceManager_.findDevice(pos)) {
-                 sendStatus(res, "404 Not Found", config_.corsOrigin);
-                 return;
-               }
-               // Time the whole operation (write + verify read-back), both over the wire, and carry
-               // X-Wire-Us on every outcome via elapsed().
-               const auto t0 = std::chrono::steady_clock::now();
-               auto elapsed = [&] {
-                 return std::chrono::duration_cast<std::chrono::microseconds>(
-                     std::chrono::steady_clock::now() - t0);
-               };
-               // A failed write is most often a device-state precondition (not in PRE-OP) or a
-               // rejected/verify-mismatched mapping — a conflict with the device's current state,
-               // not a server fault; report it as 409 with the node layer's detail.
-               auto r = deviceManager_.writeDevicePdoMapping(pos, mapping);
-               if (!r) {
-                 sendError(res, "409 Conflict", config_.corsOrigin, r.error(), elapsed());
-                 return;
-               }
-               // Echo the device's grouped read-back mapping (verified equal to the request), whose
-               // entries carry the derived bitOffsets the request did not specify.
-               auto readBack = deviceManager_.readDevicePdoMapping(pos);
-               if (!readBack) {
-                 sendError(res, "500 Internal Server Error", config_.corsOrigin, readBack.error(),
-                           elapsed());
-                 return;
-               }
-               setWireTime(res, elapsed());
-               sendJson(res, config_.corsOrigin, nlohmann::json(*readBack));
-             });
-           })
-      .get("/api/devices/:slavePosition/cia402",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p1, ec1] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec1 != std::errc() || p1 != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             if (!deviceManager_.findDevice(pos)) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             // A non-CiA402 device (or one whose OD is not yet enumerated) is a 409 — the node
-             // layer's message says which; the client uses the device's isCia402 flag to avoid
-             // asking in the first place.
-             sendTimedJson(res, config_.corsOrigin, "409 Conflict",
-                           [&] { return mm::node::cia402Status(deviceManager_, pos); });
-           })
-      .post(
-          "/api/devices/:slavePosition/cia402/mode",
-          [this](auto* res, auto* req) {
-            uint16_t pos{};
-            auto posParam = req->getParameter("slavePosition");
-            auto [p1, ec1] =
-                std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-            bool posOk = (ec1 == std::errc() && p1 == posParam.data() + posParam.size());
-            auto aborted = std::make_shared<bool>(false);
-            auto body = std::make_shared<std::string>();
-            res->onAborted([aborted]() { *aborted = true; });
-            res->onData([this, res, body, aborted, pos, posOk](std::string_view chunk, bool last) {
-              body->append(chunk);
-              if (!last) {
-                return;
-              }
-              if (*aborted) {
-                return;
-              }
-              if (!posOk) {
-                sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                return;
-              }
-              std::optional<mm::node::cia402::OperationMode> mode;
-              try {
-                nlohmann::json j = nlohmann::json::parse(*body);
-                mode = mm::node::cia402::toOperationMode(j.at("mode").get<int>());
-              } catch (const nlohmann::json::exception& e) {
-                sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
-                return;
-              }
-              if (!mode) {
-                sendError(res, "400 Bad Request", config_.corsOrigin,
-                          "invalid mode: use 1 (PP), 3 (PV), 4 (PT), 6 (HM), 8 (CSP), 9 (CSV), "
-                          "10 (CST), or 0 (NoMode)");
-                return;
-              }
-              if (!deviceManager_.findDevice(pos)) {
-                sendStatus(res, "404 Not Found", config_.corsOrigin);
-                return;
-              }
-              auto r = mm::node::setCia402OperationMode(deviceManager_, pos, *mode);
-              if (!r) {
-                sendError(res, "409 Conflict", config_.corsOrigin, r.error());
-                return;
-              }
-              sendJson(res, config_.corsOrigin, nlohmann::json(*r));
-            });
-          })
-      .post(
-          "/api/devices/:slavePosition/cia402/command",
-          [this](auto* res, auto* req) {
-            uint16_t pos{};
-            auto posParam = req->getParameter("slavePosition");
-            auto [p1, ec1] =
-                std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-            bool posOk = (ec1 == std::errc() && p1 == posParam.data() + posParam.size());
-            auto aborted = std::make_shared<bool>(false);
-            auto body = std::make_shared<std::string>();
-            res->onAborted([aborted]() { *aborted = true; });
-            res->onData([this, res, body, aborted, pos, posOk](std::string_view chunk, bool last) {
-              body->append(chunk);
-              if (!last) {
-                return;
-              }
-              if (*aborted) {
-                return;
-              }
-              if (!posOk) {
-                sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                return;
-              }
-              std::optional<mm::node::Cia402Command> command;
-              try {
-                nlohmann::json j = nlohmann::json::parse(*body);
-                command = mm::node::parseCia402Command(j.at("command").get<std::string>());
-              } catch (const nlohmann::json::exception& e) {
-                sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
-                return;
-              }
-              if (!command) {
-                sendError(res, "400 Bad Request", config_.corsOrigin,
-                          "invalid command: use enable, disable, quickStop, or faultReset");
-                return;
-              }
-              if (!deviceManager_.findDevice(pos)) {
-                sendStatus(res, "404 Not Found", config_.corsOrigin);
-                return;
-              }
-              auto r = mm::node::runCia402Command(deviceManager_, pos, *command);
-              if (!r) {
-                sendError(res, "409 Conflict", config_.corsOrigin, r.error());
-                return;
-              }
-              sendJson(res, config_.corsOrigin, nlohmann::json(*r));
-            });
-          })
-      .post(
-          "/api/devices/:slavePosition/cia402/target",
-          [this](auto* res, auto* req) {
-            uint16_t pos{};
-            auto posParam = req->getParameter("slavePosition");
-            auto [p1, ec1] =
-                std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-            bool posOk = (ec1 == std::errc() && p1 == posParam.data() + posParam.size());
-            auto aborted = std::make_shared<bool>(false);
-            auto body = std::make_shared<std::string>();
-            res->onAborted([aborted]() { *aborted = true; });
-            res->onData([this, res, body, aborted, pos, posOk](std::string_view chunk, bool last) {
-              body->append(chunk);
-              if (!last) {
-                return;
-              }
-              if (*aborted) {
-                return;
-              }
-              if (!posOk) {
-                sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                return;
-              }
-              std::optional<mm::node::Cia402TargetKind> kind;
-              int32_t value{};
-              try {
-                nlohmann::json j = nlohmann::json::parse(*body);
-                kind = mm::node::parseCia402TargetKind(j.at("target").get<std::string>());
-                // Signed: target position/velocity are INT32 and target torque INT16, all of
-                // which take negative setpoints (reverse motion / regenerative torque).
-                value = j.at("value").get<int32_t>();
-              } catch (const nlohmann::json::exception& e) {
-                sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
-                return;
-              }
-              if (!kind) {
-                sendError(res, "400 Bad Request", config_.corsOrigin,
-                          "invalid target: use position, velocity, or torque");
-                return;
-              }
-              if (!deviceManager_.findDevice(pos)) {
-                sendStatus(res, "404 Not Found", config_.corsOrigin);
-                return;
-              }
-              auto r = mm::node::setCia402Target(deviceManager_, pos, *kind, value);
-              if (!r) {
-                sendError(res, "409 Conflict", config_.corsOrigin, r.error());
-                return;
-              }
-              sendStatus(res, "204 No Content", config_.corsOrigin);
-            });
-          })
-      // --- brake ----------------------------------------------------------------------------
-      //
-      // GET reports the brake, POST release/engage command it. Two verbs rather than one
-      // PUT {released}: they are not symmetric operations — a release waits out the drive's pull
-      // time because the firmware blocks motion until it expires, an engage waits only a short
-      // settle — and both answer with the state read back, which is also how a caller learns that
-      // nothing happened (a brake on release strategy 0 is not the firmware's to drive).
-      .get("/api/devices/:slavePosition/brake",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p, ec] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             if (!deviceManager_.findDevice(pos)) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             auto state = mm::node::brakeState(deviceManager_, pos);
-             if (!state) {
-               sendError(res, "409 Conflict", config_.corsOrigin, state.error());
-               return;
-             }
-             sendJson(res, config_.corsOrigin, nlohmann::json(*state));
-           })
-      .post("/api/devices/:slavePosition/brake/release",
-            [this](auto* res, auto* req) {
-              handleBrakeCommand(res, req, deviceManager_, config_.corsOrigin, /*release=*/true);
-            })
-      .post("/api/devices/:slavePosition/brake/engage",
-            [this](auto* res, auto* req) {
-              handleBrakeCommand(res, req, deviceManager_, config_.corsOrigin, /*release=*/false);
-            })
       // --- high resolution data
       // ---------------------------------------------------------------------
       //

@@ -177,6 +177,12 @@ struct Response {
 
 /// @brief Percent-decodes a URL path component — `%20` to a space, `%2F` to a slash.
 ///
+/// RFC 3986 §2.1 calls the mechanism *percent-encoding* and its unit a *percent-encoded octet*
+/// (a triplet: `%` and two hex digits); it names the inverse only as "decoding" those octets. The
+/// name here follows the WHATWG URL Standard, which calls the operation *percent-decode*. Not
+/// `urlDecode`, deliberately — that reads as though it folds `+` into a space, which is exactly
+/// what this must not do.
+///
 /// For **path** components, and deliberately not shared with query decoding: a query decoder also
 /// maps `+` to a space (`application/x-www-form-urlencoded`), which in a path is a literal `+`, so
 /// decoding `a+b.zip` that way would look up `a b.zip`. @c Request::query handles queries; this

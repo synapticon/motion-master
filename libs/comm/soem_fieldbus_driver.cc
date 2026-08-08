@@ -35,6 +35,31 @@ SoemFieldbusDriver::SoemFieldbusDriver(SoemFieldbusDriverConfig config)
 
 SoemFieldbusDriver::~SoemFieldbusDriver() { closeContext(); }
 
+namespace {
+
+// Reports FoE transfer progress, and — via the negated sentinel our SOEM port adds to the
+// FOE_BUSY branch — whether a slave is asking for a packet to be resent while it writes flash.
+//
+// Progress is trace, because a firmware image is hundreds of packets and none of them is
+// interesting on its own. BUSY is info: it is rare, it is the thing that distinguishes "the
+// bootloader needs a moment" from "the slave has stopped answering", and telling those apart from
+// the outside is otherwise impossible — the transfer just stalls either way.
+//
+// SOEM's hook is a bare function pointer with no user data, so this is a free function.
+int foeProgressHook(uint16 slave, int packetnumber, int datasize) {
+  if (packetnumber < 0) {
+    spdlog::info(
+        "FoE slave {}: the slave reported BUSY — resending the last packet ({} bytes left)", slave,
+        datasize);
+  } else {
+    spdlog::trace("FoE slave {}: packet {} acknowledged ({} bytes left)", slave, packetnumber,
+                  datasize);
+  }
+  return 1;
+}
+
+}  // namespace
+
 std::expected<void, std::string> SoemFieldbusDriver::init() {
   std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   // SOEM has no auto-detect — an empty interface name would reach ecx_init and
@@ -52,6 +77,9 @@ std::expected<void, std::string> SoemFieldbusDriver::init() {
     ctx_.reset();
     return std::unexpected("ecx_init failed on " + ifname_ + ": " + std::strerror(errno));
   }
+  // Installed once, for the life of the context: the only window onto what a slave is doing during
+  // a multi-second file transfer.
+  ecx_FOEdefinehook(ctx_.get(), reinterpret_cast<void*>(&foeProgressHook));
   spdlog::debug("SOEM init on adapter '{}'", ifname_);
   return {};
 }

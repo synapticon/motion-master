@@ -112,6 +112,22 @@ vcpkg_replace_string(
                   worktodo = TRUE;
                   if (sendpacket)")
 
+# Make an FOE_BUSY reply observable. SOEM calls context->FOEhook on every acknowledged packet but
+# says nothing when a slave reports itself busy, so "does this drive send BUSY?" — the question the
+# fix above turns on — cannot be answered from a log without this. The BUSY branch reuses the same
+# hook with a negative packet number as a sentinel; a consumer that does not install a hook is
+# unaffected, and one that does can tell BUSY from progress by the sign.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_foe.c"
+"                  worktodo = TRUE;
+                  if (sendpacket)"
+"                  if (context->FOEhook)
+                  {
+                     context->FOEhook(slave, -1, psize);
+                  }
+                  worktodo = TRUE;
+                  if (sendpacket)")
+
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS

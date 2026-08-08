@@ -1248,6 +1248,39 @@ namespace {
 // devices). After a firmware download the slave context still holds BOOT SM parameters;
 // without reprogramming them here an INIT→PRE-OP transition would reuse stale BOOT
 // values and break mailbox communication. SOEM does not do this automatically.
+// Restores the station address of a slave that has reset, and reports whether it is now reachable.
+//
+// A SOMANET bootloader hands over to freshly written firmware by restarting the device, and the
+// restart clears the ESC's configured station address (0x0010) along with everything else the
+// master had programmed. Every FPRD/FPWR the master makes is addressed by that value, so from the
+// master's side the slave silently vanishes: state reads return the last value SOEM happened to
+// cache, and every write lands nowhere.
+//
+// Recovering it needs no scan. Auto-increment addressing reaches a slave by its position on the
+// wire and requires no configuration at all, which is precisely how ecx_config_init assigns the
+// address in the first place — so the same single APWR puts it back, for this one device, without
+// touching the rest of the bus.
+//
+// @return true when the slave answers at its configured address (either it never lost it, or it
+//         has just been given it back).
+bool restoreStationAddress(ecx_contextt* ctx, uint16_t slave) {
+  const uint16_t configadr = ctx->slavelist[slave].configadr;
+  uint16_t probe = 0;
+  if (ecx_FPRD(&ctx->port, configadr, ECT_REG_ALSTAT, sizeof(probe), &probe, EC_TIMEOUTRET) > 0) {
+    return true;
+  }
+  // Auto-increment address: 0 for slave 1, -1 for slave 2, and so on (ec_config.c's ADPh).
+  const uint16_t autoIncrement = static_cast<uint16_t>(1 - slave);
+  ecx_APWRw(&ctx->port, autoIncrement, ECT_REG_STADR, htoes(configadr), EC_TIMEOUTRET3);
+  const bool reachable =
+      ecx_FPRD(&ctx->port, configadr, ECT_REG_ALSTAT, sizeof(probe), &probe, EC_TIMEOUTRET) > 0;
+  spdlog::info(
+      "Device {}: it had reset and lost its station address; re-assigned 0x{:04X} at its "
+      "wire position — {}",
+      slave, configadr, reachable ? "it is answering again" : "it is still not answering");
+  return reachable;
+}
+
 void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState targetState) {
   if (targetState == EtherCatState::Boot) {
     uint32_t data = ecx_readeeprom(ctx, slave, ECT_SII_BOOTRXMBX, EC_TIMEOUTEEP);
@@ -1519,8 +1552,14 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
         // slave that cannot honour it.
         if (targetState == EtherCatState::PreOp && bootMailboxSlaves_.contains(pos) &&
             (state & 0x000Fu) == static_cast<uint16_t>(EtherCatState::Init)) {
-          spdlog::info("Device {}: reprogramming mailbox sync managers after its restart", pos);
-          updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::PreOp);
+          // Address first, then reprogram. The restart clears the station address, and every read
+          // the reprogramming does — including the EEPROM reads it takes the mailbox offsets from —
+          // is addressed by it. Reprogramming an unreachable slave reads zeros back and writes them
+          // into the master's own copy of its mailbox configuration, destroying the good values.
+          if (restoreStationAddress(ctx_.get(), pos)) {
+            spdlog::info("Device {}: reprogramming mailbox sync managers after its restart", pos);
+            updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::PreOp);
+          }
         }
         if (state & EC_STATE_ERROR) {
           ctx_->slavelist[pos].state = (state & 0x000Fu) | EC_STATE_ACK;

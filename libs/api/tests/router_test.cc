@@ -58,14 +58,40 @@ TEST(RequestTest, ReadsQueryValues) {
   EXPECT_FALSE(req.query("absent").has_value());
 }
 
-// Absent and present-but-empty are different requests for some parameters, so the distinction has
-// to survive: `?readValues` is a flag, no `readValues` at all is not.
-TEST(RequestTest, DistinguishesAnEmptyValueFromAnAbsentKey) {
-  const auto req = request("/", {}, "readValues=&other=1");
-  auto present = req.query("readValues");
-  ASSERT_TRUE(present.has_value());
-  EXPECT_EQ(*present, "");
+// The regression this exists to prevent, and it was a real one: clients percent-encode query values
+// (the generated TypeScript client puts every one through encodeURIComponent), so a comma-separated
+// list arrives as `1%2C2`. Read undecoded, that parses as no number at all, and `GET
+// /api/devices/state` answered 400 "'positions' must be a comma-separated list of numbers" for
+// every request the Console made — which reads to a user as being unable to change device states.
+TEST(RequestTest, DecodesPercentEncodedQueryValues) {
+  const auto req = request("/", {}, "positions=1%2C2&file=a%20b.bin&plus=a+b&pct=100%25");
+  EXPECT_EQ(req.query("positions"), "1,2");
+  EXPECT_EQ(req.query("file"), "a b.bin") << "%20 is a space";
+  EXPECT_EQ(req.query("plus"), "a b") << "'+' is a space in a query";
+  EXPECT_EQ(req.query("pct"), "100%");
+}
+
+// uWS's semantics, adopted rather than reinvented: a key is only seen when it carries '=', and a
+// present-but-empty value reads the same as an absent one. Pinned because an earlier version of
+// this class distinguished the two — a distinction of its own invention, which no route wanted and
+// which no client could produce, since a bare `?flag` was never matched here in the first place.
+TEST(RequestTest, TreatsAnEmptyValueAsAbsent) {
+  const auto req = request("/", {}, "readValues=&flag&other=1");
+  EXPECT_FALSE(req.query("readValues").has_value()) << "empty value reads as absent";
+  EXPECT_FALSE(req.query("flag").has_value()) << "a key with no '=' is not matched";
   EXPECT_FALSE(req.query("readValues2").has_value()) << "a prefix must not match";
+  EXPECT_EQ(req.query("other"), "1") << "the rest of the query still parses";
+}
+
+// Each lookup decodes into its own copy of the query, so one cannot consume or corrupt another's
+// value. uWS's decoder mutates the buffer it is handed, which is exactly why that copy exists.
+TEST(RequestTest, RepeatedLookupsAreIndependent) {
+  const auto req = request("/", {}, "a=1%2C2&b=x%20y&c=3");
+  for (int pass = 0; pass < 3; ++pass) {
+    EXPECT_EQ(req.query("a"), "1,2") << "pass " << pass;
+    EXPECT_EQ(req.query("c"), "3") << "pass " << pass;
+    EXPECT_EQ(req.query("b"), "x y") << "pass " << pass;
+  }
 }
 
 TEST(RequestTest, ReadsHeadersAndNegotiatesContent) {

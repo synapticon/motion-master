@@ -104,11 +104,22 @@ class Request {
     return {};
   }
 
-  /// @brief A query-string value by key, or @c std::nullopt when the key is absent.
+  /// @brief A query-string value by key, percent-decoded, or @c std::nullopt when it has no value.
   ///
-  /// Absent and present-but-empty are distinguished, because for some parameters they differ:
-  /// `?readValues` and no `readValues` at all are not the same request.
-  std::optional<std::string_view> query(std::string_view key) const;
+  /// Delegates to uWebSockets' own @c uWS::getDecodedQueryValue — the same function
+  /// @c HttpRequest::getQuery(key) uses — so a handler reading a query here gets exactly what it
+  /// would have got reading it on the loop thread. **Decoding is the reason this is not a
+  /// hand-rolled split:** a client encodes its query values (the generated TypeScript client runs
+  /// every one through @c encodeURIComponent), so `positions=1,2` arrives as `positions=1%2C2` and
+  /// a raw split yields `1%2C2` — which parses as no number at all.
+  ///
+  /// Follows uWS's semantics rather than inventing any: a key needs an `=` to be seen at all, and a
+  /// present-but-empty value is reported the same as an absent one. So `?flag` alone is not a
+  /// usable flag — test a value, not presence.
+  ///
+  /// Returns an owned string because the decode happens in place: each call decodes into its own
+  /// copy of the query, which is what keeps repeated lookups independent of each other.
+  std::optional<std::string> query(std::string_view key) const;
 
   /// @brief A path parameter parsed as an integer, or @c std::nullopt if it is absent or not one.
   ///

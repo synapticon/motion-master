@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Query parameters are percent-decoded again**, so `GET /api/devices/state`, `/api/devices/diagnostics` and `/api/dc-sync` work when a client filters by position. Clients encode query values — the generated TypeScript client passes every one through `encodeURIComponent` — so `positions=1,2` arrives as `positions=1%2C2`. Moving the routes off the event loop replaced uWebSockets' own decoding query lookup with a raw split, which read that back as `1%2C2` and answered `400 'positions' must be a comma-separated list of numbers` to every such request. In the Console this showed up as being unable to change device states, since the state page's own poll was the request failing. Query reads now go through uWebSockets' `getDecodedQueryValue` — the same function the handlers used before — so any encoded value (a filename with a space, a `%`) is read correctly too. Introduced in 6.0.0-alpha.66; no earlier release is affected.
+
 ## [6.0.0-alpha.66] - 2026-08-08
 
 ### Added

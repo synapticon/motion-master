@@ -84,20 +84,21 @@ void reportSaturation(const BS::light_thread_pool& pool) {
 
 }  // namespace
 
-std::optional<std::string_view> Request::query(std::string_view key) const {
-  std::string_view rest = queryString_;
-  while (!rest.empty()) {
-    const std::size_t amp = rest.find('&');
-    std::string_view pair = rest.substr(0, amp);
-    rest = amp == std::string_view::npos ? std::string_view{} : rest.substr(amp + 1);
-
-    const std::size_t eq = pair.find('=');
-    const std::string_view name = pair.substr(0, eq);
-    if (name == key) {
-      return eq == std::string_view::npos ? std::string_view{} : pair.substr(eq + 1);
-    }
+std::optional<std::string> Request::query(std::string_view key) const {
+  // uWS::getDecodedQueryValue expects the query *including* its leading '?'
+  // (HttpRequest::getQuery() strips it, which is the form stored here) and decodes in place,
+  // mutating what it is given. Hence a fresh copy per call: it keeps the mutation confined to that
+  // copy, so two lookups cannot corrupt each other's values, and it is why this returns an owned
+  // string.
+  std::string buffer;
+  buffer.reserve(queryString_.size() + 1);
+  buffer.push_back('?');
+  buffer.append(queryString_);
+  const std::string_view value = uWS::getDecodedQueryValue(key, buffer);
+  if (value.empty()) {
+    return std::nullopt;  // Absent, or present with an empty value — uWS does not distinguish.
   }
-  return std::nullopt;
+  return std::string(value);
 }
 
 Response json(const nlohmann::json& body) {

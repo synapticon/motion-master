@@ -1337,6 +1337,151 @@ void HttpServer::run() {
                });
              });
 
+  // ── CoE parameters ──────────────────────────────────────────────────────────────────────────
+  // Enumerating an object dictionary is hundreds of mailbox round-trips and takes seconds, which
+  // made this the second-worst offender after a firmware transfer.
+  router.post("/api/devices/:slavePosition/parameters/init",
+              [this](const mm::api::Request& req) -> mm::api::Response {
+                auto position = req.parameterAs<uint16_t>("slavePosition");
+                if (!position) {
+                  return mm::api::badRequest("slavePosition must be a number");
+                }
+                const auto readValues = req.query("readValues").value_or("");
+                const bool withValues = readValues == "true" || readValues == "1";
+                return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                  if (auto r = deviceManager_.initializeDeviceParameters(*position, withValues);
+                      !r) {
+                    return std::unexpected(r.error());
+                  }
+                  return nlohmann::json(deviceManager_.findDevice(*position)->parametersOrdered());
+                });
+              });
+
+  router.post("/api/devices/:slavePosition/parameters/read",
+              [this](const mm::api::Request& req) -> mm::api::Response {
+                auto position = req.parameterAs<uint16_t>("slavePosition");
+                if (!position) {
+                  return mm::api::badRequest("slavePosition must be a number");
+                }
+                return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                  if (auto r = deviceManager_.readAllDeviceParameters(*position); !r) {
+                    return std::unexpected(r.error());
+                  }
+                  return nlohmann::json(deviceManager_.findDevice(*position)->parametersOrdered());
+                });
+              });
+
+  router.get("/api/devices/:slavePosition/parameters",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               const auto* device = deviceManager_.findDevice(*position);
+               if (device == nullptr) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               return mm::api::json(nlohmann::json(device->parametersOrdered()));
+             });
+
+  router.get("/api/devices/:slavePosition/parameters/:index/:subindex",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               auto index = req.parameterAs<uint16_t>("index");
+               auto subindex = req.parameterAs<uint8_t>("subindex");
+               if (!position || !index || !subindex) {
+                 return mm::api::badRequest("slavePosition, index and subindex must be numbers");
+               }
+               // ?source=cache serves the cached value with no bus I/O; anything else (including an
+               // absent source) is the smart "auto" read that refreshes from the live PDO image or
+               // an SDO upload. The routing itself lives in Device::readParameter.
+               const bool refreshFromBus = req.query("source").value_or("") != "cache";
+               return mm::api::timed([&] {
+                 return deviceManager_.deviceParameterView(*position, *index, *subindex,
+                                                           refreshFromBus);
+               });
+             });
+
+  router.put("/api/devices/:slavePosition/parameters/:index/:subindex",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               auto index = req.parameterAs<uint16_t>("index");
+               auto subindex = req.parameterAs<uint8_t>("subindex");
+               if (!position || !index || !subindex) {
+                 return mm::api::badRequest("slavePosition, index and subindex must be numbers");
+               }
+               const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+               if (body.is_discarded() || !body.contains("value")) {
+                 return mm::api::badRequest(R"(body must be {"value": <value>})");
+               }
+               auto value = parseParameterValue(body["value"]);
+               if (!value) {
+                 return mm::api::badRequest(value.error());
+               }
+               // Smart write: PDO-staged when the object is output-mapped and exchanging, else SDO,
+               // else held in the cache (offline). Coercion to the declared type happens in
+               // DeviceParameter::setValue. The echo below is memory-only, so timing the whole
+               // lambda still reports the write's wire cost.
+               return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                 if (auto w = deviceManager_.writeDeviceParameter(*position, *index, *subindex,
+                                                                  std::move(*value));
+                     !w) {
+                   return std::unexpected(w.error());
+                 }
+                 // Echo the updated parameter from the cache so the client gets the coerced value
+                 // and the resulting syncState in the same round trip.
+                 auto r = deviceManager_.deviceParameterView(*position, *index, *subindex, false);
+                 if (!r) {
+                   return nlohmann::json{{"ok", true}};
+                 }
+                 return nlohmann::json(*r);
+               });
+             });
+
+  router.get("/api/meta/object-data-types", [](const mm::api::Request&) {
+    return mm::api::json(nlohmann::json(mm::comm::kObjectDataTypes));
+  });
+
+  // ── Fieldbus lifecycle ──────────────────────────────────────────────────────────────────────
+  // scan() walks the bus and can enumerate object dictionaries, so it is seconds of work; init()
+  // opens the raw socket. Both take the bus lock exclusively, which is what used to make every
+  // other request wait behind them.
+  router.post("/api/init", [this](const mm::api::Request& req) -> mm::api::Response {
+    if (!config_.initDeviceManager) {
+      return mm::api::statusOnly("501 Not Implemented");
+    }
+    // init() is one-shot — a re-init (a browser refresh replaying the stored session) is a 409 so
+    // the client can tell "already connected" apart from a genuine init failure.
+    if (deviceManager_.initialised()) {
+      return mm::api::error("409 Conflict", "already initialised — call reset() first");
+    }
+    nlohmann::json body = nlohmann::json::object();
+    if (!req.body().empty()) {
+      body = nlohmann::json::parse(req.body(), nullptr, false);
+      if (body.is_discarded() || !body.is_object()) {
+        return mm::api::badRequest("body must be a JSON object");
+      }
+    }
+    if (auto r = config_.initDeviceManager(body.value("driver", "soem"), body.value("adapter", ""));
+        !r) {
+      return mm::api::error("500 Internal Server Error", r.error());
+    }
+    return mm::api::json(nlohmann::json{{"ok", true}});
+  });
+
+  router.post("/api/scan", [this](const mm::api::Request&) -> mm::api::Response {
+    auto slaves = deviceManager_.scan();
+    if (!slaves) {
+      return mm::api::error("500 Internal Server Error", slaves.error());
+    }
+    return mm::api::json(nlohmann::json{{"slaves", *slaves}});
+  });
+
+  router.post("/api/reset", [this](const mm::api::Request&) {
+    deviceManager_.reset();
+    return mm::api::json(nlohmann::json{{"ok", true}});
+  });
+
   // ── end of Router registrations ─────────────────────────────────────────────────────────────
 
   // Register the built-in routes as a statement on `app` (not moved), then hand `app` to any
@@ -1359,211 +1504,6 @@ void HttpServer::run() {
                     "</ul>"
                     "</body></html>");
           })
-      .post("/api/devices/:slavePosition/parameters/init",
-            [this](auto* res, auto* req) {
-              uint16_t pos{};
-              auto posParam = req->getParameter("slavePosition");
-              auto [p, ec] =
-                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-              if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-                sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                return;
-              }
-              auto rv = req->getQuery("readValues");
-              bool readValues = rv == "true" || rv == "1";
-              sendTimedJson(
-                  res, config_.corsOrigin, "500 Internal Server Error",
-                  [&]() -> std::expected<nlohmann::json, std::string> {
-                    if (auto r = deviceManager_.initializeDeviceParameters(pos, readValues); !r) {
-                      return std::unexpected(r.error());
-                    }
-                    return nlohmann::json(deviceManager_.findDevice(pos)->parametersOrdered());
-                  });
-            })
-      .post("/api/devices/:slavePosition/parameters/read",
-            [this](auto* res, auto* req) {
-              uint16_t pos{};
-              auto posParam = req->getParameter("slavePosition");
-              auto [p, ec] =
-                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-              if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-                sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                return;
-              }
-              sendTimedJson(
-                  res, config_.corsOrigin, "500 Internal Server Error",
-                  [&]() -> std::expected<nlohmann::json, std::string> {
-                    if (auto r = deviceManager_.readAllDeviceParameters(pos); !r) {
-                      return std::unexpected(r.error());
-                    }
-                    return nlohmann::json(deviceManager_.findDevice(pos)->parametersOrdered());
-                  });
-            })
-      .get("/api/devices/:slavePosition/parameters",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p, ec] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             const auto* device = deviceManager_.findDevice(pos);
-             if (!device) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             sendJson(res, config_.corsOrigin, nlohmann::json(device->parametersOrdered()));
-           })
-      .get("/api/devices/:slavePosition/parameters/:index/:subindex",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p1, ec1] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec1 != std::errc() || p1 != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             auto index = mm::core::parseHexOrDec<uint16_t>(req->getParameter("index"));
-             auto subindex = mm::core::parseHexOrDec<uint8_t>(req->getParameter("subindex"));
-             if (!index || !subindex) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             // ?source=cache serves the cached value with no bus I/O; anything else (including
-             // an absent source) is the smart "auto" read that refreshes from the live PDO
-             // image or an SDO upload. Routing lives in the node layer (Device::readParameter).
-             bool refreshFromBus = req->getQuery("source") != "cache";
-             sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error", [&] {
-               return deviceManager_.deviceParameterView(pos, *index, *subindex, refreshFromBus);
-             });
-           })
-      .put("/api/devices/:slavePosition/parameters/:index/:subindex",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p1, ec1] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             bool posOk = (ec1 == std::errc() && p1 == posParam.data() + posParam.size());
-             // req is only valid synchronously — parse the path params before onData.
-             auto index = mm::core::parseHexOrDec<uint16_t>(req->getParameter("index"));
-             auto subindex = mm::core::parseHexOrDec<uint8_t>(req->getParameter("subindex"));
-             auto aborted = std::make_shared<bool>(false);
-             auto body = std::make_shared<std::string>();
-             res->onAborted([aborted]() { *aborted = true; });
-             res->onData([this, res, body, aborted, pos, posOk, index, subindex](
-                             std::string_view chunk, bool last) {
-               body->append(chunk);
-               if (!last) return;
-               if (*aborted) return;
-               if (!posOk || !index || !subindex) {
-                 sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                 return;
-               }
-               mm::node::DeviceParameterValue value;
-               try {
-                 nlohmann::json j = nlohmann::json::parse(*body);
-                 auto parsed = parseParameterValue(j.at("value"));
-                 if (!parsed) {
-                   sendError(res, "400 Bad Request", config_.corsOrigin, parsed.error());
-                   return;
-                 }
-                 value = std::move(*parsed);
-               } catch (const nlohmann::json::exception& e) {
-                 sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
-                 return;
-               }
-               // Smart write: PDO-staged when the object is output-mapped + exchanging, else
-               // SDO, else held in the cache (offline). Coercion to the declared type is done
-               // in the node layer (DeviceParameter::setValue). The cache echo below is memory-only
-               // (no bus I/O), so timing the whole lambda still reports the write's wire cost.
-               sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
-                             [&]() -> std::expected<nlohmann::json, std::string> {
-                               if (auto w = deviceManager_.writeDeviceParameter(
-                                       pos, *index, *subindex, std::move(value));
-                                   !w) {
-                                 return std::unexpected(w.error());
-                               }
-                               // Echo the updated parameter from the cache (no extra bus I/O) so
-                               // the client gets the coerced value and resulting syncState in the
-                               // same round-trip.
-                               auto r = deviceManager_.deviceParameterView(pos, *index, *subindex,
-                                                                           false);
-                               if (!r) {
-                                 return nlohmann::json{{"ok", true}};
-                               }
-                               return nlohmann::json(*r);
-                             });
-             });
-           })
-      .get("/api/meta/object-data-types",
-           [this](auto* res, auto* /*req*/) {
-             sendJson(res, config_.corsOrigin, nlohmann::json(mm::comm::kObjectDataTypes));
-           })
-      .post("/api/init",
-            [this](auto* res, auto* /*req*/) {
-              auto aborted = std::make_shared<bool>(false);
-              auto body = std::make_shared<std::string>();
-              res->onAborted([aborted]() { *aborted = true; });
-              res->onData([this, res, body, aborted](std::string_view data, bool last) {
-                body->append(data);
-                if (!last) return;
-                if (*aborted) return;
-                if (!config_.initDeviceManager) {
-                  sendStatus(res, "501 Not Implemented", config_.corsOrigin);
-                  return;
-                }
-                // init() is one-shot — reject a re-init (e.g. a browser refresh
-                // replaying the stored session) with 409 so the client can tell
-                // "already connected" apart from a genuine init failure (500).
-                if (deviceManager_.initialised()) {
-                  sendError(res, "409 Conflict", config_.corsOrigin,
-                            "already initialised — call reset() first");
-                  return;
-                }
-                try {
-                  nlohmann::json j =
-                      body->empty() ? nlohmann::json::object() : nlohmann::json::parse(*body);
-                  std::string driver = j.value("driver", "soem");
-                  std::string adapter = j.value("adapter", "");
-                  if (auto r = config_.initDeviceManager(driver, adapter); !r) {
-                    sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-                    return;
-                  }
-                  sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
-                } catch (const nlohmann::json::exception& e) {
-                  sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
-                }
-              });
-            })
-      .post("/api/scan",
-            [this](auto* res, auto* /*req*/) {
-              auto aborted = std::make_shared<bool>(false);
-              res->onAborted([aborted]() { *aborted = true; });
-              res->onData([this, res, aborted](std::string_view /*data*/, bool last) {
-                if (!last) return;
-                if (*aborted) return;
-                if (auto r = deviceManager_.scan(); !r) {
-                  sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-                  return;
-                } else {
-                  sendJson(res, config_.corsOrigin, nlohmann::json{{"slaves", *r}});
-                }
-              });
-            })
-      .post("/api/reset",
-            [this](auto* res, auto* /*req*/) {
-              auto aborted = std::make_shared<bool>(false);
-              res->onAborted([aborted]() { *aborted = true; });
-              res->onData([this, res, aborted](std::string_view /*data*/, bool last) {
-                if (!last) return;
-                if (*aborted) return;
-                deviceManager_.reset();
-                sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
-              });
-            })
       .post("/api/process-data/dump",
             [this](auto* res, auto* /*req*/) {
               auto aborted = std::make_shared<bool>(false);

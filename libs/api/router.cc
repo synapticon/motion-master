@@ -35,16 +35,17 @@ std::vector<std::string> parameterNames(std::string_view pattern) {
 /// will take now and `onWritable` resumes from the acknowledged offset. A recorder dump is tens of
 /// megabytes and an ESI parse a few, so this is not hypothetical — and handling it here once means
 /// no endpoint has to know its own body might be too big to write in one go.
-void writeResponse(uWS::HttpResponse<true>* res, std::string_view corsOrigin,
-                   const Response& response) {
+void writeResponse(uWS::HttpResponse<true>* res, std::string_view corsOrigin, Response response) {
   auto* r = res->writeStatus(response.status)
                 ->writeHeader("Access-Control-Allow-Origin", corsOrigin)
                 ->writeHeader("Content-Type", response.contentType);
   for (const auto& [name, value] : response.headers) {
     r = r->writeHeader(name, value);
   }
-  // Kept alive for the resumed writes: onWritable can fire long after this returns.
-  auto body = std::make_shared<std::string>(response.body);
+  // Kept alive for the resumed writes: onWritable can fire long after this returns. Moved rather
+  // than copied — a recorder dump is tens of megabytes, and taking the response by value here is
+  // what makes the move possible all the way from the handler that produced it.
+  auto body = std::make_shared<std::string>(std::move(response.body));
   auto [ok, done] = res->tryEnd(*body, body->size());
   if (done || ok) {
     return;
@@ -179,11 +180,11 @@ void Router::add(std::string_view method, std::string pattern, Handler handler, 
         const Request request(std::move(url), std::move(parameters), std::move(queryString),
                               std::move(headers), std::move(body));
         Response response = (*shared)(request);
-        loop->defer([corsOrigin, res, aborted, response = std::move(response)]() {
+        loop->defer([corsOrigin, res, aborted, response = std::move(response)]() mutable {
           if (aborted->load()) {
             return;  // The connection is gone and res with it.
           }
-          writeResponse(res, corsOrigin, response);
+          writeResponse(res, corsOrigin, std::move(response));
         });
       });
     };

@@ -76,7 +76,7 @@ Build output goes to `build/<preset>/`. Compiler requirements: C++23, warnings a
 ./tools/bump-version.sh 6.0.0-alpha.1
 ```
 
-Files updated by the script: `VERSION`, `vcpkg.json`, the root workspace `package.json`, `web/apps/console/package.json`, `web/apps/example/package.json`, `web/packages/motion-master-client/package.json`, `web/packages/ui/package.json`, `hil/api/package.json`, `apps/motion_master/swagger.yml`, the `StringConstant` assertion in `libs/core/tests/version_test.cc`, and the sidebar badge in `web/apps/console/src/layouts/RootLayout.tsx`.
+Files updated by the script: `VERSION`, `vcpkg.json`, the root workspace `package.json`, `web/apps/console/package.json`, `web/apps/example/package.json`, `web/packages/motion-master-client/package.json`, `web/packages/ui/package.json`, `hil/api/package.json`, `apps/motion_master/swagger.yml`, the `StringConstant` assertion in `libs/core/tests/version_test.cc`, the sidebar badge in `web/apps/console/src/layouts/RootLayout.tsx`, and `motion_master_version` in `rt/provision/ansible/roles/motion-master/defaults/main.yml` (the release the Raspberry Pi appliance installs — a pin *at* the version rather than a copy *of* it, kept here because a stale value fails silently: the image just installs an old build).
 
 The generated HTTP API client (`web/packages/motion-master-client/src/generated/`) is produced from `swagger.yml` via `swagger-typescript-api` (`pnpm --filter @synapticon/motion-master-client generate`) and is **committed to the repo** — regenerate and commit it whenever the API shape changes. The `api-client-drift` job in `lint.yml` regenerates from `swagger.yml` and fails on any diff, so a stale committed client is caught in CI.
 

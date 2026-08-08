@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.66] - 2026-08-08
+
 ### Added
 
 - **Firmware installation**, as `POST /api/devices/{slavePosition}/procedures/firmware-installation`: installs a SOMANET firmware package, and takes the drive from OP back to OP on its own in about half a minute — **without re-initialising the master or rescanning the bus**, so every other device keeps running. The device is taken to BOOT, where the package's application and communication binaries are written over FoE and its SII image into the EEPROM, and is then returned to the state you choose. **It is the first procedure that changes AL state**, which is why it exists at all as a distinct shape — every other procedure holds the bus for its whole run and so cannot transition; this one borrows the device per step and transitions in between. Eight steps, and their failure policy is deliberately not uniform: an unreadable package fails before anything on the bus is touched, the SII and the firmware binaries are fatal, and the package's descriptive extras are **best effort** — a failure to write the ESI or the stack image is recorded and the firmware is installed anyway, because aborting a firmware update over a picture would be the worse outcome. Whatever happens, the device is not left in the bootloader by accident: a failure after entering BOOT still attempts the exit on the way out.
@@ -524,7 +526,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.65...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.66...HEAD
+[6.0.0-alpha.66]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.65...v6.0.0-alpha.66
 [6.0.0-alpha.65]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.64...v6.0.0-alpha.65
 [6.0.0-alpha.64]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.63...v6.0.0-alpha.64
 [6.0.0-alpha.63]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.62...v6.0.0-alpha.63

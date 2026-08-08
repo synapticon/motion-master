@@ -49,6 +49,13 @@ sed -i "s/kVersion, \"${OLD_ESC}\"/kVersion, \"${NEW_VERSION}\"/" \
 sed -i "s/>v${OLD_ESC}</>v${NEW_VERSION}</" \
   "$ROOT/web/apps/console/src/layouts/RootLayout.tsx"
 
+# 7. Release the Raspberry Pi appliance installs. Not an artifact that carries the version, but a
+# pin at the version — and one that has to be maintained here rather than left to a human, because
+# it drifts invisibly: nothing fails when it is stale, the image simply installs an old build. It
+# had fallen several releases behind once already, and unsticking it cost a release of its own.
+sed -i "s/motion_master_version: ${OLD_ESC}/motion_master_version: ${NEW_VERSION}/" \
+  "$ROOT/rt/provision/ansible/roles/motion-master/defaults/main.yml"
+
 echo "Done — review with: git diff"
 echo
 echo "To release, commit and push the bump and its tag together — the atomic push"

@@ -53,6 +53,28 @@ namespace {
 // or empty parameter yields an empty vector (which the device manager reads as "all devices"). On
 // a malformed token it writes a 400 (with the CORS header) to @p res and returns nullopt — the
 // caller must return immediately without writing a further response.
+// The Router-shaped counterpart of parsePositions below: it returns the failure instead of writing
+// it, because a handler that runs off the loop has no response object to write to.
+std::expected<std::vector<uint16_t>, std::string> parsePositions(const mm::api::Request& req) {
+  std::vector<uint16_t> positions;
+  const auto raw = req.query("positions");
+  if (!raw || raw->empty()) {
+    return positions;  // No filter: every discovered device.
+  }
+  const std::string text(*raw);
+  std::istringstream stream(text);
+  std::string token;
+  while (std::getline(stream, token, ',')) {
+    uint16_t position{};
+    auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), position);
+    if (ec != std::errc() || ptr != token.data() + token.size()) {
+      return std::unexpected("'positions' must be a comma-separated list of numbers, e.g. 1,2");
+    }
+    positions.push_back(position);
+  }
+  return positions;
+}
+
 template <typename Res, typename Req>
 std::optional<std::vector<uint16_t>> parsePositions(Res* res, Req* req,
                                                     std::string_view corsOrigin) {
@@ -472,6 +494,40 @@ void HttpServer::run() {
   }};
   app_.store(&app);
 
+  // Routes registered through the Router run their handlers on the worker pool rather than on this
+  // loop, so a device operation that takes seconds cannot stall every other request. New routes go
+  // here; the chained registration below is the pre-Router shape and is being migrated onto this.
+  mm::api::Router router(app, loop_.load(), pool_, config_.corsOrigin);
+
+  // The Console polls this continuously for the sidebar's AL-state badge, and it takes the driver's
+  // control-plane lock — so on the loop thread it stalled every request behind it for the length of
+  // a firmware transfer.
+  router.get("/api/devices/state", [this](const mm::api::Request& req) -> mm::api::Response {
+    auto positions = parsePositions(req);
+    if (!positions) {
+      return mm::api::badRequest(positions.error());
+    }
+    return mm::api::timed([this, &positions] { return deviceManager_.deviceStates(*positions); });
+  });
+
+  // The poll a client watches a running procedure through. It takes the bus lock (shared) to decide
+  // applicability, so a procedure holding that lock exclusively for a state transition would
+  // otherwise freeze the very page reporting its progress.
+  router.get("/api/devices/:slavePosition/procedures",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               auto listings =
+                   mm::node::listProcedures(deviceManager_, procedureManager_, *position);
+               if (!listings) {
+                 return mm::api::error(std::string(procedureErrorStatus(listings.error().kind)),
+                                       listings.error().message);
+               }
+               return mm::api::json(nlohmann::json(*listings));
+             });
+
   // Register the built-in routes as a statement on `app` (not moved), then hand `app` to any
   // registered plug-in modules so they can add their own routes, then finish with the CORS
   // preflight, the catch-all 404, and listen(). All three phases operate on the same `app` object.
@@ -583,21 +639,6 @@ void HttpServer::run() {
       .get("/api/meta/mailbox-error-codes",
            [this](auto* res, auto* /*req*/) {
              sendJson(res, config_.corsOrigin, nlohmann::json(mm::comm::kMailboxErrorCodes));
-           })
-      .get("/api/devices/state",
-           [this](auto* res, auto* req) {
-             auto positions = parsePositions(res, req, config_.corsOrigin);
-             if (!positions) {
-               return;  // parsePositions already wrote the 400 response
-             }
-             // Off the loop, and this is the endpoint that most needs it: the Console polls it
-             // continuously for the sidebar's AL-state badge, and it takes the driver's
-             // control-plane lock — so during a firmware transfer it would sit on the loop thread
-             // for the length of the transfer with every other request queued behind it.
-             sendTimedJsonOffLoop(res, "500 Internal Server Error", [this, positions = *positions] {
-               return deviceManager_.deviceStates(positions).transform(
-                   [](auto states) { return nlohmann::json(states); });
-             });
            })
       .get("/api/devices/diagnostics",
            [this](auto* res, auto* req) {
@@ -1390,31 +1431,6 @@ void HttpServer::run() {
       // Progress is polled, never pushed — each snapshot is accumulating state in which finished
       // steps keep their status and value, so a client cannot miss a result between polls, and one
       // that reconnects sees how the last run went.
-      .get("/api/devices/:slavePosition/procedures",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p, ec] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             // Off the loop: this is the poll a client watches a running procedure through, and
-             // it takes the bus lock (shared) to decide applicability — so a procedure that holds
-             // that lock exclusively for a state transition would otherwise freeze the very page
-             // reporting its progress. The status is always 500 here because the error kinds this
-             // can produce are resolved before any blocking work; an unknown device is the only
-             // one, and it is cheap.
-             sendTimedJsonOffLoop(
-                 res, "404 Not Found", [this, pos]() -> std::expected<nlohmann::json, std::string> {
-                   auto listings = mm::node::listProcedures(deviceManager_, procedureManager_, pos);
-                   if (!listings) {
-                     return std::unexpected(listings.error().message);
-                   }
-                   return nlohmann::json(*listings);
-                 });
-           })
       .post("/api/devices/:slavePosition/procedures/:name",
             [this](auto* res, auto* req) {
               uint16_t pos{};

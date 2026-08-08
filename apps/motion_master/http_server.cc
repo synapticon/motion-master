@@ -73,15 +73,18 @@ std::expected<std::vector<uint8_t>, std::string> parseByteArrayBody(const std::s
   return data;
 }
 
-// The Router-shaped counterpart of parsePositions below: it returns the failure instead of writing
-// it, because a handler that runs off the loop has no response object to write to.
+// The optional `?positions=1,2` filter shared by the bus-wide read routes. Returns the failure
+// rather than writing it, because a handler that runs off the loop has no response object to write
+// to — it hands a Response back instead.
 std::expected<std::vector<uint16_t>, std::string> parsePositions(const mm::api::Request& req) {
   std::vector<uint16_t> positions;
   const auto raw = req.query("positions");
   if (!raw || raw->empty()) {
     return positions;  // No filter: every discovered device.
   }
-  const std::string text(*raw);
+  // Already decoded and owned by the optional, so bind a reference — Request::query percent-decodes
+  // into its own buffer and returns the result by value.
+  const std::string& text = *raw;
   std::istringstream stream(text);
   std::string token;
   while (std::getline(stream, token, ',')) {

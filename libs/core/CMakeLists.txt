@@ -12,15 +12,24 @@ else()
   set(CYCLIC_TIMER_SRC cyclic_timer_linux.cc)
 endif()
 
-add_library(core STATIC base64.cc version.cc system_info.cc platform.cc realtime.cc user_cache.cc
-                        ${CYCLIC_TIMER_SRC})
+add_library(
+  core STATIC
+  base64.cc
+  version.cc
+  system_info.cc
+  platform.cc
+  realtime.cc
+  user_cache.cc
+  ${CYCLIC_TIMER_SRC})
 add_library(mm::core ALIAS core)
 
 target_include_directories(core PUBLIC ${CMAKE_SOURCE_DIR}/libs ${CMAKE_CURRENT_BINARY_DIR}/..)
 
 # OpenSSL is an implementation detail of base64.cc — no OpenSSL type appears in a core header — but
 # a static library still propagates the link requirement to whoever links core.
-target_link_libraries(core PUBLIC semver::semver nlohmann_json::nlohmann_json
-                      PRIVATE OpenSSL::Crypto)
+target_link_libraries(
+  core
+  PUBLIC semver::semver nlohmann_json::nlohmann_json
+  PRIVATE OpenSSL::Crypto)
 
 add_subdirectory(tests)

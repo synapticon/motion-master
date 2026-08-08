@@ -2,12 +2,17 @@
 
 #include <uwebsockets/App.h>
 
+#include <BS_thread_pool.hpp>
 #include <atomic>
+#include <chrono>
 #include <expected>
 #include <functional>
 #include <future>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "api/web_api.h"
@@ -142,6 +147,55 @@ class HttpServer {
  private:
   void run();
 
+  /// @brief Runs @p op on a worker thread and sends its timed JSON result from the loop thread.
+  ///
+  /// The off-loop counterpart of @c mm::api::sendTimedJson, and the reason it exists is that uWS
+  /// runs handlers on the single loop thread: a handler that blocks on the bus blocks every other
+  /// request, including ones that touch no hardware. Wrapping a blocking endpoint in this keeps the
+  /// loop free to answer everything else while the device work happens elsewhere.
+  ///
+  /// **Response lifetime, which is the whole safety argument.** A @c uWS::HttpResponse may only be
+  /// touched on the loop thread, and it is destroyed if the client disconnects. Both rules are
+  /// honoured by construction here: @p op runs on the worker and touches nothing but the domain,
+  /// and every write happens inside @c loop->defer, on the loop thread. The abort flag is set by
+  /// @c onAborted — also on the loop thread — and read inside the same deferred callback, so the
+  /// two cannot interleave: either the abort ran first and the flag is set, or it did not and the
+  /// response is still alive. @c OffLoopPool is joined before the loop is closed, so no worker can
+  /// defer onto a loop that has gone.
+  ///
+  /// @param res          The response, captured for completion on the loop thread.
+  /// @param errorStatus  Status line for a failed @p op (e.g. "500 Internal Server Error").
+  /// @param op           Callable returning @c std::expected<T, E>; runs off the loop.
+  template <typename Res, typename Op>
+  void sendTimedJsonOffLoop(Res* res, std::string_view errorStatus, Op op) {
+    auto* loop = loop_.load();
+    if (loop == nullptr) {
+      mm::api::sendError(res, "503 Service Unavailable", config_.corsOrigin, "server is stopping");
+      return;
+    }
+    auto aborted = std::make_shared<std::atomic<bool>>(false);
+    res->onAborted([aborted]() { aborted->store(true); });
+
+    pool_.detach_task([this, res, loop, aborted, errorStatus, op = std::move(op)]() mutable {
+      const auto t0 = std::chrono::steady_clock::now();
+      auto result = op();
+      const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now() - t0);
+      loop->defer([this, res, aborted, errorStatus, wireUs, result = std::move(result)]() {
+        if (aborted->load()) {
+          return;  // The client is gone and res with it; touching it here would be a
+                   // use-after-free.
+        }
+        if (!result) {
+          mm::api::sendError(res, errorStatus, config_.corsOrigin, result.error(), wireUs);
+          return;
+        }
+        mm::api::setWireTime(res, wireUs);
+        mm::api::sendJson(res, config_.corsOrigin, *result);
+      });
+    });
+  }
+
   Config config_;
   mm::node::DeviceManager& deviceManager_;
   mm::node::MonitoringManager& monitoringManager_;
@@ -154,4 +208,23 @@ class HttpServer {
   std::atomic<uWS::SSLApp*> app_{nullptr};
   /// Signals the listen outcome from the loop thread back to start(); set exactly once per run().
   std::promise<bool> listenResult_;
+  /// Workers for handlers that would otherwise block the event loop.
+  ///
+  /// uWebSockets runs every handler on the app's single loop thread, so a handler that blocks
+  /// blocks the *whole* HTTP API rather than just its own endpoint. Several of Motion Master's
+  /// block for seconds by nature — an FoE transfer, an object-dictionary enumeration, any SDO
+  /// behind a busy control-plane lock. Measured during a firmware installation, a
+  /// `GET /api/devices/state` waiting on the control-plane lock for a 12-second file transfer
+  /// stalled every request behind it, including `/api/version`, which touches no hardware at all.
+  /// The two-port split already gives the WebSocket this protection; this is the same for HTTP
+  /// requests against each other.
+  ///
+  /// Four threads. Bus operations serialise on the driver's control-plane lock regardless, so more
+  /// threads buy no parallelism on the wire — but they keep a request blocked on a *different*
+  /// resource (the bus lock held by a running procedure, a filesystem read) from queuing behind one
+  /// waiting on the wire.
+  ///
+  /// `light_thread_pool` is the plain variant: no priorities, no pausing, no per-task futures —
+  /// this only ever needs `detach_task` and `wait`.
+  BS::light_thread_pool pool_{4};
 };

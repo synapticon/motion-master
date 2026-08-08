@@ -5,6 +5,7 @@
   "dependencies": [
     "cli11",
     "curl",
+    "bshoshany-thread-pool",
     "gtest",
     {
       "name": "libzip",

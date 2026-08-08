@@ -32,7 +32,9 @@ find_package(libzip CONFIG REQUIRED)
 
 # libzip is an implementation detail of firmware_package.cc — no libzip type appears in a node
 # header — but a static library still propagates the link requirement to whoever links node.
-target_link_libraries(node PUBLIC mm::comm nlohmann_json::nlohmann_json spdlog::spdlog
-                      PRIVATE libzip::zip)
+target_link_libraries(
+  node
+  PUBLIC mm::comm nlohmann_json::nlohmann_json spdlog::spdlog
+  PRIVATE libzip::zip)
 
 add_subdirectory(tests)

@@ -436,6 +436,15 @@ void HttpServer::stop() {
     return;
   }
 
+  // Before the loop: a worker finishing its device work defers the response onto the loop, so the
+  // loop must still be there to receive it. purge() drops what has not started (those responses die
+  // with the connections the loop is about to close anyway, and waiting out a queue of mailbox
+  // timeouts would make shutdown crawl); wait() then blocks until nothing is still running, which
+  // is the guarantee that matters — no worker is left holding a response or about to defer onto a
+  // loop that has gone.
+  pool_.purge();
+  pool_.wait();
+
   if (auto* loop = loop_.load()) {
     // App::close() closes the listen socket *and* every regular socket (incl. idle HTTP keep-alive
     // connections); each lands on the loop's closed_head queue and is freed on the next loop_post,
@@ -581,12 +590,14 @@ void HttpServer::run() {
              if (!positions) {
                return;  // parsePositions already wrote the 400 response
              }
-             auto r = deviceManager_.deviceStates(*positions);
-             if (!r) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-               return;
-             }
-             sendJson(res, config_.corsOrigin, nlohmann::json(*r));
+             // Off the loop, and this is the endpoint that most needs it: the Console polls it
+             // continuously for the sidebar's AL-state badge, and it takes the driver's
+             // control-plane lock — so during a firmware transfer it would sit on the loop thread
+             // for the length of the transfer with every other request queued behind it.
+             sendTimedJsonOffLoop(res, "500 Internal Server Error", [this, positions = *positions] {
+               return deviceManager_.deviceStates(positions).transform(
+                   [](auto states) { return nlohmann::json(states); });
+             });
            })
       .get("/api/devices/diagnostics",
            [this](auto* res, auto* req) {
@@ -1389,13 +1400,20 @@ void HttpServer::run() {
                sendStatus(res, "400 Bad Request", config_.corsOrigin);
                return;
              }
-             auto listings = mm::node::listProcedures(deviceManager_, procedureManager_, pos);
-             if (!listings) {
-               sendError(res, procedureErrorStatus(listings.error().kind), config_.corsOrigin,
-                         listings.error().message);
-               return;
-             }
-             sendJson(res, config_.corsOrigin, nlohmann::json(*listings));
+             // Off the loop: this is the poll a client watches a running procedure through, and
+             // it takes the bus lock (shared) to decide applicability — so a procedure that holds
+             // that lock exclusively for a state transition would otherwise freeze the very page
+             // reporting its progress. The status is always 500 here because the error kinds this
+             // can produce are resolved before any blocking work; an unknown device is the only
+             // one, and it is cheap.
+             sendTimedJsonOffLoop(
+                 res, "404 Not Found", [this, pos]() -> std::expected<nlohmann::json, std::string> {
+                   auto listings = mm::node::listProcedures(deviceManager_, procedureManager_, pos);
+                   if (!listings) {
+                     return std::unexpected(listings.error().message);
+                   }
+                   return nlohmann::json(*listings);
+                 });
            })
       .post("/api/devices/:slavePosition/procedures/:name",
             [this](auto* res, auto* req) {

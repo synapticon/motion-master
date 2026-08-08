@@ -1110,6 +1110,233 @@ void HttpServer::run() {
   router.post("/api/devices/:slavePosition/brake/engage",
               [brakeCommand](const mm::api::Request& req) { return brakeCommand(req, false); });
 
+  // ── High resolution data and procedures ─────────────────────────────────────────────────────
+  // Reads back what the `hrd-streaming` procedure recorded. Separate from the procedure, not its
+  // final step: a recording is worth reading more than once, and a run's snapshot — re-sent whole
+  // on every poll and retained until a rescan — is no place for ten thousand samples. `data` says
+  // how to decode the files and is required, because nothing on the drive records which signal was
+  // streamed into them.
+  router.get(
+      "/api/devices/:slavePosition/hrd", [this](const mm::api::Request& req) -> mm::api::Response {
+        auto position = req.parameterAs<uint16_t>("slavePosition");
+        if (!position) {
+          return mm::api::badRequest("slavePosition must be a number");
+        }
+        auto data = mm::node::somanet::parseHrdData(req.query("data").value_or(""));
+        if (!data) {
+          return mm::api::badRequest(std::format(
+              "'data' must be one of {} or {}",
+              mm::node::somanet::toString(mm::node::somanet::HrdData::kEncoderRawData),
+              mm::node::somanet::toString(mm::node::somanet::HrdData::kSystemIdentificationData)));
+        }
+        if (deviceManager_.findDevice(*position) == nullptr) {
+          return mm::api::notFound("no device at that bus position");
+        }
+        // CSV for the spreadsheet-and-script half of the audience: a full recording is ten
+        // thousand rows, which is a file to open rather than JSON to read. Same read and the
+        // same decode, one rendering or the other — as on the SII endpoint above.
+        if (!req.accepts("text/csv")) {
+          return mm::api::timed(
+              [&] { return mm::node::readHrdRecording(deviceManager_, *position, *data); },
+              "409 Conflict");
+        }
+        const auto t0 = std::chrono::steady_clock::now();
+        auto recording = mm::node::readHrdRecording(deviceManager_, *position, *data);
+        const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - t0);
+        if (!recording) {
+          return mm::api::withWireTime(mm::api::error("409 Conflict", recording.error()), wireUs);
+        }
+        return mm::api::withWireTime(mm::api::bytes("text/csv", mm::node::toCsv(*recording)),
+                                     wireUs);
+      });
+
+  // One resource per (device, procedure), addressed by name, with three verbs — POST starts a run,
+  // GET returns the snapshot, DELETE cancels. These four handlers serve *every* procedure: the
+  // catalogue resolves the name, decides whether the device has it, validates the request and
+  // supplies the body, so adding a procedure is a row in that table and touches nothing here.
+  //
+  // Progress is polled, never pushed — each snapshot is accumulating state in which finished steps
+  // keep their status and value, so a client cannot miss a result between polls.
+  router.post("/api/devices/:slavePosition/procedures/:name",
+              [this](const mm::api::Request& req) -> mm::api::Response {
+                auto position = req.parameterAs<uint16_t>("slavePosition");
+                if (!position) {
+                  return mm::api::badRequest("slavePosition must be a number");
+                }
+                // A procedure taking no parameters is started with no body at all: an absent body
+                // becomes an empty object, so every validator reads its fields the same way
+                // instead of each having to accept "nothing" as well.
+                nlohmann::json body = nlohmann::json::object();
+                if (!req.body().empty()) {
+                  body = nlohmann::json::parse(req.body(), nullptr, false);
+                  if (body.is_discarded()) {
+                    return mm::api::badRequest("invalid JSON body");
+                  }
+                }
+                auto snapshot = mm::node::startProcedure(deviceManager_, procedureManager_,
+                                                         *position, req.parameter("name"), body);
+                if (!snapshot) {
+                  return mm::api::error(std::string(procedureErrorStatus(snapshot.error().kind)),
+                                        snapshot.error().message);
+                }
+                // 202: the run is under way, not finished. Poll the GET for its outcome.
+                auto response = mm::api::json(nlohmann::json(*snapshot));
+                response.status = "202 Accepted";
+                return response;
+              });
+
+  router.get("/api/devices/:slavePosition/procedures/:name",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               // Never having run is not an absence: this reports the all-idle snapshot built from
+               // the procedure's step template, so a client renders one shape and polls one loop.
+               auto snapshot = mm::node::procedureSnapshot(deviceManager_, procedureManager_,
+                                                           *position, req.parameter("name"));
+               if (!snapshot) {
+                 return mm::api::error(std::string(procedureErrorStatus(snapshot.error().kind)),
+                                       snapshot.error().message);
+               }
+               return mm::api::json(nlohmann::json(*snapshot));
+             });
+
+  router.del("/api/devices/:slavePosition/procedures/:name",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               // Cancels the run, not the record: the snapshot stays, reporting how far it got.
+               auto cancelled = mm::node::cancelProcedure(deviceManager_, procedureManager_,
+                                                          *position, req.parameter("name"));
+               if (!cancelled) {
+                 return mm::api::error(std::string(procedureErrorStatus(cancelled.error().kind)),
+                                       cancelled.error().message);
+               }
+               return mm::api::statusOnly("202 Accepted");
+             });
+
+  // ── SDO access and File over EtherCAT ───────────────────────────────────────────────────────
+  // Both are single mailbox transactions whose wire cost is worth separating from the browser-side
+  // round trip, which is much larger — hence X-Wire-Us on every outcome, success or failure. A
+  // failed SDO is the clearest case: it can spend the full 700 ms mailbox timeout getting no
+  // answer.
+  router.get("/api/devices/:slavePosition/sdo/:index/:subindex",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               auto index = req.parameterAs<uint16_t>("index");
+               auto subindex = req.parameterAs<uint8_t>("subindex");
+               if (!position || !index || !subindex) {
+                 return mm::api::badRequest("slavePosition, index and subindex must be numbers");
+               }
+               const auto* device = deviceManager_.findDevice(*position);
+               if (device == nullptr) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                 auto r = device->readSdo(*index, *subindex);
+                 if (!r) {
+                   return std::unexpected(r.error());
+                 }
+                 return nlohmann::json{{"data", *r}};
+               });
+             });
+
+  router.put("/api/devices/:slavePosition/sdo/:index/:subindex",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               auto index = req.parameterAs<uint16_t>("index");
+               auto subindex = req.parameterAs<uint8_t>("subindex");
+               if (!position || !index || !subindex) {
+                 return mm::api::badRequest("slavePosition, index and subindex must be numbers");
+               }
+               auto data = parseByteArrayBody(req.body());
+               if (!data) {
+                 return mm::api::badRequest(data.error());
+               }
+               const auto* device = deviceManager_.findDevice(*position);
+               if (device == nullptr) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                 if (auto r = device->writeSdo(*index, *subindex, *data); !r) {
+                   return std::unexpected(r.error());
+                 }
+                 return nlohmann::json{{"ok", true}};
+               });
+             });
+
+  // EtherCAT defines no directory service, so this is the SOMANET `fs-getlist` pseudo-file read
+  // over FoE and parsed by the server; a device that is not a SOMANET drive is refused rather than
+  // probed.
+  router.get("/api/devices/:slavePosition/files",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               if (deviceManager_.findDevice(*position) == nullptr) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               return mm::api::timed(
+                   [&]() -> std::expected<nlohmann::json, std::string> {
+                     auto files = mm::node::readFileList(deviceManager_, *position);
+                     if (!files) {
+                       return std::unexpected(files.error());
+                     }
+                     return nlohmann::json(*files);
+                   },
+                   "409 Conflict");
+             });
+
+  router.get("/api/devices/:slavePosition/files/:filename",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               const auto* device = deviceManager_.findDevice(*position);
+               if (device == nullptr) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               const auto t0 = std::chrono::steady_clock::now();
+               auto contents = device->readFile(std::string(req.parameter("filename")));
+               const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                   std::chrono::steady_clock::now() - t0);
+               if (!contents) {
+                 return mm::api::withWireTime(
+                     mm::api::error("500 Internal Server Error", contents.error().message), wireUs);
+               }
+               return mm::api::withWireTime(
+                   mm::api::bytes("application/octet-stream",
+                                  std::string(contents->begin(), contents->end())),
+                   wireUs);
+             });
+
+  router.put("/api/devices/:slavePosition/files/:filename",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               const auto* device = deviceManager_.findDevice(*position);
+               if (device == nullptr) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(req.body().data()),
+                                             req.body().size()};
+               const std::string filename(req.parameter("filename"));
+               return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                 if (auto r = device->writeFile(filename, data); !r) {
+                   return std::unexpected(r.error().message);
+                 }
+                 return nlohmann::json{{"ok", true}};
+               });
+             });
+
   // ── end of Router registrations ─────────────────────────────────────────────────────────────
 
   // Register the built-in routes as a statement on `app` (not moved), then hand `app` to any
@@ -1132,348 +1359,6 @@ void HttpServer::run() {
                     "</ul>"
                     "</body></html>");
           })
-      // --- high resolution data
-      // ---------------------------------------------------------------------
-      //
-      // Reads back what the `hrd-streaming` procedure recorded. Separate from the procedure, not
-      // its final step, for two reasons: a recording is worth reading more than once, and a run's
-      // snapshot — re-sent whole on every poll and retained until a rescan — is no place for ten
-      // thousand samples. `data` says how to decode the files, and is required because nothing on
-      // the drive records which signal was streamed into them.
-      .get(
-          "/api/devices/:slavePosition/hrd",
-          [this](auto* res, auto* req) {
-            uint16_t pos{};
-            auto posParam = req->getParameter("slavePosition");
-            auto [p, ec] = std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-            if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-              sendStatus(res, "400 Bad Request", config_.corsOrigin);
-              return;
-            }
-            auto dataParam = req->getQuery("data");
-            auto data = mm::node::somanet::parseHrdData(dataParam);
-            if (!data) {
-              sendError(res, "400 Bad Request", config_.corsOrigin,
-                        std::format("'data' must be one of {} or {}",
-                                    mm::node::somanet::toString(
-                                        mm::node::somanet::HrdData::kEncoderRawData),
-                                    mm::node::somanet::toString(
-                                        mm::node::somanet::HrdData::kSystemIdentificationData)));
-              return;
-            }
-            // CSV for the spreadsheet-and-script half of the audience: a full recording is ten
-            // thousand rows, which is a file to open rather than JSON to read. Same read and the
-            // same decode, one rendering or the other — as on the SII endpoint above.
-            const bool wantCsv =
-                req->getHeader("accept").find("text/csv") != std::string_view::npos;
-            if (!deviceManager_.findDevice(pos)) {
-              sendStatus(res, "404 Not Found", config_.corsOrigin);
-              return;
-            }
-            if (!wantCsv) {
-              sendTimedJson(res, config_.corsOrigin, "409 Conflict",
-                            [&] { return mm::node::readHrdRecording(deviceManager_, pos, *data); });
-              return;
-            }
-            // Hand-timed rather than sendTimedJson, because the body is CSV: the wire figure still
-            // rides the same X-Wire-Us header, on the error path too.
-            const auto t0 = std::chrono::steady_clock::now();
-            auto recording = mm::node::readHrdRecording(deviceManager_, pos, *data);
-            const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::steady_clock::now() - t0);
-            if (!recording) {
-              sendError(res, "409 Conflict", config_.corsOrigin, recording.error(), wireUs);
-              return;
-            }
-            setWireTime(res, wireUs);
-            sendBytes(res, config_.corsOrigin, "text/csv", mm::node::toCsv(*recording));
-          })
-      // --- procedures -----------------------------------------------------------------------
-      //
-      // One resource per (device, procedure), addressed by name, with three verbs — POST starts a
-      // run, GET returns the snapshot, DELETE cancels — plus a collection GET returning the
-      // catalogue. These four handlers serve *every* procedure: the catalogue resolves the name,
-      // decides whether the device has it, validates the request and supplies the body, so adding a
-      // procedure is a row in that table and touches nothing here. It is also why this file names
-      // no profile type — the descriptor text and the parameter rules live with the procedure.
-      //
-      // Progress is polled, never pushed — each snapshot is accumulating state in which finished
-      // steps keep their status and value, so a client cannot miss a result between polls, and one
-      // that reconnects sees how the last run went.
-      .post("/api/devices/:slavePosition/procedures/:name",
-            [this](auto* res, auto* req) {
-              uint16_t pos{};
-              auto posParam = req->getParameter("slavePosition");
-              auto [p, ec] =
-                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-              const bool posOk = (ec == std::errc() && p == posParam.data() + posParam.size());
-              // req is valid only for this call, so the name is copied out before onData can run.
-              auto name = std::make_shared<std::string>(req->getParameter("name"));
-              auto aborted = std::make_shared<bool>(false);
-              auto body = std::make_shared<std::string>();
-              res->onAborted([aborted]() { *aborted = true; });
-              res->onData(
-                  [this, res, body, name, aborted, pos, posOk](std::string_view chunk, bool last) {
-                    body->append(chunk);
-                    if (!last || *aborted) {
-                      return;
-                    }
-                    if (!posOk) {
-                      sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                      return;
-                    }
-                    // A procedure that takes no parameters is started with no body at all: an
-                    // absent body becomes an empty object, so every validator reads its fields the
-                    // same way instead of each one having to accept "nothing" as well.
-                    nlohmann::json request = nlohmann::json::object();
-                    if (!body->empty()) {
-                      request = nlohmann::json::parse(*body, nullptr, false);
-                      if (request.is_discarded()) {
-                        sendError(res, "400 Bad Request", config_.corsOrigin, "invalid JSON body");
-                        return;
-                      }
-                    }
-                    auto snapshot = mm::node::startProcedure(deviceManager_, procedureManager_, pos,
-                                                             *name, request);
-                    if (!snapshot) {
-                      sendError(res, procedureErrorStatus(snapshot.error().kind),
-                                config_.corsOrigin, snapshot.error().message);
-                      return;
-                    }
-                    // 202: the run is under way, not finished. Poll the GET for its outcome.
-                    mm::api::setCorsOrigin(res->writeStatus("202 Accepted"), config_.corsOrigin)
-                        ->writeHeader("Content-Type", "application/json")
-                        ->end(nlohmann::json(*snapshot).dump());
-                  });
-            })
-      .get("/api/devices/:slavePosition/procedures/:name",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p, ec] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             // Never having run is not an absence: this reports the all-idle snapshot built from
-             // the procedure's step template, so a client renders one shape and polls one loop.
-             auto snapshot = mm::node::procedureSnapshot(deviceManager_, procedureManager_, pos,
-                                                         req->getParameter("name"));
-             if (!snapshot) {
-               sendError(res, procedureErrorStatus(snapshot.error().kind), config_.corsOrigin,
-                         snapshot.error().message);
-               return;
-             }
-             sendJson(res, config_.corsOrigin, nlohmann::json(*snapshot));
-           })
-      .del("/api/devices/:slavePosition/procedures/:name",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p, ec] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             // Cancels the run, not the record: the snapshot stays, reporting how far it got.
-             auto cancelled = mm::node::cancelProcedure(deviceManager_, procedureManager_, pos,
-                                                        req->getParameter("name"));
-             if (!cancelled) {
-               sendError(res, procedureErrorStatus(cancelled.error().kind), config_.corsOrigin,
-                         cancelled.error().message);
-               return;
-             }
-             sendStatus(res, "202 Accepted", config_.corsOrigin);
-           })
-      .get("/api/devices/:slavePosition/sdo/:index/:subindex",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p1, ec1] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec1 != std::errc() || p1 != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             auto index = mm::core::parseHexOrDec<uint16_t>(req->getParameter("index"));
-             if (!index) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             auto subindex = mm::core::parseHexOrDec<uint8_t>(req->getParameter("subindex"));
-             if (!subindex) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             const auto* device = deviceManager_.findDevice(pos);
-             if (!device) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             // Time the SDO transaction itself so the client can distinguish the wire cost from
-             // the (much larger, browser-side) HTTP round-trip. Brackets lock acquire + wire; a
-             // warm request is dominated by the mailbox transaction, matching the driver's own log.
-             // Reported via the uniform `X-Wire-Us` header (setWireTime), not the JSON body.
-             const auto t0 = std::chrono::steady_clock::now();
-             auto r = device->readSdo(*index, *subindex);
-             const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                 std::chrono::steady_clock::now() - t0);
-             if (!r) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error(), wireUs);
-               return;
-             }
-             setWireTime(res, wireUs);
-             sendJson(res, config_.corsOrigin, nlohmann::json{{"data", *r}});
-           })
-      .put("/api/devices/:slavePosition/sdo/:index/:subindex",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p1, ec1] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             bool posOk = (ec1 == std::errc() && p1 == posParam.data() + posParam.size());
-             // req is only valid synchronously — parse the path params before onData.
-             auto index = mm::core::parseHexOrDec<uint16_t>(req->getParameter("index"));
-             auto subindex = mm::core::parseHexOrDec<uint8_t>(req->getParameter("subindex"));
-             auto aborted = std::make_shared<bool>(false);
-             auto body = std::make_shared<std::string>();
-             res->onAborted([aborted]() { *aborted = true; });
-             res->onData([this, res, body, aborted, pos, posOk, index, subindex](
-                             std::string_view chunk, bool last) {
-               body->append(chunk);
-               if (!last) return;
-               if (*aborted) return;
-               if (!posOk || !index || !subindex) {
-                 sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                 return;
-               }
-               std::vector<uint8_t> data;
-               try {
-                 nlohmann::json j = nlohmann::json::parse(*body);
-                 data = j.at("data").get<std::vector<uint8_t>>();
-               } catch (const nlohmann::json::exception& e) {
-                 sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
-                 return;
-               }
-               const auto* device = deviceManager_.findDevice(pos);
-               if (!device) {
-                 sendStatus(res, "404 Not Found", config_.corsOrigin);
-                 return;
-               }
-               const auto t0 = std::chrono::steady_clock::now();
-               auto r = device->writeSdo(*index, *subindex, data);
-               const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                   std::chrono::steady_clock::now() - t0);
-               if (!r) {
-                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error(), wireUs);
-                 return;
-               }
-               setWireTime(res, wireUs);
-               sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
-             });
-           })
-      // The collection beside the FoE file resource below. SOMANET firmware has no standard listing
-      // service — it serves its directory as a pseudo-file read over FoE — so this is a vendor
-      // operation, and a device that is not a SOMANET drive is refused rather than probed.
-      .get("/api/devices/:slavePosition/files",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p, ec] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             if (!deviceManager_.findDevice(pos)) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             sendTimedJson(res, config_.corsOrigin, "409 Conflict",
-                           [&]() -> std::expected<nlohmann::json, std::string> {
-                             auto files = mm::node::readFileList(deviceManager_, pos);
-                             if (!files) {
-                               return std::unexpected(files.error());
-                             }
-                             return nlohmann::json{{"files", *files}};
-                           });
-           })
-      .get("/api/devices/:slavePosition/files/:filename",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p, ec] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             std::string filename{req->getParameter("filename")};
-             const auto* device = deviceManager_.findDevice(pos);
-             if (!device) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             // Time the FoE transfer itself so the client can attribute the wire cost to the
-             // device and the rest to the (much larger, browser-side) HTTP round-trip. The body is
-             // raw octet-stream, so the figure rides the `X-Wire-Us` header (setWireTime) rather
-             // than the JSON body — the uniform timing channel across endpoints.
-             const auto t0 = std::chrono::steady_clock::now();
-             auto r = device->readFile(filename);
-             const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                 std::chrono::steady_clock::now() - t0);
-             if (!r) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error().message,
-                         wireUs);
-               return;
-             }
-             setWireTime(res, wireUs);
-             sendBytes(res, config_.corsOrigin, "application/octet-stream",
-                       std::string_view{reinterpret_cast<const char*>(r->data()), r->size()});
-           })
-      .put("/api/devices/:slavePosition/files/:filename",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p, ec] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             bool posOk = (ec == std::errc() && p == posParam.data() + posParam.size());
-             // req is only valid synchronously — capture the filename before onData.
-             std::string filename{req->getParameter("filename")};
-             auto aborted = std::make_shared<bool>(false);
-             auto body = std::make_shared<std::string>();
-             res->onAborted([aborted]() { *aborted = true; });
-             res->onData([this, res, body, aborted, pos, posOk, filename](std::string_view chunk,
-                                                                          bool last) {
-               body->append(chunk);
-               if (!last) return;
-               if (*aborted) return;
-               if (!posOk) {
-                 sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                 return;
-               }
-               const auto* device = deviceManager_.findDevice(pos);
-               if (!device) {
-                 sendStatus(res, "404 Not Found", config_.corsOrigin);
-                 return;
-               }
-               std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(body->data()),
-                                             body->size()};
-               const auto t0 = std::chrono::steady_clock::now();
-               auto r = device->writeFile(filename, data);
-               const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                   std::chrono::steady_clock::now() - t0);
-               if (!r) {
-                 sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error().message,
-                           wireUs);
-                 return;
-               }
-               setWireTime(res, wireUs);
-               sendJson(res, config_.corsOrigin, nlohmann::json{{"ok", true}});
-             });
-           })
       .post("/api/devices/:slavePosition/parameters/init",
             [this](auto* res, auto* req) {
               uint16_t pos{};

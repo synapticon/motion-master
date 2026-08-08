@@ -171,12 +171,18 @@ class HttpServer {
   /// The two-port split already gives the WebSocket this protection; this is the same for HTTP
   /// requests against each other.
   ///
-  /// Four threads. Bus operations serialise on the driver's control-plane lock regardless, so more
-  /// threads buy no parallelism on the wire — but they keep a request blocked on a *different*
-  /// resource (the bus lock held by a running procedure, a filesystem read) from queuing behind one
-  /// waiting on the wire.
+  /// **Sized for blocked threads, not for throughput.** Bus operations serialise on the driver's
+  /// control-plane lock regardless, so extra workers buy no parallelism on the wire — what they buy
+  /// is that a request waiting on the wire cannot make a request waiting on something else, or one
+  /// needing nothing at all, queue behind it. Since *every* route now runs here, the pool has to be
+  /// wider than the number of requests that can be blocked at once, or `/api/version` ends up
+  /// behind a firmware transfer again — a milder version of the bug this exists to fix.
+  ///
+  /// A worker parked on a mutex costs a stack and a kernel task and nothing else, so there is no
+  /// reason to be frugal. Sixteen gives the ~5 simultaneous clients this API is sized for roughly
+  /// three concurrent requests each before anything queues.
   ///
   /// `light_thread_pool` is the plain variant: no priorities, no pausing, no per-task futures —
-  /// this only ever needs `detach_task` and `wait`.
-  BS::light_thread_pool pool_{4};
+  /// this only ever needs `detach_task`, `purge` and `wait`.
+  BS::light_thread_pool pool_{16};
 };

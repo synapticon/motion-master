@@ -19,10 +19,6 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
-### Fixed
-
-- **Live monitoring keeps streaming while another device is having firmware installed** — the point of installing firmware one device at a time is that the rest of the bus carries on, and monitoring is most of what "carries on" means. It did not: deciding whether a device is exchanging read its AL status through the driver's control-plane lock, which a file transfer holds for the whole multi-second write, and that check runs once per flush on the single thread serving *every* monitoring. So flashing one device silently stopped the live stream for **all** of them — a chart of an untouched drive froze for the length of the transfer and then jumped, which is precisely the whole-bus interruption single-device installation exists to avoid. No samples were ever lost (the recorder ring is lossless and each monitoring's cursor holds its place), but the stream is now live throughout rather than arriving as one catch-up burst. The AL status is published to a lock-free mirror as each transition and state read happens, so reading it never waits on the bus.
-
 ## [6.0.0-alpha.66] - 2026-08-08
 
 ### Added

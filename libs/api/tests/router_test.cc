@@ -94,6 +94,54 @@ TEST(RequestTest, RepeatedLookupsAreIndependent) {
   }
 }
 
+TEST(PercentDecode, DecodesEscapes) {
+  EXPECT_EQ(percentDecode("v5.6.6%20(rev%202).xml"), "v5.6.6 (rev 2).xml");
+  EXPECT_EQ(percentDecode("a%2Fb"), "a/b") << "uppercase hex";
+  EXPECT_EQ(percentDecode("a%2fb"), "a/b") << "lowercase hex";
+  EXPECT_EQ(percentDecode("nothing-encoded.bin"), "nothing-encoded.bin");
+  EXPECT_EQ(percentDecode(""), "");
+}
+
+// The reason path and query decoding are separate functions. A query decoder also maps '+' to a
+// space, which is right for application/x-www-form-urlencoded and wrong in a path — sharing one
+// would look up a file called "a+b.zip" as "a b.zip".
+TEST(PercentDecode, LeavesPlusAlone) {
+  EXPECT_EQ(percentDecode("a+b.zip"), "a+b.zip");
+  EXPECT_EQ(percentDecode("a%2Bb.zip"), "a+b.zip") << "an escaped plus still decodes";
+}
+
+// Left verbatim rather than dropped, so a name containing one reaches whatever resolves it intact
+// and fails cleanly, instead of silently becoming a different name that might exist.
+TEST(PercentDecode, KeepsAnInvalidEscapeVerbatim) {
+  EXPECT_EQ(percentDecode("a%4Zb"), "a%4Zb") << "second digit is not hex";
+  EXPECT_EQ(percentDecode("a%ZZb"), "a%ZZb") << "neither digit is hex";
+  EXPECT_EQ(percentDecode("trailing%"), "trailing%");
+  EXPECT_EQ(percentDecode("half%4"), "half%4") << "truncated at the end of input";
+  EXPECT_EQ(percentDecode("100%%20done"), "100% done") << "a bare % before a valid escape";
+}
+
+// Decoding an encoded traversal is correct and safe: UserCache::resolve validates the decoded path,
+// so "%2e%2e" is rejected exactly like a literal "..". Decoding must not hide the spelling from it.
+TEST(PercentDecode, DecodesAnEncodedTraversalRatherThanHidingIt) {
+  EXPECT_EQ(percentDecode("%2e%2e/etc/passwd"), "../etc/passwd");
+  EXPECT_EQ(percentDecode("a%2F%2E%2E%2Fb"), "a/../b");
+}
+
+// Multi-byte characters are decoded byte by byte, which is all a path needs — the bytes are handed
+// to the filesystem as they are.
+TEST(PercentDecode, PassesUtf8BytesThrough) {
+  EXPECT_EQ(percentDecode("caf%C3%A9.bin"), "caf\xC3\xA9.bin");
+}
+
+// The length is authoritative, never a terminator. Were the result read as a C string, "nul%00byte"
+// would truncate to "nul" — a different name, which might well exist.
+TEST(PercentDecode, PreservesADecodedNulAndTheLengthAroundIt) {
+  const std::string decoded = percentDecode("nul%00byte");
+  ASSERT_EQ(decoded.size(), 8u);
+  EXPECT_EQ(decoded[3], '\0');
+  EXPECT_EQ(decoded, std::string("nul\0byte", 8));
+}
+
 TEST(RequestTest, ReadsHeadersAndNegotiatesContent) {
   const auto req = request("/", {}, "", {{"accept", "application/octet-stream"}});
   EXPECT_EQ(req.header("accept"), "application/octet-stream");

@@ -175,6 +175,21 @@ struct Response {
   std::vector<std::pair<std::string, std::string>> headers;
 };
 
+/// @brief Percent-decodes a URL path component — `%20` to a space, `%2F` to a slash.
+///
+/// For **path** components, and deliberately not shared with query decoding: a query decoder also
+/// maps `+` to a space (`application/x-www-form-urlencoded`), which in a path is a literal `+`, so
+/// decoding `a+b.zip` that way would look up `a b.zip`. @c Request::query handles queries; this
+/// handles paths, which uWS hands over still encoded.
+///
+/// An invalid escape (`%4Z`, a trailing `%`, `%4`) is left verbatim rather than dropped, so a name
+/// containing one arrives intact at whatever resolves it and either names something real or fails
+/// cleanly — instead of silently becoming a different name.
+///
+/// The result may contain a NUL, from `%00`, and its length is authoritative: never treat it as a C
+/// string, or such a name truncates into a different one.
+std::string percentDecode(std::string_view text);
+
 /// @brief A 200 response carrying @p body as JSON.
 ///
 /// Serialised with the @c replace error handler so a string value carrying non-UTF-8 bytes (a

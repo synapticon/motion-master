@@ -316,31 +316,12 @@ nlohmann::json certInfoJson(const mm::CertInfo& info, const std::string& path) {
 /// The path component of a `/api/user-cache/...` URL, relative to the cache root.
 ///
 /// uWS hands the raw, still percent-encoded URL, so a file called `v5.6.6 (rev 2).xml` arrives as
-/// `v5.6.6%20(rev%202).xml` — decoded here so the name on disk is the name the user chose. An
-/// invalid escape is left verbatim rather than dropped: it then reaches @c UserCache::resolve as an
-/// ordinary character, which either names a real file or fails cleanly. Decoding cannot introduce a
-/// traversal that resolve() would miss — resolve() validates the *decoded* path, so a `%2e%2e`
-/// spelling of `..` is rejected exactly like the literal one.
+/// `v5.6.6%20(rev%202).xml` — decoded so the name on disk is the name the user chose. Decoding
+/// cannot introduce a traversal that @c UserCache::resolve would miss: resolve() validates the
+/// *decoded* path, so a `%2e%2e` spelling of `..` is rejected exactly like the literal one.
 std::string userCacheRelPath(std::string_view url) {
   constexpr std::string_view kPrefix = "/api/user-cache/";
-  std::string_view encoded = url.starts_with(kPrefix) ? url.substr(kPrefix.size()) : url;
-  std::string decoded;
-  decoded.reserve(encoded.size());
-  for (size_t i = 0; i < encoded.size(); ++i) {
-    uint32_t byte = 0;
-    const char* first = encoded.data() + i + 1;
-    const char* last = encoded.data() + i + 3;
-    // Both hex digits must be consumed: from_chars would happily read `%4Z` as 4 and leave the
-    // `Z`, which would silently drop a character the user typed.
-    if (encoded[i] == '%' && i + 2 < encoded.size() &&
-        std::from_chars(first, last, byte, 16) == std::from_chars_result{last, std::errc()}) {
-      decoded.push_back(static_cast<char>(byte));
-      i += 2;
-    } else {
-      decoded.push_back(encoded[i]);
-    }
-  }
-  return decoded;
+  return mm::api::percentDecode(url.starts_with(kPrefix) ? url.substr(kPrefix.size()) : url);
 }
 
 }  // namespace

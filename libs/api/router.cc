@@ -3,6 +3,8 @@
 #include <spdlog/spdlog.h>
 
 #include <atomic>
+#include <charconv>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <string_view>
@@ -99,6 +101,27 @@ std::optional<std::string> Request::query(std::string_view key) const {
     return std::nullopt;  // Absent, or present with an empty value — uWS does not distinguish.
   }
   return std::string(value);
+}
+
+std::string percentDecode(std::string_view text) {
+  std::string decoded;
+  decoded.reserve(text.size());
+  for (std::size_t i = 0; i < text.size(); ++i) {
+    uint32_t byte = 0;
+    const char* first = text.data() + i + 1;
+    const char* last = text.data() + i + 3;
+    // Both hex digits must be consumed: from_chars would happily read `%4Z` as 4 and leave the `Z`,
+    // which would silently drop a character the user typed. Comparing the whole result against
+    // {last, errc{}} is what demands it reached the end with no error.
+    if (text[i] == '%' && i + 2 < text.size() &&
+        std::from_chars(first, last, byte, 16) == std::from_chars_result{last, std::errc()}) {
+      decoded.push_back(static_cast<char>(byte));
+      i += 2;
+    } else {
+      decoded.push_back(text[i]);
+    }
+  }
+  return decoded;
 }
 
 Response json(const nlohmann::json& body) {

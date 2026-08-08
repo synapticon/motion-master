@@ -789,21 +789,6 @@ int retrySdoInfo(F&& call) {
   return result;
 }
 
-// Mailbox timeout for File-over-EtherCAT transfers, per transaction rather than per transfer:
-// ecx_FOEread/ecx_FOEwrite wait this long for the acknowledgement of *each* packet.
-//
-// Deliberately far longer than the EC_TIMEOUTRXM (700 ms) every other mailbox path uses, because a
-// bootloader is not an ordinary mailbox peer — between packets it erases and programs flash, and it
-// simply stops answering while it does. Measured on an ACTILINK: the application binary's packets
-// all acknowledged inside 700 ms and it wrote in ~11.5 s, but the communication binary written
-// straight after it did not, and failed at exactly EC_TIMEOUTRXM on every attempt. The same drive
-// takes ~3.5 s over the same transfer when the timeout is generous. 10 s matches what the previous
-// generation used on this hardware.
-//
-// The cost of the larger value is bounded and paid only on a genuine failure: a slave that never
-// answers stalls one transfer for this long instead of 700 ms.
-constexpr int kFoeTimeoutUs = 10'000'000;
-
 // Decodes an ecx_FOEread/ecx_FOEwrite failure return value into a FoeError. SOEM reports the FoE
 // error kind as a negated ec_err_type in the return value (not via the error list, and without the
 // wire error code), so we classify from -wkc. This SOEM-specific decode stays here, beside the
@@ -1049,7 +1034,7 @@ std::expected<std::vector<uint8_t>, FoeError> SoemFieldbusDriver::readFile(
   int size = kMaxSize;
   std::string name = filename;  // ecx_FOEread takes non-const char*
   int wkc =
-      ecx_FOEread(ctx_.get(), slavePosition, name.data(), 0, &size, data.data(), kFoeTimeoutUs);
+      ecx_FOEread(ctx_.get(), slavePosition, name.data(), 0, &size, data.data(), EC_TIMEOUTRXM);
   if (wkc <= 0) {
     // SOEM signals the FoE error kind through the negated return value, not the error list: the
     // FoE path never calls ecx_pusherror, so ecx_poperror would return nothing here. It also
@@ -1075,7 +1060,7 @@ std::expected<void, FoeError> SoemFieldbusDriver::writeFile(uint16_t slavePositi
   drainMailbox(ctx_.get(), slavePosition);
   std::string name = filename;  // ecx_FOEwrite takes non-const char*
   int wkc = ecx_FOEwrite(ctx_.get(), slavePosition, name.data(), 0, static_cast<int>(data.size()),
-                         const_cast<uint8_t*>(data.data()), kFoeTimeoutUs);
+                         const_cast<uint8_t*>(data.data()), EC_TIMEOUTRXM);
   if (wkc <= 0) {
     // See readFile: the FoE error kind is in the negated return value, not the error list.
     FoeError error = foeError(wkc, "FOEwrite", slavePosition, filename);

@@ -95,6 +95,12 @@ class Request {
   }
 
   /// @brief A path parameter by the name the route pattern declared (`:slavePosition`), or empty.
+  ///
+  /// **Verbatim — still percent-encoded.** uWS decodes query values but not path segments, and
+  /// neither does this. Harmless for every parameter the API has today, all of which are numbers or
+  /// fixed slugs that no client would encode. A route taking free-form text in its path is the case
+  /// to watch: pass it through @c percentDecode, as the user-cache routes do, or a name containing
+  /// a space arrives as `%20` and names nothing.
   std::string_view parameter(std::string_view name) const {
     for (const auto& [key, value] : parameters_) {
       if (key == name) {

@@ -12,8 +12,8 @@
 #include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <ranges>
 #include <span>
-#include <sstream>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -34,7 +34,6 @@
 #include "core/util.h"
 #include "etg/esi_request.h"
 #include "monitoring_api.h"
-#include "node/cia402.h"
 #include "node/cia402_control.h"
 #include "node/cia402_drive.h"
 #include "node/device_manager.h"
@@ -82,15 +81,17 @@ std::expected<std::vector<uint16_t>, std::string> parsePositions(const mm::api::
   if (!raw || raw->empty()) {
     return positions;  // No filter: every discovered device.
   }
-  // Already decoded and owned by the optional, so bind a reference — Request::query percent-decodes
-  // into its own buffer and returns the result by value.
-  const std::string& text = *raw;
-  std::istringstream stream(text);
-  std::string token;
-  while (std::getline(stream, token, ',')) {
+  // std::views::split rather than an istringstream: no stream object, no std::string allocated per
+  // token, and the loop is the whole of it. It is also stricter in one case — a trailing comma
+  // ("1,2,") yields a final empty token and is rejected, where getline consumed it silently — which
+  // is the better answer, since a client emitting it has a bug. Every other malformed input
+  // ("1,,2", ",1", "1, 2") was already rejected identically.
+  for (const auto part : std::views::split(std::string_view(*raw), ',')) {
+    const std::string_view token(part);
     uint16_t position{};
-    auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), position);
-    if (ec != std::errc() || ptr != token.data() + token.size()) {
+    const char* end = token.data() + token.size();
+    auto [ptr, ec] = std::from_chars(token.data(), end, position);
+    if (ec != std::errc() || ptr != end) {
       return std::unexpected("'positions' must be a comma-separated list of numbers, e.g. 1,2");
     }
     positions.push_back(position);

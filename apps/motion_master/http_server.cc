@@ -1,6 +1,5 @@
 #include "http_server.h"
 
-#include <curl/curl.h>
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
@@ -317,33 +316,31 @@ nlohmann::json certInfoJson(const mm::CertInfo& info, const std::string& path) {
 /// The path component of a `/api/user-cache/...` URL, relative to the cache root.
 ///
 /// uWS hands the raw, still percent-encoded URL, so a file called `v5.6.6 (rev 2).xml` arrives as
-/// `v5.6.6%20(rev%202).xml` — decoded here so the name on disk is the name the user chose.
-///
-/// Decoded by libcurl, which is already linked for the certificate fetch. Note that uWS' own
-/// `getDecodedQueryValue` is **not** usable for a path: besides needing the `?key=value` shape, it
-/// maps `+` to a space, which is right for a query and wrong for a path — a file called `a+b.zip`
-/// would be looked up as `a b.zip`. `curl_easy_unescape` decodes escapes only, leaving `+` alone.
-/// Its handle argument is ignored (libcurl >= 7.82), hence the null.
-///
-/// An invalid escape such as `%4Z` is left verbatim rather than dropped: it then reaches
-/// @c UserCache::resolve as ordinary characters, which either name a real file or fail cleanly.
-/// Decoding cannot introduce a traversal that resolve() would miss — resolve() validates the
-/// *decoded* path, so a `%2e%2e` spelling of `..` is rejected exactly like the literal one.
+/// `v5.6.6%20(rev%202).xml` — decoded here so the name on disk is the name the user chose. An
+/// invalid escape is left verbatim rather than dropped: it then reaches @c UserCache::resolve as an
+/// ordinary character, which either names a real file or fails cleanly. Decoding cannot introduce a
+/// traversal that resolve() would miss — resolve() validates the *decoded* path, so a `%2e%2e`
+/// spelling of `..` is rejected exactly like the literal one.
 std::string userCacheRelPath(std::string_view url) {
   constexpr std::string_view kPrefix = "/api/user-cache/";
-  // Copied because curl takes a pointer and a length, and a string_view carries no terminator.
-  const std::string encoded(url.starts_with(kPrefix) ? url.substr(kPrefix.size()) : url);
-  int length = 0;
-  char* decoded =
-      curl_easy_unescape(nullptr, encoded.c_str(), static_cast<int>(encoded.size()), &length);
-  if (decoded == nullptr) {
-    return encoded;  // Allocation failure: the encoded name fails to resolve, which is safe.
+  std::string_view encoded = url.starts_with(kPrefix) ? url.substr(kPrefix.size()) : url;
+  std::string decoded;
+  decoded.reserve(encoded.size());
+  for (size_t i = 0; i < encoded.size(); ++i) {
+    uint32_t byte = 0;
+    const char* first = encoded.data() + i + 1;
+    const char* last = encoded.data() + i + 3;
+    // Both hex digits must be consumed: from_chars would happily read `%4Z` as 4 and leave the
+    // `Z`, which would silently drop a character the user typed.
+    if (encoded[i] == '%' && i + 2 < encoded.size() &&
+        std::from_chars(first, last, byte, 16) == std::from_chars_result{last, std::errc()}) {
+      decoded.push_back(static_cast<char>(byte));
+      i += 2;
+    } else {
+      decoded.push_back(encoded[i]);
+    }
   }
-  // Built from the returned length rather than as a C string, so a decoded NUL cannot truncate the
-  // name into a different one that happens to exist.
-  std::string result(decoded, static_cast<std::size_t>(length));
-  curl_free(decoded);
-  return result;
+  return decoded;
 }
 
 }  // namespace

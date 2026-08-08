@@ -9,7 +9,6 @@
 #include <ctime>
 #include <expected>
 #include <iterator>
-#include <memory>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <ranges>
@@ -31,7 +30,6 @@
 #include "comm/sii.h"
 #include "core/system_info.h"
 #include "core/user_cache.h"
-#include "core/util.h"
 #include "etg/esi_request.h"
 #include "monitoring_api.h"
 #include "node/cia402_control.h"
@@ -81,11 +79,9 @@ std::expected<std::vector<uint16_t>, std::string> parsePositions(const mm::api::
   if (!raw || raw->empty()) {
     return positions;  // No filter: every discovered device.
   }
-  // std::views::split rather than an istringstream: no stream object, no std::string allocated per
-  // token, and the loop is the whole of it. It is also stricter in one case — a trailing comma
-  // ("1,2,") yields a final empty token and is rejected, where getline consumed it silently — which
-  // is the better answer, since a client emitting it has a bug. Every other malformed input
-  // ("1,,2", ",1", "1, 2") was already rejected identically.
+  // Every token must be a whole number with nothing around it, so "1,,2", ",1", "1, 2" and a
+  // trailing "1,2," are all rejected — an empty token is not a position, and a client emitting one
+  // has a bug worth reporting rather than absorbing.
   for (const auto part : std::views::split(std::string_view(*raw), ',')) {
     const std::string_view token(part);
     uint16_t position{};

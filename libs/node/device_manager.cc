@@ -298,9 +298,13 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
 }
 
 void DeviceManager::exchangeProcessData() {
-  if (!driver_) {
-    return;  // no driver — safe no-op so the GameLoop can call this every cycle
-  }
+  // The published image is the *only* gate, and deliberately so: driver_ is a unique_ptr that
+  // init()/reset() write under busMutex_, which this RT thread never takes, so testing it here
+  // would be an unsynchronised read. It would also be redundant — an image can only be published
+  // by remapProcessImage(), which requires a driver, and reset() calls stopExchange() (unpublish
+  // + drain) before destroying it. So a non-null image below means a live driver, established by
+  // the ordering rather than by a check the RT thread has no safe way to make.
+  //
   // Raise the in-flight flag BEFORE reading the published image, then re-read the image: this
   // closes the race against stopExchange(), which stores nullptr and then waits on this flag.
   // Both the flag store and the image load are sequentially consistent so they cannot be
@@ -372,11 +376,31 @@ void DeviceManager::stopExchange() {
   }
 }
 
-uint64_t DeviceManager::recorderHead() const { return pd_->ring.head(); }
+// The three recorder accessors take busMutex_ shared, and the adversary is not the RT producer.
+// ProcessDataRing's lock-free protocol makes a reader safe against write() — a concurrent append,
+// even one that laps the reader, is detected by the per-slot sequence re-check. It says nothing
+// about allocate()/clear(), which *release the storage* (buffer_ and the seqWords_ vector) and run
+// from the control plane: a re-map re-allocates because records under the old layout are
+// undecodable, and scan()/reset() clear. Those hold busMutex_ exclusively, so reading the ring
+// without it is a use-after-free, not a torn read — and the window is wide, since a sampler flush
+// walks thousands of records. Shared, so the exclusive rebuilders are the only thing that waits;
+// serializeDump reads the ring under the same lock.
+uint64_t DeviceManager::recorderHead() const {
+  const std::shared_lock lock(busMutex_);
+  return pd_->ring.head();
+}
 
-uint64_t DeviceManager::recorderOldestSeq() const { return pd_->ring.oldestValidSeq(); }
+uint64_t DeviceManager::recorderOldestSeq() const {
+  const std::shared_lock lock(busMutex_);
+  return pd_->ring.oldestValidSeq();
+}
 
 bool DeviceManager::readRecord(uint64_t seq, ProcessDataRing::Record& out) const {
+  // Per record rather than per span: the lock is held for one record's copy, which keeps the
+  // sampler from becoming a milliseconds-long shared holder that an exclusive scan would queue
+  // behind. A re-map part-way through a span therefore ends it — every record already reads
+  // independently (a lapped one returns false and the caller resyncs), so a span was never atomic.
+  const std::shared_lock lock(busMutex_);
   return pd_->ring.readRecord(seq, out);
 }
 

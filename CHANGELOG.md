@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The server no longer risks a crash when the process image is re-mapped while a monitoring is running** — for example taking a device SAFE-OP → PRE-OP → SAFE-OP, or resetting the bus, with a chart open. Re-mapping re-allocates the recorder's storage (records written under the old process-image layout cannot be decoded under a new one), and the thread serving monitorings was reading that storage without waiting for the re-allocation to finish. It could therefore be reading records from memory that had just been released. Nothing was wrong with the recording itself, and no crash was observed in the field; the reads now serialise against a re-map, and a monitoring whose records disappear mid-flush resyncs to the oldest recorded cycle as it already did when the ring simply lapped it.
+
 ## [6.0.0-alpha.68] - 2026-08-08
 
 ### Fixed

@@ -31,6 +31,14 @@ namespace mm::node {
 /// stores.
 ///
 /// Single writer (the RT loop), many concurrent readers. Not copyable or movable.
+///
+/// @warning That guarantee covers @c write() only, and is scoped to it deliberately: @c allocate
+///          and @c clear are a *third* kind of writer — they release the storage, so they cannot
+///          be made safe by any reader-side sequence check and are **not** covered by the
+///          lock-free protocol. The owner must exclude readers around them (@c DeviceManager does
+///          it with @c busMutex_: the control-plane callers hold it exclusively, every ring reader
+///          takes it shared). A reader that skips that lock is a use-after-free waiting for a
+///          re-map, not a torn read.
 class ProcessDataRing {
  public:
   /// @brief One recorded cycle, copied out by a reader. @c inputs / @c outputs are the raw IOmap
@@ -63,9 +71,14 @@ class ProcessDataRing {
   /// under a new one. The storage is best-effort @c mlock'd on POSIX so the RT @c write() never
   /// page-faults (process-wide @c mlockall already covers it when RT scheduling is in effect;
   /// this is belt-and-suspenders and silently does nothing if locking is not permitted).
+  ///
+  /// @warning Frees the previous storage: the caller must exclude every reader (see the class
+  ///          warning), and the RT producer must be drained.
   void allocate(uint32_t inputCap, uint32_t outputCap, size_t capacityCycles);
 
   /// @brief Releases the storage and resets to the unallocated state. Idempotent.
+  ///
+  /// @warning Same exclusion requirement as @c allocate — it frees what readers are reading.
   void clear();
 
   /// @brief Whether @c allocate has been called with a non-zero capacity.

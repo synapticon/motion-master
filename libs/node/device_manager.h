@@ -658,17 +658,26 @@ class DeviceManager {
                                              uint8_t subindex) const;
 
   /// @brief The recorder ring's next sequence number; @c recorderHead()-1 is the newest recorded
-  ///        cycle and @c recorderHead()==0 means nothing has been recorded yet. Thread-safe.
+  ///        cycle and @c recorderHead()==0 means nothing has been recorded yet.
   ///
   /// A monitoring holds a read cursor and ships every record in @c [cursor, recorderHead()) per
   /// flush, advancing the cursor — a non-destructive reader that never gates the RT producer.
+  ///
+  /// Thread-safe against both writers of the ring, which are not the same adversary and do not
+  /// need the same protection. @c ProcessDataRing is lock-free against the RT producer's
+  /// @c write(); this and the two accessors below additionally take @c busMutex_ shared, because
+  /// the *control plane* also writes the ring — @c allocate / @c clear release its storage on a
+  /// re-map, @c scan and @c reset — under the exclusive lock. Reading it without the lock is a
+  /// use-after-free rather than a torn read. Callers need not (and must not) hold @c busMutex_.
   uint64_t recorderHead() const;
 
   /// @brief The oldest sequence number still present in the ring (@c max(0, head - capacity)).
-  ///        A cursor below this has been lapped (overwritten) and must resync to it. Thread-safe.
+  ///        A cursor below this has been lapped (overwritten) and must resync to it. Thread-safe
+  ///        on the same terms as @c recorderHead.
   uint64_t recorderOldestSeq() const;
 
-  /// @brief Copies the recorded cycle for @p seq into @p out. Thread-safe, lock-free.
+  /// @brief Copies the recorded cycle for @p seq into @p out. Thread-safe on the same terms as
+  ///        @c recorderHead (the shared lock is taken per record, not per span).
   ///
   /// @return @c true if @p seq is present and copied without a concurrent overwrite; @c false if
   ///         it is no longer in the ring or the copy raced the producer (the caller skips it).

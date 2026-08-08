@@ -19,6 +19,12 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.68] - 2026-08-08
+
+### Fixed
+
+- **A monitoring's CSV export now carries the cycle time**, as a first `t_us` column holding microseconds elapsed since the first sample — matching the chart's x-axis. Without it the file was a list of values with no way to tell when any of them was captured, which is exactly what you need when the question is whether the live view kept up: the stream is lossless, so a view that froze and later caught up exports as an unbroken series, indistinguishable from one that never stalled. Gaps and repeated timestamps are the evidence, and they were being discarded on the way out.
+
 ## [6.0.0-alpha.67] - 2026-08-08
 
 ### Fixed
@@ -534,7 +540,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.67...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.68...HEAD
+[6.0.0-alpha.68]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.67...v6.0.0-alpha.68
 [6.0.0-alpha.67]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.66...v6.0.0-alpha.67
 [6.0.0-alpha.66]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.65...v6.0.0-alpha.66
 [6.0.0-alpha.65]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.64...v6.0.0-alpha.65

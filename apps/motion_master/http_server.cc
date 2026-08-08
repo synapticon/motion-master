@@ -53,6 +53,26 @@ namespace {
 // or empty parameter yields an empty vector (which the device manager reads as "all devices"). On
 // a malformed token it writes a 400 (with the CORS header) to @p res and returns nullopt — the
 // caller must return immediately without writing a further response.
+// Reads a `{"data": [byte, ...]}` body into bytes, for the endpoints that write raw bytes to a
+// device. Non-throwing (allow_exceptions = false) per the no-exceptions mandate; the shape it
+// replaces caught a nlohmann exception and forwarded its text, which named the JSON fault rather
+// than the expected shape.
+std::expected<std::vector<uint8_t>, std::string> parseByteArrayBody(const std::string& text) {
+  const auto body = nlohmann::json::parse(text, nullptr, false);
+  if (body.is_discarded() || !body.contains("data") || !body["data"].is_array()) {
+    return std::unexpected(R"(body must be {"data": [<byte>, ...]})");
+  }
+  std::vector<uint8_t> data;
+  data.reserve(body["data"].size());
+  for (const auto& entry : body["data"]) {
+    if (!entry.is_number_unsigned() || entry.get<uint64_t>() > 0xFF) {
+      return std::unexpected("every entry of 'data' must be a byte value (0-255)");
+    }
+    data.push_back(static_cast<uint8_t>(entry.get<uint64_t>()));
+  }
+  return data;
+}
+
 // The Router-shaped counterpart of parsePositions below: it returns the failure instead of writing
 // it, because a handler that runs off the loop has no response object to write to.
 std::expected<std::vector<uint16_t>, std::string> parsePositions(const mm::api::Request& req) {
@@ -678,6 +698,214 @@ void HttpServer::run() {
                return mm::api::json(nlohmann::json(*device));
              });
 
+  // ── Offline tools: no device, no bus ────────────────────────────────────────────────────────
+  // Off the loop for a different reason from the device endpoints: these are CPU-bound rather than
+  // I/O-bound, and an ESI parse of a megabyte-scale file is seconds of work that used to run on the
+  // loop thread. The Tools pages use them to inspect files with no hardware present.
+  router.post("/api/sii/parse", [](const mm::api::Request& req) -> mm::api::Response {
+    std::span<const uint8_t> bytes{reinterpret_cast<const uint8_t*>(req.body().data()),
+                                   req.body().size()};
+    auto parsed = mm::comm::parseSii(bytes);
+    if (!parsed) {
+      return mm::api::badRequest(parsed.error());
+    }
+    return mm::api::json(nlohmann::json(*parsed));
+  });
+
+  // Decodes a SOMANET firmware package filename into its five fields (Hardware description
+  // specification 3.4.2) and, where the descriptor is numeric, its product id, version, key and
+  // fieldbus. A GET with a query rather than a POST with a body: unlike its two siblings there is
+  // no file to upload, only a short string. The same decoder firmware installation uses to decide
+  // whether a package can be cached, so what this reports is what that will do.
+  router.get("/api/firmware-package-name", [](const mm::api::Request& req) -> mm::api::Response {
+    const auto filename = req.query("filename");
+    if (!filename || filename->empty()) {
+      return mm::api::badRequest("a 'filename' query parameter is required");
+    }
+    auto name = mm::node::parseFirmwarePackageName(*filename);
+    if (!name) {
+      // The grammar it missed, not a bare rejection: this is a tool whose whole job is to say what
+      // a name means, so "why not" is the useful half of a negative answer.
+      return mm::api::badRequest(name.error());
+    }
+    return mm::api::json(nlohmann::json(*name));
+  });
+
+  // The response carries every device with its own assembled entry table. That is affordable
+  // because object-level annotation is stored once, on subindex 0, rather than repeated onto every
+  // subindex. The optional modules= query narrows the merge where a slot offers a choice.
+  router.post("/api/esi/parse", [](const mm::api::Request& req) -> mm::api::Response {
+    mm::etg::EsiParseRequest request;
+    if (const auto modules = req.query("modules"); modules && !modules->empty()) {
+      auto idents = mm::etg::parseIdentList(*modules);
+      if (!idents) {
+        return mm::api::badRequest(std::format("modules: {}", idents.error()));
+      }
+      request.moduleIdents = std::move(*idents);
+    }
+    // Timed through the same X-Wire-Us channel as a device operation. The figure is CPU rather than
+    // wire time here (parse + assemble every device's dictionary), which for a megabyte-scale ESI
+    // is the part worth watching. JSON serialisation stays outside it, as everywhere else.
+    return mm::api::timed([&] { return mm::etg::buildEsiResponse(req.body(), request); },
+                          "400 Bad Request");
+  });
+
+  // ── Raw device access: ESC registers, EEPROM, watchdog ──────────────────────────────────────
+  // Every one of these is a wire transaction behind the control-plane lock, so every one of them
+  // could stall the whole API for as long as the bus was busy.
+  router.get("/api/devices/:slavePosition/registers/:address",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               auto address = req.parameterAs<uint16_t>("address");
+               auto length = req.queryAs<uint16_t>("length");
+               if (!position || !address) {
+                 return mm::api::badRequest("slavePosition and address must be numbers");
+               }
+               if (!length || *length == 0) {
+                 return mm::api::badRequest("'length' must be a non-zero byte count");
+               }
+               const auto* device = deviceManager_.findDevice(*position);
+               if (device == nullptr) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               std::vector<uint8_t> buffer(*length);
+               return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                 if (auto r = device->readRegister(*address, buffer); !r) {
+                   return std::unexpected(r.error());
+                 }
+                 return nlohmann::json{{"data", buffer}};
+               });
+             });
+
+  router.post("/api/devices/:slavePosition/registers/:address",
+              [this](const mm::api::Request& req) -> mm::api::Response {
+                auto position = req.parameterAs<uint16_t>("slavePosition");
+                auto address = req.parameterAs<uint16_t>("address");
+                if (!position || !address) {
+                  return mm::api::badRequest("slavePosition and address must be numbers");
+                }
+                auto data = parseByteArrayBody(req.body());
+                if (!data) {
+                  return mm::api::badRequest(data.error());
+                }
+                const auto* device = deviceManager_.findDevice(*position);
+                if (device == nullptr) {
+                  return mm::api::notFound("no device at that bus position");
+                }
+                return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                  if (auto r = device->writeRegister(*address, *data); !r) {
+                    return std::unexpected(r.error());
+                  }
+                  return nlohmann::json{{"ok", true}};
+                });
+              });
+
+  // Content negotiation: the raw EEPROM image only when the client asks via
+  // `Accept: application/octet-stream`, otherwise the parsed structure, which is the default. Only
+  // the EEPROM read touches the wire (parseSii is local CPU), so the read is what is timed and
+  // X-Wire-Us rides every outcome.
+  router.get(
+      "/api/devices/:slavePosition/sii", [this](const mm::api::Request& req) -> mm::api::Response {
+        auto position = req.parameterAs<uint16_t>("slavePosition");
+        if (!position) {
+          return mm::api::badRequest("slavePosition must be a number");
+        }
+        const auto* device = deviceManager_.findDevice(*position);
+        if (device == nullptr) {
+          return mm::api::notFound("no device at that bus position");
+        }
+        const auto t0 = std::chrono::steady_clock::now();
+        auto raw = device->readSii();
+        const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::steady_clock::now() - t0);
+        if (!raw) {
+          return mm::api::withWireTime(mm::api::error("500 Internal Server Error", raw.error()),
+                                       wireUs);
+        }
+        if (req.accepts("application/octet-stream")) {
+          return mm::api::withWireTime(
+              mm::api::bytes("application/octet-stream", std::string(raw->begin(), raw->end())),
+              wireUs);
+        }
+        auto parsed = mm::comm::parseSii(*raw);
+        if (!parsed) {
+          return mm::api::withWireTime(mm::api::error("500 Internal Server Error", parsed.error()),
+                                       wireUs);
+        }
+        return mm::api::withWireTime(mm::api::json(nlohmann::json(*parsed)), wireUs);
+      });
+
+  router.put(
+      "/api/devices/:slavePosition/sii", [this](const mm::api::Request& req) -> mm::api::Response {
+        auto position = req.parameterAs<uint16_t>("slavePosition");
+        if (!position) {
+          return mm::api::badRequest("slavePosition must be a number");
+        }
+        std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(req.body().data()),
+                                      req.body().size()};
+        // Rejected before the EEPROM is touched: a malformed image can leave the device
+        // unidentifiable, and the damage only shows after a power cycle.
+        if (auto parsed = mm::comm::parseSii(data); !parsed) {
+          return mm::api::badRequest(std::string("not a valid SII image: ") + parsed.error());
+        }
+        const auto* device = deviceManager_.findDevice(*position);
+        if (device == nullptr) {
+          return mm::api::notFound("no device at that bus position");
+        }
+        return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+          if (auto r = device->writeSii(data); !r) {
+            return std::unexpected(r.error());
+          }
+          return nlohmann::json{{"ok", true}};
+        });
+      });
+
+  router.get("/api/devices/:slavePosition/watchdog",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               if (deviceManager_.findDevice(*position) == nullptr) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                 auto r = deviceManager_.processDataWatchdog(*position);
+                 if (!r) {
+                   return std::unexpected(r.error());
+                 }
+                 return watchdogJson(*position, *r);
+               });
+             });
+
+  router.put(
+      "/api/devices/:slavePosition/watchdog",
+      [this](const mm::api::Request& req) -> mm::api::Response {
+        auto position = req.parameterAs<uint16_t>("slavePosition");
+        if (!position) {
+          return mm::api::badRequest("slavePosition must be a number");
+        }
+        const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+        if (body.is_discarded() || !body.contains("timeoutMs") || !body["timeoutMs"].is_number()) {
+          return mm::api::badRequest(R"(body must be {"timeoutMs": <milliseconds>})");
+        }
+        const double timeoutMs = body["timeoutMs"].get<double>();
+        if (timeoutMs < 0) {
+          return mm::api::badRequest("timeoutMs must not be negative");
+        }
+        if (deviceManager_.findDevice(*position) == nullptr) {
+          return mm::api::notFound("no device at that bus position");
+        }
+        const auto timeout = std::chrono::nanoseconds(static_cast<int64_t>(timeoutMs * 1e6 + 0.5));
+        return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+          auto r = deviceManager_.setProcessDataWatchdog(*position, timeout);
+          if (!r) {
+            return std::unexpected(r.error());
+          }
+          return watchdogJson(*position, *r);
+        });
+      });
+
   // Register the built-in routes as a statement on `app` (not moved), then hand `app` to any
   // registered plug-in modules so they can add their own routes, then finish with the CORS
   // preflight, the catch-all 404, and listen(). All three phases operate on the same `app` object.
@@ -698,353 +926,6 @@ void HttpServer::run() {
                     "</ul>"
                     "</body></html>");
           })
-      .get("/api/devices/:slavePosition/registers/:address",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p1, ec1] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec1 != std::errc() || p1 != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             uint16_t address{};
-             auto addrParam = req->getParameter("address");
-             auto [p2, ec2] =
-                 std::from_chars(addrParam.data(), addrParam.data() + addrParam.size(), address);
-             if (ec2 != std::errc() || p2 != addrParam.data() + addrParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             uint16_t length{};
-             auto lenParam = req->getQuery("length");
-             auto [p3, ec3] =
-                 std::from_chars(lenParam.data(), lenParam.data() + lenParam.size(), length);
-             if (ec3 != std::errc() || p3 != lenParam.data() + lenParam.size() || length == 0) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             const auto* device = deviceManager_.findDevice(pos);
-             if (!device) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             std::vector<uint8_t> buf(length);
-             sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
-                           [&]() -> std::expected<nlohmann::json, std::string> {
-                             if (auto r = device->readRegister(address, buf); !r) {
-                               return std::unexpected(r.error());
-                             }
-                             return nlohmann::json{{"data", buf}};
-                           });
-           })
-      .get("/api/devices/:slavePosition/sii",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p, ec] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             // Content negotiation: the raw EEPROM image is returned only when the client asks
-             // for it via Accept: application/octet-stream. Otherwise (Accept:
-             // application/json, */*, or absent) the parsed SII structure is returned — the
-             // default.
-             const bool wantRaw = req->getHeader("accept").find("application/octet-stream") !=
-                                  std::string_view::npos;
-             const auto* device = deviceManager_.findDevice(pos);
-             if (!device) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             // Only the EEPROM read touches the wire; parseSii() is local CPU. Time the read and
-             // carry X-Wire-Us on every outcome (raw bytes, parsed JSON, or error).
-             const auto t0 = std::chrono::steady_clock::now();
-             auto raw = device->readSii();
-             const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                 std::chrono::steady_clock::now() - t0);
-             if (!raw) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, raw.error(), wireUs);
-               return;
-             }
-             if (wantRaw) {
-               setWireTime(res, wireUs);
-               sendBytes(res, config_.corsOrigin, "application/octet-stream",
-                         std::string_view{reinterpret_cast<const char*>(raw->data()), raw->size()});
-               return;
-             }
-             auto parsed = mm::comm::parseSii(*raw);
-             if (!parsed) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, parsed.error(),
-                         wireUs);
-               return;
-             }
-             setWireTime(res, wireUs);
-             sendJson(res, config_.corsOrigin, nlohmann::json(*parsed));
-           })
-      .put("/api/devices/:slavePosition/sii",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p, ec] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             bool posOk = (ec == std::errc() && p == posParam.data() + posParam.size());
-             auto aborted = std::make_shared<bool>(false);
-             auto body = std::make_shared<std::string>();
-             res->onAborted([aborted]() { *aborted = true; });
-             res->onData([this, res, body, aborted, pos, posOk](std::string_view chunk, bool last) {
-               body->append(chunk);
-               if (!last) {
-                 return;
-               }
-               if (*aborted) {
-                 return;
-               }
-               if (!posOk) {
-                 sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                 return;
-               }
-               std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(body->data()),
-                                             body->size()};
-               // Reject an image that does not parse before touching the EEPROM — a guard
-               // against bricking the device by writing garbage.
-               if (auto parsed = mm::comm::parseSii(data); !parsed) {
-                 sendError(res, "400 Bad Request", config_.corsOrigin,
-                           std::string("not a valid SII image: ") + parsed.error());
-                 return;
-               }
-               const auto* device = deviceManager_.findDevice(pos);
-               if (!device) {
-                 sendStatus(res, "404 Not Found", config_.corsOrigin);
-                 return;
-               }
-               sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
-                             [&]() -> std::expected<nlohmann::json, std::string> {
-                               if (auto r = device->writeSii(data); !r) {
-                                 return std::unexpected(r.error());
-                               }
-                               return nlohmann::json{{"ok", true}};
-                             });
-             });
-           })
-      .post("/api/sii/parse",
-            [this](auto* res, auto* /*req*/) {
-              // Bus-independent utility: parse a raw SII image uploaded in the request body
-              // (e.g. a previously downloaded .bin) and return the decoded structure. No device
-              // involved — the Tools SII page uses this to view EEPROM files offline through
-              // the same parser the device read path uses.
-              auto aborted = std::make_shared<bool>(false);
-              auto body = std::make_shared<std::string>();
-              res->onAborted([aborted]() { *aborted = true; });
-              res->onData([this, res, body, aborted](std::string_view chunk, bool last) {
-                body->append(chunk);
-                if (!last) {
-                  return;
-                }
-                if (*aborted) {
-                  return;
-                }
-                std::span<const uint8_t> bytes{reinterpret_cast<const uint8_t*>(body->data()),
-                                               body->size()};
-                auto parsed = mm::comm::parseSii(bytes);
-                if (!parsed) {
-                  sendError(res, "400 Bad Request", config_.corsOrigin, parsed.error());
-                  return;
-                }
-                sendJson(res, config_.corsOrigin, nlohmann::json(*parsed));
-              });
-            })
-      .get("/api/firmware-package-name",
-           [this](auto* res, auto* req) {
-             // Bus-independent utility alongside /api/sii/parse and /api/esi/parse: decode a
-             // SOMANET firmware package filename into its five fields (Hardware description
-             // specification §3.4.2) and, where the descriptor is the numeric kind, its product id,
-             // version, key and fieldbus. A GET with a query rather than a POST with a body —
-             // unlike its two siblings there is no file to upload, only a short string, so this is
-             // a plain cacheable read that is trivial to curl.
-             //
-             // The same decoder the firmware installation procedure uses to decide whether a
-             // package can be cached, so what this reports is what that will do.
-             const std::string filename{req->getQuery("filename")};
-             if (filename.empty()) {
-               sendError(res, "400 Bad Request", config_.corsOrigin,
-                         "a 'filename' query parameter is required");
-               return;
-             }
-             auto name = mm::node::parseFirmwarePackageName(filename);
-             if (!name) {
-               // The grammar it missed, not a bare rejection: this is a tool whose whole job is to
-               // say what a name means, so "why not" is the useful half of a negative answer.
-               sendError(res, "400 Bad Request", config_.corsOrigin, name.error());
-               return;
-             }
-             sendJson(res, config_.corsOrigin, nlohmann::json(*name));
-           })
-      .post("/api/esi/parse",
-            [this](auto* res, auto* req) {
-              // Bus-independent utility, the ESI counterpart of /api/sii/parse: decode a vendor's
-              // EtherCAT Slave Information XML uploaded in the request body. No device involved —
-              // the Tools page uses this to inspect an ESI with no hardware present, which is the
-              // only way to see descriptions, enum labels, units and min/max bounds, none of which
-              // the CoE SDO-Information service reports.
-              //
-              // The response carries every device with its own assembled entry table. That is
-              // affordable because object-level annotation is stored once, on subindex 0, rather
-              // than repeated onto every subindex — repeating it made one device's JSON 4.7 MB,
-              // 83% of it duplicated description HTML. The optional modules= query narrows the
-              // merge where a slot offers a choice of modules.
-              //
-              // req is only valid synchronously — capture the query before onData.
-              mm::etg::EsiParseRequest request;
-              std::string selectorError;
-              if (const auto q = req->getQuery("modules"); !q.empty()) {
-                auto idents = mm::etg::parseIdentList(q);
-                if (idents) {
-                  request.moduleIdents = std::move(*idents);
-                } else {
-                  selectorError = std::format("modules: {}", idents.error());
-                }
-              }
-
-              auto aborted = std::make_shared<bool>(false);
-              auto body = std::make_shared<std::string>();
-              res->onAborted([aborted]() { *aborted = true; });
-              res->onData(
-                  [this, res, body, aborted, request = std::move(request),
-                   selectorError = std::move(selectorError)](std::string_view chunk, bool last) {
-                    body->append(chunk);
-                    if (!last || *aborted) {
-                      return;
-                    }
-                    if (!selectorError.empty()) {
-                      sendError(res, "400 Bad Request", config_.corsOrigin, selectorError);
-                      return;
-                    }
-                    // Timed like a device operation, through the same X-Wire-Us channel — the
-                    // figure is CPU rather than wire time here (parse + assemble every device's
-                    // dictionary), which for a megabyte-scale ESI is the part worth watching.
-                    // JSON serialisation stays outside it, as it does everywhere else.
-                    sendTimedJson(res, config_.corsOrigin, "400 Bad Request",
-                                  [&]() { return mm::etg::buildEsiResponse(*body, request); });
-                  });
-            })
-      .post("/api/devices/:slavePosition/registers/:address",
-            [this](auto* res, auto* req) {
-              uint16_t pos{};
-              auto posParam = req->getParameter("slavePosition");
-              auto [p1, ec1] =
-                  std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-              bool posOk = (ec1 == std::errc() && p1 == posParam.data() + posParam.size());
-              uint16_t address{};
-              auto addrParam = req->getParameter("address");
-              auto [p2, ec2] =
-                  std::from_chars(addrParam.data(), addrParam.data() + addrParam.size(), address);
-              bool addrOk = (ec2 == std::errc() && p2 == addrParam.data() + addrParam.size());
-              auto aborted = std::make_shared<bool>(false);
-              auto body = std::make_shared<std::string>();
-              res->onAborted([aborted]() { *aborted = true; });
-              res->onData([this, res, body, aborted, pos, posOk, address, addrOk](
-                              std::string_view chunk, bool last) {
-                body->append(chunk);
-                if (!last) return;
-                if (*aborted) return;
-                if (!posOk || !addrOk) {
-                  sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                  return;
-                }
-                std::vector<uint8_t> data;
-                try {
-                  nlohmann::json j = nlohmann::json::parse(*body);
-                  data = j.at("data").get<std::vector<uint8_t>>();
-                } catch (const nlohmann::json::exception& e) {
-                  sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
-                  return;
-                }
-                const auto* device = deviceManager_.findDevice(pos);
-                if (!device) {
-                  sendStatus(res, "404 Not Found", config_.corsOrigin);
-                  return;
-                }
-                sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
-                              [&]() -> std::expected<nlohmann::json, std::string> {
-                                if (auto r = device->writeRegister(address, data); !r) {
-                                  return std::unexpected(r.error());
-                                }
-                                return nlohmann::json{{"ok", true}};
-                              });
-              });
-            })
-      .get("/api/devices/:slavePosition/watchdog",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p1, ec1] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             if (ec1 != std::errc() || p1 != posParam.data() + posParam.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             if (!deviceManager_.findDevice(pos)) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
-                           [&]() -> std::expected<nlohmann::json, std::string> {
-                             auto r = deviceManager_.processDataWatchdog(pos);
-                             if (!r) {
-                               return std::unexpected(r.error());
-                             }
-                             return watchdogJson(pos, *r);
-                           });
-           })
-      .put("/api/devices/:slavePosition/watchdog",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto posParam = req->getParameter("slavePosition");
-             auto [p1, ec1] =
-                 std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-             bool posOk = (ec1 == std::errc() && p1 == posParam.data() + posParam.size());
-             auto aborted = std::make_shared<bool>(false);
-             auto body = std::make_shared<std::string>();
-             res->onAborted([aborted]() { *aborted = true; });
-             res->onData([this, res, body, aborted, pos, posOk](std::string_view chunk, bool last) {
-               body->append(chunk);
-               if (!last) return;
-               if (*aborted) return;
-               if (!posOk) {
-                 sendStatus(res, "400 Bad Request", config_.corsOrigin);
-                 return;
-               }
-               double timeoutMs = 0;
-               try {
-                 nlohmann::json j = nlohmann::json::parse(*body);
-                 timeoutMs = j.at("timeoutMs").get<double>();
-               } catch (const nlohmann::json::exception& e) {
-                 sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
-                 return;
-               }
-               if (timeoutMs < 0) {
-                 sendError(res, "400 Bad Request", config_.corsOrigin,
-                           "timeoutMs must not be negative");
-                 return;
-               }
-               if (!deviceManager_.findDevice(pos)) {
-                 sendStatus(res, "404 Not Found", config_.corsOrigin);
-                 return;
-               }
-               auto ns = std::chrono::nanoseconds(static_cast<int64_t>(timeoutMs * 1e6 + 0.5));
-               sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
-                             [&]() -> std::expected<nlohmann::json, std::string> {
-                               auto r = deviceManager_.setProcessDataWatchdog(pos, ns);
-                               if (!r) {
-                                 return std::unexpected(r.error());
-                               }
-                               return watchdogJson(pos, *r);
-                             });
-             });
-           })
       .get("/api/devices/:slavePosition/pdo-mapping",
            [this](auto* res, auto* req) {
              uint16_t pos{};

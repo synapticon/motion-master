@@ -18,6 +18,23 @@ import type { Api } from '@synapticon/motion-master-client'
  * hand. The probe itself uses the raw `api` client (not React Query), so it
  * keeps running while everything else is paused and can flip the switch back.
  * Only one caller should drive this (RootLayout), so there is a single writer.
+ *
+ * That reach is why the probe is deliberately reluctant to declare the server
+ * dead. It is one un-retried sample driving a switch that stops the whole UI
+ * updating, and the moment that matters most is the one where it is most
+ * tempted to fire: during a long procedure the server is busy, so a probe is
+ * likelier to be slow or to lose a race — and a page reporting that
+ * procedure's progress is exactly what must not freeze. Hence two guards:
+ *
+ * - **A generous timeout, not a tight one.** Without any timeout a request
+ *   that never settles skips the `finally` and the probe never reschedules —
+ *   permanently, and if it wedges while offline nothing is left to turn
+ *   polling back on. But a short timeout is the opposite failure: a merely
+ *   slow answer gets reported as a dead server. Several intervals' grace
+ *   distinguishes "wedged" from "busy".
+ * - **Two consecutive failures before going offline**, one success to come
+ *   back. Offline stops everything, so it should need corroboration; online
+ *   costs nothing to re-enter and should be instant.
  */
 export function useApiHealth(api: Api, intervalMs = 2000): boolean {
   const [online, setOnline] = useState(false)
@@ -25,16 +42,18 @@ export function useApiHealth(api: Api, intervalMs = 2000): boolean {
   useEffect(() => {
     let cancelled = false
     let timer: ReturnType<typeof setTimeout> | undefined
+    let failures = 0
 
     async function check() {
       try {
-        await api.getVersion()
+        await api.getVersion({ signal: AbortSignal.timeout(intervalMs * 4) })
         if (!cancelled) {
+          failures = 0
           setOnline(true)
           onlineManager.setOnline(true)
         }
       } catch {
-        if (!cancelled) {
+        if (!cancelled && ++failures >= 2) {
           setOnline(false)
           onlineManager.setOnline(false)
         }

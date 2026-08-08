@@ -628,6 +628,10 @@ class Device {
   uint32_t productCode_;
   uint32_t revisionNumber_;
   uint32_t serialNumber_;
+  // EEPROM mailbox-protocol bits, copied at construction. Immutable like the identity fields above,
+  // and cached for the same reason the constructor explains: reading it from the driver on demand
+  // would take the control-plane mutex and so block behind whatever bus operation holds it.
+  uint16_t mailboxProtocols_ = 0;
   // Guards parameters_ against the off-RT monitoring threads (the refresher refreshes cached
   // values, the sampler reads them) racing the control-plane thread. Held only briefly — across
   // a cache read/write, or a single mailbox transaction in read/writeParameter; never across the

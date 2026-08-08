@@ -38,6 +38,17 @@ Device::Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver, Process
   productCode_ = info.productCode;
   revisionNumber_ = info.revisionNumber;
   serialNumber_ = info.serialNumber;
+  // Snapshotted here with the rest of the immutable SII identity, and for a sharper reason than
+  // symmetry: FieldbusDriver::mailboxProtocols takes the driver's control-plane mutex even though
+  // the value it returns is a cached EEPROM field, so asking for it mid-operation blocks for as
+  // long as whatever holds that mutex — a multi-second FoE transfer, an object-dictionary
+  // enumeration. That is a real cost rather than a theoretical one: supportsCoe() is a
+  // procedure-applicability predicate, so the progress poll of a running firmware installation used
+  // to serialise behind the very transfer it was reporting on, and the UI sat frozen on whichever
+  // step was running when the first binary started moving. Reading it once at construction — under
+  // the scan that created this device, when nothing else can hold the bus — makes the accessor
+  // honour its documented "no bus I/O" contract for the whole lifetime of the device.
+  mailboxProtocols_ = driver_.mailboxProtocols(slavePosition);
 }
 
 uint16_t Device::slavePosition() const { return slavePosition_; }
@@ -76,7 +87,7 @@ bool Device::mailboxActive() const {
 }
 
 bool Device::supportsCoe() const {
-  return (driver_.mailboxProtocols(slavePosition_) & mm::comm::MailboxConfig::kProtocolCoe) != 0;
+  return (mailboxProtocols_ & mm::comm::MailboxConfig::kProtocolCoe) != 0;
 }
 
 bool Device::exchangesProcessData() const {

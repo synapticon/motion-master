@@ -102,6 +102,16 @@ export default function DeviceProceduresPage() {
     // actually running; a page of finished results needs no traffic at all.
     refetchInterval: query =>
       (query.state.data ?? []).some(l => l.snapshot.status === 'running') ? 300 : false,
+    // Keep polling when the window is not focused, which React Query does not do by default.
+    // Without this the page silently stops updating the moment the user looks somewhere else — and
+    // for these procedures that is the normal case, not an edge case: a firmware installation runs
+    // for half a minute and the obvious thing to do meanwhile is watch the server log in a
+    // terminal. The page then sits frozen on whichever step was running when focus was lost, which
+    // reads as the install being stuck rather than as the page having stopped asking.
+    //
+    // Scoped to this query on purpose. Background polling everywhere would spend traffic and CPU on
+    // pages nobody is looking at; here the staleness is actively misleading about a live operation.
+    refetchIntervalInBackground: true,
     retry: false,
   })
 

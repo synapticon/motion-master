@@ -1548,6 +1548,36 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
           "Device {}: failed to reach state 0x{:02X} — AL status 0x{:04X}, code 0x{:04X} ({})", pos,
           targetRaw, alStatus, alStatusCode,
           name.empty() ? "unknown — not a known AL status code" : name);
+
+      // Say whether the slave is even reachable, because the AL status above cannot: SOEM keeps the
+      // last value it read, so a slave that has stopped answering reports whatever it last said —
+      // indistinguishable from one that is genuinely sitting in that state. The distinction decides
+      // what to do next, and nothing else in the log carries it.
+      //
+      // Two reads. FPRD addresses the slave by the station address the master assigned it; APRD
+      // addresses it by position on the wire, which needs no configuration. A slave that answers
+      // the second but not the first has lost its station address — which is what a device reset
+      // does, and the firmware handover out of BOOT is a reset.
+      uint16_t alStatusProbe = 0;
+      const int configuredWkc =
+          ecx_FPRD(&ctx_->port, ctx_->slavelist[pos].configadr, ECT_REG_ALSTAT,
+                   sizeof(alStatusProbe), &alStatusProbe, EC_TIMEOUTRET);
+      const int positionWkc = ecx_APRD(&ctx_->port, static_cast<uint16_t>(1 - pos), ECT_REG_ALSTAT,
+                                       sizeof(alStatusProbe), &alStatusProbe, EC_TIMEOUTRET);
+      if (configuredWkc > 0) {
+        spdlog::error(
+            "Device {}: it is answering at its configured address 0x{:04X}, so the state above is "
+            "live — the slave is refusing or ignoring the request rather than absent",
+            pos, ctx_->slavelist[pos].configadr);
+      } else if (positionWkc > 0) {
+        spdlog::error(
+            "Device {}: it answers by wire position but NOT at its configured address 0x{:04X} — "
+            "it has been reset and lost the address the master gave it, so the AL status above is "
+            "stale. It needs re-addressing (a scan) before it can be commanded again.",
+            pos, ctx_->slavelist[pos].configadr);
+      } else {
+        spdlog::error("Device {}: it is not answering at all — check the cabling and power", pos);
+      }
     }
   }
 }

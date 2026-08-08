@@ -1263,11 +1263,19 @@ namespace {
 //
 // @return true when the slave answers at its configured address (either it never lost it, or it
 //         has just been given it back).
-bool restoreStationAddress(ecx_contextt* ctx, uint16_t slave) {
+// Outcome of checking a slave's station address, which decides what the caller must do next: only a
+// slave that had to be re-addressed has also lost the sync managers the master programmed into it.
+enum class AddressState {
+  Answering,    ///< Reachable at its configured address; nothing was changed.
+  Reassigned,   ///< It had lost the address, and now answers again.
+  Unreachable,  ///< It answers at neither address.
+};
+
+AddressState restoreStationAddress(ecx_contextt* ctx, uint16_t slave) {
   const uint16_t configadr = ctx->slavelist[slave].configadr;
   uint16_t probe = 0;
   if (ecx_FPRD(&ctx->port, configadr, ECT_REG_ALSTAT, sizeof(probe), &probe, EC_TIMEOUTRET) > 0) {
-    return true;
+    return AddressState::Answering;
   }
   // Auto-increment address: 0 for slave 1, -1 for slave 2, and so on (ec_config.c's ADPh).
   const uint16_t autoIncrement = static_cast<uint16_t>(1 - slave);
@@ -1278,7 +1286,7 @@ bool restoreStationAddress(ecx_contextt* ctx, uint16_t slave) {
       "Device {}: it had reset and lost its station address; re-assigned 0x{:04X} at its "
       "wire position — {}",
       slave, configadr, reachable ? "it is answering again" : "it is still not answering");
-  return reachable;
+  return reachable ? AddressState::Reassigned : AddressState::Unreachable;
 }
 
 void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState targetState) {
@@ -1546,20 +1554,23 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
     if (std::chrono::steady_clock::now() - lastResend > resendInterval) {
       for (uint16_t pos : pending) {
         uint16_t state = ctx_->slavelist[pos].state;
-        // A slave still marked as holding BOOT mailbox parameters, sitting in INIT, is one that
-        // restarted into freshly written firmware: its sync managers went with the restart, so
-        // reprogram them before asking again. Without this the resend is a state request to a
-        // slave that cannot honour it.
+        // Leaving BOOT for PRE-OP makes the bootloader hand over to the newly written application
+        // by restarting the device, and the restart clears both the station address the master
+        // assigned and the mailbox sync managers it programmed. So for a slave we drove into BOOT,
+        // check the address on every resend and reprogram the sync managers if it turns out to have
+        // restarted.
+        //
+        // Keyed on whether the slave answers, never on its cached AL status: the cache holds
+        // whatever the master last wrote into it when the slave stops answering — the very target
+        // being requested — so it reads as a slave sitting exactly where it was asked to go, and is
+        // worthless as a test for the one condition that matters here. restoreStationAddress
+        // probes instead, and reports Answering when nothing needed doing, so this costs one
+        // register read per resend and reprograms only a slave that genuinely restarted (doing it
+        // otherwise seizes EEPROM from the slave's own PDI).
         if (targetState == EtherCatState::PreOp && bootMailboxSlaves_.contains(pos) &&
-            (state & 0x000Fu) == static_cast<uint16_t>(EtherCatState::Init)) {
-          // Address first, then reprogram. The restart clears the station address, and every read
-          // the reprogramming does — including the EEPROM reads it takes the mailbox offsets from —
-          // is addressed by it. Reprogramming an unreachable slave reads zeros back and writes them
-          // into the master's own copy of its mailbox configuration, destroying the good values.
-          if (restoreStationAddress(ctx_.get(), pos)) {
-            spdlog::info("Device {}: reprogramming mailbox sync managers after its restart", pos);
-            updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::PreOp);
-          }
+            restoreStationAddress(ctx_.get(), pos) == AddressState::Reassigned) {
+          spdlog::info("Device {}: reprogramming mailbox sync managers after its restart", pos);
+          updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::PreOp);
         }
         if (state & EC_STATE_ERROR) {
           ctx_->slavelist[pos].state = (state & 0x000Fu) | EC_STATE_ACK;

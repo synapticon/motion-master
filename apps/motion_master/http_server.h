@@ -171,18 +171,30 @@ class HttpServer {
   /// The two-port split already gives the WebSocket this protection; this is the same for HTTP
   /// requests against each other.
   ///
-  /// **Sized for blocked threads, not for throughput.** Bus operations serialise on the driver's
-  /// control-plane lock regardless, so extra workers buy no parallelism on the wire — what they buy
-  /// is that a request waiting on the wire cannot make a request waiting on something else, or one
-  /// needing nothing at all, queue behind it. Since *every* route now runs here, the pool has to be
-  /// wider than the number of requests that can be blocked at once, or `/api/version` ends up
-  /// behind a firmware transfer again — a milder version of the bug this exists to fix.
+  /// **Sized so it cannot be exhausted, which is what makes running every route here safe.**
   ///
-  /// A worker parked on a mutex costs a stack and a kernel task and nothing else, so there is no
-  /// reason to be frugal. Sixteen gives the ~5 simultaneous clients this API is sized for roughly
-  /// three concurrent requests each before anything queues.
+  /// The usual objection to putting *all* handlers on a pool — and it is a fair one for a
+  /// high-throughput service — is that quick requests end up queued behind slow ones, competing for
+  /// worker slots. That is the original bug in miniature, and it is the only one of the objections
+  /// with real force here: the thread hop itself costs microseconds against browser TLS round trips
+  /// of milliseconds, at the handful of requests per second this API actually sees.
+  ///
+  /// It is answered by arithmetic rather than by classification. HTTP/1.1 browsers cap at about six
+  /// connections per origin, so the ~5 simultaneous clients this is sized for can have at most
+  /// ~30 requests in flight at once. A pool wider than that can never be saturated by them, so no
+  /// request ever waits for a worker — a luxury of a bounded, local client population that a public
+  /// service does not get.
+  ///
+  /// The alternative, running "fast" handlers inline and only offloading blocking ones, was
+  /// considered and rejected on asymmetry: misjudging a blocking handler as fast freezes the entire
+  /// API, misjudging a fast one as blocking costs 30 µs. Six orders of magnitude apart — and the
+  /// judgement is genuinely hard here, since most handlers reach @c DeviceManager and whether one
+  /// blocks depends on what another thread is holding at the time. A boundary that erodes toward
+  /// the catastrophic side is not worth microseconds.
+  ///
+  /// A worker parked on a mutex costs a stack reservation and a kernel task, so 32 is free.
   ///
   /// `light_thread_pool` is the plain variant: no priorities, no pausing, no per-task futures —
   /// this only ever needs `detach_task`, `purge` and `wait`.
-  BS::light_thread_pool pool_{16};
+  BS::light_thread_pool pool_{32};
 };

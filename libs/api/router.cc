@@ -1,5 +1,7 @@
 #include "api/router.h"
 
+#include <spdlog/spdlog.h>
+
 #include <atomic>
 #include <memory>
 #include <string>
@@ -51,6 +53,32 @@ void writeResponse(uWS::HttpResponse<true>* res, std::string_view corsOrigin,
     auto [chunkOk, chunkDone] = res->tryEnd(std::string_view(*body).substr(offset), body->size());
     return chunkOk || chunkDone;
   });
+}
+
+// Reports the first request that has to wait for a worker, and the return to normal after it.
+//
+// Running every route on the pool is only safe because the pool cannot be saturated by the client
+// population this serves — a handful of local clients, each capped by the browser's ~6 connections
+// per origin. That is an argument from arithmetic, so it deserves to be checked against reality
+// rather than assumed: if a request ever does queue, the API has started degrading in exactly the
+// way the Router exists to prevent, and silence would hide it.
+//
+// Edge-triggered, so a saturated pool logs twice rather than once per request.
+void reportSaturation(const BS::light_thread_pool& pool) {
+  static std::atomic<bool> saturated{false};
+  const bool queued = pool.get_tasks_queued() > 0;
+  bool was = saturated.load(std::memory_order_relaxed);
+  if (queued == was || !saturated.compare_exchange_strong(was, queued)) {
+    return;
+  }
+  if (queued) {
+    spdlog::warn(
+        "HTTP worker pool saturated: all {} workers are busy and requests are now queuing. "
+        "Responses will be delayed until one frees.",
+        pool.get_thread_count());
+  } else {
+    spdlog::info("HTTP worker pool no longer saturated");
+  }
 }
 
 }  // namespace
@@ -144,6 +172,7 @@ void Router::add(std::string_view method, std::string pattern, Handler handler, 
                         std::string queryString,
                         std::vector<std::pair<std::string, std::string>> headers,
                         std::string body) {
+      reportSaturation(*pool);
       pool->detach_task([shared, loop, corsOrigin, res, aborted, url = std::move(url),
                          parameters = std::move(parameters), queryString = std::move(queryString),
                          headers = std::move(headers), body = std::move(body)]() mutable {

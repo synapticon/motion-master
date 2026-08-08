@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.67] - 2026-08-08
+
 ### Fixed
 
 - **A device is no longer left unreachable after a firmware installation.** Leaving BOOT restarts the device so its bootloader can hand over to the newly written firmware, and the restart clears the station address every master command is addressed by. Recovering that was keyed on the device's last-known AL state — which, once it stops answering, is simply the state the master last asked it for, so it looked like a device already sitting where it was told to go and the recovery never ran. The install then failed with the device apparently in an unknown state, reachable only by a full bus rescan. The master now checks the address on the wire, so a device that restarted is re-addressed and reaches PRE-OP within a few seconds. Affects 6.0.0-alpha.66.
@@ -532,7 +534,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.66...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.67...HEAD
+[6.0.0-alpha.67]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.66...v6.0.0-alpha.67
 [6.0.0-alpha.66]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.65...v6.0.0-alpha.66
 [6.0.0-alpha.65]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.64...v6.0.0-alpha.65
 [6.0.0-alpha.64]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.63...v6.0.0-alpha.64

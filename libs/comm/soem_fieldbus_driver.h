@@ -1,5 +1,7 @@
 #pragma once
 
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <set>
@@ -220,6 +222,15 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// here. Idempotent — a second call is a no-op once @c ctx_ is null. Takes @c controlPlaneMutex_.
   void closeContext();
 
+  /// Refreshes @c slaveStates_ from the context's slavelist. Call with @c controlPlaneMutex_ held,
+  /// at the end of every locked scope that ran a SOEM call able to change a cached AL status
+  /// (@c ecx_config_init, @c ecx_readstate, @c ecx_writestate) or assigned one directly.
+  ///
+  /// Copying the whole array rather than one position is deliberate: it costs a couple of hundred
+  /// relaxed stores, and it means a new call site cannot publish a partial view by forgetting which
+  /// slaves its operation touched.
+  void publishSlaveStates();
+
   std::string ifname_;
   // Keep SOEM 2.0's mailbox-status FMMU active (see the constructor). Default false: the FMMU is
   // deactivated after every map by deactivateMailboxStatusFmmus().
@@ -234,6 +245,20 @@ class SoemFieldbusDriver : public FieldbusDriver {
   // here. At ~100 bytes per axis across both directions this holds ~320 axes — far beyond the
   // ~50 the stack targets.
   uint8_t map_[kMaxProcessImageBytes]{};
+  // Lock-free mirror of every slave's cached AL status, indexed by position exactly as SOEM's
+  // slavelist is (index 0 being the master). This exists so slaveState() can honour the
+  // "must not block" contract on FieldbusDriver::slaveState: the value it serves lives in SOEM's
+  // slavelist, which is only safe to touch under controlPlaneMutex_, and that lock is held across
+  // whole FoE transfers. Rather than make every reader wait on a flash write to learn an AL state,
+  // the writers publish here at the end of each locked scope and readers take it without a lock.
+  //
+  // Allocated once in the constructor at SOEM's compile-time maximum and never reallocated, so a
+  // reader may index it for the driver's whole lifetime with nothing to synchronise against — the
+  // reason it is not a vector<atomic>, whose reallocation paths are ill-formed on libc++ and MSVC.
+  // Sized from the .cc so this header keeps SOEM out of its includes.
+  std::unique_ptr<std::atomic<uint16_t>[]> slaveStates_;
+  // Immutable after construction, so it needs no synchronisation of its own.
+  std::size_t slaveStatesSize_ = 0;
   // 1-based positions whose context currently holds BOOT-sized mailbox sync
   // managers (set when we drive a slave into BOOT). ecx_config_init programs the
   // correct PRE-OP mailbox SMs for every slave during scan(), so a fresh-scan

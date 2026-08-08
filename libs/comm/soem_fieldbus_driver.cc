@@ -31,7 +31,14 @@
 namespace mm::comm::soem {
 
 SoemFieldbusDriver::SoemFieldbusDriver(SoemFieldbusDriverConfig config)
-    : ifname_(std::move(config.ifname)), mailboxStatusFmmu_(config.mailboxStatusFmmu) {}
+    : ifname_(std::move(config.ifname)),
+      mailboxStatusFmmu_(config.mailboxStatusFmmu),
+      // Sized here rather than in the header so EC_MAXSLAVE — and SOEM's headers with it — stay out
+      // of the public interface. Mirrors slavelist's own extent, so a position the rest of the
+      // driver accepts indexes this too. make_unique value-initialises, so every entry starts at 0:
+      // "no state known", which is exactly true before the first scan.
+      slaveStates_(std::make_unique<std::atomic<uint16_t>[]>(EC_MAXSLAVE)),
+      slaveStatesSize_(EC_MAXSLAVE) {}
 
 SoemFieldbusDriver::~SoemFieldbusDriver() { closeContext(); }
 
@@ -102,6 +109,9 @@ std::expected<int, std::string> SoemFieldbusDriver::scan() {
   // non-positive value means no slaves answered. Negative values are SOEM transport codes
   // (EC_NOFRAME = -1, etc.); 0 is a returned frame that no slave incremented.
   int found = ecx_config_init(ctx_.get());
+  // Before the branches below, so every outcome publishes: a scan that found nothing must clear the
+  // states of the slaves that are no longer there, not leave the previous scan's values readable.
+  publishSlaveStates();
   if (found > 0) {
     spdlog::debug("SOEM scan found {} slave(s) on '{}'", found, ifname_);
     return found;
@@ -301,6 +311,9 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
   // is generated, matching how the bus was brought up previously.
   const bool dc = ecx_configdc(ctx_.get());
   spdlog::info("Distributed clock configured; DC-capable slaves present: {}", dc ? "yes" : "no");
+  // ecx_config_map_group and ecx_configdc both read state back into the slavelist, so republish
+  // rather than leave the mirror describing the bus as it was before the map.
+  publishSlaveStates();
   const auto& grp = ctx_->grouplist[0];
   const auto period = recommendedCyclePeriod(grp.Obytes + grp.Ibytes, ctx_->slavecount);
   spdlog::info(
@@ -516,6 +529,9 @@ void SoemFieldbusDriver::closeContext() {
     ecx_close(ctx_.get());
     ctx_.reset();  // unique_ptr::reset: destroy the ecx_context, leave ctx_ holding nullptr
   }
+  // With no context there is no state to know. Publishing zeros here is what stops a reader seeing
+  // the states a torn-down bus had, which would read as devices still sitting in OP.
+  publishSlaveStates();
 }
 
 SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
@@ -539,10 +555,32 @@ int SoemFieldbusDriver::slaveCount() const {
 }
 
 uint16_t SoemFieldbusDriver::slaveState(uint16_t position) const {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
-  // SOEM caches the AL status in slavelist[].state, refreshed by ecx_readstate (via
-  // readStates) and ecx_writestate (via transitionToState). No bus I/O here.
-  return ctx_ ? ctx_->slavelist[position].state : 0;
+  // Deliberately lock-free — see slaveStates_ and the "must not block" note on
+  // FieldbusDriver::slaveState. Reading SOEM's slavelist directly here would need
+  // controlPlaneMutex_, which a firmware transfer holds for its whole duration, and this is asked
+  // per monitoring flush for every device; the value is published by publishSlaveStates() instead.
+  //
+  // Relaxed is the right ordering and not a shortcut: each entry is a self-contained value with no
+  // companion state to order against, and a reader is by definition unsynchronised with the
+  // transition publishing it. What it guarantees — that a torn or invented value is impossible, and
+  // that the last published one becomes visible — is the whole requirement.
+  //
+  // The bounds check makes an out-of-range position read as "no state known" rather than off the
+  // end of the array. The interface lets an implementation trust the position, but here the cost is
+  // one comparison against an immutable size, which is not worth trading for an out-of-bounds read.
+  return position < slaveStatesSize_ ? slaveStates_[position].load(std::memory_order_relaxed) : 0;
+}
+
+void SoemFieldbusDriver::publishSlaveStates() {
+  const int count = ctx_ ? ctx_->slavecount : 0;
+  for (std::size_t position = 0; position < slaveStatesSize_; ++position) {
+    // Everything past slavecount publishes 0 — the same "no state known" a fresh driver reports —
+    // so a slave that a rescan removed cannot keep answering with the state it had before.
+    const uint16_t state = (ctx_ != nullptr && position <= static_cast<std::size_t>(count))
+                               ? ctx_->slavelist[position].state
+                               : 0;
+    slaveStates_[position].store(state, std::memory_order_relaxed);
+  }
 }
 
 uint16_t SoemFieldbusDriver::mailboxProtocols(uint16_t position) const {
@@ -559,6 +597,7 @@ SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
     return std::unexpected("no driver — call init() first");
   }
   ecx_readstate(ctx_.get());
+  publishSlaveStates();
   std::vector<SlaveStateRaw> result;
   result.reserve(positions.size());
   std::ranges::transform(positions, std::back_inserter(result), [this](uint16_t pos) {
@@ -1420,6 +1459,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
           kicked.push_back(pos);
         }
       }
+      publishSlaveStates();
     }
     if (!kicked.empty()) {
       spdlog::debug("Issued INIT+ACK to {} slave(s) in INIT before requesting state 0x{:02X}",
@@ -1462,6 +1502,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
         pending.insert(pos);
       }
     }
+    publishSlaveStates();
   }
 
   auto deadline = std::chrono::steady_clock::now() + timeout;
@@ -1570,6 +1611,10 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
       }
       lastResend = std::chrono::steady_clock::now();
     }
+    // Published every poll, not once at the end. A transition can take seconds and a reader used to
+    // see each intermediate state as the lock was released between polls; publishing here preserves
+    // that, so the mirror is as live as the slavelist read it replaces.
+    publishSlaveStates();
   }
 
   if (!aborted) {

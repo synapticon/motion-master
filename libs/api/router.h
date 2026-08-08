@@ -60,10 +60,12 @@ namespace mm::api {
 class Request {
  public:
   Request(std::string url, std::vector<std::pair<std::string, std::string>> parameters,
-          std::string queryString, std::string body)
+          std::string queryString, std::vector<std::pair<std::string, std::string>> headers,
+          std::string body)
       : url_(std::move(url)),
         parameters_(std::move(parameters)),
         queryString_(std::move(queryString)),
+        headers_(std::move(headers)),
         body_(std::move(body)) {}
 
   /// @brief The full request path.
@@ -72,6 +74,25 @@ class Request {
   /// @brief The request body, empty for methods that carry none. Complete — a handler never sees a
   ///        partial body, because dispatch waits for the last chunk.
   const std::string& body() const { return body_; }
+
+  /// @brief A request header by name, lower-cased as uWS delivers it, or empty when absent.
+  ///
+  /// Needed for content negotiation: several endpoints return raw bytes or parsed JSON depending
+  /// on @c Accept, and one reads @c Content-Type.
+  std::string_view header(std::string_view name) const {
+    for (const auto& [key, value] : headers_) {
+      if (key == name) {
+        return value;
+      }
+    }
+    return {};
+  }
+
+  /// @brief Whether @c Accept asks for @p contentType. Substring, matching how these endpoints have
+  ///        always negotiated: an `Accept` of `*/*` or absent means "the default", not "any".
+  bool accepts(std::string_view contentType) const {
+    return header("accept").find(contentType) != std::string_view::npos;
+  }
 
   /// @brief A path parameter by the name the route pattern declared (`:slavePosition`), or empty.
   std::string_view parameter(std::string_view name) const {
@@ -126,6 +147,7 @@ class Request {
   std::string url_;
   std::vector<std::pair<std::string, std::string>> parameters_;
   std::string queryString_;
+  std::vector<std::pair<std::string, std::string>> headers_;
   std::string body_;
 };
 

@@ -16,8 +16,11 @@ namespace {
 // design: a handler and everything it reads can be exercised with no server, no socket and no loop.
 Request request(std::string url = "/api/devices/1/sdo/0x6040/0",
                 std::vector<std::pair<std::string, std::string>> parameters = {},
-                std::string queryString = {}, std::string body = {}) {
-  return Request(std::move(url), std::move(parameters), std::move(queryString), std::move(body));
+                std::string queryString = {},
+                std::vector<std::pair<std::string, std::string>> headers = {},
+                std::string body = {}) {
+  return Request(std::move(url), std::move(parameters), std::move(queryString), std::move(headers),
+                 std::move(body));
 }
 
 TEST(RequestTest, ReadsPathParametersByName) {
@@ -65,8 +68,16 @@ TEST(RequestTest, DistinguishesAnEmptyValueFromAnAbsentKey) {
   EXPECT_FALSE(req.query("readValues2").has_value()) << "a prefix must not match";
 }
 
+TEST(RequestTest, ReadsHeadersAndNegotiatesContent) {
+  const auto req = request("/", {}, "", {{"accept", "application/octet-stream"}});
+  EXPECT_EQ(req.header("accept"), "application/octet-stream");
+  EXPECT_TRUE(req.accepts("application/octet-stream"));
+  EXPECT_FALSE(req.accepts("text/csv"));
+  EXPECT_EQ(req.header("absent"), "");
+}
+
 TEST(RequestTest, CarriesTheWholeBody) {
-  const auto req = request("/", {}, "", R"({"state": 8})");
+  const auto req = request("/", {}, "", {}, R"({"state": 8})");
   EXPECT_EQ(req.body(), R"({"state": 8})");
 }
 

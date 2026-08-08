@@ -528,6 +528,156 @@ void HttpServer::run() {
                return mm::api::json(nlohmann::json(*listings));
              });
 
+  // ── Server, certificate and reference tables ────────────────────────────────────────────────
+  // Static or near-static, but registered through the Router like everything else: one shape per
+  // route means no per-endpoint judgement about whether it is "cheap enough" to run on the loop,
+  // and no way for one to quietly acquire a blocking call later.
+  router.get("/api/swagger.yml", [](const mm::api::Request&) {
+    // Embedded at build time (swagger_spec.h). text/yaml renders inline in a browser; a client
+    // fetches it to resolve the running server's exact API contract.
+    auto response = mm::api::bytes("text/yaml; charset=utf-8", std::string(mm::kSwaggerYml));
+    response.headers.emplace_back("Content-Disposition", "inline");
+    return response;
+  });
+
+  router.get("/api/adapters", [](const mm::api::Request&) {
+    return mm::api::json(nlohmann::json(mm::comm::enumerateNetworkAdapters()));
+  });
+
+  router.get("/api/version", [this](const mm::api::Request&) {
+    return mm::api::json(nlohmann::json{{"version", config_.version}});
+  });
+
+  router.get("/api/config", [this](const mm::api::Request&) {
+    // Pre-serialized at startup; parsed back so the response carries the JSON content type.
+    return mm::api::json(config_.startedConfig.empty()
+                             ? nlohmann::json::object()
+                             : nlohmann::json::parse(config_.startedConfig));
+  });
+
+  router.get("/api/system-info", [](const mm::api::Request&) {
+    return mm::api::json(nlohmann::json(mm::core::collectSystemInfo()));
+  });
+
+  router.get("/api/cert", [this](const mm::api::Request&) {
+    auto info = mm::readCertInfo(config_.certFile);
+    if (!info) {
+      return mm::api::error("500 Internal Server Error", info.error());
+    }
+    return mm::api::json(certInfoJson(*info, config_.certFile));
+  });
+
+  // A ~1 s network fetch. It used to block every other request for its duration; off the loop it
+  // is simply a slow endpoint, which is what it always should have been.
+  router.post("/api/cert/refresh", [this](const mm::api::Request&) {
+    if (!config_.refreshCert) {
+      return mm::api::error("501 Not Implemented", "certificate refresh is not configured");
+    }
+    if (auto r = config_.refreshCert(); !r) {
+      return mm::api::error("500 Internal Server Error", r.error());
+    }
+    // The fresh cert is on disk, but uSockets bound the old one at listen — restart to apply.
+    auto info = mm::readCertInfo(config_.certFile);
+    nlohmann::json body = info ? certInfoJson(*info, config_.certFile) : nlohmann::json::object();
+    body["restartRequired"] = true;
+    return mm::api::json(body);
+  });
+
+  router.get("/api/log", [this](const mm::api::Request&) {
+    auto lines = config_.getLog ? config_.getLog() : std::vector<std::string>{};
+    std::string body;
+    for (const auto& line : lines) {
+      body += line;
+      body += '\n';
+    }
+    return mm::api::bytes("text/plain; charset=utf-8", std::move(body));
+  });
+
+  router.get("/api/meta/esc-registers", [](const mm::api::Request&) {
+    return mm::api::json(nlohmann::json(mm::comm::kEscRegisters));
+  });
+  router.get("/api/meta/al-status-codes", [](const mm::api::Request&) {
+    return mm::api::json(nlohmann::json(mm::comm::kAlStatusCodes));
+  });
+  router.get("/api/meta/foe-error-codes", [](const mm::api::Request&) {
+    return mm::api::json(nlohmann::json(mm::comm::kFoeErrorCodes));
+  });
+  router.get("/api/meta/sdo-abort-codes", [](const mm::api::Request&) {
+    return mm::api::json(nlohmann::json(mm::comm::kSdoAbortCodes));
+  });
+  router.get("/api/meta/mailbox-error-codes", [](const mm::api::Request&) {
+    return mm::api::json(nlohmann::json(mm::comm::kMailboxErrorCodes));
+  });
+
+  // ── Bus-level reads and the game loop ───────────────────────────────────────────────────────
+  router.get("/api/devices/diagnostics", [this](const mm::api::Request& req) -> mm::api::Response {
+    auto positions = parsePositions(req);
+    if (!positions) {
+      return mm::api::badRequest(positions.error());
+    }
+    return mm::api::timed(
+        [this, &positions] { return deviceManager_.deviceDiagnostics(*positions); });
+  });
+
+  router.get("/api/dc-sync", [this](const mm::api::Request& req) -> mm::api::Response {
+    auto positions = parsePositions(req);
+    if (!positions) {
+      return mm::api::badRequest(positions.error());
+    }
+    return mm::api::timed([this, &positions] { return deviceManager_.dcSync(*positions); });
+  });
+
+  router.get("/api/devices", [this](const mm::api::Request&) {
+    return mm::api::json(nlohmann::json(deviceManager_));
+  });
+
+  router.get("/api/process-image", [this](const mm::api::Request&) {
+    return mm::api::json(nlohmann::json(deviceManager_.processImageInfo()));
+  });
+
+  router.get("/api/bus-config", [this](const mm::api::Request&) {
+    return mm::api::json(nlohmann::json(deviceManager_.busConfig()));
+  });
+
+  router.get("/api/game-loop", [this](const mm::api::Request&) -> mm::api::Response {
+    if (!config_.getGameLoopHealth) {
+      return mm::api::error("501 Not Implemented", "game-loop health is not configured");
+    }
+    return mm::api::json(nlohmann::json(config_.getGameLoopHealth()));
+  });
+
+  router.put("/api/game-loop", [this](const mm::api::Request& req) -> mm::api::Response {
+    if (!config_.setGameLoopPeriod) {
+      return mm::api::error("501 Not Implemented", "game-loop control is not configured");
+    }
+    // parse(..., allow_exceptions = false) rather than a try/catch: the no-exceptions mandate, and
+    // a discarded value says everything a caught exception would.
+    const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+    if (body.is_discarded() || !body.contains("periodUs") ||
+        !body["periodUs"].is_number_unsigned()) {
+      return mm::api::badRequest("body must be {\"periodUs\": <microseconds>}");
+    }
+    // Validation lives in the callback (main.cc) — the HTTP layer just forwards.
+    auto applied = config_.setGameLoopPeriod(body["periodUs"].get<uint32_t>());
+    if (!applied) {
+      return mm::api::badRequest(applied.error());
+    }
+    return mm::api::json(nlohmann::json(config_.getGameLoopHealth()));
+  });
+
+  router.get("/api/devices/:slavePosition",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               const auto* device = deviceManager_.findDevice(*position);
+               if (device == nullptr) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               return mm::api::json(nlohmann::json(*device));
+             });
+
   // Register the built-in routes as a statement on `app` (not moved), then hand `app` to any
   // registered plug-in modules so they can add their own routes, then finish with the CORS
   // preflight, the catch-all 404, and listen(). All three phases operate on the same `app` object.
@@ -548,185 +698,6 @@ void HttpServer::run() {
                     "</ul>"
                     "</body></html>");
           })
-      .get("/api/swagger.yml",
-           [this](auto* res, auto* /*req*/) {
-             // Embedded at build time (swagger_spec.h). text/yaml renders inline in a browser;
-             // a client fetches it to resolve the running server's exact API contract.
-             setCorsOrigin(res, config_.corsOrigin)
-                 ->writeHeader("Content-Type", "text/yaml; charset=utf-8")
-                 ->writeHeader("Content-Disposition", "inline")
-                 ->end(mm::kSwaggerYml);
-           })
-      .get("/api/adapters",
-           [this](auto* res, auto* /*req*/) {
-             nlohmann::json arr = mm::comm::enumerateNetworkAdapters();
-             sendJson(res, config_.corsOrigin, arr);
-           })
-      .get("/api/version",
-           [this](auto* res, auto* /*req*/) {
-             sendJson(res, config_.corsOrigin, nlohmann::json{{"version", config_.version}});
-           })
-      .get("/api/config",
-           [this](auto* res, auto* /*req*/) {
-             // Pre-serialized at startup; parse back so sendJson sets the JSON content type +
-             // CORS.
-             sendJson(res, config_.corsOrigin,
-                      config_.startedConfig.empty() ? nlohmann::json::object()
-                                                    : nlohmann::json::parse(config_.startedConfig));
-           })
-      .get("/api/system-info",
-           [this](auto* res, auto* /*req*/) {
-             sendJson(res, config_.corsOrigin, nlohmann::json(mm::core::collectSystemInfo()));
-           })
-      .get("/api/cert",
-           [this](auto* res, auto* /*req*/) {
-             auto info = mm::readCertInfo(config_.certFile);
-             if (!info) {
-               sendError(res, "500 Internal Server Error", config_.corsOrigin, info.error());
-               return;
-             }
-             sendJson(res, config_.corsOrigin, certInfoJson(*info, config_.certFile));
-           })
-      .post("/api/cert/refresh",
-            [this](auto* res, auto* /*req*/) {
-              if (!config_.refreshCert) {
-                sendError(res, "501 Not Implemented", config_.corsOrigin,
-                          "certificate refresh is not configured");
-                return;
-              }
-              // Synchronous network fetch on the HTTP loop thread: it briefly blocks other HTTP
-              // requests (the WebSocket runs on a separate loop, so it is unaffected), accepted
-              // because refresh is a rare, manual action and the fetch is ~1s. To make it fully
-              // non-blocking, move it to a background thread and respond via loop->defer.
-              if (auto r = config_.refreshCert(); !r) {
-                sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-                return;
-              }
-              // The fresh cert is on disk, but uSockets bound the old one at listen — restart
-              // to apply. Report the newly installed cert's details plus the restart hint.
-              auto info = mm::readCertInfo(config_.certFile);
-              nlohmann::json body =
-                  info ? certInfoJson(*info, config_.certFile) : nlohmann::json::object();
-              body["restartRequired"] = true;
-              sendJson(res, config_.corsOrigin, body);
-            })
-      .get("/api/log",
-           [this](auto* res, auto* /*req*/) {
-             auto lines = config_.getLog ? config_.getLog() : std::vector<std::string>{};
-             std::string body;
-             for (const auto& line : lines) {
-               body += line;
-               body += '\n';
-             }
-             sendBytes(res, config_.corsOrigin, "text/plain; charset=utf-8", body);
-           })
-      .get("/api/meta/esc-registers",
-           [this](auto* res, auto* /*req*/) {
-             sendJson(res, config_.corsOrigin, nlohmann::json(mm::comm::kEscRegisters));
-           })
-      .get("/api/meta/al-status-codes",
-           [this](auto* res, auto* /*req*/) {
-             sendJson(res, config_.corsOrigin, nlohmann::json(mm::comm::kAlStatusCodes));
-           })
-      .get("/api/meta/foe-error-codes",
-           [this](auto* res, auto* /*req*/) {
-             sendJson(res, config_.corsOrigin, nlohmann::json(mm::comm::kFoeErrorCodes));
-           })
-      .get("/api/meta/sdo-abort-codes",
-           [this](auto* res, auto* /*req*/) {
-             sendJson(res, config_.corsOrigin, nlohmann::json(mm::comm::kSdoAbortCodes));
-           })
-      .get("/api/meta/mailbox-error-codes",
-           [this](auto* res, auto* /*req*/) {
-             sendJson(res, config_.corsOrigin, nlohmann::json(mm::comm::kMailboxErrorCodes));
-           })
-      .get("/api/devices/diagnostics",
-           [this](auto* res, auto* req) {
-             auto positions = parsePositions(res, req, config_.corsOrigin);
-             if (!positions) {
-               return;  // parsePositions already wrote the 400 response
-             }
-             sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
-                           [&] { return deviceManager_.deviceDiagnostics(*positions); });
-           })
-      .get("/api/dc-sync",
-           [this](auto* res, auto* req) {
-             auto positions = parsePositions(res, req, config_.corsOrigin);
-             if (!positions) {
-               return;  // parsePositions already wrote the 400 response
-             }
-             sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error",
-                           [&] { return deviceManager_.dcSync(*positions); });
-           })
-      .get("/api/devices",
-           [this](auto* res, auto* /*req*/) {
-             sendJson(res, config_.corsOrigin, nlohmann::json(deviceManager_));
-           })
-      .get("/api/process-image",
-           [this](auto* res, auto* /*req*/) {
-             sendJson(res, config_.corsOrigin, nlohmann::json(deviceManager_.processImageInfo()));
-           })
-      .get("/api/game-loop",
-           [this](auto* res, auto* /*req*/) {
-             if (!config_.getGameLoopHealth) {
-               sendError(res, "501 Not Implemented", config_.corsOrigin,
-                         "game-loop health is not configured");
-               return;
-             }
-             sendJson(res, config_.corsOrigin, nlohmann::json(config_.getGameLoopHealth()));
-           })
-      .put("/api/game-loop",
-           [this](auto* res, auto* /*req*/) {
-             auto aborted = std::make_shared<bool>(false);
-             auto body = std::make_shared<std::string>();
-             res->onAborted([aborted]() { *aborted = true; });
-             res->onData([this, res, body, aborted](std::string_view chunk, bool last) {
-               body->append(chunk);
-               if (!last) return;
-               if (*aborted) return;
-               if (!config_.setGameLoopPeriod) {
-                 sendError(res, "501 Not Implemented", config_.corsOrigin,
-                           "game-loop control is not configured");
-                 return;
-               }
-               uint32_t periodUs = 0;
-               try {
-                 nlohmann::json j = nlohmann::json::parse(*body);
-                 periodUs = j.at("periodUs").get<uint32_t>();
-               } catch (const nlohmann::json::exception& e) {
-                 sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
-                 return;
-               }
-               // Validation lives in the callback (main.cc) — the HTTP layer just forwards. A
-               // rejected value (e.g. 0) comes back as an error string.
-               auto r = config_.setGameLoopPeriod(periodUs);
-               if (!r) {
-                 sendError(res, "400 Bad Request", config_.corsOrigin, r.error());
-                 return;
-               }
-               sendJson(res, config_.corsOrigin, nlohmann::json(config_.getGameLoopHealth()));
-             });
-           })
-      .get("/api/bus-config",
-           [this](auto* res, auto* /*req*/) {
-             sendJson(res, config_.corsOrigin, nlohmann::json(deviceManager_.busConfig()));
-           })
-      .get("/api/devices/:slavePosition",
-           [this](auto* res, auto* req) {
-             uint16_t pos{};
-             auto param = req->getParameter("slavePosition");
-             auto [ptr, ec] = std::from_chars(param.data(), param.data() + param.size(), pos);
-             if (ec != std::errc() || ptr != param.data() + param.size()) {
-               sendStatus(res, "400 Bad Request", config_.corsOrigin);
-               return;
-             }
-             const auto* device = deviceManager_.findDevice(pos);
-             if (!device) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             sendJson(res, config_.corsOrigin, nlohmann::json(*device));
-           })
       .get("/api/devices/:slavePosition/registers/:address",
            [this](auto* res, auto* req) {
              uint16_t pos{};

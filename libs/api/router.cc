@@ -125,6 +125,12 @@ void Router::add(std::string_view method, std::string pattern, Handler handler, 
     }
     auto url = std::string(req->getUrl());
     auto queryString = std::string(req->getQuery());
+    // Headers are copied wholesale rather than by name, because the snapshot is taken before any
+    // handler runs and cannot know which ones that handler will ask for.
+    std::vector<std::pair<std::string, std::string>> headers;
+    for (auto [key, value] : *req) {
+      headers.emplace_back(std::string(key), std::string(value));
+    }
 
     // Set before any dispatch: a client can disconnect while the handler is still working, and this
     // flag is the only thing that keeps the deferred write off a destroyed response. Both this and
@@ -135,12 +141,14 @@ void Router::add(std::string_view method, std::string pattern, Handler handler, 
     auto dispatch = [shared, loop, pool, corsOrigin, res, aborted](
                         std::string url,
                         std::vector<std::pair<std::string, std::string>> parameters,
-                        std::string queryString, std::string body) {
+                        std::string queryString,
+                        std::vector<std::pair<std::string, std::string>> headers,
+                        std::string body) {
       pool->detach_task([shared, loop, corsOrigin, res, aborted, url = std::move(url),
                          parameters = std::move(parameters), queryString = std::move(queryString),
-                         body = std::move(body)]() mutable {
+                         headers = std::move(headers), body = std::move(body)]() mutable {
         const Request request(std::move(url), std::move(parameters), std::move(queryString),
-                              std::move(body));
+                              std::move(headers), std::move(body));
         Response response = (*shared)(request);
         loop->defer([corsOrigin, res, aborted, response = std::move(response)]() {
           if (aborted->load()) {
@@ -152,7 +160,8 @@ void Router::add(std::string_view method, std::string pattern, Handler handler, 
     };
 
     if (!hasBody) {
-      dispatch(std::move(url), std::move(parameters), std::move(queryString), std::string{});
+      dispatch(std::move(url), std::move(parameters), std::move(queryString), std::move(headers),
+               std::string{});
       return;
     }
     // A body arrives in chunks; the handler is dispatched once the last one has. Accumulating here
@@ -160,12 +169,14 @@ void Router::add(std::string_view method, std::string pattern, Handler handler, 
     // body-carrying endpoint used to hold.
     auto body = std::make_shared<std::string>();
     res->onData([dispatch, aborted, body, url = std::move(url), parameters = std::move(parameters),
-                 queryString = std::move(queryString)](std::string_view chunk, bool last) mutable {
+                 queryString = std::move(queryString),
+                 headers = std::move(headers)](std::string_view chunk, bool last) mutable {
       body->append(chunk);
       if (!last || aborted->load()) {
         return;
       }
-      dispatch(std::move(url), std::move(parameters), std::move(queryString), std::move(*body));
+      dispatch(std::move(url), std::move(parameters), std::move(queryString), std::move(headers),
+               std::move(*body));
     });
   };
 

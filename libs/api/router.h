@@ -3,6 +3,7 @@
 #include <uwebsockets/App.h>
 
 #include <BS_thread_pool.hpp>
+#include <atomic>
 #include <charconv>
 #include <chrono>
 #include <functional>
@@ -202,6 +203,18 @@ struct Response {
 /// string, or such a name truncates into a different one.
 std::string percentDecode(std::string_view text);
 
+/// @brief The `:name` tokens of a route pattern, in the order uWS will index them.
+///
+/// uWS addresses path parameters positionally — `req->getParameter(0)`; naming them is this layer's
+/// doing, so a handler asks for `parameter("slavePosition")` and stays correct when a route gains a
+/// segment ahead of it. A name runs to the next `/` or to the end of the pattern, so a trailing
+/// parameter needs no terminator, and a pattern with none (`/api/user-cache/*`) yields nothing.
+///
+/// Declared here rather than kept file-local so the mapping can be tested directly: it is the one
+/// piece of pattern parsing this layer does itself, and a route whose names come out shifted by one
+/// would still compile, still serve, and answer with another parameter's value.
+std::vector<std::string> parameterNames(std::string_view pattern);
+
 /// @brief A 200 response carrying @p body as JSON.
 ///
 /// Serialised with the @c replace error handler so a string value carrying non-UTF-8 bytes (a
@@ -263,10 +276,12 @@ class Router {
   /// @param app         The uWS app to register on.
   /// @param loop        The app's loop; responses are written by deferring onto it.
   /// @param pool        Workers the handlers run on. Must be drained before @p loop is closed.
+  /// @param stopping    Set once shutdown has begun; while it is set, requests are answered 503
+  ///                    instead of being dispatched. See @c stopping_.
   /// @param corsOrigin  Value for `Access-Control-Allow-Origin`; must outlive the server.
   Router(uWS::SSLApp& app, uWS::Loop* loop, BS::light_thread_pool& pool,
-         std::string_view corsOrigin)
-      : app_(app), loop_(loop), pool_(pool), corsOrigin_(corsOrigin) {}
+         const std::atomic<bool>& stopping, std::string_view corsOrigin)
+      : app_(app), loop_(loop), pool_(pool), stopping_(stopping), corsOrigin_(corsOrigin) {}
 
   /// @brief Registers @p handler for GET @p pattern. Path parameters are `:name` as in uWS.
   void get(std::string pattern, Handler handler) {
@@ -291,6 +306,17 @@ class Router {
   uWS::SSLApp& app_;
   uWS::Loop* loop_;
   BS::light_thread_pool& pool_;
+  /// Whether the server has begun shutting down, owned by the server and only ever set there.
+  ///
+  /// A handler finishing its work defers the write back onto the loop, so a worker must never
+  /// outlive the loop thread. The server drains the pool before closing the loop for that reason —
+  /// but draining is not enough on its own, because the loop keeps accepting while it drains, and a
+  /// request arriving after the drain would dispatch a *fresh* worker that then defers onto a loop
+  /// whose thread has since exited. This flag closes that door: the server sets it on the loop
+  /// thread and only then drains, and dispatch happens on that same thread — so once it is set, no
+  /// further request can reach the pool, and everything already there is what the drain waits for.
+  /// Like @c aborted in @c add, it is serialised by the thread rather than protected by the atomic.
+  const std::atomic<bool>& stopping_;
   std::string_view corsOrigin_;
 };
 

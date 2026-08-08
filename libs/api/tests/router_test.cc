@@ -94,6 +94,28 @@ TEST(RequestTest, RepeatedLookupsAreIndependent) {
   }
 }
 
+// The mapping every named parameter read depends on. uWS hands parameters over positionally, so a
+// pattern whose names come out in the wrong order — or one short — serves happily and answers with
+// a neighbouring segment's value: slavePosition reading an SDO index rather than failing.
+TEST(ParameterNames, ReadsNamesInThePatternsOwnOrder) {
+  EXPECT_EQ(parameterNames("/api/devices/:slavePosition/sdo/:index/:subindex"),
+            (std::vector<std::string>{"slavePosition", "index", "subindex"}));
+}
+
+// A trailing parameter has no '/' to end it, which is the boundary case the scan has to get right.
+TEST(ParameterNames, EndsTheLastNameAtTheEndOfThePattern) {
+  EXPECT_EQ(parameterNames("/api/devices/:slavePosition/procedures/:name"),
+            (std::vector<std::string>{"slavePosition", "name"}));
+  EXPECT_EQ(parameterNames("/api/monitorings/:topic"), (std::vector<std::string>{"topic"}));
+}
+
+// A wildcard route carries no named parameter: /api/user-cache/* reads its path off the URL.
+TEST(ParameterNames, FindsNoneInAPatternWithoutParameters) {
+  EXPECT_TRUE(parameterNames("/api/user-cache/*").empty());
+  EXPECT_TRUE(parameterNames("/api/version").empty());
+  EXPECT_TRUE(parameterNames("").empty());
+}
+
 TEST(PercentDecode, DecodesEscapes) {
   EXPECT_EQ(percentDecode("v5.6.6%20(rev%202).xml"), "v5.6.6 (rev 2).xml");
   EXPECT_EQ(percentDecode("a%2Fb"), "a/b") << "uppercase hex";

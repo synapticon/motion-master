@@ -368,6 +368,31 @@ void HttpServer::stop() {
     return;
   }
 
+  auto* loop = loop_.load();
+  if (loop) {
+    // Close dispatch before draining, and do it *on the loop thread*. Draining first and closing
+    // afterwards looks equivalent and is not: the loop goes on accepting while the pool drains, so
+    // a request arriving in that window would start a fresh worker after wait() had already
+    // returned — and that worker would defer its response onto a loop whose thread had since
+    // exited, which is a use-after-free rather than a late reply. Because the Router dispatches on
+    // this same thread, a store made here totally orders against every dispatch: once it has run,
+    // nothing more can enter the pool, and what is already there is exactly what the drain covers.
+    //
+    // Blocking on the round trip is safe for the same reason the Router exists: no handler runs on
+    // the loop thread any more, so the only thing between us and this callback is other deferred
+    // writes. Bounded even so, since a caller racing stop() against a failed listen could otherwise
+    // wait on a loop that has already gone.
+    std::promise<void> dispatchClosed;
+    loop->defer([this, &dispatchClosed]() {
+      stopping_.store(true, std::memory_order_relaxed);
+      dispatchClosed.set_value();
+    });
+    if (dispatchClosed.get_future().wait_for(std::chrono::seconds(5)) !=
+        std::future_status::ready) {
+      spdlog::warn("HTTP server loop did not acknowledge shutdown; closing anyway");
+    }
+  }
+
   // Before the loop: a worker finishing its device work defers the response onto the loop, so the
   // loop must still be there to receive it. purge() drops what has not started (those responses die
   // with the connections the loop is about to close anyway, and waiting out a queue of mailbox
@@ -377,7 +402,7 @@ void HttpServer::stop() {
   pool_.purge();
   pool_.wait();
 
-  if (auto* loop = loop_.load()) {
+  if (loop) {
     // App::close() closes the listen socket *and* every regular socket (incl. idle HTTP keep-alive
     // connections); each lands on the loop's closed_head queue and is freed on the next loop_post,
     // dropping num_polls so us_loop_run() exits. Manually closing only the listen socket would
@@ -407,7 +432,7 @@ void HttpServer::run() {
   // Routes registered through the Router run their handlers on the worker pool rather than on this
   // loop, so a device operation that takes seconds cannot stall every other request. New routes go
   // here; the chained registration below is the pre-Router shape and is being migrated onto this.
-  mm::api::Router router(app, loop_.load(), pool_, config_.corsOrigin);
+  mm::api::Router router(app, loop_.load(), pool_, stopping_, config_.corsOrigin);
 
   // The Console polls this continuously for the sidebar's AL-state badge, and it takes the driver's
   // control-plane lock — so on the loop thread it stalled every request behind it for the length of

@@ -15,46 +15,51 @@ namespace mm::api {
 
 namespace {
 
-/// The `:name` tokens of a route pattern, in the order uWS will index them.
-///
-/// uWS addresses path parameters positionally; naming them is this layer's doing, so that a handler
-/// asks for `parameter("slavePosition")` rather than `parameter(0)` and stays correct when a route
-/// gains a segment.
-std::vector<std::string> parameterNames(std::string_view pattern) {
-  std::vector<std::string> names;
-  for (std::size_t at = pattern.find(':'); at != std::string_view::npos;
-       at = pattern.find(':', at + 1)) {
-    const std::size_t end = pattern.find('/', at);
-    names.emplace_back(pattern.substr(
-        at + 1, end == std::string_view::npos ? std::string_view::npos : end - at - 1));
-  }
-  return names;
-}
-
 /// Writes a finished response. Must run on the loop thread.
 ///
 /// Backpressure-aware for every response, not only the large ones: `tryEnd` sends what the socket
 /// will take now and `onWritable` resumes from the acknowledged offset. A recorder dump is tens of
 /// megabytes and an ESI parse a few, so this is not hypothetical — and handling it here once means
 /// no endpoint has to know its own body might be too big to write in one go.
+///
+/// **Corked, and that is not an optimisation to skip.** uWS corks the socket around a handler it
+/// invokes itself (`HttpContext`), so writes made synchronously in a handler coalesce into one
+/// send. A `Loop::defer` callback runs from the loop's wakeup queue instead, outside that cork —
+/// so an uncorked write here would issue a separate `us_socket_write`, and so a separate TLS
+/// record and syscall, for the status line, for *each* header, and for the body. `cork` also
+/// carries the shutdown that a `Connection: close` response owes its client, which otherwise lives
+/// only in the path uWS uses for its own synchronous handlers. Corking is what puts a deferred
+/// write back on equal footing with an inline one; it is safe unconditionally, since uWS runs the
+/// callback uncorked when the loop's single cork slot is taken.
 void writeResponse(uWS::HttpResponse<true>* res, std::string_view corsOrigin, Response response) {
-  auto* r = res->writeStatus(response.status)
-                ->writeHeader("Access-Control-Allow-Origin", corsOrigin)
-                ->writeHeader("Content-Type", response.contentType);
-  for (const auto& [name, value] : response.headers) {
-    r = r->writeHeader(name, value);
-  }
   // Kept alive for the resumed writes: onWritable can fire long after this returns. Moved rather
   // than copied — a recorder dump is tens of megabytes, and taking the response by value here is
   // what makes the move possible all the way from the handler that produced it.
   auto body = std::make_shared<std::string>(std::move(response.body));
-  auto [ok, done] = res->tryEnd(*body, body->size());
-  if (done || ok) {
+  bool pending = false;
+  res->cork([res, corsOrigin, &response, &body, &pending]() {
+    auto* r = res->writeStatus(response.status)
+                  ->writeHeader("Access-Control-Allow-Origin", corsOrigin)
+                  ->writeHeader("Content-Type", response.contentType);
+    for (const auto& [name, value] : response.headers) {
+      r = r->writeHeader(name, value);
+    }
+    auto [ok, done] = res->tryEnd(*body, body->size());
+    pending = !done && !ok;
+  });
+  if (!pending) {
     return;
   }
   res->onWritable([res, body](uintptr_t offset) {
-    auto [chunkOk, chunkDone] = res->tryEnd(std::string_view(*body).substr(offset), body->size());
-    return chunkOk || chunkDone;
+    // Corked for the same reason, and for one more: uWS skips its own connection-close handling
+    // while an onWritable is registered, so the cork is what closes a `Connection: close` socket
+    // on the write that finally completes the body.
+    bool more = false;
+    res->cork([res, &body, offset, &more]() {
+      auto [chunkOk, chunkDone] = res->tryEnd(std::string_view(*body).substr(offset), body->size());
+      more = chunkOk || chunkDone;
+    });
+    return more;
   });
 }
 
@@ -160,17 +165,38 @@ Response withWireTime(Response response, std::chrono::microseconds wireUs) {
   return response;
 }
 
+std::vector<std::string> parameterNames(std::string_view pattern) {
+  std::vector<std::string> names;
+  for (std::size_t at = pattern.find(':'); at != std::string_view::npos;
+       at = pattern.find(':', at + 1)) {
+    const std::size_t end = pattern.find('/', at);
+    names.emplace_back(pattern.substr(
+        at + 1, end == std::string_view::npos ? std::string_view::npos : end - at - 1));
+  }
+  return names;
+}
+
 void Router::add(std::string_view method, std::string pattern, Handler handler, bool hasBody) {
   auto names = std::make_shared<std::vector<std::string>>(parameterNames(pattern));
   auto shared = std::make_shared<Handler>(std::move(handler));
   auto* loop = loop_;
   auto* pool = &pool_;
+  const auto* stopping = &stopping_;
   const std::string_view corsOrigin = corsOrigin_;
 
   // Everything a handler could read is copied here, on the loop thread, because `req` dies when
   // this returns. Dispatch then happens either immediately or once the body is complete.
-  auto onRequest = [names, shared, loop, pool, corsOrigin, hasBody](uWS::HttpResponse<true>* res,
-                                                                    uWS::HttpRequest* req) {
+  auto onRequest = [names, shared, loop, pool, stopping, corsOrigin, hasBody](
+                       uWS::HttpResponse<true>* res, uWS::HttpRequest* req) {
+    // Refused rather than dispatched once shutdown has begun, because a worker started now could
+    // outlive the loop it would defer its response onto — see Router::stopping_. Answering here is
+    // legal (and better than dropping the request) precisely because this runs on the loop thread,
+    // which is the one thread allowed to touch a response.
+    if (stopping->load(std::memory_order_relaxed)) {
+      writeResponse(res, corsOrigin, error("503 Service Unavailable", "server is shutting down"));
+      return;
+    }
+
     auto parameters = std::vector<std::pair<std::string, std::string>>{};
     parameters.reserve(names->size());
     for (std::size_t i = 0; i < names->size(); ++i) {

@@ -160,6 +160,10 @@ class HttpServer {
   std::atomic<uWS::SSLApp*> app_{nullptr};
   /// Signals the listen outcome from the loop thread back to start(); set exactly once per run().
   std::promise<bool> listenResult_;
+  /// Set by stop(), on the loop thread, to close the Router's dispatch before the pool is drained.
+  /// Read only by the Router, also on that thread. See @c mm::api::Router::stopping_ for why the
+  /// drain alone is not enough and why the store has to happen there rather than here.
+  std::atomic<bool> stopping_{false};
   /// Workers for handlers that would otherwise block the event loop.
   ///
   /// uWebSockets runs every handler on the app's single loop thread, so a handler that blocks

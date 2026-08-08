@@ -1414,8 +1414,14 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
             updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::Boot);
             bootMailboxSlaves_.insert(pos);
           } else if (targetState == EtherCatState::PreOp && bootMailboxSlaves_.contains(pos)) {
+            // Deliberately NOT erased here. Leaving BOOT for PRE-OP makes a SOMANET bootloader
+            // hand over to the application by **restarting the device**, and the restart wipes the
+            // sync managers programmed a moment ago. Striking the slave off the list on the
+            // attempt meant nothing could ever reprogram them afterwards: the slave came back in
+            // INIT with unusable mailbox config, ignored every resend, and sat there until the
+            // timeout with no AL error to explain it. It is erased once PRE-OP is actually
+            // reached; until then the resend path below reprograms as often as it needs to.
             updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::PreOp);
-            bootMailboxSlaves_.erase(pos);
           }
         }
         ctx_->slavelist[pos].state = targetRaw;
@@ -1480,6 +1486,10 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
       // Exact match required: OP+ERROR (0x18) must not pass as OP (0x08).
       if (state == targetRaw) {
         spdlog::info("Device {}: reached state 0x{:02X}", pos, targetRaw);
+        if (targetState == EtherCatState::PreOp) {
+          // Confirmed out of the BOOT mailbox; a later plain INIT->PRE-OP must not touch the SMs.
+          bootMailboxSlaves_.erase(pos);
+        }
         it = pending.erase(it);
       } else if ((state & EC_STATE_ERROR) && isAlStatusCodeTerminal(alStatusCode)) {
         // Slave reported a terminal AL status code — retrying the same writestate
@@ -1503,6 +1513,15 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
     if (std::chrono::steady_clock::now() - lastResend > resendInterval) {
       for (uint16_t pos : pending) {
         uint16_t state = ctx_->slavelist[pos].state;
+        // A slave still marked as holding BOOT mailbox parameters, sitting in INIT, is one that
+        // restarted into freshly written firmware: its sync managers went with the restart, so
+        // reprogram them before asking again. Without this the resend is a state request to a
+        // slave that cannot honour it.
+        if (targetState == EtherCatState::PreOp && bootMailboxSlaves_.contains(pos) &&
+            (state & 0x000Fu) == static_cast<uint16_t>(EtherCatState::Init)) {
+          spdlog::info("Device {}: reprogramming mailbox sync managers after its restart", pos);
+          updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::PreOp);
+        }
         if (state & EC_STATE_ERROR) {
           ctx_->slavelist[pos].state = (state & 0x000Fu) | EC_STATE_ACK;
           ecx_writestate(ctx_.get(), pos);

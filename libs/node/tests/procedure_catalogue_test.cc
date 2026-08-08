@@ -208,6 +208,17 @@ TEST(ProcedureCatalogue, NamesAreUnique) {
   EXPECT_EQ(std::ranges::unique(names).begin(), names.end());
 }
 
+TEST(ProcedureCatalogue, IsOrderedByName) {
+  // The table's order is what clients render: applicableEntries preserves it, so the list endpoint
+  // and the Console's sidebar are ordered by the catalogue being ordered and nothing else. Pinned
+  // here because the sort is one line at the end of buildCatalogue, and dropping it would leave a
+  // list in authoring order — which every other test would still pass.
+  const auto& entries = procedureCatalogue();
+  EXPECT_TRUE(std::ranges::is_sorted(entries, {}, [](const auto& entry) {
+    return std::string_view(entry.descriptor.name);
+  })) << "the catalogue must be sorted by descriptor.name";
+}
+
 TEST(ListProcedures, ReportsAnIdleSnapshotForAProcedureNeverRun) {
   Bus bus;
   ProcedureManager manager(bus.dm);

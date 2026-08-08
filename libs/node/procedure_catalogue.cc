@@ -5,6 +5,7 @@
 #include <format>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -595,6 +596,21 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
                                                       std::move(stop), spec);
             }};
       },
+  });
+
+  // Served in name order, whatever order the table is written in. The authoring order above is
+  // grouped by profile so the commentary can explain each group's applicability, and that is worth
+  // keeping — but it is a poor order to *read* a list in, and it would shift under every insertion,
+  // so a procedure would move in the sidebar because of where a row happened to be added. Sorting
+  // here rather than in listProcedures does it once for the process instead of once per poll, and
+  // means every consumer of the catalogue sees the same order: applicableEntries preserves it, so
+  // the list endpoint and the Console's sidebar are ordered without either of them sorting.
+  //
+  // By name rather than title because the name is the stable identifier — it is what the URL and
+  // the API carry, so the order cannot drift when a title is reworded. The two happen to agree for
+  // every entry, each name being its title's slug.
+  std::ranges::sort(entries, {}, [](const ProcedureCatalogueEntry& entry) {
+    return std::string_view(entry.descriptor.name);
   });
 
   return entries;

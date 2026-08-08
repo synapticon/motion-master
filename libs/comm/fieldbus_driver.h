@@ -375,6 +375,14 @@ class FieldbusDriver {
   /// recent @c readStates() or state transition — no network round trip. Returns 0 before any
   /// state is known. Call @c readStates() to refresh the cache from the hardware. Lets callers
   /// (e.g. @c Device) derive online / exchanging status without a redundant cached copy.
+  ///
+  /// @note **Must not block.** An implementation is required to answer this without waiting on any
+  /// lock a bus operation can hold, because the callers are the ones that must stay responsive
+  /// while the bus is busy — the live monitoring sampler asks it per flush, for every device. An
+  /// implementation that reached through its control-plane lock would inherit the duration of
+  /// whatever holds it: a firmware transfer holds that lock for the whole multi-second FoE write,
+  /// so monitoring for the entire bus would stall while one device is flashed. Publish the value
+  /// somewhere a reader can take it lock-free instead.
   virtual uint16_t slaveState(uint16_t position) const = 0;
 
   /// @brief Returns the slave's advertised mailbox-protocol bits without any bus I/O.

@@ -25,12 +25,17 @@ ProgressStep* findStep(std::vector<ProgressStep>& steps, std::string_view id) {
 
 }  // namespace
 
+// Every status change is logged, which is what lets a long procedure's progress be read off the
+// same terminal as the operations it is performing. A firmware install spends ten seconds inside a
+// single step, so "which step is this output from" is otherwise a guess — and if a client ever
+// disagrees with this timeline, the disagreement is in the client rather than in the run.
 void ProgressReporter::start(std::string_view id) {
   const std::lock_guard lock(mutex_);
   if (auto* step = findStep(steps_, id)) {
     step->status = ProgressStatus::kRunning;
     step->value = nullptr;
     step->error.reset();
+    spdlog::debug("Procedure step '{}': running", id);
   }
 }
 
@@ -42,6 +47,7 @@ void ProgressReporter::succeed(std::string_view id, nlohmann::json value) {
     step->status = ProgressStatus::kSucceeded;
     step->value = std::move(value);
     step->error.reset();
+    spdlog::debug("Procedure step '{}': succeeded", id);
   }
 }
 
@@ -49,6 +55,7 @@ void ProgressReporter::fail(std::string_view id, std::string error) {
   const std::lock_guard lock(mutex_);
   if (auto* step = findStep(steps_, id)) {
     step->status = ProgressStatus::kFailed;
+    spdlog::debug("Procedure step '{}': failed — {}", id, error);
     step->error = std::move(error);
   }
 }

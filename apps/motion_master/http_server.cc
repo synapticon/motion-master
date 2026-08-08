@@ -95,39 +95,10 @@ std::expected<std::vector<uint16_t>, std::string> parsePositions(const mm::api::
   return positions;
 }
 
-template <typename Res, typename Req>
-std::optional<std::vector<uint16_t>> parsePositions(Res* res, Req* req,
-                                                    std::string_view corsOrigin) {
-  std::vector<uint16_t> positions;
-  auto posParam = req->getQuery("positions");
-  if (posParam.empty()) {
-    return positions;
-  }
-  std::string posStr(posParam);
-  std::istringstream ss(posStr);
-  std::string token;
-  while (std::getline(ss, token, ',')) {
-    uint16_t pos{};
-    auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), pos);
-    if (ec != std::errc() || ptr != token.data() + token.size()) {
-      mm::api::sendStatus(res, "400 Bad Request", corsOrigin);
-      return std::nullopt;
-    }
-    positions.push_back(pos);
-  }
-  return positions;
-}
-
-// The JSON/error/status response helpers live in api/web_api.h so route plug-ins can share the
-// exact same response shape (content type + CORS) as the built-in routes. Pull them in unqualified
-// so the call sites below read the same as before.
-using mm::api::sendBytes;
-using mm::api::sendError;
-using mm::api::sendJson;
-using mm::api::sendStatus;
-using mm::api::sendTimedJson;
+// setCorsOrigin remains for the two framework-level responses that are not Router routes: the
+// OPTIONS preflight and the HTML index. Every actual API route returns a mm::api::Response, and
+// the Router writes the CORS header itself.
 using mm::api::setCorsOrigin;
-using mm::api::setWireTime;
 
 // Maps a failed procedure operation to its status line. This translation is the whole reason
 // ProcedureError is structured rather than a string: each kind tells a client to do something
@@ -150,42 +121,6 @@ constexpr std::string_view procedureErrorStatus(mm::node::ProcedureError::Kind k
 // it (position, the optional settle, the timed call, the state read back) is identical, so the two
 // routes share this rather than duplicating it. A template because the uWS response/request types
 // are the loop's, deduced at the route.
-template <typename Res, typename Req>
-void handleBrakeCommand(Res* res, Req* req, mm::node::DeviceManager& deviceManager,
-                        std::string_view corsOrigin, bool release) {
-  uint16_t pos{};
-  auto posParam = req->getParameter("slavePosition");
-  auto [p, ec] = std::from_chars(posParam.data(), posParam.data() + posParam.size(), pos);
-  if (ec != std::errc() || p != posParam.data() + posParam.size()) {
-    sendStatus(res, "400 Bad Request", corsOrigin);
-    return;
-  }
-  // The wait after the brake is commanded. It is exposed because brake release is open-loop — the
-  // firmware reports no confirmation — so this margin is the only thing standing between
-  // "commanded" and "assume it let go", and the right value is a property of the machine.
-  auto settle = std::chrono::milliseconds(50);
-  if (auto q = req->getQuery("settle"); !q.empty()) {
-    uint32_t settleMs = 0;
-    auto [qp, qec] = std::from_chars(q.data(), q.data() + q.size(), settleMs);
-    if (qec != std::errc() || qp != q.data() + q.size()) {
-      sendStatus(res, "400 Bad Request", corsOrigin);
-      return;
-    }
-    settle = std::chrono::milliseconds(settleMs);
-  }
-  if (!deviceManager.findDevice(pos)) {
-    sendStatus(res, "404 Not Found", corsOrigin);
-    return;
-  }
-  // Synchronous and timed, like the CiA402 command and FoE handlers: this blocks the HTTP thread
-  // for the pull time while the WebSocket (own loop) and the RT loop run on. The wire time is most
-  // of the round trip here, since the call is mostly that deliberate wait.
-  sendTimedJson(res, corsOrigin, "409 Conflict", [&] {
-    return release ? mm::node::releaseBrake(deviceManager, pos, settle)
-                   : mm::node::engageBrake(deviceManager, pos, settle);
-  });
-}
-
 // Parses the "value" field of a smart parameter-write body into a DeviceParameterValue. The exact
 // numeric width does not matter here — DeviceManager::writeDeviceParameter coerces the value to the
 // parameter's declared data type — so a JSON integer becomes int64/uint64, a real becomes double, a
@@ -406,32 +341,6 @@ std::string userCacheRelPath(std::string_view url) {
     }
   }
   return decoded;
-}
-
-/// Writes the headers that make a user-cache download inert in a browser, and returns @p res for
-/// chaining.
-///
-/// The cache serves bytes the user themselves uploaded, from the API's own origin — so a rendered
-/// response is stored XSS against the origin that controls the drives, and one that CORS does not
-/// help with (a script *on* this origin is same-origin by definition). An earlier draft guessed a
-/// content type from the extension so an ESI would display inline; that is exactly the hole, since
-/// a browser executes script in an `application/xml` document (an XSLT processing instruction, or
-/// inline XHTML). Four headers close it, and none of them cost the real consumers anything — the
-/// console and the SDK both read the bytes, never render them:
-///
-/// - `application/octet-stream` unconditionally — no extension is trusted to name a type.
-/// - `Content-Disposition: attachment` — download, never render. Deliberately with **no**
-///   `filename`: the path is user-controlled, and a quote or newline in a header value is response
-///   splitting. The client names the saved file itself.
-/// - `X-Content-Type-Options: nosniff` — stops a browser from second-guessing the type above.
-/// - A `default-src 'none'; sandbox` CSP — belt and braces if the response is rendered anyway.
-template <typename Res>
-Res* setUserCacheDownloadHeaders(Res* res, std::string_view corsOrigin) {
-  return mm::api::setCorsOrigin(res, corsOrigin)
-      ->writeHeader("Content-Type", "application/octet-stream")
-      ->writeHeader("Content-Disposition", "attachment")
-      ->writeHeader("X-Content-Type-Options", "nosniff")
-      ->writeHeader("Content-Security-Policy", "default-src 'none'; sandbox");
 }
 
 }  // namespace
@@ -1482,326 +1391,272 @@ void HttpServer::run() {
     return mm::api::json(nlohmann::json{{"ok", true}});
   });
 
+  // ── Process data and AL state ───────────────────────────────────────────────────────────────
+  router.post("/api/process-data/dump", [this](const mm::api::Request&) -> mm::api::Response {
+    auto path = deviceManager_.dumpProcessData();
+    if (!path) {
+      return mm::api::error("409 Conflict", path.error());
+    }
+    return mm::api::json(nlohmann::json{{"path", *path}});
+  });
+
+  // Streams the recorder span as a raw `.mmpd` — the binary the client SDK parses. (The POST
+  // variant writes the same bytes to a file and returns the path, for terminal users.) A dump is
+  // tens of megabytes; the hand-written tryEnd/onWritable loop this used to carry is gone, because
+  // the Router writes every response backpressure-aware.
+  router.get("/api/process-data/dump", [this](const mm::api::Request&) -> mm::api::Response {
+    auto buffer = deviceManager_.dumpProcessDataBuffer();
+    if (!buffer) {
+      return mm::api::error("409 Conflict", buffer.error());
+    }
+    auto response = mm::api::bytes("application/octet-stream", std::move(*buffer));
+    response.headers.emplace_back("Content-Disposition",
+                                  R"(attachment; filename="motion-master-recorder.mmpd")");
+    return response;
+  });
+
+  router.post("/api/process-data/outputs",
+              [this](const mm::api::Request& req) -> mm::api::Response {
+                nlohmann::json body = nlohmann::json::array();
+                if (!req.body().empty()) {
+                  body = nlohmann::json::parse(req.body(), nullptr, false);
+                  if (body.is_discarded()) {
+                    return mm::api::badRequest("body must be a JSON array of output requests");
+                  }
+                }
+                auto requests = parseOutputStageRequests(body);
+                if (!requests) {
+                  return mm::api::badRequest(requests.error());
+                }
+                // Per-object outcomes (staged vs written-but-not-cyclic vs error); the batch never
+                // fails as a whole, so the UI can flag individual objects. 200 rather than 201 —
+                // this stages values, it does not create a resource.
+                return mm::api::json(
+                    nlohmann::json{{"results", deviceManager_.stageProcessDataOutputs(*requests)}});
+              });
+
+  router.post("/api/devices/state", [this](const mm::api::Request& req) -> mm::api::Response {
+    const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+    if (body.is_discarded() || !body.contains("state") || !body["state"].is_number_unsigned()) {
+      return mm::api::badRequest(R"(body must be {"state": <AL state>, ...})");
+    }
+    const auto requested = body["state"].get<uint16_t>();
+    using S = mm::comm::EtherCatState;
+    if (requested != static_cast<uint16_t>(S::Init) &&
+        requested != static_cast<uint16_t>(S::PreOp) &&
+        requested != static_cast<uint16_t>(S::Boot) &&
+        requested != static_cast<uint16_t>(S::SafeOp) &&
+        requested != static_cast<uint16_t>(S::Op)) {
+      return mm::api::badRequest(
+          "invalid state: use 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), or 8 (Op)");
+    }
+    std::vector<uint16_t> positions;
+    if (body.contains("positions")) {
+      if (!body["positions"].is_array()) {
+        return mm::api::badRequest("'positions' must be an array of bus positions");
+      }
+      positions = body["positions"].get<std::vector<uint16_t>>();
+    }
+    int timeoutMs = 5000;
+    if (body.contains("timeout")) {
+      if (!body["timeout"].is_number_integer()) {
+        return mm::api::badRequest("'timeout' must be a number of milliseconds");
+      }
+      timeoutMs = body["timeout"].get<int>();
+    }
+    auto states = deviceManager_.transitionToState(positions, static_cast<S>(requested),
+                                                   std::chrono::milliseconds(timeoutMs));
+    if (!states) {
+      return mm::api::error("500 Internal Server Error", states.error());
+    }
+    // Report each device's settled state plus whether it reached the target, and set the top-level
+    // "ok" only when every device did — so a client no longer reads success while the log shows a
+    // device stuck short of it.
+    bool allReached = true;
+    nlohmann::json devices = nlohmann::json::array();
+    for (const auto& info : *states) {
+      const bool reached = !info.error && info.alState == requested;
+      allReached = allReached && reached;
+      nlohmann::json entry = info;
+      entry["reached"] = reached;
+      devices.push_back(std::move(entry));
+    }
+    return mm::api::json(nlohmann::json{{"ok", allReached}, {"devices", devices}});
+  });
+
+  // ── Monitorings and the two file stores ─────────────────────────────────────────────────────
+  router.post("/api/monitorings", [this](const mm::api::Request& req) -> mm::api::Response {
+    nlohmann::json body = nlohmann::json::object();
+    if (!req.body().empty()) {
+      body = nlohmann::json::parse(req.body(), nullptr, false);
+      if (body.is_discarded()) {
+        return mm::api::badRequest("body must be a JSON object");
+      }
+    }
+    auto config = mm::parseMonitoringRequest(body);
+    if (!config) {
+      return mm::api::badRequest(config.error());
+    }
+    // Existence is the one conflict (409); every other rejection is a bad request.
+    if (monitoringManager_.get(config->topic)) {
+      return mm::api::error("409 Conflict", "monitoring '" + config->topic + "' already exists");
+    }
+    auto created = monitoringManager_.create(*config);
+    if (!created) {
+      return mm::api::badRequest(created.error());
+    }
+    auto response = mm::api::json(*monitoringManager_.get(config->topic));
+    response.status = "201 Created";
+    return response;
+  });
+
+  router.get("/api/monitorings",
+             [this](const mm::api::Request&) { return mm::api::json(monitoringManager_.list()); });
+
+  router.get("/api/monitorings/:topic", [this](const mm::api::Request& req) -> mm::api::Response {
+    auto resource = monitoringManager_.get(std::string(req.parameter("topic")));
+    if (!resource) {
+      return mm::api::notFound("no monitoring with that topic");
+    }
+    return mm::api::json(*resource);
+  });
+
+  router.del("/api/monitorings/:topic", [this](const mm::api::Request& req) -> mm::api::Response {
+    if (!monitoringManager_.remove(std::string(req.parameter("topic")))) {
+      return mm::api::notFound("no monitoring with that topic");
+    }
+    return mm::api::statusOnly("204 No Content");
+  });
+
+  router.get("/api/parameter-cache", [this](const mm::api::Request&) {
+    return mm::api::json(deviceManager_.parameterCache().list());
+  });
+
+  router.get("/api/parameter-cache/:id", [this](const mm::api::Request& req) -> mm::api::Response {
+    auto raw = deviceManager_.parameterCache().readRaw(req.parameter("id"));
+    if (!raw) {
+      return mm::api::notFound("no cache entry with that id");
+    }
+    // The file is JSON; served verbatim so a client can save it as-is.
+    return mm::api::bytes("application/json", std::string(raw->begin(), raw->end()));
+  });
+
+  router.del("/api/parameter-cache/:id", [this](const mm::api::Request& req) -> mm::api::Response {
+    if (!deviceManager_.parameterCache().remove(req.parameter("id"))) {
+      return mm::api::notFound("no cache entry with that id");
+    }
+    return mm::api::statusOnly("204 No Content");
+  });
+
+  // The user cache: a plain file store under Motion Master's per-user cache directory, with the
+  // path after `/api/user-cache/` taken verbatim (percent-decoded) as the path under the root.
+  // Sub-directories are implied by the path — a PUT makes whatever parents it needs and a DELETE
+  // prunes whatever it empties. Every path goes through UserCache::resolve, which is what confines
+  // this unauthenticated endpoint to the cache directory.
+  //
+  // Each route reports its server-side cost through the same X-Wire-Us header the fieldbus
+  // endpoints use. There is no device here — the figure is the filesystem operation — but the split
+  // it enables is just as useful: a 40 MB dump taking 2 s to download is a transfer cost, not a
+  // slow server, and the two figures side by side say so.
+  router.get("/api/user-cache", [this](const mm::api::Request&) {
+    // The root is reported so the page can tell the user where the files actually live — it differs
+    // per platform and is overridable in the config.
+    return mm::api::timed([this] {
+      return userCache_.list().transform([this](const auto& files) {
+        return nlohmann::json{{"root", userCache_.root().string()}, {"files", files}};
+      });
+    });
+  });
+
+  router.get("/api/user-cache/*", [this](const mm::api::Request& req) -> mm::api::Response {
+    const std::string relPath = userCacheRelPath(req.url());
+    const auto t0 = std::chrono::steady_clock::now();
+    auto data = userCache_.read(relPath);
+    const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - t0);
+    if (!data) {
+      return mm::api::withWireTime(mm::api::error("404 Not Found", data.error()), wireUs);
+    }
+    // The headers that make a user-cache download inert in a browser.
+    //
+    // The cache serves bytes the user themselves uploaded, from the API's own origin — so a
+    // rendered response is stored XSS against the origin that controls the drives, and one CORS
+    // does not help with (a script *on* this origin is same-origin by definition). An earlier
+    // draft guessed a content type from the extension so an ESI would display inline; that is
+    // exactly the hole, since a browser executes script in an `application/xml` document (an XSLT
+    // processing instruction, or inline XHTML). These close it, and cost the real consumers
+    // nothing — the Console and the SDK both read the bytes, never render them:
+    //
+    //  - `application/octet-stream` unconditionally: no extension is trusted to name a type.
+    //  - `Content-Disposition: attachment`: download, never render. Deliberately with **no**
+    //    filename — the path is user-controlled, and a quote or newline in a header value is
+    //    response splitting. The client names the saved file itself.
+    //  - `X-Content-Type-Options: nosniff`: stops a browser second-guessing the type above.
+    //  - a Content-Security-Policy permitting nothing, as the last line of defence.
+    auto response =
+        mm::api::bytes("application/octet-stream", std::string(data->begin(), data->end()));
+    response.headers.emplace_back("Content-Disposition", "attachment");
+    response.headers.emplace_back("X-Content-Type-Options", "nosniff");
+    response.headers.emplace_back("Content-Security-Policy", "default-src 'none'; sandbox");
+    return mm::api::withWireTime(std::move(response), wireUs);
+  });
+
+  router.put("/api/user-cache/*", [this](const mm::api::Request& req) {
+    const std::string relPath = userCacheRelPath(req.url());
+    // Only the write is timed — the body upload that precedes it is transport cost the client
+    // already sees in its own round-trip figure.
+    return mm::api::timed(
+        [this, &relPath, &req] {
+          std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(req.body().data()),
+                                        req.body().size()};
+          return userCache_.write(relPath, data).transform([&] {
+            return nlohmann::json{{"path", relPath}, {"size", req.body().size()}};
+          });
+        },
+        "400 Bad Request");
+  });
+
+  router.del("/api/user-cache/*", [this](const mm::api::Request& req) -> mm::api::Response {
+    const auto t0 = std::chrono::steady_clock::now();
+    auto removed = userCache_.remove(userCacheRelPath(req.url()));
+    const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::steady_clock::now() - t0);
+    if (!removed) {
+      return mm::api::withWireTime(mm::api::error("400 Bad Request", removed.error()), wireUs);
+    }
+    // A recursive directory delete is the one operation here that can take real time, so it is
+    // worth reporting even though the success response carries no body.
+    return mm::api::withWireTime(mm::api::statusOnly(*removed ? "204 No Content" : "404 Not Found"),
+                                 wireUs);
+  });
+
   // ── end of Router registrations ─────────────────────────────────────────────────────────────
 
   // Register the built-in routes as a statement on `app` (not moved), then hand `app` to any
   // registered plug-in modules so they can add their own routes, then finish with the CORS
   // preflight, the catch-all 404, and listen(). All three phases operate on the same `app` object.
-  app.get("/",
-          [](auto* res, auto* /*req*/) {
-            res->writeHeader("Content-Type", "text/html; charset=utf-8")
-                ->end(
-                    "<!DOCTYPE html><html><head><title>Motion Master API</title></head>"
-                    "<body><h1>Motion Master API</h1>"
-                    "<p>This is the Motion Master local API server. "
-                    "For documentation and the web interface, visit "
-                    "<a href=\"https://synapticon.github.io/motion-master/\">"
-                    "https://synapticon.github.io/motion-master/</a>.</p>"
-                    "<ul>"
-                    "<li><a href=\"/api/swagger.yml\">API specification (swagger.yml)</a></li>"
-                    "<li><a href=\"/api/log\">Log</a></li>"
-                    "<li><a href=\"/api/registers\">ESC registers</a></li>"
-                    "</ul>"
-                    "</body></html>");
-          })
-      .post("/api/process-data/dump",
-            [this](auto* res, auto* /*req*/) {
-              auto aborted = std::make_shared<bool>(false);
-              res->onAborted([aborted]() { *aborted = true; });
-              res->onData([this, res, aborted](std::string_view /*data*/, bool last) {
-                if (!last) return;
-                if (*aborted) return;
-                if (auto r = deviceManager_.dumpProcessData(); !r) {
-                  sendError(res, "409 Conflict", config_.corsOrigin, r.error());
-                } else {
-                  sendJson(res, config_.corsOrigin, nlohmann::json{{"path", *r}});
-                }
-              });
-            })
-      .get("/api/process-data/dump",
-           [this](auto* res, auto* /*req*/) {
-             // Streams the recorder span as a raw `.mmpd` — the binary the client SDK parses.
-             // (The POST variant writes the same bytes to a file and returns the path, for
-             // terminal users.) Serialisation blocks this HTTP loop, but the WebSocket runs on
-             // its own loop, so the monitoring stream is never stalled.
-             auto aborted = std::make_shared<bool>(false);
-             res->onAborted([aborted]() { *aborted = true; });
-             auto r = deviceManager_.dumpProcessDataBuffer();
-             if (*aborted) {
-               return;
-             }
-             if (!r) {
-               sendError(res, "409 Conflict", config_.corsOrigin, r.error());
-               return;
-             }
-             auto body = std::make_shared<std::string>(std::move(*r));
-             setCorsOrigin(res, config_.corsOrigin)
-                 ->writeHeader("Content-Type", "application/octet-stream")
-                 ->writeHeader("Content-Disposition",
-                               "attachment; filename=\"motion-master-recorder.mmpd\"");
-             // Backpressure-aware send: tryEnd what the socket accepts now, resume from the
-             // acked write offset in onWritable until the whole buffer is flushed.
-             std::string_view full{*body};
-             auto [ok, done] = res->tryEnd(full, full.size());
-             if (!done) {
-               res->onWritable([res, body](uintptr_t offset) {
-                 std::string_view chunk{body->data() + offset, body->size() - offset};
-                 auto [chunkOk, chunkDone] = res->tryEnd(chunk, body->size());
-                 return chunkOk;
-               });
-             }
-           })
-      .post("/api/process-data/outputs",
-            [this](auto* res, auto* /*req*/) {
-              auto aborted = std::make_shared<bool>(false);
-              auto body = std::make_shared<std::string>();
-              res->onAborted([aborted]() { *aborted = true; });
-              res->onData([this, res, body, aborted](std::string_view chunk, bool last) {
-                body->append(chunk);
-                if (!last) return;
-                if (*aborted) return;
-                nlohmann::json j;
-                try {
-                  j = body->empty() ? nlohmann::json::array() : nlohmann::json::parse(*body);
-                } catch (const nlohmann::json::exception& e) {
-                  sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
-                  return;
-                }
-                auto requests = parseOutputStageRequests(j);
-                if (!requests) {
-                  sendError(res, "400 Bad Request", config_.corsOrigin, requests.error());
-                  return;
-                }
-                // Per-object outcomes (staged vs written-but-not-cyclic vs error); the batch
-                // never fails as a whole, so the UI can flag individual objects. 200, not 201 —
-                // this stages values, it does not create a resource.
-                auto results = deviceManager_.stageProcessDataOutputs(*requests);
-                sendJson(res, config_.corsOrigin, nlohmann::json{{"results", results}});
-              });
-            })
-      .post("/api/devices/state",
-            [this](auto* res, auto* /*req*/) {
-              auto aborted = std::make_shared<bool>(false);
-              auto body = std::make_shared<std::string>();
-              res->onAborted([aborted]() { *aborted = true; });
-              res->onData([this, res, body, aborted](std::string_view chunk, bool last) {
-                body->append(chunk);
-                if (!last) return;
-                if (*aborted) return;
-                uint16_t stateVal{};
-                std::vector<uint16_t> positions;
-                int timeoutMs = 5000;
-                try {
-                  nlohmann::json j = nlohmann::json::parse(*body);
-                  stateVal = j.at("state").get<uint16_t>();
-                  if (j.contains("positions")) {
-                    positions = j["positions"].get<std::vector<uint16_t>>();
-                  }
-                  if (j.contains("timeout")) {
-                    timeoutMs = j["timeout"].get<int>();
-                  }
-                } catch (const nlohmann::json::exception& e) {
-                  sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
-                  return;
-                }
-                using S = mm::comm::EtherCatState;
-                if (stateVal != static_cast<uint16_t>(S::Init) &&
-                    stateVal != static_cast<uint16_t>(S::PreOp) &&
-                    stateVal != static_cast<uint16_t>(S::Boot) &&
-                    stateVal != static_cast<uint16_t>(S::SafeOp) &&
-                    stateVal != static_cast<uint16_t>(S::Op)) {
-                  sendError(res, "400 Bad Request", config_.corsOrigin,
-                            "invalid state: use 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), or "
-                            "8 (Op)");
-                  return;
-                }
-                auto targetState = static_cast<S>(stateVal);
-                auto r = deviceManager_.transitionToState(positions, targetState,
-                                                          std::chrono::milliseconds(timeoutMs));
-                if (!r) {
-                  sendError(res, "500 Internal Server Error", config_.corsOrigin, r.error());
-                  return;
-                }
-                // Report each device's settled state plus whether it reached the target, and
-                // set the top-level "ok" only when every device did — so the UI no longer
-                // reads success while the logs show a device stuck short of the target.
-                bool allReached = true;
-                nlohmann::json devices = nlohmann::json::array();
-                for (const auto& info : *r) {
-                  bool reached = !info.error && info.alState == stateVal;
-                  allReached = allReached && reached;
-                  nlohmann::json d = info;
-                  d["reached"] = reached;
-                  devices.push_back(std::move(d));
-                }
-                sendJson(res, config_.corsOrigin,
-                         nlohmann::json{{"ok", allReached}, {"devices", devices}});
-              });
-            })
-      .post("/api/monitorings",
-            [this](auto* res, auto* /*req*/) {
-              auto aborted = std::make_shared<bool>(false);
-              auto body = std::make_shared<std::string>();
-              res->onAborted([aborted]() { *aborted = true; });
-              res->onData([this, res, body, aborted](std::string_view chunk, bool last) {
-                body->append(chunk);
-                if (!last) {
-                  return;
-                }
-                if (*aborted) {
-                  return;
-                }
-                nlohmann::json j;
-                try {
-                  j = body->empty() ? nlohmann::json::object() : nlohmann::json::parse(*body);
-                } catch (const nlohmann::json::exception& e) {
-                  sendError(res, "400 Bad Request", config_.corsOrigin, e.what());
-                  return;
-                }
-                auto config = mm::parseMonitoringRequest(j);
-                if (!config) {
-                  sendError(res, "400 Bad Request", config_.corsOrigin, config.error());
-                  return;
-                }
-                // Existence is the one conflict (409); every other rejection is a bad request.
-                if (monitoringManager_.get(config->topic)) {
-                  sendError(res, "409 Conflict", config_.corsOrigin,
-                            "monitoring '" + config->topic + "' already exists");
-                  return;
-                }
-                auto created = monitoringManager_.create(*config);
-                if (!created) {
-                  sendError(res, "400 Bad Request", config_.corsOrigin, created.error());
-                  return;
-                }
-                auto resource = monitoringManager_.get(config->topic);
-                setCorsOrigin(res->writeStatus("201 Created"), config_.corsOrigin)
-                    ->writeHeader("Content-Type", "application/json")
-                    ->end(resource->dump());
-              });
-            })
-      .get("/api/monitorings",
-           [this](auto* res, auto* /*req*/) {
-             sendJson(res, config_.corsOrigin, monitoringManager_.list());
-           })
-      .get("/api/monitorings/:topic",
-           [this](auto* res, auto* req) {
-             auto resource = monitoringManager_.get(std::string(req->getParameter("topic")));
-             if (!resource) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             sendJson(res, config_.corsOrigin, *resource);
-           })
-      .del("/api/monitorings/:topic",
-           [this](auto* res, auto* req) {
-             if (monitoringManager_.remove(std::string(req->getParameter("topic")))) {
-               sendStatus(res, "204 No Content", config_.corsOrigin);
-             } else {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-             }
-           })
-      .get("/api/parameter-cache",
-           [this](auto* res, auto* /*req*/) {
-             sendJson(res, config_.corsOrigin, deviceManager_.parameterCache().list());
-           })
-      .get("/api/parameter-cache/:id",
-           [this](auto* res, auto* req) {
-             auto raw = deviceManager_.parameterCache().readRaw(req->getParameter("id"));
-             if (!raw) {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-               return;
-             }
-             // The file is JSON; serve it verbatim so the client can save it as-is.
-             sendBytes(res, config_.corsOrigin, "application/json",
-                       std::string_view{reinterpret_cast<const char*>(raw->data()), raw->size()});
-           })
-      .del("/api/parameter-cache/:id",
-           [this](auto* res, auto* req) {
-             if (deviceManager_.parameterCache().remove(req->getParameter("id"))) {
-               sendStatus(res, "204 No Content", config_.corsOrigin);
-             } else {
-               sendStatus(res, "404 Not Found", config_.corsOrigin);
-             }
-           })
-      // The user cache: a plain file store under Motion Master's per-user cache directory, with
-      // the path after `/api/user-cache/` taken verbatim (percent-decoded) as the path under the
-      // root. Sub-directories are implied by the path — there is no create-directory call; a PUT
-      // makes whatever parents it needs, and a DELETE prunes whatever it empties. Every path is
-      // validated by UserCache::resolve, which is what confines this unauthenticated endpoint to
-      // the cache directory.
-      // Each route reports its server-side cost via the same `X-Wire-Us` header the fieldbus
-      // endpoints use. There is no device here — the figure is the filesystem operation (path
-      // validation plus the read/write/list/remove) — but the channel is the uniform one, and the
-      // split it enables is just as useful: a 40 MB dump that takes 2 s to download is a transfer
-      // cost, not a slow server, and the two figures side by side say so.
-      .get("/api/user-cache",
-           [this](auto* res, auto* /*req*/) {
-             // The root is reported so the page can tell the user where the files actually live —
-             // it differs per platform and is overridable in the config.
-             mm::api::sendTimedJson(res, config_.corsOrigin, "500 Internal Server Error", [this] {
-               return userCache_.list().transform([this](const auto& files) {
-                 return nlohmann::json{{"root", userCache_.root().string()}, {"files", files}};
-               });
-             });
-           })
-      .get("/api/user-cache/*",
-           [this](auto* res, auto* req) {
-             const std::string relPath = userCacheRelPath(req->getUrl());
-             const auto t0 = std::chrono::steady_clock::now();
-             auto data = userCache_.read(relPath);
-             const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                 std::chrono::steady_clock::now() - t0);
-             if (!data) {
-               sendError(res, "404 Not Found", config_.corsOrigin, data.error(), wireUs);
-               return;
-             }
-             setWireTime(setUserCacheDownloadHeaders(res, config_.corsOrigin), wireUs)
-                 ->end(std::string_view{reinterpret_cast<const char*>(data->data()), data->size()});
-           })
-      .put("/api/user-cache/*",
-           [this](auto* res, auto* req) {
-             // req is only valid synchronously — capture the path before onData.
-             const auto relPath = std::make_shared<std::string>(userCacheRelPath(req->getUrl()));
-             auto aborted = std::make_shared<bool>(false);
-             auto body = std::make_shared<std::string>();
-             res->onAborted([aborted]() { *aborted = true; });
-             res->onData([this, res, body, aborted, relPath](std::string_view chunk, bool last) {
-               body->append(chunk);
-               if (!last) return;
-               if (*aborted) return;
-               // Only the write is timed — the body upload that precedes it is transport cost the
-               // client already sees in its own round-trip figure.
-               mm::api::sendTimedJson(
-                   res, config_.corsOrigin, "400 Bad Request", [this, relPath, body] {
-                     std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(body->data()),
-                                                   body->size()};
-                     return userCache_.write(*relPath, data).transform([&] {
-                       return nlohmann::json{{"path", *relPath}, {"size", body->size()}};
-                     });
-                   });
-             });
-           })
-      .del("/api/user-cache/*", [this](auto* res, auto* req) {
-        const auto t0 = std::chrono::steady_clock::now();
-        auto removed = userCache_.remove(userCacheRelPath(req->getUrl()));
-        const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - t0);
-        if (!removed) {
-          sendError(res, "400 Bad Request", config_.corsOrigin, removed.error(), wireUs);
-        } else {
-          // A recursive directory delete is the one operation here that can take real time, so it
-          // is worth reporting even though the success response carries no body.
-          sendStatus(res, *removed ? "204 No Content" : "404 Not Found", config_.corsOrigin,
-                     wireUs);
-        }
-      });
+  app.get("/", [](auto* res, auto* /*req*/) {
+    res->writeHeader("Content-Type", "text/html; charset=utf-8")
+        ->end(
+            "<!DOCTYPE html><html><head><title>Motion Master API</title></head>"
+            "<body><h1>Motion Master API</h1>"
+            "<p>This is the Motion Master local API server. "
+            "For documentation and the web interface, visit "
+            "<a href=\"https://synapticon.github.io/motion-master/\">"
+            "https://synapticon.github.io/motion-master/</a>.</p>"
+            "<ul>"
+            "<li><a href=\"/api/swagger.yml\">API specification (swagger.yml)</a></li>"
+            "<li><a href=\"/api/log\">Log</a></li>"
+            "<li><a href=\"/api/registers\">ESC registers</a></li>"
+            "</ul>"
+            "</body></html>");
+  });
 
   // Let registered plug-in modules add their own routes (e.g. /api/example/...) on top of the
   // built-in ones, before the CORS preflight and catch-all 404 are wired below.
   mm::api::RouteContext routeContext{deviceManager_, monitoringManager_, config_.corsOrigin};
   for (const auto& module : routeModules_) {
-    module(app, routeContext);
+    module(router, routeContext);
   }
 
   app.options("/api/*",

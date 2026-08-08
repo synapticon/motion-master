@@ -13,7 +13,9 @@ namespace mm::example {
 /// of the `web/apps/example` PWA: a minimal, copy-me starting point for adding your own endpoints.
 ///
 /// Called once, on the HTTP event-loop thread, with @p ctx bound to the live device and monitoring
-/// managers. Handlers registered here run on that same loop thread for every request.
-void registerRoutes(uWS::SSLApp& app, const mm::api::RouteContext& ctx);
+/// managers. The handlers it registers, however, do **not** run on that thread: a @c Router handler
+/// runs on a worker, so it may block on the bus for as long as it needs without stalling any other
+/// request.
+void registerRoutes(mm::api::Router& router, const mm::api::RouteContext& ctx);
 
 }  // namespace mm::example

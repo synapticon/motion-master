@@ -10,12 +10,22 @@
 #include <string_view>
 #include <utility>
 
+#include "api/router.h"
+
 namespace mm::node {
 class DeviceManager;
 class MonitoringManager;
 }  // namespace mm::node
 
 /// @brief HTTP-transport glue shared by the built-in server and route plug-in libs.
+///
+/// The response helpers here write directly to a @c uWS::HttpResponse, which is only valid on the
+/// event-loop thread — so they are for the handful of framework-level responses that genuinely run
+/// there (the OPTIONS preflight, the HTML index, the catch-all 404). **Everything that serves the
+/// API goes through @c mm::api::Router instead**, whose handlers return a @c Response value and run
+/// off the loop. A timed variant of these once existed and was used by every device endpoint; it
+/// was removed with the last of them, because a shared header offering the blocking shape is how a
+/// fixed bug comes back.
 ///
 /// This layer sits above @c mm::node (the transport-agnostic domain layer) and below the app: it is
 /// the one place that knows about uWebSockets. @c mm::node must never depend on it. It exists so a
@@ -32,10 +42,9 @@ namespace mm::api {
 /// returns. Capture the fields instead:
 ///
 /// @code
-/// void registerRoutes(uWS::SSLApp& app, const mm::api::RouteContext& ctx) {
-///   app.get("/api/example/devices", [&dm = ctx.deviceManager, cors = ctx.corsOrigin](
-///                                        auto* res, auto* /*req*/) {
-///     mm::api::sendJson(res, cors, summarize(dm));
+/// void registerRoutes(mm::api::Router& router, const mm::api::RouteContext& ctx) {
+///   router.get("/api/example/devices", [&dm = ctx.deviceManager](const mm::api::Request&) {
+///     return mm::api::json(summarize(dm));
 ///   });
 /// }
 /// @endcode
@@ -45,6 +54,9 @@ struct RouteContext {
   /// Monitoring registry (for monitoring-aware plug-ins).
   mm::node::MonitoringManager& monitoringManager;
   /// Value to send in `Access-Control-Allow-Origin`; outlives run().
+  ///
+  /// Rarely needed now: a @c Router handler returns a @c Response and the framework writes the
+  /// header. It remains for a plug-in that hand-rolls a response on the loop thread.
   std::string_view corsOrigin;
 };
 
@@ -57,7 +69,12 @@ struct RouteContext {
 /// specificity — but a plug-in must not claim `/api/*` or `/*` wildcards.
 ///
 /// Wire one up in the composition root with @c HttpServer::addRoutes (before @c start()).
-using RegisterRoutesFn = std::function<void(uWS::SSLApp& app, const RouteContext& ctx)>;
+/// A plug-in is handed the @c Router rather than the raw app, so its handlers run off the event
+/// loop like every built-in route. That is the point of passing it: a plug-in that took the app
+/// could register a handler doing bus I/O on the loop thread and stall the whole API, which is the
+/// bug the Router exists to make unrepresentable — and a shared header offering the unsafe path is
+/// how it would come back.
+using RegisterRoutesFn = std::function<void(Router& router, const RouteContext& ctx)>;
 
 /// @brief Writes the `Access-Control-Allow-Origin` header and returns @p res for chaining.
 ///
@@ -152,30 +169,6 @@ void sendStatus(Res* res, std::string_view status, std::string_view corsOrigin,
     r = setWireTime(r, *wireUs);
   }
   r->end();
-}
-
-/// @brief Runs a fieldbus operation @p op, times it, and sends the timed JSON response.
-///
-/// The shared shape of every endpoint that performs a device transaction: bracket the call with a
-/// steady_clock read, then on success emit the JSON body with the `X-Wire-Us` header (setWireTime),
-/// or on failure a `errorStatus` error carrying the same header (sendError's @c wireUs). @p op is
-/// any callable returning a `std::expected<T, E>`; on success @c *result is sent as JSON (any @c T
-/// convertible to @c nlohmann::json — return @c nlohmann::json directly for a custom body such as a
-/// fixed `{"ok": true}` or a multi-step read-back), on failure @c result.error() is the message.
-/// Only @p op is timed, so body parsing and JSON serialization stay out of the reported figure.
-/// @p errorStatus is the failure status line (e.g. "500 Internal Server Error", "409 Conflict").
-template <typename Res, typename Op>
-void sendTimedJson(Res* res, std::string_view corsOrigin, std::string_view errorStatus, Op&& op) {
-  const auto t0 = std::chrono::steady_clock::now();
-  auto result = std::forward<Op>(op)();
-  const auto wireUs =
-      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0);
-  if (!result) {
-    sendError(res, errorStatus, corsOrigin, result.error(), wireUs);
-    return;
-  }
-  setWireTime(res, wireUs);
-  sendJson(res, corsOrigin, *result);
 }
 
 }  // namespace mm::api

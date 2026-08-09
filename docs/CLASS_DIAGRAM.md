@@ -83,7 +83,8 @@ classDiagram
         -vector~Device~ devices_
         -unique_ptr~ProcessData~ pd_
         -ParameterCache parameterCache_
-        -shared_mutex busMutex_
+        -mutex busOperationMutex_
+        -shared_mutex deviceSetMutex_
     }
     class Device {
         +upload() / download()

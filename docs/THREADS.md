@@ -5,17 +5,28 @@
 > synchronization design changes, update this file (file/line citations included to
 > make that easy).
 
-Motion Master's core runs **five threads**. The main thread *is* the real-time (RT) thread;
-every other subsystem starts its own thread *before* `game_loop.run()` blocks the main
+Motion Master's core runs **five long-lived threads**. The main thread *is* the real-time (RT)
+thread; every other subsystem starts its own thread *before* `game_loop.run()` blocks the main
 thread. The HTTP API and the WebSocket run on **separate ports and separate
 event loops/threads** (61447 / 62281), so a slow or blocking HTTP handler can never stall
 the WebSocket.
 
-Five is the **built-in** count, not a hard ceiling: a C++ route plug-in (`mm::api`, see
-[CLASS_DIAGRAM.md](CLASS_DIAGRAM.md)) is ordinary code holding `DeviceManager&`, and may spawn
-its own off-RT `std::jthread` for long-running work — exactly as `MonitoringManager` (threads 4–5)
-does. Any such thread is bound by the same rules as every non-RT thread below: serialize bus
-access through `FieldbusDriver::controlPlaneMutex_` and never touch the RT path.
+Five is the **named** count, not the total number of threads in the process. Two pools sit
+alongside them, and both matter when reasoning about concurrency:
+
+- **32 HTTP worker threads** (`BS::light_thread_pool pool_{32}`, `apps/motion_master/http_server.h`).
+  **Every route handler runs on one of these**, not on the HTTP event loop — see `mm::api::Router`.
+  So "the HTTP thread" is a dispatcher, and two REST requests genuinely run in parallel.
+- **One `std::jthread` per in-flight procedure**, owned by `ProcedureManager`.
+
+A C++ route plug-in (`mm::api`, see [CLASS_DIAGRAM.md](CLASS_DIAGRAM.md)) is ordinary code holding
+`DeviceManager&`, and may spawn its own off-RT `std::jthread` for long-running work — exactly as
+`MonitoringManager` (threads 4–5) does. Any such thread is bound by the same rules as every non-RT
+thread below: serialize bus access through `FieldbusDriver::controlPlaneMutex_` and never touch the
+RT path.
+
+For the full synchronization inventory — every mutex, what it guards, the lock ordering, and the
+lock-free protocols — see **[LOCKING.md](LOCKING.md)**.
 
 ## Overview
 
@@ -85,17 +96,16 @@ process-image IOmap, the atomic `outputSlots`, and the recorder ring (a wait-fre
   access, and AL-state transition serializes through `FieldbusDriver::controlPlaneMutex_`, held
   for a single socket transaction only — never across a sleep, a blocking wait, or a user
   callback. A slow SDO read therefore never stalls the 1 ms cycle.
-- **Command-and-wait procedures (thread 2), the one long hold:** the per-transaction rule above is
-  about `controlPlaneMutex_` and does **not** generalize to `busMutex_`. A multi-second procedure —
-  `runStoreParameters` (`device_manager.cc:1249`), `runRestoreDefaultParameters` (`:1263`), the
-  `runCia402Command` `enable()` walk — holds `busMutex_` in **shared** mode for its whole duration,
-  *including the sleeps between polls* (`profile_device.cc:42,58`), because that is what keeps the
-  borrowed `Device&` valid against the exclusive rebuilders. It still takes `controlPlaneMutex_` only
-  per SDO transaction, so the RT loop is untouched — but two things follow: an exclusive mutator
-  (`scan` / `reset` / `configureProcessData`) blocks behind it for seconds, and because these
-  procedures run synchronously on the single HTTP event loop, that loop is occupied for the whole
-  run. Isolating the WebSocket on its own thread (thread 3) is what keeps the 1 ms-critical
-  monitoring stream flowing across such a hold.
+- **Command-and-wait procedures, the one long hold:** the per-transaction rule above is about
+  `controlPlaneMutex_` and does **not** generalize to `DeviceManager::deviceSetMutex_`. A
+  multi-second procedure — `runStoreParameters`, `runRestoreDefaultParameters`, the
+  `runCia402Command` `enable()` walk — holds `deviceSetMutex_` in **shared** mode for its whole
+  duration, *including the sleeps between polls* (`profile_device.cc:42,58`), because that is what
+  keeps the borrowed `Device&` valid against the exclusive rebuilders. It still takes
+  `controlPlaneMutex_` only per SDO transaction, so the RT loop is untouched — and because it holds
+  only the *shared* lock, other readers and borrowers run alongside it; just `scan` / `reset` and a
+  re-map's publish window wait. It does **not** hold `busOperationMutex_`, so an AL transition can
+  interleave with it (see [LOCKING.md](LOCKING.md)).
 
 The boundary between control-plane mutation (`init` / `reset` / `configureProcessData`,
 on the HTTP thread) and `exchangeProcessData` (on the RT loop) is guarded by an
@@ -124,7 +134,8 @@ Startup and shutdown order (`apps/motion_master/main.cc`):
 | **`ProcessDataRing`** (recorder) | `libs/node/process_data_ring.h` | Lossless per-cycle history of the raw IOmap (inputs + outputs + timestamp + WKC); source for the live stream and point reads | RT loop (single writer, wait-free append) → sampler + HTTP readers (lock-free via per-slot sequence re-check) |
 | **`ProcessData::outputSlots`** (atomic `uint64_t[]`) | `libs/node/process_data.h` | Per-output-object setpoint staging — one lock-free slot per output object | Any thread stages its own object lock-free (last-writer-wins); RT loop composes all slots into the wire image (Design B) |
 | **`FieldbusDriver::controlPlaneMutex_`** | `libs/comm/fieldbus_driver.h` | Control-plane socket access (SDO, FoE, registers, state) | HTTP thread + refresher thread — one transaction at a time |
-| **`DeviceManager::busMutex_`** (`shared_mutex`) | `libs/node/device_manager.h` | The non-RT mutable state — `driver_`, `devices_`, and the retained image `generations`; exclusive for the mutators (`init`/`reset`/`scan`/`configureProcessData`/`transitionToState`), shared for position-based value reads **and for the whole duration of a multi-second command-and-wait procedure** (see below). The RT `exchangeProcessData()` never takes it (gated by the atomic image pointer instead) | HTTP/scan threads; lock ordering: `busMutex_` before any `Device::parametersMutex_` |
+| **`DeviceManager::busOperationMutex_`** (`mutex`) | `libs/node/device_manager.h` | Nothing — a mutual-exclusion token over an *activity*: one control-plane operation drives the bus at a time. Held for their whole duration by `init`/`scan`/`reset`/`configureProcessData`/`transitionToState`/`writeDevicePdoMapping`. No reader or borrower takes it | HTTP workers only; taken **before** `deviceSetMutex_` |
+| **`DeviceManager::deviceSetMutex_`** (`shared_mutex`) | `libs/node/device_manager.h` | *Lifetime*: `devices_`, `driver_`, the retained image `generations`, the output slots and the recorder-ring storage are not being rebuilt or freed. Exclusive for `init`/`reset`/`scan` and the re-map publish window; shared for every position-based read/write, `withDevice`, the ring accessors **and the whole duration of a multi-second command-and-wait procedure**. The RT `exchangeProcessData()` never takes it (gated by the atomic image pointer instead) | HTTP workers, sampler, refresher, procedure threads; ordering: `busOperationMutex_` → `deviceSetMutex_` → `Device::parametersMutex_` → `FieldbusDriver::controlPlaneMutex_` |
 | **`GameLoop::period_`** (`atomic<microseconds>`) | `apps/motion_master/game_loop.h` | The live cycle period — the one cross-thread *write into* the RT loop. `setPeriod()` stores it (relaxed) and the RT loop reloads it each iteration, so no lock is needed: many writers, a single reader | Any thread → RT loop; reached from `PUT /api/game-loop` via the `setGameLoopPeriod` composition-root callback |
 | **`Device::parametersMutex_`** | `libs/node/device.h` | The per-device `parameters_` map (data-type lookup + decode + store) against the off-RT monitoring threads racing the control plane | HTTP thread + refresher/sampler threads |
 | **`MonitoringManager::mutex_` + `cv_`** | `libs/node/monitoring_manager.h` | Monitoring registry + sampling schedule | Sampler thread, woken on add/remove/stop |

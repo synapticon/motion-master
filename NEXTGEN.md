@@ -2277,3 +2277,81 @@ The last item from the lock inventory, and the one whose sizing was wrong when i
 **The tests were validated by re-introducing the defect, because otherwise they assert nothing.** Both new tests park a transfer inside the fake driver's `readSdo`/`writeSdo` and require a cached read to complete anyway. They passed immediately — which proves nothing on its own, so the lock was deliberately widened back over each transfer in turn and each test was confirmed to fail (blocking out its full five-second timeout) against its own defect and to pass against the other. **A concurrency test that has never been seen to fail is decoration.** A first attempt at the injection did not compile, and the run then silently used the stale binary and reported green — the failure mode of the whole exercise in miniature.
 
 **The invariant is now checkable rather than asserted**, which is why it is stated as a rule on the member: every `parametersMutex_` scope in `device.cc` was scanned for a bus call and there are none. The rule it imposes on future callers is the one the fix turned on — a `DeviceParameter*` must never cross the release — and a miss on re-find must be handled rather than assumed impossible.
+
+## Session 2026-08-09 — The value lives on the parameter: one lock-free cell, and a cyclic task that cannot tell PDO from SDO (design)
+
+The goal is a user-authored `CyclicTask` that is production code — four wheels of an autonomous vehicle — written by a controls engineer rather than by someone who has read `docs/LOCKING.md`:
+
+```cpp
+void execute(const CycleContext&) override {
+  auto* wheel = deviceManager_.findDevice(3);
+  const int32_t speed = wheel->value<int32_t>(0x606C, 0);  // PDO-mapped
+  const int16_t temp  = wheel->value<int16_t>(0x2030, 5);  // SDO, refreshed in the background
+  if (temp > kLimit) { wheel->setValue<int32_t>(0x60FF, 0, 0); }
+}
+```
+
+**The contract is one sentence: no lock, no allocation, bounded time, and no difference in the call between an object that is in the process image and one that is polled over SDO.** Whether a value is PDO-mapped is a *commissioning* decision — an engineer leaves temperature out of the image precisely because it changes slowly — and it must not leak into the control code. Nothing about `0x2030:05` being slow should change how the program that reads it is written.
+
+**None of it is implementable today, and the gap is not small.** `findDevice` walks a vector `scan()` rebuilds. `withDevice` takes `deviceSetMutex_` shared, so a re-map's publish window blocks the RT thread on a non-RT one — priority inversion in the 1 ms loop, which disqualifies it for this outright. The PDO read path reaches the newest value through `ring.readRecord`, which fills a `Record` holding **two heap vectors of the whole IOmap** and then allocates a third in `extractBits`, to extract four bytes: three mallocs per parameter per cycle. The SDO path reads `parameters_` under `parametersMutex_`, a plain blocking mutex. Outputs are the one direction already close — `outputSlots` is lock-free and non-allocating from the store down, though `writeParameter` above it takes the mutex and allocates.
+
+### The value belongs on `DeviceParameter`, and a side table was the wrong answer
+
+The first draft of this design put the cells in a `ValueTable` owned by `DeviceManager`, published atomically and retained in generations, addressed by handle — the same machinery `ProcessImage` uses. **Rejected, and the reason generalises: the ownership chain already says where a value goes.** A parameter's value lives on the parameter; the parameter is held by its device; the device is held by the manager. A side table duplicates that chain, forces every reader to learn a second addressing scheme, and puts the manager in the business of holding values it has no other reason to know about. The object model was right and the design was arguing with it.
+
+So `DeviceParameter` gains the cell:
+
+```cpp
+std::atomic<uint64_t> bits;   // ≤8 wire bytes, little-endian — the packing outputSlots already uses
+std::atomic<uint64_t> stamp;  // monotonic; 0 = never written. RT cycle sequence, or refresher tick
+```
+
+**The cell records the value and never its origin.** That single omission is what makes the API source-agnostic: there is no branch for a caller to get wrong, because there is nothing to branch on. Every parameter gets one — sixteen bytes against a few thousand entries is not worth a registration step, and opt-in would mean a task's read silently returning nothing because someone forgot to subscribe.
+
+**Scalars only.** Strings and byte arrays do not appear in a process image and are not what a cyclic program reads; they keep the existing variant path. For the end user this distinction never surfaces.
+
+**One wrinkle to plan for:** `std::atomic` is neither copyable nor movable, so `DeviceParameter` needs a hand-written copy constructor and assignment that load the cell. `Device` stays movable regardless, because `std::unordered_map` is node-based and moving the map never moves an element.
+
+### What makes it sound is the lifecycle, not machinery
+
+The reason a raw `Device*` and a raw `DeviceParameter*` are safe here — and the reason the earlier "publish and retain the device set" phase evaporates — is that **the device set and the parameter maps are not rebuilt while the loop is running.** A program initialises the driver, scans, enumerates, brings the bus to OP and registers its SDO objects with the refresher, and *then* starts the game loop. Cyclic programs deal only with what happens during operation.
+
+That is a precondition, written down and relied upon, rather than a guarantee bought with published generations and retained snapshots. It is what lets the RT fast path skip `parametersMutex_` at all: the map is not being replaced, so there is nothing to be raced against. **A `scan()` or a `initializeParameters` issued while the loop runs breaks it**, and the honest answer is that this is out of contract rather than defended against — the same posture the codebase already takes toward tearing down a driver mid-cycle.
+
+The practical consequence for a task author is better than the general case anyway: resolve the device and the parameters **once**, at task construction, and hold the pointers. The per-cycle cost is then a single relaxed atomic load per signal, with no lookup at all. Binding signals once and then looping is how this code gets written regardless.
+
+### Who fills the cell — and why every path does
+
+Not only the two fast producers. **The ordinary control-plane `readParameter` / `writeParameter` update the cell too**, which is what keeps one value rather than two:
+
+- **PDO-mapped inputs** — the RT loop, in `exchangeProcessData`, immediately after the wire exchange, while the raw input image is already in hand. Bounded by the image, no allocation, no lock.
+- **SDO-sourced** — the `ParameterRefresher`, on its own thread at its own cadence, after each successful poll.
+- **A user's read or write over HTTP** — the existing paths, which end in an SDO transfer, land in the same cell on the way through.
+
+**A property falls out of doing the PDO decode on the RT thread that is worth having deliberately: within one cycle, every PDO cell a task reads comes from the same exchange.** The same thread wrote them earlier in that cycle, so they are sequenced before the task's reads. Four wheel speeds are one coherent snapshot with no snapshot machinery. SDO cells are "latest known", which is exactly what they are and all they can be.
+
+**A write reads back as itself.** Setting target position must make the next read of `0x607A:00` return what was set, not the value from the last frame — so a write stores the cell as well as staging the wire bytes. That in turn suggests folding `outputSlots` into the cells altogether: the composer would read each output object's cell directly, keeping the single-composer property that makes bit-packed objects sharing a byte safe (Design B) while leaving exactly one home for a value. Not settled — `outputSlots` works, and this is a simplification rather than a fix.
+
+### The access surface stays as it is
+
+**`findDevice` goes back to public and stays non-locking**, because a cyclic task needs a device without taking a lock and that is the call that gets one. Making it private — done earlier in the day on the strength of a use-after-free in the HTTP layer — solved that bug by removing the API's reason for existing, and is to be reversed as the first step of this work. The HTTP fix that mattered is the one that stays: handlers borrow for the duration of what they do, which is correct for the control plane whatever the RT surface looks like.
+
+**`withDevice` stays for the control plane and procedures**, where holding the lock across a multi-second operation is the point.
+
+**No facade.** An `RtDevices` type exposing only the lock-free surface would prevent a task calling `scan()` from the RT thread by construction, but it is another class earning its keep only against a mistake the contract already forbids. Cyclic tasks get `DeviceManager&`, and the engineers writing them know what they are doing.
+
+**No third-party task wiring yet.** `main.cc` remains the only place a task is constructed; an example task is a later piece.
+
+### Phases
+
+1. **Non-allocating primitives.** An `extractBits` overload writing into a caller-provided span, and a ring read that fills spans rather than building a `Record`. Purely additive, prerequisite for everything.
+2. **The cell on `DeviceParameter`**, plus the copy constructor it forces, and `Device::value<T>()` / `setValue<T>()` as lock-free non-allocating typed accessors.
+3. **Producers.** The RT decode after exchange (with each image entry's owning `DeviceParameter*` resolved at publish time, so the RT loop does no lookup), the refresher's store, and the control-plane paths.
+4. **Read-back and possibly the `outputSlots` fold.**
+5. **Documentation and a worked example task** — the authoring story, including the lifecycle precondition stated as a precondition.
+
+### Open
+
+The naming collision between the existing `Device::value(index, subindex)` (locked, returns a `DeviceParameterValue` variant) and the new typed lock-free `value<T>()`; the old one can be reimplemented over the cell for scalars, which is probably the migration. Whether a write to a non-output-mapped object from a cyclic task should be rejected, or queued for the refresher to push over SDO — it must never issue one inline. And the per-cycle cost of the decode loop, which lands in the same budget as the wire round-trip and will show up on `GET /api/game-loop`.
+
+This partly supersedes Session 2026-07-09's "profile view is RT-callable", which routed RT access through `Device::readValue`/`writeValue` dispatching on bus state. A `Cia402Drive` over cell-backed reads becomes RT-callable without that dispatch, so the two want reconciling when this lands.

@@ -383,10 +383,15 @@ Review is what let a raw `Device*` escape to 32 concurrent workers, so the rules
 mechanical check as well:
 
 ```bash
-cmake --preset x64-linux-tsan     # needs a TSan runtime: libtsan (GCC) or CC=clang CXX=clang++
+cmake --preset x64-linux-tsan     # pinned to clang; ./tools/install-deps.sh provides the runtime
 cmake --build build/x64-linux-tsan
 ./tools/test.sh x64-linux-tsan    # exports TSAN_OPTIONS with tools/tsan.supp
 ```
+
+**Run locally, deliberately not in CI.** The suite takes ~2 minutes under TSan against ~15 seconds
+without, and the races it finds are found by *running* the concurrency tests rather than by any one
+run being decisive — so it belongs in the hands of whoever is changing the locking, not on every
+push. Run it when you touch a mutex, an atomic, or anything on this page.
 
 `libs/node/tests/device_manager_concurrency_test.cc` is written for this build. It hammers every
 public read surface — `to_json`, `busConfig`, `processImageInfo`, `deviceStates`, `hasDevice`,

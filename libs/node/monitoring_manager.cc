@@ -87,8 +87,11 @@ std::expected<Monitoring, std::string> MonitoringManager::create(Monitoring conf
       // its data type and an SDO object its entry. A device that is already enumerated has a
       // non-empty map and is skipped, so a genuinely-absent object errors immediately instead of
       // triggering a wasteful re-read.
-      const Device* device = deviceManager_.findDevice(p.devicePosition);
-      if (device && device->parameters().empty()) {
+      const auto enumerated = deviceManager_.withDevice(
+          p.devicePosition, [](Device& device) -> std::expected<bool, std::string> {
+            return device.hasParameters();
+          });
+      if (enumerated && !*enumerated) {
         if (auto r = deviceManager_.initializeDeviceParameters(p.devicePosition, false); !r) {
           spdlog::debug("monitoring '{}': object-dictionary read of device {} failed: {}",
                         config.topic, p.devicePosition, r.error());
@@ -162,12 +165,12 @@ nlohmann::json MonitoringManager::list() const {
 
 void MonitoringManager::start() {
   refresher_.start();
-  std::unique_lock<std::mutex> lock(mutex_);
+  // Assigned under the lock — see ParameterRefresher::start for the start/stop window this closes.
+  const std::lock_guard<std::mutex> lock(mutex_);
   if (running_) {
     return;
   }
   running_ = true;
-  lock.unlock();
   thread_ = std::thread([this] { run(); });
 }
 

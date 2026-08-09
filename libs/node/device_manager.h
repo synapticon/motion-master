@@ -236,29 +236,31 @@ class DeviceManager {
   void reset();
 
   /// @brief Whether a driver is currently held (i.e. @c init() has succeeded and
-  ///        @c reset() has not since been called).
-  bool initialised() const { return driver_ != nullptr; }
+  ///        @c reset() has not since been called). Thread-safe.
+  bool initialised() const;
 
-  /// @brief Returns the list of discovered devices.
-  /// @return Devices in bus order (index 0 = node position 1). Empty before @c scan().
-  const std::vector<Device>& devices() const;
+  /// @brief Whether a device holds @p slavePosition. Thread-safe; no bus access.
+  ///
+  /// For the caller that only needs to tell "no such device" from a failure of the operation
+  /// itself — an HTTP route answering 404 before it starts. It is a point-in-time answer, so it
+  /// does not entitle the caller to a @c Device&: use @c withDevice for that.
+  bool hasDevice(uint16_t slavePosition) const;
 
-  /// @brief Finds a device by its 1-based bus position.
+  /// @brief Runs @p fn against every discovered device, holding the device-set lock throughout.
   ///
-  /// @param slavePosition  1-based position of the device on the fieldbus.
-  /// @return Pointer to the matching @c Device, or @c nullptr if not found.
-  const Device* findDevice(uint16_t slavePosition) const;
-
-  /// @brief Mutable overload of @c findDevice.
+  /// The whole-set counterpart of @c withDevice, and it exists for the same reason: returning
+  /// @c const @c std::vector<Device>& would hand a caller a reference that @c scan / @c reset
+  /// invalidates, and the lock that would make it safe is private. @p fn receives the vector in
+  /// bus order (index 0 = position 1, empty before @c scan) and may return anything, including
+  /// @c void.
   ///
-  /// Hands back a writable @c Device so SDK callers can drive it directly —
-  /// e.g. @c dm.findDevice(1)->writeValue(0x2030, 1, 123). @c nullptr if not found.
-  ///
-  /// @warning Not internally synchronised: call on the control-plane (server) thread, or
-  /// while holding @c deviceSetMutex_. Off-thread consumers (monitoring) must go through the
-  /// position-based methods such as @c readDeviceParameter, which look the device up under the
-  /// lock and never hand out a pointer that @c scan / @c reset could dangle.
-  Device* findDevice(uint16_t slavePosition);
+  /// The same re-entrancy rule as @c withDevice applies: @p fn must not call back into a
+  /// @c DeviceManager control-plane operation.
+  template <typename Fn>
+  auto withDevices(Fn&& fn) const -> std::invoke_result_t<Fn, const std::vector<Device>&> {
+    const std::shared_lock lock(deviceSetMutex_);
+    return std::forward<Fn>(fn)(devices_);
+  }
 
   /// @brief Runs @p fn against the device at @p slavePosition, holding the bus lock throughout.
   ///
@@ -701,6 +703,22 @@ class DeviceManager {
   bool deviceExchangesProcessData(uint16_t slavePosition) const;
 
  private:
+  /// @brief Finds a device by its 1-based bus position. O(N); @c nullptr if not found.
+  ///
+  /// Private, and that is the point: the returned pointer is only valid while @c deviceSetMutex_
+  /// is held, because @c scan / @c reset destroy every @c Device. There is no way to express that
+  /// obligation in the signature, so the pointer never leaves the class — external callers borrow
+  /// through @c withDevice / @c withDevices, which hold the lock for the borrow's whole duration,
+  /// or use the position-based methods, which take it themselves.
+  ///
+  /// **Every caller must already hold @c deviceSetMutex_** (shared is enough) **or
+  /// @c busOperationMutex_** — the latter suffices on its own, since only an operation holding it
+  /// can rebuild the device set.
+  const Device* findDevice(uint16_t slavePosition) const;
+
+  /// @brief Mutable overload of @c findDevice. Same contract.
+  Device* findDevice(uint16_t slavePosition);
+
   /// @brief Rows written and the @c [startSeq, endSeq) sequence span of a serialised dump.
   struct DumpSpan {
     uint64_t rows = 0;

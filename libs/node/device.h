@@ -353,9 +353,13 @@ class Device {
   std::expected<std::vector<uint8_t>, std::string> valueAsBytes(uint16_t index,
                                                                 uint8_t subindex) const;
 
-  /// @brief Returns the parameter map, keyed by @c makeParameterKey(index, subindex).
-  /// Empty until @c initializeParameters() is called.
-  const std::unordered_map<uint32_t, DeviceParameter>& parameters() const;
+  /// @brief Whether the object dictionary has been enumerated (thread-safe; no bus access).
+  ///
+  /// The map itself is deliberately not exposed: handing out a reference to it would let a caller
+  /// traverse it while @c initializeParameters replaces it wholesale under @c parametersMutex_.
+  /// Callers that want the contents use @c parametersOrdered (a snapshot) or @c parameter (one
+  /// entry), both of which copy under the lock.
+  bool hasParameters() const;
 
   /// @brief Returns all parameters sorted ascending by @c (index, subindex).
   ///
@@ -364,13 +368,19 @@ class Device {
   /// rather than O(1) lookup.
   std::vector<DeviceParameter> parametersOrdered() const;
 
-  /// @brief Looks up a parameter by @c (index, subindex). O(1).
-  /// @return Pointer to the parameter, or @c nullptr if no such entry exists.
+  /// @brief Looks up one parameter by @c (index, subindex) and returns a copy of it. O(1).
   ///
-  /// @warning Returns a raw pointer into the parameter map; not synchronised against the cache
-  /// lock. Call on the control-plane thread only. Off-thread readers use the thread-safe
-  /// @c value / @c dataType getters below, which return copies under the lock.
-  const DeviceParameter* parameter(uint16_t index, uint8_t subindex) const;
+  /// A copy, taken under @c parametersMutex_, rather than a pointer into the map: @c
+  /// initializeParameters replaces the whole map, so any pointer handed out here would be
+  /// invalidated by a re-enumeration on another thread — and the readers that want an entry (the
+  /// process-image and dump headers, a profile view's capability probe) run on their own worker
+  /// threads. Copying an entry is a handful of scalars plus two short strings, and these are point
+  /// lookups rather than sweeps; @c parametersOrdered covers the whole-map case in one lock.
+  ///
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @return A copy of the parameter, or @c nullopt if the parameter is unknown.
+  std::optional<DeviceParameter> parameter(uint16_t index, uint8_t subindex) const;
 
   /// @brief Returns a copy of a parameter's cached value (the typed cache getter), no bus access.
   ///
@@ -382,17 +392,6 @@ class Device {
   /// @param subindex  CoE object subindex.
   /// @return The cached value, or @c nullopt if the parameter is unknown.
   std::optional<DeviceParameterValue> value(uint16_t index, uint8_t subindex) const;
-
-  /// @brief Returns a copy of a full parameter struct (value + metadata), no bus access.
-  ///
-  /// The struct-level analogue of @c value: a deep copy taken under the cache lock, so it is safe
-  /// to call off the control-plane thread (unlike @c parameter, which hands out a raw pointer).
-  /// Reflects the last value stored by a read/refresh; it does not itself touch the bus.
-  ///
-  /// @param index     CoE object index.
-  /// @param subindex  CoE object subindex.
-  /// @return A copy of the parameter, or @c nullopt if the parameter is unknown.
-  std::optional<DeviceParameter> parameterCopy(uint16_t index, uint8_t subindex) const;
 
   /// @brief Returns a parameter's declared ETG.1020 data-type code, thread-safely (cache lock).
   ///
@@ -565,8 +564,16 @@ class Device {
   }
 
  private:
-  /// @brief Mutable parameter lookup by @c (index, subindex). O(1); @c nullptr if absent.
+  /// @brief Parameter lookup by @c (index, subindex). O(1); @c nullptr if absent.
+  ///
+  /// The raw-pointer form, private because a pointer into @c parameters_ is only valid while
+  /// @c parametersMutex_ is held and only until the next @c initializeParameters. **Every caller
+  /// must already hold the lock**, and must not carry the pointer across a release of it. The
+  /// public counterpart is @c parameter, which locks and copies.
   DeviceParameter* findParameter(uint16_t index, uint8_t subindex);
+
+  /// @brief Const overload of @c findParameter. Same contract: caller holds @c parametersMutex_.
+  const DeviceParameter* findParameter(uint16_t index, uint8_t subindex) const;
 
   /// @brief Fills in live values on @p defs (the value-read pass of @c initializeParameters).
   ///

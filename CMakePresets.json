@@ -41,6 +41,23 @@
       }
     },
     {
+      "name": "x64-linux-tsan",
+      "inherits": "base",
+      "displayName": "Linux x64 ThreadSanitizer",
+      "description": "Debug build under ThreadSanitizer. The only mechanical check on the locking rules in docs/LOCKING.md — the concurrency tests are written to be run here, where an unsynchronised read is a reported race rather than a crash that reproduces once a month.",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "x64-linux",
+        "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer -g",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread"
+      }
+    },
+    {
       "name": "x64-windows-debug",
       "inherits": "base",
       "displayName": "Windows x64 Debug",
@@ -167,6 +184,10 @@
     {
       "name": "x64-linux-release",
       "configurePreset": "x64-linux-release"
+    },
+    {
+      "name": "x64-linux-tsan",
+      "configurePreset": "x64-linux-tsan"
     },
     {
       "name": "x64-windows-debug",

@@ -28,6 +28,17 @@ using mm::comm::SlaveInfo;
 using mm::node::DeviceManager;
 using mm::node::DeviceParameterValue;
 
+// Reads one device's mailboxActive() through the borrow, which is the only way in — findDevice is
+// private precisely so a Device& can never outlive the lock that keeps it alive.
+bool mailboxActive(DeviceManager& dm, uint16_t slavePosition) {
+  return dm
+      .withDevice(slavePosition,
+                  [](mm::node::Device& device) -> std::expected<bool, std::string> {
+                    return device.mailboxActive();
+                  })
+      .value_or(false);
+}
+
 /// Minimal FieldbusDriver test double. init() returns a configurable result;
 /// scan() reports a configurable slave count. Every other method is a trivial
 /// stub — the lifecycle tests below never reach them.
@@ -234,16 +245,16 @@ TEST(DeviceManagerMailbox, PreOpStateMarksMailboxActive) {
   ASSERT_TRUE(dm.scan().has_value());
 
   // Devices start with no mailbox until a state read establishes availability.
-  ASSERT_NE(dm.findDevice(1), nullptr);
-  EXPECT_FALSE(dm.findDevice(1)->mailboxActive());
+  ASSERT_TRUE(dm.hasDevice(1));
+  EXPECT_FALSE(mailboxActive(dm, 1));
 
   ASSERT_TRUE(dm.deviceStates({}).has_value());
-  EXPECT_TRUE(dm.findDevice(1)->mailboxActive());
+  EXPECT_TRUE(mailboxActive(dm, 1));
 
   // Dropping back to INIT must flip the mailbox inactive again.
   raw->reportState = static_cast<uint16_t>(EtherCatState::Init);
   ASSERT_TRUE(dm.deviceStates({}).has_value());
-  EXPECT_FALSE(dm.findDevice(1)->mailboxActive());
+  EXPECT_FALSE(mailboxActive(dm, 1));
 }
 
 TEST(DeviceManagerMailbox, ErrorIndicatorDoesNotDisableMailbox) {
@@ -258,8 +269,8 @@ TEST(DeviceManagerMailbox, ErrorIndicatorDoesNotDisableMailbox) {
   ASSERT_TRUE(dm.scan().has_value());
   ASSERT_TRUE(dm.deviceStates({}).has_value());
 
-  ASSERT_NE(dm.findDevice(1), nullptr);
-  EXPECT_TRUE(dm.findDevice(1)->mailboxActive());
+  ASSERT_TRUE(dm.hasDevice(1));
+  EXPECT_TRUE(mailboxActive(dm, 1));
 }
 
 TEST(DeviceManagerDelegates, UnknownDeviceErrors) {
@@ -376,8 +387,8 @@ TEST(DeviceManagerMailbox, InitStateKeepsMailboxInactive) {
   ASSERT_TRUE(dm.scan().has_value());
   ASSERT_TRUE(dm.deviceStates({}).has_value());
 
-  ASSERT_NE(dm.findDevice(1), nullptr);
-  EXPECT_FALSE(dm.findDevice(1)->mailboxActive());
+  ASSERT_TRUE(dm.hasDevice(1));
+  EXPECT_FALSE(mailboxActive(dm, 1));
 }
 
 TEST(DeviceManagerBusConfig, EnrichesDriverConfigWithDeviceName) {

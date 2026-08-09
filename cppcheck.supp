@@ -28,6 +28,7 @@ uninitMemberVarNoCtor:*/web_api.h
 // tests use to keep their FakeDriver test doubles TU-local. These files
 // compile cleanly with the real toolchain (verified with g++ -fsyntax-only).
 syntaxError:*/device_manager_test.cc
+syntaxError:*/device_manager_concurrency_test.cc
 syntaxError:*/device_test.cc
 syntaxError:*/device_parameter_test.cc
 syntaxError:*/monitoring_test.cc
@@ -121,6 +122,15 @@ unreadVariable:*/somanet_drive.cc
 // somanet_drive.cc entries above — a std::transform over a std::back_inserter, one of them into a
 // nlohmann::json array, is obscure rather than clearer. The loops stay.
 useStlAlgorithm:*/somanet_procedures.cc
+
+// The same shape one layer out: every route that touches a device does it through
+// withDeviceOr404, and every monitoring classification through withDevice. Both lend a mutable
+// Device& — that is what a borrow is for — and cppcheck flags the three lambdas out of a dozen
+// whose bodies happen to call only const methods. Splitting those three off would make the
+// signature look like a deliberate statement about the endpoint rather than an artefact of which
+// accessors it reached for. The uniform Device& is the point.
+constParameterReference:*/http_server.cc
+constParameterReference:*/monitoring_manager.cc
 
 // The firmware installation procedure borrows a device per step to perform one FoE transfer or an
 // EEPROM write. Those Device methods are const (they mutate the drive, not the object), so cppcheck

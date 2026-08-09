@@ -78,12 +78,16 @@ void ParameterRefresher::release(uint16_t devicePosition, uint16_t index, uint8_
 }
 
 void ParameterRefresher::start() {
-  std::unique_lock<std::mutex> lock(mutex_);
+  // thread_ is assigned under the lock, not after releasing it. Releasing first leaves a window in
+  // which a concurrent stop() sees running_ true, finds thread_ not yet joinable, and returns
+  // without joining — after which start() installs a thread nobody will ever join, and destroying a
+  // joinable std::thread calls std::terminate. The new thread's first act is to take this mutex, so
+  // it simply waits out the rest of this function.
+  const std::lock_guard<std::mutex> lock(mutex_);
   if (running_) {
     return;
   }
   running_ = true;
-  lock.unlock();
   thread_ = std::thread([this] { run(); });
 }
 

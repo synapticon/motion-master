@@ -1,0 +1,71 @@
+name: ThreadSanitizer (Linux x64)
+
+# The mechanical check on docs/LOCKING.md. The locking rules are otherwise enforced by review, and
+# review is what let a raw Device* escape to 32 concurrent HTTP workers — a use-after-free that every
+# unsanitised test run passed.
+#
+# Its own workflow rather than a step in build-linux-x64.yml: it is slower than the ordinary run
+# (~6x on the test suite) and it fails for a different reason, so a red X here should say "a race"
+# rather than "Linux x64 broke".
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  tsan:
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      # Shares the ordinary Linux job's cache on purpose. The preset's -fsanitize=thread lands in
+      # CMAKE_CXX_FLAGS, which vcpkg does *not* forward into port builds — the dependencies come back
+      # from the archive uninstrumented and identical to the normal build's, so there is no ABI split
+      # and no separate key to maintain. TSan works fine against uninstrumented libraries: it
+      # interposes pthread, so it still sees every lock and thread they take. It simply cannot report
+      # a race *inside* one, which is not what this job is looking for.
+      - name: Cache vcpkg packages
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/vcpkg/archives
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y ninja-build gcc-14 g++-14 libtsan2
+
+      # Ubuntu 24.04 ships a kernel that hands out 32 bits of mmap randomisation, which does not fit
+      # the fixed shadow-memory layout the sanitizers map at startup — TSan aborts with "FATAL:
+      # ThreadSanitizer: unexpected memory mapping" before running a single test. Lowering the
+      # entropy to 28 bits is the upstream-recommended workaround (google/sanitizers#1614) and
+      # affects only this runner, for this job.
+      - name: Widen the sanitizer's address space
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+
+      - name: Install CMake 4.x
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: "~4.0.0"
+
+      - name: Configure
+        run: cmake --preset x64-linux-tsan
+        env:
+          CC: gcc-14
+          CXX: g++-14
+
+      - name: Build
+        run: cmake --build --preset x64-linux-tsan
+
+      # Via the script so the suppression file and halt_on_error are applied exactly as they are
+      # locally — a race that only fails in CI because the options differ is worse than no check.
+      - name: Test
+        run: ./tools/test.sh x64-linux-tsan

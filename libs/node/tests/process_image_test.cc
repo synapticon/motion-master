@@ -398,7 +398,7 @@ TEST(DeviceManagerProcessData, WriteStagesOutputAndReadPullsInput) {
   ASSERT_TRUE(status.has_value());
   EXPECT_EQ(std::get<uint16_t>(*status), 0x0237);
   // The cached parameter now reflects the live value too.
-  EXPECT_EQ(std::get<uint16_t>(dm.findDevice(1)->parameter(0x6041, 0x00)->value), 0x0237);
+  EXPECT_EQ(std::get<uint16_t>(*dm.value(1, 0x6041, 0x00)), 0x0237);
 }
 
 TEST(DeviceManagerProcessData, IndependentOutputSlotsComposeIntoOneImage) {

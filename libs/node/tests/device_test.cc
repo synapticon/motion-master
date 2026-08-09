@@ -69,8 +69,11 @@ class SdoFakeDriver : public FieldbusDriver {
   std::map<uint16_t, std::expected<std::vector<uint8_t>, std::string>> completeReads;
   /// Object indices passed to readSdoComplete(), in call order.
   std::vector<uint16_t> completeReadIndices;
-  /// Count of per-subindex readSdo() uploads, to assert Complete Access replaced them.
-  int perSubReads = 0;
+  /// Count of per-subindex readSdo() uploads, to assert Complete Access replaced them. Atomic
+  /// because the concurrency tests below drive readSdo from several threads at once — a plain int
+  /// here is a data race in the test double itself, which ThreadSanitizer reports as loudly as one
+  /// in the code under test and which would otherwise bury a real finding.
+  std::atomic<int> perSubReads{0};
   /// Invoked at the top of readSdo()/writeSdo(), before the programmed answer. Lets a test park a
   /// transfer mid-flight and observe what the rest of the Device can still do meanwhile.
   std::function<void()> onTransfer;
@@ -335,8 +338,8 @@ TEST(DeviceReadParameter, OnlineUpdatesCacheAndMarksSynced) {
   ASSERT_TRUE(v.has_value());
   EXPECT_EQ(*v, DeviceParameterValue{uint32_t{16}});
 
-  const auto* p = device.parameter(0x6065, 0x00);
-  ASSERT_NE(p, nullptr);
+  const auto p = device.parameter(0x6065, 0x00);
+  ASSERT_TRUE(p.has_value());
   EXPECT_EQ(p->value, DeviceParameterValue{uint32_t{16}});
   EXPECT_EQ(p->syncState, SyncState::Synced);
 }
@@ -352,8 +355,8 @@ TEST(DeviceReadParameter, OfflineServesCacheWithoutBusAccess) {
   ASSERT_TRUE(v.has_value());
   EXPECT_EQ(*v, DeviceParameterValue{uint32_t{0}});
 
-  const auto* p = device.parameter(0x6065, 0x00);
-  ASSERT_NE(p, nullptr);
+  const auto p = device.parameter(0x6065, 0x00);
+  ASSERT_TRUE(p.has_value());
   EXPECT_EQ(p->syncState, SyncState::Unknown);
 }
 
@@ -376,10 +379,10 @@ TEST(DeviceReadAllParameters, RefreshesEveryReadableValueInPlace) {
 
   ASSERT_TRUE(device.readAllParameters().has_value());
 
-  const auto* a = device.parameter(0x6065, 0x00);
-  const auto* b = device.parameter(0x6066, 0x00);
-  ASSERT_NE(a, nullptr);
-  ASSERT_NE(b, nullptr);
+  const auto a = device.parameter(0x6065, 0x00);
+  const auto b = device.parameter(0x6066, 0x00);
+  ASSERT_TRUE(a.has_value());
+  ASSERT_TRUE(b.has_value());
   EXPECT_EQ(a->value, DeviceParameterValue{uint32_t{16}});
   EXPECT_EQ(a->syncState, SyncState::Synced);
   EXPECT_EQ(b->value, DeviceParameterValue{uint32_t{32}});
@@ -397,8 +400,8 @@ TEST(DeviceReadAllParameters, SkipsWriteOnlyObjects) {
 
   ASSERT_TRUE(device.readAllParameters().has_value());
 
-  const auto* p = device.parameter(0x6040, 0x00);
-  ASSERT_NE(p, nullptr);
+  const auto p = device.parameter(0x6040, 0x00);
+  ASSERT_TRUE(p.has_value());
   EXPECT_EQ(p->syncState, SyncState::Unknown);  // never read
 }
 
@@ -415,8 +418,8 @@ TEST(DeviceReadAllParameters, SucceedsDespiteAPerEntryReadFailure) {
 
   ASSERT_TRUE(device.readAllParameters().has_value());
 
-  const auto* a = device.parameter(0x6065, 0x00);
-  ASSERT_NE(a, nullptr);
+  const auto a = device.parameter(0x6065, 0x00);
+  ASSERT_TRUE(a.has_value());
   EXPECT_EQ(a->syncState, SyncState::Synced);
 }
 
@@ -574,7 +577,7 @@ TEST(DeviceParameterCopy, ReturnsFullStructFromCacheWithoutBusAccess) {
   ASSERT_TRUE(device.readParameter(0x6065, 0x00).has_value());  // sync the cache to 16
 
   const size_t writesBefore = driver.writes.size();
-  auto copy = device.parameterCopy(0x6065, 0x00);
+  auto copy = device.parameter(0x6065, 0x00);
   ASSERT_TRUE(copy.has_value());
   EXPECT_EQ(copy->index, 0x6065);
   EXPECT_EQ(copy->subindex, 0x00);
@@ -587,7 +590,7 @@ TEST(DeviceParameterCopy, ReturnsFullStructFromCacheWithoutBusAccess) {
 TEST(DeviceParameterCopy, UnknownParameterReturnsNullopt) {
   SdoFakeDriver driver;
   Device device = deviceWithU32Param(driver);
-  EXPECT_FALSE(device.parameterCopy(0x1234, 0x00).has_value());
+  EXPECT_FALSE(device.parameter(0x1234, 0x00).has_value());
 }
 
 TEST(DeviceWriteParameter, OnlineDownloadsAndMarksSynced) {
@@ -603,8 +606,8 @@ TEST(DeviceWriteParameter, OnlineDownloadsAndMarksSynced) {
   EXPECT_EQ(driver.writes[0].subindex, 0x00);
   EXPECT_EQ(driver.writes[0].data, u32le(123));
 
-  const auto* p = device.parameter(0x6065, 0x00);
-  ASSERT_NE(p, nullptr);
+  const auto p = device.parameter(0x6065, 0x00);
+  ASSERT_TRUE(p.has_value());
   EXPECT_EQ(p->value, DeviceParameterValue{uint32_t{123}});
   EXPECT_EQ(p->syncState, SyncState::Synced);
 }
@@ -618,8 +621,8 @@ TEST(DeviceWriteParameter, OfflineCachesAsPendingAndSucceeds) {
   ASSERT_TRUE(w.has_value());
   EXPECT_TRUE(driver.writes.empty());
 
-  const auto* p = device.parameter(0x6065, 0x00);
-  ASSERT_NE(p, nullptr);
+  const auto p = device.parameter(0x6065, 0x00);
+  ASSERT_TRUE(p.has_value());
   EXPECT_EQ(p->value, DeviceParameterValue{uint32_t{55}});
   EXPECT_EQ(p->syncState, SyncState::Pending);
 }
@@ -633,8 +636,8 @@ TEST(DeviceWriteParameter, OnlineDownloadFailureMarksPendingAndReturnsError) {
   auto w = device.writeParameter(0x6065, 0x00, DeviceParameterValue{uint32_t{77}});
   EXPECT_FALSE(w.has_value());
 
-  const auto* p = device.parameter(0x6065, 0x00);
-  ASSERT_NE(p, nullptr);
+  const auto p = device.parameter(0x6065, 0x00);
+  ASSERT_TRUE(p.has_value());
   // Cache still reflects the attempted value; flagged Pending for a later re-write.
   EXPECT_EQ(p->value, DeviceParameterValue{uint32_t{77}});
   EXPECT_EQ(p->syncState, SyncState::Pending);
@@ -651,8 +654,8 @@ TEST(DeviceWriteParameter, CoercesValueIntoDeclaredType) {
   ASSERT_EQ(driver.writes.size(), 1u);
   EXPECT_EQ(driver.writes[0].data, u32le(9));
 
-  const auto* p = device.parameter(0x6065, 0x00);
-  ASSERT_NE(p, nullptr);
+  const auto p = device.parameter(0x6065, 0x00);
+  ASSERT_TRUE(p.has_value());
   EXPECT_TRUE(std::holds_alternative<uint32_t>(p->value));
 }
 
@@ -942,15 +945,15 @@ TEST(DeviceInitParameters, NoCoeDeviceBuildsParametersFromSii) {
 
   ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
 
-  const DeviceParameter* out = device.parameter(0x7000, 0x01);
-  ASSERT_NE(out, nullptr);
+  const auto out = device.parameter(0x7000, 0x01);
+  ASSERT_TRUE(out.has_value());
   EXPECT_EQ(out->dataType, 0x01);  // BOOLEAN
   EXPECT_EQ(out->bitLength, 1u);
   EXPECT_EQ(out->access, 0x3F);  // read + write
   EXPECT_EQ(out->origin, ParameterOrigin::Sii);
 
-  const DeviceParameter* in = device.parameter(0x6000, 0x01);
-  ASSERT_NE(in, nullptr);
+  const auto in = device.parameter(0x6000, 0x01);
+  ASSERT_TRUE(in.has_value());
   EXPECT_EQ(in->dataType, 0x06);  // UNSIGNED16
   EXPECT_EQ(in->access, 0x07);    // read-only
   EXPECT_EQ(in->origin, ParameterOrigin::Sii);
@@ -964,8 +967,8 @@ TEST(DeviceInitParameters, CoeDeviceParametersHaveObjectDictionaryOrigin) {
   Device device(1, driver);
 
   ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
-  const DeviceParameter* p = device.parameter(0x6040, 0x00);
-  ASSERT_NE(p, nullptr);
+  const auto p = device.parameter(0x6040, 0x00);
+  ASSERT_TRUE(p.has_value());
   EXPECT_EQ(p->origin, ParameterOrigin::ObjectDictionary);
 }
 
@@ -1225,8 +1228,8 @@ TEST(DeviceCacheConcurrency, ConcurrentReadsAndCacheUpdatesAreSafe) {
   }
 
   EXPECT_EQ(failures.load(), 0);
-  const auto* p = device.parameter(0x6065, 0x00);
-  ASSERT_NE(p, nullptr);
+  const auto p = device.parameter(0x6065, 0x00);
+  ASSERT_TRUE(p.has_value());
   EXPECT_TRUE(p->value == DeviceParameterValue{uint32_t{16}} ||
               p->value == DeviceParameterValue{uint32_t{99}});
 }

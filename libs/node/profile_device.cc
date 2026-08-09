@@ -276,7 +276,7 @@ std::expected<ProfileDevice, std::string> createProfileDevice(Device& device) {
   // Device type (0x1000) is a mandatory CANopen object on any CoE device, so its presence in the
   // enumerated parameter map discriminates an un-enumerated device. No bus I/O — works online or
   // off.
-  if (device.parameter(kDeviceType, 0) == nullptr) {
+  if (!device.parameter(kDeviceType, 0)) {
     return std::unexpected(std::format(
         "device {} has no generic device area (missing 0x1000; initializeParameters first?)",
         device.slavePosition()));

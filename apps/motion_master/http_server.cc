@@ -46,6 +46,35 @@
 
 namespace {
 
+// Runs @p fn against the device at @p position with the device set held stable for the whole call,
+// answering 404 when no device holds that position.
+//
+// **The only way a route may reach a Device.** Every handler runs on its own worker thread (see
+// mm::api::Router, which dispatches to a pool), so two requests genuinely run at once — and one of
+// them may be POST /api/scan or POST /api/reset, which destroy every Device. A bare pointer into
+// the device vector is therefore dangling from the instant it is obtained.
+// DeviceManager::withDevice holds deviceSetMutex_ shared for the callable's whole duration, which
+// is precisely the lock a rescan needs exclusively, so the borrowed Device& stays valid for as long
+// as the handler uses it.
+//
+// @p fn shapes its own Response — timed or not, JSON or bytes — because these endpoints do not
+// agree on one (content negotiation, FoE's octet-stream, the 409-on-state-precondition cases). Only
+// the not-found answer is common, and it is the one thing withDevice itself reports.
+template <typename Fn>
+mm::api::Response withDeviceOr404(mm::node::DeviceManager& deviceManager, uint16_t position,
+                                  Fn&& fn) {
+  auto response = deviceManager.withDevice(
+      position, [&fn](mm::node::Device& device) -> std::expected<mm::api::Response, std::string> {
+        return fn(device);
+      });
+  if (!response) {
+    // withDevice's own and only failure is an unresolved position — fn's outcome, success or not,
+    // arrives as a Response.
+    return mm::api::notFound("no device at that bus position");
+  }
+  return std::move(*response);
+}
+
 // Parses the optional comma-separated "positions" query into 1-based slave positions. An absent
 // or empty parameter yields an empty vector (which the device manager reads as "all devices"). On
 // a malformed token it writes a 400 (with the CORS header) to @p res and returns nullopt — the
@@ -606,11 +635,9 @@ void HttpServer::run() {
                if (!position) {
                  return mm::api::badRequest("slavePosition must be a number");
                }
-               const auto* device = deviceManager_.findDevice(*position);
-               if (device == nullptr) {
-                 return mm::api::notFound("no device at that bus position");
-               }
-               return mm::api::json(nlohmann::json(*device));
+               return withDeviceOr404(deviceManager_, *position, [](mm::node::Device& device) {
+                 return mm::api::json(nlohmann::json(device));
+               });
              });
 
   // ── Offline tools: no device, no bus ────────────────────────────────────────────────────────
@@ -679,16 +706,14 @@ void HttpServer::run() {
                if (!length || *length == 0) {
                  return mm::api::badRequest("'length' must be a non-zero byte count");
                }
-               const auto* device = deviceManager_.findDevice(*position);
-               if (device == nullptr) {
-                 return mm::api::notFound("no device at that bus position");
-               }
-               std::vector<uint8_t> buffer(*length);
-               return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
-                 if (auto r = device->readRegister(*address, buffer); !r) {
-                   return std::unexpected(r.error());
-                 }
-                 return nlohmann::json{{"data", buffer}};
+               return withDeviceOr404(deviceManager_, *position, [&](mm::node::Device& device) {
+                 std::vector<uint8_t> buffer(*length);
+                 return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                   if (auto r = device.readRegister(*address, buffer); !r) {
+                     return std::unexpected(r.error());
+                   }
+                   return nlohmann::json{{"data", buffer}};
+                 });
                });
              });
 
@@ -703,15 +728,13 @@ void HttpServer::run() {
                 if (!data) {
                   return mm::api::badRequest(data.error());
                 }
-                const auto* device = deviceManager_.findDevice(*position);
-                if (device == nullptr) {
-                  return mm::api::notFound("no device at that bus position");
-                }
-                return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
-                  if (auto r = device->writeRegister(*address, *data); !r) {
-                    return std::unexpected(r.error());
-                  }
-                  return nlohmann::json{{"ok", true}};
+                return withDeviceOr404(deviceManager_, *position, [&](mm::node::Device& device) {
+                  return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                    if (auto r = device.writeRegister(*address, *data); !r) {
+                      return std::unexpected(r.error());
+                    }
+                    return nlohmann::json{{"ok", true}};
+                  });
                 });
               });
 
@@ -725,29 +748,27 @@ void HttpServer::run() {
         if (!position) {
           return mm::api::badRequest("slavePosition must be a number");
         }
-        const auto* device = deviceManager_.findDevice(*position);
-        if (device == nullptr) {
-          return mm::api::notFound("no device at that bus position");
-        }
-        const auto t0 = std::chrono::steady_clock::now();
-        auto raw = device->readSii();
-        const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - t0);
-        if (!raw) {
-          return mm::api::withWireTime(mm::api::error("500 Internal Server Error", raw.error()),
-                                       wireUs);
-        }
-        if (req.accepts("application/octet-stream")) {
-          return mm::api::withWireTime(
-              mm::api::bytes("application/octet-stream", std::string(raw->begin(), raw->end())),
-              wireUs);
-        }
-        auto parsed = mm::comm::parseSii(*raw);
-        if (!parsed) {
-          return mm::api::withWireTime(mm::api::error("500 Internal Server Error", parsed.error()),
-                                       wireUs);
-        }
-        return mm::api::withWireTime(mm::api::json(nlohmann::json(*parsed)), wireUs);
+        return withDeviceOr404(deviceManager_, *position, [&](mm::node::Device& device) {
+          const auto t0 = std::chrono::steady_clock::now();
+          auto raw = device.readSii();
+          const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+              std::chrono::steady_clock::now() - t0);
+          if (!raw) {
+            return mm::api::withWireTime(mm::api::error("500 Internal Server Error", raw.error()),
+                                         wireUs);
+          }
+          if (req.accepts("application/octet-stream")) {
+            return mm::api::withWireTime(
+                mm::api::bytes("application/octet-stream", std::string(raw->begin(), raw->end())),
+                wireUs);
+          }
+          auto parsed = mm::comm::parseSii(*raw);
+          if (!parsed) {
+            return mm::api::withWireTime(
+                mm::api::error("500 Internal Server Error", parsed.error()), wireUs);
+          }
+          return mm::api::withWireTime(mm::api::json(nlohmann::json(*parsed)), wireUs);
+        });
       });
 
   router.put(
@@ -763,15 +784,13 @@ void HttpServer::run() {
         if (auto parsed = mm::comm::parseSii(data); !parsed) {
           return mm::api::badRequest(std::string("not a valid SII image: ") + parsed.error());
         }
-        const auto* device = deviceManager_.findDevice(*position);
-        if (device == nullptr) {
-          return mm::api::notFound("no device at that bus position");
-        }
-        return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
-          if (auto r = device->writeSii(data); !r) {
-            return std::unexpected(r.error());
-          }
-          return nlohmann::json{{"ok", true}};
+        return withDeviceOr404(deviceManager_, *position, [&](mm::node::Device& device) {
+          return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+            if (auto r = device.writeSii(data); !r) {
+              return std::unexpected(r.error());
+            }
+            return nlohmann::json{{"ok", true}};
+          });
         });
       });
 
@@ -781,7 +800,7 @@ void HttpServer::run() {
                if (!position) {
                  return mm::api::badRequest("slavePosition must be a number");
                }
-               if (deviceManager_.findDevice(*position) == nullptr) {
+               if (!deviceManager_.hasDevice(*position)) {
                  return mm::api::notFound("no device at that bus position");
                }
                return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
@@ -808,7 +827,7 @@ void HttpServer::run() {
         if (timeoutMs < 0) {
           return mm::api::badRequest("timeoutMs must not be negative");
         }
-        if (deviceManager_.findDevice(*position) == nullptr) {
+        if (!deviceManager_.hasDevice(*position)) {
           return mm::api::notFound("no device at that bus position");
         }
         const auto timeout = std::chrono::nanoseconds(static_cast<int64_t>(timeoutMs * 1e6 + 0.5));
@@ -838,7 +857,7 @@ void HttpServer::run() {
       }
       settle = std::chrono::milliseconds(*settleMs);
     }
-    if (deviceManager_.findDevice(*position) == nullptr) {
+    if (!deviceManager_.hasDevice(*position)) {
       return mm::api::notFound("no device at that bus position");
     }
     // Most of the round trip is the deliberate wait, which is what the wire time reports.
@@ -857,7 +876,7 @@ void HttpServer::run() {
                if (!position) {
                  return mm::api::badRequest("slavePosition must be a number");
                }
-               if (deviceManager_.findDevice(*position) == nullptr) {
+               if (!deviceManager_.hasDevice(*position)) {
                  return mm::api::notFound("no device at that bus position");
                }
                // Read fresh over SDO, so the mailbox must be live: INIT/BOOT is a 409.
@@ -879,7 +898,7 @@ void HttpServer::run() {
                if (!mapping) {
                  return mm::api::badRequest(mapping.error());
                }
-               if (deviceManager_.findDevice(*position) == nullptr) {
+               if (!deviceManager_.hasDevice(*position)) {
                  return mm::api::notFound("no device at that bus position");
                }
                // Both the write and the verifying read-back are on the wire, so both are timed.
@@ -910,7 +929,7 @@ void HttpServer::run() {
                if (!position) {
                  return mm::api::badRequest("slavePosition must be a number");
                }
-               if (deviceManager_.findDevice(*position) == nullptr) {
+               if (!deviceManager_.hasDevice(*position)) {
                  return mm::api::notFound("no device at that bus position");
                }
                // A non-CiA402 device (or one whose OD is not yet enumerated) is a 409; the node
@@ -934,7 +953,7 @@ void HttpServer::run() {
                 if (!mode) {
                   return mm::api::badRequest("unknown CiA402 operation mode");
                 }
-                if (deviceManager_.findDevice(*position) == nullptr) {
+                if (!deviceManager_.hasDevice(*position)) {
                   return mm::api::notFound("no device at that bus position");
                 }
                 auto r = mm::node::setCia402OperationMode(deviceManager_, *position, *mode);
@@ -960,7 +979,7 @@ void HttpServer::run() {
           return mm::api::badRequest(
               "invalid command: use enable, disable, quickStop, or faultReset");
         }
-        if (deviceManager_.findDevice(*position) == nullptr) {
+        if (!deviceManager_.hasDevice(*position)) {
           return mm::api::notFound("no device at that bus position");
         }
         auto r = mm::node::runCia402Command(deviceManager_, *position, *command);
@@ -989,7 +1008,7 @@ void HttpServer::run() {
         // Signed: target position/velocity are INT32 and target torque INT16, all of which
         // take negative setpoints (reverse motion / regenerative torque).
         const auto value = body["value"].get<int32_t>();
-        if (deviceManager_.findDevice(*position) == nullptr) {
+        if (!deviceManager_.hasDevice(*position)) {
           return mm::api::notFound("no device at that bus position");
         }
         auto r = mm::node::setCia402Target(deviceManager_, *position, *kind, value);
@@ -1010,7 +1029,7 @@ void HttpServer::run() {
                if (!position) {
                  return mm::api::badRequest("slavePosition must be a number");
                }
-               if (deviceManager_.findDevice(*position) == nullptr) {
+               if (!deviceManager_.hasDevice(*position)) {
                  return mm::api::notFound("no device at that bus position");
                }
                auto state = mm::node::brakeState(deviceManager_, *position);
@@ -1044,7 +1063,7 @@ void HttpServer::run() {
               mm::node::somanet::toString(mm::node::somanet::HrdData::kEncoderRawData),
               mm::node::somanet::toString(mm::node::somanet::HrdData::kSystemIdentificationData)));
         }
-        if (deviceManager_.findDevice(*position) == nullptr) {
+        if (!deviceManager_.hasDevice(*position)) {
           return mm::api::notFound("no device at that bus position");
         }
         // CSV for the spreadsheet-and-script half of the audience: a full recording is ten
@@ -1147,16 +1166,14 @@ void HttpServer::run() {
                if (!position || !index || !subindex) {
                  return mm::api::badRequest("slavePosition, index and subindex must be numbers");
                }
-               const auto* device = deviceManager_.findDevice(*position);
-               if (device == nullptr) {
-                 return mm::api::notFound("no device at that bus position");
-               }
-               return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
-                 auto r = device->readSdo(*index, *subindex);
-                 if (!r) {
-                   return std::unexpected(r.error());
-                 }
-                 return nlohmann::json{{"data", *r}};
+               return withDeviceOr404(deviceManager_, *position, [&](mm::node::Device& device) {
+                 return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                   auto r = device.readSdo(*index, *subindex);
+                   if (!r) {
+                     return std::unexpected(r.error());
+                   }
+                   return nlohmann::json{{"data", *r}};
+                 });
                });
              });
 
@@ -1172,15 +1189,13 @@ void HttpServer::run() {
                if (!data) {
                  return mm::api::badRequest(data.error());
                }
-               const auto* device = deviceManager_.findDevice(*position);
-               if (device == nullptr) {
-                 return mm::api::notFound("no device at that bus position");
-               }
-               return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
-                 if (auto r = device->writeSdo(*index, *subindex, *data); !r) {
-                   return std::unexpected(r.error());
-                 }
-                 return nlohmann::json{{"ok", true}};
+               return withDeviceOr404(deviceManager_, *position, [&](mm::node::Device& device) {
+                 return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                   if (auto r = device.writeSdo(*index, *subindex, *data); !r) {
+                     return std::unexpected(r.error());
+                   }
+                   return nlohmann::json{{"ok", true}};
+                 });
                });
              });
 
@@ -1193,7 +1208,7 @@ void HttpServer::run() {
                if (!position) {
                  return mm::api::badRequest("slavePosition must be a number");
                }
-               if (deviceManager_.findDevice(*position) == nullptr) {
+               if (!deviceManager_.hasDevice(*position)) {
                  return mm::api::notFound("no device at that bus position");
                }
                return mm::api::timed(
@@ -1213,22 +1228,21 @@ void HttpServer::run() {
                if (!position) {
                  return mm::api::badRequest("slavePosition must be a number");
                }
-               const auto* device = deviceManager_.findDevice(*position);
-               if (device == nullptr) {
-                 return mm::api::notFound("no device at that bus position");
-               }
-               const auto t0 = std::chrono::steady_clock::now();
-               auto contents = device->readFile(std::string(req.parameter("filename")));
-               const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
-                   std::chrono::steady_clock::now() - t0);
-               if (!contents) {
+               return withDeviceOr404(deviceManager_, *position, [&](mm::node::Device& device) {
+                 const auto t0 = std::chrono::steady_clock::now();
+                 auto contents = device.readFile(std::string(req.parameter("filename")));
+                 const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
+                     std::chrono::steady_clock::now() - t0);
+                 if (!contents) {
+                   return mm::api::withWireTime(
+                       mm::api::error("500 Internal Server Error", contents.error().message),
+                       wireUs);
+                 }
                  return mm::api::withWireTime(
-                     mm::api::error("500 Internal Server Error", contents.error().message), wireUs);
-               }
-               return mm::api::withWireTime(
-                   mm::api::bytes("application/octet-stream",
-                                  std::string(contents->begin(), contents->end())),
-                   wireUs);
+                     mm::api::bytes("application/octet-stream",
+                                    std::string(contents->begin(), contents->end())),
+                     wireUs);
+               });
              });
 
   router.put("/api/devices/:slavePosition/files/:filename",
@@ -1237,18 +1251,16 @@ void HttpServer::run() {
                if (!position) {
                  return mm::api::badRequest("slavePosition must be a number");
                }
-               const auto* device = deviceManager_.findDevice(*position);
-               if (device == nullptr) {
-                 return mm::api::notFound("no device at that bus position");
-               }
                std::span<const uint8_t> data{reinterpret_cast<const uint8_t*>(req.body().data()),
                                              req.body().size()};
                const std::string filename(req.parameter("filename"));
-               return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
-                 if (auto r = device->writeFile(filename, data); !r) {
-                   return std::unexpected(r.error().message);
-                 }
-                 return nlohmann::json{{"ok", true}};
+               return withDeviceOr404(deviceManager_, *position, [&](mm::node::Device& device) {
+                 return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                   if (auto r = device.writeFile(filename, data); !r) {
+                     return std::unexpected(r.error().message);
+                   }
+                   return nlohmann::json{{"ok", true}};
+                 });
                });
              });
 
@@ -1268,7 +1280,12 @@ void HttpServer::run() {
                       !r) {
                     return std::unexpected(r.error());
                   }
-                  return nlohmann::json(deviceManager_.findDevice(*position)->parametersOrdered());
+                  // Re-borrowed rather than reusing a pointer: the read above released the lock.
+                  return deviceManager_.withDevice(
+                      *position,
+                      [](mm::node::Device& device) -> std::expected<nlohmann::json, std::string> {
+                        return nlohmann::json(device.parametersOrdered());
+                      });
                 });
               });
 
@@ -1282,7 +1299,12 @@ void HttpServer::run() {
                   if (auto r = deviceManager_.readAllDeviceParameters(*position); !r) {
                     return std::unexpected(r.error());
                   }
-                  return nlohmann::json(deviceManager_.findDevice(*position)->parametersOrdered());
+                  // Re-borrowed rather than reusing a pointer: the read above released the lock.
+                  return deviceManager_.withDevice(
+                      *position,
+                      [](mm::node::Device& device) -> std::expected<nlohmann::json, std::string> {
+                        return nlohmann::json(device.parametersOrdered());
+                      });
                 });
               });
 
@@ -1292,11 +1314,9 @@ void HttpServer::run() {
                if (!position) {
                  return mm::api::badRequest("slavePosition must be a number");
                }
-               const auto* device = deviceManager_.findDevice(*position);
-               if (device == nullptr) {
-                 return mm::api::notFound("no device at that bus position");
-               }
-               return mm::api::json(nlohmann::json(device->parametersOrdered()));
+               return withDeviceOr404(deviceManager_, *position, [](mm::node::Device& device) {
+                 return mm::api::json(nlohmann::json(device.parametersOrdered()));
+               });
              });
 
   router.get("/api/devices/:slavePosition/parameters/:index/:subindex",

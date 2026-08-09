@@ -219,7 +219,17 @@ uint64_t DeviceManager::topologyGeneration() const {
   return topologyGeneration_.load(std::memory_order_relaxed);
 }
 
-const std::vector<Device>& DeviceManager::devices() const { return devices_; }
+bool DeviceManager::initialised() const {
+  // Locked like every other public read of driver_: init()/reset() replace it under the exclusive
+  // lock, and this is asked from an HTTP worker that races them.
+  const std::shared_lock lock(deviceSetMutex_);
+  return driver_ != nullptr;
+}
+
+bool DeviceManager::hasDevice(uint16_t slavePosition) const {
+  const std::shared_lock lock(deviceSetMutex_);
+  return findDevice(slavePosition) != nullptr;
+}
 
 const Device* DeviceManager::findDevice(uint16_t slavePosition) const {
   auto it = std::find_if(devices_.begin(), devices_.end(), [slavePosition](const Device& d) {
@@ -281,11 +291,9 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
     if (!device) {
       continue;
     }
-    const DeviceParameter* p = device->parameter(entry.index, entry.subindex);
-    if (!p) {
-      continue;
-    }
-    auto bytes = encodeSdoBytes(p->dataType, p->value);
+    // valueAsBytes does the lookup and the encode in one hold of the device's own parameter lock,
+    // so nothing here reaches into the map while another thread may be re-enumerating it.
+    auto bytes = device->valueAsBytes(entry.index, entry.subindex);
     if (!bytes) {
       continue;
     }
@@ -398,6 +406,16 @@ void DeviceManager::stopExchange() {
          std::chrono::steady_clock::now() < deadline) {
     std::this_thread::yield();
   }
+  // Giving up is not free, and the caller proceeds regardless: it is about to free the recorder
+  // ring and rewrite the IOmap that an RT cycle still inside exchangeProcessData is reading. That
+  // is the accepted price of never hanging a control-plane call on a stalled RT loop — but it must
+  // not be silent, or the memory corruption it can cause arrives with nothing to explain it. An RT
+  // thread preempted for a fifth of a second is itself the diagnosis worth reporting.
+  if (pd_->exchanging.load(std::memory_order_seq_cst)) {
+    spdlog::warn(
+        "Process-data exchange did not drain within 200 ms — proceeding anyway. The RT loop is "
+        "stalled or descheduled; a re-map or teardown now races the cycle still in flight.");
+  }
 }
 
 // The three recorder accessors take deviceSetMutex_ shared, and the adversary is not the RT
@@ -483,8 +501,8 @@ ProcessImageInfo DeviceManager::processImageInfo() const {
     for (const auto& e : entries) {
       std::string name;
       if (const Device* device = findDevice(e.slavePosition)) {
-        if (const DeviceParameter* p = device->parameter(e.index, e.subindex)) {
-          name = p->name;
+        if (auto p = device->parameter(e.index, e.subindex)) {
+          name = std::move(p->name);
         }
       }
       out.push_back(
@@ -558,8 +576,8 @@ std::expected<DeviceManager::DumpSpan, std::string> DeviceManager::serializeDump
                       .bitOffset = e.bitOffset,
                       .name = {}};
       if (const Device* dev = findDevice(e.slavePosition)) {
-        if (const DeviceParameter* p = dev->parameter(e.index, e.subindex)) {
-          pe.name = p->name;
+        if (auto p = dev->parameter(e.index, e.subindex)) {
+          pe.name = std::move(p->name);
           pe.dataType = p->dataType;
         }
       }
@@ -637,6 +655,9 @@ std::expected<std::string, std::string> DeviceManager::dumpProcessDataBuffer() {
 }
 
 std::vector<SlaveConfigInfo> DeviceManager::busConfig() const {
+  // Shared, like every other position-based read surface: this dereferences driver_ and resolves
+  // slave positions against devices_, both of which the exclusive rebuilders replace.
+  const std::shared_lock lock(deviceSetMutex_);
   std::vector<SlaveConfigInfo> out;
   if (!driver_) {
     return out;
@@ -876,7 +897,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   if (config_.readObjectDictionaryOnPreop) {
     for (const auto& info : result) {
       Device* device = findDevice(info.slavePosition);
-      if (!device || !device->mailboxActive() || !device->parameters().empty()) {
+      if (!device || !device->mailboxActive() || device->hasParameters()) {
         continue;
       }
       if (auto r = device->initializeParameters(/*readValues=*/false); !r) {
@@ -1163,7 +1184,7 @@ std::expected<DeviceParameter, std::string> DeviceManager::deviceParameterView(
       return std::unexpected(r.error());
     }
   }
-  auto copy = device->parameterCopy(index, subindex);
+  auto copy = device->parameter(index, subindex);
   if (!copy) {
     return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
                                        slavePosition, index, subindex));
@@ -1371,6 +1392,9 @@ void to_json(nlohmann::json& j, const DcSyncInfo& info) {
        {"systemTimeDifference", d.systemTimeDifference}};
 }
 
-void to_json(nlohmann::json& j, const DeviceManager& dm) { j = dm.devices(); }
+void to_json(nlohmann::json& j, const DeviceManager& dm) {
+  // Serialised inside the borrow: the vector must not be rebuilt underneath the conversion.
+  dm.withDevices([&j](const std::vector<Device>& devices) { j = devices; });
+}
 
 }  // namespace mm::node

@@ -69,9 +69,11 @@ uint32_t Device::serialNumber() const { return serialNumber_; }
 bool Device::isCia402() const {
   // Same offline-safe discriminator as createCia402Drive: a CiA402 drive exposes both the
   // controlword and statusword in its object dictionary. Presence in the enumerated parameter
-  // map is enough — no bus I/O.
-  return parameter(cia402::kControlword, 0) != nullptr &&
-         parameter(cia402::kStatusword, 0) != nullptr;
+  // map is enough — no bus I/O. Both lookups under one lock: this is reached from to_json on an
+  // HTTP worker while another worker may be re-enumerating the dictionary.
+  std::lock_guard<std::mutex> lock(*parametersMutex_);
+  return findParameter(cia402::kControlword, 0) != nullptr &&
+         findParameter(cia402::kStatusword, 0) != nullptr;
 }
 
 bool Device::mailboxActive() const {
@@ -410,8 +412,9 @@ void Device::readParameterValues(std::vector<DeviceParameter>& defs, bool useCom
   }
 }
 
-const std::unordered_map<uint32_t, DeviceParameter>& Device::parameters() const {
-  return parameters_;
+bool Device::hasParameters() const {
+  std::lock_guard<std::mutex> lock(*parametersMutex_);
+  return !parameters_.empty();
 }
 
 namespace {
@@ -863,7 +866,7 @@ std::expected<DeviceParameterValue, std::string> Device::setValueFromBytes(
 std::expected<std::vector<uint8_t>, std::string> Device::valueAsBytes(uint16_t index,
                                                                       uint8_t subindex) const {
   std::lock_guard<std::mutex> lock(*parametersMutex_);
-  const DeviceParameter* p = parameter(index, subindex);
+  const DeviceParameter* p = findParameter(index, subindex);
   if (!p) {
     return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
                                        slavePosition_, index, subindex));
@@ -883,23 +886,18 @@ std::vector<DeviceParameter> Device::parametersOrdered() const {
   return ordered;
 }
 
-const DeviceParameter* Device::parameter(uint16_t index, uint8_t subindex) const {
-  auto it = parameters_.find(makeParameterKey(index, subindex));
-  return it != parameters_.end() ? &it->second : nullptr;
-}
-
 std::optional<DeviceParameterValue> Device::value(uint16_t index, uint8_t subindex) const {
   std::lock_guard<std::mutex> lock(*parametersMutex_);
-  const DeviceParameter* p = parameter(index, subindex);
+  const DeviceParameter* p = findParameter(index, subindex);
   if (!p) {
     return std::nullopt;
   }
   return p->value;
 }
 
-std::optional<DeviceParameter> Device::parameterCopy(uint16_t index, uint8_t subindex) const {
+std::optional<DeviceParameter> Device::parameter(uint16_t index, uint8_t subindex) const {
   std::lock_guard<std::mutex> lock(*parametersMutex_);
-  const DeviceParameter* p = parameter(index, subindex);
+  const DeviceParameter* p = findParameter(index, subindex);
   if (!p) {
     return std::nullopt;
   }
@@ -908,7 +906,7 @@ std::optional<DeviceParameter> Device::parameterCopy(uint16_t index, uint8_t sub
 
 std::optional<uint16_t> Device::dataType(uint16_t index, uint8_t subindex) const {
   std::lock_guard<std::mutex> lock(*parametersMutex_);
-  const DeviceParameter* p = parameter(index, subindex);
+  const DeviceParameter* p = findParameter(index, subindex);
   if (!p) {
     return std::nullopt;
   }
@@ -916,6 +914,11 @@ std::optional<uint16_t> Device::dataType(uint16_t index, uint8_t subindex) const
 }
 
 DeviceParameter* Device::findParameter(uint16_t index, uint8_t subindex) {
+  auto it = parameters_.find(makeParameterKey(index, subindex));
+  return it != parameters_.end() ? &it->second : nullptr;
+}
+
+const DeviceParameter* Device::findParameter(uint16_t index, uint8_t subindex) const {
   auto it = parameters_.find(makeParameterKey(index, subindex));
   return it != parameters_.end() ? &it->second : nullptr;
 }
@@ -1134,7 +1137,7 @@ std::expected<ObjectValues, std::string> Device::readObject(uint16_t index,
     ObjectValues object{index, {}};
     const std::lock_guard<std::mutex> lock(*parametersMutex_);
     for (uint8_t si : subindices) {
-      const DeviceParameter* p = parameter(index, si);
+      const DeviceParameter* p = findParameter(index, si);
       if (!p) {
         break;  // re-enumerated between the decode and here — fall through to per-subindex reads
       }

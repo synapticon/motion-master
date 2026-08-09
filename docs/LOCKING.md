@@ -28,20 +28,28 @@ them is reasoning about half the machine.
 
 ## The one-page summary
 
-Four rules carry almost all of the correctness:
+Five rules carry almost all of the correctness:
 
-1. **The RT thread takes no lock, ever.** `DeviceManager::exchangeProcessData`
+1. **No lock-protected state is reachable without the lock.** `DeviceManager` hands out no
+   reference or pointer into `devices_`; `Device` hands out none into `parameters_`. You borrow
+   (`withDevice` / `withDevices`, which hold the lock for the callable's whole duration) or you get
+   a copy (`parameter`, `parametersOrdered`, `value`). The raw-pointer lookups still exist —
+   `DeviceManager::findDevice`, `Device::findParameter` — but both are **private**, so the rule is
+   enforced by the compiler rather than by a comment that a later change can quietly invalidate.
+   This is the rule the other four rest on: it is what makes "which lock does this need?" a question
+   with an answer at the call site.
+2. **The RT thread takes no lock, ever.** `DeviceManager::exchangeProcessData`
    (`libs/node/device_manager.cc:323`) is gated by an atomic image pointer, not a mutex. Everything
    it touches — the IOmap, the output staging slots, the recorder ring — is lock-free by
    construction.
-2. **`FieldbusDriver::controlPlaneMutex_` is per *transaction*; `DeviceManager::busOperationMutex_`
+3. **`FieldbusDriver::controlPlaneMutex_` is per *transaction*; `DeviceManager::busOperationMutex_`
    is per *operation*.** The first serialises one socket round-trip, the second serialises a whole
    multi-transaction activity (a scan, an AL transition, a re-map). They are not tiers of the same
    thing and a caller often holds only one.
-3. **`deviceSetMutex_` guards lifetime, not data.** Shared means "the `Device` objects and the
+4. **`deviceSetMutex_` guards lifetime, not data.** Shared means "the `Device` objects and the
    process-data runtime will not be freed while I hold this". It is legitimate to hold it shared for
    minutes, because its exclusive holders are rare and brief.
-4. **No lock is held across bus I/O except `controlPlaneMutex_` itself**, and that one is held for
+5. **No lock is held across bus I/O except `controlPlaneMutex_` itself**, and that one is held for
    exactly one transfer. `Device::parametersMutex_` in particular is taken, released for the
    transfer, and re-taken to commit (`libs/node/device.h:658-670`).
 
@@ -162,10 +170,14 @@ Exclusive holders are few and brief by design:
 - the publish window inside `remapProcessImage` (`device_manager.cc:302-317`) — slot-vector swap,
   ring re-allocation, generation append.
 
-Everything else takes it shared, including `withDevice` (`device_manager.h:297`), which is the
-supported way to borrow a `Device&` from outside the class. Holding it shared for a multi-second
-procedure is *correct*, not merely tolerated: a rescan mid-operation is exactly what would dangle the
-reference.
+Everything else takes it shared, including `withDevice` and `withDevices`, which are the **only**
+ways to reach a `Device` from outside the class. Holding it shared for a multi-second procedure is
+*correct*, not merely tolerated: a rescan mid-operation is exactly what would dangle the reference.
+
+`findDevice` is private for that reason. Its returned pointer is valid only while the lock is held,
+and that obligation cannot be expressed in the signature — so the pointer never leaves the class,
+and a caller who wants a device either borrows it (lock held for the borrow's whole duration) or
+calls a position-based method that takes the lock itself.
 
 **The recorder accessors take it for a reason that is easy to get wrong.** `recorderHead`,
 `recorderOldestSeq` and `readRecord` (`device_manager.cc:412-429`) take it shared even though
@@ -201,10 +213,12 @@ release, because `initializeParameters` replaces the whole map. Re-find after th
 a miss — or a changed `dataType` — as "re-enumerated mid-transfer" rather than assuming it cannot
 happen.
 
-**Two accessors deliberately do not take it** and hand out raw pointers into the map:
-`Device::parameter()` (`device.cc:886`) and `Device::parameters()` (`device.cc:413`). Their
-documented contract is "control-plane thread only". See [F2](#f2--parameter--parameters-race-a-concurrent-re-enumeration)
-— that contract no longer holds.
+**Nothing hands out a pointer into the map.** `parameter()` returns a copy of one entry,
+`parametersOrdered()` a snapshot of all of them, `value()` / `dataType()` a single field —
+each taken under the lock. The raw lookup survives as the private `findParameter()`, whose contract
+is "the caller already holds `parametersMutex_`". That is enforced by access control rather than by
+a comment, which matters because the previous public raw-pointer accessor was documented
+"control-plane thread only" and the control plane silently became 32 threads.
 
 ### 4. `FieldbusDriver::controlPlaneMutex_` — one socket transaction
 
@@ -363,9 +377,38 @@ Things that must stay true. Each is currently relied upon somewhere.
 7. **`stopExchange()` precedes every mutation of the IOmap, the ring storage, or `driver_`.**
 8. **Published `ProcessImage` generations are retained until `reset()`.**
 
+## Checking it mechanically
+
+Review is what let a raw `Device*` escape to 32 concurrent workers, so the rules above have a
+mechanical check as well:
+
+```bash
+cmake --preset x64-linux-tsan     # needs a TSan runtime: libtsan (GCC) or CC=clang CXX=clang++
+cmake --build build/x64-linux-tsan
+./tools/test.sh x64-linux-tsan    # exports TSAN_OPTIONS with tools/tsan.supp
+```
+
+`libs/node/tests/device_manager_concurrency_test.cc` is written for this build. It hammers every
+public read surface — `to_json`, `busConfig`, `processImageInfo`, `deviceStates`, `hasDevice`,
+`value`, `recorderHead`, a `withDevice` borrow — against a thread calling `scan()` in a loop, and
+separately hammers the parameter readers against a thread re-enumerating the object dictionary.
+**Nothing is asserted about the values read**: whether a position resolves depends on when the read
+lands, and both answers are correct. What is asserted is that no read races the rebuild.
+
+Two things worth knowing about it:
+
+- **Without TSan the tests mostly pass even against racy code** — an unsynchronised read of a vector
+  being cleared usually touches memory that is still mapped. They are a race *detector* harness, not
+  a functional test. Verified by removing `busConfig`'s lock and re-running: TSan reports the write
+  in `scan()`'s `devices_` teardown against the reader, with both stacks.
+- **`tools/tsan.supp` has exactly one entry**, for `ProcessDataRing`'s seqlock — the one place where
+  a race is real at the memory-model level and correct anyway, because the reader re-checks the
+  sequence word afterwards. Everything else TSan reports is a bug. Do not extend that file.
+
 ## Review findings
 
-Ranked by severity. Line numbers are as of this commit.
+Ranked by severity, and **all fixed** — the record is kept because the reasoning is what stops them
+coming back. Line numbers are from before the fix.
 
 ### F1 — `findDevice` hands a raw `Device*` to 32 concurrent workers
 
@@ -393,11 +436,17 @@ the vector as it is cleared.
 siblings `deviceStates`, `deviceDiagnostics`, `dcSync` and `processDataWatchdog` all take
 `deviceSetMutex_` shared for exactly this reason (`:904, 927, 954, 981`).
 
-**Fix.** `withDevice` already exists for precisely this and returns `std::expected`, which is the
-shape the handlers use. Route the handlers through it; give `busConfig()` and `devices()` the shared
-lock, or replace `devices()` with a snapshot-returning accessor. The `findDevice` overloads should
-either become private or keep the raw-pointer form only for genuinely single-threaded SDK use, with
-the warning restated in terms of the lock rather than "the server thread".
+**Fixed.** Both `findDevice` overloads are now **private**, so the compiler enforces what the comment
+asked for. `devices()` is gone, replaced by `withDevices(fn)` — the whole-set analogue of
+`withDevice`, lending the vector under the shared lock. `busConfig()` and `initialised()` take the
+shared lock like their siblings. A new `hasDevice(pos)` serves the 404 guard, which is all that a
+dozen of those handlers wanted `findDevice` for.
+
+The handlers that genuinely need a `Device&` go through one file-local helper in `http_server.cc`,
+`withDeviceOr404`, which borrows for the handler's whole duration and maps the one failure
+`withDevice` itself can report — an unresolved position — to a 404. The handler shapes its own
+response, because these endpoints do not agree on one (content negotiation, FoE's octet-stream, the
+409-on-state-precondition cases).
 
 ### F2 — `parameter()` / `parameters()` race a concurrent re-enumeration
 
@@ -416,11 +465,15 @@ Two shared holders exclude nothing. `GET /api/process-image` on one worker and
 `POST /api/devices/1/parameters` on another therefore rehash and traverse the same map concurrently.
 
 `remapProcessImage` (`:284`) is a fourth: it holds only `busOperationMutex_`, which
-`initializeDeviceParameters` never takes.
+`initializeDeviceParameters` never takes. `Device::isCia402()` (`device.cc:69`) was a fifth — two
+unlocked lookups, reached from `to_json` on every `GET /api/devices`.
 
-**Fix.** These readers want a value, not a pointer — `parameterCopy()` and `dataType()` already
-return copies under the lock. Convert them, and make `parameter()`'s "control-plane thread only"
-warning concrete (name the lock, not a thread).
+**Fixed.** The raw-pointer `parameter()` is gone. `parameterCopy()` took its name and its place, so
+there is now one accessor, it returns `std::optional<DeviceParameter>` under the lock, and the
+unlocked lookup survives only as the private `findParameter()` (whose callers all hold the mutex).
+`parameters()` — which returned the map by reference — is replaced by `hasParameters()`. `isCia402`
+takes the lock for both lookups. `remapProcessImage` now calls `valueAsBytes`, which does the lookup
+and the encode in one hold of the device's own lock, and is shorter for it.
 
 ### F3 — `MonitoringManager::create` touches the device set with no lock
 
@@ -430,9 +483,8 @@ warning concrete (name the lock, not a thread).
 `device->parameters().empty()`. It runs on an HTTP worker (`POST /api/monitorings`), so it races both
 a rescan and a concurrent re-enumeration.
 
-**Fix.** `deviceManager_.value(...)` and `pdoSampleSpec(...)` — already used two lines above — are
-locked. The "has this device been enumerated?" question wants a small locked accessor on
-`DeviceManager` rather than a raw `Device*`.
+**Fixed.** The "has this device been enumerated?" question now goes through a `withDevice` borrow
+calling `Device::hasParameters()`, so both the lookup and the map read happen under a lock.
 
 ### F4 — `stopExchange()`'s 200 ms bound fails silently
 
@@ -448,9 +500,11 @@ CLAUDE.md itself documents sustained overrun as *expected* on coarse-timer Windo
 non-RT thread preempted mid-exchange for >200 ms under load is not fantasy. Today the timeout is
 indistinguishable from a clean drain.
 
-**Fix.** Log a warning when the deadline expires — it converts an unexplained crash into a legible
-one, at zero cost on the normal path. Scaling the bound to the configured period (rather than a flat
-200 ms) would also be reasonable.
+**Fixed** (the diagnostic, not the bound). `stopExchange` now logs a warning when the deadline
+expires, naming what it is about to do anyway. The bound itself stays: never hanging a control-plane
+call on a stalled RT loop is the right trade, and the point is that taking it should not be silent —
+memory corruption arriving with nothing in the log to explain it is the failure mode that costs
+days.
 
 ### F5 — `start()` assigns `thread_` outside the lock
 
@@ -468,8 +522,8 @@ Both classes advertise "All public methods are thread-safe" / "Idempotent". Toda
 each exactly once, so this is latent — but it is exactly the kind of thing the
 library-grade-public-surface goal exists to prevent.
 
-**Fix.** Assign `thread_` while holding the lock (the thread body's first act is to take it, so it
-simply blocks briefly), or guard start/stop with a separate lifecycle mutex.
+**Fixed.** Both assign `thread_` while holding the lock. The new thread's first act is to take that
+same mutex, so it simply waits out the rest of `start()` — no deadlock, and the window is gone.
 
 ### F6 — `serializeDump` holds the shared lock for the whole dump
 

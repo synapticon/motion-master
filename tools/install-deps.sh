@@ -78,6 +78,10 @@ if [ "$FAMILY" = debian ]; then
     # Python and come further down.
     packages+=(clang clang-format clang-tidy cppcheck shellcheck)
 
+    # The ThreadSanitizer runtime, for the x64-linux-tsan preset (see docs/LOCKING.md).
+    # GCC needs libtsan installed separately; clang's ships with the compiler.
+    packages+=(libtsan2)
+
     # tools/package.sh builds both a .deb and an .rpm, on either distro.
     packages+=(dpkg-dev rpm)
 
@@ -115,6 +119,8 @@ else
     packages=(gcc gcc-c++ make cmake ninja-build pkgconf-pkg-config)
     packages+=(git curl zip unzip tar xz autoconf automake libtool perl)
     packages+=(clang clang-tools-extra cppcheck ShellCheck)
+    # ThreadSanitizer runtime for GCC (x64-linux-tsan preset; clang bundles its own).
+    packages+=(libtsan)
     packages+=(dpkg-dev rpm-build)
     have node || packages+=(nodejs)
     have npm || packages+=(npm)

@@ -36,13 +36,29 @@ namespace mm::node {
 ///   cycle from that cycle's ring record (no bus access, all values in a row from the same cycle).
 ///   The decode spec is captured up front and re-captured on a re-map.
 /// - **SDO** — the object is not PDO-mapped; it is registered with the owned @c ParameterRefresher
-///   which polls it in the background, and the sampler reads the cached value.
+///   which polls it in the background, and the sampler reads the cached value. See *Why a refresher
+///   exists at all* below.
 ///
 /// Monitoring is live-only: a parameter whose owning device is not exchanging (SAFE-OP/OP) samples
 /// @c null. Topics are unique.
 ///
-/// Thread-safe. Owns a private @c ParameterRefresher (the sampler is its sole client). The App
-/// wires only this manager (with a @c DeviceManager& and a publish callback).
+/// **Why a refresher exists at all.** The sampler must never touch the bus: it serves a lossless
+/// per-cycle stream, and an SDO upload is a blocking mailbox round-trip that queues behind the
+/// driver's control-plane lock — one per cycle per object is not an option at kHz rates. PDO
+/// parameters need no bus access (they decode out of the recorder ring), but an SDO-sourced
+/// parameter has no cyclic source at all, so something has to fetch it on a slower cadence, off the
+/// flush path. The refresher polls into each device's parameter cache in the background and the
+/// flush reads only that cache — which is why every row in one batch shares the same SDO value
+/// (slow telemetry, not a per-cycle signal). This manager drives @c acquire / @c release rather
+/// than merely reading, because the classification is dynamic: a re-map can flip a parameter
+/// PDO→SDO or SDO→PDO, and @c recaptureIfRemapped moves it between the two.
+///
+/// Thread-safe. Owns a private @c ParameterRefresher because monitoring is its only client today.
+/// That is an ownership choice, not a coupling: the refresher depends on nothing but
+/// @c DeviceManager&, its entries are reference-counted per object, and its @c start / @c stop are
+/// idempotent — so it is usable on its own, and a second client would be served by constructing it
+/// in the composition root and injecting it here instead. The App wires only this manager (with a
+/// @c DeviceManager& and a publish callback).
 class MonitoringManager {
  public:
   /// @brief Publishes one batch: @p json (a @c {"type":"monitoring","topic",...} envelope) under

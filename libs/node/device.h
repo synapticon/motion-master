@@ -578,6 +578,26 @@ class Device {
   /// @c parametersMutex_. Per-entry failures are logged and leave the type default.
   void readParameterValues(std::vector<DeviceParameter>& defs, bool useCompleteAccess);
 
+  /// @brief Reads one multi-subindex object into the parameter map with a single Complete Access
+  ///        upload, taking @c parametersMutex_ itself and releasing it across the transfer.
+  ///
+  /// Shared by @c readAllParameters (bulk refresh) and @c readObject (grouped point read), which
+  /// previously held the lock across the upload each in their own copy of this logic. Three phases:
+  /// decide under the lock (CA enabled, entries present and eligible, no subindex better served by
+  /// the live process image), upload with the lock released, then re-find the entries and decode
+  /// under the lock again. The re-find is what makes releasing safe — a concurrent
+  /// @c initializeParameters replaces the whole map, so a @c DeviceParameter* must never be carried
+  /// across the bus call.
+  ///
+  /// @param index             CoE object index.
+  /// @param subindices        The object's readable subindices, ascending and contiguous from 0.
+  /// @param useCompleteAccess Whether CA is permitted at all (the config knob).
+  /// @return @c true if the object was filled; @c false means the caller falls back to per-subindex
+  ///         reads (CA unsupported/ineligible, PDO-served, the upload failed, or the object
+  ///         dictionary was re-enumerated mid-transfer).
+  bool readObjectComplete(uint16_t index, std::span<const uint8_t> subindices,
+                          bool useCompleteAccess);
+
   /// @brief Reads one PDO direction grouped by mapping object: the assignment object and each
   ///        mapping object it references, with every entry's @c bitOffset derived from the running
   ///        offset across the direction. The shared reader behind @c readPdoMapping and (flattened)
@@ -632,11 +652,22 @@ class Device {
   // and cached for the same reason the constructor explains: reading it from the driver on demand
   // would take the control-plane mutex and so block behind whatever bus operation holds it.
   uint16_t mailboxProtocols_ = 0;
-  // Guards parameters_ against the off-RT monitoring threads (the refresher refreshes cached
-  // values, the sampler reads them) racing the control-plane thread. Held only briefly — across
-  // a cache read/write, or a single mailbox transaction in read/writeParameter; never across the
-  // multi-entry object-dictionary enumeration, which builds a local map and swaps it in under
-  // the lock. Lock order, where both are taken: DeviceManager::deviceSetMutex_ before this.
+  // Guards parameters_ (and caSupport_) against the off-RT monitoring threads (the refresher
+  // refreshes cached values, the sampler reads them) racing the control-plane thread.
+  //
+  // **Never held across bus I/O.** Every method that reads or writes the bus — readParameter,
+  // writeParameter, readObjectComplete, readAllParameters, initializeParameters — takes it, decides
+  // what to transfer, releases it for the transfer, and re-takes it to commit. That is not a
+  // micro-optimisation: a mailbox transfer queues behind the driver's control-plane mutex, which an
+  // FoE file transfer holds for its whole multi-second duration, so a lock held across "one mailbox
+  // round-trip" is in fact held for as long as any unrelated bus traffic takes. With a background
+  // parameter refresh and a user on the FoE page — the ordinary configuration, not a rare one —
+  // that stalled every cached read of the device.
+  //
+  // The rule this imposes on callers: a DeviceParameter* must never be carried across the release,
+  // because initializeParameters replaces the whole map. Re-find after the transfer, and treat a
+  // miss (or a changed dataType) as "re-enumerated mid-transfer" rather than assuming it cannot
+  // happen. Lock order, where both are taken: DeviceManager::deviceSetMutex_ before this.
   //
   // Held by unique_ptr because std::mutex is neither movable nor copyable, and Device is moved
   // into DeviceManager's std::vector<Device> (which relocates on growth). The indirection keeps

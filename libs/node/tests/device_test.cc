@@ -71,6 +71,9 @@ class SdoFakeDriver : public FieldbusDriver {
   std::vector<uint16_t> completeReadIndices;
   /// Count of per-subindex readSdo() uploads, to assert Complete Access replaced them.
   int perSubReads = 0;
+  /// Invoked at the top of readSdo()/writeSdo(), before the programmed answer. Lets a test park a
+  /// transfer mid-flight and observe what the rest of the Device can still do meanwhile.
+  std::function<void()> onTransfer;
   /// Cached AL status returned by slaveState() (what mailboxActive()/exchangesProcessData read).
   uint16_t state = 0;
   /// Mailbox-protocol bits returned by mailboxProtocols() (drives supportsCoe()). Defaults to CoE
@@ -102,6 +105,9 @@ class SdoFakeDriver : public FieldbusDriver {
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t index,
                                                            uint8_t subindex) override {
     ++perSubReads;
+    if (onTransfer) {
+      onTransfer();
+    }
     auto it = reads.find(key(index, subindex));
     if (it == reads.end()) {
       return std::unexpected("no such object");
@@ -121,6 +127,9 @@ class SdoFakeDriver : public FieldbusDriver {
 
   std::expected<void, std::string> writeSdo(uint16_t, uint16_t index, uint8_t subindex,
                                             std::span<const uint8_t> data) override {
+    if (onTransfer) {
+      onTransfer();
+    }
     writes.push_back({index, subindex, std::vector<uint8_t>(data.begin(), data.end())});
     if (failWrites.contains(key(index, subindex))) {
       return std::unexpected("simulated write failure");
@@ -1255,6 +1264,95 @@ TEST(DeviceProductName, FallsBackToSiiNameForForeignVendor) {
   // Product codes are only unique within a vendor, so a foreign vendor never resolves to a
   // SOMANET name even if the code collides.
   EXPECT_EQ(device.productName(), "Some Other Drive");
+}
+
+// --- parametersMutex_ is never held across bus I/O ---------------------------
+//
+// A mailbox transfer queues behind the driver's control-plane mutex, which an FoE file transfer
+// holds for its entire multi-second duration. So a parameter read that kept parametersMutex_ across
+// its upload would block every cached read of that device for as long as the file transfer ran —
+// and a background parameter refresh alongside a user on the FoE page is the ordinary
+// configuration, not a rare one. These two pin the release by parking a transfer inside the driver
+// and requiring the rest of the Device to stay usable.
+
+/// Runs @p body on another thread and reports whether it finished within @p timeout. Joins either
+/// way, so the caller must ensure the body can always finish (release the parked transfer first).
+bool completesWithin(std::chrono::milliseconds timeout, std::function<void()> body,
+                     std::atomic<bool>& releaseFlag) {
+  std::atomic<bool> done{false};
+  std::thread worker([&] {
+    body();
+    done.store(true);
+  });
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (!done.load() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::yield();
+  }
+  const bool finished = done.load();
+  releaseFlag.store(true);  // let the parked transfer go so the worker can always be joined
+  worker.join();
+  return finished;
+}
+
+TEST(DeviceParameterLocking, CachedReadProceedsWhileAnSdoUploadIsInFlight) {
+  SdoFakeDriver driver;
+  driver.programOd(0x6065, 0x00, kU32);
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  driver.state = kPreOp;
+  driver.programRead(0x6065, 0x00, u32le(16));
+
+  std::atomic<bool> release{false};
+  std::atomic<bool> parked{false};
+  driver.onTransfer = [&] {
+    parked.store(true);
+    while (!release.load()) {
+      std::this_thread::yield();
+    }
+  };
+
+  std::thread uploader([&] { (void)device.readParameter(0x6065, 0x00); });
+  while (!parked.load()) {
+    std::this_thread::yield();
+  }
+
+  EXPECT_TRUE(completesWithin(
+      std::chrono::seconds(5), [&] { (void)device.value(0x6065, 0x00); }, release))
+      << "a cached read blocked behind an in-flight SDO upload";
+  uploader.join();
+}
+
+TEST(DeviceParameterLocking, CachedReadSeesTheNewValueWhileAnSdoDownloadIsInFlight) {
+  SdoFakeDriver driver;
+  driver.programOd(0x6065, 0x00, kU32);
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  driver.state = kPreOp;
+
+  std::atomic<bool> release{false};
+  std::atomic<bool> parked{false};
+  driver.onTransfer = [&] {
+    parked.store(true);
+    while (!release.load()) {
+      std::this_thread::yield();
+    }
+  };
+
+  std::thread downloader([&] { (void)device.writeParameter(0x6065, 0x00, uint32_t{77}); });
+  while (!parked.load()) {
+    std::this_thread::yield();
+  }
+
+  // writeParameter is cache-first: the value is committed before the bus call, so a reader mid-
+  // transfer sees the intended value rather than the stale one — and is not blocked to see it.
+  std::optional<DeviceParameterValue> seen;
+  EXPECT_TRUE(completesWithin(
+      std::chrono::seconds(5), [&] { seen = device.value(0x6065, 0x00); }, release))
+      << "a cached read blocked behind an in-flight SDO download";
+  downloader.join();
+  ASSERT_TRUE(seen.has_value());
+  EXPECT_EQ(*seen, DeviceParameterValue{uint32_t{77}});
+  EXPECT_EQ(device.parameter(0x6065, 0x00)->syncState, SyncState::Synced);
 }
 
 }  // namespace

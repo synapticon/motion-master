@@ -922,40 +922,62 @@ DeviceParameter* Device::findParameter(uint16_t index, uint8_t subindex) {
 
 std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t index,
                                                                        uint8_t subindex) {
-  // Held across the upload below: one mailbox round-trip, so a concurrent cached read of this
-  // device waits at most that long. The map cannot be rehashed (by initializeParameters) while
-  // we hold it, so the p pointer stays valid across the bus call.
-  std::lock_guard<std::mutex> lock(*parametersMutex_);
-  DeviceParameter* p = findParameter(index, subindex);
-  if (!p) {
-    return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
-                                       slavePosition_, index, subindex));
-  }
-  // Prefer the live PDO image while exchanging: readPdo returns the staged/snapshot bytes when the
-  // object is PDO-mapped and the bus is healthy, and nullopt otherwise (not mapped / unhealthy /
-  // no image) — in which case we fall through to the authoritative SDO upload below. Decode inline
-  // rather than via setValueFromBytes, which would re-take parametersMutex_ that we already hold.
-  if (processData_ && exchangesProcessData()) {
-    if (auto bytes = processData_->readPdo(slavePosition_, index, subindex)) {
-      auto decoded = decodeSdoBytes(p->dataType, *bytes);
-      if (!decoded) {
-        return std::unexpected(decoded.error());
-      }
-      p->value = std::move(*decoded);
-      p->syncState = SyncState::Synced;
-      return p->value;
+  // Phase 1 — under the lock: resolve, serve locally if we can, else capture the decode type. Both
+  // local paths (the live PDO image and the offline cache) touch no bus, so they finish here.
+  uint16_t declaredType = 0;
+  {
+    const std::lock_guard<std::mutex> lock(*parametersMutex_);
+    DeviceParameter* p = findParameter(index, subindex);
+    if (!p) {
+      return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
+                                         slavePosition_, index, subindex));
     }
+    // Prefer the live PDO image while exchanging: readPdo returns the staged/snapshot bytes when
+    // the object is PDO-mapped and the bus is healthy, and nullopt otherwise (not mapped /
+    // unhealthy / no image) — in which case we fall through to the authoritative SDO upload below.
+    // Decode inline rather than via setValueFromBytes, which would re-take parametersMutex_ that we
+    // already hold.
+    if (processData_ && exchangesProcessData()) {
+      if (auto bytes = processData_->readPdo(slavePosition_, index, subindex)) {
+        auto decoded = decodeSdoBytes(p->dataType, *bytes);
+        if (!decoded) {
+          return std::unexpected(decoded.error());
+        }
+        p->value = std::move(*decoded);
+        p->syncState = SyncState::Synced;
+        return p->value;
+      }
+    }
+    if (!mailboxActive()) {
+      return p->value;  // no mailbox: serve the cached value, never touch the bus
+    }
+    declaredType = p->dataType;
   }
-  if (!mailboxActive()) {
-    return p->value;  // no mailbox: serve the cached value, never touch the bus
-  }
+
+  // Phase 2 — lock released: the mailbox round-trip and the decode. The upload queues behind the
+  // driver's control-plane lock, which an FoE transfer holds for its whole multi-second duration;
+  // holding parametersMutex_ across that would block every cached read of this device for as long,
+  // which is what a background parameter refresh plus a user reading a file actually produces.
   auto bytes = readSdo(index, subindex);
   if (!bytes) {
     return std::unexpected(bytes.error());
   }
-  auto decoded = decodeSdoBytes(p->dataType, *bytes);
+  auto decoded = decodeSdoBytes(declaredType, *bytes);
   if (!decoded) {
     return std::unexpected(decoded.error());
+  }
+
+  // Phase 3 — under the lock: re-find and commit. Never reuse phase 1's pointer — a concurrent
+  // initializeParameters replaces the whole map, destroying every entry. A miss, or an entry whose
+  // declared type has changed, means the dictionary was re-enumerated while we were on the wire:
+  // the bytes were decoded under a type this object no longer declares, so report it rather than
+  // cache a value that may be misdecoded. The caller retries and gets the current object.
+  const std::lock_guard<std::mutex> lock(*parametersMutex_);
+  DeviceParameter* p = findParameter(index, subindex);
+  if (!p || p->dataType != declaredType) {
+    return std::unexpected(std::format(
+        "device {}: parameter 0x{:04X}:{:02X} was re-enumerated during the read — retry",
+        slavePosition_, index, subindex));
   }
   p->value = std::move(*decoded);
   p->syncState = SyncState::Synced;
@@ -964,9 +986,9 @@ std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t 
 
 std::expected<void, std::string> Device::readAllParameters(bool useCompleteAccess) {
   // Snapshot the readable subindices grouped by object index under the lock, then read with it
-  // released — so this multi-mailbox sweep never holds parametersMutex_ across more than one
-  // object's transfer (a concurrent cached read waits at most that). Write-only objects are
-  // skipped: an SDO upload of one would abort and only add a spurious failure log.
+  // released — and the per-object reads below release it across their transfers too, so this sweep
+  // never holds parametersMutex_ across any bus I/O at all. Write-only objects are skipped: an SDO
+  // upload of one would abort and only add a spurious failure log.
   std::map<uint16_t, std::vector<uint8_t>> objects;
   {
     std::lock_guard<std::mutex> lock(*parametersMutex_);
@@ -985,15 +1007,34 @@ std::expected<void, std::string> Device::readAllParameters(bool useCompleteAcces
         subindices);  // completeAccessEligible needs subindex order, contiguous from 0
   }
 
-  // Fills one object via a single Complete Access upload, returning true on success. Runs the CA
-  // read + decode under parametersMutex_ — one mailbox round-trip, matching readParameter's own
-  // lock contract — so the re-found parameter pointers stay valid across the transfer. The probe
-  // binds the persistent caSupport_ (guarded by parametersMutex_, hence checked inside the lock),
-  // so support discovered here carries over to readObject's point reads and vice versa.
-  auto tryComplete = [&](uint16_t index, const std::vector<uint8_t>& subindices) -> bool {
-    std::lock_guard<std::mutex> lock(*parametersMutex_);
+  // Best-effort, like initializeParameters(readValues=true): a per-entry failure keeps that entry's
+  // cached value and is logged, and the sweep still succeeds so one bad object never blocks the
+  // rest. Multi-subindex objects try Complete Access first; single-subindex objects and any CA
+  // fallthrough go through the PDO-aware per-subindex readParameter.
+  for (const auto& [index, subindices] : objects) {
+    if (subindices.size() >= 2 && readObjectComplete(index, subindices, useCompleteAccess)) {
+      continue;
+    }
+    for (uint8_t si : subindices) {
+      if (auto r = readParameter(index, si); !r) {
+        spdlog::warn("Device {}: read 0x{:04X}:{:02X} failed: {}", slavePosition_, index, si,
+                     r.error());
+      }
+    }
+  }
+  return {};
+}
+
+bool Device::readObjectComplete(uint16_t index, std::span<const uint8_t> subindices,
+                                bool useCompleteAccess) {
+  // Phase 1 — under the lock: is a Complete Access upload the right thing for this object at all?
+  {
+    const std::lock_guard<std::mutex> lock(*parametersMutex_);
     CompleteAccessProbe ca(useCompleteAccess, caSupport_);
-    if (!ca.enabled()) {
+    // mailboxActive() is part of the decision, not just an optimisation: without it a device below
+    // PRE-OP would fail the upload and recordFailure() would latch caSupport_ to kUnsupported for
+    // the device's whole lifetime, on evidence that says nothing about whether it supports CA.
+    if (!ca.enabled() || !mailboxActive()) {
       return false;
     }
     std::vector<DeviceParameter*> subs;
@@ -1001,7 +1042,7 @@ std::expected<void, std::string> Device::readAllParameters(bool useCompleteAcces
     for (uint8_t si : subindices) {
       DeviceParameter* p = findParameter(index, si);
       if (!p) {
-        return false;  // map re-enumerated under us — fall back to the per-subindex path
+        return false;  // not in the map — fall back to the per-subindex path
       }
       subs.push_back(p);
     }
@@ -1018,25 +1059,51 @@ std::expected<void, std::string> Device::readAllParameters(bool useCompleteAcces
         return false;
       }
     }
-    return readCompleteInto(driver_, slavePosition_, subs, ca);
-  };
-
-  // Best-effort, like initializeParameters(readValues=true): a per-entry failure keeps that entry's
-  // cached value and is logged, and the sweep still succeeds so one bad object never blocks the
-  // rest. Multi-subindex objects try Complete Access first; single-subindex objects and any CA
-  // fallthrough go through the PDO-aware per-subindex readParameter.
-  for (const auto& [index, subindices] : objects) {
-    if (subindices.size() >= 2 && tryComplete(index, subindices)) {
-      continue;
-    }
-    for (uint8_t si : subindices) {
-      if (auto r = readParameter(index, si); !r) {
-        spdlog::warn("Device {}: read 0x{:04X}:{:02X} failed: {}", slavePosition_, index, si,
-                     r.error());
-      }
-    }
   }
-  return {};
+
+  // Phase 2 — lock released: the mailbox round-trip. This is the whole point of the split. The
+  // upload queues behind the driver's control-plane lock, which an FoE transfer holds for its
+  // entire multi-second duration, so holding parametersMutex_ here would block every cached read of
+  // this device for that long — the background parameter refresher and a user on the FoE page are
+  // the ordinary case, not a rare one.
+  auto blob = driver_.readSdoComplete(slavePosition_, index);
+
+  // Phase 3 — under the lock: record the probe outcome, then re-find the entries and decode.
+  const std::lock_guard<std::mutex> lock(*parametersMutex_);
+  CompleteAccessProbe ca(useCompleteAccess, caSupport_);
+  if (!blob) {
+    if (ca.recordFailure()) {
+      spdlog::debug("Device {}: complete access unsupported ({}); using per-subindex reads",
+                    slavePosition_, blob.error());
+    } else {
+      spdlog::debug("Device {}: complete-access read of 0x{:04X} failed ({}); per-subindex",
+                    slavePosition_, index, blob.error());
+    }
+    return false;
+  }
+  ca.recordSuccess();
+  // Re-find rather than reuse phase 1's pointers: initializeParameters replaces the whole map, so
+  // a pointer taken before the transfer may name a destroyed entry. A miss (or an object that is no
+  // longer CA-eligible) means the dictionary was re-enumerated mid-transfer — drop this blob and
+  // let the caller re-read per subindex rather than decode into the wrong layout.
+  std::vector<DeviceParameter*> subs;
+  subs.reserve(subindices.size());
+  for (uint8_t si : subindices) {
+    DeviceParameter* p = findParameter(index, si);
+    if (!p) {
+      return false;
+    }
+    subs.push_back(p);
+  }
+  if (!completeAccessEligible(subs)) {
+    return false;
+  }
+  if (!decodeCompleteAccess(subs, *blob)) {
+    spdlog::warn("Device {}: complete-access layout for 0x{:04X} inconsistent; per-subindex reads",
+                 slavePosition_, index);
+    return false;
+  }
+  return true;
 }
 
 std::expected<ObjectValues, std::string> Device::readObject(uint16_t index,
@@ -1059,50 +1126,22 @@ std::expected<ObjectValues, std::string> Device::readObject(uint16_t index,
   }
   std::ranges::sort(subindices);  // completeAccessEligible needs subindex order
 
-  // One Complete Access upload when possible — the same preconditions as readAllParameters'
-  // grouped path, evaluated and executed under parametersMutex_ (one mailbox round-trip, matching
-  // readParameter's own lock contract). Returns the decoded values on success, nullopt to take
-  // the per-subindex path.
-  auto tryComplete = [&]() -> std::optional<ObjectValues> {
-    std::lock_guard<std::mutex> lock(*parametersMutex_);
-    CompleteAccessProbe ca(useCompleteAccess, caSupport_);
-    if (!ca.enabled() || !mailboxActive()) {
-      return std::nullopt;
-    }
-    std::vector<DeviceParameter*> subs;
-    subs.reserve(subindices.size());
-    for (uint8_t si : subindices) {
-      DeviceParameter* p = findParameter(index, si);
-      if (!p) {
-        return std::nullopt;  // map re-enumerated under us — take the per-subindex path
-      }
-      subs.push_back(p);
-    }
-    if (!completeAccessEligible(subs)) {
-      return std::nullopt;
-    }
-    // Prefer the live process image while exchanging: if any subindex is PDO-served, let the
-    // per-subindex path (readParameter) read it from the image rather than issuing an SDO here.
-    if (processData_ && exchangesProcessData()) {
-      const bool anyImageServed = std::ranges::any_of(subs, [&](const DeviceParameter* p) {
-        return processData_->readPdo(slavePosition_, index, p->subindex).has_value();
-      });
-      if (anyImageServed) {
-        return std::nullopt;
-      }
-    }
-    if (!readCompleteInto(driver_, slavePosition_, subs, ca)) {
-      return std::nullopt;
-    }
+  // One Complete Access upload when possible (shared with readAllParameters' bulk path, which
+  // applies the identical preconditions), then collect the decoded values out of the map. The
+  // collect is a second short lock rather than part of the upload: readObjectComplete releases
+  // parametersMutex_ across the transfer, so there are no entry pointers to reuse afterwards.
+  if (subindices.size() >= 2 && readObjectComplete(index, subindices, useCompleteAccess)) {
     ObjectValues object{index, {}};
-    for (const DeviceParameter* p : subs) {
-      object.values.emplace(p->subindex, p->value);
+    const std::lock_guard<std::mutex> lock(*parametersMutex_);
+    for (uint8_t si : subindices) {
+      const DeviceParameter* p = parameter(index, si);
+      if (!p) {
+        break;  // re-enumerated between the decode and here — fall through to per-subindex reads
+      }
+      object.values.emplace(si, p->value);
     }
-    return object;
-  };
-  if (subindices.size() >= 2) {
-    if (auto object = tryComplete()) {
-      return std::move(*object);
+    if (object.values.size() == subindices.size()) {
+      return object;
     }
   }
 
@@ -1122,46 +1161,60 @@ std::expected<ObjectValues, std::string> Device::readObject(uint16_t index,
 
 std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t subindex,
                                                         DeviceParameterValue newValue) {
-  // Held across the download below (one mailbox round-trip), like readParameter.
-  std::lock_guard<std::mutex> lock(*parametersMutex_);
-  DeviceParameter* p = findParameter(index, subindex);
-  if (!p) {
-    return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
-                                       slavePosition_, index, subindex));
-  }
-  // Cache-first: coerce and store into the cached parameter before any bus access, so the
-  // cache always reflects the latest intended value regardless of online state.
-  if (auto set = p->setValue(newValue); !set) {
-    return std::unexpected(set.error());
-  }
-  // While exchanging, stage an output-mapped object into the process image (sent next cycle)
-  // instead of an SDO download. writePdo returns false when the object is not output-mapped (or no
-  // image is published), in which case we fall through to the SDO/offline paths below. Encode
-  // inline rather than via valueAsBytes, which would re-take parametersMutex_ that we already hold.
-  // No health gate here (unlike the read path): staging is always safe — the value is simply sent
-  // on the next cycle.
-  if (processData_ && exchangesProcessData()) {
-    auto bytes = encodeSdoBytes(p->dataType, p->value);
-    if (bytes && processData_->writePdo(slavePosition_, index, subindex, *bytes)) {
+  // Phase 1 — under the lock: coerce into the cache, and settle every path that needs no bus. Only
+  // the SDO download escapes this block, so an offline edit or a PDO stage costs a single lock.
+  std::vector<uint8_t> bytes;
+  {
+    const std::lock_guard<std::mutex> lock(*parametersMutex_);
+    DeviceParameter* p = findParameter(index, subindex);
+    if (!p) {
+      return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
+                                         slavePosition_, index, subindex));
+    }
+    // Cache-first: coerce and store into the cached parameter before any bus access, so the
+    // cache always reflects the latest intended value regardless of online state.
+    if (auto set = p->setValue(std::move(newValue)); !set) {
+      return std::unexpected(set.error());
+    }
+    // While exchanging, stage an output-mapped object into the process image (sent next cycle)
+    // instead of an SDO download. writePdo returns false when the object is not output-mapped (or
+    // no image is published), in which case we fall through to the SDO/offline paths below. Encode
+    // inline rather than via valueAsBytes, which would re-take parametersMutex_ that we already
+    // hold. No health gate here (unlike the read path): staging is always safe — the value is
+    // simply sent on the next cycle.
+    auto encoded = encodeSdoBytes(p->dataType, p->value);
+    if (processData_ && exchangesProcessData() && encoded &&
+        processData_->writePdo(slavePosition_, index, subindex, *encoded)) {
       p->syncState = SyncState::Synced;
       return {};
     }
+    if (!mailboxActive()) {
+      // No mailbox: hold the change in the cache, to be flushed when the device returns.
+      p->syncState = SyncState::Pending;
+      return {};
+    }
+    if (!encoded) {
+      p->syncState = SyncState::Pending;
+      return std::unexpected(encoded.error());
+    }
+    bytes = std::move(*encoded);
   }
-  if (!mailboxActive()) {
-    // No mailbox: hold the change in the cache, to be flushed when the device returns.
-    p->syncState = SyncState::Pending;
-    return {};
+
+  // Phase 2 — lock released: the mailbox round-trip, for the same reason as readParameter's. The
+  // value is already in the cache, so a concurrent reader sees the intended value throughout; only
+  // syncState is still provisional.
+  auto written = writeSdo(index, subindex, bytes);
+
+  // Phase 3 — under the lock: re-find and settle syncState. A miss means the dictionary was
+  // re-enumerated while we were on the wire, so there is no entry left to mark — the download
+  // itself still happened, and its outcome is what we report.
+  const std::lock_guard<std::mutex> lock(*parametersMutex_);
+  if (DeviceParameter* p = findParameter(index, subindex)) {
+    p->syncState = written ? SyncState::Synced : SyncState::Pending;
   }
-  auto bytes = encodeSdoBytes(p->dataType, p->value);
-  if (!bytes) {
-    p->syncState = SyncState::Pending;
-    return std::unexpected(bytes.error());
+  if (!written) {
+    return std::unexpected(written.error());
   }
-  if (auto w = writeSdo(index, subindex, *bytes); !w) {
-    p->syncState = SyncState::Pending;
-    return std::unexpected(w.error());
-  }
-  p->syncState = SyncState::Synced;
   return {};
 }
 

@@ -85,6 +85,21 @@ std::expected<void, ProcedureError> ProcedureManager::startRun(uint16_t devicePo
                                                                std::string name,
                                                                std::vector<ProgressStep> steps,
                                                                ResolvedWork work) {
+  // Resolve now rather than inside the thread, so an unknown position is reported to the caller
+  // instead of surfacing later as a run that failed immediately — and do it *before* taking mutex_.
+  // withDevice takes DeviceManager's device-set lock, so holding ours across it would stall every
+  // procedure endpoint (start, poll, cancel) behind whatever holds that lock. Capturing the
+  // topology generation here rather than after the lock is also the more accurate reading: it is
+  // the generation the device was actually resolved under, and a rescan landing between here and
+  // the insert below simply makes discardIfRescanned() collect the run on a later pass.
+  if (auto found = deviceManager_.withDevice(
+          devicePosition, [](Device&) -> std::expected<void, std::string> { return {}; });
+      !found) {
+    return std::unexpected(
+        ProcedureError{.kind = ProcedureError::Kind::kUnknownDevice, .message = found.error()});
+  }
+  const uint64_t topologyGeneration = deviceManager_.topologyGeneration();
+
   const std::lock_guard lock(mutex_);
   discardIfRescanned();
 
@@ -96,15 +111,6 @@ std::expected<void, ProcedureError> ProcedureManager::startRun(uint16_t devicePo
     }
   }
 
-  // Resolve now rather than inside the thread, so an unknown position is reported to the caller
-  // instead of surfacing later as a run that failed immediately.
-  if (auto found = deviceManager_.withDevice(
-          devicePosition, [](Device&) -> std::expected<void, std::string> { return {}; });
-      !found) {
-    return std::unexpected(
-        ProcedureError{.kind = ProcedureError::Kind::kUnknownDevice, .message = found.error()});
-  }
-
   const Key key{devicePosition, std::move(name)};
   auto previous = runs_.find(key);
   const uint32_t runCount = (previous == runs_.end() ? 0 : previous->second->runCount) + 1;
@@ -113,7 +119,7 @@ std::expected<void, ProcedureError> ProcedureManager::startRun(uint16_t devicePo
   run->reporter = std::make_shared<ProgressReporter>(std::move(steps));
   run->runCount = runCount;
   run->startedAt = nowMs();
-  run->topologyGeneration = deviceManager_.topologyGeneration();
+  run->topologyGeneration = topologyGeneration;
 
   // Replacing the entry drops the previous run, joining its thread — already finished, since the
   // busy check above passed.

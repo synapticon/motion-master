@@ -636,7 +636,7 @@ class Device {
   // values, the sampler reads them) racing the control-plane thread. Held only briefly — across
   // a cache read/write, or a single mailbox transaction in read/writeParameter; never across the
   // multi-entry object-dictionary enumeration, which builds a local map and swaps it in under
-  // the lock. Lock order, where both are taken: DeviceManager::busMutex_ before this.
+  // the lock. Lock order, where both are taken: DeviceManager::deviceSetMutex_ before this.
   //
   // Held by unique_ptr because std::mutex is neither movable nor copyable, and Device is moved
   // into DeviceManager's std::vector<Device> (which relocates on growth). The indirection keeps

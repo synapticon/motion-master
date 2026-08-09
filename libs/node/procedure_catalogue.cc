@@ -620,9 +620,9 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 //
 // The borrow is released before this returns, and that is deliberate rather than incidental: every
 // caller below goes on to call something that borrows again (ProcedureManager::start does its own
-// withDevice), and busMutex_ is shared but not recursive — a second shared acquisition can deadlock
-// behind a writer that arrived between the two. So applicability is decided under the lock and
-// nothing else is done while holding it.
+// withDevice), and deviceSetMutex_ is shared but not recursive — a second shared acquisition can
+// deadlock behind a writer that arrived between the two. So applicability is decided under the lock
+// and nothing else is done while holding it.
 std::expected<std::vector<const ProcedureCatalogueEntry*>, ProcedureError> applicableEntries(
     DeviceManager& deviceManager, uint16_t devicePosition) {
   using Entries = std::vector<const ProcedureCatalogueEntry*>;

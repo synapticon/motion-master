@@ -113,7 +113,10 @@ bool isValidStateTransition(EtherCatState currentState, EtherCatState targetStat
 
 std::expected<void, std::string> DeviceManager::init(
     std::unique_ptr<mm::comm::FieldbusDriver> driver, const DeviceManagerConfig& config) {
-  std::unique_lock lock(busMutex_);
+  // Exclusive on both: a one-shot startup operation that installs driver_, so there is nothing to
+  // gain from a narrower window and readers must not see a driver whose context has not opened.
+  const std::lock_guard busOperationLock(busOperationMutex_);
+  const std::unique_lock lock(deviceSetMutex_);
   // init() is a one-shot: replacing a live driver would destroy it while the
   // Devices in devices_ still hold a FieldbusDriver& to it, leaving every Device
   // with a dangling reference. Require an explicit reset() between inits instead.
@@ -145,7 +148,13 @@ void DeviceManager::configureParameterCache(const ParameterCacheConfig& config) 
 const ParameterCache& DeviceManager::parameterCache() const { return parameterCache_; }
 
 std::expected<int, std::string> DeviceManager::scan() {
-  std::unique_lock lock(busMutex_);
+  // Exclusive on deviceSetMutex_ for the whole call, not just the vector rebuild: driver_->scan()
+  // reprograms the SOEM context underneath the *existing* devices_, so a reader resolving a device
+  // mid-scan would drive a slavelist being rebuilt. This is the one operation for which a borrower
+  // holding the shared lock legitimately blocks the control plane — a rescan is precisely what
+  // would dangle its Device&.
+  const std::lock_guard busOperationLock(busOperationMutex_);
+  const std::unique_lock lock(deviceSetMutex_);
   if (!driver_) {
     spdlog::error("scan() called with no driver — call init() first");
     return std::unexpected("no driver — call init() first");
@@ -186,7 +195,9 @@ std::expected<int, std::string> DeviceManager::scan() {
 }
 
 void DeviceManager::reset() {
-  std::unique_lock lock(busMutex_);
+  // Exclusive on both, for the same reason as scan(): this destroys every Device and the driver.
+  const std::lock_guard busOperationLock(busOperationMutex_);
+  const std::unique_lock lock(deviceSetMutex_);
   // Unpublish the image and drain any in-flight cycle so a concurrent exchangeProcessData
   // becomes a no-op, then reclaim every retained image generation (safe now that exchange is
   // gated off).
@@ -225,7 +236,11 @@ Device* DeviceManager::findDevice(uint16_t slavePosition) {
 }
 
 std::expected<void, std::string> DeviceManager::configureProcessData() {
-  std::unique_lock lock(busMutex_);
+  // busOperationMutex_ only: it keeps driver_/devices_ stable and serialises against the other
+  // control-plane operations, while remapProcessImage() takes deviceSetMutex_ exclusively for its
+  // brief publish window. The bus I/O and the per-device PDO-mapping reads therefore run without
+  // excluding the monitoring sampler.
+  const std::lock_guard busOperationLock(busOperationMutex_);
   return remapProcessImage();
 }
 
@@ -256,10 +271,9 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
   // Build a fresh staging slot per output object and seed each from the current cached parameter
   // value, so the RxPDO setpoints callers initialised before OP (controlword, modes, targets) are
   // sent on the very first cycle. Unset parameters encode their type-appropriate zero, the safe
-  // default. Building the slots here, under busMutex with exchange drained by stopExchange() above,
-  // is the only place the slot vector is (re)sized — the RT composer only ever reads it, gated by
-  // the image pointer. (Output point reads come straight from these slots, so no pre-exchange
-  // snapshot is needed; monitoring begins streaming once the first cycle is recorded.)
+  // default. Built here into a local, then swapped in under the exclusive lock below — the RT
+  // composer only ever reads the live vector, gated by the image pointer, and a non-RT point
+  // read/write goes through ProcessData::readPdo/writePdo under the shared lock.
   std::vector<std::atomic<uint64_t>> slots(image->outputs.size());
   for (size_t i = 0; i < image->outputs.size(); ++i) {
     const ProcessImageEntry& entry = image->outputs[i];
@@ -277,21 +291,30 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
     }
     slots[i].store(packSlot(*bytes), std::memory_order_relaxed);
   }
-  pd_->outputSlots = std::move(slots);
 
-  // (Re)allocate the recorder for this image's per-cycle byte size and the configured depth. A
-  // layout-changing re-map restarts the recording — records under the old layout are undecodable
-  // under the new one. Exchange is drained (stopExchange above) and the image is not yet published,
-  // so the RT writer cannot touch the ring while it is being rebuilt.
-  pd_->ring.allocate(image->inputBytes, image->outputBytes, config_.recorderCapacity);
+  // The publish window — the only part of a re-map that touches state a reader can see, and so the
+  // only part that takes deviceSetMutex_ exclusively. Everything above (the IOmap rebuild, the
+  // per-device PDO-mapping SDO reads, building the image and the slots) ran under
+  // busOperationMutex_ alone, so the sampler kept flushing throughout. Bounded by the ring
+  // re-allocation, which is the slowest step here.
+  std::shared_ptr<const ProcessImage> shared;
+  {
+    const std::unique_lock lock(deviceSetMutex_);
+    pd_->outputSlots = std::move(slots);
+    // (Re)allocate the recorder for this image's per-cycle byte size and the configured depth. A
+    // layout-changing re-map restarts the recording — records under the old layout are undecodable
+    // under the new one. Exchange is drained (stopExchange above) and the image is not yet
+    // published, so the RT writer cannot touch the ring while it is being rebuilt.
+    pd_->ring.allocate(image->inputBytes, image->outputBytes, config_.recorderCapacity);
 
-  auto shared = std::make_shared<const ProcessImage>(std::move(*image));
-  pd_->generations.push_back(shared);
-  pd_->image.store(shared.get(), std::memory_order_release);
-  // A new image is published: object offsets may differ from the previous one, so signal
-  // consumers that captured the layout (the monitoring sampler) to re-capture it.
-  processImageGeneration_.fetch_add(1, std::memory_order_relaxed);
-  updateExpectedWkc();
+    shared = std::make_shared<const ProcessImage>(std::move(*image));
+    pd_->generations.push_back(shared);
+    pd_->image.store(shared.get(), std::memory_order_release);
+    // A new image is published: object offsets may differ from the previous one, so signal
+    // consumers that captured the layout (the monitoring sampler) to re-capture it.
+    processImageGeneration_.fetch_add(1, std::memory_order_relaxed);
+    updateExpectedWkc();
+  }
   spdlog::info("Process data configured: {} output bytes, {} input bytes, expected WKC {}",
                shared->outputBytes, shared->inputBytes, shared->expectedWkc);
   return {};
@@ -299,9 +322,10 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
 
 void DeviceManager::exchangeProcessData() {
   // The published image is the *only* gate, and deliberately so: driver_ is a unique_ptr that
-  // init()/reset() write under busMutex_, which this RT thread never takes, so testing it here
-  // would be an unsynchronised read. It would also be redundant — an image can only be published
-  // by remapProcessImage(), which requires a driver, and reset() calls stopExchange() (unpublish
+  // init()/reset() write under deviceSetMutex_, which this RT thread never takes, so testing it
+  // here would be an unsynchronised read. It would also be redundant — an image can only be
+  // published by remapProcessImage(), which requires a driver, and reset() calls stopExchange()
+  // (unpublish
   // + drain) before destroying it. So a non-null image below means a live driver, established by
   // the ordering rather than by a check the RT thread has no safe way to make.
   //
@@ -376,22 +400,22 @@ void DeviceManager::stopExchange() {
   }
 }
 
-// The three recorder accessors take busMutex_ shared, and the adversary is not the RT producer.
-// ProcessDataRing's lock-free protocol makes a reader safe against write() — a concurrent append,
-// even one that laps the reader, is detected by the per-slot sequence re-check. It says nothing
-// about allocate()/clear(), which *release the storage* (buffer_ and the seqWords_ vector) and run
-// from the control plane: a re-map re-allocates because records under the old layout are
-// undecodable, and scan()/reset() clear. Those hold busMutex_ exclusively, so reading the ring
-// without it is a use-after-free, not a torn read — and the window is wide, since a sampler flush
-// walks thousands of records. Shared, so the exclusive rebuilders are the only thing that waits;
-// serializeDump reads the ring under the same lock.
+// The three recorder accessors take deviceSetMutex_ shared, and the adversary is not the RT
+// producer. ProcessDataRing's lock-free protocol makes a reader safe against write() — a concurrent
+// append, even one that laps the reader, is detected by the per-slot sequence re-check. It says
+// nothing about allocate()/clear(), which *release the storage* (buffer_ and the seqWords_ vector)
+// and run from the control plane: a re-map re-allocates because records under the old layout are
+// undecodable, and scan()/reset() clear. Those hold deviceSetMutex_ exclusively, so reading the
+// ring without it is a use-after-free, not a torn read — and the window is wide, since a sampler
+// flush walks thousands of records. Shared, so the exclusive rebuilders are the only thing that
+// waits; serializeDump reads the ring under the same lock.
 uint64_t DeviceManager::recorderHead() const {
-  const std::shared_lock lock(busMutex_);
+  const std::shared_lock lock(deviceSetMutex_);
   return pd_->ring.head();
 }
 
 uint64_t DeviceManager::recorderOldestSeq() const {
-  const std::shared_lock lock(busMutex_);
+  const std::shared_lock lock(deviceSetMutex_);
   return pd_->ring.oldestValidSeq();
 }
 
@@ -400,7 +424,7 @@ bool DeviceManager::readRecord(uint64_t seq, ProcessDataRing::Record& out) const
   // sampler from becoming a milliseconds-long shared holder that an exclusive scan would queue
   // behind. A re-map part-way through a span therefore ends it — every record already reads
   // independently (a lapped one returns false and the caller resyncs), so a span was never atomic.
-  const std::shared_lock lock(busMutex_);
+  const std::shared_lock lock(deviceSetMutex_);
   return pd_->ring.readRecord(seq, out);
 }
 
@@ -423,11 +447,14 @@ int DeviceManager::expectedWorkingCounter() const {
 bool DeviceManager::processDataHealthy() const { return pd_->healthy(); }
 
 ProcessImageInfo DeviceManager::processImageInfo() const {
+  // Shared: generations is a vector the control plane appends to (a re-map) and clears
+  // (scan/reset), and this walks it and dereferences its back() — plus findDevice below. Both are
+  // exclusive-lock writes, so the read needs the shared lock even though every caller today is on
+  // an HTTP thread.
+  const std::shared_lock lock(deviceSetMutex_);
   ProcessImageInfo info{};
   info.lastWkc = pd_->lastWkc.load(std::memory_order_relaxed);
   info.expectedWkc = pd_->expectedWkc.load(std::memory_order_relaxed);
-  // generations is mutated only by configureProcessData()/reset(), both on the control-plane
-  // thread that also calls this accessor — so the size read needs no synchronisation.
   info.generations = pd_->generations.size();
 
   const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
@@ -475,7 +502,7 @@ std::expected<DeviceManager::DumpSpan, std::string> DeviceManager::serializeDump
   // Shared lock: serialise against the exclusive mutators (init/scan/reset/configure) that rebuild
   // devices_ and the retained image generations, exactly as the other off-thread read surfaces do.
   // The RT producer is never blocked — it appends to the ring lock-free; we only read the ring.
-  std::shared_lock lock(busMutex_);
+  std::shared_lock lock(deviceSetMutex_);
 
   // Header image: the live published image, or — once the bus has left the exchange states and the
   // image was torn down — the most recent retained generation (kept until reset()/scan()). Records
@@ -520,7 +547,8 @@ std::expected<DeviceManager::DumpSpan, std::string> DeviceManager::serializeDump
     for (const ProcessImageEntry& e : entries) {
       auto it = deviceIndex.find(e.slavePosition);
       if (it == deviceIndex.end()) {
-        continue;  // entry for a device no longer present — skip (cannot happen under busMutex_)
+        continue;  // entry for a device no longer present — skip (cannot happen under
+                   // deviceSetMutex_)
       }
       DumpPdoEntry pe{.index = e.index,
                       .subindex = e.subindex,
@@ -676,7 +704,14 @@ void DeviceManager::updateExpectedWkc() {
 std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transitionToState(
     const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
     std::chrono::steady_clock::duration timeout) {
-  std::unique_lock lock(busMutex_);
+  // busOperationMutex_ only, and this is the operation the split exists for. Driving AL state
+  // blocks for seconds (the driver polls each slave to the target with a timeout), and holding a
+  // lock readers share for all of it stalls the monitoring sampler and with it every
+  // /api/monitorings endpoint. Holding busOperationMutex_ excludes the other control-plane
+  // operations (which is what correctness needs: no concurrent scan/reset/re-map) while leaving
+  // readers and borrowers untouched. driver_ and devices_ are stable throughout because only an
+  // operation holding this mutex can rebuild them.
+  const std::lock_guard busOperationLock(busOperationMutex_);
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -752,8 +787,8 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
                                    timeout);
       }
 
-      // Already holding busMutex_ exclusively — call the mapping primitive directly, not the
-      // public configureProcessData (which would re-acquire the non-recursive lock and deadlock).
+      // Already holding busOperationMutex_ — call the mapping primitive directly, not the public
+      // configureProcessData (which would re-acquire the non-recursive lock and deadlock).
       if (auto r = remapProcessImage(); !r) {
         return std::unexpected("auto-configure process data failed: " + r.error());
       }
@@ -864,6 +899,9 @@ void to_json(nlohmann::json& j, const DeviceStateInfo& info) {
 
 std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::deviceStates(
     const std::vector<uint16_t>& positions) {
+  // Shared, like every other position-based read surface: this dereferences driver_ and resolves
+  // positions against devices_, both of which the exclusive rebuilders replace.
+  const std::shared_lock lock(deviceSetMutex_);
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -886,6 +924,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::deviceSt
 
 std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> DeviceManager::deviceDiagnostics(
     const std::vector<uint16_t>& positions) {
+  const std::shared_lock lock(deviceSetMutex_);
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -912,6 +951,7 @@ std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> DeviceManager::de
 
 std::expected<std::vector<DcSyncInfo>, std::string> DeviceManager::dcSync(
     const std::vector<uint16_t>& positions) {
+  const std::shared_lock lock(deviceSetMutex_);
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -938,7 +978,7 @@ std::expected<std::vector<DcSyncInfo>, std::string> DeviceManager::dcSync(
 
 std::expected<mm::comm::ProcessDataWatchdogConfig, std::string> DeviceManager::processDataWatchdog(
     uint16_t slavePosition) {
-  std::shared_lock lock(busMutex_);
+  std::shared_lock lock(deviceSetMutex_);
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -950,7 +990,7 @@ std::expected<mm::comm::ProcessDataWatchdogConfig, std::string> DeviceManager::p
 
 std::expected<mm::comm::ProcessDataWatchdogConfig, std::string>
 DeviceManager::setProcessDataWatchdog(uint16_t slavePosition, std::chrono::nanoseconds timeout) {
-  std::shared_lock lock(busMutex_);
+  std::shared_lock lock(deviceSetMutex_);
   if (!driver_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -964,16 +1004,16 @@ std::expected<void, std::string> DeviceManager::initializeDeviceParameters(uint1
                                                                            bool readValues) {
   // Shared lock, matching readAllDeviceParameters and the position-based-method contract (see
   // findDevice's warning): a method that resolves a device by position and does not hand back a
-  // pointer looks the device up under busMutex_, so it stays safe against the exclusive mutators
-  // (scan/reset/transitionToState) that rebuild devices_/driver_ regardless of caller thread. Both
-  // callers today are on the HTTP loop thread (so serialised with those mutators anyway), but this
-  // triggers the multi-second readObjectDictionary enumeration — during which
+  // pointer looks the device up under deviceSetMutex_, so it stays safe against the exclusive
+  // mutators (scan/reset/transitionToState) that rebuild devices_/driver_ regardless of caller
+  // thread. Both callers today are on the HTTP loop thread (so serialised with those mutators
+  // anyway), but this triggers the multi-second readObjectDictionary enumeration — during which
   // SoemFieldbusDriver::readObjectDictionary releases the driver's controlPlaneMutex_ between
   // SDO-Info transactions on the promise that the bus lock keeps the context alive — so not relying
   // on the single-thread invariant here is the robust choice. Held shared for the read's duration;
   // the RT loop (lock-free PDO) and WebSocket (separate loop) are unaffected — only exclusive
   // mutators wait.
-  std::shared_lock lock(busMutex_);
+  std::shared_lock lock(deviceSetMutex_);
   Device* device = findDevice(slavePosition);
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
@@ -986,7 +1026,7 @@ std::expected<void, std::string> DeviceManager::readAllDeviceParameters(uint16_t
   // mutators that rebuild devices_/driver_ so the device pointer stays valid for the sweep, while
   // still allowing concurrent off-thread reads. Device::readAllParameters re-takes the per-device
   // parametersMutex_ per entry, so this holds only the shared bus lock for the duration.
-  std::shared_lock lock(busMutex_);
+  std::shared_lock lock(deviceSetMutex_);
   Device* device = findDevice(slavePosition);
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
@@ -1053,7 +1093,7 @@ bool ProcessData::writePdo(uint16_t slavePosition, uint16_t index, uint8_t subin
 
 std::optional<DeviceParameterValue> DeviceManager::value(uint16_t slavePosition, uint16_t index,
                                                          uint8_t subindex) const {
-  std::shared_lock lock(busMutex_);
+  std::shared_lock lock(deviceSetMutex_);
   const Device* device = findDevice(slavePosition);
   if (!device) {
     return std::nullopt;
@@ -1064,7 +1104,7 @@ std::optional<DeviceParameterValue> DeviceManager::value(uint16_t slavePosition,
 std::optional<DeviceManager::PdoSampleSpec> DeviceManager::pdoSampleSpec(uint16_t slavePosition,
                                                                          uint16_t index,
                                                                          uint8_t subindex) const {
-  std::shared_lock lock(busMutex_);
+  std::shared_lock lock(deviceSetMutex_);
   const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
   if (!image) {
     return std::nullopt;
@@ -1085,7 +1125,7 @@ std::optional<DeviceManager::PdoSampleSpec> DeviceManager::pdoSampleSpec(uint16_
 }
 
 bool DeviceManager::deviceExchangesProcessData(uint16_t slavePosition) const {
-  std::shared_lock lock(busMutex_);
+  std::shared_lock lock(deviceSetMutex_);
   const Device* device = findDevice(slavePosition);
   return device != nullptr && device->exchangesProcessData();
 }
@@ -1094,7 +1134,7 @@ std::expected<DeviceParameterValue, std::string> DeviceManager::readDeviceParame
     uint16_t slavePosition, uint16_t index, uint8_t subindex) {
   // Shared lock: this is the entry point monitoring calls from its own threads, so it must be
   // serialised against the exclusive mutators (init/scan/reset/…) that rebuild devices_/driver_.
-  std::shared_lock lock(busMutex_);
+  std::shared_lock lock(deviceSetMutex_);
   Device* device = findDevice(slavePosition);
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
@@ -1110,7 +1150,7 @@ std::expected<DeviceParameter, std::string> DeviceManager::deviceParameterView(
   // Shared lock for the same reason as readDeviceParameter: serialise against the exclusive
   // mutators that rebuild devices_, so the device pointer and its parameter map stay valid for the
   // refresh + copy below.
-  std::shared_lock lock(busMutex_);
+  std::shared_lock lock(deviceSetMutex_);
   Device* device = findDevice(slavePosition);
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
@@ -1135,7 +1175,7 @@ std::expected<void, std::string> DeviceManager::writeDeviceParameter(
     uint16_t slavePosition, uint16_t index, uint8_t subindex, DeviceParameterValue newValue) {
   // Shared lock: serialise against the exclusive mutators that rebuild devices_/driver_, so a
   // write that lands here off the control-plane thread can never see a half-torn device set.
-  std::shared_lock lock(busMutex_);
+  std::shared_lock lock(deviceSetMutex_);
   Device* device = findDevice(slavePosition);
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
@@ -1148,11 +1188,15 @@ std::expected<void, std::string> DeviceManager::writeDeviceParameter(
 
 std::expected<void, std::string> DeviceManager::writeDevicePdoMapping(uint16_t slavePosition,
                                                                       const PdoMapping& mapping) {
-  // Shared lock, like writeDeviceParameter: serialise against the exclusive mutators that rebuild
-  // devices_/driver_ so the device pointer stays valid, while the actual PRE-OP mailbox writes are
-  // serialised per transaction by the driver's socket mutex. The process image is not touched here
-  // — a subsequent transitionToState back to SAFE-OP/OP re-reads the mapping and re-maps.
-  std::shared_lock lock(busMutex_);
+  // A control-plane operation, not a plain position-based write: rewriting 0x1C12/0x1C13 and the
+  // 0x16xx/0x1Axx records is a multi-SDO sequence, and its read-back refreshes the device's
+  // flatPdoMapping_ — the same field remapProcessImage() rewrites and buildProcessImage() reads.
+  // busOperationMutex_ makes it exclusive against a concurrent re-map and against another write to
+  // the same device, which a shared lock alone never did. The mailbox writes themselves are still
+  // serialised per transaction by the driver's socket mutex, and the process image is not touched
+  // here — a subsequent transitionToState back to SAFE-OP/OP re-reads the mapping and re-maps.
+  const std::lock_guard busOperationLock(busOperationMutex_);
+  const std::shared_lock lock(deviceSetMutex_);
   Device* device = findDevice(slavePosition);
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
@@ -1163,7 +1207,7 @@ std::expected<void, std::string> DeviceManager::writeDevicePdoMapping(uint16_t s
 std::expected<PdoMapping, std::string> DeviceManager::readDevicePdoMapping(uint16_t slavePosition) {
   // Shared lock: keep the device pointer valid against the exclusive rebuilders while the SDO reads
   // are serialised per transaction by the driver's socket mutex.
-  std::shared_lock lock(busMutex_);
+  std::shared_lock lock(deviceSetMutex_);
   Device* device = findDevice(slavePosition);
   if (!device) {
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
@@ -1176,7 +1220,7 @@ std::vector<OutputStageResult> DeviceManager::stageProcessDataOutputs(
   // One shared lock for the whole batch (per-item writeParameter takes each device's own
   // parametersMutex_): serialise against the exclusive mutators that rebuild devices_/driver_, so
   // every item in the batch sees one consistent device set and a stable published image.
-  std::shared_lock lock(busMutex_);
+  std::shared_lock lock(deviceSetMutex_);
   const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
   std::vector<OutputStageResult> results;
   results.reserve(requests.size());

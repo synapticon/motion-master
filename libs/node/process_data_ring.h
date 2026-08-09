@@ -36,9 +36,9 @@ namespace mm::node {
 ///          and @c clear are a *third* kind of writer — they release the storage, so they cannot
 ///          be made safe by any reader-side sequence check and are **not** covered by the
 ///          lock-free protocol. The owner must exclude readers around them (@c DeviceManager does
-///          it with @c busMutex_: the control-plane callers hold it exclusively, every ring reader
-///          takes it shared). A reader that skips that lock is a use-after-free waiting for a
-///          re-map, not a torn read.
+///          it with @c deviceSetMutex_: the control-plane callers hold it exclusively, every ring
+///          reader takes it shared). A reader that skips that lock is a use-after-free waiting for
+///          a re-map, not a torn read.
 class ProcessDataRing {
  public:
   /// @brief One recorded cycle, copied out by a reader. @c inputs / @c outputs are the raw IOmap

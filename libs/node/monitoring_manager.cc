@@ -119,6 +119,7 @@ std::expected<Monitoring, std::string> MonitoringManager::create(Monitoring conf
   Entry entry;
   entry.config = config;
   entry.plans = std::move(plans);
+  entry.epoch = nextEpoch_++;
   entry.imageGeneration = deviceManager_.processImageGeneration();
   entries_.emplace(config.topic, std::move(entry));
   cv_.notify_one();  // wake the sampler thread to pick up the new monitoring (due immediately)
@@ -195,12 +196,7 @@ void MonitoringManager::run() {
       nearest = std::min(nearest, entry.nextDue);
     }
     if (nearest <= now) {
-      for (auto& [topic, entry] : entries_) {
-        if (entry.nextDue <= now) {
-          flushEntry(entry);
-          entry.nextDue = now + entry.config.interval;  // reschedule from now (no catch-up burst)
-        }
-      }
+      flushDue(lock, now, /*forceAll=*/false);
     } else {
       cv_.wait_until(lock, nearest);  // wake at the deadline, or earlier on create/remove/stop
     }
@@ -208,10 +204,59 @@ void MonitoringManager::run() {
 }
 
 void MonitoringManager::sampleAll() {
-  std::lock_guard<std::mutex> lock(mutex_);
-  for (auto& [topic, entry] : entries_) {
-    flushEntry(entry);
+  std::unique_lock<std::mutex> lock(mutex_);
+  flushDue(lock, std::chrono::steady_clock::now(), /*forceAll=*/true);
+}
+
+void MonitoringManager::flushDue(std::unique_lock<std::mutex>& lock,
+                                 std::chrono::steady_clock::time_point now, bool forceAll) {
+  auto states = takeDue(now, forceAll);
+  if (states.empty()) {
+    return;
   }
+  // Copy the callback out too: publish_ is guarded by mutex_ and we are about to drop it.
+  const PublishFn publish = publish_;
+  lock.unlock();
+  for (auto& state : states) {
+    flushDetached(state, publish);
+  }
+  lock.lock();
+  for (const auto& state : states) {
+    commitFlush(state);
+  }
+}
+
+std::vector<MonitoringManager::FlushState> MonitoringManager::takeDue(
+    std::chrono::steady_clock::time_point now, bool forceAll) {
+  std::vector<FlushState> states;
+  for (auto& [topic, entry] : entries_) {
+    if (!forceAll && entry.nextDue > now) {
+      continue;
+    }
+    states.push_back(FlushState{.topic = topic,
+                                .epoch = entry.epoch,
+                                .interval = entry.config.interval,
+                                .plans = entry.plans,
+                                .cursor = entry.cursor,
+                                .cursorPrimed = entry.cursorPrimed,
+                                .imageGeneration = entry.imageGeneration});
+    entry.nextDue = now + entry.config.interval;  // reschedule from now (no catch-up burst)
+  }
+  return states;
+}
+
+void MonitoringManager::commitFlush(const FlushState& state) {
+  auto it = entries_.find(state.topic);
+  // The epoch check is what makes releasing the lock safe: a remove + re-create of the same topic
+  // while the flush was running produces a new registration with its own cursor, and writing this
+  // flush's cursor onto it would skip the new monitoring past cycles it never delivered.
+  if (it == entries_.end() || it->second.epoch != state.epoch) {
+    return;
+  }
+  it->second.plans = state.plans;
+  it->second.cursor = state.cursor;
+  it->second.cursorPrimed = state.cursorPrimed;
+  it->second.imageGeneration = state.imageGeneration;
 }
 
 std::size_t MonitoringManager::monitoringCount() const {
@@ -221,9 +266,9 @@ std::size_t MonitoringManager::monitoringCount() const {
 
 std::size_t MonitoringManager::polledSdoCount() const { return refresher_.trackedCount(); }
 
-void MonitoringManager::recaptureIfRemapped(Entry& entry) {
+void MonitoringManager::recaptureIfRemapped(FlushState& state) {
   const uint64_t generation = deviceManager_.processImageGeneration();
-  if (generation == entry.imageGeneration) {
+  if (generation == state.imageGeneration) {
     return;
   }
   // A re-map can change not just a mapped object's offset but whether it is PDO-mapped at all:
@@ -233,7 +278,7 @@ void MonitoringManager::recaptureIfRemapped(Entry& entry) {
   // the PDO path and the SDO refresher accordingly, so both the sampled source and the reported
   // source stay correct after a remap (a stale classification would sample the wrong path — null
   // for a PDO plan whose object left, or a stale SDO cache for one that joined).
-  for (auto& plan : entry.plans) {
+  for (auto& plan : state.plans) {
     auto spec = deviceManager_.pdoSampleSpec(plan.devicePosition, plan.index, plan.subindex);
     const Source newSource = spec ? Source::Pdo : Source::Sdo;
     if (newSource == plan.source) {
@@ -242,7 +287,7 @@ void MonitoringManager::recaptureIfRemapped(Entry& entry) {
     }
     if (newSource == Source::Sdo) {
       // PDO→SDO: the object left the image; start polling it in the background.
-      refresher_.acquire(plan.devicePosition, plan.index, plan.subindex, entry.config.interval);
+      refresher_.acquire(plan.devicePosition, plan.index, plan.subindex, state.interval);
       plan.pdoSpec = std::nullopt;
     } else {
       // SDO→PDO: the object joined the image; stop the now-redundant background poll.
@@ -251,21 +296,21 @@ void MonitoringManager::recaptureIfRemapped(Entry& entry) {
     }
     plan.source = newSource;
   }
-  entry.imageGeneration = generation;
+  state.imageGeneration = generation;
 }
 
-void MonitoringManager::flushEntry(Entry& entry) {
-  recaptureIfRemapped(entry);
+void MonitoringManager::flushDetached(FlushState& state, const PublishFn& publish) {
+  recaptureIfRemapped(state);
 
   const uint64_t head = deviceManager_.recorderHead();
   // Seed the cursor on the first flush so the monitoring streams from "now" rather than dumping the
   // whole ring history that predates it.
-  if (!entry.cursorPrimed) {
-    entry.cursor = head;
-    entry.cursorPrimed = true;
+  if (!state.cursorPrimed) {
+    state.cursor = head;
+    state.cursorPrimed = true;
     return;
   }
-  if (head == entry.cursor) {
+  if (head == state.cursor) {
     return;  // no new cycles recorded since the last flush (bus idle / not exchanging)
   }
   // Resync a cursor that has fallen outside the live recorded span [oldest, head). Two causes:
@@ -276,10 +321,10 @@ void MonitoringManager::flushEntry(Entry& entry) {
   //     unsigned head - cursor below would underflow into a gigantic rows.reserve() (length_error).
   // Either way, log the gap (never silent) and skip forward to the oldest record still present.
   const uint64_t oldest = deviceManager_.recorderOldestSeq();
-  if (entry.cursor < oldest || entry.cursor > head) {
-    spdlog::warn("monitoring '{}' resynced — cursor {} outside recorded span [{}, {})",
-                 entry.config.topic, entry.cursor, oldest, head);
-    entry.cursor = oldest;
+  if (state.cursor < oldest || state.cursor > head) {
+    spdlog::warn("monitoring '{}' resynced — cursor {} outside recorded span [{}, {})", state.topic,
+                 state.cursor, oldest, head);
+    state.cursor = oldest;
   }
 
   // Per-flush constants, evaluated once and applied to every row: the device live gate (current AL
@@ -293,9 +338,9 @@ void MonitoringManager::flushEntry(Entry& entry) {
     }
     return it->second;
   };
-  std::vector<std::optional<DeviceParameterValue>> sdoValues(entry.plans.size());
-  for (size_t i = 0; i < entry.plans.size(); ++i) {
-    const auto& plan = entry.plans[i];
+  std::vector<std::optional<DeviceParameterValue>> sdoValues(state.plans.size());
+  for (size_t i = 0; i < state.plans.size(); ++i) {
+    const auto& plan = state.plans[i];
     if (plan.source == Source::Sdo && isExchanging(plan.devicePosition)) {
       sdoValues[i] = deviceManager_.value(plan.devicePosition, plan.index, plan.subindex);
     }
@@ -303,17 +348,17 @@ void MonitoringManager::flushEntry(Entry& entry) {
 
   // Decode every recorded cycle in [cursor, head) into one row each — the lossless span.
   std::vector<Sample> rows;
-  rows.reserve(static_cast<size_t>(head - entry.cursor));
+  rows.reserve(static_cast<size_t>(head - state.cursor));
   ProcessDataRing::Record record;
-  for (uint64_t seq = entry.cursor; seq != head; ++seq) {
+  for (uint64_t seq = state.cursor; seq != head; ++seq) {
     if (!deviceManager_.readRecord(seq, record)) {
       continue;  // raced an overwrite at the oldest edge — skip this one cycle
     }
     Sample sample;
     sample.timestampUs = static_cast<int64_t>(record.timestampNs / 1000);
-    sample.values.reserve(entry.plans.size());
-    for (size_t i = 0; i < entry.plans.size(); ++i) {
-      const auto& plan = entry.plans[i];
+    sample.values.reserve(state.plans.size());
+    for (size_t i = 0; i < state.plans.size(); ++i) {
+      const auto& plan = state.plans[i];
       std::optional<DeviceParameterValue> value;  // null unless resolved below
       if (isExchanging(plan.devicePosition)) {
         if (plan.source == Source::Pdo) {
@@ -334,9 +379,11 @@ void MonitoringManager::flushEntry(Entry& entry) {
     }
     rows.push_back(std::move(sample));
   }
-  entry.cursor = head;
+  state.cursor = head;
 
-  if (!publish_ || rows.empty()) {
+  // The caller's copy, not publish_ — that member is guarded by mutex_, which is deliberately not
+  // held here.
+  if (!publish || rows.empty()) {
     return;
   }
   auto data = nlohmann::json::array();
@@ -348,11 +395,10 @@ void MonitoringManager::flushEntry(Entry& entry) {
     data.push_back(std::move(row));
   }
   const nlohmann::json envelope = {
-      {"type", "monitoring"}, {"topic", entry.config.topic}, {"data", std::move(data)}};
+      {"type", "monitoring"}, {"topic", state.topic}, {"data", std::move(data)}};
   // `replace` handler: a string-typed param carrying non-UTF-8 bytes must not throw here — this
   // runs on the sampler thread with no surrounding catch, so a throw would terminate the server.
-  publish_(entry.config.topic,
-           envelope.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
+  publish(state.topic, envelope.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace));
 }
 
 nlohmann::json MonitoringManager::resourceJson(const Entry& entry) {

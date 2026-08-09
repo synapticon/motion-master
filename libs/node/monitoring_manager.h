@@ -126,15 +126,53 @@ class MonitoringManager {
   struct Entry {
     Monitoring config;
     std::vector<ParamPlan> plans;
+    uint64_t epoch = 0;            // identifies this registration across a remove + re-create
     uint64_t cursor = 0;           // next recorder sequence number to deliver ([cursor, head))
     bool cursorPrimed = false;     // false until the first flush seeds cursor from recorderHead()
     uint64_t imageGeneration = 0;  // processImageGeneration the PDO specs were captured under
     std::chrono::steady_clock::time_point nextDue{};  // default (epoch) => due on the next wake
   };
 
-  void flushEntry(Entry& entry);  // decode + publish [cursor, head); assumes mutex_ held
-  void recaptureIfRemapped(
-      Entry& entry);  // re-classify source + re-capture specs; assumes mutex_ held
+  /// @brief One entry's flushable state, carried out of @c mutex_ and back in.
+  ///
+  /// A flush is the only thing this class does that calls into @c DeviceManager, and it is by far
+  /// the longest — it walks every recorded cycle since the cursor. Doing it under @c mutex_ meant a
+  /// control-plane operation that held the bus lock stalled not just the sampler but every
+  /// @c /api/monitorings endpoint. So the flush works on a detached copy: snapshot under the lock
+  /// (@c takeDue), run the DeviceManager reads and the publish with no lock held (@c
+  /// flushDetached), then write the advanced cursor back (@c commitFlush). @c
+  /// ParameterRefresher::pollDue does the same thing for the same reason.
+  struct FlushState {
+    std::string topic;
+    uint64_t epoch = 0;
+    std::chrono::milliseconds interval{};  // poll period handed to the refresher on an SDO switch
+    std::vector<ParamPlan> plans;
+    uint64_t cursor = 0;
+    bool cursorPrimed = false;
+    uint64_t imageGeneration = 0;
+  };
+
+  /// @brief Snapshots every entry due at @p now (all of them when @p forceAll) and reschedules it.
+  ///        Assumes @c mutex_ held.
+  std::vector<FlushState> takeDue(std::chrono::steady_clock::time_point now, bool forceAll);
+
+  /// @brief Decodes [cursor, head) and publishes it, advancing @p state's cursor.
+  ///        @c mutex_ must NOT be held.
+  void flushDetached(FlushState& state, const PublishFn& publish);
+
+  /// @brief Writes a completed flush back onto its entry, if that entry is still registered under
+  ///        the same epoch. Assumes @c mutex_ held.
+  void commitFlush(const FlushState& state);
+
+  /// @brief Runs one round of due flushes, releasing @p lock across the DeviceManager reads.
+  ///        Called with @p lock held; returns with it held.
+  void flushDue(std::unique_lock<std::mutex>& lock, std::chrono::steady_clock::time_point now,
+                bool forceAll);
+
+  /// @brief Re-classifies each plan's source against the freshly published image and re-captures
+  ///        its decode spec. @c mutex_ must NOT be held (it calls into @c DeviceManager).
+  void recaptureIfRemapped(FlushState& state);
+
   static nlohmann::json resourceJson(const Entry& entry);  // assumes mutex_ held
 
   /// @brief Sampler thread body: waits until the nearest monitoring is due (or an
@@ -143,9 +181,10 @@ class MonitoringManager {
 
   DeviceManager& deviceManager_;
   ParameterRefresher refresher_;
-  mutable std::mutex mutex_;    ///< Guards entries_ and running_.
+  mutable std::mutex mutex_;    ///< Guards entries_, running_ and nextEpoch_.
   std::condition_variable cv_;  ///< Wakes the sampler thread on create/remove/stop.
   std::map<std::string, Entry> entries_;
+  uint64_t nextEpoch_ = 1;  ///< Stamped onto each new Entry; see FlushState.
   PublishFn publish_;
   bool running_ = false;  ///< Whether the sampler thread should keep looping.
   std::thread thread_;

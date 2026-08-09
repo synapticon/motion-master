@@ -41,7 +41,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y ninja-build gcc-14 g++-14 libtsan2
+          sudo apt-get install -y ninja-build clang libclang-rt-dev
 
       # Ubuntu 24.04 ships a kernel that hands out 32 bits of mmap randomisation, which does not fit
       # the fixed shadow-memory layout the sanitizers map at startup — TSan aborts with "FATAL:
@@ -56,11 +56,10 @@ jobs:
         with:
           cmakeVersion: "~4.0.0"
 
+      # No CC/CXX here: the preset pins clang itself, because GCC will not compile the recorder
+      # ring's acquire fence under -fsanitize=thread.
       - name: Configure
         run: cmake --preset x64-linux-tsan
-        env:
-          CC: gcc-14
-          CXX: g++-14
 
       - name: Build
         run: cmake --build --preset x64-linux-tsan

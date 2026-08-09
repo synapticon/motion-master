@@ -44,7 +44,7 @@
       "name": "x64-linux-tsan",
       "inherits": "base",
       "displayName": "Linux x64 ThreadSanitizer",
-      "description": "Debug build under ThreadSanitizer. The only mechanical check on the locking rules in docs/LOCKING.md — the concurrency tests are written to be run here, where an unsynchronised read is a reported race rather than a crash that reproduces once a month.",
+      "description": "Debug build under ThreadSanitizer. The only mechanical check on the locking rules in docs/LOCKING.md — the concurrency tests are written to be run here, where an unsynchronised read is a reported race rather than a crash that reproduces once a month. Pinned to clang: GCC refuses to compile ProcessDataRing's acquire fence under -fsanitize=thread at all ('atomic_thread_fence is not supported', -Werror=tsan), because its TSan cannot model a standalone fence. That warning is true of clang too — it just says so instead of failing — and it is precisely why the seqlock carries a suppression rather than being verified.",
       "condition": {
         "type": "equals",
         "lhs": "${hostSystemName}",
@@ -53,6 +53,8 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
         "VCPKG_TARGET_TRIPLET": "x64-linux",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++",
         "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer -g",
         "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread"
       }

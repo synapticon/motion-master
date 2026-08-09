@@ -28,7 +28,6 @@ uninitMemberVarNoCtor:*/web_api.h
 // tests use to keep their FakeDriver test doubles TU-local. These files
 // compile cleanly with the real toolchain (verified with g++ -fsyntax-only).
 syntaxError:*/device_manager_test.cc
-syntaxError:*/device_manager_concurrency_test.cc
 syntaxError:*/device_test.cc
 syntaxError:*/device_parameter_test.cc
 syntaxError:*/monitoring_test.cc

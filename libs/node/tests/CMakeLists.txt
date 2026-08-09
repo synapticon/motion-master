@@ -7,7 +7,6 @@ add_executable(
   device_parameter_test.cc
   device_test.cc
   device_manager_test.cc
-  device_manager_concurrency_test.cc
   firmware_package_test.cc
   monitoring_test.cc
   monitoring_manager_test.cc

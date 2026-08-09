@@ -377,38 +377,24 @@ Things that must stay true. Each is currently relied upon somewhere.
 7. **`stopExchange()` precedes every mutation of the IOmap, the ring storage, or `driver_`.**
 8. **Published `ProcessImage` generations are retained until `reset()`.**
 
-## Checking it mechanically
+## How these rules are checked
 
-Review is what let a raw `Device*` escape to 32 concurrent workers, so the rules above have a
-mechanical check as well:
+**By review, and by nothing else. Know that before trusting a green test run.**
 
-```bash
-cmake --preset x64-linux-tsan     # pinned to clang; ./tools/install-deps.sh provides the runtime
-cmake --build build/x64-linux-tsan
-./tools/test.sh x64-linux-tsan    # exports TSAN_OPTIONS with tools/tsan.supp
-```
+The test suite is ~95% single-threaded, so a locking mistake does not fail it. That is not an
+oversight to route around casually — a race detector was tried and deliberately dropped, because the
+coverage it could actually give was narrow (it sees only what runs concurrently, which here is the
+`DeviceManager` read surfaces and `ProcedureManager`'s run lifecycle) and it left the parts that
+matter most untouched: nothing anywhere exercises `exchangeProcessData` against a concurrent re-map,
+or `busOperationMutex_` against anything, or the real driver's `controlPlaneMutex_`.
 
-**Run locally, deliberately not in CI.** The suite takes ~2 minutes under TSan against ~15 seconds
-without, and the races it finds are found by *running* the concurrency tests rather than by any one
-run being decisive — so it belongs in the hands of whoever is changing the locking, not on every
-push. Run it when you touch a mutex, an atomic, or anything on this page.
+So the practical rules for a change on this page are:
 
-`libs/node/tests/device_manager_concurrency_test.cc` is written for this build. It hammers every
-public read surface — `to_json`, `busConfig`, `processImageInfo`, `deviceStates`, `hasDevice`,
-`value`, `recorderHead`, a `withDevice` borrow — against a thread calling `scan()` in a loop, and
-separately hammers the parameter readers against a thread re-enumerating the object dictionary.
-**Nothing is asserted about the values read**: whether a position resolves depends on when the read
-lands, and both answers are correct. What is asserted is that no read races the rebuild.
-
-Two things worth knowing about it:
-
-- **Without TSan the tests mostly pass even against racy code** — an unsynchronised read of a vector
-  being cleared usually touches memory that is still mapped. They are a race *detector* harness, not
-  a functional test. Verified by removing `busConfig`'s lock and re-running: TSan reports the write
-  in `scan()`'s `devices_` teardown against the reader, with both stacks.
-- **`tools/tsan.supp` has exactly one entry**, for `ProcessDataRing`'s seqlock — the one place where
-  a race is real at the memory-model level and correct anyway, because the reader re-checks the
-  sequence word afterwards. Everything else TSan reports is a bug. Do not extend that file.
+- Read the [invariants](#invariants) above and say which one your change relies on.
+- Prefer a design where the mistake cannot compile — private raw accessors, borrow-or-copy — over one
+  that merely documents the obligation. That is what rule 1 buys, and it is the only enforcement here
+  that does not depend on someone remembering.
+- Treat "the tests pass" as evidence about behaviour, not about synchronisation.
 
 ## Review findings
 

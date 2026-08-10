@@ -2499,3 +2499,58 @@ Writing a non-PDO-mapped object from a cycle gets an **explicit `writeValueAsync
 ### Open
 
 Where the `writeValueAsync` sweep runs: the only off-RT thread that touches parameters is the refresher's, inside `MonitoringManager`, so exposing it means a pass-through named for writing on a class named for monitoring — or a second small worker at the composition root. Deferred to phase 8, where it is cheap to decide with the code in front of us. And the per-cycle decode cost lands in the same budget as the wire round-trip, so it will show up on `GET /api/game-loop` — worth measuring on a real bus before the beta rather than trusting the estimate above.
+
+## Session 2026-08-10 — The RT value path, as built: what landed, what changed on the way, and the one piece deferred (as-built)
+
+Eight commits over one session took the design of earlier today from nothing to a working Tier-3 surface. A cyclic task now reads and writes live process data with one lookup and one atomic operation, and cannot tell a PDO-mapped object from an SDO-polled one:
+
+```cpp
+void execute(const CycleContext&) override {
+  const DeviceManager::CycleLock cycle(deviceManager_);
+  if (!cycle) { return; }                                     // bus not activated / being rebuilt
+  Device* drive = deviceManager_.findDevice(3);
+  if (drive == nullptr) { return; }                           // not on the bus this cycle
+  const auto status = drive->value<uint16_t>(0x6041, 0);      // decoded from the wire this cycle
+  const auto temp   = drive->value<int16_t>(0x2030, 5);       // polled in the background — same call
+  drive->setValue<int32_t>(0x60FF, 0, *temp > 55 ? 200 : 100);  // sent next cycle
+}
+```
+
+`libs/example/example_cyclic_task.{h,cc}` is the copy-me starter, registered from `main.cc` behind three commented lines. `libs/example` is now the template for **both** extension tiers — the HTTP route plug-in and the cyclic task — in one directory.
+
+### What the plan got wrong, and what replaced it
+
+**The arena is gone, and with it the largest commit.** The design's first answer to "a rescan dangles every pointer" was to never destroy a `Device` or a parameter map — append-only storage, absent devices retained, identity-matched rescans. Rejected on the day: it buys pointer safety with unbounded memory against a misuse the contract already forbids. The model is the simple one — *rescan and you get a new device list; reset clears everything* — which deleted a `std::vector<Device>` → stable-storage refactor across ~31 call sites and made `findDevice`/`findParameter` public and non-locking with nothing to defend.
+
+**The precondition it left behind was not satisfiable, and that was the session's real finding.** "Do not call `scan()` while the game loop runs" reads like a rule a user could follow. It is not one: `gameLoop.run()` blocks the main thread and every other subsystem starts before it, so **a scan is always concurrent with a running loop** — `POST /api/init` is an HTTP handler. It only looked harmless because the sole registered task held no device pointers. The fix is `DeviceManager::CycleLock`, and the thing worth keeping is *how small it turned out*: the published image pointer already **is** the bus's "activated" state, and `stopExchange()` already unpublishes and drains. So the lock adds no state — it takes the same seq_cst raise-then-load handshake `exchangeProcessData` uses, one level up so it covers the task's own lookups. `ProcessData::exchanging` became a depth counter (`inCycle`) because the two now nest. This is the two-phase model every EtherCAT stack uses — IgH: configure, then `ecrt_master_activate`, and reconfiguring means deactivating first — and it is what `ProcessDataCyclicTask` already did implicitly by being a no-op until an image is published.
+
+**An insert-only merge was designed, written, and reverted.** It was the answer to `initializeParameters` replacing the map under a lookup. It works, but it adds a rule, a collision error, and a "re-enumerate hardware you swapped without rescanning" case that produces a union of two dictionaries. Once `CycleLock` existed the simpler answer was available: **re-enumeration pauses the RT cycle across the swap** and republishes — `Device::publishParameters` — which is the same protocol a re-map takes, costs a skipped cycle or two, and leaves no stale entries. The multi-second enumeration stays outside the pause; only the swap is inside it.
+
+**`std::atomic<uint64_t>` lost to a plain `uint64_t` + `std::atomic_ref`, on the opposite argument to the one expected.** The design anticipated hand-written copy/move constructors as the cost of an atomic member. The decisive point is that those five special members are not a one-time cost but a *maintenance* one: `DeviceParameter` gains fields over time, and a field added but forgotten in a hand-written copy constructor loses data silently. Compiler-generated copies never forget. `atomic_ref` puts the lock-free guarantee on the access rather than the storage, which is the guarantee that matters; static asserts pin lock-freedom, the alignment precondition, and little-endianness.
+
+**`stamp` was never built.** The design wanted a monotonic per-cell counter to distinguish "never written" from "the value is zero". `syncState` already records exactly that, and nothing else had a use for freshness, so the field would have been sixteen bytes and a write per cell per cycle for nobody.
+
+### Two decisions about cost that the real bus size settled
+
+**The back-pointer.** `ProcessImageEntry` carries the owning `DeviceParameter*`, resolved once in `buildProcessImage`. A hash lookup per mapped object per cycle is ~1–2 µs for one device and **60–100 µs for fifty devices × forty objects** against a 1 ms grid. The number on the desk is not the number that decides. A task's *own* reads are still per-cycle lookups, and that is fine — it is per signal read, not per mapped object.
+
+**The decode is eager** — every mapped object into its cell every cycle, ~20–40 µs at that same bus size — and the only argument that holds it up is read-path cost: `value<T>()` stays a lookup plus an atomic load, where lazy decoding would put an image lookup and a bit extraction into every read, and every other consumer (HTTP, monitoring, `readParameter`'s PDO branch) gets the value for free. Two arguments that look like support are not: *"it avoids a branch"* — the PDO/SDO distinction is hidden from the **end user**, an API promise, and internally a branch is just a branch; and *"every value comes from the same exchange"* — true, but worth nothing over lazy, because a task runs on the RT thread after the exchange and would have seen one consistent frame either way. The honest shape is sparse-vs-dense, and eager loses the sparse case; the escape hatch, unbuilt, is a flag marking objects someone has actually bound.
+
+### The identity half, deliberately not built
+
+`CycleLock` stops the crash. It does nothing about **positions shifting** — insert a device between 3 and 4 and every position after it moves, so a task bound to position 4 silently drives what used to be 5. `topologyGeneration()` exists for it and is documented on `findDevice`, but nothing enforces it and no machinery was added. That is the owner's call, and the reasoning is theirs: a Tier-3 program knows it has four wheels at known positions because that is the machine it was written for, and inserting a node is a commissioning act after which you rescan and restart. It also means `TrajectoryRun` needs no generation stamp.
+
+### Deferred: `writeValueAsync`
+
+**Writing a non-PDO-mapped object from inside a cycle is not implemented, and is not expected to be needed soon.** `setValue<T>()` stores the cell; for an output-mapped object that is the whole write, because the composer sends the cell. For anything else the value is stored and nothing transmits it — `writeParameter`, off the RT thread, is the way to reach such an object today.
+
+Both implementations are worked out, so this need not be re-derived:
+
+- **A lock-free queue.** `writeValueAsync` pushes `{devicePosition, index, subindex, bits}` into a bounded ring that the refresher's thread drains via `writeDeviceParameter`. ~40 lines of a primitive nothing else in the tree currently needs, plus drain logic. Precise, and overflow is detectable.
+- **A `Pending` sweep.** `writeValueAsync` stores the cell and marks the entry `Pending`; the refresher sweeps for `Pending` entries and pushes them. ~15 lines, but `syncState` must become atomic, and — the real objection — **`Pending` already means something else**: an offline edit through the HTTP API sits `Pending` today and is deliberately never auto-pushed. This would start pushing those too.
+
+**Take the queue when the day comes.** Not for the precision; because the sweep silently repurposes an existing state, which is the kind of coupling that surprises someone a year later. The extra ~25 lines buy a mechanism that does one thing.
+
+### Superseded
+
+This supersedes the phase list of the design session earlier today (phases 8's write-back is deferred as above), and the parts of Session 2026-08-09 describing `outputSlots` as the output path — the staging slots are gone, folded into the cells, and a re-map no longer seeds anything because the cells already hold the values. Session 2026-07-09's "profile view is RT-callable" is still open, and is now a smaller change than it was: the bus-state dispatch it was built around is what the cells replace, and `libs/node/cia402.h` is already pure `constexpr`, so a task decodes a statusword today without any view at all.

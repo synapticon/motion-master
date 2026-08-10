@@ -17,6 +17,7 @@
 #include "core/platform.h"
 #include "core/user_cache.h"
 #include "core/version.h"
+#include "example/example_cyclic_task.h"
 #include "example/example_routes.h"
 #include "game_loop.h"
 #include "http_server.h"
@@ -221,6 +222,13 @@ int main(int argc, char** argv) {
   // outlive every call to GameLoop::run().
   ProcessDataCyclicTask processDataCyclicTask{deviceManager};
 
+  // Tier 3 — your own code inside the RT loop. Uncomment the three marked lines (here, and the
+  // keepFresh + addTask below) to run libs/example/example_cyclic_task.cc, then copy that file to
+  // start your own. It commands a velocity based on a drive's temperature, and only while the drive
+  // is already enabled — it never enables one itself. Check Config::slavePosition and the
+  // temperature object against your bus before uncommenting: the defaults are placeholders.
+  // mm::example::ExampleCyclicTask exampleCyclicTask{deviceManager, {}};
+
   // The RT game loop is constructed here — before the servers — so HttpServer's GET /api/game-loop
   // callback can borrow it via a lambda. Its constructor is side-effect-free; RT setup and the
   // cycle loop happen in run() at the very end. Declared before httpServer so it outlives the HTTP
@@ -228,6 +236,9 @@ int main(int argc, char** argv) {
   GameLoop gameLoop{std::chrono::microseconds{opts.config.gameLoop.periodUs},
                     opts.config.gameLoop.cpuAffinity};
   gameLoop.addTask(&processDataCyclicTask);
+  // Tier 3, line 2 of 3 — register the example task. Membership is fixed: every task is added
+  // before run(), and the loop never gains or loses one afterwards.
+  // gameLoop.addTask(&exampleCyclicTask);
 
   HttpServer httpServer{
       HttpServer::Config{
@@ -304,6 +315,10 @@ int main(int argc, char** argv) {
     wsServer.publish(std::move(topic), std::move(json));
   });
   monitoringManager.start();
+  // Tier 3, line 3 of 3 — keep the example task's temperature object polled. It is SDO-only, so
+  // nothing refills it cyclically; without this the task reads zero forever and always takes the
+  // cool branch. Off the RT thread, as it must be — this is an ordinary call on an ordinary thread.
+  // monitoringManager.keepFresh(1, 0x2030, 0x01, std::chrono::milliseconds{200});
 
   if (opts.openBrowser) {
     mm::core::openInBrowser("https://motion-master.synapticon.com/apps/console/");

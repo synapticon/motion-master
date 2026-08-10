@@ -4,6 +4,8 @@
 
 #include "core/cyclic_task.h"
 #include "node/device_manager.h"
+#include "node/device_parameter.h"
+#include "node/somanet_drive_objects.h"
 
 namespace mm::example {
 
@@ -60,25 +62,25 @@ class ExampleCyclicTask : public CyclicTask {
     /// into the chain shifts every position after it, so re-check this after changing the bus.
     uint16_t slavePosition = 1;
 
-    /// The temperature object. Defaults to SOMANET **0x2031:01 "Drive temperature"** — measured
-    /// near the inverter, which is the one that matters for a power-stage interlock; 0x2030:01
-    /// "Core temperature" is the control board. Both are @c DINT and read-only.
+    /// The temperature object, as an @c ObjectAddress: index, subindex, and the C++ type the
+    /// drive's own dictionary declares, in one constant from @c somanet_drive_objects.h. Defaults
+    /// to SOMANET **0x2031:01 "Drive temperature"** — measured near the inverter, which is what a
+    /// power-stage interlock cares about; @c kCoreTemperatureMeasuredTemperature is the control
+    /// board instead.
     ///
-    /// **On any other drive, look the object up rather than assuming it**, and check two things
-    /// that are easy to get wrong and produce the same silent symptom — a motor that never turns.
-    /// The read is type-exact, so if the object is not a 32-bit signed integer the @c
-    /// value<int32_t> call in @c execute has to change with it; and the *unit* is whatever the
-    /// dictionary says, not whatever seems natural (see @c temperatureLimit). A mismatch on either
-    /// reads as no value at all, which this task treats as too hot to run.
-    uint16_t temperatureIndex = 0x2031;
-    uint8_t temperatureSubindex = 0x01;
+    /// **The type travelling with the address is the point, not decoration.** This object is a
+    /// @c DINT; reading it as an @c int16_t returns nothing at all, and this task reads "no value"
+    /// as too hot — so the drive would never enable and the example would look simply broken.
+    /// Substituting another drive's object is a one-line change here, and the type follows it.
+    mm::node::ObjectAddress<int32_t> temperature =
+        mm::node::somanet::objects::kDriveTemperatureMeasuredTemperature;
 
     /// Above this, the drive is quick-stopped and held until it cools.
     ///
-    /// **In the object's own units, which here are milli-degrees Celsius** — the ESI gives
-    /// 0x2031:01 the ETG.1004 unit 0xFD2D0000, that is prefix 0xFD (milli) applied to notation 0x2D
-    /// (°C). So this is 60 °C, and writing @c 60 would mean 0.06 °C and quick-stop the drive
-    /// immediately.
+    /// **In the object's own units, which here are milli-degrees Celsius** — the generated line for
+    /// @c kDriveTemperatureMeasuredTemperature carries @c m°C in its trailing comment, decoded from
+    /// the ESI's ETG.1004 unit 0xFD2D0000. So this is 60 °C; writing @c 60 would mean 0.06 °C and
+    /// quick-stop the drive immediately.
     int32_t temperatureLimit = 60000;
 
     /// The velocity commanded while the drive is enabled and below the limit, in whatever units

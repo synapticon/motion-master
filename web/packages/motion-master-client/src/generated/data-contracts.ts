@@ -1441,6 +1441,11 @@ export interface EsiEntry {
    * @example 7
    */
   dataType: number;
+  /**
+   * The C++ type this entry's value maps to, resolved from `dataType` **and** `bitSize`. The width is not decoration: a vendor's `ARRAY [0..24] OF BYTE` resolves to the ETG.1020 code for BYTE, so trusting the code alone would call a 25-byte object a `uint8_t` and every read of it would return its first byte. Where the declared width contradicts the code, this is `std::vector<uint8_t>`.
+   * @example "int32_t"
+   */
+  cxxType: string;
   isSigned: boolean;
   bitSize: number;
   /** Offset within the object's complete-access image */

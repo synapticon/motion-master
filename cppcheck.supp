@@ -42,6 +42,7 @@ syntaxError:*/procedure_catalogue_test.cc
 syntaxError:*/ring_log_sink_test.cc
 syntaxError:*/monitoring_api_test.cc
 syntaxError:*/process_image_test.cc
+syntaxError:*/object_addresses_test.cc
 syntaxError:*/cia402_test.cc
 syntaxError:*/cia402_drive_test.cc
 syntaxError:*/profile_device_test.cc

@@ -590,6 +590,8 @@ std::expected<EsiEntryTable, std::string> buildDeviceEntries(const EsiFile& file
         entry.bitSize =
             input.bitSize > 0 ? input.bitSize : typeBitSize(source, input.typeName, primitive);
         entry.bitOffset = input.bitOffset;
+        // After bitSize, because the width is half of what decides this (see ValueKind).
+        entry.valueKind = resolveValueKind(entry.dataType, entry.bitSize);
         if (!primitive) {
           warnings.add(
               std::format("0x{:04X}:{:02X} [{}]: type '{}' is not a known primitive; the "
@@ -820,6 +822,7 @@ void to_json(nlohmann::json& j, const EsiEntry& v) {
       {"objectCodeValue", static_cast<uint16_t>(v.objectCode)},
       {"dataTypeName", v.dataTypeName},
       {"dataType", v.dataType},
+      {"cxxType", cxxTypeName(v.valueKind)},
       {"isSigned", v.isSigned},
       {"bitSize", v.bitSize},
       {"bitOffset", v.bitOffset},

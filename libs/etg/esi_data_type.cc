@@ -95,6 +95,60 @@ std::optional<PrimitiveType> resolvePrimitiveType(std::string_view esiName) {
   return std::nullopt;
 }
 
+ValueKind resolveValueKind(uint16_t dataType, uint16_t bitSize) {
+  // The code decides the family; the declared width then has to agree with it, or the entry is not
+  // really that type at all (see the header — ARRAY OF BYTE is the case that matters).
+  const auto agrees = [bitSize](uint16_t declared) { return bitSize == 0 || bitSize == declared; };
+
+  switch (dataType) {
+    case 0x0001:  // BOOL — declared 1 bit, but devices commonly write 8; both are a bool.
+      return (bitSize == 0 || bitSize == 1 || bitSize == 8) ? ValueKind::Bool : ValueKind::Bytes;
+
+    case 0x0002:  // SINT
+      return agrees(8) ? ValueKind::Int8 : ValueKind::Bytes;
+    case 0x0003:  // INT
+      return agrees(16) ? ValueKind::Int16 : ValueKind::Bytes;
+    case 0x0004:  // DINT
+      return agrees(32) ? ValueKind::Int32 : ValueKind::Bytes;
+    case 0x0015:  // LINT
+      return agrees(64) ? ValueKind::Int64 : ValueKind::Bytes;
+
+    case 0x0005:  // USINT
+    case 0x001E:  // BYTE
+    case 0x002D:  // BITARR8
+      return agrees(8) ? ValueKind::Uint8 : ValueKind::Bytes;
+    case 0x0006:  // UINT
+    case 0x001F:  // WORD
+    case 0x002E:  // BITARR16
+      return agrees(16) ? ValueKind::Uint16 : ValueKind::Bytes;
+    case 0x0007:  // UDINT
+    case 0x0020:  // DWORD
+    case 0x002F:  // BITARR32
+      return agrees(32) ? ValueKind::Uint32 : ValueKind::Bytes;
+    case 0x001B:  // ULINT
+      return agrees(64) ? ValueKind::Uint64 : ValueKind::Bytes;
+
+    case 0x0008:  // REAL
+      return agrees(32) ? ValueKind::Real32 : ValueKind::Bytes;
+    case 0x0011:  // LREAL
+      return agrees(64) ? ValueKind::Real64 : ValueKind::Bytes;
+
+    case 0x0009:  // VISIBLE_STRING / STRING(n)
+    case 0x000B:  // UNICODE_STRING(n)
+      // Width is the parameterised element count, so there is nothing to cross-check against.
+      return ValueKind::String;
+
+    default:
+      // BIT1..BIT16 land here alongside OCTET_STRING, GUID, DOMAIN, TIME_OF_DAY, the
+      // 24/40/48/56-bit integers, and every composite: sub-byte bit types have no distinct C++
+      // type, and the rest have no scalar equivalent at all. Bytes is what they are.
+      if (dataType >= 0x0030 && dataType <= 0x003F) {  // BIT1..BIT16
+        return bitSize <= 8 ? ValueKind::Uint8 : ValueKind::Uint16;
+      }
+      return ValueKind::Bytes;
+  }
+}
+
 void to_json(nlohmann::json& j, const PrimitiveType& type) {
   j = nlohmann::json{
       {"name", type.name},

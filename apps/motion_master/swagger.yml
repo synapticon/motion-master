@@ -4907,7 +4907,7 @@ components:
         a byte-wise comparison of `minData` against `maxData` is wrong when `isSigned`.
       required:
         [index, subindex, objectName, entryName, displayName, objectCode, dataTypeName,
-         dataType, isSigned, bitSize, bitOffset, access, category, pdoMapping, sdoAccess,
+         dataType, cxxType, isSigned, bitSize, bitOffset, access, category, pdoMapping, sdoAccess,
          backup, setting, objAccess, source]
       properties:
         index: { type: integer, description: Effective CoE index, slot offset applied }
@@ -4937,6 +4937,15 @@ components:
           type: integer
           description: ETG.1020 code, matching `DeviceParameter.dataType`; 0 if unresolved
           example: 7
+        cxxType:
+          type: string
+          description: >
+            The C++ type this entry's value maps to, resolved from `dataType` **and** `bitSize`.
+            The width is not decoration: a vendor's `ARRAY [0..24] OF BYTE` resolves to the
+            ETG.1020 code for BYTE, so trusting the code alone would call a 25-byte object a
+            `uint8_t` and every read of it would return its first byte. Where the declared width
+            contradicts the code, this is `std::vector<uint8_t>`.
+          example: "int32_t"
         isSigned: { type: boolean }
         bitSize: { type: integer }
         bitOffset:

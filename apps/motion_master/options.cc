@@ -16,6 +16,7 @@
 #include "config.h"
 #include "core/platform.h"
 #include "core/version.h"
+#include "object_address_generator.h"
 
 // Every std::exit below carries a NOLINT for concurrency-mt-unsafe. The call is unsafe only
 // against other threads running during teardown, and this function runs before main starts any:
@@ -50,11 +51,45 @@ Options parseOptions(int argc, char** argv) {
   app.add_option("--key-url", opts.keyUrl, "Source URL for the TLS private key")
       ->capture_default_str();
 
+  // A developer action rather than a setting: it reads a vendor's ESI, writes the generated
+  // object-address headers, and exits. Here rather than in a separate tool because it needs the
+  // very ESI parser the server already links, and a second binary to carry one function is a
+  // second binary to build, package and keep in step.
+  std::string esiPath;
+  std::string outDir;
+  auto* generate =
+      app.add_subcommand("generate-object-addresses",
+                         "Generate the ObjectAddress headers from a vendor's ESI file and exit");
+  generate->add_option("--esi", esiPath, "Path to the ESI XML to read")
+      ->required()
+      ->check(CLI::ExistingFile);
+  generate->add_option("--out", outDir, "Directory to write the headers into")
+      ->required()
+      ->check(CLI::ExistingDirectory);
+
   try {
     app.parse(argc, argv);
   } catch (const CLI::ParseError& e) {
     // NOLINTNEXTLINE(concurrency-mt-unsafe)
     std::exit(app.exit(e));
+  }
+
+  if (*generate) {
+    const auto result = mm::generateObjectAddresses(esiPath, outDir);
+    if (!result) {
+      std::cerr << result.error() << "\n";
+      // NOLINTNEXTLINE(concurrency-mt-unsafe)
+      std::exit(1);
+    }
+    for (const auto& warning : result->warnings) {
+      std::cerr << "warning: " << warning << "\n";
+    }
+    for (const auto& path : result->files) {
+      std::cout << path << "\n";
+    }
+    std::cout << result->rows << " object addresses from " << esiPath << "\n";
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
+    std::exit(0);
   }
 
   if (listAdapters) {

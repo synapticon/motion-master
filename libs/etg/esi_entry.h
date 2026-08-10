@@ -70,10 +70,19 @@ struct EsiEntry {
 
   std::string dataTypeName;  ///< Resolved ESI type name, e.g. @c "UDINT", @c "STRING(50)".
   uint16_t dataType = 0;     ///< ETG.1020 code; 0 when the name could not be resolved.
-  bool isSigned = false;     ///< Whether @c minData / @c maxData / @c defaultData are two's
-                             ///< complement — needed to compare or render them correctly.
-  uint16_t bitSize = 0;      ///< Width of this entry.
-  uint16_t bitOffset = 0;    ///< Offset within the object's complete-access image.
+
+  /// @brief The C++ type this entry's value maps to (@c resolveValueKind of @c dataType and
+  ///        @c bitSize).
+  ///
+  /// Precomputed here for the same reason @c unitSymbol is: it is derived from two other fields by
+  /// a rule with a trap in it — a width that contradicts its type code means the entry is bytes,
+  /// not the scalar the code names — and every consumer deriving it independently is how one of
+  /// them gets it wrong.
+  ValueKind valueKind = ValueKind::Bytes;
+  bool isSigned = false;   ///< Whether @c minData / @c maxData / @c defaultData are two's
+                           ///< complement — needed to compare or render them correctly.
+  uint16_t bitSize = 0;    ///< Width of this entry.
+  uint16_t bitOffset = 0;  ///< Offset within the object's complete-access image.
 
   std::optional<std::vector<uint8_t>> defaultData;  ///< Raw bytes, first byte least significant.
   std::optional<std::vector<uint8_t>> minData;

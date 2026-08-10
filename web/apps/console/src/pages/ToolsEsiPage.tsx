@@ -117,7 +117,7 @@ function DeviceDictionary({ device, moduleNames }: DeviceDictionaryProps) {
       return entries
     }
     return entries.filter(e =>
-      [address(e), e.objectName, e.entryName, e.displayName, e.dataTypeName, e.description ?? '']
+      [address(e), e.objectName, e.entryName, e.displayName, e.dataTypeName, e.cxxType, e.description ?? '']
         .join(' ')
         .toLowerCase()
         .includes(needle),
@@ -194,6 +194,7 @@ function DeviceDictionary({ device, moduleNames }: DeviceDictionaryProps) {
                       'Entry',
                       'Kind',
                       'Type',
+                      'C++',
                       'Bits',
                       'Access',
                       'Cat',
@@ -253,6 +254,9 @@ function DeviceDictionary({ device, moduleNames }: DeviceDictionaryProps) {
                         </td>
                         <td className="px-3 py-1.5 font-mono text-grey-500">{e.objectCode}</td>
                         <td className="px-3 py-1.5 font-mono text-grey-700">{e.dataTypeName}</td>
+                        <td className="px-3 py-1.5 font-mono text-grey-500 whitespace-nowrap">
+                          {e.cxxType}
+                        </td>
                         <td className="px-3 py-1.5 font-mono text-grey-700">{e.bitSize}</td>
                         <td className="px-3 py-1.5 font-mono text-grey-700 whitespace-nowrap">
                           {formatAccess(e)}

@@ -139,5 +139,82 @@ TEST(EsiDataTypeTest, ObjectCodeValuesAreTheCoeWireCodes) {
   EXPECT_EQ(objectCodeName(ObjectCode::Record), "RECORD");
 }
 
+// --- ValueKind ---------------------------------------------------------------
+
+TEST(EsiValueKindTest, MapsEachScalarCodeToItsCxxType) {
+  const struct {
+    uint16_t code;
+    uint16_t bitSize;
+    ValueKind kind;
+    const char* cxx;
+  } kCases[] = {
+      {0x0001, 1, ValueKind::Bool, "uint8_t"},          // BOOL
+      {0x0002, 8, ValueKind::Int8, "int8_t"},           // SINT
+      {0x0003, 16, ValueKind::Int16, "int16_t"},        // INT
+      {0x0004, 32, ValueKind::Int32, "int32_t"},        // DINT
+      {0x0015, 64, ValueKind::Int64, "int64_t"},        // LINT
+      {0x0005, 8, ValueKind::Uint8, "uint8_t"},         // USINT
+      {0x001E, 8, ValueKind::Uint8, "uint8_t"},         // BYTE
+      {0x0006, 16, ValueKind::Uint16, "uint16_t"},      // UINT
+      {0x001F, 16, ValueKind::Uint16, "uint16_t"},      // WORD
+      {0x0007, 32, ValueKind::Uint32, "uint32_t"},      // UDINT
+      {0x0020, 32, ValueKind::Uint32, "uint32_t"},      // DWORD
+      {0x001B, 64, ValueKind::Uint64, "uint64_t"},      // ULINT
+      {0x0008, 32, ValueKind::Real32, "float"},         // REAL
+      {0x0011, 64, ValueKind::Real64, "double"},        // LREAL
+      {0x0009, 400, ValueKind::String, "std::string"},  // STRING(50)
+      {0x000B, 32, ValueKind::String, "std::string"},   // UNICODE_STRING(2)
+  };
+  for (const auto& c : kCases) {
+    EXPECT_EQ(resolveValueKind(c.code, c.bitSize), c.kind) << std::format("code 0x{:04X}", c.code);
+    EXPECT_EQ(cxxTypeName(resolveValueKind(c.code, c.bitSize)), c.cxx);
+  }
+}
+
+// The reason bitSize is a parameter at all. A vendor writes "ARRAY [0..24] OF BYTE"; the ESI
+// resolves that to the code for BYTE, so trusting the code alone types a 25-byte object as a
+// uint8_t and every read of it silently returns its first byte. Seven entries of the shipped
+// SOMANET dictionary are exactly this shape.
+TEST(EsiValueKindTest, WidthContradictingItsCodeIsBytes) {
+  EXPECT_EQ(resolveValueKind(0x001E, 8), ValueKind::Uint8);    // BYTE, as declared
+  EXPECT_EQ(resolveValueKind(0x001E, 64), ValueKind::Bytes);   // ARRAY [0..7] OF BYTE
+  EXPECT_EQ(resolveValueKind(0x001E, 200), ValueKind::Bytes);  // ARRAY [0..24] OF BYTE
+  EXPECT_EQ(resolveValueKind(0x001E, 48), ValueKind::Bytes);   // ARRAY [0..5] OF BYTE
+  EXPECT_EQ(cxxTypeName(resolveValueKind(0x001E, 200)), "std::vector<uint8_t>");
+
+  // Same rule for every other fixed-width scalar.
+  EXPECT_EQ(resolveValueKind(0x0004, 64), ValueKind::Bytes);  // DINT that is not 32 bits
+  EXPECT_EQ(resolveValueKind(0x0008, 64), ValueKind::Bytes);  // REAL that is not 32 bits
+}
+
+TEST(EsiValueKindTest, UnknownWidthSuppressesTheCrossCheckRatherThanFailingIt) {
+  // bitSize 0 means the ESI did not say; refusing to type the entry would be worse than trusting
+  // the code, which is all a consumer has.
+  EXPECT_EQ(resolveValueKind(0x0004, 0), ValueKind::Int32);
+  EXPECT_EQ(resolveValueKind(0x0007, 0), ValueKind::Uint32);
+}
+
+TEST(EsiValueKindTest, BooleanAcceptsOneOrEightBits) {
+  // ETG.1020 says BOOL is one bit; devices commonly declare it as a whole byte. Both are a bool.
+  EXPECT_EQ(resolveValueKind(0x0001, 1), ValueKind::Bool);
+  EXPECT_EQ(resolveValueKind(0x0001, 8), ValueKind::Bool);
+  EXPECT_EQ(resolveValueKind(0x0001, 16), ValueKind::Bytes);
+}
+
+TEST(EsiValueKindTest, TypesWithNoScalarEquivalentAreBytes) {
+  EXPECT_EQ(resolveValueKind(0x000A, 64), ValueKind::Bytes);   // OCTET_STRING(8)
+  EXPECT_EQ(resolveValueKind(0x001D, 128), ValueKind::Bytes);  // GUID
+  EXPECT_EQ(resolveValueKind(0x000F, 0), ValueKind::Bytes);    // DOMAIN
+  EXPECT_EQ(resolveValueKind(0x000C, 48), ValueKind::Bytes);   // TIME_OF_DAY
+  EXPECT_EQ(resolveValueKind(0x0010, 24), ValueKind::Bytes);   // INT24 — no C++ type
+  EXPECT_EQ(resolveValueKind(0x0000, 0), ValueKind::Bytes);    // unresolved code
+}
+
+TEST(EsiValueKindTest, SubByteBitTypesWidenToTheSmallestIntegerThatHoldsThem) {
+  EXPECT_EQ(resolveValueKind(0x0030, 1), ValueKind::Uint8);    // BIT1
+  EXPECT_EQ(resolveValueKind(0x0037, 8), ValueKind::Uint8);    // BIT8
+  EXPECT_EQ(resolveValueKind(0x003F, 16), ValueKind::Uint16);  // BIT16
+}
+
 }  // namespace
 }  // namespace mm::etg

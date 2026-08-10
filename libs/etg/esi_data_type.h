@@ -157,6 +157,81 @@ std::string_view arrayElementTypeName(std::string_view esiName);
 ///        @c UNICODE_STRING(n).
 bool isStringTypeName(std::string_view esiName);
 
+/// @brief The C++ type an entry's value maps to.
+///
+/// Coarser than the ETG.1020 numbering on purpose: a dozen codes describe the same eight bytes, and
+/// what a caller needs is which C++ type holds the value, not which spelling the vendor chose.
+/// @c Bytes is the honest answer for everything with no scalar equivalent — octet strings, GUIDs,
+/// domains, the odd 24/40/48/56-bit integers, and anything whose declared width contradicts its
+/// code.
+enum class ValueKind : uint8_t {
+  Bool,    ///< BOOL — carried in a @c uint8_t, as CoE does.
+  Int8,    ///< SINT.
+  Int16,   ///< INT.
+  Int32,   ///< DINT.
+  Int64,   ///< LINT.
+  Uint8,   ///< USINT, BYTE, BITARR8, BIT1..BIT8.
+  Uint16,  ///< UINT, WORD, BITARR16, BIT9..BIT16.
+  Uint32,  ///< UDINT, DWORD, BITARR32.
+  Uint64,  ///< ULINT.
+  Real32,  ///< REAL.
+  Real64,  ///< LREAL.
+  String,  ///< STRING(n) / UNICODE_STRING(n).
+  Bytes,   ///< Everything else, including any type/width contradiction.
+};
+
+/// @brief The C++ spelling of @p kind — @c "int32_t", @c "std::string", @c "std::vector<uint8_t>".
+///
+/// Matches the alternatives of @c mm::node::DeviceParameterValue, so a generated
+/// @c ObjectAddress<T> lines up with what @c decodeSdoBytes produces for the same object. The
+/// duplication is deliberate and one-directional: @c mm::etg cannot depend on @c mm::node, and a
+/// pure XML parser must not link SOEM to know what @c UDINT is.
+constexpr std::string_view cxxTypeName(ValueKind kind) {
+  switch (kind) {
+    case ValueKind::Bool:
+    case ValueKind::Uint8:
+      return "uint8_t";
+    case ValueKind::Int8:
+      return "int8_t";
+    case ValueKind::Int16:
+      return "int16_t";
+    case ValueKind::Int32:
+      return "int32_t";
+    case ValueKind::Int64:
+      return "int64_t";
+    case ValueKind::Uint16:
+      return "uint16_t";
+    case ValueKind::Uint32:
+      return "uint32_t";
+    case ValueKind::Uint64:
+      return "uint64_t";
+    case ValueKind::Real32:
+      return "float";
+    case ValueKind::Real64:
+      return "double";
+    case ValueKind::String:
+      return "std::string";
+    case ValueKind::Bytes:
+      return "std::vector<uint8_t>";
+  }
+  return "std::vector<uint8_t>";
+}
+
+/// @brief Resolves the C++ type an entry holds, from its ETG.1020 code and declared width.
+///
+/// **@p bitSize is the cross-check, and it is not decoration.** A vendor writes
+/// @c "ARRAY [0..24] OF BYTE" and the ESI resolves that to the code for BYTE — so a mapping that
+/// trusted the code alone would call a 25-byte object a @c uint8_t, and every read of it would
+/// silently return its first byte. Seven entries of the shipped SOMANET dictionary are exactly
+/// that shape (OS command 0x1023, high-resolution data 0x20E1, the FSoE device ID). Whenever the
+/// declared width contradicts the code's own, the answer is @c Bytes.
+///
+/// @param dataType ETG.1020 data type code.
+/// @param bitSize  The entry's declared width in bits; @c 0 means "unknown", which suppresses the
+///                 cross-check rather than failing it.
+/// @return The value kind; @c Bytes for anything with no scalar equivalent.
+ValueKind resolveValueKind(uint16_t dataType, uint16_t bitSize);
+
 /// @brief Serialises a PrimitiveType to JSON (@c name, @c code, @c bitSize, @c isSigned).
 void to_json(nlohmann::json& j, const PrimitiveType& type);
 

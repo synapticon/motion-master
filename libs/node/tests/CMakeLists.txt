@@ -5,6 +5,7 @@ add_executable(
   cia402_drive_test.cc
   cia402_test.cc
   device_parameter_test.cc
+  object_addresses_test.cc
   device_test.cc
   device_manager_test.cc
   firmware_package_test.cc

@@ -60,16 +60,26 @@ class ExampleCyclicTask : public CyclicTask {
     /// into the chain shifts every position after it, so re-check this after changing the bus.
     uint16_t slavePosition = 1;
 
-    /// The temperature object. **A placeholder — replace it with your drive's.** Read the device's
-    /// object dictionary (the console's Parameters page) rather than assuming an index, and if its
-    /// data type is not INTEGER16, change the @c value<int16_t> call in @c execute to match: the
-    /// read is type-exact and a mismatch reads as nothing at all — which this task treats as too
-    /// hot to run.
-    uint16_t temperatureIndex = 0x2030;
+    /// The temperature object. Defaults to SOMANET **0x2031:01 "Drive temperature"** — measured
+    /// near the inverter, which is the one that matters for a power-stage interlock; 0x2030:01
+    /// "Core temperature" is the control board. Both are @c DINT and read-only.
+    ///
+    /// **On any other drive, look the object up rather than assuming it**, and check two things
+    /// that are easy to get wrong and produce the same silent symptom — a motor that never turns.
+    /// The read is type-exact, so if the object is not a 32-bit signed integer the @c
+    /// value<int32_t> call in @c execute has to change with it; and the *unit* is whatever the
+    /// dictionary says, not whatever seems natural (see @c temperatureLimit). A mismatch on either
+    /// reads as no value at all, which this task treats as too hot to run.
+    uint16_t temperatureIndex = 0x2031;
     uint8_t temperatureSubindex = 0x01;
 
-    /// Above this, the drive is quick-stopped and held until it cools. Units are the object's own.
-    int16_t temperatureLimit = 60;
+    /// Above this, the drive is quick-stopped and held until it cools.
+    ///
+    /// **In the object's own units, which here are milli-degrees Celsius** — the ESI gives
+    /// 0x2031:01 the ETG.1004 unit 0xFD2D0000, that is prefix 0xFD (milli) applied to notation 0x2D
+    /// (°C). So this is 60 °C, and writing @c 60 would mean 0.06 °C and quick-stop the drive
+    /// immediately.
+    int32_t temperatureLimit = 60000;
 
     /// The velocity commanded while the drive is enabled and below the limit, in whatever units
     /// 0x60FF uses on your drive (RPM on a SOMANET drive configured that way). Keep it small while

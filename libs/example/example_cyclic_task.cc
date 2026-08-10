@@ -99,10 +99,12 @@ void ExampleCyclicTask::execute(const CycleContext& /*ctx*/) {
   // reach into the control program.
   //
   // **No reading counts as unsafe.** An interlock that runs the motor whenever it cannot see the
-  // temperature is not an interlock. If the drive never spins, that is the first thing to check —
-  // usually keepFresh naming a different object than Config does, or the wrong data type.
+  // temperature is not an interlock. If the drive never spins, that is the first thing to check,
+  // and there are three ways to get it wrong, all silent: keepFresh naming a different object than
+  // Config does; the wrong type here (the read is type-exact, and 0x2031:01 is a DINT); or a limit
+  // in the wrong unit (it is milli-degrees, so 60 °C is 60000).
   const auto temperature =
-      drive->value<int16_t>(config_.temperatureIndex, config_.temperatureSubindex);
+      drive->value<int32_t>(config_.temperatureIndex, config_.temperatureSubindex);
   if (!temperature || *temperature > config_.temperatureLimit) {
     if (state == cia402::State::kOperationEnabled) {
       // Quick stop rather than removing the setpoint: the drive decelerates on its own

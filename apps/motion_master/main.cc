@@ -318,10 +318,12 @@ int main(int argc, char** argv) {
     wsServer.publish(std::move(topic), std::move(json));
   });
   monitoringManager.start();
-  // Tier 3, line 3 of 3 — keep the example task's temperature object polled. It is SDO-only, so
-  // nothing refills it cyclically; without this the task reads zero forever and always takes the
-  // cool branch. Off the RT thread, as it must be — this is an ordinary call on an ordinary thread.
-  // monitoringManager.keepFresh(1, 0x2030, 0x01, std::chrono::milliseconds{200});
+  // Tier 3, line 3 of 3 — keep the example task's temperature object polled. 0x2031:01 (SOMANET
+  // "Drive temperature") is not in the process image, so nothing refills it cyclically; without
+  // this the task never gets a reading and its interlock holds the drive stopped. Off the RT
+  // thread, as it must be — an ordinary call on an ordinary thread. Must name the same object as
+  // ExampleCyclicTask::Config.
+  // monitoringManager.keepFresh(1, 0x2031, 0x01, std::chrono::milliseconds{200});
 
   if (opts.openBrowser) {
     mm::core::openInBrowser("https://motion-master.synapticon.com/apps/console/");

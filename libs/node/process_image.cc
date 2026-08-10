@@ -16,10 +16,11 @@ namespace {
 // bit offset to an absolute offset within the direction's image. Padding entries (index 0)
 // are skipped. Returns an error if the mapping overflows the window the driver reserved.
 std::expected<void, std::string> appendEntries(std::vector<ProcessImageEntry>& out,
-                                               uint16_t slavePosition,
+                                               const Device& device,
                                                const std::vector<PdoMappingEntry>& entries,
                                                uint32_t mappedBits, uint32_t windowOffsetBytes,
                                                uint32_t windowBytes, const char* direction) {
+  const uint16_t slavePosition = device.slavePosition();
   if (mappedBits > windowBytes * 8u) {
     return std::unexpected(
         std::format("device {}: {} mapping is {} bits but the driver reserved only {} bytes",
@@ -36,6 +37,9 @@ std::expected<void, std::string> appendEntries(std::vector<ProcessImageEntry>& o
         .subindex = e.subindex,
         .bitLength = e.bitLength,
         .bitOffset = windowOffsetBits + e.bitOffset,
+        // Resolved here, once, so the RT decode loop does no lookups. Null when the dictionary has
+        // not been enumerated — the object still exchanges, it just has no cell to land in.
+        .parameter = device.findParameter(e.index, e.subindex),
     });
   }
   return {};
@@ -83,13 +87,13 @@ std::expected<ProcessImage, std::string> buildProcessImage(const mm::comm::PdoLa
           device.slavePosition()));
     }
     const mm::comm::SlaveIo& io = *it->second;
-    if (auto r = appendEntries(image.outputs, device.slavePosition(), mappings.outputs,
-                               mappings.outputBits, io.outputOffset, io.outputBytes, "output");
+    if (auto r = appendEntries(image.outputs, device, mappings.outputs, mappings.outputBits,
+                               io.outputOffset, io.outputBytes, "output");
         !r) {
       return std::unexpected(r.error());
     }
-    if (auto r = appendEntries(image.inputs, device.slavePosition(), mappings.inputs,
-                               mappings.inputBits, io.inputOffset, io.inputBytes, "input");
+    if (auto r = appendEntries(image.inputs, device, mappings.inputs, mappings.inputBits,
+                               io.inputOffset, io.inputBytes, "input");
         !r) {
       return std::unexpected(r.error());
     }

@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
+#include "node/device_parameter.h"
 
 namespace mm::node {
 
@@ -33,11 +34,29 @@ struct ProcessBuffer {
 /// object's offset inside that window, already combined.  Used by the node layer to decode a
 /// value from the input snapshot or encode one into the output staging buffer.
 struct ProcessImageEntry {
-  uint16_t slavePosition;  ///< 1-based bus position of the owning device.
-  uint16_t index;          ///< CoE object index.
-  uint8_t subindex;        ///< CoE object subindex.
-  uint16_t bitLength;      ///< Width of the value in bits.
-  uint32_t bitOffset;      ///< Absolute bit offset within the direction's image.
+  uint16_t slavePosition = 0;  ///< 1-based bus position of the owning device.
+  uint16_t index = 0;          ///< CoE object index.
+  uint8_t subindex = 0;        ///< CoE object subindex.
+  uint16_t bitLength = 0;      ///< Width of the value in bits.
+  uint32_t bitOffset = 0;      ///< Absolute bit offset within the direction's image.
+
+  /// @brief The owning device's parameter, resolved once when the image is built.
+  ///
+  /// **Why it is here rather than looked up per cycle.** The RT loop decodes every mapped object
+  /// into its cell after each exchange; a hash lookup per object is nothing for one device and
+  /// 60–100 µs against a 1 ms grid for fifty of them. Resolving at publish time makes the decode
+  /// loop a walk over contiguous entries with no lookups at all.
+  ///
+  /// Valid for as long as the image generation is: @c initializeParameters replaces the parameter
+  /// map, and @c scan / @c reset destroy the @c Device — but both pause the RT cycle across the
+  /// change (@c ProcessData::pauseCycle), and a re-map rebuilds every entry here. @c nullptr when
+  /// the object dictionary had not been enumerated at build time, which is legal: the object is
+  /// still exchanged, it simply has nowhere to decode into.
+  ///
+  /// Const because the cell is written through @c DeviceParameter::storeBits, which is itself const
+  /// — the value is a @c mutable atomic, like a lock. That keeps @c buildProcessImage taking the
+  /// devices by const reference.
+  const DeviceParameter* parameter = nullptr;
 };
 
 /// @brief The whole bus's process-data layout, resolved to absolute positions.

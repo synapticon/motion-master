@@ -394,7 +394,32 @@ void DeviceManager::exchangeProcessData() {
   pd_->ring.write(timestampNs, wkc,
                   std::span<const uint8_t>(pd_->inScratch.bytes.data(), image->inputBytes),
                   std::span<const uint8_t>(pd_->outScratch.bytes.data(), outputBytes));
+  decodeInputsIntoCells(*image);
   pd_->inCycle.fetch_sub(1, std::memory_order_release);
+}
+
+void DeviceManager::decodeInputsIntoCells(const ProcessImage& image) {
+  // Every mapped input lands in its parameter's cell, every cycle, read or not. That is what makes
+  // Device::value<T>() a single atomic load rather than an image lookup plus a bit extraction, and
+  // it is what a cyclic task's whole read path rests on.
+  //
+  // Deliberately ungated on the working counter. A short WKC means the driver left the previous
+  // cycle's bytes in the IOmap, so the cells hold the last value that did arrive — which is what
+  // "last known value" means and what a control loop can act on. The alternative, diverting to a
+  // blocking SDO upload, is not available on this thread at all. The WKC is recorded with the cycle
+  // in the ring, so a caller that needs to know reads it there (processDataHealthy()).
+  //
+  // Non-allocating and lookup-free: one stack buffer reused for every object, and the owning
+  // parameter resolved when the image was built.
+  const std::span<const uint8_t> inputs(pd_->inScratch.bytes.data(), image.inputBytes);
+  std::array<uint8_t, sizeof(uint64_t)> buf{};
+  for (const ProcessImageEntry& entry : image.inputs) {
+    if (entry.parameter == nullptr) {
+      continue;  // dictionary not enumerated — the object exchanges, it just has no cell
+    }
+    extractBits(inputs, entry.bitOffset, entry.bitLength, buf);
+    entry.parameter->storeBits(packLeBits(buf));
+  }
 }
 
 DeviceManager::CycleLock::CycleLock(DeviceManager& deviceManager)

@@ -528,6 +528,61 @@ TEST(CycleLock, DeviceValueReadsScalarsWithoutALock) {
   EXPECT_EQ(drive->value<int32_t>(0x607A, 0x00), std::optional<int32_t>{0});
 }
 
+// The point of the whole value path: after an exchange, a cyclic task reads live process data with
+// no bus access and no prior control-plane read — the RT decode filled the cells.
+TEST(CycleLock, ExchangeDecodesInputsIntoCells) {
+  auto bus = makeCia402Bus();
+  bus->cannedInputs = {0x37, 0x02, 0x44, 0x33, 0x22, 0x11};  // statusword, actual position
+  bus->wkc = 3;
+  FakeBus* busPtr = bus.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+
+  const Device* drive = dm.findDevice(1);
+  ASSERT_NE(drive, nullptr);
+  // Before the first exchange nothing has been read, so the cells hold the type zero.
+  EXPECT_EQ(drive->value<uint16_t>(0x6041, 0x00), std::optional<uint16_t>{0});
+
+  dm.exchangeProcessData();
+  EXPECT_EQ(drive->value<uint16_t>(0x6041, 0x00), std::optional<uint16_t>{0x0237});
+  EXPECT_EQ(drive->value<int32_t>(0x6064, 0x00), std::optional<int32_t>{0x11223344});
+
+  // Live, not latched: the next cycle's bytes replace them.
+  busPtr->cannedInputs = {0x27, 0x06, 0x01, 0x00, 0x00, 0x00};
+  dm.exchangeProcessData();
+  EXPECT_EQ(drive->value<uint16_t>(0x6041, 0x00), std::optional<uint16_t>{0x0627});
+  EXPECT_EQ(drive->value<int32_t>(0x6064, 0x00), std::optional<int32_t>{1});
+}
+
+// A short working counter means the driver left the previous cycle's bytes in the IOmap. The decode
+// stores them anyway: "last known value" is what a control loop can act on, and diverting to a
+// blocking SDO upload is not available on this thread. Health is reported separately.
+TEST(CycleLock, DecodeIsNotGatedOnTheWorkingCounter) {
+  auto bus = makeCia402Bus();
+  bus->cannedInputs = {0x37, 0x02, 0x44, 0x33, 0x22, 0x11};
+  bus->wkc = 3;
+  FakeBus* busPtr = bus.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  dm.exchangeProcessData();
+
+  const Device* drive = dm.findDevice(1);
+  ASSERT_NE(drive, nullptr);
+  ASSERT_EQ(drive->value<uint16_t>(0x6041, 0x00), std::optional<uint16_t>{0x0237});
+
+  busPtr->wkc = 0;  // nothing answered this cycle
+  dm.exchangeProcessData();
+  EXPECT_FALSE(dm.processDataHealthy());
+  // The value is still readable, and it is the last one that arrived.
+  EXPECT_EQ(drive->value<uint16_t>(0x6041, 0x00), std::optional<uint16_t>{0x0237});
+}
+
 // Re-enumerating replaces the parameter map, destroying every entry a task may be looking up. The
 // swap therefore pauses the RT cycle the same way a re-map does — and puts the image back, so the
 // loop resumes rather than stopping for good.

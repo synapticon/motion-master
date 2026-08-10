@@ -206,6 +206,19 @@ void MonitoringManager::run() {
   }
 }
 
+void MonitoringManager::keepFresh(uint16_t devicePosition, uint16_t index, uint8_t subindex,
+                                  std::chrono::milliseconds period) {
+  // A pass-through and nothing more: the refresher already reference-counts, clamps the period and
+  // polls through DeviceManager::readDeviceParameter, which stores into the parameter's cell — the
+  // very cell a cyclic task reads. Owning the refresher is what makes this class the door.
+  refresher_.acquire(devicePosition, index, subindex, period);
+}
+
+void MonitoringManager::stopKeepingFresh(uint16_t devicePosition, uint16_t index,
+                                         uint8_t subindex) {
+  refresher_.release(devicePosition, index, subindex);
+}
+
 void MonitoringManager::sampleAll() {
   std::unique_lock<std::mutex> lock(mutex_);
   flushDue(lock, std::chrono::steady_clock::now(), /*forceAll=*/true);

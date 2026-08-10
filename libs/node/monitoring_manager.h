@@ -106,6 +106,34 @@ class MonitoringManager {
   /// @brief Stops the owned refresher (and, once added, the sampler thread). Idempotent.
   void stop();
 
+  /// @brief Keeps an SDO-only object's value fresh in the background, for a cyclic task to read.
+  ///
+  /// **The Tier-3 door onto the refresher this class owns.** A cyclic task reads every value the
+  /// same way — @c Device::value<T>() off the parameter's cell — but only PDO-mapped objects are
+  /// refilled by the RT exchange. An object left out of the process image because it changes slowly
+  /// (a temperature, a drive's own error register) has no cyclic source, so something has to poll
+  /// it; that is what the refresher does, and this is how a program asks for it without inventing a
+  /// monitoring and a WebSocket topic it will never subscribe to.
+  ///
+  /// Reference-counted with @c stopKeepingFresh and with the monitorings that need the same object:
+  /// several requesters poll it once, at the shortest period any of them asked for, and it stops
+  /// being polled when the last one lets go. @p period is clamped to an internal floor — SDO is
+  /// slow, and hammering the mailbox would starve the control plane.
+  ///
+  /// **Call it off the RT thread**, before or during the loop — never from inside a cycle. It takes
+  /// the refresher's mutex and may allocate. That is the only restriction: registering while the
+  /// loop runs is fine, since the refresher's thread never touches the RT path.
+  ///
+  /// @param devicePosition  1-based bus position.
+  /// @param index           CoE object index.
+  /// @param subindex        CoE object subindex.
+  /// @param period          Desired maximum time between polls.
+  void keepFresh(uint16_t devicePosition, uint16_t index, uint8_t subindex,
+                 std::chrono::milliseconds period);
+
+  /// @brief Drops a reference taken by @c keepFresh. Polling stops when the last one is released.
+  void stopKeepingFresh(uint16_t devicePosition, uint16_t index, uint8_t subindex);
+
   /// @brief Flushes every monitoring once: delivers each one's recorded cycles since its last
   ///        flush. The deterministic core the scheduler thread drives; exposed for tests.
   void sampleAll();

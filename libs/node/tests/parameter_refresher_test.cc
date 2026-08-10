@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
+#include "node/device.h"
 #include "node/device_manager.h"
 
 namespace {
@@ -156,6 +157,24 @@ TEST(ParameterRefresherTest, PollsDueParameterViaSdo) {
 
   refresher.pollDue();  // a freshly-acquired entry is due immediately
   EXPECT_EQ(driver->readCount(0x2030, 0x01), 1);
+}
+
+// What the polling is *for*: the value has to land where a cyclic task reads it. The refresher
+// polls through the same path a control-plane read takes, so the object's cell is filled and
+// Device::value<T>() serves it with the identical call a PDO-mapped object would use — which is the
+// whole point of keeping the two indistinguishable.
+TEST(ParameterRefresherTest, PollStoresIntoTheCellACyclicTaskReads) {
+  DeviceManager dm;
+  setUp(dm, 57);
+  ParameterRefresher refresher(dm);
+
+  const mm::node::Device* device = dm.findDevice(1);
+  ASSERT_NE(device, nullptr);
+  EXPECT_EQ(device->value<uint32_t>(0x2030, 0x01), std::optional<uint32_t>{0});  // never read yet
+
+  refresher.acquire(1, 0x2030, 0x01, std::chrono::milliseconds{50});
+  refresher.pollDue();
+  EXPECT_EQ(device->value<uint32_t>(0x2030, 0x01), std::optional<uint32_t>{57});
 }
 
 TEST(ParameterRefresherTest, RefcountTracksAcquireAndRelease) {

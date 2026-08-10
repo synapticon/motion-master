@@ -202,6 +202,29 @@ void drive(DeviceManager& dm, int n) {
   }
 }
 
+// The Tier-3 door: a cyclic task wants a slowly-changing SDO object polled into its cell, and
+// should not have to invent a monitoring and a WebSocket topic to get it. keepFresh shares the
+// refresher with the monitorings, so the same object asked for twice is polled once and survives
+// until the last requester lets go. (That the poll lands in the cell is
+// ParameterRefresherTest.PollStoresIntoTheCellACyclicTaskReads.)
+TEST(MonitoringManagerTest, KeepFreshSharesRefcountsWithMonitorings) {
+  DeviceManager dm;
+  setUp(dm);
+  MonitoringManager manager(dm);
+
+  ASSERT_TRUE(manager.create(axisConfig()).has_value());  // acquires 0x2030:01
+  EXPECT_EQ(manager.polledSdoCount(), 1u);
+
+  manager.keepFresh(1, 0x2030, 0x01, std::chrono::milliseconds{10});
+  EXPECT_EQ(manager.polledSdoCount(), 1u);  // same object, polled once
+
+  EXPECT_TRUE(manager.remove("axis"));
+  EXPECT_EQ(manager.polledSdoCount(), 1u);  // the task still needs it
+
+  manager.stopKeepingFresh(1, 0x2030, 0x01);
+  EXPECT_EQ(manager.polledSdoCount(), 0u);
+}
+
 TEST(MonitoringManagerTest, CreateClassifiesPdoAndSdoAndExposesSource) {
   DeviceManager dm;
   setUp(dm);

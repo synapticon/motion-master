@@ -94,3 +94,40 @@ else()
     VERBATIM)
   message(STATUS "cppcheck not found -- 'cppcheck' target unavailable")
 endif()
+
+# ---------- clang-tidy ----------
+# Driven through run-clang-tidy rather than clang-tidy directly: it reads the compilation database,
+# so every translation unit is analysed with the flags it is actually built with, and it runs them
+# in parallel. The check list and the exit-code policy live in .clang-tidy at the repo root.
+find_program(RUN_CLANG_TIDY_EXECUTABLE NAMES run-clang-tidy run-clang-tidy.py)
+
+# Analysis is as heavy as compilation, and at full fan-out on a workstation it starves the desktop.
+# Capped at 8 for the same reason the build is.
+include(ProcessorCount)
+ProcessorCount(MM_HOST_CORES)
+if(MM_HOST_CORES EQUAL 0 OR MM_HOST_CORES GREATER 8)
+  set(MM_TIDY_JOBS 8)
+else()
+  set(MM_TIDY_JOBS ${MM_HOST_CORES})
+endif()
+
+if(RUN_CLANG_TIDY_EXECUTABLE)
+  # The positional argument is a regex matched against the paths in compile_commands.json, which is
+  # why the source tree is named here instead of a file list: a new .cc is picked up with no change
+  # to this target. Generated sources under the build directory are excluded by it too.
+  add_custom_target(
+    tidy
+    COMMAND ${RUN_CLANG_TIDY_EXECUTABLE} -p ${CMAKE_BINARY_DIR} -quiet -j ${MM_TIDY_JOBS}
+            "${CMAKE_SOURCE_DIR}/(apps|libs)/.*\\.cc$"
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    COMMENT "Running clang-tidy (${MM_TIDY_JOBS} jobs)"
+    VERBATIM)
+else()
+  add_custom_target(
+    tidy
+    COMMAND ${CMAKE_COMMAND} -E echo
+            "run-clang-tidy not found -- install the clang-tools-extra package"
+    COMMENT "clang-tidy unavailable -- printing install hint"
+    VERBATIM)
+  message(STATUS "run-clang-tidy not found -- 'tidy' target will print an install hint")
+endif()

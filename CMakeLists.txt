@@ -8,6 +8,13 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# This codebase does not use C++20 modules and is not going to, so the dependency scan CMake runs
+# for them buys nothing. Turning it off is not only a small build saving: with GCC the scan adds
+# -fmodules-ts, -fdeps-format= and -fmodule-mapper= to every compile command, and those reach
+# compile_commands.json, where clang-tidy reads them and refuses the translation unit outright
+# ("unknown argument"). Left on, the tidy target reports a parse error per file and nothing else.
+set(CMAKE_CXX_SCAN_FOR_MODULES OFF)
+
 if(MSVC)
   add_compile_options(/W4 /WX /utf-8)
   # Standard C functions (strerror, etc.) trip MSVC's C4996 "unsafe" deprecation, which /WX makes

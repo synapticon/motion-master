@@ -46,6 +46,7 @@ All common tasks have wrapper scripts in `tools/`. They default to the `x64-linu
 ./tools/format-cmake.sh           # cmake-format all CMake files (--check to verify; requires: pip install cmakelang)
 ./tools/lint.sh                   # cpplint (requires: pip install cpplint)
 ./tools/cppcheck.sh               # cppcheck static analysis
+./tools/tidy.sh                   # clang-tidy (bug-finding checks only; see .clang-tidy)
 ./tools/shellcheck.sh             # shellcheck every tracked shell script (git-driven file list)
 ./tools/check.sh                  # format + cppcheck + lint + cmake-lint + shellcheck in sequence
 ./tools/clean.sh                  # remove build/<preset>
@@ -411,13 +412,18 @@ Headers use `.h`, sources use `.cc`. Repo/folder names use hyphens (`motion-mast
 
 ## Static Analysis
 
-`lint`, `cppcheck`, and `format` are CMake custom targets defined in `cmake/lint.cmake`, callable via scripts or directly with ninja:
+`lint`, `cppcheck`, `tidy`, and `format` are CMake custom targets defined in `cmake/lint.cmake`, callable via scripts or directly with ninja:
 
 ```bash
 ./tools/cppcheck.sh                            # or: ninja -C build/x64-linux-debug cppcheck
 ./tools/lint.sh                                # or: ninja -C build/x64-linux-debug lint
+./tools/tidy.sh                                # or: ninja -C build/x64-linux-debug tidy
 ```
 
 cpplint is configured via `CPPLINT.cfg` (`-legal/copyright`, `-build/c++11` suppressed; 100-column limit; `.h` treated as headers). cppcheck runs with `warning,style,performance,portability`, `--std=c++23`, exits non-zero on findings.
+
+clang-tidy is configured by `.clang-tidy` at the repo root and driven through `run-clang-tidy`, so every translation unit is analysed with the flags it is actually built with. **It runs only the bug-finding checks** — `bugprone-*`, `clang-analyzer-*`, `concurrency-*`, `performance-*` — and none of the style families, because layout is settled by `.clang-format`, includes and naming by `CPPLINT.cfg`, and the rest by `-Wall -Wextra -Wpedantic -Werror`. What it adds over all three is the path-sensitive analysis none of them can do. `misc-*` is off wholesale on measurement, not taste: over five files it produced 497 of 560 findings from three checks (`misc-include-cleaner`, `misc-non-private-member-variables-in-classes`, `misc-const-correctness`), none naming a defect. Four checks are excluded by name with the reason written beside each in the file. `WarningsAsErrors` is `'*'`, matching cppcheck's `--error-exitcode=1` — a finding is fixed or the check is argued off the list, never silently suppressed.
+
+Two build-system prerequisites exist for this target and are easy to undo by accident. `CMAKE_EXPORT_COMPILE_COMMANDS` is `ON` in the **base** preset, so every preset emits a compilation database. And `CMAKE_CXX_SCAN_FOR_MODULES` is `OFF` in the root `CMakeLists.txt` — this codebase does not use C++20 modules, and with GCC the scan injects `-fmodules-ts`, `-fdeps-format=` and `-fmodule-mapper=` into `compile_commands.json`, where clang-tidy rejects the translation unit outright. `.clang-tidy` also carries `ExtraArgs: ['-Wno-unknown-warning-option']` for the same class of problem one level down: the four test targets pass GCC-only `-Wno-stringop-overflow`, which clang does not recognise.
 
 Shell scripts are covered by `./tools/shellcheck.sh` (part of `check.sh`), which is **not** a CMake target — it needs no build directory. Its file list comes from `git ls-files`, so a new script is covered as soon as it is tracked and nothing under `build/` or `extern/` is ever picked up; `packaging/postinst` is added explicitly because dpkg requires that extensionless name. It runs with `-x` so the `rt/vm` scripts are checked against the `common.sh` they source. Two suppressions are deliberate and should stay: `# shellcheck disable=SC2034` in `rt/vm/common.sh` (a sourced config file — every variable is used by its consumers, which shellcheck cannot see) and `# shellcheck source=/dev/null` in `clients/python/setup.sh` (it sources a venv activator that the same line creates). Note that `tools/code-stats.sh` embeds a single-quoted `awk` program, so an apostrophe inside those comments would terminate the string — SC1112 there is a real trap, not a nit to "fix".

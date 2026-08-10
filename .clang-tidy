@@ -1,0 +1,65 @@
+# clang-tidy runs the checks that find bugs. It runs none of the ones that have opinions about
+# style, because style is already settled elsewhere and a second voice on it would only disagree:
+# layout by .clang-format, includes and naming by CPPLINT.cfg, and the whole -Wall -Wextra
+# -Wpedantic -Werror set by the compiler on every build. What clang-tidy adds over those is the
+# path-sensitive analysis (clang-analyzer-*) none of them can do — following a value across
+# branches to find the null dereference or the leak on the one path nobody tested.
+#
+# The enabled set is deliberately narrow, and it was chosen from a measurement rather than from
+# taste. Run over five representative translation units, bugprone-* + clang-analyzer-* +
+# concurrency-* + performance-* + misc-* reported 560 findings — of which 497 came from three
+# misc-* checks alone: misc-include-cleaner (228, an include-what-you-use pass that disagrees with
+# how this codebase groups headers), misc-non-private-member-variables-in-classes (178, which fires
+# on every Config and every DTO, all of them public data by design), and misc-const-correctness
+# (91). None of the three names a defect. A check that reports 89 things in one file trains the
+# reader to skim the output, which costs more than the check is worth, so misc-* is off entirely.
+#
+# Four further checks are excluded by name, each because it is structurally wrong for this
+# codebase rather than because its findings are inconvenient:
+#   - bugprone-easily-swappable-parameters fires on adjacent same-typed parameters, and
+#     (index, subindex) is the shape of most of the device API. Renaming cannot fix it and the
+#     types cannot change.
+#   - performance-enum-size wants a smaller underlying type on enums that cross the HTTP surface,
+#     where the width is part of the contract and the saving is nothing.
+#   - bugprone-unchecked-optional-access reported 207 findings over the tree, *every one of them in
+#     a test and none in shipped code*. Its dataflow engine cannot see through gtest's ASSERT_
+#     macros, so the mandated idiom — ASSERT_TRUE(r) << r.error(); then *r — reads to it as an
+#     unchecked dereference. A check that is silent on the code it was meant to guard and noisy on
+#     the code that already proves its own precondition is measuring the wrong thing here.
+#   - bugprone-suspicious-missing-comma exists to catch a dropped comma in an array of string
+#     literals. Every hit is a procedure descriptor whose prose clang-format wrapped at 100
+#     columns, which is adjacent-literal concatenation working as intended.
+#
+# Checks that fire only a handful of times are deliberately left on even where the current hit is
+# defensible — bugprone-command-processor on the one popen, bugprone-exception-escape on main.
+# A finding worth answering at the call site (with a reason) is not a reason to blind the check.
+#
+# WarningsAsErrors is '*' so a finding fails the target, matching cppcheck's --error-exitcode=1.
+# Suppressing is not the way out of a report here: fix it, or argue the check off this list.
+Checks: >
+  -*,
+  bugprone-*,
+  clang-analyzer-*,
+  concurrency-*,
+  performance-*,
+  -bugprone-easily-swappable-parameters,
+  -bugprone-suspicious-missing-comma,
+  -bugprone-unchecked-optional-access,
+  -performance-enum-size
+
+# The compilation database is written by whichever compiler configured the build, and on Linux that
+# is GCC. Four test targets add -Wno-array-bounds and -Wno-stringop-overflow to work around GCC
+# false positives in libstdc++; clang does not know the second flag and rejects the translation
+# unit over it, which cost 41 parse errors before this line existed. Ignoring an unknown -Wno- flag
+# is exactly right for an analyser reading someone else's build.
+ExtraArgs: ['-Wno-unknown-warning-option']
+
+# Findings are reported for our own headers as well as our .cc files — a header-only bug in
+# libs/api or a template in libs/core would otherwise be invisible, since clang-tidy only reports
+# on the main file by default. The exclusion keeps vcpkg and the vendored SOEM out of the output:
+# they are third-party, we do not fix them, and their findings would bury ours.
+HeaderFilterRegex: '.*/(apps|libs)/.*'
+ExcludeHeaderFilterRegex: '.*/(extern|build)/.*'
+
+WarningsAsErrors: '*'
+FormatStyle: file

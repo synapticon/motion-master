@@ -75,8 +75,10 @@ if [ "$FAMILY" = debian ]; then
     packages+=(git curl zip unzip tar xz-utils autoconf automake libtool perl)
 
     # tools/check.sh — format, cppcheck, lint. cpplint and cmake-format are
-    # Python and come further down.
-    packages+=(clang clang-format clang-tidy cppcheck shellcheck)
+    # Python and come further down. clang-tools is here for run-clang-tidy,
+    # which drives the tidy target; the clang-tidy package alone ships only
+    # the per-file binary on some releases.
+    packages+=(clang clang-format clang-tidy clang-tools cppcheck shellcheck)
 
     # tools/package.sh builds both a .deb and an .rpm, on either distro.
     packages+=(dpkg-dev rpm)
@@ -196,7 +198,7 @@ check() {
         printf '  MISS  %-22s\n' "$1"
     fi
 }
-for t in gcc g++ cmake ninja clang-format clang-tidy cppcheck shellcheck \
+for t in gcc g++ cmake ninja clang-format clang-tidy run-clang-tidy cppcheck shellcheck \
          cpplint cmake-format node npm python3 ansible-playbook jq; do
     check "$t"
 done

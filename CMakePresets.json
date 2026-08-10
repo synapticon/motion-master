@@ -9,7 +9,8 @@
       "cacheVariables": {
         "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/extern/vcpkg/scripts/buildsystems/vcpkg.cmake",
         "VCPKG_OVERLAY_PORTS": "${sourceDir}/ports",
-        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/triplets"
+        "VCPKG_OVERLAY_TRIPLETS": "${sourceDir}/triplets",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },
     {

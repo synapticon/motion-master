@@ -156,8 +156,7 @@ std::expected<void, std::string> Device::initializeParameters(bool readValues,
     for (auto& p : *defs) {
       built.emplace(p.key(), std::move(p));
     }
-    std::lock_guard<std::mutex> lock(*parametersMutex_);
-    parameters_ = std::move(built);
+    installParameters(std::move(built));
     return {};
   }
 
@@ -236,11 +235,27 @@ std::expected<void, std::string> Device::initializeParameters(bool readValues,
   for (auto& p : defs) {
     built.emplace(p.key(), std::move(p));
   }
-
-  // Publish the freshly-built map in one move under the lock.
-  std::lock_guard<std::mutex> lock(*parametersMutex_);
-  parameters_ = std::move(built);
+  installParameters(std::move(built));
   return {};
+}
+
+void Device::installParameters(std::unordered_map<uint32_t, DeviceParameter>&& built) {
+  // Replacing the map destroys every entry in it, and a cyclic task resolves its parameters by
+  // lookup each cycle — so the swap has to happen while no RT thread is inside a cycle body. That
+  // is the same pause a re-map or a rescan takes, and for the same reason; only the swap is inside
+  // it, never the multi-second enumeration that produced `built`, so the cost is a skipped cycle or
+  // two rather than a stalled bus.
+  //
+  // parametersMutex_ covers the other adversary — the refresher and the sampler, which are ordinary
+  // threads and do take it.
+  const ProcessImage* paused = processData_ ? processData_->pauseCycle() : nullptr;
+  {
+    const std::lock_guard<std::mutex> lock(*parametersMutex_);
+    parameters_ = std::move(built);
+  }
+  if (processData_) {
+    processData_->resumeCycle(paused);
+  }
 }
 
 namespace {

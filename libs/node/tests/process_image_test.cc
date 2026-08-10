@@ -500,6 +500,59 @@ TEST(CycleLock, IsTruthyOnceTheBusIsActivatedAndDevicesResolve) {
   EXPECT_EQ(dm.findDevice(2), nullptr);  // absent device — a task simply does nothing
 }
 
+// What a cyclic task actually writes: resolve, read, act — no lock, no bus, and the same call
+// whether the object rides the process image or is polled over SDO in the background.
+TEST(CycleLock, DeviceValueReadsScalarsWithoutALock) {
+  auto bus = makeCia402Bus();
+  bus->cannedInputs = {0x37, 0x02, 0x44, 0x33, 0x22, 0x11};  // statusword, actual position
+  bus->wkc = 3;
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  // Seed the cell the way a control-plane read does — off the live image, which needs one recorded
+  // cycle. The RT decode that fills every cell each cycle arrives in a later step.
+  dm.exchangeProcessData();
+  ASSERT_TRUE(dm.readDeviceParameter(1, 0x6041, 0x00).has_value());
+
+  const DeviceManager::CycleLock cycle(dm);
+  ASSERT_TRUE(static_cast<bool>(cycle));
+  const Device* drive = dm.findDevice(1);
+  ASSERT_NE(drive, nullptr);
+
+  EXPECT_EQ(drive->value<uint16_t>(0x6041, 0x00), std::optional<uint16_t>{0x0237});
+  EXPECT_EQ(drive->value<int32_t>(0x6041, 0x00), std::nullopt);   // wrong type reads as nothing
+  EXPECT_EQ(drive->value<uint16_t>(0x9999, 0x00), std::nullopt);  // unknown object, no throw
+  // Never read: zero rather than nullopt, so a loop always has a number to act on.
+  EXPECT_EQ(drive->value<int32_t>(0x607A, 0x00), std::optional<int32_t>{0});
+}
+
+// Re-enumerating replaces the parameter map, destroying every entry a task may be looking up. The
+// swap therefore pauses the RT cycle the same way a re-map does — and puts the image back, so the
+// loop resumes rather than stopping for good.
+TEST(CycleLock, ReEnumeratingKeepsTheImagePublished) {
+  auto bus = makeCia402Bus();
+  bus->wkc = 3;
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  ASSERT_TRUE(static_cast<bool>(DeviceManager::CycleLock(dm)));
+
+  // The Console listing a device's parameters while the loop runs.
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+
+  EXPECT_TRUE(static_cast<bool>(DeviceManager::CycleLock(dm)));
+  const Device* drive = dm.findDevice(1);
+  ASSERT_NE(drive, nullptr);
+  EXPECT_NE(drive->findParameter(0x6041, 0x00), nullptr);
+  // And the loop is still exchanging — the pause covered the swap, not the enumeration.
+  dm.exchangeProcessData();
+  EXPECT_GT(dm.recorderHead(), 0u);
+}
+
 // reset() tears the image down, so the next cycle's lock fails and the task stops touching devices
 // before they are destroyed. This is the ordering scan()/reset() rely on.
 TEST(CycleLock, GoesFalsyAgainWhenTheImageIsTornDown) {

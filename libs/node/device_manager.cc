@@ -419,8 +419,10 @@ DeviceManager::CycleLock::~CycleLock() {
   }
 }
 
-void DeviceManager::stopExchange() {
-  pd_->image.store(nullptr, std::memory_order_seq_cst);
+void DeviceManager::stopExchange() { pd_->pauseCycle(); }
+
+const ProcessImage* ProcessData::pauseCycle() {
+  const ProcessImage* previous = image.exchange(nullptr, std::memory_order_seq_cst);
   // Drain whatever the RT thread has in flight — the exchange itself, and any cyclic task body
   // holding a CycleLock (which resolves devices and parameters of its own, so it must be out before
   // scan/reset destroy them). Both operations here are sequentially consistent so they pair with
@@ -430,7 +432,7 @@ void DeviceManager::stopExchange() {
   // cycle already in flight. Bounded so a stalled/absent RT loop can never hang a control-plane
   // call.
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
-  while (pd_->inCycle.load(std::memory_order_seq_cst) != 0 &&
+  while (inCycle.load(std::memory_order_seq_cst) != 0 &&
          std::chrono::steady_clock::now() < deadline) {
     std::this_thread::yield();
   }
@@ -440,11 +442,17 @@ void DeviceManager::stopExchange() {
   // That is the accepted price of never hanging a control-plane call on a stalled RT loop — but it
   // must not be silent, or the memory corruption it can cause arrives with nothing to explain it.
   // An RT thread preempted for a fifth of a second is itself the diagnosis worth reporting.
-  if (pd_->inCycle.load(std::memory_order_seq_cst) != 0) {
+  if (inCycle.load(std::memory_order_seq_cst) != 0) {
     spdlog::warn(
         "RT cycle did not drain within 200 ms — proceeding anyway. The RT loop is stalled or "
-        "descheduled; a re-map, teardown or rescan now races the cycle still in flight.");
+        "descheduled; a re-map, teardown, rescan or re-enumeration now races the cycle still in "
+        "flight.");
   }
+  return previous;
+}
+
+void ProcessData::resumeCycle(const ProcessImage* previous) {
+  image.store(previous, std::memory_order_release);
 }
 
 // The three recorder accessors take deviceSetMutex_ shared, and the adversary is not the RT

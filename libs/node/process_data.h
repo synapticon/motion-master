@@ -71,6 +71,26 @@ struct ProcessData {
   std::atomic<int> lastWkc{0};
   std::atomic<int> expectedWkc{0};
 
+  /// @brief Control plane: unpublishes the image and waits out the RT cycle already in flight.
+  ///
+  /// The pause every mutation of shared state needs when it cannot take a lock the RT thread also
+  /// takes — replacing a device's parameter map, rebuilding the device set, re-mapping the image.
+  /// Unpublishing is what stops a *new* cycle starting (@c DeviceManager::CycleLock and
+  /// @c exchangeProcessData both back out on a null image); the wait covers the one already
+  /// running. Together they mean no RT thread is inside the cycle body when this returns.
+  ///
+  /// Bounded, so a stalled or absent RT loop can never hang a control-plane call; giving up is
+  /// logged rather than silent.
+  ///
+  /// @return The image that was published, to hand back to @c resumeCycle. @c nullptr if none was.
+  const ProcessImage* pauseCycle();
+
+  /// @brief Control plane: republishes @p previous, letting RT work resume.
+  ///
+  /// Pass back exactly what @c pauseCycle returned. A permanent stop (teardown, re-map, rescan)
+  /// simply never calls this — it publishes a freshly built image instead, or nothing at all.
+  void resumeCycle(const ProcessImage* previous);
+
   /// @brief True when an image is published and the last working counter meets the expectation.
   ///
   /// A read of an *input* off a published-but-unhealthy bus would serve stale snapshot bytes (a

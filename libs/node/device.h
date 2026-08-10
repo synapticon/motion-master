@@ -582,7 +582,48 @@ class Device {
   /// @brief Const overload of @c findParameter. Same contract.
   const DeviceParameter* findParameter(uint16_t index, uint8_t subindex) const;
 
+  /// @brief Reads a scalar parameter's current value as @p T. Lock-free, non-allocating.
+  ///
+  /// **The cyclic-task read.** One hash lookup and one relaxed atomic load — no lock, no
+  /// allocation, no bus access, and nothing in the call that distinguishes a PDO-mapped object from
+  /// one polled over SDO in the background. Whether a value is in the process image is a
+  /// commissioning decision, and it must not change how the control program is written.
+  ///
+  /// @c nullopt means the parameter is unknown to this device, is not a scalar (a string or byte
+  /// array), or does not hold a @p T — never "the value happens to be zero", and never "the device
+  /// is offline". A parameter whose device has stopped exchanging keeps reporting its last known
+  /// value: swapping a real number for nothing is how a control loop ends up acting on a fallback
+  /// it never asked for. Use @c exchangesProcessData() and @c parameter()'s @c syncState to decide
+  /// otherwise.
+  ///
+  /// Distinct from the untyped @c value(index, subindex), which takes @c parametersMutex_ and
+  /// returns a variant: that one serves every type and is for the control plane, this one serves
+  /// scalars without a lock and is for a cycle.
+  ///
+  /// @warning Call it from inside a @c DeviceManager::CycleLock. The lookup walks a map that
+  ///          @c initializeParameters replaces, and the @c Device itself dies at the next
+  ///          @c scan / @c reset; the lock is what holds both still for the body of the cycle.
+  ///
+  /// @tparam T        The arithmetic type the parameter's data type maps to.
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @return The value, or @c nullopt (see above).
+  template <typename T>
+  std::optional<T> value(uint16_t index, uint8_t subindex) const {
+    const DeviceParameter* p = findParameter(index, subindex);
+    if (p == nullptr) {
+      return std::nullopt;
+    }
+    return p->scalar<T>();
+  }
+
  private:
+  /// @brief Replaces @c parameters_ wholesale, pausing the RT cycle across the swap.
+  ///
+  /// The one place the map is installed, so the pause cannot be taken on one path and forgotten on
+  /// another. See the definition for why the swap needs it and the enumeration does not.
+  void installParameters(std::unordered_map<uint32_t, DeviceParameter>&& built);
+
   /// @brief Fills in live values on @p defs (the value-read pass of @c initializeParameters).
   ///
   /// Reads each object over CoE and stores the decoded value on its entries. When

@@ -30,11 +30,12 @@
 #     literals. Every hit is a procedure descriptor whose prose clang-format wrapped at 100
 #     columns, which is adjacent-literal concatenation working as intended.
 #
-# The fifth exclusion is different in kind: clang-analyzer-optin.core.EnumCastOutOfRange. It is a
-# reasonable hygiene check — it is what flagged resolveSiiCategoryType forming a SiiCategoryType
-# from a raw EEPROM word before knowing the word was an enumerator. Note what it did *not* find:
-# that enum fixes its underlying type, so the cast was well defined and the code was correct; the
-# rewrite states intent at a validator boundary and is not a bug fix. It is off because its only
+# The fifth exclusion is different in kind: clang-analyzer-optin.core.EnumCastOutOfRange. It flagged
+# resolveSiiCategoryType widening a raw EEPROM word into SiiCategoryType before knowing the word was
+# an enumerator — and that report was a false alarm, worth recording as the one measured example of
+# this check's value here. The enum fixes its underlying type, so the conversion is well defined and
+# the switch was correct; it was briefly rewritten into a lookup table and then reverted, because the
+# switch is exhaustiveness-checked by -Wswitch and a table is not. It is off because its only
 # remaining reports are inside uWebSockets' TopicTree.h, which we cannot annotate, and because
 # clang-tidy's header filters do **not** apply to static-analyzer diagnostics (verified: neither
 # ExcludeHeaderFilterRegex nor --exclude-header-filter suppresses them, and the vcpkg include is

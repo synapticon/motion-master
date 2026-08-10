@@ -1,11 +1,9 @@
 #include "comm/sii.h"
 
 #include <algorithm>
-#include <array>
 #include <cstddef>
 #include <format>
 #include <string>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -208,34 +206,42 @@ std::optional<SiiCategoryType> resolveSiiCategoryType(uint16_t value) {
   if (value >= 0x3000 && value <= 0xFFFE) {
     return SiiCategoryType::VendorSpecific;
   }
-  // The remaining categories are single values rather than ranges, so they are matched against a
-  // table. Comparing @p value to each enumerator's underlying value — rather than casting it to
-  // SiiCategoryType and asking afterwards — is a statement of intent for a validator over untrusted
-  // input: @p value is a raw word read off a slave's EEPROM and may be anything at all, and this
-  // way no SiiCategoryType object is ever formed from a word that is not an enumerator. That is
-  // hygiene, not a correctness fix — because the enum fixes its underlying type (: uint16_t), the
-  // wider cast is well defined and value-preserving, so the preceding switch-on-the-cast was not
-  // undefined behaviour and returned the same answers.
+  // The remaining categories are single values rather than ranges. Switching over the enum rather
+  // than matching against a table is deliberate: the switch is exhaustiveness-checked, so a
+  // category added to SiiCategoryType fails the build here (-Wswitch, and warnings are errors)
+  // instead of silently never resolving. The enum lives in the header and this resolver does not,
+  // so nothing else would prompt whoever extends it — and the failure would be quiet, a real
+  // category read as unknown.
   //
-  // The cost of the table is that it is not exhaustiveness-checked the way a switch over the enum
-  // is: a new single-value category added to SiiCategoryType must be added here too, and nothing
-  // will warn if it is not.
-  //
-  // DeviceSpecific / VendorSpecific / ApplicationSpecific are absent because the ranges above
-  // already answered for them.
-  static constexpr std::array kSingleValueCategories = {
-      SiiCategoryType::Nop,        SiiCategoryType::Strings,  SiiCategoryType::DataTypes,
-      SiiCategoryType::General,    SiiCategoryType::Fmmu,     SiiCategoryType::SyncM,
-      SiiCategoryType::FmmuX,      SiiCategoryType::SyncUnit, SiiCategoryType::TxPdo,
-      SiiCategoryType::RxPdo,      SiiCategoryType::Dc,       SiiCategoryType::Timeouts,
-      SiiCategoryType::Dictionary, SiiCategoryType::Hardware, SiiCategoryType::VendorInformation,
-      SiiCategoryType::Images,     SiiCategoryType::End,
-  };
-  const auto known = std::ranges::find_if(kSingleValueCategories, [value](SiiCategoryType c) {
-    return static_cast<std::underlying_type_t<SiiCategoryType>>(c) == value;
-  });
-  if (known != kSingleValueCategories.end()) {
-    return *known;
+  // Widening @p value into the enum before knowing it is an enumerator reads worse than it is, and
+  // is safe: SiiCategoryType fixes its underlying type (: uint16_t), so the conversion is well
+  // defined and value-preserving for every input, and an unmatched word falls through to nullopt.
+  // Only an enum *without* a fixed underlying type would make this undefined, so this does not need
+  // "fixing" into a table.
+  switch (static_cast<SiiCategoryType>(value)) {
+    case SiiCategoryType::Nop:
+    case SiiCategoryType::Strings:
+    case SiiCategoryType::DataTypes:
+    case SiiCategoryType::General:
+    case SiiCategoryType::Fmmu:
+    case SiiCategoryType::SyncM:
+    case SiiCategoryType::FmmuX:
+    case SiiCategoryType::SyncUnit:
+    case SiiCategoryType::TxPdo:
+    case SiiCategoryType::RxPdo:
+    case SiiCategoryType::Dc:
+    case SiiCategoryType::Timeouts:
+    case SiiCategoryType::Dictionary:
+    case SiiCategoryType::Hardware:
+    case SiiCategoryType::VendorInformation:
+    case SiiCategoryType::Images:
+    case SiiCategoryType::End:
+      return static_cast<SiiCategoryType>(value);
+    // DeviceSpecific / VendorSpecific / ApplicationSpecific are handled by the ranges above.
+    case SiiCategoryType::DeviceSpecific:
+    case SiiCategoryType::VendorSpecific:
+    case SiiCategoryType::ApplicationSpecific:
+      break;
   }
   return std::nullopt;
 }

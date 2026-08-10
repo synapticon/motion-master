@@ -15,9 +15,15 @@ namespace mm::example {
 /// cycle period (1 ms by default). Everything below honours that, and the rules it follows are the
 /// whole point of reading it.
 ///
-/// **What it does.** Watches one drive's temperature and commands a velocity that depends on it —
-/// faster when warm, slower when cool — but only while the drive is already enabled and in cyclic
-/// synchronous velocity mode. Trivial as control goes; it is here to show the shape.
+/// **What it does — a very naive thermal interlock.** It brings one drive into cyclic synchronous
+/// velocity mode, enables it, and runs it at a fixed velocity; if the drive's temperature goes over
+/// a limit it issues a **quick stop**, and it will not enable again until the temperature falls, at
+/// which point it climbs back up by itself. Naive is the word: a real interlock has hysteresis, an
+/// alarm path, and a considered answer for every sensor failure mode. What is realistic here is the
+/// *shape* — read state, decide, command, once per cycle, with nothing that can block.
+///
+/// @warning **Uncommenting this in @c main.cc will spin a motor.** It does not wait for anyone to
+///          enable the drive; enabling is its job. Check @c Config against your bus first.
 ///
 /// **The four rules a cyclic task lives by**, each visible in @c execute:
 ///
@@ -31,19 +37,21 @@ namespace mm::example {
 ///    task picks it up again when it returns. That is what lets a machine be powered up in stages.
 /// 4. **Read and write values through @c Device::value<T>() / @c setValue<T>().** Both are a hash
 ///    lookup plus one atomic load or store, and neither can tell whether an object rides the
-///    process image or is polled over SDO in the background. Whether the temperature below is
-///    PDO-mapped is a commissioning decision, and this code does not change if it flips.
+///    process image or is polled over SDO in the background. Whether the temperature is PDO-mapped
+///    is a commissioning decision, and this code does not change if it flips.
 ///
-/// **What it deliberately does not do: enable the drive.** It commands a setpoint only when the
-/// statusword already reports @c kOperationEnabled and the mode is already CSV. Bringing a drive up
-/// is a sequence of state transitions belonging off the RT thread (the HTTP API and the console do
-/// it); a task that enables a motor as a side effect of being registered is a task that moves a
-/// machine nobody asked to move.
+/// **Driving the CiA402 state machine from here is the right place for it, not a liberty.** Mode of
+/// operation, controlword and statusword are all in the process image and all exchanged every
+/// cycle, so the climb (Switch On Disabled → Ready To Switch On → Switched On → Operation Enabled)
+/// is one write per cycle with the wire doing the waiting — where an off-RT caller has to sleep and
+/// poll for the same result. What must stay off the RT thread is the **EtherCAT AL state** (INIT /
+/// PRE-OP / SAFE-OP / OP): seconds of mailbox and register traffic, done through the HTTP API. A
+/// task runs in OP and never touches it.
 ///
-/// **One value here is not free.** @c Config::temperature is an SDO-only object on most drives, so
+/// **One value here is not free.** @c Config's temperature object is SDO-only on most drives, so
 /// nothing refills it cyclically — @c MonitoringManager::keepFresh has to be called once, off the
-/// RT thread, before the loop starts. Without it the read returns the type's zero forever and the
-/// task quietly picks the cool branch. @c main.cc shows the call.
+/// RT thread, before the loop starts. Without it the read never produces a value, the interlock
+/// treats that as unsafe, and the drive never spins. @c main.cc shows the call.
 class ExampleCyclicTask : public CyclicTask {
  public:
   /// @brief Everything the task needs to know, so nothing is hard-coded in @c execute.
@@ -55,18 +63,18 @@ class ExampleCyclicTask : public CyclicTask {
     /// The temperature object. **A placeholder — replace it with your drive's.** Read the device's
     /// object dictionary (the console's Parameters page) rather than assuming an index, and if its
     /// data type is not INTEGER16, change the @c value<int16_t> call in @c execute to match: the
-    /// read is type-exact and a mismatch reads as nothing at all.
+    /// read is type-exact and a mismatch reads as nothing at all — which this task treats as too
+    /// hot to run.
     uint16_t temperatureIndex = 0x2030;
     uint8_t temperatureSubindex = 0x01;
 
-    /// Above this temperature the drive is commanded @c warmVelocity, at or below it
-    /// @c coolVelocity. Units are the object's own.
-    int16_t temperatureLimit = 55;
+    /// Above this, the drive is quick-stopped and held until it cools. Units are the object's own.
+    int16_t temperatureLimit = 60;
 
-    /// Velocity setpoints, in whatever units 0x60FF uses on your drive (RPM on a SOMANET drive
-    /// configured that way). Keep them small while trying this out.
-    int32_t warmVelocity = 200;
-    int32_t coolVelocity = 100;
+    /// The velocity commanded while the drive is enabled and below the limit, in whatever units
+    /// 0x60FF uses on your drive (RPM on a SOMANET drive configured that way). Keep it small while
+    /// trying this out.
+    int32_t velocity = 100;
   };
 
   /// @brief Binds the task to a device manager. Registers nothing and touches no device — a task is

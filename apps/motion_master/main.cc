@@ -223,10 +223,13 @@ int main(int argc, char** argv) {
   ProcessDataCyclicTask processDataCyclicTask{deviceManager};
 
   // Tier 3 — your own code inside the RT loop. Uncomment the three marked lines (here, and the
-  // keepFresh + addTask below) to run libs/example/example_cyclic_task.cc, then copy that file to
-  // start your own. It commands a velocity based on a drive's temperature, and only while the drive
-  // is already enabled — it never enables one itself. Check Config::slavePosition and the
-  // temperature object against your bus before uncommenting: the defaults are placeholders.
+  // addTask + keepFresh below) to run libs/example/example_cyclic_task.cc, then copy that file to
+  // start your own. It is a naive thermal interlock: it puts a drive into CSV, enables it, runs it
+  // at a fixed velocity, and quick-stops it if the temperature goes over the limit.
+  //
+  // WARNING: this spins a motor. Enabling the drive is the task's job, not something it waits for.
+  // Check Config::slavePosition and the temperature object against your bus first — the defaults
+  // are placeholders, and the object index in particular has to come from your device's dictionary.
   // mm::example::ExampleCyclicTask exampleCyclicTask{deviceManager, {}};
 
   // The RT game loop is constructed here — before the servers — so HttpServer's GET /api/game-loop

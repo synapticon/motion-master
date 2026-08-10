@@ -841,21 +841,6 @@ std::expected<void, std::string> Device::writePdoMapping(const PdoMapping& mappi
                                      slavePosition_, kMaxAttempts, lastError));
 }
 
-std::expected<void, std::string> Device::setValue(uint16_t index, uint8_t subindex,
-                                                  const DeviceParameterValue& newValue) {
-  std::lock_guard<std::mutex> lock(*parametersMutex_);
-  DeviceParameter* p = findParameter(index, subindex);
-  if (!p) {
-    return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
-                                       slavePosition_, index, subindex));
-  }
-  if (auto set = p->setValue(newValue); !set) {
-    return std::unexpected(set.error());
-  }
-  p->syncState = SyncState::Synced;
-  return {};
-}
-
 std::expected<DeviceParameterValue, std::string> Device::setValueFromBytes(
     uint16_t index, uint8_t subindex, std::span<const uint8_t> bytes) {
   std::lock_guard<std::mutex> lock(*parametersMutex_);

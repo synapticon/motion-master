@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <cstring>
 #include <expected>
 #include <format>
 #include <map>
@@ -10,6 +11,7 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 #include <variant>
 #include <vector>
@@ -310,29 +312,13 @@ class Device {
   ///         SDO write/read-back fails after all retries, or the read-back does not match.
   std::expected<void, std::string> writePdoMapping(const PdoMapping& mapping);
 
-  /// @brief Stores a parameter's value locally, without any bus access (the typed setter).
-  ///
-  /// Coerces @p value into the parameter's declared type, stores it, and marks it
-  /// @c SyncState::Synced.  Used to reflect a value obtained out-of-band — e.g. one decoded
-  /// from the process image by @c DeviceManager — so @c DeviceParameter stays the source of
-  /// truth.  The parameter must already exist.  Unlike @c writeParameter this never touches the
-  /// wire; it is the typed counterpart of @c setValueFromBytes.
-  ///
-  /// @param index     CoE object index.
-  /// @param subindex  CoE object subindex.
-  /// @param value     Value to store; coerced to the parameter's declared type.
-  /// @return Void on success, or an error string if the parameter is unknown or @p value
-  ///         cannot be coerced to its type.
-  std::expected<void, std::string> setValue(uint16_t index, uint8_t subindex,
-                                            const DeviceParameterValue& newValue);
-
   /// @brief Sets the parameter's value from its raw on-the-wire bytes (the bytes-domain setter).
   ///
-  /// The byte-input counterpart of @c setValue: decodes @p bytes with the parameter's
-  /// declared data type, stores the result (marking it @c SyncState::Synced), and returns the
-  /// decoded value — all under @c parametersMutex_ so the data-type lookup, decode, and store are
-  /// one atomic step. @p bytes are the LSB-aligned little-endian encoding of the object's value;
-  /// the source is irrelevant (a slice of the process image, an SDO upload, a test fixture).
+  /// The bytes-in counterpart of @c value: decodes @p bytes with the parameter's declared data
+  /// type, stores the result (marking it @c SyncState::Synced), and returns the decoded value — all
+  /// under @c parametersMutex_ so the data-type lookup, decode, and store are one atomic step. @p
+  /// bytes are the LSB-aligned little-endian encoding of the object's value; the source is
+  /// irrelevant (a slice of the process image, an SDO upload, a test fixture).
   ///
   /// @param index     CoE object index.
   /// @param subindex  CoE object subindex.
@@ -384,9 +370,10 @@ class Device {
 
   /// @brief Returns a copy of a parameter's cached value (the typed cache getter), no bus access.
   ///
-  /// The read counterpart of @c setValue, and thread-safe (taken under the cache lock) so the
-  /// monitoring sampler can read it concurrently with refresher/control-plane writes. Returns
-  /// the last value stored by a read/refresh; it does not itself touch the bus.
+  /// The untyped, any-type read, thread-safe (taken under the cache lock) so the monitoring sampler
+  /// can read it concurrently with refresher/control-plane writes. Returns the last value stored by
+  /// a read/refresh; it does not itself touch the bus. For a scalar inside a cycle use the
+  /// lock-free @c value<T>() instead.
   ///
   /// @param index     CoE object index.
   /// @param subindex  CoE object subindex.
@@ -615,6 +602,46 @@ class Device {
       return std::nullopt;
     }
     return p->scalar<T>();
+  }
+
+  /// @brief Sets a scalar parameter's value as @p T. Lock-free, non-allocating.
+  ///
+  /// **The cyclic-task write, and the mirror of @c value<T>().** It stores into the parameter's
+  /// cell and returns; it never touches the wire itself. For an object in the output image that is
+  /// all that is needed — the RT loop composes the wire image from these cells, so the value goes
+  /// out on the next cycle — and the next @c value<T>() of the same object returns what was set,
+  /// not the last frame's reading.
+  ///
+  /// @warning **An object that is not output-mapped is stored and never transmitted.** Deciding
+  ///          otherwise would mean scanning the process image on every call, which is what this
+  ///          accessor exists to avoid. Use @c writeParameter off the RT thread to reach such an
+  ///          object over SDO.
+  ///
+  /// @c false means the parameter is unknown to this device, is not a scalar, or does not hold a
+  /// @p T. Nothing is coerced: unlike @c writeParameter, which accepts any number and casts it into
+  /// the declared width, @p T must already be the parameter's type — an RT path has no room for the
+  /// variant machinery that coercion needs.
+  ///
+  /// @warning Call it from inside a @c DeviceManager::CycleLock, for the reason @c value<T>()
+  /// gives.
+  ///
+  /// @tparam T        The arithmetic type the parameter's data type maps to.
+  /// @param index     CoE object index.
+  /// @param subindex  CoE object subindex.
+  /// @param newValue  Value to store.
+  /// @return @c true if the cell was written.
+  template <typename T>
+  bool setValue(uint16_t index, uint8_t subindex, T newValue) {
+    static_assert(std::is_arithmetic_v<T>, "the cell holds arithmetic types only");
+    static_assert(sizeof(T) <= sizeof(uint64_t), "the cell holds at most eight bytes");
+    const DeviceParameter* p = findParameter(index, subindex);
+    if (p == nullptr || !std::holds_alternative<T>(defaultValueForDataType(p->dataType))) {
+      return false;
+    }
+    uint64_t bits = 0;
+    std::memcpy(&bits, &newValue, sizeof(T));
+    p->storeBits(bits);
+    return true;
   }
 
  private:

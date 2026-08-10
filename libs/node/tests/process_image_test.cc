@@ -557,6 +557,37 @@ TEST(CycleLock, ExchangeDecodesInputsIntoCells) {
   EXPECT_EQ(drive->value<int32_t>(0x6064, 0x00), std::optional<int32_t>{1});
 }
 
+// The write half: a setpoint stored from inside a cycle reaches the wire on the next exchange, with
+// no staging step in between — the cell the task wrote is what the composer sends.
+TEST(CycleLock, SetValueFromACycleReachesTheWire) {
+  auto bus = makeCia402Bus();
+  bus->wkc = 3;
+  FakeBus* busPtr = bus.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+
+  {
+    const DeviceManager::CycleLock cycle(dm);
+    ASSERT_TRUE(static_cast<bool>(cycle));
+    Device* drive = dm.findDevice(1);
+    ASSERT_NE(drive, nullptr);
+    EXPECT_TRUE(drive->setValue<uint16_t>(0x6040, 0x00, 0x000F));  // controlword
+    EXPECT_TRUE(drive->setValue<int32_t>(0x607A, 0x00, -2));       // target position
+    EXPECT_FALSE(drive->setValue<int32_t>(0x6040, 0x00, 1));       // wrong type: refused
+    EXPECT_FALSE(drive->setValue<uint16_t>(0x9999, 0x00, 1));      // unknown object: refused
+    // A write reads back as itself, rather than as the last frame's value.
+    EXPECT_EQ(drive->value<uint16_t>(0x6040, 0x00), std::optional<uint16_t>{0x000F});
+  }
+
+  dm.exchangeProcessData();
+  ASSERT_EQ(busPtr->lastOutputs.size(), 6u);
+  // controlword @ bit 0 (16 bits), target position @ bit 16 (32 bits), little-endian.
+  EXPECT_EQ(busPtr->lastOutputs, (std::vector<uint8_t>{0x0F, 0x00, 0xFE, 0xFF, 0xFF, 0xFF}));
+}
+
 // A short working counter means the driver left the previous cycle's bytes in the IOmap. The decode
 // stores them anyway: "last known value" is what a control loop can act on, and diverting to a
 // blocking SDO upload is not available on this thread. Health is reported separately.

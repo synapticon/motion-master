@@ -92,6 +92,10 @@ void unpackSlotInto(uint64_t packed, std::span<uint8_t> out) {
 // reach that mailbox read while still in BOOT and segfault inside SOEM before the slave ever sees
 // the request. Validating here keeps the bad jump away from the mapper entirely.
 using mm::comm::EtherCatState;
+// The only throw this static initialisation can produce is bad_alloc, allocating a five-entry
+// table before main runs; a process that cannot afford that has nothing to fall back to. The map
+// is what makes the rule above readable, and a constexpr array would trade that for nothing.
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
 const std::map<EtherCatState, std::set<EtherCatState>> kValidStateTransitions = {
     {EtherCatState::Init, {EtherCatState::Init, EtherCatState::PreOp, EtherCatState::Boot}},
     {EtherCatState::PreOp, {EtherCatState::PreOp, EtherCatState::Init, EtherCatState::SafeOp}},
@@ -1193,7 +1197,8 @@ std::expected<DeviceParameter, std::string> DeviceManager::deviceParameterView(
 }
 
 std::expected<void, std::string> DeviceManager::writeDeviceParameter(
-    uint16_t slavePosition, uint16_t index, uint8_t subindex, DeviceParameterValue newValue) {
+    uint16_t slavePosition, uint16_t index, uint8_t subindex,
+    const DeviceParameterValue& newValue) {
   // Shared lock: serialise against the exclusive mutators that rebuild devices_/driver_, so a
   // write that lands here off the control-plane thread can never see a half-torn device set.
   std::shared_lock lock(deviceSetMutex_);
@@ -1204,7 +1209,7 @@ std::expected<void, std::string> DeviceManager::writeDeviceParameter(
   // Routing (stage into the output image when exchanging + output-mapped, SDO otherwise) lives in
   // Device. This entry point only resolves the position and takes the shared lock so an off-thread
   // caller is serialised against a device-set rebuild.
-  return device->writeParameter(index, subindex, std::move(newValue));
+  return device->writeParameter(index, subindex, newValue);
 }
 
 std::expected<void, std::string> DeviceManager::writeDevicePdoMapping(uint16_t slavePosition,

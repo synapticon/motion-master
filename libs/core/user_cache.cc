@@ -147,7 +147,7 @@ std::expected<fs::path, std::string> UserCache::resolve(std::string_view relPath
   // Compared component-wise, not as strings: a string prefix test would accept a sibling directory
   // whose name merely starts with the root's ("motion-master-elsewhere"). root_ is already
   // normalised by the constructor, so only the assembled path needs it here.
-  const fs::path normalized = p.lexically_normal();
+  fs::path normalized = p.lexically_normal();
   const auto rootEnd =
       std::mismatch(root_.begin(), root_.end(), normalized.begin(), normalized.end()).first;
   if (rootEnd != root_.end()) {

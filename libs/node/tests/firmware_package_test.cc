@@ -29,6 +29,7 @@ std::vector<uint8_t> readPackage(std::string_view filename) {
 
 std::vector<std::string> defaultSkipFiles() {
   std::vector<std::string> files;
+  files.reserve(std::size(kDefaultSkippedFirmwareFiles));
   for (std::string_view name : kDefaultSkippedFirmwareFiles) {
     files.emplace_back(name);
   }

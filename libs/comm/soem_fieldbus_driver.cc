@@ -27,6 +27,7 @@
 #include "comm/mailbox_error_codes.h"
 #include "comm/sdo_abort_codes.h"
 #include "comm/sdo_log.h"
+#include "core/platform.h"
 
 namespace mm::comm::soem {
 
@@ -82,7 +83,7 @@ std::expected<void, std::string> SoemFieldbusDriver::init() {
   ctx_ = std::make_unique<ecx_contextt>();
   if (!ecx_init(ctx_.get(), ifname_.c_str())) {
     ctx_.reset();
-    return std::unexpected("ecx_init failed on " + ifname_ + ": " + std::strerror(errno));
+    return std::unexpected("ecx_init failed on " + ifname_ + ": " + mm::core::errnoMessage(errno));
   }
   // Installed once, for the life of the context: the only window onto what a slave is doing during
   // a multi-second file transfer.
@@ -319,7 +320,8 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
   spdlog::info(
       "Process data mapped: {} bytes (out {}, in {}) across {} slave(s); "
       "recommended GameLoop cycle >= {} us ({:.1f} ms)",
-      usedSize, grp.Obytes, grp.Ibytes, ctx_->slavecount, period.count(), period.count() / 1000.0);
+      usedSize, grp.Obytes, grp.Ibytes, ctx_->slavecount, period.count(),
+      static_cast<double>(period.count()) / 1000.0);
   return {};
 }
 
@@ -647,7 +649,7 @@ std::expected<std::vector<SlaveDiagnostics>, std::string> SoemFieldbusDriver::re
 
     SlaveDiagnostics d{};
     d.slavePosition = pos;
-    for (int p = 0; p < 4; ++p) {
+    for (size_t p = 0; p < 4; ++p) {
       d.ports[p] = PortDiagnostics{
           .linkUp = (dlStatus & (1u << (4 + p))) != 0,
           .loopClosed = (dlStatus & (1u << (8 + 2 * p))) != 0,

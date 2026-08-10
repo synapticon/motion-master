@@ -830,14 +830,14 @@ std::expected<void, std::string> Device::writePdoMapping(const PdoMapping& mappi
 }
 
 std::expected<void, std::string> Device::setValue(uint16_t index, uint8_t subindex,
-                                                  DeviceParameterValue newValue) {
+                                                  const DeviceParameterValue& newValue) {
   std::lock_guard<std::mutex> lock(*parametersMutex_);
   DeviceParameter* p = findParameter(index, subindex);
   if (!p) {
     return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
                                        slavePosition_, index, subindex));
   }
-  if (auto set = p->setValue(std::move(newValue)); !set) {
+  if (auto set = p->setValue(newValue); !set) {
     return std::unexpected(set.error());
   }
   p->syncState = SyncState::Synced;
@@ -1163,7 +1163,7 @@ std::expected<ObjectValues, std::string> Device::readObject(uint16_t index,
 }
 
 std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t subindex,
-                                                        DeviceParameterValue newValue) {
+                                                        const DeviceParameterValue& newValue) {
   // Phase 1 — under the lock: coerce into the cache, and settle every path that needs no bus. Only
   // the SDO download escapes this block, so an offline edit or a PDO stage costs a single lock.
   std::vector<uint8_t> bytes;
@@ -1176,7 +1176,7 @@ std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t 
     }
     // Cache-first: coerce and store into the cached parameter before any bus access, so the
     // cache always reflects the latest intended value regardless of online state.
-    if (auto set = p->setValue(std::move(newValue)); !set) {
+    if (auto set = p->setValue(newValue); !set) {
       return std::unexpected(set.error());
     }
     // While exchanging, stage an output-mapped object into the process image (sent next cycle)

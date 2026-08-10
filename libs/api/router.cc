@@ -176,7 +176,8 @@ std::vector<std::string> parameterNames(std::string_view pattern) {
   return names;
 }
 
-void Router::add(std::string_view method, std::string pattern, Handler handler, bool hasBody) {
+void Router::add(std::string_view method, const std::string& pattern, Handler handler,
+                 bool hasBody) {
   auto names = std::make_shared<std::vector<std::string>>(parameterNames(pattern));
   auto shared = std::make_shared<Handler>(std::move(handler));
   auto* loop = loop_;

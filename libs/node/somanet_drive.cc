@@ -283,9 +283,8 @@ std::optional<uint32_t> hrdFileIndex(std::string_view name) {
     return std::nullopt;
   }
   uint32_t index = 0;
-  const auto* end = digits.data() + digits.size();
-  auto [p, ec] = std::from_chars(digits.data(), end, index);
-  if (ec != std::errc() || p != end) {
+  auto [p, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), index);
+  if (ec != std::errc() || p != digits.data() + digits.size()) {
     return std::nullopt;
   }
   return index;
@@ -662,7 +661,7 @@ std::vector<DeviceFile> parseDeviceFileList(std::string_view text) {
         if (const auto last = name.find_last_not_of(" \t"); last != std::string_view::npos) {
           name = name.substr(0, last + 1);
         }
-        file = DeviceFile{.name = std::string(name), .byteCount = *size};
+        file = DeviceFile{.name = std::string(name), .byteCount = size};
         break;
       }
     }
@@ -961,7 +960,7 @@ std::expected<OpenPhaseResult, std::string> SomanetDrive::runOpenPhaseDetection(
       return std::unexpected(std::format("open phase detection was not performed: {} (OS error {})",
                                          *general, *response->errorCode));
     }
-    result.faultCode = *response->errorCode;
+    result.faultCode = response->errorCode;
     if (*response->errorCode <= static_cast<uint8_t>(somanet::OpenPhaseFault::kOpenFetCLow)) {
       result.fault = static_cast<somanet::OpenPhaseFault>(*response->errorCode);
     }

@@ -29,8 +29,11 @@ void init_devices(const char* ifname) {
   std::println("Initializing EtherCAT on {}...", ifname);
 
   if (!ecx_init(&ctx, ifname)) {
+    // strerror's shared buffer needs a second thread to be a hazard, and this scratch binary has
+    // none. mm::core::errnoMessage() is the answer in the shipped code; reaching for it here would
+    // make playground link mm::core for one message.
     std::println("Failed to open socket on {}: {} (wrong interface name, or run as root)", ifname,
-                 std::strerror(errno));
+                 std::strerror(errno));  // NOLINT(concurrency-mt-unsafe)
     return;
   }
 
@@ -56,6 +59,9 @@ void init_devices(const char* ifname) {
 
 }  // namespace
 
+// See the shipped main(): the standard library can still raise bad_alloc, and terminating is the
+// right answer for a scratch binary.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char* argv[]) {
   if (argc < 2) {
     list_adapters();

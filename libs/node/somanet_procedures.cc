@@ -178,6 +178,11 @@ class DiagnosticsRestorer {
   DiagnosticsRestorer(const DiagnosticsRestorer&) = delete;
   DiagnosticsRestorer& operator=(const DiagnosticsRestorer&) = delete;
 
+  // A destructor is implicitly noexcept, so this is a statement about the standard library rather
+  // than about this code: the restore path builds strings and can therefore raise bad_alloc. There
+  // is no better answer inside a destructor whose whole job is to put the drive back — swallowing
+  // it would hide a failed restore.
+  // NOLINTNEXTLINE(bugprone-exception-escape)
   ~DiagnosticsRestorer() {
     if (!mode_ && !brake_) {
       return;
@@ -1437,7 +1442,7 @@ std::filesystem::path firmwareCacheDir() { return mm::core::userCacheDir() / "fi
 std::vector<ProcedureParameter> firmwareInstallationParameters() {
   // Built from the same helper the parser defaults to, so the advertised default and the applied
   // one cannot drift.
-  const nlohmann::json skipDefault = defaultSkipFiles();
+  nlohmann::json skipDefault = defaultSkipFiles();
   return {
       fileParameter(
           "packageContent", "Firmware package",

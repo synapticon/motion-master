@@ -213,6 +213,8 @@ ResolvedCert resolveCertPaths(const std::string& configCertPath, const std::stri
   }
 
   // 2. A local acme.sh install, renewed automatically by its own cron.
+  // See mm::core::envVar: getenv races only setenv, which this process never calls.
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
   if (const char* home = std::getenv("HOME")) {
     const auto acmeDir =
         std::filesystem::path(home) / ".acme.sh/local.motion-master.synapticon.com_ecc";

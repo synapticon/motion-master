@@ -41,6 +41,10 @@ class CyclicTimer {
 
   /// @brief Destroys the timer.  On Windows, cancels and closes the OS timer
   ///        handle.  On Linux, no OS resource is held.
+  // Trivially destructible only in the build being analysed: the Windows implementation closes the
+  // waitable-timer handle here, so defaulting this would leak a kernel object on the one platform
+  // that owns one.
+  // NOLINTNEXTLINE(performance-trivially-destructible)
   ~CyclicTimer();
 
   /// @brief Copying is deleted — each instance owns its own deadline state and,

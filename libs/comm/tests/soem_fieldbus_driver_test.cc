@@ -72,6 +72,7 @@ TEST(SoemFieldbusDriverState, IsReadableConcurrently) {
   // catches a crash from an unallocated or wrongly sized mirror.
   SoemFieldbusDriver driver = makeDriver();
   std::vector<std::thread> readers;
+  readers.reserve(4);
   for (int reader = 0; reader < 4; ++reader) {
     readers.emplace_back([&driver] {
       for (int pass = 0; pass < 200; ++pass) {

@@ -324,7 +324,7 @@ class Device {
   /// @return Void on success, or an error string if the parameter is unknown or @p value
   ///         cannot be coerced to its type.
   std::expected<void, std::string> setValue(uint16_t index, uint8_t subindex,
-                                            DeviceParameterValue newValue);
+                                            const DeviceParameterValue& newValue);
 
   /// @brief Sets the parameter's value from its raw on-the-wire bytes (the bytes-domain setter).
   ///
@@ -485,7 +485,7 @@ class Device {
   ///         if the parameter is unknown, @p value cannot be coerced, or an online
   ///         download fails.
   std::expected<void, std::string> writeParameter(uint16_t index, uint8_t subindex,
-                                                  DeviceParameterValue newValue);
+                                                  const DeviceParameterValue& newValue);
 
   /// @brief Typed convenience wrapper for @c writeParameter.
   ///

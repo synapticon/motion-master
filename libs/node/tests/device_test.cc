@@ -431,7 +431,7 @@ TEST(DeviceReadAllParameters, ErrorsWhenNoParametersLoaded) {
 
 // Builds the wire layout of a Complete Access upload: subindex 0 as a padded 16-bit value
 // (count byte + alignment pad) followed by the subindex payloads concatenated.
-std::vector<uint8_t> completeBlob(uint8_t count, std::vector<std::vector<uint8_t>> subs) {
+std::vector<uint8_t> completeBlob(uint8_t count, const std::vector<std::vector<uint8_t>>& subs) {
   std::vector<uint8_t> blob{count, 0};
   for (const auto& s : subs) {
     blob.insert(blob.end(), s.begin(), s.end());
@@ -1181,6 +1181,7 @@ TEST(DeviceCacheConcurrency, ConcurrentReadsAndCacheUpdatesAreSafe) {
   std::atomic<bool> go{false};
   std::atomic<int> failures{0};
   std::vector<std::thread> workers;
+  workers.reserve(kThreads);
 
   for (int t = 0; t < kThreads; ++t) {
     workers.emplace_back([&] {

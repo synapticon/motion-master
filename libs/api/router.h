@@ -284,24 +284,24 @@ class Router {
       : app_(app), loop_(loop), pool_(pool), stopping_(stopping), corsOrigin_(corsOrigin) {}
 
   /// @brief Registers @p handler for GET @p pattern. Path parameters are `:name` as in uWS.
-  void get(std::string pattern, Handler handler) {
-    add("GET", std::move(pattern), std::move(handler), /*hasBody=*/false);
+  void get(const std::string& pattern, Handler handler) {
+    add("GET", pattern, std::move(handler), /*hasBody=*/false);
   }
   /// @brief Registers @p handler for POST @p pattern; the body is accumulated before dispatch.
-  void post(std::string pattern, Handler handler) {
-    add("POST", std::move(pattern), std::move(handler), /*hasBody=*/true);
+  void post(const std::string& pattern, Handler handler) {
+    add("POST", pattern, std::move(handler), /*hasBody=*/true);
   }
   /// @brief Registers @p handler for PUT @p pattern; the body is accumulated before dispatch.
-  void put(std::string pattern, Handler handler) {
-    add("PUT", std::move(pattern), std::move(handler), /*hasBody=*/true);
+  void put(const std::string& pattern, Handler handler) {
+    add("PUT", pattern, std::move(handler), /*hasBody=*/true);
   }
   /// @brief Registers @p handler for DELETE @p pattern.
-  void del(std::string pattern, Handler handler) {
-    add("DELETE", std::move(pattern), std::move(handler), /*hasBody=*/false);
+  void del(const std::string& pattern, Handler handler) {
+    add("DELETE", pattern, std::move(handler), /*hasBody=*/false);
   }
 
  private:
-  void add(std::string_view method, std::string pattern, Handler handler, bool hasBody);
+  void add(std::string_view method, const std::string& pattern, Handler handler, bool hasBody);
 
   uWS::SSLApp& app_;
   uWS::Loop* loop_;

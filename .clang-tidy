@@ -30,6 +30,19 @@
 #     literals. Every hit is a procedure descriptor whose prose clang-format wrapped at 100
 #     columns, which is adjacent-literal concatenation working as intended.
 #
+# The fifth exclusion is different in kind: clang-analyzer-optin.core.EnumCastOutOfRange. It is a
+# reasonable hygiene check — it is what flagged resolveSiiCategoryType forming a SiiCategoryType
+# from a raw EEPROM word before knowing the word was an enumerator. Note what it did *not* find:
+# that enum fixes its underlying type, so the cast was well defined and the code was correct; the
+# rewrite states intent at a validator boundary and is not a bug fix. It is off because its only
+# remaining reports are inside uWebSockets' TopicTree.h, which we cannot annotate, and because
+# clang-tidy's header filters do **not** apply to static-analyzer diagnostics (verified: neither
+# ExcludeHeaderFilterRegex nor --exclude-header-filter suppresses them, and the vcpkg include is
+# already -isystem). Two unfixable reports would leave the target permanently red, which is worth
+# more than a check with no defect to its name here. Do not expect UBSan's -fsanitize=enum to stand
+# in for it either: for a fixed-underlying-type enum there is no undefined behaviour for UBSan to
+# trap, so this coverage does not come back through the sanitizer plan in NEXTGEN.md.
+#
 # Checks that fire only a handful of times are deliberately left on even where the current hit is
 # defensible — bugprone-command-processor on the one popen, bugprone-exception-escape on main.
 # A finding worth answering at the call site (with a reason) is not a reason to blind the check.
@@ -45,6 +58,7 @@ Checks: >
   -bugprone-easily-swappable-parameters,
   -bugprone-suspicious-missing-comma,
   -bugprone-unchecked-optional-access,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
   -performance-enum-size
 
 # The compilation database is written by whichever compiler configured the build, and on Linux that
@@ -53,6 +67,14 @@ Checks: >
 # unit over it, which cost 41 parse errors before this line existed. Ignoring an unknown -Wno- flag
 # is exactly right for an analyser reading someone else's build.
 ExtraArgs: ['-Wno-unknown-warning-option']
+
+CheckOptions:
+  # An explicit `(void)` cast is how C++ spells "I am ignoring this on purpose", and the tests use
+  # it exactly that way — `(void)dm.init(...)` in a test whose subject is what happens *after* a
+  # failed init. Without this the check cannot be satisfied except by inventing an unused variable,
+  # which says less. A bare unignored call still reports.
+  - key: bugprone-unused-return-value.AllowCastToVoid
+    value: true
 
 # Findings are reported for our own headers as well as our .cc files — a header-only bug in
 # libs/api or a template in libs/core would otherwise be invisible, since clang-tidy only reports

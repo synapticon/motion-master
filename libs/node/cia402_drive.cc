@@ -222,6 +222,11 @@ std::expected<void, std::string> Cia402Drive::enable(std::chrono::milliseconds t
           return r;
         }
         break;
+      // kQuickStopActive and kNotReadyToSwitchOn both wait, and they are kept apart because *why*
+      // they wait differs: one is a safety state the master must not override, the other is a
+      // device still coming up. Merging them into one fall-through label would delete the
+      // distinction that makes the first one auditable.
+      // NOLINTNEXTLINE(bugprone-branch-clone)
       case State::kQuickStopActive:
         // Deliberate safety state — do not auto-override it (CiA402 transition 16, enable-operation
         // from quick stop, is "not recommended" per IEC 61800-7-201 Table 26). Just wait: with

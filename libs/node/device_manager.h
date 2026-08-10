@@ -586,7 +586,7 @@ class DeviceManager {
   ///         the value cannot be coerced, or an online download fails.
   std::expected<void, std::string> writeDeviceParameter(uint16_t slavePosition, uint16_t index,
                                                         uint8_t subindex,
-                                                        DeviceParameterValue newValue);
+                                                        const DeviceParameterValue& newValue);
 
   /// @brief Convenience: finds a device by position and writes its PDO mapping.
   ///

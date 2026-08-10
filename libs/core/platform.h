@@ -34,6 +34,19 @@ std::filesystem::path exeDir();
 /// @return Absolute path to the cache directory (never empty).
 std::filesystem::path userCacheDir();
 
+/// @brief Describe an @c errno value, safely from any thread.
+/// @details The drop-in replacement for @c std::strerror, which returns a pointer into a single
+///          static buffer that a concurrent call may overwrite — a real hazard here, because the
+///          failures being described happen on the 32-worker HTTP pool and on the procedure
+///          threads, not only during single-threaded startup. @c std::system_category().message()
+///          returns an owned string and is implemented over the reentrant @c strerror_r /
+///          @c strerror_s, so two threads reporting different errors cannot corrupt each other's
+///          message.
+/// @param err An @c errno value. Capture it into a local before any intervening call, since almost
+///            anything can overwrite @c errno.
+/// @return The platform's description of @p err.
+std::string errnoMessage(int err);
+
 /// @brief Open the given URL in the system default browser.
 /// @details Non-blocking — returns immediately after spawning the browser process.
 ///          Uses xdg-open on Linux, `open` on macOS, and ShellExecute on Windows.

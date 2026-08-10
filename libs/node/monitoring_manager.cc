@@ -104,7 +104,7 @@ std::expected<Monitoring, std::string> MonitoringManager::create(Monitoring conf
           "device {} object 0x{:04X}:{:02X} is neither PDO-mapped nor in the object dictionary",
           p.devicePosition, p.index, p.subindex));
     }
-    plans.push_back(std::move(*plan));
+    plans.push_back(*plan);
   }
 
   std::lock_guard<std::mutex> lock(mutex_);
@@ -285,7 +285,7 @@ void MonitoringManager::recaptureIfRemapped(FlushState& state) {
     auto spec = deviceManager_.pdoSampleSpec(plan.devicePosition, plan.index, plan.subindex);
     const Source newSource = spec ? Source::Pdo : Source::Sdo;
     if (newSource == plan.source) {
-      plan.pdoSpec = std::move(spec);  // unchanged classification; offsets may have shifted
+      plan.pdoSpec = spec;  // unchanged classification; offsets may have shifted
       continue;
     }
     if (newSource == Source::Sdo) {
@@ -295,7 +295,7 @@ void MonitoringManager::recaptureIfRemapped(FlushState& state) {
     } else {
       // SDO→PDO: the object joined the image; stop the now-redundant background poll.
       refresher_.release(plan.devicePosition, plan.index, plan.subindex);
-      plan.pdoSpec = std::move(spec);
+      plan.pdoSpec = spec;
     }
     plan.source = newSource;
   }

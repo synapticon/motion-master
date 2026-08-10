@@ -67,7 +67,7 @@ bool isMacAddress(const std::string& s) {
 std::string normalizeMac(const std::string& raw, char sep) {
   std::string result;
   result.reserve(17);
-  for (int i = 0; i < 6; ++i) {
+  for (size_t i = 0; i < 6; ++i) {
     if (i > 0) {
       result += sep;
     }

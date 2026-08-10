@@ -77,7 +77,7 @@ std::expected<void, ProcedureError> ProcedureManager::start(uint16_t devicePosit
   return startRun(devicePosition, std::move(name), std::move(steps),
                   [this, devicePosition, body = std::move(body)](ProgressReporter& reporter,
                                                                  std::stop_token stop) {
-                    return body(deviceManager_, devicePosition, reporter, stop);
+                    return body(deviceManager_, devicePosition, reporter, std::move(stop));
                   });
 }
 
@@ -125,7 +125,7 @@ std::expected<void, ProcedureError> ProcedureManager::startRun(uint16_t devicePo
   // busy check above passed.
   runs_[key] = run;
 
-  run->thread = std::jthread([run, work = std::move(work)](std::stop_token stop) {
+  run->thread = std::jthread([run, work = std::move(work)](const std::stop_token& stop) {
     auto result = work(*run->reporter, stop);
 
     if (!result) {

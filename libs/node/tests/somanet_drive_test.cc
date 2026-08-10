@@ -301,6 +301,9 @@ class OsCommandFakeDriver : public FieldbusDriver {
 constexpr auto kNoDelay = std::chrono::milliseconds(0);
 
 // An arbitrary well-formed request: command ID 8 (phase resistance measurement) and no parameters.
+// A test fixture's eight-byte vector; the only throw is bad_alloc before main, which would fail
+// the run either way.
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
 const std::vector<uint8_t> kRequest{8, 0, 0, 0, 0, 0, 0, 0};
 
 // Programs the 0x2004 sub-entries the brake operations touch. Voltages and pull time are arbitrary

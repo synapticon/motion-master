@@ -41,6 +41,11 @@ static std::atomic<GameLoop*> gGameLoop{nullptr};
 /// @param argc Argument count from the OS.
 /// @param argv Argument vector from the OS.
 /// @return 0 on clean shutdown.
+// Nothing here throws deliberately — the codebase returns std::expected rather than throwing —
+// but the standard library still can: a std::string or nlohmann::json allocation raises bad_alloc.
+// Letting that terminate the process at startup is the honest outcome; a catch-all here could only
+// print and exit non-zero anyway.
+// NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char** argv) {
   // Replacing the default logger drops its built-in console sink, so re-add it
   // explicitly alongside the ring sink that backs GET /api/log.

@@ -43,7 +43,9 @@ class DumpReader {
   }
 
   std::vector<uint8_t> getBytes(size_t n) {
-    std::vector<uint8_t> v(bytes_.begin() + pos_, bytes_.begin() + pos_ + n);
+    const auto at = static_cast<std::ptrdiff_t>(pos_);
+    std::vector<uint8_t> v(bytes_.begin() + at,
+                           bytes_.begin() + at + static_cast<std::ptrdiff_t>(n));
     pos_ += n;
     return v;
   }
@@ -96,7 +98,7 @@ DumpHeader makeHeader(uint32_t inputBytes, uint32_t outputBytes) {
 TEST(ProcessDataDumpTest, RoundTripsHeaderAndRows) {
   constexpr uint32_t kIn = 6, kOut = 4;
   ProcessDataRing ring;
-  ring.allocate(kIn, kOut, /*capacity=*/64);
+  ring.allocate(kIn, kOut, /*capacityCycles=*/64);
   for (uint64_t seq = 0; seq < 10; ++seq) {
     writeSeq(ring, seq, kIn, kOut);
   }

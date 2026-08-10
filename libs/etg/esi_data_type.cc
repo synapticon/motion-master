@@ -29,9 +29,8 @@ bool splitParameterised(std::string_view name, std::string_view& base, uint32_t&
     return false;
   }
   uint32_t value = 0;
-  const auto* end = digits.data() + digits.size();
-  const auto [ptr, ec] = std::from_chars(digits.data(), end, value);
-  if (ec != std::errc() || ptr != end) {
+  const auto [ptr, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), value);
+  if (ec != std::errc() || ptr != digits.data() + digits.size()) {
     return false;
   }
   base = name.substr(0, open);

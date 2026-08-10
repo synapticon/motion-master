@@ -85,6 +85,10 @@ std::string detectDockerVersion() {
 #if defined(_WIN32)
   std::FILE* pipe = _popen("docker --version 2>NUL", "r");
 #else
+  // The command is a fixed literal with no interpolation, so there is no input for a shell to
+  // reinterpret. Asking the docker CLI is the only portable way to learn the version; there is no
+  // library call for it.
+  // NOLINTNEXTLINE(bugprone-command-processor)
   std::FILE* pipe = popen("docker --version 2>/dev/null", "r");
 #endif
   if (!pipe) {

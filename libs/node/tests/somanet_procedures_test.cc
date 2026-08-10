@@ -428,6 +428,7 @@ TEST(EncoderRegisterParameters, DescribeExactlyWhatTheParserAccepts) {
   // the parser knows and vice versa — the two drifting apart is what this pairing exists to stop.
   const auto parameters = encoderRegisterParameters();
   std::vector<std::string> names;
+  names.reserve(parameters.size());
   for (const auto& parameter : parameters) {
     names.push_back(parameter.name);
   }
@@ -1704,12 +1705,17 @@ class FirmwareFakeDriver : public FieldbusDriver {
 /// Points mm::core::userCacheDir (and so firmwareCacheDir) at a throwaway directory, so a test that
 /// exercises caching cannot write into the developer's real cache. Restores the variable on the way
 /// out, whatever the test did.
+// The environment calls below carry a NOLINT for concurrency-mt-unsafe: this fixture is the
+// setenv half of the getenv/setenv race, on purpose. It is safe because it runs on the gtest main
+// thread before the code under test starts any — which is also what lets the shipped binary's
+// getenv callers be justified from the other side (see mm::core::envVar).
 class CacheRedirect {
  public:
   CacheRedirect() {
     root_ = std::filesystem::temp_directory_path() /
             std::format("mm-firmware-test-{}", static_cast<const void*>(this));
     std::filesystem::create_directories(root_);
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     if (const char* previous = std::getenv(kVar)) {
       previous_ = previous;
     }
@@ -1720,8 +1726,10 @@ class CacheRedirect {
       setVar(*previous_);
     } else {
 #ifdef _WIN32
+      // NOLINTNEXTLINE(concurrency-mt-unsafe)
       _putenv_s(kVar, "");
 #else
+      // NOLINTNEXTLINE(concurrency-mt-unsafe)
       unsetenv(kVar);
 #endif
     }
@@ -1742,8 +1750,10 @@ class CacheRedirect {
 #endif
   static void setVar(const std::string& value) {
 #ifdef _WIN32
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     _putenv_s(kVar, value.c_str());
 #else
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     setenv(kVar, value.c_str(), 1);
 #endif
   }

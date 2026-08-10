@@ -42,7 +42,8 @@ std::string base64Encode(std::span<const uint8_t> bytes) {
 
   int written = 0;
   auto* out = reinterpret_cast<unsigned char*>(buffer.data());
-  if (EVP_EncodeUpdate(ctx.get(), out, &written, bytes.data(), bytes.size()) != 1) {
+  if (EVP_EncodeUpdate(ctx.get(), out, &written, bytes.data(), static_cast<int>(bytes.size())) !=
+      1) {
     return {};
   }
   int finalWritten = 0;

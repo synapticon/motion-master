@@ -189,6 +189,7 @@ TEST(ProcedureCatalogue, ParameterNamesAreUniqueWithinAProcedure) {
   // They are the keys of one request object, so a duplicate would make one of them unreachable.
   for (const auto& entry : procedureCatalogue()) {
     std::vector<std::string> names;
+    names.reserve(entry.descriptor.parameters.size());
     for (const auto& parameter : entry.descriptor.parameters) {
       names.push_back(parameter.name);
     }

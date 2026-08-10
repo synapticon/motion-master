@@ -648,7 +648,7 @@ EsiSlots readSlots(const pugi::xml_node& node) {
       }
       slot.moduleIdents.push_back(*ident);
       if (attrBool(m, "Default") && !slot.defaultModuleIdent) {
-        slot.defaultModuleIdent = *ident;
+        slot.defaultModuleIdent = ident;
       }
     }
     slots.slots.push_back(std::move(slot));

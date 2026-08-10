@@ -105,9 +105,9 @@ std::vector<ProgressStep> oneStep(std::string id = "work") {
 // blocking procedure body is exactly where it bites.
 class Gate {
  public:
-  void waitUntilOpen(std::stop_token stop) {
+  void waitUntilOpen(const std::stop_token& stop) {
     std::unique_lock lock(mutex_);
-    opened_.wait(lock, std::move(stop), [&] { return open_; });
+    opened_.wait(lock, stop, [&] { return open_; });
   }
   void open() {
     {
@@ -166,14 +166,15 @@ TEST(ProcedureManagerStart, RunsTheBodyAndRecordsSuccess) {
   ProcedureManager manager(bus.dm);
 
   std::atomic<uint16_t> sawPosition{0};
-  auto started = manager.start(2, "demo", oneStep(),
-                               [&sawPosition](Device& device, ProgressReporter& reporter,
-                                              std::stop_token) -> std::expected<void, std::string> {
-                                 sawPosition.store(device.slavePosition());
-                                 reporter.start("work");
-                                 reporter.succeed("work", 42);
-                                 return {};
-                               });
+  auto started =
+      manager.start(2, "demo", oneStep(),
+                    [&sawPosition](Device& device, ProgressReporter& reporter,
+                                   const std::stop_token&) -> std::expected<void, std::string> {
+                      sawPosition.store(device.slavePosition());
+                      reporter.start("work");
+                      reporter.succeed("work", 42);
+                      return {};
+                    });
   ASSERT_TRUE(started.has_value()) << started.error();
   EXPECT_EQ(awaitCompletion(manager, 2, "demo"), ProcedureStatus::kSucceeded);
   EXPECT_EQ(sawPosition.load(), 2) << "the body must receive the addressed device";
@@ -197,7 +198,7 @@ TEST(ProcedureManagerStart, RecordsAFailureReturnedOutsideAnyStep) {
   ASSERT_TRUE(manager
                   .start(1, "demo", oneStep(),
                          [](Device&, ProgressReporter&,
-                            std::stop_token) -> std::expected<void, std::string> {
+                            const std::stop_token&) -> std::expected<void, std::string> {
                            return std::unexpected("not the right kind of device");
                          })
                   .has_value());
@@ -217,7 +218,7 @@ TEST(ProcedureManagerStart, RejectsASecondRunOnABusyDevice) {
   ASSERT_TRUE(manager
                   .start(1, "slow", oneStep(),
                          [&gate](Device&, ProgressReporter&,
-                                 std::stop_token stop) -> std::expected<void, std::string> {
+                                 const std::stop_token& stop) -> std::expected<void, std::string> {
                            gate.markEntered();
                            gate.waitUntilOpen(stop);
                            return {};
@@ -230,7 +231,7 @@ TEST(ProcedureManagerStart, RejectsASecondRunOnABusyDevice) {
   auto rejected =
       manager.start(1, "other", oneStep(),
                     [](Device&, ProgressReporter&,
-                       std::stop_token) -> std::expected<void, std::string> { return {}; });
+                       const std::stop_token&) -> std::expected<void, std::string> { return {}; });
   ASSERT_FALSE(rejected.has_value());
   EXPECT_EQ(rejected.error().kind, ProcedureError::Kind::kBusy);
   EXPECT_NE(rejected.error().message.find("slow"), std::string::npos) << rejected.error();
@@ -247,7 +248,7 @@ TEST(ProcedureManagerStart, AllowsConcurrentRunsOnDifferentDevices) {
   ASSERT_TRUE(manager
                   .start(1, "slow", oneStep(),
                          [&gate](Device&, ProgressReporter&,
-                                 std::stop_token stop) -> std::expected<void, std::string> {
+                                 const std::stop_token& stop) -> std::expected<void, std::string> {
                            gate.markEntered();
                            gate.waitUntilOpen(stop);
                            return {};
@@ -260,7 +261,7 @@ TEST(ProcedureManagerStart, AllowsConcurrentRunsOnDifferentDevices) {
   auto second =
       manager.start(2, "quick", oneStep(),
                     [](Device&, ProgressReporter&,
-                       std::stop_token) -> std::expected<void, std::string> { return {}; });
+                       const std::stop_token&) -> std::expected<void, std::string> { return {}; });
   ASSERT_TRUE(second.has_value()) << second.error();
   EXPECT_EQ(awaitCompletion(manager, 2, "quick"), ProcedureStatus::kSucceeded);
 
@@ -273,12 +274,12 @@ TEST(ProcedureManagerStart, RejectsAnUnknownDeviceBeforeSpawning) {
   ProcedureManager manager(bus.dm);
 
   bool ran = false;
-  auto rejected = manager.start(
-      99, "demo", oneStep(),
-      [&ran](Device&, ProgressReporter&, std::stop_token) -> std::expected<void, std::string> {
-        ran = true;
-        return {};
-      });
+  auto rejected = manager.start(99, "demo", oneStep(),
+                                [&ran](Device&, ProgressReporter&,
+                                       const std::stop_token&) -> std::expected<void, std::string> {
+                                  ran = true;
+                                  return {};
+                                });
   ASSERT_FALSE(rejected.has_value());
   EXPECT_EQ(rejected.error().kind, ProcedureError::Kind::kUnknownDevice);
   EXPECT_FALSE(ran) << "an unknown position must fail before any thread is spawned";
@@ -289,9 +290,8 @@ TEST(ProcedureManagerStart, CountsAcceptedRunsOnly) {
   Bus bus;
   ProcedureManager manager(bus.dm);
 
-  auto body = [](Device&, ProgressReporter&, std::stop_token) -> std::expected<void, std::string> {
-    return {};
-  };
+  auto body = [](Device&, ProgressReporter&,
+                 const std::stop_token&) -> std::expected<void, std::string> { return {}; };
   for (int run = 0; run < 3; ++run) {
     ASSERT_TRUE(manager.start(1, "demo", oneStep(), body).has_value());
     ASSERT_EQ(awaitCompletion(manager, 1, "demo"), ProcedureStatus::kSucceeded);
@@ -304,7 +304,7 @@ TEST(ProcedureManagerStart, CountsAcceptedRunsOnly) {
   ASSERT_TRUE(manager
                   .start(1, "slow", oneStep(),
                          [&gate](Device&, ProgressReporter&,
-                                 std::stop_token stop) -> std::expected<void, std::string> {
+                                 const std::stop_token& stop) -> std::expected<void, std::string> {
                            gate.markEntered();
                            gate.waitUntilOpen(stop);
                            return {};
@@ -325,7 +325,7 @@ TEST(ProcedureManagerCancel, StopsARunningProcedure) {
   ASSERT_TRUE(manager
                   .start(1, "slow", oneStep(),
                          [&gate](Device&, ProgressReporter& reporter,
-                                 std::stop_token stop) -> std::expected<void, std::string> {
+                                 const std::stop_token& stop) -> std::expected<void, std::string> {
                            reporter.start("work");
                            gate.markEntered();
                            gate.waitUntilOpen(stop);
@@ -355,8 +355,8 @@ TEST(ProcedureManagerCancel, ReportsNothingToCancel) {
 
   ASSERT_TRUE(manager
                   .start(1, "demo", oneStep(),
-                         [](Device&, ProgressReporter&,
-                            std::stop_token) -> std::expected<void, std::string> { return {}; })
+                         [](Device&, ProgressReporter&, const std::stop_token&)
+                             -> std::expected<void, std::string> { return {}; })
                   .has_value());
   ASSERT_EQ(awaitCompletion(manager, 1, "demo"), ProcedureStatus::kSucceeded);
   EXPECT_FALSE(manager.cancel(1, "demo")) << "a finished run has nothing to cancel";
@@ -369,7 +369,7 @@ TEST(ProcedureManagerSnapshot, IsRetainedAfterTheRunEnds) {
   ASSERT_TRUE(manager
                   .start(1, "demo", oneStep(),
                          [](Device&, ProgressReporter& reporter,
-                            std::stop_token) -> std::expected<void, std::string> {
+                            const std::stop_token&) -> std::expected<void, std::string> {
                            reporter.succeed("work", 7);
                            return {};
                          })
@@ -389,8 +389,8 @@ TEST(ProcedureManagerSnapshot, IsDiscardedWhenTheDeviceSetIsRebuilt) {
 
   ASSERT_TRUE(manager
                   .start(1, "demo", oneStep(),
-                         [](Device&, ProgressReporter&,
-                            std::stop_token) -> std::expected<void, std::string> { return {}; })
+                         [](Device&, ProgressReporter&, const std::stop_token&)
+                             -> std::expected<void, std::string> { return {}; })
                   .has_value());
   ASSERT_EQ(awaitCompletion(manager, 1, "demo"), ProcedureStatus::kSucceeded);
   ASSERT_TRUE(manager.snapshot(1, "demo").has_value());
@@ -412,7 +412,7 @@ TEST(ProcedureManagerDestruction, CancelsAndJoinsRunningProcedures) {
     ASSERT_TRUE(manager
                     .start(1, "slow", oneStep(),
                            [&](Device&, ProgressReporter&,
-                               std::stop_token stop) -> std::expected<void, std::string> {
+                               const std::stop_token& stop) -> std::expected<void, std::string> {
                              gate.markEntered();
                              gate.waitUntilOpen(stop);
                              observedStop.store(stop.stop_requested());
@@ -441,7 +441,7 @@ TEST(ProcedureManagerBusBody, CanChangeAlStateWithoutDeadlocking) {
   auto started = manager.start(
       1, "flash", oneStep(),
       [&transitioned](DeviceManager& deviceManager, uint16_t position, ProgressReporter& reporter,
-                      std::stop_token) -> std::expected<void, std::string> {
+                      const std::stop_token&) -> std::expected<void, std::string> {
         reporter.start("work");
         // Borrow for one step, then let go before changing state — the pattern a firmware install
         // follows around each FoE write.
@@ -468,14 +468,15 @@ TEST(ProcedureManagerBusBody, ReceivesTheAddressedPosition) {
   ProcedureManager manager(bus.dm);
 
   std::atomic<uint16_t> sawPosition{0};
-  ASSERT_TRUE(manager
-                  .start(2, "flash", oneStep(),
-                         [&sawPosition](DeviceManager&, uint16_t position, ProgressReporter&,
-                                        std::stop_token) -> std::expected<void, std::string> {
-                           sawPosition.store(position);
-                           return {};
-                         })
-                  .has_value());
+  ASSERT_TRUE(
+      manager
+          .start(2, "flash", oneStep(),
+                 [&sawPosition](DeviceManager&, uint16_t position, ProgressReporter&,
+                                const std::stop_token&) -> std::expected<void, std::string> {
+                   sawPosition.store(position);
+                   return {};
+                 })
+          .has_value());
   EXPECT_EQ(awaitCompletion(manager, 2, "flash"), ProcedureStatus::kSucceeded);
   EXPECT_EQ(sawPosition.load(), 2);
 }
@@ -493,7 +494,7 @@ TEST(ProcedureManagerBusBody, SurvivesARescanWhileRunningAndIsCollectedAfterward
   ASSERT_TRUE(manager
                   .start(1, "flash", oneStep(),
                          [&](DeviceManager&, uint16_t, ProgressReporter&,
-                             std::stop_token stop) -> std::expected<void, std::string> {
+                             const std::stop_token& stop) -> std::expected<void, std::string> {
                            gate.markEntered();
                            gate.waitUntilOpen(stop);
                            finished.store(true);

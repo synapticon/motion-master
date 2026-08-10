@@ -38,8 +38,8 @@ constexpr uint32_t kCommandComplete = 1;
 // one settle or interval rather than at the end of the whole budget.
 std::expected<void, std::string> runSignatureConfirmCommand(
     Device& device, uint16_t index, uint8_t subindex, uint32_t signature, uint32_t retries,
-    std::chrono::milliseconds interval, std::chrono::milliseconds settle, std::stop_token stop,
-    std::string_view label) {
+    std::chrono::milliseconds interval, std::chrono::milliseconds settle,
+    const std::stop_token& stop, std::string_view label) {
   const auto cancelled = [label]() {
     return std::unexpected(std::format(
         "{} was cancelled while waiting for the device to confirm it — the command was already "

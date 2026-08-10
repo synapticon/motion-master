@@ -302,7 +302,7 @@ TEST(MonitoringManagerTest, FlushPublishesEveryRecordedCycleAsPositionalRows) {
 
   MonitoringManager manager(dm);
   std::vector<nlohmann::json> published;
-  manager.setPublish([&](std::string /*topic*/, std::string json) {
+  manager.setPublish([&](const std::string& /*topic*/, const std::string& json) {
     published.push_back(nlohmann::json::parse(json));
   });
   ASSERT_TRUE(manager.create(axisConfig()).has_value());
@@ -343,8 +343,9 @@ TEST(MonitoringManagerTest, RemapResyncsCursorPastHeadInsteadOfUnderflowing) {
 
   MonitoringManager manager(dm);
   std::vector<nlohmann::json> published;
-  manager.setPublish(
-      [&](std::string, std::string json) { published.push_back(nlohmann::json::parse(json)); });
+  manager.setPublish([&](const std::string&, const std::string& json) {
+    published.push_back(nlohmann::json::parse(json));
+  });
   ASSERT_TRUE(manager.create(axisConfig()).has_value());
 
   manager.sampleAll();  // prime the cursor at the current head
@@ -372,8 +373,9 @@ TEST(MonitoringManagerTest, NonExchangingDeviceSamplesNull) {
 
   MonitoringManager manager(dm);
   std::vector<nlohmann::json> published;
-  manager.setPublish(
-      [&](std::string, std::string json) { published.push_back(nlohmann::json::parse(json)); });
+  manager.setPublish([&](const std::string&, const std::string& json) {
+    published.push_back(nlohmann::json::parse(json));
+  });
   ASSERT_TRUE(manager.create(axisConfig()).has_value());
 
   manager.sampleAll();  // prime the cursor
@@ -405,8 +407,9 @@ TEST(MonitoringManagerTest, SchedulerThreadSamplesAndPublishes) {
   setUp(dm);
   MonitoringManager manager(dm);
   std::atomic<int> publishCount{0};
-  manager.setPublish(
-      [&](std::string, std::string) { publishCount.fetch_add(1, std::memory_order_relaxed); });
+  manager.setPublish([&](const std::string&, const std::string&) {
+    publishCount.fetch_add(1, std::memory_order_relaxed);
+  });
 
   Monitoring m = axisConfig();
   m.interval = std::chrono::milliseconds{16};  // ~one batch per 60 Hz display frame

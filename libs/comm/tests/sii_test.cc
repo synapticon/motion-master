@@ -214,8 +214,9 @@ TEST(SiiValidateTest, RejectsATruncatedCategorySection) {
 TEST(SiiValidateTest, RejectsACategoryClaimingMoreWordsThanTheImageHolds) {
   std::vector<uint8_t> image(kIntegroSii.begin(), kIntegroSii.end());
   // Word 0x41 is the size of the first category (STRINGS); inflate it past the image.
-  image[0x41 * 2] = 0xFF;
-  image[0x41 * 2 + 1] = 0x00;
+  constexpr size_t kFirstCategorySizeWord = 0x41;
+  image[kFirstCategorySizeWord * 2] = 0xFF;
+  image[kFirstCategorySizeWord * 2 + 1] = 0x00;
   auto result = validateSiiImage(image);
   ASSERT_FALSE(result);
   EXPECT_NE(result.error().find("runs past"), std::string::npos) << result.error();

@@ -34,7 +34,7 @@ TEST(ProcessDataRingTest, UnallocatedIsInert) {
 
 TEST(ProcessDataRingTest, WriteThenReadRoundTrips) {
   ProcessDataRing ring;
-  ring.allocate(/*inputCap=*/6, /*outputCap=*/4, /*capacity=*/8);
+  ring.allocate(/*inputCap=*/6, /*outputCap=*/4, /*capacityCycles=*/8);
   ASSERT_TRUE(ring.allocated());
   EXPECT_EQ(ring.capacity(), 8u);
 
@@ -106,7 +106,7 @@ TEST(ProcessDataRingTest, ReallocateRestartsRecording) {
 
 TEST(ProcessDataRingTest, ClampsOversizedPayload) {
   ProcessDataRing ring;
-  ring.allocate(/*inputCap=*/2, /*outputCap=*/2, /*capacity=*/2);
+  ring.allocate(/*inputCap=*/2, /*outputCap=*/2, /*capacityCycles=*/2);
   // Pass more bytes than the per-direction capacity — must be clamped, not overflow.
   ring.write(1, 3, std::vector<uint8_t>{1, 2, 3, 4, 5}, std::vector<uint8_t>{6, 7, 8});
   ProcessDataRing::Record rec;
@@ -121,7 +121,7 @@ TEST(ProcessDataRingTest, ClampsOversizedPayload) {
 // newest record. The reader must never observe a torn record (a value inconsistent with its seq).
 TEST(ProcessDataRingTest, ConcurrentWriterAndReaderNeverTears) {
   ProcessDataRing ring;
-  ring.allocate(/*inputCap=*/8, /*outputCap=*/8, /*capacity=*/64);
+  ring.allocate(/*inputCap=*/8, /*outputCap=*/8, /*capacityCycles=*/64);
 
   std::atomic<bool> stop{false};
   constexpr uint64_t kWrites = 200'000;

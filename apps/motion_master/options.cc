@@ -17,6 +17,10 @@
 #include "core/platform.h"
 #include "core/version.h"
 
+// Every std::exit below carries a NOLINT for concurrency-mt-unsafe. The call is unsafe only
+// against other threads running during teardown, and this function runs before main starts any:
+// it is the argument parser, and each exit is the CLI refusing to start (a parse error,
+// --list-adapters, an unreadable config).
 Options parseOptions(int argc, char** argv) {
   Options opts;
   opts.certUrl = mm::defaultCertUrl();
@@ -49,6 +53,7 @@ Options parseOptions(int argc, char** argv) {
   try {
     app.parse(argc, argv);
   } catch (const CLI::ParseError& e) {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     std::exit(app.exit(e));
   }
 
@@ -56,6 +61,7 @@ Options parseOptions(int argc, char** argv) {
     for (const auto& adapter : mm::comm::enumerateNetworkAdapters()) {
       std::cout << adapter.macLinux << "  " << adapter.name << "\n";
     }
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     std::exit(0);
   }
 
@@ -82,11 +88,13 @@ Options parseOptions(int argc, char** argv) {
         nlohmann::json::parse(f, nullptr, /*allow_exceptions=*/false, /*ignore_comments=*/true);
     if (doc.is_discarded()) {
       spdlog::error("Failed to parse config file: {}", configPath);
+      // NOLINTNEXTLINE(concurrency-mt-unsafe)
       std::exit(1);
     }
     auto parsed = parseConfig(doc);
     if (!parsed) {
       spdlog::error("Config error in {}: {}", configPath, parsed.error());
+      // NOLINTNEXTLINE(concurrency-mt-unsafe)
       std::exit(1);
     }
     opts.config = std::move(*parsed);

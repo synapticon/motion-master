@@ -142,9 +142,7 @@ class Cia402FakeDriver : public FieldbusDriver {
     } else if ((cmd & 0x000F) == 0x0006) {  // shutdown
       machineState = State::kReadyToSwitchOn;
     } else if ((cmd & 0x000F) == 0x0007) {  // switch on / disable operation
-      if (machineState == State::kOperationEnabled) {
-        machineState = State::kSwitchedOn;
-      } else if (machineState == State::kReadyToSwitchOn) {
+      if (machineState == State::kOperationEnabled || machineState == State::kReadyToSwitchOn) {
         machineState = State::kSwitchedOn;
       }
     } else if ((cmd & 0x000F) == 0x000F) {  // enable operation

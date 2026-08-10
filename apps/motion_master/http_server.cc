@@ -114,9 +114,8 @@ std::expected<std::vector<uint16_t>, std::string> parsePositions(const mm::api::
   for (const auto part : std::views::split(std::string_view(*raw), ',')) {
     const std::string_view token(part);
     uint16_t position{};
-    const char* end = token.data() + token.size();
-    auto [ptr, ec] = std::from_chars(token.data(), end, position);
-    if (ec != std::errc() || ptr != end) {
+    auto [ptr, ec] = std::from_chars(token.data(), token.data() + token.size(), position);
+    if (ec != std::errc() || ptr != token.data() + token.size()) {
       return std::unexpected("'positions' must be a comma-separated list of numbers, e.g. 1,2");
     }
     positions.push_back(position);
@@ -830,7 +829,7 @@ void HttpServer::run() {
         if (!deviceManager_.hasDevice(*position)) {
           return mm::api::notFound("no device at that bus position");
         }
-        const auto timeout = std::chrono::nanoseconds(static_cast<int64_t>(timeoutMs * 1e6 + 0.5));
+        const auto timeout = std::chrono::nanoseconds(std::llround(timeoutMs * 1e6));
         return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
           auto r = deviceManager_.setProcessDataWatchdog(*position, timeout);
           if (!r) {
@@ -1337,41 +1336,41 @@ void HttpServer::run() {
                });
              });
 
-  router.put("/api/devices/:slavePosition/parameters/:index/:subindex",
-             [this](const mm::api::Request& req) -> mm::api::Response {
-               auto position = req.parameterAs<uint16_t>("slavePosition");
-               auto index = req.parameterAs<uint16_t>("index");
-               auto subindex = req.parameterAs<uint8_t>("subindex");
-               if (!position || !index || !subindex) {
-                 return mm::api::badRequest("slavePosition, index and subindex must be numbers");
-               }
-               const auto body = nlohmann::json::parse(req.body(), nullptr, false);
-               if (body.is_discarded() || !body.contains("value")) {
-                 return mm::api::badRequest(R"(body must be {"value": <value>})");
-               }
-               auto value = parseParameterValue(body["value"]);
-               if (!value) {
-                 return mm::api::badRequest(value.error());
-               }
-               // Smart write: PDO-staged when the object is output-mapped and exchanging, else SDO,
-               // else held in the cache (offline). Coercion to the declared type happens in
-               // DeviceParameter::setValue. The echo below is memory-only, so timing the whole
-               // lambda still reports the write's wire cost.
-               return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
-                 if (auto w = deviceManager_.writeDeviceParameter(*position, *index, *subindex,
-                                                                  std::move(*value));
-                     !w) {
-                   return std::unexpected(w.error());
-                 }
-                 // Echo the updated parameter from the cache so the client gets the coerced value
-                 // and the resulting syncState in the same round trip.
-                 auto r = deviceManager_.deviceParameterView(*position, *index, *subindex, false);
-                 if (!r) {
-                   return nlohmann::json{{"ok", true}};
-                 }
-                 return nlohmann::json(*r);
-               });
-             });
+  router.put(
+      "/api/devices/:slavePosition/parameters/:index/:subindex",
+      [this](const mm::api::Request& req) -> mm::api::Response {
+        auto position = req.parameterAs<uint16_t>("slavePosition");
+        auto index = req.parameterAs<uint16_t>("index");
+        auto subindex = req.parameterAs<uint8_t>("subindex");
+        if (!position || !index || !subindex) {
+          return mm::api::badRequest("slavePosition, index and subindex must be numbers");
+        }
+        const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+        if (body.is_discarded() || !body.contains("value")) {
+          return mm::api::badRequest(R"(body must be {"value": <value>})");
+        }
+        auto value = parseParameterValue(body["value"]);
+        if (!value) {
+          return mm::api::badRequest(value.error());
+        }
+        // Smart write: PDO-staged when the object is output-mapped and exchanging, else SDO,
+        // else held in the cache (offline). Coercion to the declared type happens in
+        // DeviceParameter::setValue. The echo below is memory-only, so timing the whole
+        // lambda still reports the write's wire cost.
+        return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+          if (auto w = deviceManager_.writeDeviceParameter(*position, *index, *subindex, *value);
+              !w) {
+            return std::unexpected(w.error());
+          }
+          // Echo the updated parameter from the cache so the client gets the coerced value
+          // and the resulting syncState in the same round trip.
+          auto r = deviceManager_.deviceParameterView(*position, *index, *subindex, false);
+          if (!r) {
+            return nlohmann::json{{"ok", true}};
+          }
+          return nlohmann::json(*r);
+        });
+      });
 
   router.get("/api/meta/object-data-types", [](const mm::api::Request&) {
     return mm::api::json(nlohmann::json(mm::comm::kObjectDataTypes));

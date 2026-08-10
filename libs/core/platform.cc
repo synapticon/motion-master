@@ -10,8 +10,7 @@
 #include <sys/file.h>  // flock
 #include <unistd.h>    // close
 
-#include <cerrno>   // errno
-#include <cstring>  // strerror
+#include <cerrno>  // errno
 #ifdef __APPLE__
 #include <mach-o/dyld.h>  // _NSGetExecutablePath — macOS has no /proc/self/exe
 
@@ -50,6 +49,10 @@ namespace {
 /// The value of an environment variable, or nullopt when it is unset *or* empty — an empty value is
 /// as unusable as an absent one for a path root, and both must fall through to the next candidate.
 std::optional<std::string> envVar(const char* name) {
+  // getenv races only a concurrent setenv/putenv, and the shipped binary calls neither. (The one
+  // caller that does is a test fixture, which sets the variable on the gtest main thread before
+  // starting anything.) std::getenv is the only portable reader; secure_getenv is glibc-only.
+  // NOLINTNEXTLINE(concurrency-mt-unsafe)
   const char* v = std::getenv(name);
   if (v == nullptr || *v == '\0') {
     return std::nullopt;
@@ -79,6 +82,8 @@ std::filesystem::path userCacheDir() {
   std::error_code ec;
   return std::filesystem::temp_directory_path(ec) / "motion-master";
 }
+
+std::string errnoMessage(int err) { return std::system_category().message(err); }
 
 void openInBrowser(const std::string& url) {
 #ifdef _WIN32
@@ -138,7 +143,7 @@ std::expected<SingleInstanceLock, std::string> acquireSingleInstanceLock() {
   // simply re-locked next run, so there is no unlink race. O_CLOEXEC keeps it out of any child.
   const int fd = ::open(path.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0644);
   if (fd < 0) {
-    return std::unexpected("cannot open lock file " + path.string() + ": " + std::strerror(errno));
+    return std::unexpected("cannot open lock file " + path.string() + ": " + errnoMessage(errno));
   }
   if (::flock(fd, LOCK_EX | LOCK_NB) != 0) {
     const int err = errno;
@@ -147,7 +152,7 @@ std::expected<SingleInstanceLock, std::string> acquireSingleInstanceLock() {
       return std::unexpected("another Motion Master instance is already running (lock held on " +
                              path.string() + ")");
     }
-    return std::unexpected("cannot lock " + path.string() + ": " + std::strerror(err));
+    return std::unexpected("cannot lock " + path.string() + ": " + errnoMessage(err));
   }
   return SingleInstanceLock{static_cast<std::intptr_t>(fd)};
 #endif

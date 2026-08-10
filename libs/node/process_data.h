@@ -57,9 +57,15 @@ struct ProcessData {
   // RT-thread scratch for the exchange (touched only on the RT thread).
   ProcessBuffer outScratch;
   ProcessBuffer inScratch;
-  // Set by the RT thread while it is inside a driver exchange; lets stopExchange() drain an
-  // in-flight cycle before a re-map or teardown mutates the IOmap.
-  std::atomic<bool> exchanging{false};
+  // How deep the RT thread currently is inside work that reads the device set or the IOmap; lets
+  // stopExchange() drain an in-flight cycle before a re-map or teardown mutates either.
+  //
+  // A depth counter rather than a flag because it is raised at two nesting levels: by
+  // DeviceManager::CycleLock around a whole cyclic task body (which resolves devices and parameters
+  // of its own, so it must not run while the device vector is being rebuilt) and by
+  // exchangeProcessData around the exchange itself, which stays self-contained for callers that
+  // invoke it directly. Only the RT thread raises it, so the count is small and bounded by nesting.
+  std::atomic<int> inCycle{0};
   // Working-counter health. lastWkc is written by the RT thread each cycle; expectedWkc is
   // recomputed by the control plane from current device states. healthy = last >= expected.
   std::atomic<int> lastWkc{0};

@@ -16,7 +16,18 @@ class ProcessDataCyclicTask : public CyclicTask {
 
   // Exchanges the freshest process data; ignores the timing context — skipped
   // cycles just mean fewer exchanges, which is correct (never a catch-up burst).
-  void execute(const CycleContext&) override { deviceManager_.exchangeProcessData(); }
+  //
+  // exchangeProcessData is self-gating (it takes the same lock internally), so the CycleLock here
+  // buys nothing for this task in particular. It is written anyway because this file is the
+  // template a Tier-3 author copies, and every task that resolves a device of its own needs it —
+  // the nesting is exactly what the depth counter behind it is for.
+  void execute(const CycleContext&) override {
+    const mm::node::DeviceManager::CycleLock cycle(deviceManager_);
+    if (!cycle) {
+      return;  // no image published — the bus is not activated, or is being reconfigured
+    }
+    deviceManager_.exchangeProcessData();
+  }
 
  private:
   mm::node::DeviceManager& deviceManager_;

@@ -304,6 +304,73 @@ class DeviceManager {
     return std::forward<Fn>(fn)(*device);
   }
 
+  /// @brief Holds a cyclic task's whole body open against a device-set rebuild. RT-safe.
+  ///
+  /// A cyclic task resolves its own devices and parameters (@c findDevice / @c
+  /// Device::findParameter) rather than being handed them, so it must not run while @c scan or
+  /// @c reset is destroying the device vector it walks. Construct one at the top of @c
+  /// CyclicTask::execute and do nothing when it is falsy:
+  ///
+  /// @code
+  /// void execute(const CycleContext&) override {
+  ///   const DeviceManager::CycleLock cycle(deviceManager_);
+  ///   if (!cycle) { return; }   // bus not activated, or being reconfigured — skip this cycle
+  ///   Device* drive = deviceManager_.findDevice(3);
+  ///   if (drive == nullptr) { return; }   // not on the bus — skip
+  ///   ...
+  /// }
+  /// @endcode
+  ///
+  /// **It is the published process image that decides.** Falsy means no image is published, which
+  /// is the bus's "not activated" state — the same two-phase model every EtherCAT stack uses
+  /// (configure, then activate; reconfiguring means deactivating first). Every control-plane
+  /// operation that rebuilds the device set already unpublishes the image and then drains via
+  /// @c stopExchange, so a lock taken after the unpublish fails and one taken before is waited out.
+  /// The RT thread never blocks: it runs no tasks for those cycles, which is what the bus is doing
+  /// anyway.
+  ///
+  /// Never blocks, never allocates: one atomic increment and one atomic load.
+  ///
+  /// @warning Holding one across a control-plane call (@c scan, @c reset, @c transitionToState)
+  ///          deadlocks that call against its own drain. A cyclic task does none of those.
+  class CycleLock {
+   public:
+    /// @brief Takes the lock. Falsy if the bus is not activated — run no device work.
+    explicit CycleLock(DeviceManager& deviceManager);
+    /// @brief Releases the lock, if it was taken.
+    ~CycleLock();
+
+    CycleLock(const CycleLock&) = delete;
+    CycleLock& operator=(const CycleLock&) = delete;
+
+    /// @brief Whether the lock was taken and device access is safe this cycle.
+    explicit operator bool() const { return held_; }
+
+   private:
+    ProcessData* processData_;
+    bool held_;
+  };
+
+  /// @brief Device lookup by bus position. O(N) over a handful of devices; @c nullptr if absent.
+  ///
+  /// Takes no lock, which is what makes it callable from a cyclic task. @c withDevice is the
+  /// counterpart for the control plane, where an operation must hold its device across seconds of
+  /// bus traffic.
+  ///
+  /// **Lifetime.** The returned pointer — and any @c DeviceParameter* obtained through it — is
+  /// valid only until the next @c scan() or @c reset(), which destroy every @c Device. A cyclic
+  /// task must therefore re-resolve each cycle inside a @c CycleLock and never cache a @c Device*
+  /// across cycles; a control-plane caller uses @c withDevice, which holds @c deviceSetMutex_ for
+  /// the borrow's whole duration.
+  ///
+  /// **Position is not identity.** Inserting a device into the chain shifts every position after
+  /// it, so a task pinned to position 4 can silently find different hardware there after a rescan.
+  /// Capture @c topologyGeneration() when binding and abandon the work when it changes.
+  Device* findDevice(uint16_t slavePosition);
+
+  /// @brief Const overload of @c findDevice. Same contract.
+  const Device* findDevice(uint16_t slavePosition) const;
+
   /// @brief Monotonic counter bumped every time the device set is rebuilt (@c scan / @c reset).
   ///
   /// An off-thread consumer that pinned work to a device position records this value and
@@ -703,22 +770,6 @@ class DeviceManager {
   bool deviceExchangesProcessData(uint16_t slavePosition) const;
 
  private:
-  /// @brief Finds a device by its 1-based bus position. O(N); @c nullptr if not found.
-  ///
-  /// Private, and that is the point: the returned pointer is only valid while @c deviceSetMutex_
-  /// is held, because @c scan / @c reset destroy every @c Device. There is no way to express that
-  /// obligation in the signature, so the pointer never leaves the class — external callers borrow
-  /// through @c withDevice / @c withDevices, which hold the lock for the borrow's whole duration,
-  /// or use the position-based methods, which take it themselves.
-  ///
-  /// **Every caller must already hold @c deviceSetMutex_** (shared is enough) **or
-  /// @c busOperationMutex_** — the latter suffices on its own, since only an operation holding it
-  /// can rebuild the device set.
-  const Device* findDevice(uint16_t slavePosition) const;
-
-  /// @brief Mutable overload of @c findDevice. Same contract.
-  Device* findDevice(uint16_t slavePosition);
-
   /// @brief Rows written and the @c [startSeq, endSeq) sequence span of a serialised dump.
   struct DumpSpan {
     uint64_t rows = 0;

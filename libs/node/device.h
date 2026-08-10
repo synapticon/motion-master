@@ -563,18 +563,26 @@ class Device {
     return readValue<T>(index, subindex);  // never read: fetch once — readValue marks it Synced.
   }
 
- private:
-  /// @brief Parameter lookup by @c (index, subindex). O(1); @c nullptr if absent.
+  /// @brief Parameter lookup by @c (index, subindex). O(1); @c nullptr if absent. Takes no lock.
   ///
-  /// The raw-pointer form, private because a pointer into @c parameters_ is only valid while
-  /// @c parametersMutex_ is held and only until the next @c initializeParameters. **Every caller
-  /// must already hold the lock**, and must not carry the pointer across a release of it. The
-  /// public counterpart is @c parameter, which locks and copies.
+  /// The pointer form, for a caller that works with an entry rather than a copy of it — a cyclic
+  /// task resolves its signals this way each cycle. @c parameter is the copying counterpart for a
+  /// one-off read.
+  ///
+  /// **Lifetime.** The returned pointer is invalidated by @c initializeParameters, which replaces
+  /// the whole map, and by @c DeviceManager::scan / @c reset, which destroy the @c Device. Never
+  /// carry one across cycles or across a release of @c parametersMutex_: re-resolve where you use
+  /// it. A cyclic task does its lookups inside a @c DeviceManager::CycleLock, which is what keeps
+  /// the device (and therefore its map) alive for the body of the cycle.
+  ///
+  /// **Locking.** A control-plane caller must hold @c parametersMutex_ for the lookup *and* for any
+  /// access to @c value / @c syncState, which the refresher and the control plane both write.
   DeviceParameter* findParameter(uint16_t index, uint8_t subindex);
 
-  /// @brief Const overload of @c findParameter. Same contract: caller holds @c parametersMutex_.
+  /// @brief Const overload of @c findParameter. Same contract.
   const DeviceParameter* findParameter(uint16_t index, uint8_t subindex) const;
 
+ private:
   /// @brief Fills in live values on @p defs (the value-read pass of @c initializeParameters).
   ///
   /// Reads each object over CoE and stores the decoded value on its entries. When

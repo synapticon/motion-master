@@ -348,10 +348,10 @@ void DeviceManager::exchangeProcessData() {
   // seq_cst prevents). The total order then guarantees that for any concurrent teardown either
   // we observe the null image and back out here, or stopExchange() observes the flag and drains
   // us — never both missing each other and letting us touch a half-remapped IOmap.
-  pd_->exchanging.store(true, std::memory_order_seq_cst);
+  pd_->inCycle.fetch_add(1, std::memory_order_seq_cst);
   const ProcessImage* image = pd_->image.load(std::memory_order_seq_cst);
   if (image == nullptr) {
-    pd_->exchanging.store(false, std::memory_order_release);
+    pd_->inCycle.fetch_sub(1, std::memory_order_release);
     return;  // not mapped yet, or torn down mid-flight — back out without touching the IOmap
   }
   // Compose the output image from the per-object staging slots — this RT thread is the sole writer
@@ -394,31 +394,56 @@ void DeviceManager::exchangeProcessData() {
   pd_->ring.write(timestampNs, wkc,
                   std::span<const uint8_t>(pd_->inScratch.bytes.data(), image->inputBytes),
                   std::span<const uint8_t>(pd_->outScratch.bytes.data(), outputBytes));
-  pd_->exchanging.store(false, std::memory_order_release);
+  pd_->inCycle.fetch_sub(1, std::memory_order_release);
+}
+
+DeviceManager::CycleLock::CycleLock(DeviceManager& deviceManager)
+    : processData_(deviceManager.pd_.get()), held_(false) {
+  // The same handshake exchangeProcessData uses, one level up so it covers the task's own device
+  // and parameter lookups: raise the depth BEFORE loading the image, then load it. Both are
+  // sequentially consistent so they cannot be reordered against stopExchange()'s image-store /
+  // depth-load (a StoreLoad pair only seq_cst prevents). The resulting total order guarantees that
+  // for any concurrent rebuild either we observe the null image and take nothing, or stopExchange
+  // observes our depth and waits us out — never both missing each other.
+  processData_->inCycle.fetch_add(1, std::memory_order_seq_cst);
+  if (processData_->image.load(std::memory_order_seq_cst) == nullptr) {
+    processData_->inCycle.fetch_sub(1, std::memory_order_release);
+    return;
+  }
+  held_ = true;
+}
+
+DeviceManager::CycleLock::~CycleLock() {
+  if (held_) {
+    processData_->inCycle.fetch_sub(1, std::memory_order_release);
+  }
 }
 
 void DeviceManager::stopExchange() {
   pd_->image.store(nullptr, std::memory_order_seq_cst);
-  // Drain an in-flight exchange cycle. Both operations here are sequentially consistent so they
-  // pair with exchangeProcessData()'s seq_cst flag-store / image-load: once we have stored the
-  // null image, any RT cycle that has already raised the flag is visible to this load, and any
-  // RT cycle that has not yet raised it will observe the null image and back out. We therefore
-  // only wait out the at-most-one cycle already in flight. Bounded so a stalled/absent RT loop
-  // can never hang a control-plane call.
+  // Drain whatever the RT thread has in flight — the exchange itself, and any cyclic task body
+  // holding a CycleLock (which resolves devices and parameters of its own, so it must be out before
+  // scan/reset destroy them). Both operations here are sequentially consistent so they pair with
+  // each raiser's seq_cst depth-increment / image-load: once we have stored the null image, any RT
+  // cycle that has already raised the depth is visible to this load, and any that has not yet
+  // raised it will observe the null image and back out. We therefore only wait out the at-most-one
+  // cycle already in flight. Bounded so a stalled/absent RT loop can never hang a control-plane
+  // call.
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
-  while (pd_->exchanging.load(std::memory_order_seq_cst) &&
+  while (pd_->inCycle.load(std::memory_order_seq_cst) != 0 &&
          std::chrono::steady_clock::now() < deadline) {
     std::this_thread::yield();
   }
   // Giving up is not free, and the caller proceeds regardless: it is about to free the recorder
-  // ring and rewrite the IOmap that an RT cycle still inside exchangeProcessData is reading. That
-  // is the accepted price of never hanging a control-plane call on a stalled RT loop — but it must
-  // not be silent, or the memory corruption it can cause arrives with nothing to explain it. An RT
-  // thread preempted for a fifth of a second is itself the diagnosis worth reporting.
-  if (pd_->exchanging.load(std::memory_order_seq_cst)) {
+  // ring and rewrite the IOmap that an RT cycle still inside exchangeProcessData is reading — or,
+  // for scan/reset, destroy the very devices a cyclic task still inside its CycleLock is reading.
+  // That is the accepted price of never hanging a control-plane call on a stalled RT loop — but it
+  // must not be silent, or the memory corruption it can cause arrives with nothing to explain it.
+  // An RT thread preempted for a fifth of a second is itself the diagnosis worth reporting.
+  if (pd_->inCycle.load(std::memory_order_seq_cst) != 0) {
     spdlog::warn(
-        "Process-data exchange did not drain within 200 ms — proceeding anyway. The RT loop is "
-        "stalled or descheduled; a re-map or teardown now races the cycle still in flight.");
+        "RT cycle did not drain within 200 ms — proceeding anyway. The RT loop is stalled or "
+        "descheduled; a re-map, teardown or rescan now races the cycle still in flight.");
   }
 }
 

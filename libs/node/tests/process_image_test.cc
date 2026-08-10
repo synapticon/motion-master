@@ -464,6 +464,60 @@ TEST(DeviceManagerProcessData, WriteStagesOutputAndReadPullsInput) {
   EXPECT_EQ(std::get<uint16_t>(*dm.value(1, 0x6041, 0x00)), 0x0237);
 }
 
+// --- CycleLock ---------------------------------------------------------------
+
+// A cyclic task must do nothing before the bus is activated: no image is published, so there is
+// nothing to exchange and — more to the point — no promise that the device set is stable.
+TEST(CycleLock, IsFalsyBeforeAnImageIsPublished) {
+  DeviceManager dm;
+  {
+    const DeviceManager::CycleLock cycle(dm);  // no driver at all
+    EXPECT_FALSE(static_cast<bool>(cycle));
+  }
+  auto bus = makeCia402Bus();
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  const DeviceManager::CycleLock cycle(dm);  // scanned, but not yet mapped
+  EXPECT_FALSE(static_cast<bool>(cycle));
+}
+
+TEST(CycleLock, IsTruthyOnceTheBusIsActivatedAndDevicesResolve) {
+  auto bus = makeCia402Bus();
+  bus->wkc = 3;
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+
+  const DeviceManager::CycleLock cycle(dm);
+  ASSERT_TRUE(static_cast<bool>(cycle));
+  // What the lock is for: resolving a device, and a parameter on it, without taking a lock.
+  Device* device = dm.findDevice(1);
+  ASSERT_NE(device, nullptr);
+  EXPECT_NE(device->findParameter(0x6041, 0x00), nullptr);
+  EXPECT_EQ(device->findParameter(0x9999, 0x00), nullptr);
+  EXPECT_EQ(dm.findDevice(2), nullptr);  // absent device — a task simply does nothing
+}
+
+// reset() tears the image down, so the next cycle's lock fails and the task stops touching devices
+// before they are destroyed. This is the ordering scan()/reset() rely on.
+TEST(CycleLock, GoesFalsyAgainWhenTheImageIsTornDown) {
+  auto bus = makeCia402Bus();
+  bus->wkc = 3;
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  ASSERT_TRUE(static_cast<bool>(DeviceManager::CycleLock(dm)));
+
+  dm.reset();
+  const DeviceManager::CycleLock cycle(dm);
+  EXPECT_FALSE(static_cast<bool>(cycle));
+  EXPECT_EQ(dm.findDevice(1), nullptr);
+}
+
 TEST(DeviceManagerProcessData, IndependentOutputSlotsComposeIntoOneImage) {
   auto bus = makeCia402Bus();
   bus->wkc = 3;

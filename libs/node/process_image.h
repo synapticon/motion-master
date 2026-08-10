@@ -70,9 +70,29 @@ struct ProcessImage {
 /// @brief Extracts @p bitLength bits at @p bitOffset from @p src into a fresh LSB-aligned
 ///        little-endian byte vector (@c ceil(bitLength/8) bytes), as the SDO encoding would.
 ///
-/// Byte-aligned extents are a plain copy; sub-byte extents are assembled bit by bit.
+/// Byte-aligned extents are a plain copy; sub-byte extents are assembled bit by bit. Allocates —
+/// use the @p out overload on any path that must not.
 std::vector<uint8_t> extractBits(std::span<const uint8_t> src, uint32_t bitOffset,
                                  uint16_t bitLength);
+
+/// @brief Extracts @p bitLength bits at @p bitOffset from @p src into the caller's @p out buffer.
+///
+/// The non-allocating form of @c extractBits, and the primitive the vector-returning overload is
+/// written over — the RT decode loop runs this once per mapped object per cycle into a stack
+/// buffer, where a heap allocation is not permitted.
+///
+/// @p out is **zeroed in full** before anything is written, so a buffer wider than the value (the
+/// expected case: an 8-byte scratch for a 2-byte object) is left with defined zero padding rather
+/// than the caller's stale bytes. At most @c ceil(bitLength/8) bytes are then written, clamped to
+/// @c out.size(): an @p out too small to hold the value is filled as far as it goes rather than
+/// overrun, matching how a @p src too short to supply the bits leaves the remainder zero.
+///
+/// @param src        Source image bytes.
+/// @param bitOffset  Absolute bit offset within @p src.
+/// @param bitLength  Width of the value in bits.
+/// @param out        Destination buffer; zeroed, then filled LSB-aligned little-endian.
+void extractBits(std::span<const uint8_t> src, uint32_t bitOffset, uint16_t bitLength,
+                 std::span<uint8_t> out);
 
 /// @brief Inserts @p bitLength bits of @p value (LSB-first) into @p dst at @p bitOffset.
 ///

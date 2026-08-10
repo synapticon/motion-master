@@ -117,25 +117,35 @@ std::optional<ProcessImage::Location> ProcessImage::find(uint16_t slavePosition,
   return std::nullopt;
 }
 
-std::vector<uint8_t> extractBits(std::span<const uint8_t> src, uint32_t bitOffset,
-                                 uint16_t bitLength) {
-  std::vector<uint8_t> out((bitLength + 7u) / 8u, 0u);
+void extractBits(std::span<const uint8_t> src, uint32_t bitOffset, uint16_t bitLength,
+                 std::span<uint8_t> out) {
+  // Zero the whole buffer, not just the value's width: out is routinely wider than the value (an
+  // 8-byte scratch for a 2-byte object), and the caller packs all of it, so the padding has to be
+  // defined rather than whatever was on the stack.
+  std::ranges::fill(out, uint8_t{0});
+  const size_t valueBytes = std::min<size_t>(out.size(), (bitLength + 7u) / 8u);
   if ((bitOffset % 8u) == 0u && (bitLength % 8u) == 0u) {
     const uint32_t byteOffset = bitOffset / 8u;
-    for (uint32_t i = 0; i < out.size() && byteOffset + i < src.size(); ++i) {
+    for (size_t i = 0; i < valueBytes && byteOffset + i < src.size(); ++i) {
       out[i] = src[byteOffset + i];
     }
-    return out;
+    return;
   }
   for (uint16_t i = 0; i < bitLength; ++i) {
     const uint32_t srcBit = bitOffset + i;
     const uint32_t srcByte = srcBit / 8u;
-    if (srcByte >= src.size()) {
+    if (srcByte >= src.size() || (i / 8u) >= valueBytes) {
       break;
     }
     const uint8_t bit = (src[srcByte] >> (srcBit % 8u)) & 1u;
     out[i / 8u] |= static_cast<uint8_t>(bit << (i % 8u));
   }
+}
+
+std::vector<uint8_t> extractBits(std::span<const uint8_t> src, uint32_t bitOffset,
+                                 uint16_t bitLength) {
+  std::vector<uint8_t> out((bitLength + 7u) / 8u, 0u);
+  extractBits(src, bitOffset, bitLength, std::span<uint8_t>(out));
   return out;
 }
 

@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -328,6 +329,68 @@ TEST(ProcessImageBits, SubByteRoundTrip) {
   insertBits(image, 0, 4, std::vector<uint8_t>{0b1111});
   EXPECT_EQ(extractBits(image, 0, 4), (std::vector<uint8_t>{0b1111}));
   EXPECT_EQ(extractBits(image, 5, 3), (std::vector<uint8_t>{0b101}));
+}
+
+// The span overload is the primitive the vector one is written over, so the two must agree
+// everywhere — byte-aligned, sub-byte, and straddling a byte boundary.
+TEST(ProcessImageBits, SpanOverloadMatchesVectorOverload) {
+  const std::vector<uint8_t> image = {0x9A, 0x78, 0x56, 0x34, 0x12, 0xF5};
+  const std::vector<std::pair<uint32_t, uint16_t>> extents = {{0, 8}, {8, 16},  {16, 32}, {5, 3},
+                                                              {7, 2}, {12, 12}, {0, 1}};
+  for (const auto& [bitOffset, bitLength] : extents) {
+    std::vector<uint8_t> out((bitLength + 7u) / 8u, 0xAA);
+    extractBits(image, bitOffset, bitLength, out);
+    EXPECT_EQ(out, extractBits(image, bitOffset, bitLength))
+        << "offset " << bitOffset << " length " << bitLength;
+  }
+}
+
+// The RT decode loop reuses one 8-byte stack scratch for every object, so the bytes beyond the
+// value must be zeroed rather than left holding whatever the previous object wrote there.
+TEST(ProcessImageBits, WiderBufferIsZeroedInFull) {
+  const std::vector<uint8_t> image = {0x00, 0x00, 0x44, 0x33, 0x22, 0x11};
+  std::array<uint8_t, 8> out{};
+  out.fill(0xAA);
+  extractBits(image, 16, 32, out);
+  EXPECT_EQ(out, (std::array<uint8_t, 8>{0x44, 0x33, 0x22, 0x11, 0, 0, 0, 0}));
+}
+
+// A sub-byte value must clear the scratch too — it ORs its bits in, so a dirty buffer would
+// otherwise read back as the union of this value and the last one.
+TEST(ProcessImageBits, WiderBufferIsZeroedForSubByteValues) {
+  std::vector<uint8_t> image(2, 0);
+  insertBits(image, 5, 3, std::vector<uint8_t>{0b101});
+  std::array<uint8_t, 8> out{};
+  out.fill(0xFF);
+  extractBits(image, 5, 3, out);
+  EXPECT_EQ(out, (std::array<uint8_t, 8>{0b101, 0, 0, 0, 0, 0, 0, 0}));
+}
+
+// An out buffer too small for the value is filled as far as it goes, never overrun.
+TEST(ProcessImageBits, NarrowerBufferIsClampedNotOverrun) {
+  const std::vector<uint8_t> image = {0x00, 0x00, 0x44, 0x33, 0x22, 0x11};
+  std::array<uint8_t, 4> guarded{};
+  guarded.fill(0xAA);
+  extractBits(image, 16, 32, std::span<uint8_t>(guarded.data(), 2));
+  EXPECT_EQ(guarded, (std::array<uint8_t, 4>{0x44, 0x33, 0xAA, 0xAA}));
+
+  // Same clamp on the bit-by-bit path.
+  std::vector<uint8_t> bits(2, 0);
+  insertBits(bits, 0, 12, std::vector<uint8_t>{0xCD, 0x0A});
+  std::array<uint8_t, 4> narrow{};
+  narrow.fill(0xAA);
+  extractBits(bits, 0, 12, std::span<uint8_t>(narrow.data(), 1));
+  EXPECT_EQ(narrow, (std::array<uint8_t, 4>{0xCD, 0xAA, 0xAA, 0xAA}));
+}
+
+// A source too short to supply the bits leaves the remainder zero rather than reading past it.
+TEST(ProcessImageBits, ShortSourceLeavesRemainderZero) {
+  const std::vector<uint8_t> image = {0x44, 0x33};
+  std::array<uint8_t, 4> out{};
+  out.fill(0xAA);
+  extractBits(image, 0, 32, out);
+  EXPECT_EQ(out, (std::array<uint8_t, 4>{0x44, 0x33, 0x00, 0x00}));
+  EXPECT_EQ(extractBits(image, 0, 32), (std::vector<uint8_t>{0x44, 0x33, 0x00, 0x00}));
 }
 
 // Builds a single-axis bus with the CiA402 mapping, object dictionary, and layout wired up.

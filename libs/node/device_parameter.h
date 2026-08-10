@@ -1,5 +1,6 @@
 #pragma once
 
+#include <atomic>
 #include <cstdint>
 #include <expected>
 #include <format>
@@ -31,10 +32,24 @@ constexpr uint32_t makeParameterKey(uint16_t index, uint8_t subindex) {
 
 /// @brief Returns a zero-equivalent value for the given ETG.1020 @p dataType.
 ///
-/// Used to initialise @c DeviceParameter::value so the active variant alternative
-/// matches the parameter's declared type before the first read.
+/// The variant alternative a value of this type is reported as, holding its type-appropriate zero.
 /// Unknown data types fall back to @c std::vector<uint8_t>{}.
 DeviceParameterValue defaultValueForDataType(uint16_t dataType);
+
+/// @brief Whether a value of @p dataType is stored in @c DeviceParameter::bits.
+///
+/// True for every arithmetic ETG.1020 type — all of which fit in eight bytes — and false for
+/// strings and for the composite / unknown types that fall through to raw bytes. This is what
+/// decides which of a parameter's two storage fields holds its value, and because @c dataType is
+/// immutable once the object dictionary is enumerated, the choice never changes: a value has
+/// exactly one home and the two fields can never disagree.
+bool isScalarDataType(uint16_t dataType);
+
+/// @brief Packs up to eight raw little-endian wire bytes into a @c uint64_t (zero-extended).
+uint64_t packLeBits(std::span<const uint8_t> bytes);
+
+/// @brief Unpacks @p bits into @p out, little-endian. The inverse of @c packLeBits.
+void unpackLeBits(uint64_t bits, std::span<uint8_t> out);
 
 /// @brief Coerces a @c DeviceParameterValue to a @c double, when it holds a number.
 ///
@@ -86,8 +101,35 @@ struct DeviceParameter {
   uint16_t bitLength{};   ///< Bit length of the value.
   uint16_t access{};      ///< ObjAccess bitfield (read/write per-state flags).
   ParameterOrigin origin{ParameterOrigin::ObjectDictionary};  ///< Where this definition came from.
-  DeviceParameterValue value;  ///< Last-known value; type-appropriate zero before first read.
-  SyncState syncState{SyncState::Unknown};  ///< Freshness of @c value relative to the device.
+
+  // --- value -------------------------------------------------------------------------------
+  // The last-known value, stored as its raw little-endian wire bytes — the same encoding an SDO
+  // transfer carries. @c isScalarDataType(dataType) picks the field; zero (an empty @c rawValue)
+  // is the type-appropriate default before the first read.
+  //
+  // The scalar cell is what a cyclic task reads: one relaxed atomic load, no lock, no allocation,
+  // and no way to tell whether the RT exchange or a background SDO poll put the value there.
+  //
+  // It is a plain @c uint64_t accessed through @c std::atomic_ref rather than a
+  // @c std::atomic<uint64_t> member, which would be neither copyable nor movable — and
+  // @c DeviceParameter is both (@c Device::parameter and @c parametersOrdered hand out copies, and
+  // entries are moved into the map and into growing vectors). That would force all five special
+  // members to be written by hand, and *those* are the real hazard: this struct gains fields over
+  // time, and a field added but forgotten in a hand-written copy constructor loses data silently
+  // with nothing to catch it. Compiler-generated copies never forget. @c atomic_ref puts the
+  // lock-free guarantee on the access instead of the storage, which is the guarantee that matters;
+  // @c loadBits / @c storeBits below are the only way the field is ever touched. @c mutable because
+  // a load is a const operation but @c std::atomic_ref needs a non-const lvalue.
+  mutable uint64_t bits{0};         ///< Scalar value, LSB-aligned little-endian, zero-extended.
+  std::vector<uint8_t> rawValue{};  ///< Non-scalar value (string / byte array) as wire bytes.
+  // The two properties the cell's whole contract rests on. Lock-freedom is what makes a read safe
+  // from the RT loop at all; the alignment precondition is atomic_ref's, and a platform where a
+  // uint64_t member does not satisfy it must fail here rather than degrade silently.
+  static_assert(std::atomic_ref<uint64_t>::is_always_lock_free,
+                "the parameter cell must be lock-free so the RT path never blocks");
+  static_assert(alignof(uint64_t) >= std::atomic_ref<uint64_t>::required_alignment,
+                "the parameter cell must satisfy std::atomic_ref's alignment requirement");
+  SyncState syncState{SyncState::Unknown};  ///< Freshness of the value relative to the device.
   std::optional<uint32_t> unit;             ///< ETG.1004 unit code, when reported.
   std::optional<DeviceParameterValue> defaultValue;  ///< Slave-reported default, when available.
   std::optional<DeviceParameterValue> minValue;      ///< Slave-reported minimum, when available.
@@ -96,24 +138,57 @@ struct DeviceParameter {
   /// @brief Returns the packed @c (index, subindex) key used in the parameter map.
   uint32_t key() const { return makeParameterKey(index, subindex); }
 
-  /// @brief Returns @c value as the requested type @p T.
+  /// @brief Loads the scalar cell. Lock-free, non-allocating, relaxed — safe from the RT loop.
   ///
-  /// Type-exact: @p T must be the active variant alternative (e.g. @c uint32_t for an
-  /// UNSIGNED32 parameter — booleans are stored as @c uint8_t, see
-  /// @c defaultValueForDataType). Use @c numeric() when you only need a number and do
-  /// not care about the exact width.
+  /// Relaxed is the whole requirement: the cell is a self-contained value with no companion state
+  /// to order against, and a reader is by definition unsynchronised with the writer that published
+  /// it. What it guarantees — that a torn or invented value is impossible, and that the last store
+  /// becomes visible — is exactly what a cyclic task needs.
+  uint64_t loadBits() const {
+    return std::atomic_ref<uint64_t>(bits).load(std::memory_order_relaxed);
+  }
+
+  /// @brief Stores the scalar cell. Lock-free, non-allocating, relaxed — safe from the RT loop.
+  void storeBits(uint64_t v) const {
+    std::atomic_ref<uint64_t>(bits).store(v, std::memory_order_relaxed);
+  }
+
+  /// @brief Returns the current value as a @c DeviceParameterValue, built on the spot.
   ///
-  /// @return The value, or an error string if @p T is not the active alternative.
+  /// The value is stored as wire bytes, so the variant is *reconstructed* here rather than held:
+  /// one switch on the immutable @c dataType turns the bytes into the right alternative — the same
+  /// mapping @c defaultValueForDataType has always used to choose it. That is what keeps a value in
+  /// exactly one home, so the HTTP view and a cyclic task's view can never disagree.
+  ///
+  /// Off-RT only, by cost rather than by safety: it may allocate (a string or byte-array
+  /// parameter). A cyclic task reads @c loadBits instead.
+  DeviceParameterValue currentValue() const;
+
+  /// @brief Replaces the stored value with @p bytes, its raw little-endian wire encoding.
+  ///
+  /// The storage-level setter: no coercion, no decoding, no @c syncState change — it takes the
+  /// bytes an SDO upload or the process image already produced and puts them where
+  /// @c isScalarDataType says they belong. @c setValue is the typed counterpart.
+  void setRawValue(std::span<const uint8_t> bytes);
+
+  /// @brief Returns the value as the requested type @p T.
+  ///
+  /// Type-exact: @p T must be the alternative @c dataType maps to (e.g. @c uint32_t for an
+  /// UNSIGNED32 parameter — booleans are stored as @c uint8_t, see @c defaultValueForDataType).
+  /// Use @c numeric() when you only need a number and do not care about the exact width.
+  ///
+  /// @return The value, or an error string if @p T is not the parameter's alternative.
   template <typename T>
   std::expected<T, std::string> getValue() const {
-    if (const auto* p = std::get_if<T>(&value)) {
+    const DeviceParameterValue v = currentValue();
+    if (const auto* p = std::get_if<T>(&v)) {
       return *p;
     }
     return std::unexpected(
         std::format("parameter 0x{:04X}:{:02X} holds a different type", index, subindex));
   }
 
-  /// @brief Returns @c value coerced to a @c double, for any numeric parameter.
+  /// @brief Returns the value coerced to a @c double, for any numeric parameter.
   ///
   /// The "don't worry about the type" accessor — handy because most parameters are
   /// numbers of varying width.

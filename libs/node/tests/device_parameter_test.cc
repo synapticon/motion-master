@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <utility>
@@ -10,11 +11,15 @@
 namespace {
 
 using mm::node::decodeSdoBytes;
+using mm::node::defaultValueForDataType;
 using mm::node::DeviceParameter;
 using mm::node::DeviceParameterValue;
 using mm::node::encodeSdoBytes;
+using mm::node::isScalarDataType;
 using mm::node::numericValue;
+using mm::node::packLeBits;
 using mm::node::SyncState;
+using mm::node::unpackLeBits;
 
 // ETG.1020 data type codes used across the tests.
 constexpr uint16_t kU8 = 0x0005;
@@ -28,10 +33,12 @@ constexpr uint16_t kVisibleString = 0x0009;
 
 // Builds a parameter with the given type and value (other fields value-initialised).
 // Avoids partial aggregate initialisation, which -Wmissing-field-initializers rejects.
-DeviceParameter param(uint16_t dataType, DeviceParameterValue value) {
+DeviceParameter param(uint16_t dataType, const DeviceParameterValue& value) {
   DeviceParameter p{};
   p.dataType = dataType;
-  p.value = std::move(value);
+  // Through the typed setter, so the fixture exercises the same coerce-and-encode path production
+  // does rather than reaching into storage.
+  (void)p.setValue(value);
   return p;
 }
 
@@ -119,12 +126,12 @@ TEST(DeviceParameterSetValue, CoercesIntoDeclaredWidth) {
   // A bare int literal must land in the parameter's declared alternative (uint32),
   // not int32 — this is the "don't worry about the type" guarantee.
   ASSERT_TRUE(p.setValue(5).has_value());
-  EXPECT_TRUE(std::holds_alternative<uint32_t>(p.value));
+  EXPECT_TRUE(std::holds_alternative<uint32_t>(p.currentValue()));
   EXPECT_EQ(p.getValue<uint32_t>().value(), 5u);
 
   // A differently-sized integer is coerced too.
   ASSERT_TRUE(p.setValue(uint16_t{7}).has_value());
-  EXPECT_TRUE(std::holds_alternative<uint32_t>(p.value));
+  EXPECT_TRUE(std::holds_alternative<uint32_t>(p.currentValue()));
   EXPECT_EQ(p.getValue<uint32_t>().value(), 7u);
 }
 
@@ -179,6 +186,94 @@ TEST(DeviceParameterBounds, ClampToRangeClampsAndPreservesType) {
 TEST(DeviceParameter, DefaultsToUnknownSyncState) {
   DeviceParameter p{};
   EXPECT_EQ(p.syncState, SyncState::Unknown);
+}
+
+// --- value storage: the cell -------------------------------------------------
+
+// Which field holds a value must agree with which alternative defaultValueForDataType reports, or
+// currentValue() would look in the wrong place. Checked over the whole table rather than a sample.
+TEST(DeviceParameterStorage, ScalarClassificationMatchesTheDefaultValueTable) {
+  for (uint32_t dataType = 0; dataType <= 0x0030; ++dataType) {
+    const DeviceParameterValue zero = defaultValueForDataType(static_cast<uint16_t>(dataType));
+    const bool arithmetic = !std::holds_alternative<std::string>(zero) &&
+                            !std::holds_alternative<std::vector<uint8_t>>(zero);
+    EXPECT_EQ(isScalarDataType(static_cast<uint16_t>(dataType)), arithmetic)
+        << "data type 0x" << std::hex << dataType;
+  }
+}
+
+TEST(DeviceParameterStorage, PackAndUnpackRoundTripLittleEndian) {
+  const std::vector<uint8_t> bytes = {0x44, 0x33, 0x22, 0x11};
+  EXPECT_EQ(packLeBits(bytes), 0x11223344ULL);
+
+  std::array<uint8_t, 8> out{};
+  unpackLeBits(0x11223344ULL, out);
+  EXPECT_EQ(out, (std::array<uint8_t, 8>{0x44, 0x33, 0x22, 0x11, 0, 0, 0, 0}));
+
+  // More than eight bytes cannot fit the cell: the excess is dropped, not wrapped.
+  const std::vector<uint8_t> tooMany(12, 0xFF);
+  EXPECT_EQ(packLeBits(tooMany), 0xFFFFFFFFFFFFFFFFULL);
+}
+
+// The cell holds wire bytes and currentValue() rebuilds the variant from them, so a value must
+// survive the round trip for every width — including the signed and floating-point types, where a
+// naive reinterpretation of the cell would be wrong.
+TEST(DeviceParameterStorage, EveryScalarWidthRoundTripsThroughTheCell) {
+  EXPECT_EQ(param(kU8, DeviceParameterValue{uint8_t{0xAB}}).currentValue(),
+            DeviceParameterValue{uint8_t{0xAB}});
+  EXPECT_EQ(param(kI16, DeviceParameterValue{int16_t{-1234}}).currentValue(),
+            DeviceParameterValue{int16_t{-1234}});
+  EXPECT_EQ(param(kU32, DeviceParameterValue{uint32_t{0xDEADBEEF}}).currentValue(),
+            DeviceParameterValue{uint32_t{0xDEADBEEF}});
+  EXPECT_EQ(param(kI32, DeviceParameterValue{int32_t{-1}}).currentValue(),
+            DeviceParameterValue{int32_t{-1}});
+  EXPECT_EQ(param(kReal32, DeviceParameterValue{-12.5F}).currentValue(),
+            DeviceParameterValue{-12.5F});
+  EXPECT_EQ(param(kReal64, DeviceParameterValue{2.718281828}).currentValue(),
+            DeviceParameterValue{2.718281828});
+}
+
+// A never-written parameter reads as its type's zero rather than as an error or empty optional —
+// callers std::visit the result directly.
+TEST(DeviceParameterStorage, UnwrittenParameterReadsAsTheTypeZero) {
+  DeviceParameter scalar{};
+  scalar.dataType = kI32;
+  EXPECT_EQ(scalar.currentValue(), DeviceParameterValue{int32_t{0}});
+
+  DeviceParameter text{};
+  text.dataType = kVisibleString;
+  EXPECT_EQ(text.currentValue(), DeviceParameterValue{std::string{}});
+}
+
+// setRawValue is the storage-level setter: it takes the bytes a transfer produced, with no
+// coercion and no syncState change.
+TEST(DeviceParameterStorage, SetRawValueStoresWireBytesForBothKinds) {
+  DeviceParameter scalar{};
+  scalar.dataType = kU32;
+  const std::vector<uint8_t> le = {0x44, 0x33, 0x22, 0x11};
+  scalar.setRawValue(le);
+  EXPECT_EQ(scalar.loadBits(), 0x11223344ULL);
+  EXPECT_EQ(scalar.currentValue(), DeviceParameterValue{uint32_t{0x11223344}});
+  EXPECT_EQ(scalar.syncState, SyncState::Unknown);  // storage only — freshness is the caller's
+
+  DeviceParameter text{};
+  text.dataType = kVisibleString;
+  const std::vector<uint8_t> hello = {'h', 'i', ' ', 0x00};  // padded, as a slave answers
+  text.setRawValue(hello);
+  EXPECT_EQ(text.rawValue, hello);                                          // stored verbatim
+  EXPECT_EQ(text.currentValue(), DeviceParameterValue{std::string{"hi"}});  // padding stripped
+}
+
+// The point of the cell: copies are compiler-generated, so a field added later is copied without
+// anyone remembering to. A copy must carry the value, not share or drop it.
+TEST(DeviceParameterStorage, CopiesCarryTheCellIndependently) {
+  DeviceParameter original = param(kU32, DeviceParameterValue{uint32_t{7}});
+  DeviceParameter copy = original;
+  EXPECT_EQ(copy.currentValue(), DeviceParameterValue{uint32_t{7}});
+
+  ASSERT_TRUE(original.setValue(uint32_t{9}).has_value());
+  EXPECT_EQ(original.currentValue(), DeviceParameterValue{uint32_t{9}});
+  EXPECT_EQ(copy.currentValue(), DeviceParameterValue{uint32_t{7}});  // snapshot, not a view
 }
 
 }  // namespace

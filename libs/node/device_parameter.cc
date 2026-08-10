@@ -1,6 +1,7 @@
 #include "node/device_parameter.h"
 
 #include <algorithm>
+#include <array>
 #include <cstdint>
 #include <cstring>
 #include <expected>
@@ -11,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -86,6 +88,46 @@ DeviceParameterValue defaultValueForDataType(uint16_t dataType) {
       // BIT*, BITARR*, GUID, OCTET_STRING, RECORD, composite/user types, and
       // anything not in the table fall through to raw bytes.
       return std::vector<uint8_t>{};
+  }
+}
+
+bool isScalarDataType(uint16_t dataType) {
+  switch (static_cast<ObjectDataType>(dataType)) {
+    case ObjectDataType::BOOLEAN:
+    case ObjectDataType::UNSIGNED8:
+    case ObjectDataType::BYTE:
+    case ObjectDataType::INTEGER8:
+    case ObjectDataType::INTEGER16:
+    case ObjectDataType::INTEGER32:
+    case ObjectDataType::UNSIGNED16:
+    case ObjectDataType::WORD:
+    case ObjectDataType::UNSIGNED32:
+    case ObjectDataType::DWORD:
+    case ObjectDataType::REAL32:
+    case ObjectDataType::REAL64:
+    case ObjectDataType::INTEGER64:
+    case ObjectDataType::UNSIGNED64:
+      return true;
+    default:
+      // Strings, and the BIT*/GUID/OCTET_STRING/composite types defaultValueForDataType maps to
+      // raw bytes. Kept as one switch beside that table so the two cannot drift: every case
+      // returning a scalar alternative there must return true here.
+      return false;
+  }
+}
+
+uint64_t packLeBits(std::span<const uint8_t> bytes) {
+  uint64_t out = 0;
+  const size_t n = std::min<size_t>(bytes.size(), sizeof(uint64_t));
+  for (size_t i = 0; i < n; ++i) {
+    out |= static_cast<uint64_t>(bytes[i]) << (8U * i);
+  }
+  return out;
+}
+
+void unpackLeBits(uint64_t bits, std::span<uint8_t> out) {
+  for (size_t i = 0; i < out.size(); ++i) {
+    out[i] = i < sizeof(uint64_t) ? static_cast<uint8_t>(bits >> (8U * i)) : uint8_t{0};
   }
 }
 
@@ -219,8 +261,33 @@ std::string_view parameterOriginName(ParameterOrigin origin) {
   return "objectDictionary";
 }
 
+DeviceParameterValue DeviceParameter::currentValue() const {
+  // Reconstructed rather than stored: dataType is immutable, so the same mapping
+  // defaultValueForDataType uses to pick the alternative turns the stored wire bytes back into it.
+  // A decode failure can only mean the stored bytes are too short for the type (nothing has been
+  // read yet, or a slave answered short), for which the type's zero is the honest answer.
+  if (isScalarDataType(dataType)) {
+    // Always the full eight bytes: decodeSdoBytes takes the leading sizeof(T) of them, so one
+    // buffer serves every scalar width and the zero-extended tail is never read.
+    std::array<uint8_t, sizeof(uint64_t)> buf{};
+    unpackLeBits(loadBits(), buf);
+    auto decoded = decodeSdoBytes(dataType, buf);
+    return decoded ? std::move(*decoded) : defaultValueForDataType(dataType);
+  }
+  auto decoded = decodeSdoBytes(dataType, rawValue);
+  return decoded ? std::move(*decoded) : defaultValueForDataType(dataType);
+}
+
+void DeviceParameter::setRawValue(std::span<const uint8_t> bytes) {
+  if (isScalarDataType(dataType)) {
+    storeBits(packLeBits(bytes));
+    return;
+  }
+  rawValue.assign(bytes.begin(), bytes.end());
+}
+
 std::expected<double, std::string> DeviceParameter::numeric() const {
-  auto n = numericValue(value);
+  auto n = numericValue(currentValue());
   if (n) {
     return *n;
   }
@@ -228,17 +295,19 @@ std::expected<double, std::string> DeviceParameter::numeric() const {
 }
 
 std::expected<void, std::string> DeviceParameter::setValue(const DeviceParameterValue& v) {
-  // The target alternative is dictated by the parameter's declared data type, so an
-  // incoming uint16 (or int, double, ...) is coerced to the right width before storage.
+  // Two steps, because storage is wire bytes and the caller may pass any numeric width: coerce the
+  // incoming value into the alternative the declared data type dictates, then encode that to bytes.
+  // Coercion is what makes setValue(5) work whether the object is UNSIGNED8 or UNSIGNED32 — a bare
+  // assignment would encode the wrong width.
   DeviceParameterValue target = defaultValueForDataType(dataType);
-  return std::visit(
-      [this](const auto& proto, const auto& incoming) -> std::expected<void, std::string> {
+  auto coerced = std::visit(
+      [this](const auto& proto,
+             const auto& incoming) -> std::expected<DeviceParameterValue, std::string> {
         using Target = std::decay_t<decltype(proto)>;
         using In = std::decay_t<decltype(incoming)>;
         if constexpr (std::is_arithmetic_v<Target>) {
           if constexpr (std::is_arithmetic_v<In>) {
-            value = static_cast<Target>(incoming);
-            return {};
+            return DeviceParameterValue{static_cast<Target>(incoming)};
           } else {
             return std::unexpected(std::format(
                 "parameter 0x{:04X}:{:02X} is numeric; cannot assign a non-numeric value", index,
@@ -246,8 +315,7 @@ std::expected<void, std::string> DeviceParameter::setValue(const DeviceParameter
           }
         } else if constexpr (std::is_same_v<Target, std::string>) {
           if constexpr (std::is_same_v<In, std::string>) {
-            value = incoming;
-            return {};
+            return DeviceParameterValue{incoming};
           } else {
             return std::unexpected(std::format(
                 "parameter 0x{:04X}:{:02X} is a string; cannot assign a non-string value", index,
@@ -255,8 +323,7 @@ std::expected<void, std::string> DeviceParameter::setValue(const DeviceParameter
           }
         } else {  // std::vector<uint8_t>
           if constexpr (std::is_same_v<In, std::vector<uint8_t>>) {
-            value = incoming;
-            return {};
+            return DeviceParameterValue{incoming};
           } else {
             return std::unexpected(
                 std::format("parameter 0x{:04X}:{:02X} is raw bytes; assign a std::vector<uint8_t>",
@@ -265,6 +332,15 @@ std::expected<void, std::string> DeviceParameter::setValue(const DeviceParameter
         }
       },
       target, v);
+  if (!coerced) {
+    return std::unexpected(coerced.error());
+  }
+  auto bytes = encodeSdoBytes(dataType, *coerced);
+  if (!bytes) {
+    return std::unexpected(bytes.error());
+  }
+  setRawValue(*bytes);
+  return {};
 }
 
 bool DeviceParameter::inRange(const DeviceParameterValue& v) const {
@@ -330,7 +406,7 @@ void to_json(nlohmann::json& j, const DeviceParameter& p) {
       {"origin", parameterOriginName(p.origin)},
       {"syncState", syncStateName(p.syncState)},
   };
-  std::visit([&j](const auto& v) { j["value"] = v; }, p.value);
+  std::visit([&j](const auto& v) { j["value"] = v; }, p.currentValue());
   if (p.unit) {
     j["unit"] = *p.unit;
   }

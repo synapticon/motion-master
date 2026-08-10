@@ -340,7 +340,7 @@ TEST(DeviceReadParameter, OnlineUpdatesCacheAndMarksSynced) {
 
   const auto p = device.parameter(0x6065, 0x00);
   ASSERT_TRUE(p.has_value());
-  EXPECT_EQ(p->value, DeviceParameterValue{uint32_t{16}});
+  EXPECT_EQ(p->currentValue(), DeviceParameterValue{uint32_t{16}});
   EXPECT_EQ(p->syncState, SyncState::Synced);
 }
 
@@ -383,9 +383,9 @@ TEST(DeviceReadAllParameters, RefreshesEveryReadableValueInPlace) {
   const auto b = device.parameter(0x6066, 0x00);
   ASSERT_TRUE(a.has_value());
   ASSERT_TRUE(b.has_value());
-  EXPECT_EQ(a->value, DeviceParameterValue{uint32_t{16}});
+  EXPECT_EQ(a->currentValue(), DeviceParameterValue{uint32_t{16}});
   EXPECT_EQ(a->syncState, SyncState::Synced);
-  EXPECT_EQ(b->value, DeviceParameterValue{uint32_t{32}});
+  EXPECT_EQ(b->currentValue(), DeviceParameterValue{uint32_t{32}});
   EXPECT_EQ(b->syncState, SyncState::Synced);
 }
 
@@ -454,9 +454,11 @@ TEST(DeviceInitParametersCompleteAccess, DecodesMultiSubObjectInOneUpload) {
   // One Complete Access read replaced the three per-subindex uploads.
   EXPECT_EQ(driver.completeReadIndices, (std::vector<uint16_t>{0x1600}));
   EXPECT_EQ(driver.perSubReads, 0);
-  EXPECT_EQ(device.parameter(0x1600, 0x00)->value, DeviceParameterValue{uint8_t{2}});
-  EXPECT_EQ(device.parameter(0x1600, 0x01)->value, DeviceParameterValue{uint32_t{0x11111111}});
-  EXPECT_EQ(device.parameter(0x1600, 0x02)->value, DeviceParameterValue{uint32_t{0x22222222}});
+  EXPECT_EQ(device.parameter(0x1600, 0x00)->currentValue(), DeviceParameterValue{uint8_t{2}});
+  EXPECT_EQ(device.parameter(0x1600, 0x01)->currentValue(),
+            DeviceParameterValue{uint32_t{0x11111111}});
+  EXPECT_EQ(device.parameter(0x1600, 0x02)->currentValue(),
+            DeviceParameterValue{uint32_t{0x22222222}});
   EXPECT_EQ(device.parameter(0x1600, 0x02)->syncState, SyncState::Synced);
 }
 
@@ -475,7 +477,8 @@ TEST(DeviceInitParametersCompleteAccess, FallsBackToPerSubindexWhenUnsupported) 
 
   EXPECT_EQ(driver.completeReadIndices, (std::vector<uint16_t>{0x1600}));  // probed once
   EXPECT_GT(driver.perSubReads, 0);                                        // then fell back
-  EXPECT_EQ(device.parameter(0x1600, 0x01)->value, DeviceParameterValue{uint32_t{0x33333333}});
+  EXPECT_EQ(device.parameter(0x1600, 0x01)->currentValue(),
+            DeviceParameterValue{uint32_t{0x33333333}});
   EXPECT_EQ(device.parameter(0x1600, 0x01)->syncState, SyncState::Synced);
 }
 
@@ -494,7 +497,8 @@ TEST(DeviceInitParametersCompleteAccess, DisabledFlagForcesPerSubindexReads) {
 
   EXPECT_TRUE(driver.completeReadIndices.empty());  // CA never attempted
   EXPECT_GT(driver.perSubReads, 0);
-  EXPECT_EQ(device.parameter(0x1600, 0x01)->value, DeviceParameterValue{uint32_t{0x44444444}});
+  EXPECT_EQ(device.parameter(0x1600, 0x01)->currentValue(),
+            DeviceParameterValue{uint32_t{0x44444444}});
 }
 
 TEST(DeviceInitParametersCompleteAccess, SingleSubindexVarSkipsCompleteAccess) {
@@ -508,7 +512,7 @@ TEST(DeviceInitParametersCompleteAccess, SingleSubindexVarSkipsCompleteAccess) {
       device.initializeParameters(/*readValues=*/true, /*useCompleteAccess=*/true).has_value());
 
   EXPECT_TRUE(driver.completeReadIndices.empty());  // a lone subindex gains nothing from CA
-  EXPECT_EQ(device.parameter(0x6065, 0x00)->value, DeviceParameterValue{uint32_t{16}});
+  EXPECT_EQ(device.parameter(0x6065, 0x00)->currentValue(), DeviceParameterValue{uint32_t{16}});
 }
 
 TEST(DeviceReadAllParameters, UsesCompleteAccessForMultiSubObjects) {
@@ -529,9 +533,11 @@ TEST(DeviceReadAllParameters, UsesCompleteAccessForMultiSubObjects) {
   // The record was read with one CA upload; only the VAR used a per-subindex read.
   EXPECT_EQ(driver.completeReadIndices, (std::vector<uint16_t>{0x1600}));
   EXPECT_EQ(driver.perSubReads, 1);
-  EXPECT_EQ(device.parameter(0x1600, 0x01)->value, DeviceParameterValue{uint32_t{0xAAAA0001}});
-  EXPECT_EQ(device.parameter(0x1600, 0x02)->value, DeviceParameterValue{uint32_t{0xAAAA0002}});
-  EXPECT_EQ(device.parameter(0x6060, 0x00)->value, DeviceParameterValue{uint32_t{7}});
+  EXPECT_EQ(device.parameter(0x1600, 0x01)->currentValue(),
+            DeviceParameterValue{uint32_t{0xAAAA0001}});
+  EXPECT_EQ(device.parameter(0x1600, 0x02)->currentValue(),
+            DeviceParameterValue{uint32_t{0xAAAA0002}});
+  EXPECT_EQ(device.parameter(0x6060, 0x00)->currentValue(), DeviceParameterValue{uint32_t{7}});
 }
 
 TEST(DeviceReadAllParameters, FallsBackToPerSubindexWhenCompleteAccessUnsupported) {
@@ -548,7 +554,7 @@ TEST(DeviceReadAllParameters, FallsBackToPerSubindexWhenCompleteAccessUnsupporte
   ASSERT_TRUE(device.readAllParameters(/*useCompleteAccess=*/true).has_value());
 
   EXPECT_EQ(driver.completeReadIndices, (std::vector<uint16_t>{0x1600}));  // probed once
-  EXPECT_EQ(device.parameter(0x1600, 0x01)->value, DeviceParameterValue{uint32_t{0x1234}});
+  EXPECT_EQ(device.parameter(0x1600, 0x01)->currentValue(), DeviceParameterValue{uint32_t{0x1234}});
   EXPECT_EQ(device.parameter(0x1600, 0x01)->syncState, SyncState::Synced);
 }
 
@@ -566,7 +572,7 @@ TEST(DeviceReadAllParameters, DisabledFlagForcesPerSubindexReads) {
   ASSERT_TRUE(device.readAllParameters(/*useCompleteAccess=*/false).has_value());
 
   EXPECT_TRUE(driver.completeReadIndices.empty());  // CA never attempted
-  EXPECT_EQ(device.parameter(0x1600, 0x01)->value, DeviceParameterValue{uint32_t{0x4444}});
+  EXPECT_EQ(device.parameter(0x1600, 0x01)->currentValue(), DeviceParameterValue{uint32_t{0x4444}});
 }
 
 TEST(DeviceParameterCopy, ReturnsFullStructFromCacheWithoutBusAccess) {
@@ -582,7 +588,7 @@ TEST(DeviceParameterCopy, ReturnsFullStructFromCacheWithoutBusAccess) {
   EXPECT_EQ(copy->index, 0x6065);
   EXPECT_EQ(copy->subindex, 0x00);
   EXPECT_EQ(copy->dataType, kU32);
-  EXPECT_EQ(copy->value, DeviceParameterValue{uint32_t{16}});
+  EXPECT_EQ(copy->currentValue(), DeviceParameterValue{uint32_t{16}});
   EXPECT_EQ(copy->syncState, SyncState::Synced);
   EXPECT_EQ(driver.writes.size(), writesBefore);  // a copy never touches the bus
 }
@@ -608,7 +614,7 @@ TEST(DeviceWriteParameter, OnlineDownloadsAndMarksSynced) {
 
   const auto p = device.parameter(0x6065, 0x00);
   ASSERT_TRUE(p.has_value());
-  EXPECT_EQ(p->value, DeviceParameterValue{uint32_t{123}});
+  EXPECT_EQ(p->currentValue(), DeviceParameterValue{uint32_t{123}});
   EXPECT_EQ(p->syncState, SyncState::Synced);
 }
 
@@ -623,7 +629,7 @@ TEST(DeviceWriteParameter, OfflineCachesAsPendingAndSucceeds) {
 
   const auto p = device.parameter(0x6065, 0x00);
   ASSERT_TRUE(p.has_value());
-  EXPECT_EQ(p->value, DeviceParameterValue{uint32_t{55}});
+  EXPECT_EQ(p->currentValue(), DeviceParameterValue{uint32_t{55}});
   EXPECT_EQ(p->syncState, SyncState::Pending);
 }
 
@@ -639,7 +645,7 @@ TEST(DeviceWriteParameter, OnlineDownloadFailureMarksPendingAndReturnsError) {
   const auto p = device.parameter(0x6065, 0x00);
   ASSERT_TRUE(p.has_value());
   // Cache still reflects the attempted value; flagged Pending for a later re-write.
-  EXPECT_EQ(p->value, DeviceParameterValue{uint32_t{77}});
+  EXPECT_EQ(p->currentValue(), DeviceParameterValue{uint32_t{77}});
   EXPECT_EQ(p->syncState, SyncState::Pending);
 }
 
@@ -656,7 +662,7 @@ TEST(DeviceWriteParameter, CoercesValueIntoDeclaredType) {
 
   const auto p = device.parameter(0x6065, 0x00);
   ASSERT_TRUE(p.has_value());
-  EXPECT_TRUE(std::holds_alternative<uint32_t>(p->value));
+  EXPECT_TRUE(std::holds_alternative<uint32_t>(p->currentValue()));
 }
 
 TEST(DeviceWriteParameter, UnknownParameterErrors) {
@@ -1231,8 +1237,8 @@ TEST(DeviceCacheConcurrency, ConcurrentReadsAndCacheUpdatesAreSafe) {
   EXPECT_EQ(failures.load(), 0);
   const auto p = device.parameter(0x6065, 0x00);
   ASSERT_TRUE(p.has_value());
-  EXPECT_TRUE(p->value == DeviceParameterValue{uint32_t{16}} ||
-              p->value == DeviceParameterValue{uint32_t{99}});
+  EXPECT_TRUE(p->currentValue() == DeviceParameterValue{uint32_t{16}} ||
+              p->currentValue() == DeviceParameterValue{uint32_t{99}});
 }
 
 // --- productName -----------------------------------------------------------

@@ -76,8 +76,7 @@ DeviceParameter definitionFromJson(const nlohmann::json& j) {
   p.dataType = j.at("dataType").get<uint16_t>();
   p.bitLength = j.at("bitLength").get<uint16_t>();
   p.access = j.at("access").get<uint16_t>();
-  p.value = defaultValueForDataType(p.dataType);
-  p.syncState = SyncState::Unknown;
+  p.syncState = SyncState::Unknown;  // the cache holds definitions only, never values
   if (auto it = j.find("unit"); it != j.end() && !it->is_null()) {
     p.unit = it->get<uint32_t>();
   }

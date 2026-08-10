@@ -40,8 +40,7 @@ DeviceParameter makeParam(uint16_t index, uint8_t subindex, uint16_t dataType) {
   p.dataType = dataType;
   p.bitLength = 32;
   p.access = 0x3F;
-  p.value = defaultValueForDataType(dataType);
-  return p;
+  return p;  // value storage defaults to the type's zero
 }
 
 // The definitions persist; the live value / sync state do not. Round-tripping a Synapticon device
@@ -56,7 +55,7 @@ TEST(ParameterCacheTest, RoundTripsDefinitionsButNotLiveValues) {
   withBounds.minValue = DeviceParameterValue{uint32_t{0}};
   withBounds.maxValue = DeviceParameterValue{uint32_t{100}};
   // These two are volatile and must be dropped by the cache.
-  withBounds.value = DeviceParameterValue{uint32_t{42}};
+  (void)withBounds.setValue(DeviceParameterValue{uint32_t{42}});
   withBounds.syncState = SyncState::Synced;
 
   DeviceParameter plain = makeParam(0x6041, 0, kUnsigned32);
@@ -82,7 +81,7 @@ TEST(ParameterCacheTest, RoundTripsDefinitionsButNotLiveValues) {
   EXPECT_EQ(std::get<uint32_t>(*a.minValue), 0u);
   EXPECT_EQ(std::get<uint32_t>(*a.maxValue), 100u);
   // The live value is reset to the type default and the sync state to Unknown — never cached.
-  EXPECT_EQ(std::get<uint32_t>(a.value), 0u);
+  EXPECT_EQ(std::get<uint32_t>(a.currentValue()), 0u);
   EXPECT_EQ(a.syncState, SyncState::Unknown);
 
   const DeviceParameter& b = (*loaded)[1];

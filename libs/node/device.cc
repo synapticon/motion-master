@@ -184,7 +184,6 @@ std::expected<void, std::string> Device::initializeParameters(bool readValues,
           .dataType = e.dataType,
           .bitLength = e.bitLength,
           .access = e.access,
-          .value = defaultValueForDataType(e.dataType),
           .unit = e.unit,
           .defaultValue = std::nullopt,
           .minValue = std::nullopt,
@@ -224,7 +223,8 @@ std::expected<void, std::string> Device::initializeParameters(bool readValues,
   //    end. Every value starts at its type default / Unknown; a successful read overwrites it.
   auto& defs = *definitions;
   for (auto& p : defs) {
-    p.value = defaultValueForDataType(p.dataType);
+    p.storeBits(0);
+    p.rawValue.clear();
     p.syncState = SyncState::Unknown;
   }
   if (readValues) {
@@ -288,11 +288,10 @@ bool decodeCompleteAccess(std::span<DeviceParameter* const> subs,
     }
     const std::vector<uint8_t> slice =
         extractBits(std::span<const uint8_t>(blob.data(), blob.size()), cursor, p->bitLength);
-    auto decoded = decodeSdoBytes(p->dataType, slice);
-    if (!decoded) {
-      return false;
+    if (!decodeSdoBytes(p->dataType, slice)) {
+      return false;  // slice too short for the declared type — the layout assumption was wrong
     }
-    p->value = std::move(*decoded);
+    p->setRawValue(slice);
     p->syncState = SyncState::Synced;
     // Subindex 0 occupies a padded 16-bit slot; every later entry follows at its native width.
     cursor += (k == 0) ? 16u : p->bitLength;
@@ -371,13 +370,12 @@ void Device::readParameterValues(std::vector<DeviceParameter>& defs, bool useCom
                    p.subindex, bytes.error());
       return;
     }
-    auto decoded = decodeSdoBytes(p.dataType, *bytes);
-    if (!decoded) {
+    if (auto decoded = decodeSdoBytes(p.dataType, *bytes); !decoded) {
       spdlog::warn("Device {}: decode 0x{:04X}:{:02X} failed: {}", slavePosition_, p.index,
                    p.subindex, decoded.error());
       return;
     }
-    p.value = std::move(*decoded);
+    p.setRawValue(*bytes);
     p.syncState = SyncState::Synced;
   };
 
@@ -600,7 +598,6 @@ std::expected<std::vector<DeviceParameter>, std::string> Device::buildSiiParamet
             .bitLength = e.bitLen,
             .access = access,
             .origin = ParameterOrigin::Sii,
-            .value = defaultValueForDataType(e.dataType),
             .unit = std::nullopt,
             .defaultValue = std::nullopt,
             .minValue = std::nullopt,
@@ -860,7 +857,7 @@ std::expected<DeviceParameterValue, std::string> Device::setValueFromBytes(
     return std::unexpected(set.error());
   }
   p->syncState = SyncState::Synced;
-  return p->value;
+  return p->currentValue();
 }
 
 std::expected<std::vector<uint8_t>, std::string> Device::valueAsBytes(uint16_t index,
@@ -871,7 +868,7 @@ std::expected<std::vector<uint8_t>, std::string> Device::valueAsBytes(uint16_t i
     return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
                                        slavePosition_, index, subindex));
   }
-  return encodeSdoBytes(p->dataType, p->value);
+  return encodeSdoBytes(p->dataType, p->currentValue());
 }
 
 std::vector<DeviceParameter> Device::parametersOrdered() const {
@@ -892,7 +889,7 @@ std::optional<DeviceParameterValue> Device::value(uint16_t index, uint8_t subind
   if (!p) {
     return std::nullopt;
   }
-  return p->value;
+  return p->currentValue();
 }
 
 std::optional<DeviceParameter> Device::parameter(uint16_t index, uint8_t subindex) const {
@@ -946,13 +943,13 @@ std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t 
         if (!decoded) {
           return std::unexpected(decoded.error());
         }
-        p->value = std::move(*decoded);
+        p->setRawValue(*bytes);
         p->syncState = SyncState::Synced;
-        return p->value;
+        return std::move(*decoded);
       }
     }
     if (!mailboxActive()) {
-      return p->value;  // no mailbox: serve the cached value, never touch the bus
+      return p->currentValue();  // no mailbox: serve the cached value, never touch the bus
     }
     declaredType = p->dataType;
   }
@@ -982,9 +979,9 @@ std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t 
         "device {}: parameter 0x{:04X}:{:02X} was re-enumerated during the read — retry",
         slavePosition_, index, subindex));
   }
-  p->value = std::move(*decoded);
+  p->setRawValue(*bytes);
   p->syncState = SyncState::Synced;
-  return p->value;
+  return std::move(*decoded);
 }
 
 std::expected<void, std::string> Device::readAllParameters(bool useCompleteAccess) {
@@ -1141,7 +1138,7 @@ std::expected<ObjectValues, std::string> Device::readObject(uint16_t index,
       if (!p) {
         break;  // re-enumerated between the decode and here — fall through to per-subindex reads
       }
-      object.values.emplace(si, p->value);
+      object.values.emplace(si, p->currentValue());
     }
     if (object.values.size() == subindices.size()) {
       return object;
@@ -1185,7 +1182,7 @@ std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t 
     // inline rather than via valueAsBytes, which would re-take parametersMutex_ that we already
     // hold. No health gate here (unlike the read path): staging is always safe — the value is
     // simply sent on the next cycle.
-    auto encoded = encodeSdoBytes(p->dataType, p->value);
+    auto encoded = encodeSdoBytes(p->dataType, p->currentValue());
     if (processData_ && exchangesProcessData() && encoded &&
         processData_->writePdo(slavePosition_, index, subindex, *encoded)) {
       p->syncState = SyncState::Synced;

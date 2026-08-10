@@ -39,6 +39,32 @@ constexpr uint32_t makeParameterKey(uint16_t index, uint8_t subindex) {
   return (static_cast<uint32_t>(index) << 8) | static_cast<uint32_t>(subindex);
 }
 
+/// @brief The address of one object-dictionary entry, carrying the type that entry holds.
+///
+/// The typed counterpart of @c makeParameterKey: an index and a subindex, plus the C++ type the
+/// object's declared ETG.1020 data type maps to. It names a location in *any* dictionary — it holds
+/// no device and no pointer, which is why it is an address rather than a reference or a handle.
+///
+/// Its point is that the three things easiest to get wrong about an object — its index, its type,
+/// and (in the trailing comment beside each generated constant) its unit — travel together instead
+/// of being retyped at every call site. @c Device's overloads take one in place of an
+/// index/subindex pair, so the type argument disappears from the call:
+///
+/// @code
+/// device.value(somanet::objects::kDriveTemperatureMeasuredTemperature);  // std::optional<int32_t>
+/// device.readValue(profile::objects::kManufacturerSoftwareVersion);      //
+/// expected<std::string,…>
+/// @endcode
+///
+/// A whole dictionary's worth of these is generated from a vendor's ESI — see
+/// @c cia402_drive_objects.h and its siblings — but there is nothing generated about the type
+/// itself: writing one by hand for an object you care about is a one-liner.
+template <typename T>
+struct ObjectAddress {
+  uint16_t index{};    ///< CoE object index.
+  uint8_t subindex{};  ///< CoE object subindex.
+};
+
 /// @brief Returns a zero-equivalent value for the given ETG.1020 @p dataType.
 ///
 /// The variant alternative a value of this type is reported as, holding its type-appropriate zero.

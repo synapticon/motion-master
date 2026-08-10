@@ -614,6 +614,38 @@ TEST(CycleLock, DecodeIsNotGatedOnTheWorkingCounter) {
   EXPECT_EQ(drive->value<uint16_t>(0x6041, 0x00), std::optional<uint16_t>{0x0237});
 }
 
+// An ObjectAddress carries the type with the address, so a call site cannot disagree with the
+// object it names — which is the whole reason for generating dictionaries of them.
+TEST(CycleLock, ObjectAddressOverloadsCarryTheType) {
+  auto bus = makeCia402Bus();
+  bus->cannedInputs = {0x37, 0x02, 0x44, 0x33, 0x22, 0x11};
+  bus->wkc = 3;
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  dm.exchangeProcessData();
+
+  constexpr mm::node::ObjectAddress<uint16_t> kStatusword{0x6041, 0x00};
+  constexpr mm::node::ObjectAddress<int32_t> kTargetPosition{0x607A, 0x00};
+
+  const DeviceManager::CycleLock cycle(dm);
+  ASSERT_TRUE(static_cast<bool>(cycle));
+  Device* drive = dm.findDevice(1);
+  ASSERT_NE(drive, nullptr);
+
+  // Identical to value<uint16_t>(0x6041, 0), with the type supplied by the address.
+  EXPECT_EQ(drive->value(kStatusword), std::optional<uint16_t>{0x0237});
+  EXPECT_TRUE(drive->setValue(kTargetPosition, 12345));
+  EXPECT_EQ(drive->value(kTargetPosition), std::optional<int32_t>{12345});
+
+  // The blocking pair addresses the same objects and reaches the same values.
+  auto blocking = drive->readValue(kStatusword);
+  ASSERT_TRUE(blocking.has_value());
+  EXPECT_EQ(*blocking, 0x0237);
+}
+
 // Re-enumerating replaces the parameter map, destroying every entry a task may be looking up. The
 // swap therefore pauses the RT cycle the same way a re-map does — and puts the image back, so the
 // loop resumes rather than stopping for good.

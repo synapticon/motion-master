@@ -13,6 +13,7 @@
 #include <string>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <variant>
 #include <vector>
 
@@ -516,6 +517,21 @@ class Device {
         std::format("parameter 0x{:04X}:{:02X} holds a different type", index, subindex));
   }
 
+  /// @brief @c readValue<T>() addressed by an @c ObjectAddress. Blocking; off the RT thread only.
+  ///
+  /// Unlike @c value(), this serves every type an object can have — including the strings and byte
+  /// arrays a cycle cannot read — because it goes through the variant rather than the scalar cell.
+  template <typename T>
+  std::expected<T, std::string> readValue(ObjectAddress<T> address) {
+    return readValue<T>(address.index, address.subindex);
+  }
+
+  /// @brief @c writeValue<T>() addressed by an @c ObjectAddress. Blocking; off the RT thread only.
+  template <typename T>
+  std::expected<void, std::string> writeValue(ObjectAddress<T> address, T newValue) {
+    return writeValue<T>(address.index, address.subindex, std::move(newValue));
+  }
+
   /// @brief Read-once typed accessor for objects the caller knows are immutable.
   ///
   /// Serves the cached value as soon as it is @c SyncState::Synced (populated by a prior read, a
@@ -642,6 +658,21 @@ class Device {
     std::memcpy(&bits, &newValue, sizeof(T));
     p->storeBits(bits);
     return true;
+  }
+
+  /// @brief @c value<T>() addressed by an @c ObjectAddress. Lock-free, non-allocating.
+  ///
+  /// The form generated dictionaries are written for: the type comes from the address, so it cannot
+  /// disagree with the object it names.
+  template <typename T>
+  std::optional<T> value(ObjectAddress<T> address) const {
+    return value<T>(address.index, address.subindex);
+  }
+
+  /// @brief @c setValue<T>() addressed by an @c ObjectAddress. Lock-free, non-allocating.
+  template <typename T>
+  bool setValue(ObjectAddress<T> address, T newValue) {
+    return setValue<T>(address.index, address.subindex, newValue);
   }
 
  private:

@@ -618,11 +618,11 @@ class Device {
   }
 
  private:
-  /// @brief Replaces @c parameters_ wholesale, pausing the RT cycle across the swap.
+  /// @brief Publishes a freshly built @c parameters_ map, pausing the RT cycle across the swap.
   ///
-  /// The one place the map is installed, so the pause cannot be taken on one path and forgotten on
+  /// The one place the map is published, so the pause cannot be taken on one path and forgotten on
   /// another. See the definition for why the swap needs it and the enumeration does not.
-  void installParameters(std::unordered_map<uint32_t, DeviceParameter>&& built);
+  void publishParameters(std::unordered_map<uint32_t, DeviceParameter>&& built);
 
   /// @brief Fills in live values on @p defs (the value-read pass of @c initializeParameters).
   ///

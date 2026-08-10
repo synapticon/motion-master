@@ -156,7 +156,7 @@ std::expected<void, std::string> Device::initializeParameters(bool readValues,
     for (auto& p : *defs) {
       built.emplace(p.key(), std::move(p));
     }
-    installParameters(std::move(built));
+    publishParameters(std::move(built));
     return {};
   }
 
@@ -235,11 +235,11 @@ std::expected<void, std::string> Device::initializeParameters(bool readValues,
   for (auto& p : defs) {
     built.emplace(p.key(), std::move(p));
   }
-  installParameters(std::move(built));
+  publishParameters(std::move(built));
   return {};
 }
 
-void Device::installParameters(std::unordered_map<uint32_t, DeviceParameter>&& built) {
+void Device::publishParameters(std::unordered_map<uint32_t, DeviceParameter>&& built) {
   // Replacing the map destroys every entry in it, and a cyclic task resolves its parameters by
   // lookup each cycle — so the swap has to happen while no RT thread is inside a cycle body. That
   // is the same pause a re-map or a rescan takes, and for the same reason; only the swap is inside

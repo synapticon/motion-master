@@ -868,7 +868,7 @@ std::expected<std::vector<uint8_t>, std::string> Device::valueAsBytes(uint16_t i
     return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
                                        slavePosition_, index, subindex));
   }
-  return encodeSdoBytes(p->dataType, p->currentValue());
+  return p->rawValueBytes();
 }
 
 std::vector<DeviceParameter> Device::parametersOrdered() const {
@@ -1178,13 +1178,14 @@ std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t 
     }
     // While exchanging, stage an output-mapped object into the process image (sent next cycle)
     // instead of an SDO download. writePdo returns false when the object is not output-mapped (or
-    // no image is published), in which case we fall through to the SDO/offline paths below. Encode
-    // inline rather than via valueAsBytes, which would re-take parametersMutex_ that we already
-    // hold. No health gate here (unlike the read path): staging is always safe — the value is
-    // simply sent on the next cycle.
-    auto encoded = encodeSdoBytes(p->dataType, p->currentValue());
-    if (processData_ && exchangesProcessData() && encoded &&
-        processData_->writePdo(slavePosition_, index, subindex, *encoded)) {
+    // no image is published), in which case we fall through to the SDO/offline paths below. Read
+    // the bytes off the parameter directly rather than via valueAsBytes, which would re-take
+    // parametersMutex_ that we already hold — and setValue above has just encoded them, so this
+    // cannot fail. No health gate here (unlike the read path): staging is always safe — the value
+    // is simply sent on the next cycle.
+    bytes = p->rawValueBytes();
+    if (processData_ && exchangesProcessData() &&
+        processData_->writePdo(slavePosition_, index, subindex, bytes)) {
       p->syncState = SyncState::Synced;
       return {};
     }
@@ -1193,11 +1194,6 @@ std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t 
       p->syncState = SyncState::Pending;
       return {};
     }
-    if (!encoded) {
-      p->syncState = SyncState::Pending;
-      return std::unexpected(encoded.error());
-    }
-    bytes = std::move(*encoded);
   }
 
   // Phase 2 — lock released: the mailbox round-trip, for the same reason as readParameter's. The

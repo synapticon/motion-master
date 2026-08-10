@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <bit>
 #include <cstdint>
+#include <cstring>
 #include <expected>
 #include <format>
 #include <nlohmann/json_fwd.hpp>
@@ -9,10 +11,17 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <variant>
 #include <vector>
 
 namespace mm::node {
+
+// Values are stored and exchanged as little-endian wire bytes and read back by memcpy, here
+// and in decodeSdoBytes. A big-endian host would need every one of those to byte-swap, so it
+// must fail here rather than silently return reversed numbers.
+static_assert(std::endian::native == std::endian::little,
+              "parameter values are stored as little-endian wire bytes");
 
 /// @brief Decoded value of a single device parameter (CoE object dictionary entry).
 ///
@@ -44,6 +53,12 @@ DeviceParameterValue defaultValueForDataType(uint16_t dataType);
 /// immutable once the object dictionary is enumerated, the choice never changes: a value has
 /// exactly one home and the two fields can never disagree.
 bool isScalarDataType(uint16_t dataType);
+
+/// @brief Width in bytes of a value of @p dataType, or @c 0 when it is not a scalar.
+///
+/// The declared width, which is what an SDO transfer carries — not @c bitLength, which describes
+/// the object's slot in the process image and may be narrower.
+size_t scalarByteWidth(uint16_t dataType);
 
 /// @brief Packs up to eight raw little-endian wire bytes into a @c uint64_t (zero-extended).
 uint64_t packLeBits(std::span<const uint8_t> bytes);
@@ -163,6 +178,41 @@ struct DeviceParameter {
   /// Off-RT only, by cost rather than by safety: it may allocate (a string or byte-array
   /// parameter). A cyclic task reads @c loadBits instead.
   DeviceParameterValue currentValue() const;
+
+  /// @brief Reads the value as @p T straight out of the cell. Lock-free, non-allocating.
+  ///
+  /// The RT-callable read: one relaxed atomic load and a copy, with no lookup, no decode into a
+  /// variant and no error string to build. @p T must be the alternative @c dataType maps to —
+  /// @c int32_t for an INTEGER32 object, @c uint8_t for a BOOLEAN — and a mismatch, or a
+  /// non-scalar parameter, reads as @c nullopt rather than as a wrong number.
+  ///
+  /// A parameter that has never been written reads as zero, not @c nullopt: @c syncState is where
+  /// "never read" is recorded, and a control loop wants a number it can act on.
+  template <typename T>
+  std::optional<T> scalar() const {
+    static_assert(std::is_arithmetic_v<T>, "the cell holds arithmetic types only");
+    static_assert(sizeof(T) <= sizeof(uint64_t), "the cell holds at most eight bytes");
+    // Constructing the type's zero is how the alternative is named; for every scalar it is a
+    // register-sized value, and for the string/bytes cases an empty container — no allocation
+    // either way, so this stays RT-safe.
+    if (!std::holds_alternative<T>(defaultValueForDataType(dataType))) {
+      return std::nullopt;
+    }
+    const uint64_t v = loadBits();
+    T out{};
+    std::memcpy(&out, &v, sizeof(T));
+    return out;
+  }
+
+  /// @brief Returns the value's raw wire bytes at the object's declared width.
+  ///
+  /// The storage-level getter, and the inverse of @c setRawValue: a scalar is unpacked from the
+  /// cell, a non-scalar returned as stored. Prefer it over @c encodeSdoBytes(dataType,
+  /// currentValue()) — storage is already bytes, so that route decodes and re-encodes for nothing.
+  ///
+  /// One difference worth knowing for strings: this returns what the slave actually sent, padding
+  /// included, where @c currentValue() strips the trailing NUL/space padding ETG.1000.6 allows.
+  std::vector<uint8_t> rawValueBytes() const;
 
   /// @brief Replaces the stored value with @p bytes, its raw little-endian wire encoding.
   ///

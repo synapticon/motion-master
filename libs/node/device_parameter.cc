@@ -116,6 +116,21 @@ bool isScalarDataType(uint16_t dataType) {
   }
 }
 
+size_t scalarByteWidth(uint16_t dataType) {
+  // Derived from the same table rather than a second switch: the width of a scalar is the size of
+  // the alternative defaultValueForDataType names for it, so the two cannot drift.
+  return std::visit(
+      [](const auto& zero) -> size_t {
+        using T = std::decay_t<decltype(zero)>;
+        if constexpr (std::is_arithmetic_v<T>) {
+          return sizeof(T);
+        } else {
+          return 0;  // string / raw bytes — not a scalar, so it has no fixed width
+        }
+      },
+      defaultValueForDataType(dataType));
+}
+
 uint64_t packLeBits(std::span<const uint8_t> bytes) {
   uint64_t out = 0;
   const size_t n = std::min<size_t>(bytes.size(), sizeof(uint64_t));
@@ -276,6 +291,16 @@ DeviceParameterValue DeviceParameter::currentValue() const {
   }
   auto decoded = decodeSdoBytes(dataType, rawValue);
   return decoded ? std::move(*decoded) : defaultValueForDataType(dataType);
+}
+
+std::vector<uint8_t> DeviceParameter::rawValueBytes() const {
+  const size_t width = scalarByteWidth(dataType);
+  if (width == 0) {
+    return rawValue;  // non-scalar: storage is already the wire bytes
+  }
+  std::vector<uint8_t> out(width);
+  unpackLeBits(loadBits(), out);
+  return out;
 }
 
 void DeviceParameter::setRawValue(std::span<const uint8_t> bytes) {

@@ -4,6 +4,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -18,6 +19,7 @@ using mm::node::encodeSdoBytes;
 using mm::node::isScalarDataType;
 using mm::node::numericValue;
 using mm::node::packLeBits;
+using mm::node::scalarByteWidth;
 using mm::node::SyncState;
 using mm::node::unpackLeBits;
 
@@ -262,6 +264,60 @@ TEST(DeviceParameterStorage, SetRawValueStoresWireBytesForBothKinds) {
   text.setRawValue(hello);
   EXPECT_EQ(text.rawValue, hello);                                          // stored verbatim
   EXPECT_EQ(text.currentValue(), DeviceParameterValue{std::string{"hi"}});  // padding stripped
+}
+
+// The RT read: type-exact, and a mismatch reads as nothing rather than as a wrong number.
+TEST(DeviceParameterStorage, ScalarReadsTheCellTypeExactly) {
+  DeviceParameter p = param(kI32, DeviceParameterValue{int32_t{-77}});
+  EXPECT_EQ(p.scalar<int32_t>(), std::optional<int32_t>{-77});
+  EXPECT_EQ(p.scalar<uint32_t>(), std::nullopt);  // right width, wrong signedness
+  EXPECT_EQ(p.scalar<int16_t>(), std::nullopt);   // right family, wrong width
+
+  // A string parameter has no scalar reading at all.
+  DeviceParameter text = param(kVisibleString, DeviceParameterValue{std::string{"hi"}});
+  EXPECT_EQ(text.scalar<int32_t>(), std::nullopt);
+
+  // Never written reads as zero, not nullopt — a control loop wants a number it can act on, and
+  // "never read" is what syncState records.
+  DeviceParameter fresh{};
+  fresh.dataType = kI32;
+  EXPECT_EQ(fresh.scalar<int32_t>(), std::optional<int32_t>{0});
+  EXPECT_EQ(fresh.syncState, SyncState::Unknown);
+}
+
+// rawValueBytes is the inverse of setRawValue and must return the object's declared width — not
+// the eight bytes of the cell, and not bitLength, which describes the process-image slot.
+TEST(DeviceParameterStorage, RawValueBytesReturnsTheDeclaredWidth) {
+  DeviceParameter p = param(kU16, DeviceParameterValue{uint16_t{0x1234}});
+  p.bitLength = 4;  // deliberately inconsistent: the wire width comes from dataType
+  EXPECT_EQ(p.rawValueBytes(), (std::vector<uint8_t>{0x34, 0x12}));
+
+  DeviceParameter wide = param(kReal64, DeviceParameterValue{1.0});
+  EXPECT_EQ(wide.rawValueBytes().size(), 8u);
+
+  // Round trip against the storage setter, for both kinds.
+  DeviceParameter scalar{};
+  scalar.dataType = kU32;
+  const std::vector<uint8_t> le = {0x44, 0x33, 0x22, 0x11};
+  scalar.setRawValue(le);
+  EXPECT_EQ(scalar.rawValueBytes(), le);
+
+  DeviceParameter text{};
+  text.dataType = kVisibleString;
+  const std::vector<uint8_t> padded = {'h', 'i', 0x00, 0x00};
+  text.setRawValue(padded);
+  // Verbatim, padding included — unlike currentValue(), which strips it for display.
+  EXPECT_EQ(text.rawValueBytes(), padded);
+  EXPECT_EQ(text.currentValue(), DeviceParameterValue{std::string{"hi"}});
+}
+
+TEST(DeviceParameterStorage, ScalarByteWidthMatchesTheDeclaredType) {
+  EXPECT_EQ(scalarByteWidth(kU8), 1u);
+  EXPECT_EQ(scalarByteWidth(kI16), 2u);
+  EXPECT_EQ(scalarByteWidth(kU32), 4u);
+  EXPECT_EQ(scalarByteWidth(kReal32), 4u);
+  EXPECT_EQ(scalarByteWidth(kReal64), 8u);
+  EXPECT_EQ(scalarByteWidth(kVisibleString), 0u);  // no fixed width
 }
 
 // The point of the cell: copies are compiler-generated, so a field added later is copied without

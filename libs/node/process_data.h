@@ -23,12 +23,12 @@ namespace mm::node {
 /// what lets @c Device::readParameter / @c Device::writeParameter serve the live IO-map value while
 /// exchanging — identically from an HTTP handler or an RT task — and fall back to SDO otherwise.
 ///
-/// Both accessors are lock-free, including writes (so an RT task can stage a setpoint without ever
-/// blocking on a non-RT writer). The output path is single-writer-per-buffer by construction: each
-/// output object owns an atomic staging slot that any number of writers store into independently,
-/// and the RT loop is the sole thread that composes those slots into the packed wire image each
-/// cycle (@c DeviceManager::exchangeProcessData). Composing on one thread is what makes bit-packed
-/// objects that share a byte safe without a lock — see NEXTGEN.md (Design B).
+/// Both accessors are lock-free (so an RT task can read a value or set a setpoint without ever
+/// blocking on a non-RT writer). The output path is single-composer by construction: each output
+/// object's value lives in its own @c DeviceParameter cell, which any number of writers store into
+/// independently, and the RT loop is the sole thread that composes those cells into the packed wire
+/// image each cycle (@c DeviceManager::exchangeProcessData). Composing on one thread is what makes
+/// bit-packed objects that share a byte safe without a lock — see NEXTGEN.md (Design B).
 ///
 /// Defined in a header (rather than pimpl'd) so both @c device.cc and @c device_manager.cc can use
 /// it; the recorder ring and fixed buffers are heavy, but only those two translation units pull
@@ -40,15 +40,6 @@ struct ProcessData {
   // Every image ever published since the last reset(), retained so a lock-free reader can never
   // dereference a freed image after a re-map republishes a new one.
   std::vector<std::shared_ptr<const ProcessImage>> generations;
-  // Per-output-object staging slots, one per entry in image->outputs (rebuilt and seeded at each
-  // re-map). A writer stores its object's latest wire bytes (≤8, packed little-endian into the u64)
-  // here lock-free — writers to different objects never contend; the same object is last-writer-
-  // wins. The RT loop reads every slot each cycle and composes the output image (one thread
-  // composing is what keeps bit-packed objects sharing a byte safe without a lock; NEXTGEN Design
-  // B).
-  std::vector<std::atomic<uint64_t>> outputSlots;
-  static_assert(std::atomic<uint64_t>::is_always_lock_free,
-                "output staging slots must be lock-free so the RT path never blocks");
   // The lossless flight-data recorder: the RT loop appends one record per cycle (raw input + output
   // IOmap, timestamp, working counter), the source for both the live monitoring stream and point
   // reads of the freshest value (head()-1). Allocated at configureProcessData (sizes known then),
@@ -104,21 +95,23 @@ struct ProcessData {
 
   /// @brief Reads a PDO-mapped object's current bytes from the live image. Lock-free.
   ///
-  /// Outputs come from their staging slot (our current setpoint — always valid); inputs from the
-  /// newest recorded cycle (@c ring head()-1), gated on @c healthy(). Returns @c nullopt when no
-  /// image is published, nothing has been recorded yet, the object is not PDO-mapped, or (inputs
-  /// only) the bus is unhealthy — in each case the caller reads it over SDO instead. Bytes are
-  /// little-endian and LSB-aligned.
+  /// Outputs come from the parameter's own cell (our current setpoint — always valid); inputs from
+  /// the newest recorded cycle (@c ring head()-1), gated on @c healthy(). Returns @c nullopt when
+  /// no image is published, nothing has been recorded yet, the object is not PDO-mapped, its owning
+  /// parameter is unknown, or (inputs only) the bus is unhealthy — in each case the caller reads it
+  /// over SDO instead. Bytes are little-endian and LSB-aligned.
   std::optional<std::vector<uint8_t>> readPdo(uint16_t slavePosition, uint16_t index,
                                               uint8_t subindex) const;
 
-  /// @brief Stages a PDO output object's bytes into its slot, sent on the next cycle. Lock-free.
+  /// @brief Whether an object is output-mapped in the published image, and so driven cyclically.
   ///
-  /// @return @c true if the object is output-mapped and was staged; @c false otherwise (no image,
-  ///         or the object is an input / not mapped — the caller then writes it over SDO). No
-  ///         health gate: staging is always safe, the value is simply sent next cycle.
-  bool writePdo(uint16_t slavePosition, uint16_t index, uint8_t subindex,
-                std::span<const uint8_t> bytes);
+  /// Asks a question rather than staging a value, because there is nowhere left to stage one: the
+  /// parameter's own cell is what the RT loop composes the wire image from, and a writer has
+  /// already stored there by the time it asks. So a @c true answer means "your value will go out on
+  /// the next cycle"; @c false means the caller must reach the object over SDO instead.
+  ///
+  /// Lock-free. No health gate — an output is our own setpoint, always valid to send.
+  bool isOutputMapped(uint16_t slavePosition, uint16_t index, uint8_t subindex) const;
 };
 
 }  // namespace mm::node

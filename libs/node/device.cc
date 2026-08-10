@@ -1191,16 +1191,15 @@ std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t 
     if (auto set = p->setValue(newValue); !set) {
       return std::unexpected(set.error());
     }
-    // While exchanging, stage an output-mapped object into the process image (sent next cycle)
-    // instead of an SDO download. writePdo returns false when the object is not output-mapped (or
-    // no image is published), in which case we fall through to the SDO/offline paths below. Read
-    // the bytes off the parameter directly rather than via valueAsBytes, which would re-take
-    // parametersMutex_ that we already hold — and setValue above has just encoded them, so this
-    // cannot fail. No health gate here (unlike the read path): staging is always safe — the value
-    // is simply sent on the next cycle.
+    // While exchanging, an output-mapped object needs no SDO download at all: setValue above has
+    // already put the value in the parameter's cell, and the cell is what the RT composer sends on
+    // the next cycle. So all that is left to ask is whether the object is output-mapped —
+    // isOutputMapped answers false when it is not, or when no image is published, and we fall
+    // through to the SDO/offline paths below. No health gate here (unlike the read path): our own
+    // setpoint is always safe to send.
     bytes = p->rawValueBytes();
     if (processData_ && exchangesProcessData() &&
-        processData_->writePdo(slavePosition_, index, subindex, bytes)) {
+        processData_->isOutputMapped(slavePosition_, index, subindex)) {
       p->syncState = SyncState::Synced;
       return {};
     }

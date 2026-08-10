@@ -55,31 +55,6 @@ DeviceStateInfo decodeState(uint16_t slavePosition,
   };
 }
 
-// Number of whole bytes a bit-width object occupies on the wire, capped at the 8 a staging slot
-// (uint64_t) holds. Objects wider than 64 bits are not represented by the slot scheme (documented
-// in process_data.h); no SOMANET CiA402 output approaches that.
-size_t slotByteWidth(uint16_t bitLength) {
-  return std::min<size_t>((static_cast<size_t>(bitLength) + 7) / 8, sizeof(uint64_t));
-}
-
-// Pack up to 8 little-endian wire bytes into a u64 staging slot, and unpack them back out. The
-// slot is type-agnostic — it carries whatever encodeSdoBytes produced for the object.
-uint64_t packSlot(std::span<const uint8_t> bytes) {
-  uint64_t v = 0;
-  for (size_t i = 0; i < bytes.size() && i < sizeof(uint64_t); ++i) {
-    v |= static_cast<uint64_t>(bytes[i]) << (8 * i);
-  }
-  return v;
-}
-
-// Unpacks the low bytes of a slot into a caller-provided buffer (no allocation, so the RT compose
-// loop can use a stack array). Writes min(out.size(), 8) little-endian bytes.
-void unpackSlotInto(uint64_t packed, std::span<uint8_t> out) {
-  for (size_t i = 0; i < out.size() && i < sizeof(uint64_t); ++i) {
-    out[i] = static_cast<uint8_t>(packed >> (8 * i));
-  }
-}
-
 // The EtherCAT AL state machine, keyed by a device's current state: each entry lists every state
 // that state may transition to (including itself — re-commanding the current state is harmless).
 // Climbs are single-step only (INIT -> PRE-OP -> SAFE-OP -> OP); drops may skip levels (e.g.
@@ -282,27 +257,10 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
     return std::unexpected(image.error());
   }
 
-  // Build a fresh staging slot per output object and seed each from the current cached parameter
-  // value, so the RxPDO setpoints callers initialised before OP (controlword, modes, targets) are
-  // sent on the very first cycle. Unset parameters encode their type-appropriate zero, the safe
-  // default. Built here into a local, then swapped in under the exclusive lock below — the RT
-  // composer only ever reads the live vector, gated by the image pointer, and a non-RT point
-  // read/write goes through ProcessData::readPdo/writePdo under the shared lock.
-  std::vector<std::atomic<uint64_t>> slots(image->outputs.size());
-  for (size_t i = 0; i < image->outputs.size(); ++i) {
-    const ProcessImageEntry& entry = image->outputs[i];
-    const Device* device = findDevice(entry.slavePosition);
-    if (!device) {
-      continue;
-    }
-    // valueAsBytes does the lookup and the encode in one hold of the device's own parameter lock,
-    // so nothing here reaches into the map while another thread may be re-enumerating it.
-    auto bytes = device->valueAsBytes(entry.index, entry.subindex);
-    if (!bytes) {
-      continue;
-    }
-    slots[i].store(packSlot(*bytes), std::memory_order_relaxed);
-  }
+  // Nothing to seed: each output object's value already lives in its own parameter's cell, which is
+  // what the composer reads. The RxPDO setpoints callers initialised before OP (controlword, modes,
+  // targets) are therefore sent on the very first cycle by construction, and a write that lands
+  // while this re-map is running is picked up rather than lost between a seed and a publish.
 
   // The publish window — the only part of a re-map that touches state a reader can see, and so the
   // only part that takes deviceSetMutex_ exclusively. Everything above (the IOmap rebuild, the
@@ -312,7 +270,6 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
   std::shared_ptr<const ProcessImage> shared;
   {
     const std::unique_lock lock(deviceSetMutex_);
-    pd_->outputSlots = std::move(slots);
     // (Re)allocate the recorder for this image's per-cycle byte size and the configured depth. A
     // layout-changing re-map restarts the recording — records under the old layout are undecodable
     // under the new one. Exchange is drained (stopExchange above) and the image is not yet
@@ -354,22 +311,22 @@ void DeviceManager::exchangeProcessData() {
     pd_->inCycle.fetch_sub(1, std::memory_order_release);
     return;  // not mapped yet, or torn down mid-flight — back out without touching the IOmap
   }
-  // Compose the output image from the per-object staging slots — this RT thread is the sole writer
-  // of outScratch, so no lock is needed and bit-packed objects sharing a byte are applied safely in
-  // sequence. Zero the live region first so alignment gaps (and any object whose slot is untouched)
-  // go out as zero. outputSlots is sized to image->outputs for this published generation.
+  // Compose the output image from each output object's parameter cell — this RT thread is the sole
+  // writer of outScratch, so no lock is needed and bit-packed objects sharing a byte are applied
+  // safely in sequence. Zero the live region first so alignment gaps (and any object with no
+  // parameter behind it) go out as zero.
   const uint32_t outputBytes = image->outputBytes;
   std::fill_n(pd_->outScratch.bytes.begin(), outputBytes, uint8_t{0});
   pd_->outScratch.size = outputBytes;
-  for (size_t i = 0; i < image->outputs.size(); ++i) {
-    const ProcessImageEntry& entry = image->outputs[i];
-    const uint64_t packed = pd_->outputSlots[i].load(std::memory_order_relaxed);
-    // Unpack into a stack buffer — no allocation on the RT path.
-    std::array<uint8_t, sizeof(uint64_t)> buf;
-    const size_t width = slotByteWidth(entry.bitLength);
-    unpackSlotInto(packed, std::span<uint8_t>(buf.data(), width));
-    insertBits(std::span<uint8_t>(pd_->outScratch.bytes.data(), outputBytes), entry.bitOffset,
-               entry.bitLength, std::span<const uint8_t>(buf.data(), width));
+  const std::span<uint8_t> outputs(pd_->outScratch.bytes.data(), outputBytes);
+  std::array<uint8_t, sizeof(uint64_t)> buf{};
+  for (const ProcessImageEntry& entry : image->outputs) {
+    if (entry.parameter == nullptr) {
+      continue;  // dictionary not enumerated — nothing to send, the zeroed region stands
+    }
+    // Unpack into a stack buffer — no allocation, no lookup on the RT path.
+    unpackLeBits(entry.parameter->loadBits(), buf);
+    insertBits(outputs, entry.bitOffset, entry.bitLength, buf);
   }
   // Exchange one cycle, then append it to the recorder for non-RT readers. The scratch buffers are
   // touched only on this (RT) thread; ring.write() copies just the live image bytes (the published
@@ -1128,12 +1085,13 @@ std::optional<std::vector<uint8_t>> ProcessData::readPdo(uint16_t slavePosition,
     return std::nullopt;  // not PDO-mapped — caller uses SDO
   }
   if (loc->isOutput) {
-    // Our own staged setpoint: always valid, no health gate, lock-free. outputSlots is sized to
-    // img->outputs for this generation, so the entry index addresses our slot directly.
-    const uint64_t packed = outputSlots[loc->entryIndex].load(std::memory_order_relaxed);
-    std::vector<uint8_t> bytes(slotByteWidth(loc->bitLength));
-    unpackSlotInto(packed, bytes);
-    return bytes;
+    // Our own setpoint: always valid, no health gate, lock-free. It lives in the owning parameter's
+    // cell, which is also what the composer sends — so a read here and the wire cannot disagree.
+    const DeviceParameter* parameter = img->outputs[loc->entryIndex].parameter;
+    if (parameter == nullptr) {
+      return std::nullopt;  // dictionary not enumerated — caller uses SDO
+    }
+    return parameter->rawValueBytes();
   }
   // Input: gate on health, then read the newest recorded cycle (ring head()-1). On a lost or
   // partial frame the driver leaves the prior cycle's bytes in the IOmap, so an unhealthy bus
@@ -1157,21 +1115,17 @@ std::optional<std::vector<uint8_t>> ProcessData::readPdo(uint16_t slavePosition,
                      loc->bitOffset, loc->bitLength);
 }
 
-bool ProcessData::writePdo(uint16_t slavePosition, uint16_t index, uint8_t subindex,
-                           std::span<const uint8_t> bytes) {
+bool ProcessData::isOutputMapped(uint16_t slavePosition, uint16_t index, uint8_t subindex) const {
   const ProcessImage* img = image.load(std::memory_order_acquire);
   if (!img) {
     return false;
   }
   auto loc = img->find(slavePosition, index, subindex);
-  if (!loc || !loc->isOutput) {
-    return false;  // only outputs are writable from the master
-  }
-  // Lock-free store into this object's own slot. The RT loop composes the wire image from all
-  // slots each cycle, so two writers to different objects never contend and bit-packed objects
-  // sharing a byte stay safe (the single RT composer applies them). Same object = last-writer-wins.
-  outputSlots[loc->entryIndex].store(packSlot(bytes), std::memory_order_relaxed);
-  return true;
+  // Only outputs are driven from the master. The value itself is already in the parameter's cell,
+  // which the RT composer reads each cycle — writers to different objects never contend, and
+  // bit-packed objects sharing a byte stay safe because one thread composes them. Same object =
+  // last-writer-wins.
+  return loc.has_value() && loc->isOutput;
 }
 
 std::optional<DeviceParameterValue> DeviceManager::value(uint16_t slavePosition, uint16_t index,

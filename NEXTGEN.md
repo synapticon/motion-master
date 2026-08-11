@@ -2554,3 +2554,37 @@ Both implementations are worked out, so this need not be re-derived:
 ### Superseded
 
 This supersedes the phase list of the design session earlier today (phases 8's write-back is deferred as above), and the parts of Session 2026-08-09 describing `outputSlots` as the output path — the staging slots are gone, folded into the cells, and a re-map no longer seeds anything because the cells already hold the values. Session 2026-07-09's "profile view is RT-callable" is still open, and is now a smaller change than it was: the bus-state dispatch it was built around is what the cells replace, and `libs/node/cia402.h` is already pure `constexpr`, so a task decodes a statusword today without any view at all.
+
+## Session 2026-08-10 — Object addresses generated from the ESI: the type belongs to the dictionary, not to the call site (as-built)
+
+The trigger was three mistakes about one object in a single sitting. Writing the Tier-3 example's temperature interlock, `0x2031:01` was got wrong three times running — first the index, then the type (it is a `DINT`, not an `INTEGER16`), then the unit (milli-degrees, so a 60 °C limit is `60000`). Two of those failed **silently**: `value<int16_t>` on a 32-bit object returns nothing at all, and an interlock that never sees a temperature just looks like broken example code. The information needed to avoid all three was sitting in the shipped ESI the whole time.
+
+So it is now carried in the type system. `ObjectAddress<T>` (`libs/node/device_parameter.h`) is an index, a subindex, and the C++ type the object's declared ETG.1020 data type maps to, travelling together instead of being retyped at every call site. It is an **address**, not a reference or a handle, because it holds no device and no pointer — it names a location in *any* dictionary. (ETG.1000.6 and CiA 301 have no collective noun for the pair; they just say index and subindex.) Four `Device` overloads take one and forward to what already existed: `value`/`setValue` lock-free for a cycle, `readValue`/`writeValue` blocking for the control plane. The blocking pair goes through the variant, so it serves strings and byte arrays too — objects a cycle cannot read at all — which is what makes an address worth having for **every** entry of a dictionary rather than only the scalar ones. Ten string addresses and seven byte-array ones in this dictionary would otherwise have no representation.
+
+Then 826 of them, generated from `libs/etg/tests/data/somanet-v5.6.6.xml` by a `motion-master generate-object-addresses` subcommand into three headers — `profile_device_objects.h` (0x1xxx + the standard MDP objects), `cia402_drive_objects.h` (0x6xxx), `somanet_drive_objects.h` (0x2xxx + FSoE) — whose namespaces (`profile::`, `cia402::`, `somanet::`) mirror the view chain rather than the file names.
+
+### The type resolution is `mm::etg`'s job, and it has a trap in it
+
+The generator knows nothing about types on purpose. Resolving one is ESI knowledge, and the ESI has a trap: a vendor writes `ARRAY [0..24] OF BYTE` and the file resolves that to the *code* for `BYTE`. Trust the code alone and a 25-byte object is emitted as `uint8_t`, and every read of it returns its first byte — a silent wrong answer of exactly the kind the whole exercise is against. `mm::etg::resolveValueKind` cross-checks the declared width against the code and answers `std::vector<uint8_t>` when they disagree. Seven entries of this dictionary are that shape: OS command `0x1023:01`/`:03`, the four high-resolution-data buffers `0x20E1:01`–`:04`, and the FSoE unique device ID.
+
+The generator's one piece of judgement is **naming**: `k` + PascalCase of the object, plus the entry name where a subindex names something different, and `k<Object>Count` for subindex 0 of a composite — that last rule is what keeps the six safety objects whose subindex 1 repeats the object's own name from colliding with their own entry-count field. It takes 826 rows to 826 distinct identifiers with no collisions; a duplicate would be a compile error in the output, so one is disambiguated deterministically *and* reported.
+
+It lives in the `motion-master` binary rather than a second tool because it needs the ESI parser the server already links, and a separate binary to carry one function is another thing to build, package and keep in step.
+
+### One header per index range, not per device — and the assumption that buys
+
+Recorded a day later, in `docs`-only form, because it was folklore in three heads and nowhere in the tree. The generator merges every device in the file into **one** table keyed by `(index, subindex)`, which is sound only if an address names the same quantity, with the same data type and the same unit, on every device in the family. For 0x1xxx and 0x6xxx the standards guarantee that. For the manufacturer-specific area **nothing does** — ETG.1000.6 reserves 0x2xxx for the vendor and says nothing about stability across devices — so the merge rests on SOMANET's own convention.
+
+That convention holds for a stronger reason than four descriptions agreeing: Node, Circulo, Circulo SMM and Integro all reference the **same** ESI module (`0x04020001`, "Default CiA402 object dictionary") for the bulk of their dictionary, so most of the union is one text merged with itself. Measured against the pinned file: of the ~40 objects each device declares at the device level, 40 indices appear on more than one device and **none** disagree on name or type, and the generator's type-disagreement warning never fires. The only merge collisions are the SMM's four mutually exclusive FSoE safety modules, already covered by the last-wins policy.
+
+The gap is named in the same comments: one index reused for a different quantity of the **same type** merges silently. Nothing detects it, and it would mean a header per device instead of one — a second vendor's ESI being the likely occasion.
+
+### Two mechanical decisions
+
+**Regenerating is two steps** — the subcommand, then `tools/format.sh` — because clang-format wraps the declarations that overrun 100 columns and does it context-sensitively enough that reproducing its choices in the generator would be guesswork. The banner in each generated file says so, and the round trip is exact: regenerating the pinned ESI reproduces the committed bodies byte for byte, which is how the family-convention banner could be added as a 12-line diff per header with no body churn.
+
+**There is no CI drift check, deliberately.** The ESI is pinned and regenerated on request, so a check would fail exactly when the lag is intentional — the one state it would report is the one that is fine.
+
+### Not generated, and not planned
+
+Only addresses. No accessors, no enums for the ESI's enumerated values, and **units stay in the trailing comment rather than becoming types** — a milli-degree type that made `60000` unwritable would be worth having and is a different project. The example task naming `somanet::objects::kDriveTemperatureMeasuredTemperature` instead of a raw index and a hand-written `int32_t` is the whole argument in one line; `libs/node/tests/object_addresses_test.cc` pins the three motivating cases, and most of its job is that 826 declarations compile at all.

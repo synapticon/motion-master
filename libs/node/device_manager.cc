@@ -264,9 +264,9 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
 
   // The publish window — the only part of a re-map that touches state a reader can see, and so the
   // only part that takes deviceSetMutex_ exclusively. Everything above (the IOmap rebuild, the
-  // per-device PDO-mapping SDO reads, building the image and the slots) ran under
-  // busOperationMutex_ alone, so the sampler kept flushing throughout. Bounded by the ring
-  // re-allocation, which is the slowest step here.
+  // per-device PDO-mapping SDO reads and building the image) ran under busOperationMutex_ alone, so
+  // the sampler kept flushing throughout. Bounded by the ring re-allocation, which is the slowest
+  // step here.
   std::shared_ptr<const ProcessImage> shared;
   {
     const std::unique_lock lock(deviceSetMutex_);

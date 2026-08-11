@@ -18,16 +18,17 @@
 /// `wss://host:port`.
 ///
 /// Carries traffic in both directions:
-///   - server → client: monitoring batches (published per topic), notifications (slaves changed,
-///     watchdog, ...), and long-running procedure progress (firmware, calibration, ...);
+///   - server → client: monitoring batches (published per topic) and notifications (slaves changed,
+///     watchdog, ...);
 ///   - client → server: topic subscribe/unsubscribe, and process-data output values (target-map
-///     writes staged for the RT loop).
+///     writes for the RT loop).
 ///
 /// Today the inbound path handles only subscribe/unsubscribe and the outbound path only monitoring
-/// publishes; notifications, procedure progress, and output staging plug in here as those features
-/// land.  All public methods are thread-safe — publish() and broadcast() may be called from any
-/// thread; the send is marshalled onto this server's event loop via defer() so the caller never
-/// blocks.
+/// publishes; notifications and output values plug in here as those features land.  Procedure
+/// progress deliberately does **not**: @c ProcedureManager holds no publish callback and names no
+/// WebSocket, so that surface is HTTP-poll-only.  All public methods are thread-safe — publish()
+/// and broadcast() may be called from any thread; the send is marshalled onto this server's event
+/// loop via defer() so the caller never blocks.
 class WebSocketServer {
  public:
   /// @brief Server configuration.

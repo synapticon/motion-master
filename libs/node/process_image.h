@@ -32,7 +32,8 @@ struct ProcessBuffer {
 /// @c bitOffset is absolute within its direction's image (the output image for an output
 /// entry, the input image for an input entry) — i.e. the slave's window offset plus the
 /// object's offset inside that window, already combined.  Used by the node layer to decode a
-/// value from the input snapshot or encode one into the output staging buffer.
+/// value out of the input image into its parameter's cell, or to insert one from that cell into
+/// the output image.
 struct ProcessImageEntry {
   uint16_t slavePosition = 0;  ///< 1-based bus position of the owning device.
   uint16_t index = 0;          ///< CoE object index.
@@ -77,8 +78,8 @@ struct ProcessImage {
     uint32_t bitOffset;  ///< Absolute bit offset within the direction's image.
     uint16_t bitLength;  ///< Width of the value in bits.
     bool isOutput;       ///< True for an RxPDO output, false for a TxPDO input.
-    size_t entryIndex;   ///< Index within @c outputs (output) or @c inputs (input). For an output,
-                         ///< this addresses the matching lock-free staging slot in @c ProcessData.
+    size_t entryIndex;   ///< Index within @c outputs (output) or @c inputs (input), which is where
+                         ///< the entry's owning @c DeviceParameter — and so its cell — is reached.
   };
 
   /// @brief Locates a mapped object by bus position and CoE address.

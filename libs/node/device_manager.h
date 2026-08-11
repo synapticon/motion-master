@@ -27,8 +27,8 @@
 namespace mm::node {
 
 /// @brief Holds the RT process-data runtime state (the recorder ring, the published image
-///        pointer, output staging slots, and scratch). Defined in the .cc — pimpl'd so its
-///        non-movable members and large fixed buffers stay out of the header.
+///        pointer, the in-cycle depth counter, and the RT scratch buffers). Defined in the .cc —
+///        pimpl'd so its non-movable members and large fixed buffers stay out of the header.
 struct ProcessData;
 
 /// @brief Current AL state snapshot for a single device.
@@ -382,10 +382,10 @@ class DeviceManager {
   /// @brief Maps process data and publishes the process image for exchange.
   ///
   /// Calls @c FieldbusDriver::configureProcessData (which maps the IOmap and lays out the
-  /// FMMUs), reads each device's PDO mapping via SDO, assembles a @c ProcessImage that
-  /// resolves every mapped object to an absolute position, zero-initialises the output
-  /// staging buffer, and publishes the image so @c exchangeProcessData begins exchanging.
-  /// All devices must be in PRE-OP (mailbox active) for the mapping reads to succeed.
+  /// FMMUs), reads each device's PDO mapping via SDO, assembles a @c ProcessImage that resolves
+  /// every mapped object to an absolute position *and* to its owning parameter's cell, and
+  /// publishes the image so @c exchangeProcessData begins exchanging. All devices must be in
+  /// PRE-OP (mailbox active) for the mapping reads to succeed.
   ///
   /// Re-runnable: a later call (e.g. after a device returns from a firmware download)
   /// re-maps the whole bus and republishes. While re-mapping it first unpublishes the image
@@ -397,13 +397,14 @@ class DeviceManager {
   ///         read, or the assembled image is inconsistent with the driver layout.
   std::expected<void, std::string> configureProcessData();
 
-  /// @brief Exchanges one cycle of process data: sends staged outputs, captures inputs.
+  /// @brief Exchanges one cycle of process data: sends the current outputs, captures inputs.
   ///
-  /// Composes the output image from the per-object staging slots, calls
-  /// @c FieldbusDriver::exchangeProcessData, and appends the cycle (both directions) to the
-  /// recorder ring for non-RT readers.  No-op until @c configureProcessData has published an
-  /// image, so the GameLoop can call it unconditionally every cycle.  Runs on the RT thread and
-  /// takes no lock.
+  /// Composes the output image from each output object's parameter cell, calls
+  /// @c FieldbusDriver::exchangeProcessData, appends the cycle (both directions) to the recorder
+  /// ring for non-RT readers, and decodes every mapped input back into its own cell — which is what
+  /// makes @c Device::value<T>() a single atomic load rather than an image lookup.  No-op until
+  /// @c configureProcessData has published an image, so the GameLoop can call it unconditionally
+  /// every cycle.  Runs on the RT thread and takes no lock.
   ///
   /// @warning @c exchangeProcessData() runs on the RT GameLoop thread while @c init(),
   ///          @c scan(), @c reset(), and @c configureProcessData() may be called from the
@@ -796,8 +797,9 @@ class DeviceManager {
   /// @brief (Re)maps the whole-bus process image and publishes it for exchange.
   ///
   /// The core mapping primitive: drains exchange, has the driver map the IOmap, re-reads each
-  /// device's PDO mapping, builds the @c ProcessImage, seeds the output staging from cached
-  /// parameter values, and publishes the image. **The caller must hold @c busOperationMutex_**
+  /// device's PDO mapping, builds the @c ProcessImage, and publishes it — with nothing to seed,
+  /// since each output object's value already lives in its own parameter's cell, which is what the
+  /// composer reads. **The caller must hold @c busOperationMutex_**
   /// (which is what keeps @c driver_ and @c devices_ stable here); this takes @c deviceSetMutex_
   /// exclusively itself, for the brief publish window only, so a re-map never blocks a reader for
   /// longer than the ring re-allocation takes. Two callers compose it: the public
@@ -852,9 +854,9 @@ class DeviceManager {
   // The only lock readers and borrowers take, and the reason it can be held shared for minutes
   // (withDevice) is that its exclusive holders are brief: init/scan/reset, which genuinely
   // invalidate every Device& in flight, plus the publish window inside remapProcessImage() that
-  // swaps outputSlots / re-allocates the recorder ring / appends a generation. The RT
-  // exchangeProcessData() never takes it (it is gated by the atomic image pointer instead), so the
-  // lock never touches the real-time path.
+  // re-allocates the recorder ring / appends a generation / publishes the image. Neither the RT
+  // exchangeProcessData() nor a cyclic task takes it (both are gated by the atomic image pointer
+  // and the inCycle drain instead), so the lock never touches the real-time path.
   //
   // Lock order: busOperationMutex_ -> deviceSetMutex_ -> Device::parametersMutex_ ->
   // FieldbusDriver::controlPlaneMutex_.

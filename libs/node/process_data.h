@@ -87,7 +87,7 @@ struct ProcessData {
   /// A read of an *input* off a published-but-unhealthy bus would serve stale snapshot bytes (a
   /// short working counter means the driver left the prior cycle's bytes in the IOmap), so the
   /// input branch of @c readPdo gates on this and the caller falls back to the authoritative SDO
-  /// upload. Outputs are not gated — a staging slot is always our own valid setpoint.
+  /// upload. Outputs are not gated — an output cell is always our own valid setpoint.
   bool healthy() const {
     return image.load(std::memory_order_acquire) != nullptr &&
            lastWkc.load(std::memory_order_relaxed) >= expectedWkc.load(std::memory_order_relaxed);

@@ -700,7 +700,7 @@ TEST(DeviceManagerProcessData, IndependentOutputSlotsComposeIntoOneImage) {
   ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
   ASSERT_TRUE(dm.configureProcessData().has_value());
 
-  // Two distinct output objects, each staged into its own lock-free slot — no shared buffer, no
+  // Two distinct output objects, each written into its own lock-free cell — no shared buffer, no
   // lock. The RT loop is the sole composer that assembles them into the packed wire image.
   ASSERT_TRUE(
       dm.writeDeviceParameter(1, 0x6040, 0x00, DeviceParameterValue{uint16_t{0xABCD}}).has_value());
@@ -756,7 +756,7 @@ TEST(DeviceManagerProcessData, OutputReadBackServesStagedSlotNotSdoAndIgnoresHea
   ASSERT_TRUE(
       dm.writeDeviceParameter(1, 0x6040, 0x00, DeviceParameterValue{uint16_t{0x000F}}).has_value());
 
-  // An output read returns the staged slot (0x000F) — our own setpoint, always valid and lock-free
+  // An output read returns the cell (0x000F) — our own setpoint, always valid and lock-free
   // — never the SDO value (0x1111). Unlike an input, it is NOT gated on bus health: a momentarily
   // short working counter must not push an RT caller onto a blocking SDO upload for its own output.
   auto v = dm.readDeviceParameter(1, 0x6040, 0x00);
@@ -774,11 +774,12 @@ TEST(DeviceManagerProcessData, OutputsInitialisedBeforeOpAreSentOnFirstCycle) {
   ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
 
   // Set the target position BEFORE configuring process data (i.e. before OP). The image is
-  // not yet published, so this lands in the cached parameter.
+  // not yet published, so this lands in the parameter's cell without going out on the wire.
   ASSERT_TRUE(dm.writeDeviceParameter(1, 0x607A, 0x00, DeviceParameterValue{int32_t{0x00405060}})
                   .has_value());
 
-  // configureProcessData seeds the output staging from the cached values.
+  // The cell is what the composer reads, so the setpoint written before OP goes out on the very
+  // first cycle with nothing to seed.
   ASSERT_TRUE(dm.configureProcessData().has_value());
   dm.exchangeProcessData();
 

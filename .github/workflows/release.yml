@@ -225,7 +225,9 @@ jobs:
 
   # ── macOS Apple Silicon (arm64): .tar.gz ───────────────────────────────────
   macos:
-    runs-on: macos-14
+    # macos-26 for the same reason as build-macos-arm64.yml: its Xcode has std::atomic_ref, and
+    # CMAKE_OSX_DEPLOYMENT_TARGET — not the image — sets the floor of the artifact it builds.
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v6
         with:

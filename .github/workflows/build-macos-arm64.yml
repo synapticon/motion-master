@@ -9,8 +9,13 @@ on:
 
 jobs:
   build:
-    # macos-14 is Apple Silicon (arm64) — the only macOS target we support.
-    runs-on: macos-14
+    # macos-26 is Apple Silicon (arm64) — the only macOS target we support — and is what
+    # macos-latest points to. Its Xcode is well past LLVM 19, which is where libc++ gained
+    # std::atomic_ref, the parameter cell in libs/node/device_parameter.h needs it, and Apple's
+    # libc++ has no fallback for it. The image version does not set the floor for the binaries we
+    # ship: CMAKE_OSX_DEPLOYMENT_TARGET (CMakePresets.json) does, and std::atomic_ref is
+    # header-only, so it back-deploys with no availability constraint.
+    runs-on: macos-26
 
     steps:
       - uses: actions/checkout@v6

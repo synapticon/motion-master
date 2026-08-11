@@ -2067,12 +2067,8 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [files]
-                properties:
-                  files:
-                    type: array
-                    items: { $ref: "#/components/schemas/DeviceFile" }
+                type: array
+                items: { $ref: "#/components/schemas/DeviceFile" }
         "400":
           description: slavePosition is invalid
         "404":

@@ -1281,12 +1281,7 @@ export class Api<
    * @request GET:/api/devices/{slavePosition}/files
    */
   listDeviceFiles = (slavePosition: number, params: RequestParams = {}) =>
-    this.request<
-      {
-        files: DeviceFile[];
-      },
-      void
-    >({
+    this.request<DeviceFile[], void>({
       path: `/api/devices/${slavePosition}/files`,
       method: "GET",
       format: "json",

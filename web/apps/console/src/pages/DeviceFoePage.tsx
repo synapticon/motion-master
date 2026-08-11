@@ -250,7 +250,7 @@ export default function DeviceFoePage() {
       // The server reads and parses the drive's `fs-getlist` pseudo-file; the listing format is
       // firmware knowledge and belongs in one place, not in every client that wants a file list.
       const { data } = await api.listDeviceFiles(slavePosition)
-      setFiles(data.files)
+      setFiles(data)
     } catch (err) {
       setFiles(null)
       setListError(apiError(err))

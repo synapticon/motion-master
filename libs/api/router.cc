@@ -200,8 +200,11 @@ void Router::add(std::string_view method, const std::string& pattern, Handler ha
 
     auto parameters = std::vector<std::pair<std::string, std::string>>{};
     parameters.reserve(names->size());
+    // The index is narrowed explicitly because uWS takes an `unsigned short`; a pattern never has
+    // more than a handful of parameters, so the range is never in question.
     for (std::size_t i = 0; i < names->size(); ++i) {
-      parameters.emplace_back((*names)[i], std::string(req->getParameter(i)));
+      const auto index = static_cast<uint16_t>(i);
+      parameters.emplace_back((*names)[i], std::string(req->getParameter(index)));
     }
     auto url = std::string(req->getUrl());
     auto queryString = std::string(req->getQuery());

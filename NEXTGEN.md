@@ -2588,3 +2588,39 @@ The gap is named in the same comments: one index reused for a different quantity
 ### Not generated, and not planned
 
 Only addresses. No accessors, no enums for the ESI's enumerated values, and **units stay in the trailing comment rather than becoming types** — a milli-degree type that made `60000` unwritable would be worth having and is a different project. The example task naming `somanet::objects::kDriveTemperatureMeasuredTemperature` instead of a raw index and a hand-written `int32_t` is the whole argument in one line; `libs/node/tests/object_addresses_test.cc` pins the three motivating cases, and most of its job is that 826 declarations compile at all.
+
+## Session 2026-08-11 — Can it drive a machine in production? The RT path is no longer the answer; free-run DC and a missing motion layer are (review)
+
+Asked directly, of the tree as it stands at `6.0.0-alpha.69` on an RT Linux host. Worth recording because the honest answer moved this week and the reason it moved is narrow: what the cells closed is **value access**. Before them there was no way to read a position or write a target inside a cycle without touching something that locks or allocates, so the question did not arise. Now `value<T>`/`setValue<T>`, `CycleLock` and `keepFresh` make an in-process control task ordinary C++ — and every remaining obstacle is somewhere else. None of them are in the RT value path.
+
+### The bus is not synchronised, and that decides most of it
+
+`soem_fieldbus_driver.cc` calls `ecx_configdc` and deliberately does not call `ecx_dcsync0`: DC is initialised, propagation delays are measured, a reference clock is elected, and no SYNC0 pulse is ever generated. Drives therefore act on **frame arrival**, which makes the loop's wake jitter the actuation jitter. On a tuned PREEMPT_RT host that is small and, for one axis, unimportant. It is still not hardware synchronisation, so anything requiring two axes to act on the *same instant* — coordinated multi-axis, a gantry, an interpolated path — is out until SYNC0 lands together with the DC-locked cycle timer it needs to not be a regression.
+
+This is the item that decides the verdict, and it is the one already scheduled.
+
+### There is no motion layer, and the Tier-3 door is not a substitute for one
+
+`TrajectoryCyclicTask` appears nowhere in `libs/` or `apps/`; `main.cc` registers exactly one task, `ProcessDataCyclicTask`, with the example commented out. `Cia402Drive::enable()` sleep-polls, so the view stays off-RT and a cyclic task must step the 402 state machine itself from the `constexpr` helpers, one transition per cycle.
+
+So "it can drive a machine" today means *you write the setpoint generation, the enable sequencing and the fault handling*, and they are as good as you make them. For a machine builder extending the source that is a legitimate answer — it is what Tier 3 is for. It is not a product feature to lean on, and the difference matters: the shared, tested motion path that a trajectory task would make possible is exactly what a per-site reimplementation is not.
+
+### The rest of the debt is validation, not code
+
+The RT value path is days old and has not been soaked on hardware. There is no hardware-in-the-loop CI; `hil/api` and the unit tests cover the contract, not a week of continuous motion. Several shipped features still carry an outstanding hardware re-test of their own (the two-device firmware install, the partial-bus re-map watchdog).
+
+Three deliberate accepted-risk behaviours belong in the same paragraph, because each is correct by design and each is something an unattended machine would eventually meet: `pauseCycle` gives up draining after 200 ms and **proceeds anyway** (logged, never silent — the alternative was hanging a control-plane call on a stalled RT loop), so a descheduled RT thread during a re-map is a real corruption window; a `withDevice` borrow does not exclude an AL transition; and a bus position is not a device identity across a rescan.
+
+### Authentication is a non-goal
+
+Raised as an exposure — the HTTP surface has no authorization of any kind, so anything that can reach the port has drive control, firmware installation and AL-state changes — and **decided against**: these are local programs, not network services. The default bind is loopback and that is the deployment being designed for.
+
+Recorded rather than dropped for one reason: the off-loopback path exists in the tree (`server.bindAddress`, the two-SAN certificate, the Pi appliance, `docs/LAN_DEPLOYMENT.md`), and it is the condition that would reopen the question — a plant LAN, not a laptop. Until something ships that way as a matter of course, there is nothing to build.
+
+### Safety is not on this axis at all
+
+E-stop and STO are hardwired or FSoE, and nothing here is a safety controller — the FSoE support is dictionary access to a safety module's parameters. That is unchanged by SYNC0, by a trajectory task, and by any amount of soak testing, so it does not belong in the readiness argument in either direction.
+
+### Where it stands
+
+As a **commissioning and diagnostics tool** — parameters, monitoring and the lossless recorder, firmware, ESC diagnostics, PDO mapping — production-ready, which is what it was built to be first. For **motion**, pilot grade: a single axis or loosely-coupled axes, your own control task, on a tuned PREEMPT_RT host with `skippedCycles()` observed flat over hours, safety wired in hardware. Four things would change the verdict, in this order: SYNC0 plus the DC-locked timer; a trajectory task so the motion path is shared and tested rather than per-site; a real soak on the target hardware; and the alpha line settling, since the changelog's own promise is that the API may break between any two alphas.

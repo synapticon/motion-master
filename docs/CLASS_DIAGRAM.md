@@ -21,6 +21,12 @@ classDiagram
         +execute(CycleContext)
         -DeviceManager& deviceManager_
     }
+    class ExampleCyclicTask {
+        <<mm::example — copy-me, Tier 3>>
+        +execute(CycleContext)
+        -DeviceManager& deviceManager_
+        -Config config_
+    }
     class GameLoop {
         +addTask(CyclicTask*)
         +run()
@@ -37,8 +43,11 @@ classDiagram
         +addRoutes(RegisterRoutesFn)
         -DeviceManager& deviceManager_
         -MonitoringManager& monitoringManager_
+        -ProcedureManager& procedureManager_
+        -UserCache& userCache_
         -vector~RegisterRoutesFn~ routeModules_
         -thread thread_ «port 61447»
+        -light_thread_pool pool_ «32 workers»
         -atomic~uWS::Loop*~ loop_
     }
     class RouteContext {
@@ -62,10 +71,17 @@ classDiagram
     class MonitoringManager {
         +create(Monitoring)
         +setPublish(cb)
+        +keepFresh() / stopKeepingFresh()
         +start() / stop()
         -DeviceManager& deviceManager_
         -ParameterRefresher refresher_
         -thread thread_
+    }
+    class ProcedureManager {
+        +start(body) «off-RT jthread»
+        +snapshot() / cancel()
+        -DeviceManager& deviceManager_
+        -map~key,shared_ptr~Run~~ runs_
     }
     class ParameterRefresher {
         +acquire() / release()
@@ -79,6 +95,9 @@ classDiagram
         +configureProcessData()
         +transitionToState()
         +exchangeProcessData() «RT, lock-free»
+        +withDevice(pos, fn) / withDevices(fn)
+        +findDevice(pos) «RT, no lock»
+        +topologyGeneration()
         -unique_ptr~FieldbusDriver~ driver_
         -vector~Device~ devices_
         -unique_ptr~ProcessData~ pd_
@@ -86,16 +105,24 @@ classDiagram
         -mutex busOperationMutex_
         -shared_mutex deviceSetMutex_
     }
+    class CycleLock {
+        <<DeviceManager::CycleLock — RT>>
+        +operator bool()
+        -ProcessData* processData_
+    }
     class Device {
         +upload() / download()
         +readFile() / writeFile()
         +readRegister() / writeRegister()
         +readParameter() / writeParameter()
+        +value~T~() / setValue~T~() «RT, lock-free»
+        +findParameter() «RT, no lock»
         -FieldbusDriver& driver_
         -uint16 slavePosition_
         -map~uint32,DeviceParameter~ parameters_
         -FlatPdoMapping flatPdoMapping_
         -const ParameterCache* parameterCache_
+        -unique_ptr~mutex~ parametersMutex_
     }
     class ParameterCache {
         +load() / store() «control-plane»
@@ -116,18 +143,29 @@ classDiagram
         -unique_ptr~ecx_context~ ctx_
     }
     class DeviceParameter {
-        +DeviceParameterValue value
         +uint16 index, subindex
+        +uint16 dataType, bitLength
+        +uint64 bits «atomic_ref cell»
+        +vector~uint8~ rawValue
+        +loadBits() / storeBits() «RT»
+        +scalar~T~() «RT»
+        +currentValue() «off-RT, may allocate»
+    }
+    class ObjectAddress~T~ {
+        +uint16 index
+        +uint8 subindex
     }
     class FlatPdoMapping
     class ProcessData {
-        +readPdo() / writePdo() «lock-free»
+        +readPdo() «lock-free»
+        +isOutputMapped()
         +healthy()
+        +pauseCycle() / resumeCycle()
         -atomic~ProcessImage*~ image
-        -vector~atomic_u64~ outputSlots
         -ProcessDataRing ring
+        -ProcessBuffer outScratch, inScratch
+        -atomic~int~ inCycle
         -atomic~int~ lastWkc, expectedWkc
-        -atomic~bool~ exchanging
     }
     class ProcessDataRing {
         +write() «RT, wait-free»
@@ -138,7 +176,15 @@ classDiagram
         -vector~atomic_u64~ seqWords_
         -atomic~u64~ head_
     }
-    class ProcessImage
+    class ProcessImage {
+        +vector~ProcessImageEntry~ inputs, outputs
+        +uint32 inputBytes, outputBytes
+    }
+    class ProcessImageEntry {
+        +uint16 slavePosition, index
+        +uint32 bitOffset
+        +const DeviceParameter* parameter
+    }
     class ProfileDevice {
         +device() Device&
         -Device& device_
@@ -153,6 +199,7 @@ classDiagram
     }
 
     CyclicTask <|.. ProcessDataCyclicTask
+    CyclicTask <|.. ExampleCyclicTask
     FieldbusDriver <|.. SoemFieldbusDriver
     ProfileDevice <|-- Cia402Drive
     Cia402Drive <|-- SomanetDrive
@@ -160,8 +207,14 @@ classDiagram
     GameLoop o-- "0..*" CyclicTask : non-owning
     GameLoop *-- CyclicTimer
     ProcessDataCyclicTask ..> DeviceManager : ref
+    ExampleCyclicTask ..> DeviceManager : ref
+    ProcessDataCyclicTask ..> CycleLock : holds per cycle
+    ExampleCyclicTask ..> CycleLock : holds per cycle
+    DeviceManager *-- CycleLock : nested class
+    CycleLock ..> ProcessData : raises inCycle
     HttpServer ..> DeviceManager : ref
     HttpServer ..> MonitoringManager : ref
+    HttpServer ..> ProcedureManager : ref
     HttpServer o-- "0..*" RoutePlugin : addRoutes (RegisterRoutesFn)
     HttpServer ..> RouteContext : builds, passes to each plugin
     RouteContext ..> DeviceManager : ref
@@ -171,17 +224,21 @@ classDiagram
     MonitoringManager ..> WebSocketServer : publish cb (setPublish)
     MonitoringManager *-- ParameterRefresher
     ParameterRefresher ..> DeviceManager : ref
+    ProcedureManager ..> DeviceManager : ref
     DeviceManager *-- "1" FieldbusDriver : owns
     DeviceManager *-- "0..*" Device : owns
     DeviceManager *-- "1" ProcessData : owns (pd_)
     DeviceManager *-- "1" ParameterCache : owns
     ProcessData *-- "1" ProcessDataRing : owns (recorder)
     ProcessData o-- "0..*" ProcessImage : generations
+    ProcessImage *-- "0..*" ProcessImageEntry
+    ProcessImageEntry ..> DeviceParameter : ref (cell, resolved at publish)
     Device ..> FieldbusDriver : ref (shared)
     Device ..> ProcessData : ref (live IO image)
     Device ..> ParameterCache : ref (OD-definition cache)
     Device *-- "0..*" DeviceParameter
     Device *-- FlatPdoMapping
+    Device ..> ObjectAddress~T~ : addressed by
     ProfileDevice ..> Device : borrows (non-owning)
 ```
 
@@ -195,24 +252,29 @@ classDiagram
 | `GameLoop` | `tasks_` | `vector<CyclicTask*>` | No — caller owns | `apps/motion_master/game_loop.h` |
 | `GameLoop` | `timer_` | `CyclicTimer` | Yes | `apps/motion_master/game_loop.h` |
 | `ProcessDataCyclicTask` | `deviceManager_` | `DeviceManager&` | No | `libs/node/process_data_cyclic_task.h` |
-| `HttpServer` | `deviceManager_`, `monitoringManager_` | `&` | No | `apps/motion_master/http_server.h` |
+| `ExampleCyclicTask` | `deviceManager_` | `DeviceManager&` | No | `libs/example/example_cyclic_task.h` |
+| `HttpServer` | `deviceManager_`, `monitoringManager_`, `procedureManager_`, `userCache_` | `&` | No | `apps/motion_master/http_server.h` |
+| `HttpServer` | `pool_` | `BS::light_thread_pool` (32) | **Yes** — every route handler runs here | `apps/motion_master/http_server.h` |
 | `HttpServer` | `routeModules_` | `vector<mm::api::RegisterRoutesFn>` | **Yes** — queued plug-ins, run once at `start()` | `apps/motion_master/http_server.h` |
 | `WebSocketServer` | — (publish target for `MonitoringManager::setPublish`) | — | No | `apps/motion_master/ws_server.h` |
 | `MonitoringManager` | `refresher_` | `ParameterRefresher` | **Yes** | `libs/node/monitoring_manager.h` |
 | `MonitoringManager` | `deviceManager_` | `DeviceManager&` | No | `libs/node/monitoring_manager.h` |
 | `ParameterRefresher` | `deviceManager_` | `DeviceManager&` | No | `libs/node/parameter_refresher.h` |
+| `ProcedureManager` | `runs_` | `map<key, shared_ptr<Run>>` (each owns a `std::jthread`) | **Yes** | `libs/node/procedure_manager.h` |
 | `DeviceManager` | `driver_` | `unique_ptr<FieldbusDriver>` | **Yes (exclusive)** | `libs/node/device_manager.h` |
 | `DeviceManager` | `devices_` | `vector<Device>` | **Yes** | `libs/node/device_manager.h` |
 | `DeviceManager` | `pd_` | `unique_ptr<ProcessData>` | **Yes** | `libs/node/device_manager.h` |
 | `DeviceManager` | `parameterCache_` | `ParameterCache` | **Yes** | `libs/node/device_manager.h` |
 | `ProcessData` | `ring` | `ProcessDataRing` | **Yes** | `libs/node/process_data.h` |
-| `ProcessData` | `outputSlots` | `vector<atomic<uint64_t>>` | **Yes** | `libs/node/process_data.h` |
+| `ProcessData` | `outScratch`, `inScratch` | `ProcessBuffer` | **Yes** — RT-thread-only scratch | `libs/node/process_data.h` |
 | `ProcessData` | `generations` | `vector<shared_ptr<const ProcessImage>>` | **Yes (retained)** | `libs/node/process_data.h` |
+| `ProcessImageEntry` | `parameter` | `const DeviceParameter*` | No — points into the owning `Device`'s map, resolved at publish | `libs/node/process_image.h` |
 | `Device` | `driver_` | `FieldbusDriver&` | No — same instance `DeviceManager` owns | `libs/node/device.h` |
 | `Device` | `processData_` | `ProcessData*` | No — points at `DeviceManager::pd_` | `libs/node/device.h` |
 | `Device` | `parameters_` | `unordered_map<uint32_t, DeviceParameter>` | **Yes** | `libs/node/device.h` |
 | `Device` | `flatPdoMapping_` | `FlatPdoMapping` | **Yes** | `libs/node/device.h` |
 | `Device` | `parameterCache_` | `const ParameterCache*` | No — points at `DeviceManager::parameterCache_` | `libs/node/device.h` |
+| `Device` | `parametersMutex_` | `unique_ptr<std::mutex>` | **Yes** — indirect only so `Device` stays movable for `vector<Device>` | `libs/node/device.h` |
 
 ## Inheritance
 
@@ -222,6 +284,7 @@ points; the third is a stateless view chain:
 | Derived | Base | File |
 | --- | --- | --- |
 | `ProcessDataCyclicTask` | `CyclicTask` (`libs/core/cyclic_task.h`) | `libs/node/process_data_cyclic_task.h` |
+| `ExampleCyclicTask` | `CyclicTask` | `libs/example/example_cyclic_task.h` |
 | `SoemFieldbusDriver` | `FieldbusDriver` | `libs/comm/soem_fieldbus_driver.h` |
 | `Cia402Drive` | `ProfileDevice` | `libs/node/cia402_drive.h` |
 | `SomanetDrive` | `Cia402Drive` | `libs/node/somanet_drive.h` |
@@ -238,7 +301,13 @@ no polymorphic container), `SomanetDrive → Cia402Drive → ProfileDevice` is a
 chain. Validate-then-bind via `createCia402Drive` / `createSomanetDrive`. See `NEXTGEN.md` for
 the rationale and the Somanet free-function design.
 
-## Route plug-ins (`mm::api`)
+## Extension points
+
+Two tiers extend Motion Master without editing its core, and `libs/example/` holds the copy-me
+starter for both — the HTTP route plug-in (`example_routes.cc`, Tier 2) and the cyclic task
+(`example_cyclic_task.cc`, Tier 3) in one directory.
+
+### Route plug-ins, Tier 2 (`mm::api`)
 
 The HTTP API is extensible without touching `http_server.cc`. `mm::api` (`libs/api/web_api.h`,
 header-only) is the **only** layer that depends on uWebSockets besides the app itself — so
@@ -267,6 +336,35 @@ spawn its own background `std::jthread` for off-RT work (a long-running procedur
 exactly as `MonitoringManager` does. Such a thread is bound by the same rules as any non-RT thread:
 serialize all bus access through `FieldbusDriver::controlPlaneMutex_` and never touch the RT path.
 
+### Cyclic tasks, Tier 3 (`mm::core::CyclicTask`)
+
+A `CyclicTask` is machine control *inside* the RT loop: `execute(CycleContext)` is called once per
+cycle on thread 1, so it may not block, allocate, or touch the bus, and must return well inside the
+period. `ExampleCyclicTask` (`libs/example/example_cyclic_task.{h,cc}`) is the starter — a naive
+thermal interlock that brings one drive into CSV, enables it, runs it at a fixed velocity, and
+quick-stops it if the temperature goes over a limit. `main.cc` registers it behind three commented
+lines: construction, `gameLoop.addTask`, and the `keepFresh` its SDO-only object needs.
+
+The whole surface is four rules, each visible in that `execute`:
+
+1. **Take a `DeviceManager::CycleLock` first and do nothing if it is falsy.** It holds the device set
+   still for the body of the cycle; falsy means the bus is not activated (or is being reconfigured).
+2. **Resolve the device every cycle** with `findDevice`; never cache the pointer across cycles.
+3. **A device that is not there is not an error** — it simply is not driven this cycle.
+4. **Read and write through `Device::value<T>()` / `setValue<T>()`.** A hash lookup plus one atomic
+   load or store, and neither can tell whether the object rides the process image or is polled over
+   SDO in the background — so whether a signal is PDO-mapped stays a commissioning decision and does
+   not change how the control program is written.
+
+Two consequences worth knowing. **Driving the CiA402 state machine from a cycle is the right place
+for it:** mode of operation, controlword and statusword are all exchanged every cycle, so the climb
+to Operation Enabled is one write per cycle with the wire doing the waiting, where an off-RT caller
+must sleep and poll. What stays off the RT thread is the EtherCAT **AL** state (INIT / PRE-OP /
+SAFE-OP / OP) — seconds of mailbox traffic, done through the HTTP API. And **an object that is not
+output-mapped is stored but never transmitted**: `setValue` writes the cell and returns, so reaching
+such an object needs `writeParameter` off the RT thread, just as reading a fresh SDO-only value needs
+`MonitoringManager::keepFresh`.
+
 ## Key value types
 
 ```cpp
@@ -276,7 +374,36 @@ using DeviceParameterValue = std::variant<
   float, double, std::string, std::vector<uint8_t>>;
 ```
 
-`DeviceParameter` holds an `index`, `subindex`, and a `DeviceParameterValue`
-(`libs/node/device_parameter.h`). Dispatch on the value with `std::visit`.
+`DeviceParameterValue` is the **interchange** type in signatures, not where the bytes sit.
+`DeviceParameter` (`libs/node/device_parameter.h`) stores a value as its raw little-endian wire
+bytes — the same encoding an SDO transfer carries — in one of two fields chosen by the immutable
+`dataType`, so a value has exactly one home and the two can never disagree:
 
-See also the [threading model](THREADS.md) for how these objects are accessed across threads.
+| Storage | Holds | Access |
+| --- | --- | --- |
+| `uint64_t bits` (LSB-aligned, zero-extended) | every arithmetic type — all fit in 8 bytes | `loadBits()` / `storeBits()` / `scalar<T>()` — one relaxed atomic op through `std::atomic_ref`, RT-safe |
+| `vector<uint8_t> rawValue` | strings, byte arrays, composite/unknown types | `rawValueBytes()` / `setRawValue()` — off-RT |
+
+`isScalarDataType(dataType)` picks the field. `currentValue()` reconstructs the variant on demand
+with one switch on `dataType` (off-RT — it may allocate); `std::visit` still dispatches on the
+result. The cell is a plain `uint64_t` reached through `std::atomic_ref` rather than an
+`std::atomic<uint64_t>` member so `DeviceParameter` stays copyable and movable — the lock-freedom
+goes on the *access*, and two `static_assert`s pin it (always-lock-free, and `atomic_ref`'s
+alignment requirement).
+
+`ObjectAddress<T>` carries an index, a subindex and the C++ type the object holds, so the three
+things easiest to get wrong travel together. Every `Device` accessor pair has an overload taking
+one, which drops the type argument from the call:
+
+```cpp
+device.value(somanet::objects::kDriveTemperatureMeasuredTemperature);  // optional<int32_t>
+device.readValue(profile::objects::kManufacturerSoftwareVersion);      // expected<string, …>
+```
+
+A constant for every entry of the SOMANET dictionary is generated from the pinned ESI into
+`profile_device_objects.h` (0x1xxx + standard MDP), `cia402_drive_objects.h` (0x6xxx) and
+`somanet_drive_objects.h` (0x2xxx + FSoE). Nothing about the type is generated — writing one by hand
+for an object you care about is a one-liner.
+
+See also the [threading model](THREADS.md) for how these objects are accessed across threads, and
+[LOCKING.md](LOCKING.md#the-parameter-cell) for the cell's synchronization contract.

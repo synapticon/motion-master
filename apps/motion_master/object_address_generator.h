@@ -45,6 +45,17 @@ std::string objectIdentifier(std::string_view objectName, std::string_view entry
 /// that does not apply to the drive in front of you simply fails to resolve at runtime, exactly as
 /// a hand-written index would.
 ///
+/// **One header per index range rather than per device rests on the vendor giving one address one
+/// meaning.** Merging four devices into a single table keyed by @c (index,subindex) is sound only
+/// if an address names the same quantity, with the same data type and unit, on every one of them.
+/// The standards guarantee that for the communication area (0x1xxx) and the CiA 402 profile
+/// (0x6xxx); for the manufacturer-specific area (0x2xxx) nothing does, so it is a SOMANET
+/// convention — and it holds because the family's devices draw the bulk of their dictionary from
+/// one shared ESI module rather than from four descriptions that happen to agree. Type
+/// disagreements between devices are reported as warnings and resolved first-wins; one index reused
+/// for a different quantity of the *same* type is what this cannot detect, and would mean a header
+/// per device instead of one.
+///
 /// The generator itself knows nothing about types: @c mm::etg resolves each entry to the C++ type
 /// it holds (@c EsiEntry::valueKind), including the width cross-check that keeps an
 /// @c "ARRAY [0..24] OF BYTE" from being emitted as a @c uint8_t.

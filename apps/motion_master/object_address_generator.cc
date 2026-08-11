@@ -109,9 +109,15 @@ std::expected<ObjectAddressGeneratorSummary, std::string> generateObjectAddresse
   ObjectAddressGeneratorSummary summary;
   summary.warnings = file->warnings;
 
-  // Merge every device's dictionary into one table keyed by address. The devices in a family share
-  // most of their objects, so the union is mostly agreement; where two disagree the first wins and
-  // the difference is reported rather than silently resolved.
+  // Merge every device's dictionary into one table keyed by address. That is sound only because the
+  // vendor gives one address one meaning across the family — the same quantity, data type and unit
+  // on a Node, a Circulo, a Circulo SMM and an Integro alike. For 0x1xxx and 0x6xxx the standards
+  // require it; in the manufacturer-specific area (0x2xxx) nothing does, and it holds here because
+  // those devices draw the bulk of their dictionary from one shared ESI module rather than from
+  // four descriptions that happen to agree, so most of the union is the same text merged with
+  // itself. Where two devices disagree on an entry's type the first wins and the difference is
+  // reported rather than silently resolved; one index reused for a different quantity of the same
+  // type is the case this cannot see, and would mean a header per device instead of one.
   std::map<uint32_t, EsiEntry> merged;
   for (const auto& device : file->devices) {
     auto table = mm::etg::buildDeviceEntries(*file, device, {});
@@ -204,6 +210,18 @@ std::expected<ObjectAddressGeneratorSummary, std::string> generateObjectAddresse
         "// to resolve at runtime, exactly as a hand-written index would. The trailing comment on\n"
         "// each line is the ESI's own name, access mode and unit — the unit especially, since a\n"
         "// temperature in milli-degrees looks exactly like one in degrees until a motor stops.\n"
+        "//\n"
+        "// One header serves the whole device family because SOMANET gives one address one\n"
+        "// meaning across it: an index/subindex names the same quantity, with the same data type\n"
+        "// and the same unit, on a Node, a Circulo, a Circulo SMM and an Integro alike. For\n"
+        "// 0x1xxx and 0x6xxx the standards require that; in the manufacturer-specific area\n"
+        "// (0x2xxx) nothing does — ETG.1000.6 reserves the range for the vendor and says nothing\n"
+        "// about keeping it stable between devices — so it is a vendor convention, and it holds\n"
+        "// here because those devices draw the bulk of their dictionary from one shared ESI\n"
+        "// module (0x04020001, \"Default CiA402 object dictionary\") rather than from four\n"
+        "// descriptions that happen to agree. Where two devices disagree on an address's type\n"
+        "// the generator warns and keeps the first; one index reused for a different quantity of\n"
+        "// the same type would merge silently, and would mean a header per device instead.\n"
         "\n#pragma once\n\n#include <cstdint>\n#include <string>\n#include <vector>\n\n"
         "#include \"node/device_parameter.h\"\n\nnamespace {} {{\n\n{}}}  // namespace {}\n",
         source, bucket.title, bucket.entries.size(), bucket.nameSpace, body, bucket.nameSpace);

@@ -16,6 +16,18 @@
 // to resolve at runtime, exactly as a hand-written index would. The trailing comment on
 // each line is the ESI's own name, access mode and unit — the unit especially, since a
 // temperature in milli-degrees looks exactly like one in degrees until a motor stops.
+//
+// One header serves the whole device family because SOMANET gives one address one
+// meaning across it: an index/subindex names the same quantity, with the same data type
+// and the same unit, on a Node, a Circulo, a Circulo SMM and an Integro alike. For
+// 0x1xxx and 0x6xxx the standards require that; in the manufacturer-specific area
+// (0x2xxx) nothing does — ETG.1000.6 reserves the range for the vendor and says nothing
+// about keeping it stable between devices — so it is a vendor convention, and it holds
+// here because those devices draw the bulk of their dictionary from one shared ESI
+// module (0x04020001, "Default CiA402 object dictionary") rather than from four
+// descriptions that happen to agree. Where two devices disagree on an address's type
+// the generator warns and keeps the first; one index reused for a different quantity of
+// the same type would merge silently, and would mean a header per device instead.
 
 #pragma once
 

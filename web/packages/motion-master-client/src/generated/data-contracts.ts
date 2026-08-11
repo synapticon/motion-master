@@ -10,6 +10,8 @@
  * ---------------------------------------------------------------
  */
 
+type UtilRequiredKeys<T, K extends keyof T> = Omit<T, K> & Required<Pick<T, K>>;
+
 /** A CiA402 drive's control snapshot — its state machine, control words, and mode. */
 export interface Cia402Status {
   /**
@@ -632,40 +634,235 @@ export interface FirmwarePackageName {
    */
   hardwareName: string;
   /**
-   * The full firmware descriptor, verbatim.
+   * The hardware this package is built for, verbatim — the string a compatibility check compares.
    * @example "8500-04-2332"
    */
-  firmwareId: string;
+  fullFirmwareDescriptor: string;
   /**
-   * Software name.
+   * Firmware or software name.
    * @example "motion-drive"
    */
-  firmwareName: string;
+  softwareName: string;
   /**
-   * Software version, including the leading `v`.
+   * The firmware or software version, including the leading `v`. Not to be confused with `firmwareVersion`, which is the *hardware* revision inside the descriptor.
    * @example "v5.6.10"
    */
-  firmwareVersion: string;
+  softwareVersion: string;
   /**
-   * Product id from the descriptor.
-   * @example 8500
+   * Firmware id from the descriptor — the hardware product.
+   * @example "8500"
    */
-  productId?: number;
+  firmwareId?: string;
   /**
-   * Product version from the descriptor.
-   * @example 4
+   * Hardware revision from the descriptor. A string, so a leading zero survives: `04` read as a number and printed back would be `4`, and `8500-4` matches no package.
+   * @example "04"
    */
-  productVersion?: number;
+  firmwareVersion?: string;
   /**
-   * Firmware encryption key id from the descriptor.
-   * @example 2332
+   * Firmware encryption key id from the descriptor. A string because real packages carry non-numeric ones, e.g. `A`.
+   * @example "2332"
    */
-  keyId?: number;
+  keyId?: string;
   /**
-   * Fieldbus protocol from the descriptor, decoded as hexadecimal. 1 is EtherCAT.
+   * Fieldbus protocol character from the descriptor, hexadecimal. `1` is EtherCAT.
+   * @example "1"
+   */
+  fieldbusProtocol?: string;
+  /**
+   * `firmwareId` and `firmwareVersion` joined — the descriptor without the key or fieldbus. Useful for saying *how* a package missed: a matching build descriptor with a different key means right hardware, wrong encryption key.
+   * @example "8500-04"
+   */
+  buildDescriptor?: string;
+}
+
+/** One item making up a device or assembly. Carries no function beyond recording what has a serial number, so every property can legitimately be empty. */
+export interface HardwareComponent {
+  /** @example "Com EtherCAT" */
+  name: string;
+  /** @example "A.2" */
+  version: string;
+  /** @example "1000-02-0005739-1815" */
+  serialNumber: string;
+}
+
+/** A device or an assembly. The two are one shape — the specification lists their fields in a single table and they differ only in that `keyId` and `macAddress` are device-only. */
+export interface HardwareProduct {
+  /**
+   * Human-readable description of the hardware.
+   * @example "SOMANET Servo Node 400 EtherCAT"
+   */
+  name: string;
+  /**
+   * Names the product's picture. Empty when the file carries none.
+   * @example "9501-xx"
+   */
+  imageId: string;
+  /**
+   * The `firmwareId` — identifies the hardware product.
+   * @example "9501"
+   */
+  id: string;
+  /**
+   * The `firmwareVersion` — revision of that product.
+   * @example "01"
+   */
+  version: string;
+  /**
+   * Firmware encryption key burned to OTP memory. Device only, and empty on hardware whose firmware predates encryption.
+   * @example "4622"
+   */
+  keyId: string;
+  /** @example "9501-01-040595-4023" */
+  serialNumber: string;
+  /**
+   * MAC address of the Ethernet port. Device only.
+   * @example "01-23-45-67-89-AB"
+   */
+  macAddress: string;
+  components: HardwareComponent[];
+  /**
+   * `id` and `version` joined by a dash.
+   * @example "9501-01"
+   */
+  buildDescriptor: string;
+}
+
+/**
+ * A device's `.hardware_description` file — what the hardware says it is, and the source of the descriptor that decides which firmware belongs on it.
+ *
+ * `device` is never absent, and that is structural rather than a simplification: the file lives *on* the device, so a file without one cannot exist. `assembly` is present only when the device was packaged into a product — an ACTILINK is an assembly with a SOMANET Node device inside it — and when it is, it is what firmware is matched against first.
+ */
+export interface HardwareDescription {
+  /**
+   * Format version of the file itself, semver.
+   * @example "1.2.0"
+   */
+  fileVersion: string;
+  /** A device or an assembly. The two are one shape — the specification lists their fields in a single table and they differ only in that `keyId` and `macAddress` are device-only. */
+  device: HardwareProduct;
+  /** A device or an assembly. The two are one shape — the specification lists their fields in a single table and they differ only in that `keyId` and `macAddress` are device-only. */
+  assembly?: HardwareProduct;
+}
+
+/** One entry of the Integro runtime-variant option catalogue. Nothing on the server acts on `socVariables` or `incompatibleOptionIds` — the drive enforces them — but they are what make a decoded file legible. */
+export interface IntegroVariantOption {
+  /**
+   * The option code as it appears in the file.
+   * @example 1
+   */
+  id: number;
+  /**
+   * What the option selects.
+   * @example "Fieldbus Protocol"
+   */
+  category: string;
+  /**
+   * Which choice within that category.
+   * @example "EtherCAT"
+   */
+  meaning: string;
+  /**
+   * The drive's own configuration values this option sets. Empty for an option the fieldbus firmware acts on rather than the SoC.
+   * @example ["adc_phase_current_sensor_gain"]
+   */
+  socVariables: string[];
+  /**
+   * Options that cannot be selected alongside this one — the other members of a category that selects exactly one choice. Empty for an independent flag such as "disable DI1".
+   * @example [0,2,3,39]
+   */
+  incompatibleOptionIds: number[];
+  /**
+   * Segments of the part number this option corresponds to. Empty for an option not distinguished in the part number.
+   * @example ["EC"]
+   */
+  mpnSegmentCodes: string[];
+}
+
+/** One option code from a decoded file, expanded into its catalogue entry. Everything but `id` is absent for a code the catalogue does not name, so "we do not know what this is" is missing properties rather than the string `unknown`. */
+export type IntegroVariantFileOption = UtilRequiredKeys<
+  IntegroVariantOption,
+  "id"
+>;
+
+/**
+ * A decoded `.variant` file: which features a SOMANET Integro was licensed with.
+ *
+ * Only Integro drives carry one. Its layout comes from the firmware that reads it rather than from a specification — there is none — and the one thing on it that matters beyond inspection is `fieldbusProtocol`, which the hardware description deliberately does not carry and a full firmware descriptor ends with.
+ */
+export interface IntegroVariant {
+  /**
+   * Format version; 1 in every file seen so far.
+   * @example 1
+   */
+  fileVersion: number;
+  /** Lowercase hex. Opaque — verification needs the private key and happens on the drive — and reported only so a caller can see whether one is present. */
+  signature: string;
+  /**
+   * Lowercase hex netX chip id this file was issued for.
+   * @example "4e64646c70b286a000000000"
+   */
+  chipId: string;
+  /** @example "9004-02-0000424-2445" */
+  serialNumber: string;
+  /** @example "40:49:8A:01:21:D6" */
+  macAddress: string;
+  /**
+   * Who the device was licensed to.
+   * @example 1
+   */
+  customerId: number;
+  /**
+   * Raw mode value. `passive` (0x51) is the failure state as much as a mode: firmware falls back to it when the file is missing, its signature does not verify, or its chip id belongs to another device.
+   * @example 87
+   */
+  operationMode: number;
+  /** @example "live" */
+  operationModeName: "passive" | "trial" | "production" | "live" | "unknown";
+  /**
+   * The fieldbus the device is licensed for, for the tail of a full firmware descriptor. **EtherCAT wins when several are selected** — real files do carry more than one. Absent when the file selects no fieldbus at all.
    * @example 1
    */
   fieldbusProtocol?: number;
+  /** The option codes, in the order the file lists them — which is not sorted, and is the only record of how the file was written. */
+  options: IntegroVariantFileOption[];
+}
+
+/** The full firmware descriptors one device accepts firmware under. Two rather than one because the specification says both are compatible and lists both for the user to choose from: the assembly's firmware "should have been customized for the assembly", so it is the one to prefer, while the device package is the generic build for the hardware inside it. */
+export interface FullFirmwareDescriptors {
+  /**
+   * The device's own descriptor. Always present.
+   * @example "9010-02-2423-1"
+   */
+  device: string;
+  /**
+   * The assembly's build descriptor with the **device's** key id — assemblies have no key of their own. Absent when the hardware description carries no assembly.
+   * @example "6000-01-2423-1"
+   */
+  assembly?: string;
+}
+
+/**
+ * Whether one firmware package belongs on one device.
+ *
+ * **The whole descriptor string is compared, never its decoded parts.** That is what makes the check correct for descriptors outside the numeric convention, and it is how the specification frames the operation — find compatible firmware by searching for the `fullFirmwareDescriptor` string.
+ */
+export interface FirmwareCompatibility {
+  /** @example true */
+  compatible: boolean;
+  /**
+   * Which of the device's descriptors matched. `device` is a match that still has something to say: it is the generic build rather than the one customised for the assembly.
+   * @example "assembly"
+   */
+  match: "none" | "assembly" | "device";
+  /** A SOMANET firmware package filename broken into its fields. The four decoded-descriptor properties are absent — not null — when the full firmware descriptor is not the numeric kind, which the naming specification explicitly allows. */
+  packageName: FirmwarePackageName;
+  /** The full firmware descriptors one device accepts firmware under. Two rather than one because the specification says both are compatible and lists both for the user to choose from: the assembly's firmware "should have been customized for the assembly", so it is the one to prefer, while the device package is the generic build for the hardware inside it. */
+  deviceDescriptors: FullFirmwareDescriptors;
+  /**
+   * One sentence naming the descriptors involved, ready to show a user. Populated for a match as well as a mismatch.
+   * @example "This package is built for 6000-01-2423-1, which is this device's assembly."
+   */
+  explanation: string;
 }
 
 /** One procedure paired with how its last run on this device went — an entry of `GET /api/devices/{slavePosition}/procedures`. The pairing is what lets a page render in a single request instead of one per procedure. */

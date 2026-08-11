@@ -1,6 +1,13 @@
 import { useState } from 'react'
-import type { FirmwarePackageName } from '@synapticon/motion-master-client'
+import {
+  apiErrorMessage,
+  type FirmwarePackageName,
+  type HardwareDescription,
+} from '@synapticon/motion-master-client'
 import Callout from '../components/Callout'
+import FieldRow from '../components/FieldRow'
+import FilePickerButton from '../components/FilePickerButton'
+import HardwareDescriptionView from '../components/HardwareDescriptionView'
 import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnPrimary } from '../utils/styles'
@@ -12,22 +19,6 @@ const labelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display
 const cardCls = 'border border-grey-200 bg-white p-5 space-y-4'
 
 const EXAMPLE_PACKAGE = 'package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip'
-
-/**
- * One row of a decoded result. `hint` explains what the field is for rather than repeating it —
- * these names come from a specification most people have not read.
- */
-function Field({ label, value, hint }: { label: string; value: string; hint?: string }) {
-  return (
-    <div className="grid grid-cols-[11rem_1fr] gap-3 py-1.5 border-b border-grey-100 last:border-0">
-      <div className={labelCls}>{label}</div>
-      <div className="text-sm">
-        <span className="font-mono">{value}</span>
-        {hint && <span className="text-grey-400 text-xs"> — {hint}</span>}
-      </div>
-    </div>
-  )
-}
 
 /**
  * Decodes a SOMANET firmware package filename.
@@ -56,16 +47,7 @@ function FirmwarePackageNameTool() {
       const res = await api.getFirmwarePackageName({ filename: trimmed })
       setResult(res.data)
     } catch (err) {
-      // The generated client throws the parsed response body on a non-2xx, so a 400 arrives as
-      // `{ error: "..." }` — a message naming which part of the grammar the name missed, which is
-      // the useful half of a negative answer and belongs on screen rather than swallowed.
-      const message =
-        typeof err === 'object' && err !== null && 'error' in err
-          ? String((err as { error: unknown }).error)
-          : err instanceof Error
-            ? err.message
-            : 'Could not decode that filename.'
-      setError(message)
+      setError(apiErrorMessage(err, 'Could not decode that filename.'))
     } finally {
       setDecoding(false)
     }
@@ -128,35 +110,42 @@ function FirmwarePackageNameTool() {
 
       {result && (
         <div className="border-t border-grey-200 pt-3">
-          <Field label="Hardware" value={result.hardwareName} />
-          <Field label="Firmware ID" value={result.firmwareId} hint="full firmware descriptor" />
-          <Field label="Software" value={result.firmwareName} />
-          <Field label="Version" value={result.firmwareVersion} />
-          {result.productId !== undefined ? (
+          <FieldRow label="Hardware" value={result.hardwareName} />
+          <FieldRow
+            label="Full firmware descriptor"
+            value={result.fullFirmwareDescriptor}
+            hint="the hardware this is built for"
+          />
+          <FieldRow label="Software" value={result.softwareName} />
+          <FieldRow label="Software version" value={result.softwareVersion} />
+          {result.firmwareId !== undefined ? (
             <>
-              <Field label="Product ID" value={String(result.productId)} />
-              <Field label="Product version" value={String(result.productVersion)} />
+              <FieldRow label="Firmware ID" value={result.firmwareId} hint="the hardware product" />
+              <FieldRow
+                label="Firmware version"
+                value={String(result.firmwareVersion)}
+                hint="hardware revision"
+              />
+              {result.buildDescriptor !== undefined && (
+                <FieldRow label="Build descriptor" value={result.buildDescriptor} />
+              )}
               {result.keyId !== undefined && (
-                <Field
-                  label="Key ID"
-                  value={String(result.keyId)}
-                  hint="firmware encryption key"
-                />
+                <FieldRow label="Key ID" value={result.keyId} hint="firmware encryption key" />
               )}
               {result.fieldbusProtocol !== undefined && (
-                <Field
-                  label="Fieldbus"
-                  value={String(result.fieldbusProtocol)}
-                  hint={result.fieldbusProtocol === 1 ? 'EtherCAT' : 'see the specification'}
+                <FieldRow
+                  label="Fieldbus protocol"
+                  value={result.fieldbusProtocol}
+                  hint={result.fieldbusProtocol === '1' ? 'EtherCAT' : 'see the specification'}
                 />
               )}
             </>
           ) : (
             <p className="text-xs text-grey-500 pt-2">
-              The firmware descriptor is not the numeric{' '}
-              <span className="font-mono">id-version-key-fieldbus</span> form, so there is no
-              product id to report. That is a valid descriptor — the naming specification allows an
-              arbitrary string — and the package installs either way.
+              The full firmware descriptor is not the numeric{' '}
+              <span className="font-mono">firmwareId-firmwareVersion-keyId-fieldbusProtocol</span>{' '}
+              form, so there is nothing further to decode. That is a valid descriptor — the naming
+              specification allows an arbitrary string — and the package installs either way.
             </p>
           )}
         </div>
@@ -166,11 +155,67 @@ function FirmwarePackageNameTool() {
 }
 
 /**
+ * Decodes a `.hardware_description` file.
+ *
+ * A file rather than a filename, but small enough to belong here beside its sibling: a device's
+ * hardware description is a few hundred bytes of JSON, and the answer is one table. The interesting
+ * part is the build descriptor on each product — with the device's key id appended, that is what
+ * decides which firmware package the hardware takes.
+ */
+function HardwareDescriptionTool() {
+  const { api } = useConnection()
+  const [result, setResult] = useState<HardwareDescription | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [parsing, setParsing] = useState(false)
+
+  async function parse(file: File) {
+    setParsing(true)
+    setError(null)
+    setResult(null)
+    try {
+      const res = await api.parseHardwareDescription(await file.text())
+      setResult(res.data)
+    } catch (err) {
+      setError(apiErrorMessage(err, 'Could not parse that file.'))
+    } finally {
+      setParsing(false)
+    }
+  }
+
+  return (
+    <section className={cardCls}>
+      <div>
+        <h3 className="font-display uppercase text-sm tracking-wide">Hardware description</h3>
+        <p className="text-xs text-grey-500 mt-1">
+          Decodes a <span className="font-mono">.hardware_description</span> file — what a SOMANET
+          product says it is, and the build descriptors that decide which firmware belongs on it. To
+          read one off a connected device instead, use its Files page.
+        </p>
+      </div>
+
+      {/* No `accept`: the file is named `.hardware_description`, an extension no dialog filter
+          matches, so restricting by type would hide the only file anyone wants to pick. */}
+      <FilePickerButton accept="" onFile={file => void parse(file)} className="h-[38px]">
+        {parsing ? 'Parsing…' : 'Choose file…'}
+      </FilePickerButton>
+
+      {error && <Callout variant="error">{error}</Callout>}
+
+      {result && (
+        <div className="border-t border-grey-200 pt-3">
+          <HardwareDescriptionView description={result} />
+        </div>
+      )}
+    </section>
+  )
+}
+
+/**
  * A home for small, device-free utilities.
  *
- * The other two Tools pages each exist for one substantial thing (an ESI file, an SII image). This
- * one is deliberately a page of *several* small tools instead, so a one-input-one-answer helper has
- * somewhere to live without earning a sidebar entry of its own.
+ * The other Tools pages each exist for one substantial thing (an ESI file, an SII image, a variant
+ * file). This one is deliberately a page of *several* small tools instead, so a
+ * one-input-one-answer helper has somewhere to live without earning a sidebar entry of its own.
  */
 export default function ToolsUtilitiesPage() {
   return (
@@ -182,6 +227,7 @@ export default function ToolsUtilitiesPage() {
       />
       <div className="p-4 sm:px-8 sm:py-7 space-y-6 max-w-4xl">
         <FirmwarePackageNameTool />
+        <HardwareDescriptionTool />
       </div>
     </div>
   )

@@ -20,10 +20,14 @@ import {
   DeviceParameter,
   EscRegister,
   EsiParseResult,
+  FirmwareCompatibility,
   FirmwarePackageName,
   FoeErrorCode,
   GameLoopHealth,
+  HardwareDescription,
   HrdRecording,
+  IntegroVariant,
+  IntegroVariantOption,
   MailboxErrorCode,
   Monitoring,
   ObjectDataTypeInfo,
@@ -1288,6 +1292,65 @@ export class Api<
       ...params,
     });
   /**
+   * @description Reads and decodes the device's `.hardware_description` file over FoE — its product id and revision, serial number, the components it is built from, and the assembly it was packaged into. It is also the only source of the descriptor that decides which firmware belongs on the device, which is what most callers want it for (see `/api/devices/{slavePosition}/firmware-compatibility`). **Readable in BOOT as well as PRE-OP and above.** The bootloader deliberately allows this one file, which is what lets a compatibility check work on a drive a failed install left stranded there — precisely when knowing whether the package was the right one matters most.
+   *
+   * @name GetDeviceHardwareDescription
+   * @summary Read what a device says it is
+   * @request GET:/api/devices/{slavePosition}/hardware-description
+   */
+  getDeviceHardwareDescription = (
+    slavePosition: number,
+    params: RequestParams = {},
+  ) =>
+    this.request<HardwareDescription, void>({
+      path: `/api/devices/${slavePosition}/hardware-description`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Reads and decodes the device's `.variant` file over FoE — which features the Integro was licensed with. **A 404 is the ordinary answer for most devices.** Only Integro drives carry this file, so the resource being absent is normal rather than a problem. Its one property that matters beyond inspection is `fieldbusProtocol`, which the hardware description deliberately does not carry and a full firmware descriptor ends with.
+   *
+   * @name GetDeviceIntegroVariant
+   * @summary Read a device's Integro variant file
+   * @request GET:/api/devices/{slavePosition}/variant
+   */
+  getDeviceIntegroVariant = (
+    slavePosition: number,
+    params: RequestParams = {},
+  ) =>
+    this.request<IntegroVariant, void>({
+      path: `/api/devices/${slavePosition}/variant`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Reads the device's `.hardware_description` and `.variant`, assembles the full firmware descriptors it accepts, and compares them against the descriptor in `filename`. **A mismatch is a `200` carrying `compatible: false`**, not an error status: the client asked a question and got an answer, and the body names both descriptors so it can say which hardware the package was for. A `4xx` means the question could not be asked — the filename is not a package name, or the hardware description could not be read. **Nothing acts on the answer.** The firmware installation procedure writes whatever it is given, on purpose, so this exists to tell a user before they start.
+   *
+   * @name CheckDeviceFirmwareCompatibility
+   * @summary Check whether a firmware package belongs on a device
+   * @request GET:/api/devices/{slavePosition}/firmware-compatibility
+   */
+  checkDeviceFirmwareCompatibility = (
+    slavePosition: number,
+    query: {
+      /**
+       * The package filename, with no directory part.
+       * @example "package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip"
+       */
+      filename: string;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<FirmwareCompatibility, void>({
+      path: `/api/devices/${slavePosition}/firmware-compatibility`,
+      method: "GET",
+      query: query,
+      format: "json",
+      ...params,
+    });
+  /**
    * @description Sends an FoE read request for `filename` to the device at `slavePosition` and returns the raw file bytes.  FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is responsible for ensuring the device is in a suitable state before calling.  The call blocks until the full file has been received or a per-packet timeout of 700 ms is exceeded.
    *
    * @name FoeReadFile
@@ -1431,6 +1494,51 @@ export class Api<
       path: `/api/firmware-package-name`,
       method: "GET",
       query: query,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Decodes a `.hardware_description` supplied in the request body. No device is involved — the same parse a device read uses, so a file saved from one device can be inspected with no hardware present. Three things fail a parse: content that is not JSON, content with no `device` object, and a device carrying no `id` or no `version`. Everything else is accepted as written. Those three required fields are exactly what a descriptor is built from, which is also what makes this a usable type check — arbitrary JSON is rejected rather than yielding an empty descriptor. The `fileVersion` major is reported but not enforced: a bump means "a new parser is needed", but refusing an unknown one would make a drive flashed with a future file unreadable today.
+   *
+   * @name ParseHardwareDescription
+   * @summary Parse a .hardware_description file
+   * @request POST:/api/hardware-description/parse
+   */
+  parseHardwareDescription = (data: string, params: RequestParams = {}) =>
+    this.request<HardwareDescription, void>({
+      path: `/api/hardware-description/parse`,
+      method: "POST",
+      body: data,
+      type: ContentType.Text,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Decodes a `.variant` file supplied in the request body. Binary rather than text, hence a `POST` with bytes like `/api/sii/parse` rather than a query like `/api/firmware-package-name`. Trailing bytes past the last option are accepted: the firmware reads only as many options as the count claims and ignores the rest, so refusing padding would reject a file the drive is happy with.
+   *
+   * @name ParseIntegroVariant
+   * @summary Parse a .variant file
+   * @request POST:/api/integro-variant/parse
+   */
+  parseIntegroVariant = (data: File, params: RequestParams = {}) =>
+    this.request<IntegroVariant, void>({
+      path: `/api/integro-variant/parse`,
+      method: "POST",
+      body: data,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Every option an Integro can be licensed with, in code order. Static data: no device, no bus, no request body. Served so a client can explain a decoded file — or simply show what is available — without carrying a second copy of a table that belongs to the firmware. The codes ascend with real gaps, and the catalogue keeps codes current firmware no longer implements, because files written years ago still carry them.
+   *
+   * @name ListIntegroVariantOptions
+   * @summary The whole Integro variant option catalogue
+   * @request GET:/api/integro-variant/options
+   */
+  listIntegroVariantOptions = (params: RequestParams = {}) =>
+    this.request<IntegroVariantOption[], any>({
+      path: `/api/integro-variant/options`,
+      method: "GET",
       format: "json",
       ...params,
     });

@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "node/cia402_drive.h"
+#include "node/firmware_package.h"
 
 namespace mm::node {
 
@@ -1151,6 +1152,60 @@ class SomanetDrive : public Cia402Drive {
   ///
   /// @return Every file the device reported, in the order it reported them.
   std::expected<std::vector<DeviceFile>, std::string> readFileList() const;
+
+  /// @brief Reads and parses the drive's @c .hardware_description file (FoE).
+  ///
+  /// This is how a device says what it *is* — its product id and revision, serial number, the
+  /// components it is built from, and the assembly it was packaged into. It is also the only source
+  /// of the descriptor that decides which firmware belongs on it, which is what most callers want
+  /// it for (see @c checkFirmwareCompatibility).
+  ///
+  /// **Readable in BOOT as well as PRE-OP and above.** The bootloader deliberately allows this one
+  /// file, which is what lets a compatibility check work on a drive left stranded in BOOT by a
+  /// failed install — precisely when knowing whether the package was the right one matters most.
+  ///
+  /// @return The parsed description, or why it could not be read or made sense of.
+  std::expected<HardwareDescription, std::string> readHardwareDescription() const;
+
+  /// @brief Reads and parses the drive's @c .variant file (FoE).
+  ///
+  /// Only Integro drives carry one. A Node or a Circulo has none, so an empty optional is the
+  /// normal answer rather than an error.
+  ///
+  /// Any failure to read the file is taken as "there is none", because FoE cannot distinguish a
+  /// missing file from a failed read. Reading the hardware description first is what makes that
+  /// safe: its failure is fatal, so FoE is known to work by the time this runs.
+  ///
+  /// A file that is read but does not decode is the one error — the device has a variant this build
+  /// cannot make sense of.
+  ///
+  /// @return The parsed file, nothing if the device has none, or why an existing one made no sense.
+  std::expected<std::optional<IntegroVariant>, std::string> readIntegroVariant() const;
+
+  /// @brief Reads both files and assembles the descriptors this drive accepts firmware under.
+  ///
+  /// Two FoE reads, one of which is expected to fail on any drive that is not an Integro. The
+  /// hardware description is required — without it there is no descriptor at all — so its failure
+  /// is this call's failure.
+  ///
+  /// @return The device and (where there is one) assembly descriptors, or why they could not be
+  ///         assembled.
+  std::expected<FullFirmwareDescriptors, std::string> readFullFirmwareDescriptors() const;
+
+  /// @brief Reads what this drive is and decides whether @p packageFilename belongs on it.
+  ///
+  /// The two FoE reads of @c readFullFirmwareDescriptors, then @c checkFirmwareCompatibility. An
+  /// incompatible package is a **verdict, not an error** — the returned value carries both
+  /// descriptors and a sentence naming them — so an error here means the question could not be
+  /// asked: the filename is not a package name, or the hardware description could not be read.
+  ///
+  /// Nothing acts on the answer: the firmware installation procedure writes whatever it is given,
+  /// on purpose. This is for telling a user before they start.
+  ///
+  /// @param packageFilename  Bare package filename, with no directory part.
+  /// @return The verdict, or why no verdict could be reached.
+  std::expected<FirmwareCompatibility, std::string> checkFirmwarePackage(
+      std::string_view packageFilename) const;
 
   /// @brief Runs open phase detection (OS command 6) and decodes its verdict.
   ///

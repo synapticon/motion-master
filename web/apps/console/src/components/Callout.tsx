@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react'
-import { AlertTriangle, Info, XCircle, type LucideIcon } from 'lucide-react'
+import { AlertTriangle, CheckCircle, Info, XCircle, type LucideIcon } from 'lucide-react'
 
-export type CalloutVariant = 'danger' | 'warning' | 'error' | 'info'
+export type CalloutVariant = 'danger' | 'warning' | 'error' | 'success' | 'info'
 
 const variants: Record<CalloutVariant, { container: string; icon: string; Icon: LucideIcon }> = {
   // Safety / destructive action — brand red, the strongest emphasis.
@@ -14,6 +14,14 @@ const variants: Record<CalloutVariant, { container: string; icon: string; Icon: 
   },
   // A failure that already happened (request error, invalid input).
   error: { container: 'border-status-bad/40 bg-status-bad/5', icon: 'text-status-bad', Icon: XCircle },
+  // A check that passed. The counterpart to `warning` rather than a way to praise the user: it earns
+  // its place where the *absence* of a warning would be ambiguous — "we checked, and it is fine"
+  // reads differently from a page that simply says nothing.
+  success: {
+    container: 'border-status-good/40 bg-status-good/5',
+    icon: 'text-status-good',
+    Icon: CheckCircle,
+  },
   // Neutral information.
   info: {
     container: 'border-status-info/40 bg-status-info/5',

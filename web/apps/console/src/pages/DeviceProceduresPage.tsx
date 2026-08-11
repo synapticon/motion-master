@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Navigate, NavLink, useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import type {
-  ProcedureListing,
-  ProcedureSnapshot,
-  ProgressStep,
+import {
+  apiErrorMessage,
+  type ProcedureListing,
+  type ProcedureSnapshot,
+  type ProgressStep,
 } from '@synapticon/motion-master-client'
 import Callout from '../components/Callout'
 import DevicePageHeader from '../components/DevicePageHeader'
@@ -46,23 +47,11 @@ const STEP_DOT: Record<ProgressStep['status'], string> = {
   failed: 'bg-syn-red',
 }
 
-// Surfaces the node layer's error string from a failed request (matching the other device pages).
+// Surfaces the node layer's error string from a failed request. The unwrapping itself lives in the
+// client library, which owns the generated client and therefore its error shape — the pages that
+// still hand-roll it predate that helper.
 function apiError(err: unknown): string {
-  if (err && typeof err === 'object') {
-    if ('error' in err) {
-      const inner = (err as { error: unknown }).error
-      if (inner && typeof inner === 'object' && 'error' in inner) {
-        return String((inner as { error: unknown }).error)
-      }
-      if (typeof inner === 'string') return inner
-    }
-    if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
-      const { status } = err as { status: number }
-      return `HTTP ${status}`
-    }
-  }
-  if (err instanceof Error) return err.message
-  return 'Unknown error'
+  return apiErrorMessage(err)
 }
 
 // Wall-clock time of a run boundary, to the millisecond — 11:01:28.762. The precision is the point:
@@ -318,6 +307,18 @@ function ProcedureDetail({
     }
   }
 
+  // Firmware installation only: whether the chosen package is built for this device. Checked from
+  // the filename the picker filled in, so it costs nothing until a file is actually chosen.
+  //
+  // It **warns and never blocks**. A package can legitimately be renamed, the naming specification
+  // allows a descriptor this cannot decode at all, and the procedure itself deliberately writes
+  // whatever it is given — so turning this into a locked Run button would be the console overruling
+  // a decision the server leaves to the user.
+  const packageFilename =
+    descriptor.name === 'firmware-installation' && typeof values.packageFilename === 'string'
+      ? values.packageFilename.trim()
+      : ''
+
   return (
     <div className="space-y-6">
       {/* What it is — title, flags, description, and the caveats that apply before running it. */}
@@ -363,19 +364,29 @@ function ProcedureDetail({
           onChange={(name, value) => setValues(previous => ({ ...previous, [name]: value }))}
           // The one procedure-specific line on this page, and the honest cost of keeping a file
           // parameter to bytes alone: the name of the file the user chose would otherwise be
-          // discarded, and for firmware installation that name is what decides whether the package
-          // is cached and what it is cached as. Filling its sibling beats asking someone to retype
-          // a filename their own file picker already knew. Only overwrites an empty field, so a
-          // name typed on purpose survives picking a file.
+          // discarded, and for firmware installation that name is what the package is cached as and
+          // what the compatibility check above is answered about. Filling its sibling beats asking
+          // someone to retype a filename their own file picker already knew.
+          //
+          // **Always overwritten, never only when empty.** Picking a file replaces the bytes, so a
+          // filename left over from an earlier pick now describes something that is not being
+          // installed — which cached the package under the wrong name, and reported a compatibility
+          // verdict about the wrong hardware. The picked file's own name is the only name that is
+          // certainly right for it. Editing the field afterwards still works, and the check re-runs
+          // against whatever it then says, because that is what the server will be sent.
           onFilePicked={(parameter, file) => {
             if (parameter.name !== 'packageContent') {
               return
             }
-            setValues(previous =>
-              previous.packageFilename ? previous : { ...previous, packageFilename: file.name },
-            )
+            setValues(previous => ({ ...previous, packageFilename: file.name }))
           }}
         />
+
+        {/* Directly under the picker that produced the filename, so the verdict reads as a response
+            to choosing a file rather than as a page-level notice. */}
+        {packageFilename !== '' && (
+          <FirmwareCompatibilityNotice slavePosition={slavePosition} filename={packageFilename} />
+        )}
 
         {/* Run / Cancel, with the elapsed or last-run duration beside the button that produced it. */}
         <div className="flex items-center justify-between gap-4 pt-1">
@@ -510,5 +521,92 @@ function ProcedureDetail({
         </pre>
       </section>
     </div>
+  )
+}
+
+/**
+ * Whether the chosen firmware package is built for this device.
+ *
+ * Two FoE reads on the server (`.hardware_description`, then `.variant` for an Integro), so this is
+ * fetched once per filename and cached — picking the same file twice does not go back to the bus.
+ *
+ * **It warns; it never blocks.** A mismatch is the server's own verdict, not an error, and the
+ * procedure will still install whatever it is given. A filename that cannot be decoded at all is a
+ * neutral note rather than a warning: a renamed package is a normal thing to have, and the naming
+ * specification allows descriptors this cannot read.
+ */
+function FirmwareCompatibilityNotice({
+  slavePosition,
+  filename,
+}: {
+  slavePosition: number
+  filename: string
+}) {
+  const { api } = useConnection()
+  const query = useQuery({
+    queryKey: ['firmware-compatibility', slavePosition, filename],
+    queryFn: async () => {
+      const res = await api.checkDeviceFirmwareCompatibility(slavePosition, { filename })
+      return res.data
+    },
+    // The answer depends on the device's own files and the filename, neither of which changes while
+    // this panel is open, so there is nothing to refetch.
+    staleTime: Infinity,
+    retry: false,
+  })
+
+  if (query.isPending) {
+    return <p className="text-xs text-grey-500">Checking the package against this device…</p>
+  }
+
+  if (query.isError) {
+    return (
+      <Callout variant="info">
+        <p>
+          Could not check whether this package fits: {apiError(query.error)}. The installation is not
+          affected — nothing about it depends on this check.
+        </p>
+      </Callout>
+    )
+  }
+
+  const verdict = query.data
+  const { deviceDescriptors, packageName } = verdict
+
+  return (
+    <Callout variant={verdict.compatible ? 'success' : 'warning'}>
+      <p>
+        <strong>
+          {verdict.compatible
+            ? 'This package is built for this device.'
+            : 'This package is built for other hardware.'}
+        </strong>{' '}
+        {verdict.explanation}
+      </p>
+      <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 mt-1.5 text-xs">
+        <dt className="text-grey-500">Package</dt>
+        <dd className="font-mono">
+          {packageName.fullFirmwareDescriptor}
+          <span className="text-grey-500 font-sans">
+            {' '}
+            — {packageName.softwareName} {packageName.softwareVersion}
+          </span>
+        </dd>
+        <dt className="text-grey-500">Device</dt>
+        <dd className="font-mono">{deviceDescriptors.device}</dd>
+        {deviceDescriptors.assembly !== undefined && (
+          <>
+            <dt className="text-grey-500">Assembly</dt>
+            <dd className="font-mono">{deviceDescriptors.assembly}</dd>
+          </>
+        )}
+      </dl>
+      {!verdict.compatible && (
+        <p className="mt-1.5">
+          Installing it anyway is allowed and nothing here prevents it — the procedure writes what it
+          is given. Check the descriptors above first.
+        </p>
+      )}
+    </Callout>
   )
 }

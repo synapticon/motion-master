@@ -74,6 +74,42 @@ std::expected<BrakeState, std::string> engageBrake(DeviceManager& deviceManager,
 std::expected<std::vector<DeviceFile>, std::string> readFileList(DeviceManager& deviceManager,
                                                                  uint16_t slavePosition);
 
+/// @brief Reads and parses a device's @c .hardware_description file.
+///
+/// Thin forward to @c SomanetDrive::readHardwareDescription — what the device says it is, and the
+/// source of the descriptor that decides which firmware belongs on it.
+///
+/// @param deviceManager  Owner of the device set; lends locked access for the call.
+/// @param slavePosition  1-based bus position of the target device.
+/// @return The parsed description, or why it could not be read.
+std::expected<HardwareDescription, std::string> readHardwareDescription(
+    DeviceManager& deviceManager, uint16_t slavePosition);
+
+/// @brief Reads and parses a device's @c .variant file.
+///
+/// Thin forward to @c SomanetDrive::readIntegroVariant. Only Integro drives carry one; an empty
+/// optional means the device has none — which a Node or a Circulo correctly does, and which is
+/// therefore not a failure. Read its documentation for why *any* unreadable variant is reported
+/// that way rather than only a not-found one.
+///
+/// @param deviceManager  Owner of the device set; lends locked access for the call.
+/// @param slavePosition  1-based bus position of the target device.
+/// @return The parsed file, nothing if the device has none, or why the read failed.
+std::expected<std::optional<IntegroVariant>, std::string> readIntegroVariant(
+    DeviceManager& deviceManager, uint16_t slavePosition);
+
+/// @brief Reads what a device is and decides whether a firmware package belongs on it.
+///
+/// Thin forward to @c SomanetDrive::checkFirmwarePackage. Two FoE reads; an incompatible package is
+/// a verdict rather than an error, so an error here means the question could not be asked.
+///
+/// @param deviceManager    Owner of the device set; lends locked access for the call.
+/// @param slavePosition    1-based bus position of the target device.
+/// @param packageFilename  Bare package filename, with no directory part.
+/// @return The verdict, or why no verdict could be reached.
+std::expected<FirmwareCompatibility, std::string> checkFirmwarePackage(
+    DeviceManager& deviceManager, uint16_t slavePosition, std::string_view packageFilename);
+
 /// @brief Reads a drive's high resolution data recording back and decodes it.
 ///
 /// Thin forward to @c SomanetDrive::readHrdRecording. Blocks for the transfer — up to five 8 KB FoE

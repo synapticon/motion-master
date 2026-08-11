@@ -21,6 +21,7 @@ import MetaMailboxErrorCodesPage from './pages/MetaMailboxErrorCodesPage'
 import MetaObjectDataTypesPage from './pages/MetaObjectDataTypesPage'
 import MetaSdoAbortCodesPage from './pages/MetaSdoAbortCodesPage'
 import ToolsEsiPage from './pages/ToolsEsiPage'
+import ToolsIntegroVariantPage from './pages/ToolsIntegroVariantPage'
 import ToolsSiiPage from './pages/ToolsSiiPage'
 import ToolsUtilitiesPage from './pages/ToolsUtilitiesPage'
 import StorageUserCachePage from './pages/StorageUserCachePage'
@@ -74,6 +75,7 @@ export default function App() {
         </Route>
         <Route path="tools">
           <Route path="esi" element={<ToolsEsiPage />} />
+          <Route path="integro-variant" element={<ToolsIntegroVariantPage />} />
           <Route path="sii" element={<ToolsSiiPage />} />
           <Route path="utilities" element={<ToolsUtilitiesPage />} />
         </Route>

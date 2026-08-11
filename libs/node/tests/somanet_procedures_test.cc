@@ -1504,7 +1504,7 @@ TEST(FirmwareInstallationRequest, AcceptsAnInlinePackage) {
   EXPECT_EQ(request->package[0], 'P');
   EXPECT_EQ(request->package[1], 'K');
   ASSERT_TRUE(request->name.has_value());
-  EXPECT_EQ(request->name->firmwareVersion, "v5.6.10");
+  EXPECT_EQ(request->name->softwareVersion, "v5.6.10");
 }
 
 TEST(FirmwareInstallationRequest, DefaultsMatchTheDescriptor) {

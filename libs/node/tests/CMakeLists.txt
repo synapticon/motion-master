@@ -9,6 +9,8 @@ add_executable(
   device_test.cc
   device_manager_test.cc
   firmware_package_test.cc
+  hardware_description_test.cc
+  integro_variant_test.cc
   monitoring_test.cc
   monitoring_manager_test.cc
   parameter_cache_test.cc

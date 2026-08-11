@@ -6,6 +6,8 @@ add_library(
   device_manager.cc
   device_parameter.cc
   firmware_package.cc
+  hardware_description.cc
+  integro_variant.cc
   monitoring.cc
   monitoring_manager.cc
   parameter_cache.cc

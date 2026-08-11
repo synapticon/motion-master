@@ -52,6 +52,25 @@ std::expected<std::vector<DeviceFile>, std::string> readFileList(DeviceManager& 
                           [](SomanetDrive& drive) { return drive.readFileList(); });
 }
 
+std::expected<HardwareDescription, std::string> readHardwareDescription(
+    DeviceManager& deviceManager, uint16_t slavePosition) {
+  return withSomanetDrive(deviceManager, slavePosition,
+                          [](SomanetDrive& drive) { return drive.readHardwareDescription(); });
+}
+
+std::expected<std::optional<IntegroVariant>, std::string> readIntegroVariant(
+    DeviceManager& deviceManager, uint16_t slavePosition) {
+  return withSomanetDrive(deviceManager, slavePosition,
+                          [](SomanetDrive& drive) { return drive.readIntegroVariant(); });
+}
+
+std::expected<FirmwareCompatibility, std::string> checkFirmwarePackage(
+    DeviceManager& deviceManager, uint16_t slavePosition, std::string_view packageFilename) {
+  return withSomanetDrive(deviceManager, slavePosition, [packageFilename](SomanetDrive& drive) {
+    return drive.checkFirmwarePackage(packageFilename);
+  });
+}
+
 std::expected<HrdRecording, std::string> readHrdRecording(DeviceManager& deviceManager,
                                                           uint16_t slavePosition,
                                                           somanet::HrdData data) {

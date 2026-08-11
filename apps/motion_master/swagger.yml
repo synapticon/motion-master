@@ -2075,6 +2075,133 @@ paths:
           description: No device at that slavePosition
         "409":
           description: The device is not a SOMANET drive, or the listing could not be read
+  /api/devices/{slavePosition}/hardware-description:
+    get:
+      summary: Read what a device says it is
+      operationId: getDeviceHardwareDescription
+      description: >
+        Reads and decodes the device's `.hardware_description` file over FoE — its product id and
+        revision, serial number, the components it is built from, and the assembly it was packaged
+        into.
+
+
+        It is also the only source of the descriptor that decides which firmware belongs on the
+        device, which is what most callers want it for (see
+        `/api/devices/{slavePosition}/firmware-compatibility`).
+
+
+        **Readable in BOOT as well as PRE-OP and above.** The bootloader deliberately allows this one
+        file, which is what lets a compatibility check work on a drive a failed install left
+        stranded there — precisely when knowing whether the package was the right one matters most.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The decoded file
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HardwareDescription"
+        "400":
+          description: slavePosition is invalid
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: >
+            The device is not a SOMANET drive, the file could not be read, or its content is not a
+            hardware description
+  /api/devices/{slavePosition}/variant:
+    get:
+      summary: Read a device's Integro variant file
+      operationId: getDeviceIntegroVariant
+      description: >
+        Reads and decodes the device's `.variant` file over FoE — which features the Integro was
+        licensed with.
+
+
+        **A 404 is the ordinary answer for most devices.** Only Integro drives carry this file, so
+        the resource being absent is normal rather than a problem. Its one property that matters
+        beyond inspection is `fieldbusProtocol`, which the hardware description deliberately does
+        not carry and a full firmware descriptor ends with.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The decoded file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegroVariant"
+        "400":
+          description: slavePosition is invalid
+        "404":
+          description: No device at that slavePosition, or the device carries no `.variant` file
+        "409":
+          description: >
+            The device is not a SOMANET drive, the file could not be read, or its content is not a
+            variant file
+  /api/devices/{slavePosition}/firmware-compatibility:
+    get:
+      summary: Check whether a firmware package belongs on a device
+      operationId: checkDeviceFirmwareCompatibility
+      description: >
+        Reads the device's `.hardware_description` and `.variant`, assembles the full firmware
+        descriptors it accepts, and compares them against the descriptor in `filename`.
+
+
+        **A mismatch is a `200` carrying `compatible: false`**, not an error status: the client asked
+        a question and got an answer, and the body names both descriptors so it can say which
+        hardware the package was for. A `4xx` means the question could not be asked — the filename is
+        not a package name, or the hardware description could not be read.
+
+
+        **Nothing acts on the answer.** The firmware installation procedure writes whatever it is
+        given, on purpose, so this exists to tell a user before they start.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: filename
+          in: query
+          required: true
+          schema: { type: string }
+          description: The package filename, with no directory part.
+          example: package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip
+      responses:
+        "200":
+          description: The verdict, compatible or not
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FirmwareCompatibility"
+        "400":
+          description: >
+            slavePosition is invalid, no `filename` was given, or it is not a SOMANET firmware
+            package name
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: >
+            The device is not a SOMANET drive, or its hardware description could not be read
   /api/devices/{slavePosition}/files/{filename}:
     get:
       summary: Read a file from a device via FoE (File over EtherCAT)
@@ -2336,6 +2463,94 @@ paths:
           description: >
             No `filename` was given, or it is not a SOMANET firmware package name. The `error`
             message names the part of the grammar it missed.
+  /api/hardware-description/parse:
+    post:
+      summary: Parse a .hardware_description file
+      operationId: parseHardwareDescription
+      description: >
+        Decodes a `.hardware_description` supplied in the request body. No device is involved — the
+        same parse a device read uses, so a file saved from one device can be inspected with no
+        hardware present.
+
+
+        Three things fail a parse: content that is not JSON, content with no `device` object, and a
+        device carrying no `id` or no `version`. Everything else is accepted as written. Those three
+        required fields are exactly what a descriptor is built from, which is also what makes this a
+        usable type check — arbitrary JSON is rejected rather than yielding an empty descriptor.
+
+
+        The `fileVersion` major is reported but not enforced: a bump means "a new parser is needed",
+        but refusing an unknown one would make a drive flashed with a future file unreadable today.
+      requestBody:
+        required: true
+        description: >
+          The file's text, sent as-is. `text/plain` rather than `application/json` because the body
+          *is* the document — a JSON body would be the file re-encoded as a JSON string, which is
+          then not a hardware description at all.
+        content:
+          text/plain:
+            schema:
+              type: string
+      responses:
+        "200":
+          description: The decoded file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HardwareDescription"
+        "400":
+          description: The body is not a valid hardware description
+  /api/integro-variant/parse:
+    post:
+      summary: Parse a .variant file
+      operationId: parseIntegroVariant
+      description: >
+        Decodes a `.variant` file supplied in the request body. Binary rather than text, hence a
+        `POST` with bytes like `/api/sii/parse` rather than a query like `/api/firmware-package-name`.
+
+
+        Trailing bytes past the last option are accepted: the firmware reads only as many options as
+        the count claims and ignores the rest, so refusing padding would reject a file the drive is
+        happy with.
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: The decoded file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IntegroVariant"
+        "400":
+          description: >
+            The body is not a valid variant file — too short for its 128-byte header, claiming more
+            options than a drive accepts, or truncated mid-option
+  /api/integro-variant/options:
+    get:
+      summary: The whole Integro variant option catalogue
+      operationId: listIntegroVariantOptions
+      description: >
+        Every option an Integro can be licensed with, in code order. Static data: no device, no bus,
+        no request body.
+
+
+        Served so a client can explain a decoded file — or simply show what is available — without
+        carrying a second copy of a table that belongs to the firmware. The codes ascend with real
+        gaps, and the catalogue keeps codes current firmware no longer implements, because files
+        written years ago still carry them.
+      responses:
+        "200":
+          description: The catalogue
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/IntegroVariantOption" }
   /api/esi/parse:
     post:
       summary: Parse an EtherCAT Slave Information (ESI) file
@@ -3998,7 +4213,14 @@ components:
         A SOMANET firmware package filename broken into its fields. The four decoded-descriptor
         properties are absent — not null — when the full firmware descriptor is not the numeric
         kind, which the naming specification explicitly allows.
-      required: [description, hardwareName, firmwareId, firmwareName, firmwareVersion]
+      required:
+        [
+          description,
+          hardwareName,
+          fullFirmwareDescriptor,
+          softwareName,
+          softwareVersion,
+        ]
       properties:
         description:
           type: string
@@ -4008,35 +4230,312 @@ components:
           type: string
           description: Human-readable hardware name.
           example: SOMANET-Circulo-7
+        fullFirmwareDescriptor:
+          type: string
+          description: >
+            The hardware this package is built for, verbatim — the string a compatibility check
+            compares.
+          example: 8500-04-2332
+        softwareName:
+          type: string
+          description: Firmware or software name.
+          example: motion-drive
+        softwareVersion:
+          type: string
+          description: >
+            The firmware or software version, including the leading `v`. Not to be confused with
+            `firmwareVersion`, which is the *hardware* revision inside the descriptor.
+          example: v5.6.10
         firmwareId:
           type: string
-          description: The full firmware descriptor, verbatim.
-          example: 8500-04-2332
-        firmwareName:
-          type: string
-          description: Software name.
-          example: motion-drive
+          description: Firmware id from the descriptor — the hardware product.
+          example: "8500"
         firmwareVersion:
           type: string
-          description: Software version, including the leading `v`.
-          example: v5.6.10
-        productId:
-          type: integer
-          description: Product id from the descriptor.
-          example: 8500
-        productVersion:
-          type: integer
-          description: Product version from the descriptor.
-          example: 4
+          description: >
+            Hardware revision from the descriptor. A string, so a leading zero survives: `04`
+            read as a number and printed back would be `4`, and `8500-4` matches no package.
+          example: "04"
         keyId:
+          type: string
+          description: >
+            Firmware encryption key id from the descriptor. A string because real packages carry
+            non-numeric ones, e.g. `A`.
+          example: "2332"
+        fieldbusProtocol:
+          type: string
+          description: >
+            Fieldbus protocol character from the descriptor, hexadecimal. `1` is EtherCAT.
+          example: "1"
+        buildDescriptor:
+          type: string
+          description: >
+            `firmwareId` and `firmwareVersion` joined — the descriptor without the key or fieldbus.
+            Useful for saying *how* a package missed: a matching build descriptor with a different
+            key means right hardware, wrong encryption key.
+          example: 8500-04
+    HardwareComponent:
+      type: object
+      description: >
+        One item making up a device or assembly. Carries no function beyond recording what has a
+        serial number, so every property can legitimately be empty.
+      required: [name, version, serialNumber]
+      properties:
+        name:
+          type: string
+          example: Com EtherCAT
+        version:
+          type: string
+          example: A.2
+        serialNumber:
+          type: string
+          example: "1000-02-0005739-1815"
+    HardwareProduct:
+      type: object
+      description: >
+        A device or an assembly. The two are one shape — the specification lists their fields in a
+        single table and they differ only in that `keyId` and `macAddress` are device-only.
+      required:
+        [
+          name,
+          imageId,
+          id,
+          version,
+          keyId,
+          serialNumber,
+          macAddress,
+          components,
+          buildDescriptor,
+        ]
+      properties:
+        name:
+          type: string
+          description: Human-readable description of the hardware.
+          example: SOMANET Servo Node 400 EtherCAT
+        imageId:
+          type: string
+          description: Names the product's picture. Empty when the file carries none.
+          example: 9501-xx
+        id:
+          type: string
+          description: The `firmwareId` — identifies the hardware product.
+          example: "9501"
+        version:
+          type: string
+          description: The `firmwareVersion` — revision of that product.
+          example: "01"
+        keyId:
+          type: string
+          description: >
+            Firmware encryption key burned to OTP memory. Device only, and empty on hardware whose
+            firmware predates encryption.
+          example: "4622"
+        serialNumber:
+          type: string
+          example: "9501-01-040595-4023"
+        macAddress:
+          type: string
+          description: MAC address of the Ethernet port. Device only.
+          example: "01-23-45-67-89-AB"
+        components:
+          type: array
+          items: { $ref: "#/components/schemas/HardwareComponent" }
+        buildDescriptor:
+          type: string
+          description: "`id` and `version` joined by a dash."
+          example: 9501-01
+    HardwareDescription:
+      type: object
+      description: >
+        A device's `.hardware_description` file — what the hardware says it is, and the source of
+        the descriptor that decides which firmware belongs on it.
+
+
+        `device` is never absent, and that is structural rather than a simplification: the file
+        lives *on* the device, so a file without one cannot exist. `assembly` is present only when
+        the device was packaged into a product — an ACTILINK is an assembly with a SOMANET Node
+        device inside it — and when it is, it is what firmware is matched against first.
+      required: [fileVersion, device]
+      properties:
+        fileVersion:
+          type: string
+          description: Format version of the file itself, semver.
+          example: 1.2.0
+        device:
+          $ref: "#/components/schemas/HardwareProduct"
+        assembly:
+          $ref: "#/components/schemas/HardwareProduct"
+    IntegroVariantOption:
+      type: object
+      description: >
+        One entry of the Integro runtime-variant option catalogue. Nothing on the server acts on
+        `socVariables` or `incompatibleOptionIds` — the drive enforces them — but they are what make
+        a decoded file legible.
+      required:
+        [id, category, meaning, socVariables, incompatibleOptionIds, mpnSegmentCodes]
+      properties:
+        id:
           type: integer
-          description: Firmware encryption key id from the descriptor.
-          example: 2332
+          description: The option code as it appears in the file.
+          example: 1
+        category:
+          type: string
+          description: What the option selects.
+          example: Fieldbus Protocol
+        meaning:
+          type: string
+          description: Which choice within that category.
+          example: EtherCAT
+        socVariables:
+          type: array
+          description: >
+            The drive's own configuration values this option sets. Empty for an option the fieldbus
+            firmware acts on rather than the SoC.
+          items: { type: string }
+          example: [adc_phase_current_sensor_gain]
+        incompatibleOptionIds:
+          type: array
+          description: >
+            Options that cannot be selected alongside this one — the other members of a category
+            that selects exactly one choice. Empty for an independent flag such as "disable DI1".
+          items: { type: integer }
+          example: [0, 2, 3, 39]
+        mpnSegmentCodes:
+          type: array
+          description: >
+            Segments of the part number this option corresponds to. Empty for an option not
+            distinguished in the part number.
+          items: { type: string }
+          example: [EC]
+    IntegroVariantFileOption:
+      type: object
+      description: >
+        One option code from a decoded file, expanded into its catalogue entry. Everything but `id`
+        is absent for a code the catalogue does not name, so "we do not know what this is" is
+        missing properties rather than the string `unknown`.
+      required: [id]
+      allOf: [{ $ref: "#/components/schemas/IntegroVariantOption" }]
+    IntegroVariant:
+      type: object
+      description: >
+        A decoded `.variant` file: which features a SOMANET Integro was licensed with.
+
+
+        Only Integro drives carry one. Its layout comes from the firmware that reads it rather than
+        from a specification — there is none — and the one thing on it that matters beyond
+        inspection is `fieldbusProtocol`, which the hardware description deliberately does not
+        carry and a full firmware descriptor ends with.
+      required:
+        [
+          fileVersion,
+          signature,
+          chipId,
+          serialNumber,
+          macAddress,
+          customerId,
+          operationMode,
+          operationModeName,
+          options,
+        ]
+      properties:
+        fileVersion:
+          type: integer
+          description: Format version; 1 in every file seen so far.
+          example: 1
+        signature:
+          type: string
+          description: >
+            Lowercase hex. Opaque — verification needs the private key and happens on the drive —
+            and reported only so a caller can see whether one is present.
+        chipId:
+          type: string
+          description: Lowercase hex netX chip id this file was issued for.
+          example: 4e64646c70b286a000000000
+        serialNumber:
+          type: string
+          example: 9004-02-0000424-2445
+        macAddress:
+          type: string
+          example: 40:49:8A:01:21:D6
+        customerId:
+          type: integer
+          description: Who the device was licensed to.
+          example: 1
+        operationMode:
+          type: integer
+          description: >
+            Raw mode value. `passive` (0x51) is the failure state as much as a mode: firmware falls
+            back to it when the file is missing, its signature does not verify, or its chip id
+            belongs to another device.
+          example: 87
+        operationModeName:
+          type: string
+          enum: [passive, trial, production, live, unknown]
+          example: live
         fieldbusProtocol:
           type: integer
           description: >
-            Fieldbus protocol from the descriptor, decoded as hexadecimal. 1 is EtherCAT.
+            The fieldbus the device is licensed for, for the tail of a full firmware descriptor.
+            **EtherCAT wins when several are selected** — real files do carry more than one.
+            Absent when the file selects no fieldbus at all.
           example: 1
+        options:
+          type: array
+          description: >
+            The option codes, in the order the file lists them — which is not sorted, and is the
+            only record of how the file was written.
+          items: { $ref: "#/components/schemas/IntegroVariantFileOption" }
+    FullFirmwareDescriptors:
+      type: object
+      description: >
+        The full firmware descriptors one device accepts firmware under. Two rather than one because
+        the specification says both are compatible and lists both for the user to choose from: the
+        assembly's firmware "should have been customized for the assembly", so it is the one to
+        prefer, while the device package is the generic build for the hardware inside it.
+      required: [device]
+      properties:
+        device:
+          type: string
+          description: The device's own descriptor. Always present.
+          example: 9010-02-2423-1
+        assembly:
+          type: string
+          description: >
+            The assembly's build descriptor with the **device's** key id — assemblies have no key of
+            their own. Absent when the hardware description carries no assembly.
+          example: 6000-01-2423-1
+    FirmwareCompatibility:
+      type: object
+      description: >
+        Whether one firmware package belongs on one device.
+
+
+        **The whole descriptor string is compared, never its decoded parts.** That is what makes the
+        check correct for descriptors outside the numeric convention, and it is how the
+        specification frames the operation — find compatible firmware by searching for the
+        `fullFirmwareDescriptor` string.
+      required: [compatible, match, packageName, deviceDescriptors, explanation]
+      properties:
+        compatible:
+          type: boolean
+          example: true
+        match:
+          type: string
+          enum: [none, assembly, device]
+          description: >
+            Which of the device's descriptors matched. `device` is a match that still has something
+            to say: it is the generic build rather than the one customised for the assembly.
+          example: assembly
+        packageName:
+          $ref: "#/components/schemas/FirmwarePackageName"
+        deviceDescriptors:
+          $ref: "#/components/schemas/FullFirmwareDescriptors"
+        explanation:
+          type: string
+          description: >
+            One sentence naming the descriptors involved, ready to show a user. Populated for a
+            match as well as a mismatch.
+          example: This package is built for 6000-01-2423-1, which is this device's assembly.
     ProcedureListing:
       type: object
       description: >

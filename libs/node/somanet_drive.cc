@@ -247,6 +247,11 @@ constexpr unsigned kHrdVelocityFractionalBits = 15;
 // this name runs a listing.
 constexpr std::string_view kFileListName = "fs-getlist";
 
+// The two files that say what a device is. Both begin with a period, which is what makes the
+// bootloader protect them from being modified or deleted without a password (specification §3.1).
+constexpr std::string_view kHardwareDescriptionName = ".hardware_description";
+constexpr std::string_view kVariantName = ".variant";
+
 // Names a failed HRD streaming response. Shared by both actions because the drive answers them from
 // the same error table, and a configure that fails for a reason a start could also fail for should
 // not read differently.
@@ -838,6 +843,75 @@ std::expected<std::vector<DeviceFile>, std::string> SomanetDrive::readFileList()
                                        kFileListName, listing.error().message));
   }
   return parseDeviceFileList(std::string(listing->begin(), listing->end()));
+}
+
+std::expected<HardwareDescription, std::string> SomanetDrive::readHardwareDescription() const {
+  auto content = device().readFile(std::string(kHardwareDescriptionName));
+  if (!content) {
+    return std::unexpected(
+        std::format("reading '{}' failed: {}", kHardwareDescriptionName, content.error().message));
+  }
+  auto description = parseHardwareDescription(std::string(content->begin(), content->end()));
+  if (!description) {
+    return std::unexpected(std::format("'{}' on the device could not be read: {}",
+                                       kHardwareDescriptionName, description.error()));
+  }
+  return description;
+}
+
+std::expected<std::optional<IntegroVariant>, std::string> SomanetDrive::readIntegroVariant() const {
+  auto content = device().readFile(std::string(kVariantName));
+  if (!content) {
+    // Any FoE failure means "no variant here", not just FileNotFound. A device without the file
+    // answers with a generic FoE Error packet, which SOEM reports as EC_ERR_TYPE_FOE_ERROR — the
+    // same return as no answer at all (see foeError in soem_fieldbus_driver.cc). Missing and failed
+    // cannot be told apart, so checking for FileNotFound alone made every Node and Circulo fail.
+    //
+    // Callers read the hardware description first, where a failure is fatal. FoE is therefore known
+    // to work by the time this runs, so a failure here is about the file rather than the bus.
+    return std::nullopt;
+  }
+  auto variant = parseIntegroVariant(*content);
+  if (!variant) {
+    // Read but undecodable stays an error: the device has a variant this build cannot make sense
+    // of, which is worth reporting rather than answering "no variant" and building a descriptor
+    // without its fieldbus character.
+    return std::unexpected(
+        std::format("'{}' on the device could not be read: {}", kVariantName, variant.error()));
+  }
+  return *variant;
+}
+
+std::expected<FullFirmwareDescriptors, std::string> SomanetDrive::readFullFirmwareDescriptors()
+    const {
+  auto description = readHardwareDescription();
+  if (!description) {
+    return std::unexpected(description.error());
+  }
+  auto variant = readIntegroVariant();
+  if (!variant) {
+    return std::unexpected(variant.error());
+  }
+  return fullFirmwareDescriptors(*description, variant->has_value() ? &**variant : nullptr);
+}
+
+std::expected<FirmwareCompatibility, std::string> SomanetDrive::checkFirmwarePackage(
+    std::string_view packageFilename) const {
+  // The filename first, so a name that is not a package name costs no bus traffic at all.
+  auto name = parseFirmwarePackageName(packageFilename);
+  if (!name) {
+    return std::unexpected(name.error());
+  }
+  auto description = readHardwareDescription();
+  if (!description) {
+    return std::unexpected(description.error());
+  }
+  auto variant = readIntegroVariant();
+  if (!variant) {
+    return std::unexpected(variant.error());
+  }
+  return checkFirmwareCompatibility(*description, *name,
+                                    variant->has_value() ? &**variant : nullptr);
 }
 
 std::expected<HrdRecording, std::string> SomanetDrive::readHrdRecording(

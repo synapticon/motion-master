@@ -672,6 +672,36 @@ void HttpServer::run() {
     return mm::api::json(nlohmann::json(*name));
   });
 
+  // Decodes a .hardware_description supplied in the body — the same parse a device read uses, so a
+  // file saved from one device can be inspected with no hardware present at all.
+  router.post("/api/hardware-description/parse",
+              [](const mm::api::Request& req) -> mm::api::Response {
+                auto description = mm::node::parseHardwareDescription(req.body());
+                if (!description) {
+                  return mm::api::badRequest(description.error());
+                }
+                return mm::api::json(nlohmann::json(*description));
+              });
+
+  // Decodes a .variant supplied in the body. Binary rather than text, hence a POST with bytes like
+  // /api/sii/parse rather than a query like /api/firmware-package-name.
+  router.post("/api/integro-variant/parse", [](const mm::api::Request& req) -> mm::api::Response {
+    std::span<const uint8_t> bytes{reinterpret_cast<const uint8_t*>(req.body().data()),
+                                   req.body().size()};
+    auto variant = mm::node::parseIntegroVariant(bytes);
+    if (!variant) {
+      return mm::api::badRequest(variant.error());
+    }
+    return mm::api::json(nlohmann::json(*variant));
+  });
+
+  // The whole option catalogue, so a client can explain a decoded file — or simply show what an
+  // Integro can be licensed with — without carrying a second copy of a table that belongs to the
+  // firmware. Static data: no device, no bus, no request body.
+  router.get("/api/integro-variant/options", [](const mm::api::Request&) -> mm::api::Response {
+    return mm::api::json(nlohmann::json(mm::node::integroVariantOptions()));
+  });
+
   // The response carries every device with its own assembled entry table. That is affordable
   // because object-level annotation is stored once, on subindex 0, rather than repeated onto every
   // subindex. The optional modules= query narrows the merge where a slot offers a choice.
@@ -1261,6 +1291,84 @@ void HttpServer::run() {
                    return nlohmann::json{{"ok", true}};
                  });
                });
+             });
+
+  // ── What a device is, and which firmware fits it ─────────────────────────────────────────────
+  // Two FoE reads behind the control-plane lock, so both are off the loop like every other device
+  // endpoint. The hardware description is readable in BOOT as well as PRE-OP and above, which is
+  // what makes the compatibility check usable on a drive a failed install left stranded there.
+  router.get("/api/devices/:slavePosition/hardware-description",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               if (!deviceManager_.hasDevice(*position)) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               return mm::api::timed(
+                   [&]() -> std::expected<nlohmann::json, std::string> {
+                     auto description =
+                         mm::node::readHardwareDescription(deviceManager_, *position);
+                     if (!description) {
+                       return std::unexpected(description.error());
+                     }
+                     return nlohmann::json(*description);
+                   },
+                   "409 Conflict");
+             });
+
+  // A 404 for a device that carries no .variant, because that is what the resource is: absent. Only
+  // Integro drives have one, so this answering 404 is the ordinary case rather than a problem.
+  router.get("/api/devices/:slavePosition/variant",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               if (!deviceManager_.hasDevice(*position)) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               auto variant = mm::node::readIntegroVariant(deviceManager_, *position);
+               if (!variant) {
+                 return mm::api::error("409 Conflict", variant.error());
+               }
+               if (!variant->has_value()) {
+                 return mm::api::notFound("this device carries no .variant file");
+               }
+               return mm::api::json(nlohmann::json(**variant));
+             });
+
+  // Whether a package belongs on this device. A mismatch is a 200 carrying `compatible: false` and
+  // both descriptors, not an error status: the client asked a question and got an answer. A 4xx
+  // here means the question could not be asked — the filename is not a package name, or the
+  // device's hardware description could not be read.
+  //
+  // Nothing acts on the answer. The firmware installation procedure writes whatever it is given, on
+  // purpose, so this exists to tell a user before they start.
+  router.get("/api/devices/:slavePosition/firmware-compatibility",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               const auto filename = req.query("filename");
+               if (!filename || filename->empty()) {
+                 return mm::api::badRequest("a 'filename' query parameter is required");
+               }
+               if (!deviceManager_.hasDevice(*position)) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               return mm::api::timed(
+                   [&]() -> std::expected<nlohmann::json, std::string> {
+                     auto verdict =
+                         mm::node::checkFirmwarePackage(deviceManager_, *position, *filename);
+                     if (!verdict) {
+                       return std::unexpected(verdict.error());
+                     }
+                     return nlohmann::json(*verdict);
+                   },
+                   "409 Conflict");
              });
 
   // ── CoE parameters ──────────────────────────────────────────────────────────────────────────

@@ -1,11 +1,20 @@
 import { useState } from 'react'
 import { useParams } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
+import Callout from '../components/Callout'
 import DevicePageHeader from '../components/DevicePageHeader'
+import HardwareDescriptionView from '../components/HardwareDescriptionView'
 import HexViewer from '../components/HexViewer'
+import IntegroVariantView from '../components/IntegroVariantView'
 import { useConnection } from '../contexts/ConnectionContext'
 import { downloadBytes } from '../utils/download'
-import { wireTimeMs, type DeviceFile } from '@synapticon/motion-master-client'
+import {
+  apiErrorMessage,
+  wireTimeMs,
+  type DeviceFile,
+  type HardwareDescription,
+  type IntegroVariant,
+} from '@synapticon/motion-master-client'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
@@ -14,24 +23,10 @@ const btnCls =
 const btnOutlineCls =
   'border border-grey-300 text-grey-700 px-4 py-2 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
 
-// Surfaces the node layer's error string from a failed request (matching the other device pages).
-// The generated client rejects with its response object rather than an Error, so the listing below
-// would otherwise report "Unknown error" for every 409 the server explains.
+// Surfaces the node layer's error string from a failed request. The unwrapping lives in the client
+// library, which owns the generated client and therefore its error shape.
 function apiError(err: unknown): string {
-  if (err && typeof err === 'object') {
-    if ('error' in err) {
-      const inner = (err as { error: unknown }).error
-      if (inner && typeof inner === 'object' && 'error' in inner) {
-        return String((inner as { error: unknown }).error)
-      }
-      if (typeof inner === 'string') return inner
-    }
-    if ('status' in err && typeof (err as { status: unknown }).status === 'number') {
-      return `HTTP ${(err as { status: number }).status}`
-    }
-  }
-  if (err instanceof Error) return err.message
-  return 'Unknown error'
+  return apiErrorMessage(err)
 }
 
 // Reading this FoE pseudo-command unlocks the drive's filesystem for writing.
@@ -46,6 +41,9 @@ const SYNAPTICON_VENDOR_ID = 0x000022d2
 // interprets on read (as is `fs-remove=<file>`); it is read-only.
 const SOMANET_FILES: { name: string; write: boolean }[] = [
   { name: '.hardware_description', write: true },
+  // Integro only, and read-only here on purpose: the drive verifies its signature, so a file this
+  // page could write would be one the drive falls back to passive mode over.
+  { name: '.variant', write: false },
   { name: '.factory_config', write: true },
   { name: '.assembly_config', write: true },
   { name: 'config.csv', write: true },
@@ -624,10 +622,75 @@ export default function DeviceFoePage() {
                 {jsonContent}
               </pre>
             )}
+
+            {/* The two files that describe the device are decoded as well as dumped: their bytes say
+                nothing at a glance, and the server already has the parser. */}
+            <DecodedFile filename={filename} bytes={result} />
           </section>
         )}
 
       </div>
+    </div>
+  )
+}
+
+/**
+ * Decodes `.hardware_description` and `.variant` under the raw result.
+ *
+ * Parsed on the server, by the same code the device endpoints use — so what this shows is what a
+ * compatibility check will read. Any other filename renders nothing.
+ */
+function DecodedFile({ filename, bytes }: { filename: string; bytes: Uint8Array }) {
+  const { api } = useConnection()
+  const kind =
+    filename === '.hardware_description'
+      ? 'hardware-description'
+      : filename === '.variant'
+        ? 'integro-variant'
+        : null
+
+  const query = useQuery({
+    queryKey: ['decoded-file', kind, filename, bytes.length, bytes[0] ?? 0],
+    enabled: kind !== null,
+    staleTime: Infinity,
+    retry: false,
+    queryFn: async () => {
+      // Posted as raw bytes rather than through the generated client, which JSON-encodes its body.
+      const response = await fetch(`${api.baseUrl}/api/${kind}/parse`, {
+        method: 'POST',
+        headers: {
+          'Content-Type':
+            kind === 'hardware-description' ? 'text/plain' : 'application/octet-stream',
+        },
+        // Copied so the buffer is definitely an ArrayBuffer rather than a shared one, which is what
+        // fetch accepts as a body. Both files are a few hundred bytes.
+        body: bytes.slice(),
+      })
+      if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { error?: string } | null
+        throw new Error(body?.error ?? `HTTP ${response.status}`)
+      }
+      return (await response.json()) as HardwareDescription | IntegroVariant
+    },
+  })
+
+  if (kind === null) {
+    return null
+  }
+
+  return (
+    <div className="mt-6 border-t border-grey-200 pt-4">
+      <p className="eyebrow mb-3">Decoded</p>
+      {query.isPending && <p className="text-xs text-grey-600">Decoding…</p>}
+      {query.isError && (
+        <Callout variant="error">{apiErrorMessage(query.error, 'Could not decode the file.')}</Callout>
+      )}
+      {query.data !== undefined &&
+        (kind === 'hardware-description' ? (
+          <HardwareDescriptionView description={query.data as HardwareDescription} />
+        ) : (
+          <IntegroVariantView variant={query.data as IntegroVariant} />
+        ))}
     </div>
   )
 }

@@ -1632,8 +1632,8 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
     }
     manifest["extras"] = std::move(extras);
     if (request.name) {
-      manifest["firmwareVersion"] = request.name->firmwareVersion;
-      manifest["firmwareId"] = request.name->firmwareId;
+      manifest["softwareVersion"] = request.name->softwareVersion;
+      manifest["fullFirmwareDescriptor"] = request.name->fullFirmwareDescriptor;
     }
     reporter.succeed(kPackageStep, std::move(manifest));
   }

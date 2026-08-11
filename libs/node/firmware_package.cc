@@ -4,7 +4,6 @@
 
 #include <algorithm>
 #include <cctype>
-#include <charconv>
 #include <cstddef>
 #include <expected>
 #include <format>
@@ -67,37 +66,33 @@ std::vector<std::string_view> split(std::string_view text, char separator) {
   }
 }
 
-std::optional<uint32_t> parseNumber(std::string_view text, int base) {
-  uint32_t value = 0;
-  const auto [ptr, ec] = std::from_chars(text.data(), text.data() + text.size(), value, base);
-  if (ec != std::errc{} || ptr != text.data() + text.size()) {  // NOLINT(whitespace/braces)
-    return std::nullopt;
-  }
-  return value;
+bool isDigits(std::string_view text) {
+  return !text.empty() && std::ranges::all_of(text, [](char c) {
+    return std::isdigit(static_cast<unsigned char>(c)) != 0;
+  });
 }
 
-/// Decodes the numeric `<id>-<version>[-<key>[-<fieldbus>]]` form of a full firmware descriptor,
-/// leaving every field empty for a descriptor that does not follow it (which the specification
-/// permits). All-or-nothing on the mandatory pair: a descriptor whose first two fields are not both
-/// numbers is not the numeric form at all, so reporting a product id from it would be a guess.
-void decodeFirmwareId(std::string_view firmwareId, FirmwarePackageName& name) {
-  const std::vector<std::string_view> parts = split(firmwareId, '-');
-  if (parts.size() < 2) {
+/// Decodes the numeric `<firmwareId>-<firmwareVersion>[-<keyId>[-<fieldbusProtocol>]]` form of a
+/// full firmware descriptor, leaving every field empty for a descriptor that does not follow it
+/// (which the specification permits). All-or-nothing on the mandatory pair: a descriptor whose
+/// first two fields are not both numbers is not the numeric form at all, and decoding one anyway
+/// would dress `MyProduct-v25-key3-ecat` up as a firmware id and a hardware revision.
+///
+/// The two optional tails are kept as written even when they are not numbers — a real package
+/// carries the key id "A" — because the point of decoding is to show a user which part is which,
+/// and the whole descriptor is what a compatibility check compares.
+void decodeFullFirmwareDescriptor(std::string_view descriptor, FirmwarePackageName& name) {
+  const std::vector<std::string_view> parts = split(descriptor, '-');
+  if (parts.size() < 2 || !isDigits(parts[0]) || !isDigits(parts[1])) {
     return;
   }
-  const std::optional<uint32_t> productId = parseNumber(parts[0], 10);
-  const std::optional<uint32_t> productVersion = parseNumber(parts[1], 10);
-  if (!productId || !productVersion) {
-    return;
-  }
-  name.productId = productId;
-  name.productVersion = productVersion;
+  name.firmwareId = std::string(parts[0]);
+  name.firmwareVersion = std::string(parts[1]);
   if (parts.size() >= 3) {
-    name.keyId = parseNumber(parts[2], 10);
+    name.keyId = std::string(parts[2]);
   }
-  // The fieldbus protocol character is hexadecimal (specification §3.4.2.1: 1 = EtherCAT).
   if (parts.size() >= 4) {
-    name.fieldbusProtocol = parseNumber(parts[3], 16);
+    name.fieldbusProtocol = std::string(parts[3]);
   }
 }
 
@@ -126,7 +121,7 @@ std::expected<FirmwarePackageName, std::string> parseFirmwarePackageName(
   if (fields.size() != kPackageNameFieldCount) {
     return std::unexpected(std::format(
         "'{}' is not a firmware package name: it has {} underscore-separated fields, not {} "
-        "(package_<hardware>_<firmware-id>_<software>_v<version>.zip)",
+        "(package_<hardware>_<fullFirmwareDescriptor>_<software>_v<version>.zip)",
         filename, fields.size(), kPackageNameFieldCount));
   }
   const bool anyFieldEmpty =
@@ -150,11 +145,18 @@ std::expected<FirmwarePackageName, std::string> parseFirmwarePackageName(
   FirmwarePackageName name;
   name.description = std::string(fields[0]);
   name.hardwareName = std::string(fields[1]);
-  name.firmwareId = std::string(fields[2]);
-  name.firmwareName = std::string(fields[3]);
-  name.firmwareVersion = std::string(fields[4]);
-  decodeFirmwareId(name.firmwareId, name);
+  name.fullFirmwareDescriptor = std::string(fields[2]);
+  name.softwareName = std::string(fields[3]);
+  name.softwareVersion = std::string(fields[4]);
+  decodeFullFirmwareDescriptor(name.fullFirmwareDescriptor, name);
   return name;
+}
+
+std::optional<std::string> FirmwarePackageName::buildDescriptor() const {
+  if (!firmwareId || !firmwareVersion) {
+    return std::nullopt;
+  }
+  return std::format("{}-{}", *firmwareId, *firmwareVersion);
 }
 
 std::expected<FirmwarePackage, std::string> openFirmwarePackage(
@@ -240,15 +242,17 @@ std::expected<FirmwarePackage, std::string> openFirmwarePackage(
 
 void to_json(nlohmann::json& j, const FirmwarePackageName& name) {
   j = nlohmann::json{
-      {"description", name.description},         {"hardwareName", name.hardwareName},
-      {"firmwareId", name.firmwareId},           {"firmwareName", name.firmwareName},
-      {"firmwareVersion", name.firmwareVersion},
+      {"description", name.description},
+      {"hardwareName", name.hardwareName},
+      {"fullFirmwareDescriptor", name.fullFirmwareDescriptor},
+      {"softwareName", name.softwareName},
+      {"softwareVersion", name.softwareVersion},
   };
-  if (name.productId) {
-    j["productId"] = *name.productId;
+  if (name.firmwareId) {
+    j["firmwareId"] = *name.firmwareId;
   }
-  if (name.productVersion) {
-    j["productVersion"] = *name.productVersion;
+  if (name.firmwareVersion) {
+    j["firmwareVersion"] = *name.firmwareVersion;
   }
   if (name.keyId) {
     j["keyId"] = *name.keyId;
@@ -256,6 +260,120 @@ void to_json(nlohmann::json& j, const FirmwarePackageName& name) {
   if (name.fieldbusProtocol) {
     j["fieldbusProtocol"] = *name.fieldbusProtocol;
   }
+  if (const auto build = name.buildDescriptor()) {
+    j["buildDescriptor"] = *build;
+  }
+}
+
+// ── Compatibility ──────────────────────────────────────────────────────────────────────────────
+
+FullFirmwareDescriptors fullFirmwareDescriptors(const HardwareDescription& description,
+                                                const IntegroVariant* variant) {
+  // Both tails come from the device however the head was chosen: the key id because assemblies have
+  // none of their own (§3.4.1), the fieldbus because it describes the device's communication
+  // firmware and an assembly has no say in it.
+  std::string tail;
+  if (!description.device.keyId.empty()) {
+    tail += std::format("-{}", description.device.keyId);
+  }
+  if (variant != nullptr) {
+    if (const auto fieldbus = variantFieldbusProtocol(*variant)) {
+      // Hexadecimal, per §3.4.2.1's "1 means EtherCAT" and the same base parseFirmwarePackageName
+      // reads it in. Every fieldbus option is a single digit, where hex and decimal agree.
+      tail += std::format("-{:X}", *fieldbus);
+    }
+  }
+
+  FullFirmwareDescriptors descriptors;
+  descriptors.device = description.device.buildDescriptor() + tail;
+  if (description.assembly) {
+    descriptors.assembly = description.assembly->buildDescriptor() + tail;
+  }
+  return descriptors;
+}
+
+std::string_view toString(FirmwareMatch match) {
+  switch (match) {
+    case FirmwareMatch::kNone:
+      return "none";
+    case FirmwareMatch::kAssembly:
+      return "assembly";
+    case FirmwareMatch::kDevice:
+      return "device";
+  }
+  return "none";
+}
+
+FirmwareCompatibility checkFirmwareCompatibility(const HardwareDescription& description,
+                                                 const FirmwarePackageName& packageName,
+                                                 const IntegroVariant* variant) {
+  FirmwareCompatibility compatibility;
+  compatibility.packageName = packageName;
+  compatibility.deviceDescriptors = fullFirmwareDescriptors(description, variant);
+
+  const std::string& descriptor = compatibility.packageName.fullFirmwareDescriptor;
+  const FullFirmwareDescriptors& accepted = compatibility.deviceDescriptors;
+
+  // Assembly first because that is the one to prefer when both match — which they do not, since the
+  // two descriptors differ in their build descriptor whenever an assembly exists.
+  if (accepted.assembly && descriptor == *accepted.assembly) {
+    compatibility.match = FirmwareMatch::kAssembly;
+    compatibility.explanation =
+        std::format("This package is built for {}, which is this device's assembly.", descriptor);
+    return compatibility;
+  }
+  if (descriptor == accepted.device) {
+    compatibility.match = FirmwareMatch::kDevice;
+    compatibility.explanation =
+        accepted.assembly
+            ? std::format(
+                  "This package is built for {}, which is this device. It is the generic build for "
+                  "the hardware rather than one customised for its assembly {}.",
+                  descriptor, *accepted.assembly)
+            : std::format("This package is built for {}, which is this device.", descriptor);
+    return compatibility;
+  }
+
+  compatibility.explanation =
+      accepted.assembly
+          ? std::format(
+                "This package is built for {}. This device accepts {} (the device) or {} "
+                "(its assembly).",
+                descriptor, accepted.device, *accepted.assembly)
+          : std::format("This package is built for {}. This device accepts {}.", descriptor,
+                        accepted.device);
+  return compatibility;
+}
+
+std::expected<FirmwareCompatibility, std::string> checkFirmwareCompatibility(
+    std::string_view hardwareDescriptionContent, std::string_view packageFilename,
+    const IntegroVariant* variant) {
+  auto name = parseFirmwarePackageName(packageFilename);
+  if (!name) {
+    return std::unexpected(name.error());
+  }
+  auto description = parseHardwareDescription(hardwareDescriptionContent);
+  if (!description) {
+    return std::unexpected(description.error());
+  }
+  return checkFirmwareCompatibility(*description, *name, variant);
+}
+
+void to_json(nlohmann::json& j, const FullFirmwareDescriptors& descriptors) {
+  j = nlohmann::json{{"device", descriptors.device}};
+  if (descriptors.assembly) {
+    j["assembly"] = *descriptors.assembly;
+  }
+}
+
+void to_json(nlohmann::json& j, const FirmwareCompatibility& compatibility) {
+  j = nlohmann::json{
+      {"compatible", compatibility.compatible()},
+      {"match", toString(compatibility.match)},
+      {"packageName", compatibility.packageName},
+      {"deviceDescriptors", compatibility.deviceDescriptors},
+      {"explanation", compatibility.explanation},
+  };
 }
 
 }  // namespace mm::node

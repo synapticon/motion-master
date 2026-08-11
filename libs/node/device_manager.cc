@@ -1208,11 +1208,12 @@ std::expected<DeviceParameter, std::string> DeviceManager::deviceParameterView(
   return *copy;
 }
 
-std::expected<void, std::string> DeviceManager::writeDeviceParameter(
+std::expected<DeviceParameter, std::string> DeviceManager::writeDeviceParameter(
     uint16_t slavePosition, uint16_t index, uint8_t subindex,
     const DeviceParameterValue& newValue) {
   // Shared lock: serialise against the exclusive mutators that rebuild devices_/driver_, so a
-  // write that lands here off the control-plane thread can never see a half-torn device set.
+  // write that lands here off the control-plane thread can never see a half-torn device set. It
+  // spans the read-back too, which is the point — see the header.
   std::shared_lock lock(deviceSetMutex_);
   Device* device = findDevice(slavePosition);
   if (!device) {
@@ -1221,7 +1222,20 @@ std::expected<void, std::string> DeviceManager::writeDeviceParameter(
   // Routing (stage into the output image when exchanging + output-mapped, SDO otherwise) lives in
   // Device. This entry point only resolves the position and takes the shared lock so an off-thread
   // caller is serialised against a device-set rebuild.
-  return device->writeParameter(index, subindex, newValue);
+  if (auto written = device->writeParameter(index, subindex, newValue); !written) {
+    return std::unexpected(std::move(written.error()));
+  }
+  auto updated = device->parameter(index, subindex);
+  if (!updated) {
+    // Unreachable, and reported rather than dereferenced: writeParameter resolved this parameter a
+    // line ago, a device's parameter map is insert-only for its lifetime, and the shared lock spans
+    // both halves — so an empty optional here means one of those three no longer holds.
+    return std::unexpected(
+        std::format("device {}: parameter 0x{:04X}:{:02X} vanished after a "
+                    "successful write",
+                    slavePosition, index, subindex));
+  }
+  return *updated;
 }
 
 std::expected<void, std::string> DeviceManager::writeDevicePdoMapping(uint16_t slavePosition,

@@ -4708,7 +4708,6 @@ components:
             holds the decoded value; the JSON encoding follows the variant
             alternative — number, string, or array of byte values.
           oneOf:
-            - type: integer
             - type: number
             - type: string
             - type: array
@@ -4728,7 +4727,6 @@ components:
             Slave-reported default value, decoded with the same logic as
             `value`.  Absent when the slave does not report a default.
           oneOf:
-            - type: integer
             - type: number
             - type: string
             - type: array
@@ -4739,7 +4737,6 @@ components:
             Slave-reported minimum value, decoded with the same logic as
             `value`.  Absent when the slave does not report a minimum.
           oneOf:
-            - type: integer
             - type: number
             - type: string
             - type: array
@@ -4750,7 +4747,6 @@ components:
             Slave-reported maximum value, decoded with the same logic as
             `value`.  Absent when the slave does not report a maximum.
           oneOf:
-            - type: integer
             - type: number
             - type: string
             - type: array

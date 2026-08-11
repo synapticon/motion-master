@@ -702,8 +702,14 @@ TEST(DeviceManagerProcessData, IndependentOutputSlotsComposeIntoOneImage) {
 
   // Two distinct output objects, each written into its own lock-free cell — no shared buffer, no
   // lock. The RT loop is the sole composer that assembles them into the packed wire image.
-  ASSERT_TRUE(
-      dm.writeDeviceParameter(1, 0x6040, 0x00, DeviceParameterValue{uint16_t{0xABCD}}).has_value());
+  //
+  // The write answers with the parameter as it now stands, so a caller needs no second read to see
+  // the coerced value — which is what lets the HTTP layer echo it without dropping the lock.
+  auto written = dm.writeDeviceParameter(1, 0x6040, 0x00, DeviceParameterValue{uint16_t{0xABCD}});
+  ASSERT_TRUE(written) << written.error();
+  EXPECT_EQ(written->index, 0x6040);
+  EXPECT_EQ(written->subindex, 0x00);
+  EXPECT_EQ(std::get<uint16_t>(written->currentValue()), 0xABCD);
   ASSERT_TRUE(dm.writeDeviceParameter(1, 0x607A, 0x00, DeviceParameterValue{int32_t{0x11223344}})
                   .has_value());
   dm.exchangeProcessData();

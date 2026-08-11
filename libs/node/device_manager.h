@@ -640,21 +640,29 @@ class DeviceManager {
                                                                   uint16_t index, uint8_t subindex,
                                                                   bool refreshFromBus);
 
-  /// @brief Convenience: finds a device by position and writes one of its parameters.
+  /// @brief Convenience: finds a device by position, writes one of its parameters, returns it.
   ///
   /// Equivalent to @c findDevice(slavePosition)->writeParameter(index, subindex, value) —
   /// see @c Device::writeParameter for the online/offline semantics (offline edits succeed
   /// and are held as @c SyncState::Pending).
   ///
+  /// **The updated parameter is returned rather than left for the caller to read back**, because
+  /// the write coerces the value to the declared type and moves @c syncState: a caller that wants
+  /// either has to ask, and asking in a second call would drop @c deviceSetMutex_ in between. A
+  /// @c scan or @c reset landing in that gap rebuilds @c devices_, so the read-back would fail for
+  /// a write that succeeded — leaving the caller to answer with something other than the parameter
+  /// it is expected to produce. One shared lock over both halves removes the gap.
+  ///
   /// @param slavePosition  1-based bus position of the target device.
   /// @param index          CoE object index.
   /// @param subindex       CoE object subindex.
   /// @param value          Value to set; coerced to the parameter's declared type.
-  /// @return Void on success, or an error string if the device or parameter is unknown,
-  ///         the value cannot be coerced, or an online download fails.
-  std::expected<void, std::string> writeDeviceParameter(uint16_t slavePosition, uint16_t index,
-                                                        uint8_t subindex,
-                                                        const DeviceParameterValue& newValue);
+  /// @return The parameter as it stands after the write — coerced value and resulting
+  ///         @c syncState — or an error string if the device or parameter is unknown, the value
+  ///         cannot be coerced, or an online download fails.
+  std::expected<DeviceParameter, std::string> writeDeviceParameter(
+      uint16_t slavePosition, uint16_t index, uint8_t subindex,
+      const DeviceParameterValue& newValue);
 
   /// @brief Convenience: finds a device by position and writes its PDO mapping.
   ///

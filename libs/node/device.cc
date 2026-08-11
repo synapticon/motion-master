@@ -860,17 +860,6 @@ std::expected<DeviceParameterValue, std::string> Device::setValueFromBytes(
   return p->currentValue();
 }
 
-std::expected<std::vector<uint8_t>, std::string> Device::valueAsBytes(uint16_t index,
-                                                                      uint8_t subindex) const {
-  std::lock_guard<std::mutex> lock(*parametersMutex_);
-  const DeviceParameter* p = findParameter(index, subindex);
-  if (!p) {
-    return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
-                                       slavePosition_, index, subindex));
-  }
-  return p->rawValueBytes();
-}
-
 std::vector<DeviceParameter> Device::parametersOrdered() const {
   std::lock_guard<std::mutex> lock(*parametersMutex_);
   std::vector<DeviceParameter> ordered;

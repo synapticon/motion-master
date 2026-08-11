@@ -328,18 +328,6 @@ class Device {
   std::expected<DeviceParameterValue, std::string> setValueFromBytes(
       uint16_t index, uint8_t subindex, std::span<const uint8_t> bytes);
 
-  /// @brief Returns the parameter's value as its raw on-the-wire bytes (the bytes-domain getter).
-  ///
-  /// Reads the stored value and its declared data type under @c parametersMutex_ and encodes them,
-  /// so a caller can stage the current setpoint into the output image without reaching into the
-  /// parameter map itself. The encode counterpart of @c setValueFromBytes.
-  ///
-  /// @param index     CoE object index.
-  /// @param subindex  CoE object subindex.
-  /// @return The encoded bytes, or an error string if the parameter is unknown or encoding fails.
-  std::expected<std::vector<uint8_t>, std::string> valueAsBytes(uint16_t index,
-                                                                uint8_t subindex) const;
-
   /// @brief Whether the object dictionary has been enumerated (thread-safe; no bus access).
   ///
   /// The map itself is deliberately not exposed: handing out a reference to it would let a caller

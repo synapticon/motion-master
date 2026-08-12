@@ -21,120 +21,66 @@ namespace {
 std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   std::vector<ProcedureCatalogueEntry> entries;
 
-  // The generic CiA301 procedures come first, and their applicability is the widest in the table:
-  // every CoE device carries the non-volatile storage objects, whatever profile it implements, so
-  // these are offered on a third-party slave as readily as on a drive. CoE support comes from the
-  // slave's EEPROM capability bits and is known as soon as the device is, which is what an
-  // `applies` predicate is allowed to consult.
-  ProcedureDescriptor storeParameters;
-  storeParameters.name = std::string(kStoreParametersProcedure);
-  storeParameters.title = "Store parameters";
-  storeParameters.description =
-      "Persists the device's current parameter values to non-volatile memory — the CoE 0x1010 "
-      "\"store parameters\" object — so the changes you have made survive a power cycle. The "
-      "\"save\" signature is written and the device is then polled until it reports the save "
-      "complete, which usually takes about a second while it writes to flash.";
-  storeParameters.caveats = {
-      "It stores what the device currently holds, which includes anything written since the last "
-      "store — there is no selecting what to keep.",
-      "Cancelling stops the wait, not the store: the command has already been written, so the "
-      "device may complete it anyway.",
-      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  // Authored in the order the table is sorted into below — alphabetically by name, which is the
+  // order every consumer renders in (the list endpoint, the Console sidebar). The sort is what
+  // guarantees that order; keeping the source in it too is so that reading this file and reading
+  // the UI are the same exercise.
+  //
+  // Two entries are CiA301 rather than profile procedures, and have the widest applicability in
+  // the table: every CoE device carries the non-volatile storage objects whatever profile it
+  // implements, so store-parameters and restore-default-parameters are offered on a third-party
+  // slave as readily as on a drive. CoE support comes from the slave's EEPROM capability bits and
+  // is known as soon as the device is, which is what an `applies` predicate is allowed to
+  // consult.
+  ProcedureDescriptor commutationOffset;
+  commutationOffset.name = std::string(kCommutationOffsetDetectionProcedure);
+  commutationOffset.title = "Commutation offset detection";
+  commutationOffset.description =
+      "Detects the motor phase order and then measures the commutation angle offset, storing both "
+      "in "
+      "the drive (0x2003:05, and 0x2001 marked valid in 0x2009:01). This is what commissions an "
+      "axis, "
+      "and the two commands are one unit rather than two you sequence yourself: an offset measured "
+      "against an unknown phase order is wrong, and the drive does not check that the phase order "
+      "was "
+      "established. It is also exactly the sequence an axis with an incremental encoder repeats "
+      "after "
+      "every power-on. On a new absolute-encoder axis, run open phase detection and pole pair "
+      "detection first. How the offset is measured is configured on the drive rather than chosen "
+      "here "
+      "— the method in 0x2009:03 decides whether that step turns the rotor and which way the "
+      "brake goes — and the method that ran is reported with the result.";
+  commutationOffset.caveats = {
+      "This turns the rotor whatever the method is set to: the stationary offset method does not "
+      "turn "
+      "it, but phase order detection always does. The shaft must be free, and whatever it drives "
+      "must "
+      "be safe to move.",
+      "The brake is released for phase order detection, which requires that unconditionally — "
+      "so "
+      "anything it was holding is free to move, even under the stationary method. Support the load "
+      "first. It is engaged again before a stationary measurement, which cannot hold the load "
+      "itself.",
+      "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
+      "The rotating methods (0x2009:03 = 0 or 1) measure with the brake released; method 1 "
+      "additionally needs the gains in 0x2009:04-06 tuned. The stationary method (2) is less "
+      "precise.",
+      "A successful run changes the drive's configuration twice over, and the restore does not "
+      "undo "
+      "either — the phase order and the offset are the result, not side effects.",
+      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
+      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
   };
-  storeParameters.movesMotor = false;
-  storeParameters.requiresEnabled = false;
-  storeParameters.steps = storeParametersSteps();
+  commutationOffset.movesMotor = true;
+  commutationOffset.requiresEnabled = false;
+  commutationOffset.steps = commutationOffsetDetectionSteps();
 
   entries.push_back(ProcedureCatalogueEntry{
-      .descriptor = std::move(storeParameters),
-      .applies = [](Device& device) { return device.supportsCoe(); },
+      .descriptor = std::move(commutationOffset),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
         return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-          return runStoreParametersProcedure(device, reporter, std::move(stop));
-        };
-      },
-  });
-
-  ProcedureDescriptor restoreDefaults;
-  restoreDefaults.name = std::string(kRestoreDefaultParametersProcedure);
-  restoreDefaults.title = "Restore default parameters";
-  restoreDefaults.description =
-      "Restores the device's default parameters — the CoE 0x1011 \"restore default parameters\" "
-      "object — for the selected group. The \"load\" signature is written and the device is then "
-      "polled until it reports the restore complete.";
-  restoreDefaults.caveats = {
-      "Destructive: the selected group's live values are overwritten with the device's defaults, "
-      "so anything you have not stored is gone. Run Store parameters first if you want to keep it.",
-      "The defaults are restored into volatile memory. They become permanent only if a store "
-      "follows, and some devices apply them only after a reset or power cycle.",
-      "Cancelling stops the wait, not the restore: the command has already been written, so the "
-      "device may complete it anyway.",
-      "The mailbox must be active, so the device has to be in PRE-OP or above.",
-  };
-  restoreDefaults.movesMotor = false;
-  restoreDefaults.requiresEnabled = false;
-  restoreDefaults.parameters = restoreDefaultParametersParameters();
-  restoreDefaults.steps = restoreDefaultParametersSteps();
-
-  entries.push_back(ProcedureCatalogueEntry{
-      .descriptor = std::move(restoreDefaults),
-      .applies = [](Device& device) { return device.supportsCoe(); },
-      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
-        auto spec = parseRestoreDefaultParametersRequest(request);
-        if (!spec) {
-          return std::unexpected(spec.error());
-        }
-        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-          return runRestoreDefaultParametersProcedure(device, reporter, std::move(stop), spec);
-        };
-      },
-  });
-
-  ProcedureDescriptor osCommand;
-  osCommand.name = std::string(kOsCommandProcedure);
-  osCommand.title = "OS command";
-  osCommand.description =
-      "Issues one OS command (CANopen 0x1023 / 0x1024) with the request bytes passed through "
-      "exactly as given, and reports the drive's terminal status, its reply payload and any OS "
-      "error code. This is the direct route to the drive's whole OS command set: byte 0 is the "
-      "command ID and bytes 1-7 are its parameters, so any command the firmware implements can be "
-      "run here. Where a command also has a procedure of its own, that one names and validates its "
-      "parameters and decodes its result for you; this one asks you for the bytes and hands back "
-      "what the drive replied.";
-  osCommand.caveats = {
-      "The request bytes are not checked against any command's expected parameters — an unintended "
-      "command ID or parameter is issued to the drive as written.",
-      "Depending on the command issued, this can move the shaft.",
-      "Some commands are refused unless the drive is already enabled in a suitable mode of "
-      "operation; the drive reports those as OS error 251, \"command not allowed\".",
-      "Size the timeout for the command being run. Reaching it aborts the command on the drive.",
-  };
-  // Unknowable here — the caller chooses the command, and some of them spin the motor — so this
-  // reports the possibility rather than a false negative. requiresEnabled stays false because the
-  // mechanism itself needs nothing; the commands that do are covered by the caveat above, and a
-  // command with a procedure of its own sets the flag for what that command actually needs.
-  osCommand.movesMotor = true;
-  osCommand.parameters = osCommandParameters();
-  osCommand.steps = osCommandSteps();
-
-  entries.push_back(ProcedureCatalogueEntry{
-      .descriptor = std::move(osCommand),
-      // Vendor ID, deliberately, and not createSomanetDrive: that also requires the device's object
-      // dictionary to have been enumerated (its CiA402 check looks for controlword/statusword in
-      // the parameter map), and enumeration is opportunistic — it happens when a device is first
-      // seen at PRE-OP. Binding applicability to it would report a genuine drive as having *no*
-      // procedures merely because its OD had not been read yet, which is a wrong answer rather than
-      // a late one. The vendor ID comes from SII at scan time and is always known. Whether the
-      // device is also a conformant CiA402 drive stays the body's business, where it fails with a
-      // reason.
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
-      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
-        auto spec = parseOsCommandRequest(request);
-        if (!spec) {
-          return std::unexpected(spec.error());
-        }
-        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-          return runOsCommandProcedure(device, reporter, std::move(stop), spec);
+          return runCommutationOffsetDetectionProcedure(device, reporter, std::move(stop));
         };
       },
   });
@@ -180,45 +126,52 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
-  ProcedureDescriptor icMuCalibrationMode;
-  icMuCalibrationMode.name = std::string(kIcMuCalibrationModeProcedure);
-  icMuCalibrationMode.title = "iC-MU calibration mode";
-  icMuCalibrationMode.description =
-      "Sets how the BiSS service clocks an iC-MU encoder — the chip behind a Circulo's internal "
-      "encoder. Standard is normal operation. Configuration keeps the encoder clocked but uses "
-      "only the register-communication bits, so position stops updating and no CRC fault is "
-      "raised, which is what makes it possible to change the encoder's configuration registers "
-      "with Encoder register communication. Raw clocks an encoder already configured for raw "
-      "output and averages that data into 0x2704. Calibrating an encoder means moving between "
-      "these modes, not setting one switch.";
-  icMuCalibrationMode.caveats = {
-      "There is no restore: the encoder stays in the mode this sets until another run puts it back "
-      "to standard. Leaving one in configuration mode leaves the drive without a position update.",
-      "In configuration mode the encoder's position is not updated and the BiSS CRC error is "
-      "suppressed, so the drive will not report a problem it would normally fault on.",
-      "Entering configuration mode saves the current position, and entering raw mode counts from "
-      "that saved position because raw data is relative — so do not move the motor while in "
-      "configuration mode if raw mode is to follow.",
-      "The command works only on a configured Circulo internal encoder. Anything else is refused "
-      "by the drive as OS error 251 (\"command not allowed\").",
-      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  ProcedureDescriptor firmware;
+  firmware.name = std::string(kFirmwareInstallationProcedure);
+  firmware.title = "Firmware installation";
+  firmware.description =
+      "Installs a SOMANET firmware package. The device is taken to BOOT, where its bootloader "
+      "accepts the package's application and communication binaries over FoE and its SII image "
+      "into the EEPROM, and is then returned to the state you choose. PRE-OP is the default and is "
+      "the confirmation that it worked: the bootloader hands over to the newly written firmware on "
+      "that transition, so reaching PRE-OP means the new firmware booted and answered. The "
+      "descriptive extras a package carries — the ESI and the stack image — are skipped by default "
+      "and can be un-skipped by editing the list.";
+  firmware.caveats = {
+      "The device stops exchanging process data for the whole installation, so anything it was "
+      "driving is uncontrolled from the moment it leaves OP. Other devices on the bus keep "
+      "running, but the bus is briefly re-mapped when this one rejoins.",
+      "Cancelling does not undo anything, and between two files it leaves the device part-flashed. "
+      "A transfer already under way finishes regardless — cancellation is noticed between files.",
+      "If the package writes an SII, that part does need a power cycle: the ESC reads its EEPROM "
+      "at reset, unlike the firmware, which loads on the transition out of BOOT.",
+      "Choose BOOT as the final state when no application will be present — after erasing one, or "
+      "between two installs — because a PRE-OP transition then has nothing to hand over to and the "
+      "drive answers AL status 0x0014, \"No valid firmware\".",
+      "Nothing here checks that the package matches the device. A package built for other hardware "
+      "is written as readily as the right one.",
   };
-  icMuCalibrationMode.movesMotor = false;
-  icMuCalibrationMode.requiresEnabled = false;
-  icMuCalibrationMode.parameters = icMuCalibrationModeParameters();
-  icMuCalibrationMode.steps = icMuCalibrationModeSteps();
+  firmware.movesMotor = false;
+  firmware.requiresEnabled = false;
+  firmware.parameters = firmwareInstallationParameters();
+  firmware.steps = firmwareInstallationSteps();
 
   entries.push_back(ProcedureCatalogueEntry{
-      .descriptor = std::move(icMuCalibrationMode),
+      .descriptor = std::move(firmware),
       .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
-      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
-        auto spec = parseIcMuCalibrationModeRequest(request);
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureWork, std::string> {
+        auto spec = parseFirmwareInstallationRequest(request);
         if (!spec) {
           return std::unexpected(spec.error());
         }
-        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-          return runIcMuCalibrationModeProcedure(device, reporter, std::move(stop), spec);
-        };
+        // The only BusProcedureBody in the table: this one changes AL state, so it is handed the
+        // manager and borrows per step rather than being given a device for the whole run.
+        return BusProcedureBody{
+            [spec = std::move(*spec)](DeviceManager& deviceManager, uint16_t devicePosition,
+                                      ProgressReporter& reporter, std::stop_token stop) {
+              return runFirmwareInstallationProcedure(deviceManager, devicePosition, reporter,
+                                                      std::move(stop), spec);
+            }};
       },
   });
 
@@ -265,6 +218,133 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
         }
         return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
           return runHrdStreamingProcedure(device, reporter, std::move(stop), spec);
+        };
+      },
+  });
+
+  ProcedureDescriptor icMuCalibrationMode;
+  icMuCalibrationMode.name = std::string(kIcMuCalibrationModeProcedure);
+  icMuCalibrationMode.title = "iC-MU calibration mode";
+  icMuCalibrationMode.description =
+      "Sets how the BiSS service clocks an iC-MU encoder — the chip behind a Circulo's internal "
+      "encoder. Standard is normal operation. Configuration keeps the encoder clocked but uses "
+      "only the register-communication bits, so position stops updating and no CRC fault is "
+      "raised, which is what makes it possible to change the encoder's configuration registers "
+      "with Encoder register communication. Raw clocks an encoder already configured for raw "
+      "output and averages that data into 0x2704. Calibrating an encoder means moving between "
+      "these modes, not setting one switch.";
+  icMuCalibrationMode.caveats = {
+      "There is no restore: the encoder stays in the mode this sets until another run puts it back "
+      "to standard. Leaving one in configuration mode leaves the drive without a position update.",
+      "In configuration mode the encoder's position is not updated and the BiSS CRC error is "
+      "suppressed, so the drive will not report a problem it would normally fault on.",
+      "Entering configuration mode saves the current position, and entering raw mode counts from "
+      "that saved position because raw data is relative — so do not move the motor while in "
+      "configuration mode if raw mode is to follow.",
+      "The command works only on a configured Circulo internal encoder. Anything else is refused "
+      "by the drive as OS error 251 (\"command not allowed\").",
+      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  };
+  icMuCalibrationMode.movesMotor = false;
+  icMuCalibrationMode.requiresEnabled = false;
+  icMuCalibrationMode.parameters = icMuCalibrationModeParameters();
+  icMuCalibrationMode.steps = icMuCalibrationModeSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(icMuCalibrationMode),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseIcMuCalibrationModeRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runIcMuCalibrationModeProcedure(device, reporter, std::move(stop), spec);
+        };
+      },
+  });
+
+  ProcedureDescriptor ignoreBissStatusBits;
+  ignoreBissStatusBits.name = std::string(kIgnoreBissStatusBitsProcedure);
+  ignoreBissStatusBits.title = "Ignore BiSS status bits";
+  ignoreBissStatusBits.description =
+      "Stops the firmware acting on a BiSS encoder's status bits — or restores the default. Every "
+      "BiSS frame carries two bits by which the encoder reports on its own reading; the firmware "
+      "checks them each cycle, putting a warning in the error report and faulting the drive on an "
+      "error. Ignoring them switches that check off for the chosen encoder, which is a tool for "
+      "bringing up and diagnosing an encoder rather than for running a machine.";
+  ignoreBissStatusBits.caveats = {
+      "What this suppresses is a fault, not a nuisance: a BiSS error bit otherwise puts the drive "
+      "into active short circuit, whatever the quick stop option code says. With the bits ignored "
+      "the drive keeps running on an encoder that is reporting its own position as unreliable — so "
+      "the position it acts on may be wrong, with nothing to say so.",
+      "There is no restore. Ignoring holds until another run turns it back on or the drive is "
+      "power-cycled, and nothing on the drive reports the flag back, so what the run recorded is "
+      "the only account of it.",
+      "The encoder's warning and error reports (BisWnBit / BisErBit) both stop, and on an iC-MU "
+      "the "
+      "firmware also stops reading the chip's status registers to find out what went wrong.",
+      "Only the addressed encoder is affected; the other one goes on reporting.",
+      "The encoder must be configured and be a BiSS encoder. When it is not, nothing on the drive "
+      "answers the command at all and it fails after about 20 seconds — reported as exactly that "
+      "rather than as a timeout.",
+  };
+  ignoreBissStatusBits.parameters = ignoreBissStatusBitsParameters();
+  ignoreBissStatusBits.movesMotor = false;
+  ignoreBissStatusBits.requiresEnabled = false;
+  ignoreBissStatusBits.steps = ignoreBissStatusBitsSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(ignoreBissStatusBits),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
+        auto request = parseIgnoreBissStatusBitsRequest(body);
+        if (!request) {
+          return std::unexpected(request.error());
+        }
+        return
+            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+              return runIgnoreBissStatusBitsProcedure(device, reporter, std::move(stop), request);
+            };
+      },
+  });
+
+  ProcedureDescriptor motorPhaseOrder;
+  motorPhaseOrder.name = std::string(kMotorPhaseOrderDetectionProcedure);
+  motorPhaseOrder.title = "Motor phase order detection";
+  motorPhaseOrder.description =
+      "Works out whether the motor's phases are wired normally or inverted — whether the sensor "
+      "angle and the rotor angle move in the same direction — and stores the answer in the drive "
+      "(0x2003:05). Unlike the other detections this one reconfigures the drive, which is the "
+      "point "
+      "of running it: commutation offset measurement requires that it has been done, so it is the "
+      "step immediately before it, and it has to be repeated after every power-on on an axis with "
+      "an "
+      "incremental encoder. The drive is put into diagnostics mode, enabled, its brake released, "
+      "and "
+      "all of that restored afterwards.";
+  motorPhaseOrder.caveats = {
+      "This command turns the rotor. The shaft must be free to move, and whatever it drives must "
+      "be "
+      "safe to move with it.",
+      "The brake is released while it runs, because this command requires that. Anything the brake "
+      "was holding is free to move: on a vertical or loaded axis, support the load first.",
+      "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
+      "A successful run changes the drive's configuration, and the restore does not undo it — the "
+      "new phase order is the result, not a side effect.",
+      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
+      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
+  };
+  motorPhaseOrder.movesMotor = true;
+  motorPhaseOrder.requiresEnabled = false;
+  motorPhaseOrder.steps = motorPhaseOrderDetectionSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(motorPhaseOrder),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runMotorPhaseOrderDetectionProcedure(device, reporter, std::move(stop));
         };
       },
   });
@@ -352,165 +432,51 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
-  ProcedureDescriptor polePair;
-  polePair.name = std::string(kPolePairDetectionProcedure);
-  polePair.title = "Pole pair detection";
-  polePair.description =
-      "Counts the connected motor's pole pairs, by turning the rotor and watching what it takes to "
-      "do so. Part of commissioning an absolute-encoder axis, where it is run after open phase "
-      "detection and before motor phase order detection and commutation offset measurement. The "
-      "drive is put into diagnostics mode, enabled, its brake released, and all of that restored "
-      "afterwards.";
-  polePair.caveats = {
-      "This command turns the rotor — it has to, in order to count poles. The shaft must be free "
-      "to "
-      "move, and whatever it drives must be safe to move with it.",
-      "The brake is released while it runs, because this command requires that. Anything the brake "
-      "was holding is free to move: on a vertical or loaded axis, support the load first.",
-      "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
-      "The count is reported, not stored — nothing in the drive's configuration changes. Object "
-      "0x2003:01 is where a pole pair count belongs if you want to keep it.",
-      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
-      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
-      "A drive that cannot raise the motor phase currents far enough reports the run as failed — a "
-      "limited DC-link voltage or a high motor phase impedance can both cause that.",
+  ProcedureDescriptor osCommand;
+  osCommand.name = std::string(kOsCommandProcedure);
+  osCommand.title = "OS command";
+  osCommand.description =
+      "Issues one OS command (CANopen 0x1023 / 0x1024) with the request bytes passed through "
+      "exactly as given, and reports the drive's terminal status, its reply payload and any OS "
+      "error code. This is the direct route to the drive's whole OS command set: byte 0 is the "
+      "command ID and bytes 1-7 are its parameters, so any command the firmware implements can be "
+      "run here. Where a command also has a procedure of its own, that one names and validates its "
+      "parameters and decodes its result for you; this one asks you for the bytes and hands back "
+      "what the drive replied.";
+  osCommand.caveats = {
+      "The request bytes are not checked against any command's expected parameters — an unintended "
+      "command ID or parameter is issued to the drive as written.",
+      "Depending on the command issued, this can move the shaft.",
+      "Some commands are refused unless the drive is already enabled in a suitable mode of "
+      "operation; the drive reports those as OS error 251, \"command not allowed\".",
+      "Size the timeout for the command being run. Reaching it aborts the command on the drive.",
   };
-  polePair.movesMotor = true;
-  polePair.requiresEnabled = false;
-  polePair.steps = polePairDetectionSteps();
+  // Unknowable here — the caller chooses the command, and some of them spin the motor — so this
+  // reports the possibility rather than a false negative. requiresEnabled stays false because the
+  // mechanism itself needs nothing; the commands that do are covered by the caveat above, and a
+  // command with a procedure of its own sets the flag for what that command actually needs.
+  osCommand.movesMotor = true;
+  osCommand.parameters = osCommandParameters();
+  osCommand.steps = osCommandSteps();
 
   entries.push_back(ProcedureCatalogueEntry{
-      .descriptor = std::move(polePair),
+      .descriptor = std::move(osCommand),
+      // Vendor ID, deliberately, and not createSomanetDrive: that also requires the device's object
+      // dictionary to have been enumerated (its CiA402 check looks for controlword/statusword in
+      // the parameter map), and enumeration is opportunistic — it happens when a device is first
+      // seen at PRE-OP. Binding applicability to it would report a genuine drive as having *no*
+      // procedures merely because its OD had not been read yet, which is a wrong answer rather than
+      // a late one. The vendor ID comes from SII at scan time and is always known. Whether the
+      // device is also a conformant CiA402 drive stays the body's business, where it fails with a
+      // reason.
       .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
-      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
-        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-          return runPolePairDetectionProcedure(device, reporter, std::move(stop));
-        };
-      },
-  });
-
-  ProcedureDescriptor motorPhaseOrder;
-  motorPhaseOrder.name = std::string(kMotorPhaseOrderDetectionProcedure);
-  motorPhaseOrder.title = "Motor phase order detection";
-  motorPhaseOrder.description =
-      "Works out whether the motor's phases are wired normally or inverted — whether the sensor "
-      "angle and the rotor angle move in the same direction — and stores the answer in the drive "
-      "(0x2003:05). Unlike the other detections this one reconfigures the drive, which is the "
-      "point "
-      "of running it: commutation offset measurement requires that it has been done, so it is the "
-      "step immediately before it, and it has to be repeated after every power-on on an axis with "
-      "an "
-      "incremental encoder. The drive is put into diagnostics mode, enabled, its brake released, "
-      "and "
-      "all of that restored afterwards.";
-  motorPhaseOrder.caveats = {
-      "This command turns the rotor. The shaft must be free to move, and whatever it drives must "
-      "be "
-      "safe to move with it.",
-      "The brake is released while it runs, because this command requires that. Anything the brake "
-      "was holding is free to move: on a vertical or loaded axis, support the load first.",
-      "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
-      "A successful run changes the drive's configuration, and the restore does not undo it — the "
-      "new phase order is the result, not a side effect.",
-      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
-      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
-  };
-  motorPhaseOrder.movesMotor = true;
-  motorPhaseOrder.requiresEnabled = false;
-  motorPhaseOrder.steps = motorPhaseOrderDetectionSteps();
-
-  entries.push_back(ProcedureCatalogueEntry{
-      .descriptor = std::move(motorPhaseOrder),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
-      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
-        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-          return runMotorPhaseOrderDetectionProcedure(device, reporter, std::move(stop));
-        };
-      },
-  });
-
-  ProcedureDescriptor commutationOffset;
-  commutationOffset.name = std::string(kCommutationOffsetDetectionProcedure);
-  commutationOffset.title = "Commutation offset detection";
-  commutationOffset.description =
-      "Detects the motor phase order and then measures the commutation angle offset, storing both "
-      "in "
-      "the drive (0x2003:05, and 0x2001 marked valid in 0x2009:01). This is what commissions an "
-      "axis, "
-      "and the two commands are one unit rather than two you sequence yourself: an offset measured "
-      "against an unknown phase order is wrong, and the drive does not check that the phase order "
-      "was "
-      "established. It is also exactly the sequence an axis with an incremental encoder repeats "
-      "after "
-      "every power-on. On a new absolute-encoder axis, run open phase detection and pole pair "
-      "detection first. How the offset is measured is configured on the drive rather than chosen "
-      "here "
-      "— the method in 0x2009:03 decides whether that step turns the rotor and which way the "
-      "brake goes — and the method that ran is reported with the result.";
-  commutationOffset.caveats = {
-      "This turns the rotor whatever the method is set to: the stationary offset method does not "
-      "turn "
-      "it, but phase order detection always does. The shaft must be free, and whatever it drives "
-      "must "
-      "be safe to move.",
-      "The brake is released for phase order detection, which requires that unconditionally — "
-      "so "
-      "anything it was holding is free to move, even under the stationary method. Support the load "
-      "first. It is engaged again before a stationary measurement, which cannot hold the load "
-      "itself.",
-      "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
-      "The rotating methods (0x2009:03 = 0 or 1) measure with the brake released; method 1 "
-      "additionally needs the gains in 0x2009:04-06 tuned. The stationary method (2) is less "
-      "precise.",
-      "A successful run changes the drive's configuration twice over, and the restore does not "
-      "undo "
-      "either — the phase order and the offset are the result, not side effects.",
-      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
-      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
-  };
-  commutationOffset.movesMotor = true;
-  commutationOffset.requiresEnabled = false;
-  commutationOffset.steps = commutationOffsetDetectionSteps();
-
-  entries.push_back(ProcedureCatalogueEntry{
-      .descriptor = std::move(commutationOffset),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
-      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
-        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-          return runCommutationOffsetDetectionProcedure(device, reporter, std::move(stop));
-        };
-      },
-  });
-
-  ProcedureDescriptor phaseResistance;
-  phaseResistance.name = std::string(kPhaseResistanceMeasurementProcedure);
-  phaseResistance.title = "Phase resistance measurement";
-  phaseResistance.description =
-      "Measures the resistance of one motor phase, in milliohms, and reports it. The drive is put "
-      "into diagnostics mode, enabled, and restored to exactly the state it was found in "
-      "afterwards. Measured at the drive's own terminals, so what comes back is the winding plus "
-      "whatever is in series with it — your cabling and connectors included.";
-  phaseResistance.caveats = {
-      "The value is reported, not stored — nothing in the drive's configuration changes. Object "
-      "0x2003:03 is where a phase resistance belongs if you want to keep it.",
-      "The brake is left exactly as found — this command does not require it released, and an "
-      "engaged brake steadying the shaft is the better state to measure in.",
-      "The shaft can still turn if nothing holds it: no brake, or one already disengaged.",
-      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
-      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
-      "A drive that cannot raise the current amplitude far enough reports the run as failed rather "
-      "than returning a low reading.",
-  };
-  phaseResistance.movesMotor = true;
-  phaseResistance.requiresEnabled = false;
-  phaseResistance.steps = phaseResistanceMeasurementSteps();
-
-  entries.push_back(ProcedureCatalogueEntry{
-      .descriptor = std::move(phaseResistance),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
-      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
-        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-          return runPhaseResistanceMeasurementProcedure(device, reporter, std::move(stop));
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseOsCommandRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runOsCommandProcedure(device, reporter, std::move(stop), spec);
         };
       },
   });
@@ -549,48 +515,108 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
-  ProcedureDescriptor ignoreBissStatusBits;
-  ignoreBissStatusBits.name = std::string(kIgnoreBissStatusBitsProcedure);
-  ignoreBissStatusBits.title = "Ignore BiSS status bits";
-  ignoreBissStatusBits.description =
-      "Stops the firmware acting on a BiSS encoder's status bits — or restores the default. Every "
-      "BiSS frame carries two bits by which the encoder reports on its own reading; the firmware "
-      "checks them each cycle, putting a warning in the error report and faulting the drive on an "
-      "error. Ignoring them switches that check off for the chosen encoder, which is a tool for "
-      "bringing up and diagnosing an encoder rather than for running a machine.";
-  ignoreBissStatusBits.caveats = {
-      "What this suppresses is a fault, not a nuisance: a BiSS error bit otherwise puts the drive "
-      "into active short circuit, whatever the quick stop option code says. With the bits ignored "
-      "the drive keeps running on an encoder that is reporting its own position as unreliable — so "
-      "the position it acts on may be wrong, with nothing to say so.",
-      "There is no restore. Ignoring holds until another run turns it back on or the drive is "
-      "power-cycled, and nothing on the drive reports the flag back, so what the run recorded is "
-      "the only account of it.",
-      "The encoder's warning and error reports (BisWnBit / BisErBit) both stop, and on an iC-MU "
-      "the "
-      "firmware also stops reading the chip's status registers to find out what went wrong.",
-      "Only the addressed encoder is affected; the other one goes on reporting.",
-      "The encoder must be configured and be a BiSS encoder. When it is not, nothing on the drive "
-      "answers the command at all and it fails after about 20 seconds — reported as exactly that "
-      "rather than as a timeout.",
+  ProcedureDescriptor phaseResistance;
+  phaseResistance.name = std::string(kPhaseResistanceMeasurementProcedure);
+  phaseResistance.title = "Phase resistance measurement";
+  phaseResistance.description =
+      "Measures the resistance of one motor phase, in milliohms, and reports it. The drive is put "
+      "into diagnostics mode, enabled, and restored to exactly the state it was found in "
+      "afterwards. Measured at the drive's own terminals, so what comes back is the winding plus "
+      "whatever is in series with it — your cabling and connectors included.";
+  phaseResistance.caveats = {
+      "The value is reported, not stored — nothing in the drive's configuration changes. Object "
+      "0x2003:03 is where a phase resistance belongs if you want to keep it.",
+      "The brake is left exactly as found — this command does not require it released, and an "
+      "engaged brake steadying the shaft is the better state to measure in.",
+      "The shaft can still turn if nothing holds it: no brake, or one already disengaged.",
+      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
+      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
+      "A drive that cannot raise the current amplitude far enough reports the run as failed rather "
+      "than returning a low reading.",
   };
-  ignoreBissStatusBits.parameters = ignoreBissStatusBitsParameters();
-  ignoreBissStatusBits.movesMotor = false;
-  ignoreBissStatusBits.requiresEnabled = false;
-  ignoreBissStatusBits.steps = ignoreBissStatusBitsSteps();
+  phaseResistance.movesMotor = true;
+  phaseResistance.requiresEnabled = false;
+  phaseResistance.steps = phaseResistanceMeasurementSteps();
 
   entries.push_back(ProcedureCatalogueEntry{
-      .descriptor = std::move(ignoreBissStatusBits),
+      .descriptor = std::move(phaseResistance),
       .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
-      .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
-        auto request = parseIgnoreBissStatusBitsRequest(body);
-        if (!request) {
-          return std::unexpected(request.error());
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runPhaseResistanceMeasurementProcedure(device, reporter, std::move(stop));
+        };
+      },
+  });
+
+  ProcedureDescriptor polePair;
+  polePair.name = std::string(kPolePairDetectionProcedure);
+  polePair.title = "Pole pair detection";
+  polePair.description =
+      "Counts the connected motor's pole pairs, by turning the rotor and watching what it takes to "
+      "do so. Part of commissioning an absolute-encoder axis, where it is run after open phase "
+      "detection and before motor phase order detection and commutation offset measurement. The "
+      "drive is put into diagnostics mode, enabled, its brake released, and all of that restored "
+      "afterwards.";
+  polePair.caveats = {
+      "This command turns the rotor — it has to, in order to count poles. The shaft must be free "
+      "to "
+      "move, and whatever it drives must be safe to move with it.",
+      "The brake is released while it runs, because this command requires that. Anything the brake "
+      "was holding is free to move: on a vertical or loaded axis, support the load first.",
+      "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
+      "The count is reported, not stored — nothing in the drive's configuration changes. Object "
+      "0x2003:01 is where a pole pair count belongs if you want to keep it.",
+      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
+      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
+      "A drive that cannot raise the motor phase currents far enough reports the run as failed — a "
+      "limited DC-link voltage or a high motor phase impedance can both cause that.",
+  };
+  polePair.movesMotor = true;
+  polePair.requiresEnabled = false;
+  polePair.steps = polePairDetectionSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(polePair),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runPolePairDetectionProcedure(device, reporter, std::move(stop));
+        };
+      },
+  });
+
+  ProcedureDescriptor restoreDefaults;
+  restoreDefaults.name = std::string(kRestoreDefaultParametersProcedure);
+  restoreDefaults.title = "Restore default parameters";
+  restoreDefaults.description =
+      "Restores the device's default parameters — the CoE 0x1011 \"restore default parameters\" "
+      "object — for the selected group. The \"load\" signature is written and the device is then "
+      "polled until it reports the restore complete.";
+  restoreDefaults.caveats = {
+      "Destructive: the selected group's live values are overwritten with the device's defaults, "
+      "so anything you have not stored is gone. Run Store parameters first if you want to keep it.",
+      "The defaults are restored into volatile memory. They become permanent only if a store "
+      "follows, and some devices apply them only after a reset or power cycle.",
+      "Cancelling stops the wait, not the restore: the command has already been written, so the "
+      "device may complete it anyway.",
+      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  };
+  restoreDefaults.movesMotor = false;
+  restoreDefaults.requiresEnabled = false;
+  restoreDefaults.parameters = restoreDefaultParametersParameters();
+  restoreDefaults.steps = restoreDefaultParametersSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(restoreDefaults),
+      .applies = [](Device& device) { return device.supportsCoe(); },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseRestoreDefaultParametersRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
         }
-        return
-            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-              return runIgnoreBissStatusBitsProcedure(device, reporter, std::move(stop), request);
-            };
+        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runRestoreDefaultParametersProcedure(device, reporter, std::move(stop), spec);
+        };
       },
   });
 
@@ -631,6 +657,35 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
             [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
               return runSkippedCyclesProcedure(device, reporter, std::move(stop), request);
             };
+      },
+  });
+
+  ProcedureDescriptor storeParameters;
+  storeParameters.name = std::string(kStoreParametersProcedure);
+  storeParameters.title = "Store parameters";
+  storeParameters.description =
+      "Persists the device's current parameter values to non-volatile memory — the CoE 0x1010 "
+      "\"store parameters\" object — so the changes you have made survive a power cycle. The "
+      "\"save\" signature is written and the device is then polled until it reports the save "
+      "complete, which usually takes about a second while it writes to flash.";
+  storeParameters.caveats = {
+      "It stores what the device currently holds, which includes anything written since the last "
+      "store — there is no selecting what to keep.",
+      "Cancelling stops the wait, not the store: the command has already been written, so the "
+      "device may complete it anyway.",
+      "The mailbox must be active, so the device has to be in PRE-OP or above.",
+  };
+  storeParameters.movesMotor = false;
+  storeParameters.requiresEnabled = false;
+  storeParameters.steps = storeParametersSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(storeParameters),
+      .applies = [](Device& device) { return device.supportsCoe(); },
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runStoreParametersProcedure(device, reporter, std::move(stop));
+        };
       },
   });
 
@@ -676,62 +731,13 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
-  ProcedureDescriptor firmware;
-  firmware.name = std::string(kFirmwareInstallationProcedure);
-  firmware.title = "Firmware installation";
-  firmware.description =
-      "Installs a SOMANET firmware package. The device is taken to BOOT, where its bootloader "
-      "accepts the package's application and communication binaries over FoE and its SII image "
-      "into the EEPROM, and is then returned to the state you choose. PRE-OP is the default and is "
-      "the confirmation that it worked: the bootloader hands over to the newly written firmware on "
-      "that transition, so reaching PRE-OP means the new firmware booted and answered. The "
-      "descriptive extras a package carries — the ESI and the stack image — are skipped by default "
-      "and can be un-skipped by editing the list.";
-  firmware.caveats = {
-      "The device stops exchanging process data for the whole installation, so anything it was "
-      "driving is uncontrolled from the moment it leaves OP. Other devices on the bus keep "
-      "running, but the bus is briefly re-mapped when this one rejoins.",
-      "Cancelling does not undo anything, and between two files it leaves the device part-flashed. "
-      "A transfer already under way finishes regardless — cancellation is noticed between files.",
-      "If the package writes an SII, that part does need a power cycle: the ESC reads its EEPROM "
-      "at reset, unlike the firmware, which loads on the transition out of BOOT.",
-      "Choose BOOT as the final state when no application will be present — after erasing one, or "
-      "between two installs — because a PRE-OP transition then has nothing to hand over to and the "
-      "drive answers AL status 0x0014, \"No valid firmware\".",
-      "Nothing here checks that the package matches the device. A package built for other hardware "
-      "is written as readily as the right one.",
-  };
-  firmware.movesMotor = false;
-  firmware.requiresEnabled = false;
-  firmware.parameters = firmwareInstallationParameters();
-  firmware.steps = firmwareInstallationSteps();
-
-  entries.push_back(ProcedureCatalogueEntry{
-      .descriptor = std::move(firmware),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
-      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureWork, std::string> {
-        auto spec = parseFirmwareInstallationRequest(request);
-        if (!spec) {
-          return std::unexpected(spec.error());
-        }
-        // The only BusProcedureBody in the table: this one changes AL state, so it is handed the
-        // manager and borrows per step rather than being given a device for the whole run.
-        return BusProcedureBody{
-            [spec = std::move(*spec)](DeviceManager& deviceManager, uint16_t devicePosition,
-                                      ProgressReporter& reporter, std::stop_token stop) {
-              return runFirmwareInstallationProcedure(deviceManager, devicePosition, reporter,
-                                                      std::move(stop), spec);
-            }};
-      },
-  });
-
-  // Served in name order, whatever order the table is written in. The authoring order above is
-  // grouped by profile so the commentary can explain each group's applicability, and that is worth
-  // keeping — but it is a poor order to *read* a list in, and it would shift under every insertion,
-  // so a procedure would move in the sidebar because of where a row happened to be added. Sorting
-  // here rather than in listProcedures does it once for the process instead of once per poll, and
-  // means every consumer of the catalogue sees the same order: applicableEntries preserves it, so
-  // the list endpoint and the Console's sidebar are ordered without either of them sorting.
+  // Served in name order, whatever order the table happens to be written in. The rows above are
+  // authored in this same order, so the two normally agree — but the sort is what *guarantees* it,
+  // and it is what keeps a row appended in the wrong place from moving a procedure in the sidebar.
+  // Sorting here rather than in listProcedures does it once for the process instead of once per
+  // poll, and means every consumer of the catalogue sees the same order: applicableEntries
+  // preserves it, so the list endpoint and the Console's sidebar are ordered without either of them
+  // sorting.
   //
   // By name rather than title because the name is the stable identifier — it is what the URL and
   // the API carry, so the order cannot drift when a title is reworded. The two happen to agree for

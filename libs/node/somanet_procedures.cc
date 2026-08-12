@@ -1437,6 +1437,28 @@ std::expected<void, std::string> runPhaseInductanceMeasurementProcedure(Device& 
                                  });
 }
 
+std::vector<ProgressStep> torqueConstantMeasurementSteps() {
+  return stepsFrom({kPrepareStep, kReleaseBrakeStep, kTorqueConstantMeasurementStep, kRestoreStep});
+}
+
+std::expected<void, std::string> runTorqueConstantMeasurementProcedure(Device& device,
+                                                                       ProgressReporter& reporter,
+                                                                       std::stop_token stop) {
+  // Releases the brake, like pole pair and motor phase order detection, because this command's
+  // restrictions require it — and takes their longer ceiling rather than the winding measurements'
+  // for its own reason: the drive spends about ten seconds ramping the motor up to speed before it
+  // measures anything.
+  return runMeasurementProcedure(device, reporter, std::move(stop),
+                                 {.procedure = kTorqueConstantMeasurementProcedure,
+                                  .step = kTorqueConstantMeasurementStep,
+                                  .what = "torque constant measurement",
+                                  .releaseBrake = true,
+                                  .timeout = std::chrono::seconds(60)},
+                                 [](SomanetDrive& drive, const OsCommandConfig& config) {
+                                   return drive.runTorqueConstantMeasurement(config);
+                                 });
+}
+
 std::filesystem::path firmwareCacheDir() { return mm::core::userCacheDir() / "firmwares"; }
 
 std::vector<ProcedureParameter> firmwareInstallationParameters() {

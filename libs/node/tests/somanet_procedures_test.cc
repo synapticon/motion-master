@@ -78,6 +78,8 @@ using mm::node::runOsCommandProcedure;
 using mm::node::runPhaseInductanceMeasurementProcedure;
 using mm::node::runPhaseResistanceMeasurementProcedure;
 using mm::node::runPolePairDetectionProcedure;
+using mm::node::runTorqueConstantMeasurementProcedure;
+using mm::node::torqueConstantMeasurementSteps;
 namespace somanet = mm::node::somanet;
 using mm::node::cia402::Object;
 
@@ -1455,6 +1457,62 @@ TEST(RunPhaseInductanceMeasurementProcedure, NeverTouchesTheBrake) {
       runPhaseInductanceMeasurementProcedure(device, reporter, std::stop_token{}).has_value());
 
   EXPECT_EQ(brakeWrites(driver), 0);
+}
+
+// --- Torque constant measurement procedure -------------------------------------------------------
+
+TEST(TorqueConstantMeasurementSteps, DeclaresFourStepsIncludingTheBrake) {
+  // With the brake step, unlike the two winding measurements: command 10's restrictions require a
+  // disengaged brake, which is the firmware grouping it with pole pair and phase order detection.
+  auto steps = torqueConstantMeasurementSteps();
+  ASSERT_EQ(steps.size(), 4u);
+  EXPECT_EQ(steps[0].id, "prepare");
+  EXPECT_EQ(steps[1].id, "release-brake");
+  EXPECT_EQ(steps[2].id, "torque-constant-measurement");
+  EXPECT_EQ(steps[3].id, "restore");
+}
+
+TEST(RunTorqueConstantMeasurementProcedure, PreparesReleasesMeasuresAndRestores) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(torqueConstantMeasurementSteps());
+
+  driver.responses = {{1, 0, 0x00, 0x12, 0x5C, 0x0A, 0, 0}};  // 1203210 mNm/A_rms
+  auto result = runTorqueConstantMeasurementProcedure(device, reporter, std::stop_token{});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto steps = reporter.steps();
+  for (auto id : {"prepare", "release-brake", "torque-constant-measurement", "restore"}) {
+    const auto step = stepById(steps, id);
+    ASSERT_TRUE(step.has_value()) << id;
+    EXPECT_EQ(step->status, ProgressStatus::kSucceeded) << id;
+  }
+
+  const auto measured = stepById(steps, "torque-constant-measurement");
+  ASSERT_TRUE(measured.has_value());
+  EXPECT_EQ(measured->value.at("milliNewtonMetresPerAmpere").get<int32_t>(), 1203210);
+
+  // The brake is released only once the drive is enabled, as for pole pair detection.
+  EXPECT_TRUE(
+      driver.wroteBefore(Object::kControlword, 0, somanet::kBrakeOptions, somanet::kBrakeStatus));
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 10);
+}
+
+TEST(RunTorqueConstantMeasurementProcedure, AFailedMeasurementStillRestoresTheBrake) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(torqueConstantMeasurementSteps());
+
+  driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};
+  auto result = runTorqueConstantMeasurementProcedure(device, reporter, std::stop_token{});
+  ASSERT_FALSE(result.has_value());
+
+  const auto restore = stepById(reporter.steps(), "restore");
+  ASSERT_TRUE(restore.has_value());
+  EXPECT_EQ(restore->status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(
+      driver.store.at(OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeStatus)),
+      std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)});
 }
 
 TEST(RunOpenPhaseDetectionProcedure, FailsTheDeviceCheckBeforeAnyStepRuns) {

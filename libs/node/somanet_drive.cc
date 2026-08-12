@@ -85,20 +85,54 @@ std::expected<T, std::string> decodeBigEndian(const std::vector<uint8_t>& payloa
 
 // Whether a command has command-specific error codes, and if so which table.
 //
-// Motor phase order detection (4) has **none** — the specification says its status 3 can only ever
-// carry a general code — so decoding its code 0 as the current-amplitude fault its siblings share
-// would invent a motor diagnosis out of a code that means nothing.
+// Motor phase order detection (4) and torque constant measurement (10) have **none** — neither
+// defines a command-specific code, so their status 3 can only ever carry a general one — and
+// decoding a code 0 from either as the current-amplitude fault its siblings share would invent a
+// motor diagnosis out of a code that means nothing.
 enum class CommandSpecificFault {
   kNone,
   kCurrentAmplitude,  // Pole pair (7), phase resistance (8), phase inductance (9).
 };
 
+// Names what the drive is doing, to be appended to a general OS error that does not say.
+//
+// Only for the two codes that mean the drive refused or dropped the command over its own
+// preconditions, and they are the two that need it most: **251 and 252 name a *precondition*
+// without naming which one**. The firmware re-checks the whole set — diagnostics mode, Operation
+// Enabled, no limit switch, the brake — on every control cycle a command runs, and aborts with 252
+// the moment one stops holding. So a drive that faulted half way through an eleven-second
+// measurement reports exactly what a drive that was never enabled reports, and the fault that
+// caused it appears nowhere in the message.
+//
+// Best-effort and quiet: an empty suffix when the state cannot be read, or when the drive is still
+// enabled and so is not itself the explanation — leaving the caller's message as it was rather than
+// padding it with a state that rules nothing out.
+std::string driveStateSuffix(const SomanetDrive& drive, uint8_t code) {
+  if (code != static_cast<uint8_t>(OsCommandError::kNotAllowed) &&
+      code != static_cast<uint8_t>(OsCommandError::kAborted)) {
+    return {};
+  }
+  auto state = drive.state();
+  if (!state || *state == cia402::State::kOperationEnabled) {
+    return {};
+  }
+  auto suffix = std::format(" — the drive is in {}", cia402::toString(*state));
+  if (*state == cia402::State::kFault || *state == cia402::State::kFaultReactionActive) {
+    // Best-effort within a best-effort: a description is what makes the fault actionable, but
+    // failing to read one must not cost the state we already know.
+    if (auto report = drive.errorReport(); report && !report->empty()) {
+      suffix += std::format(" (drive error report: {})", *report);
+    }
+  }
+  return suffix;
+}
+
 // Issues a parameterless motor-measurement command and returns its response payload.
 //
-// The shared front half of motor phase order (4), pole pair (7), phase resistance (8) and phase
-// inductance (9): all take no parameters and differ only in how wide the value in the payload is —
-// which each caller decodes itself with decodeBigEndian — and in whether they have a
-// command-specific error code.
+// The shared front half of motor phase order (4), pole pair (7), phase resistance (8), phase
+// inductance (9) and torque constant (10): all take no parameters and differ only in how wide the
+// value in the payload is — which each caller decodes itself with decodeBigEndian — and in whether
+// they have a command-specific error code.
 //
 // A failed command is an error here rather than a result, which is the opposite of open phase
 // detection: that command's failure *is* its finding, while these either produce a measurement or
@@ -123,8 +157,8 @@ std::expected<std::vector<uint8_t>, std::string> runMotorMeasurement(
     }
     const uint8_t code = *response->errorCode;
     if (auto general = osCommandErrorName(code)) {
-      return std::unexpected(
-          std::format("{} was not performed: {} (OS error {})", what, *general, code));
+      return std::unexpected(std::format("{} was not performed: {} (OS error {}){}", what, *general,
+                                         code, driveStateSuffix(drive, code)));
     }
     if (commandSpecificFault == CommandSpecificFault::kCurrentAmplitude &&
         code == static_cast<uint8_t>(somanet::MotorMeasurementFault::kCurrentAmplitudeError)) {
@@ -1031,8 +1065,9 @@ std::expected<OpenPhaseResult, std::string> SomanetDrive::runOpenPhaseDetection(
   // "a phase is open" would be a false hardware fault, which is far worse than an error.
   if (response->errorCode) {
     if (auto general = osCommandErrorName(*response->errorCode)) {
-      return std::unexpected(std::format("open phase detection was not performed: {} (OS error {})",
-                                         *general, *response->errorCode));
+      return std::unexpected(
+          std::format("open phase detection was not performed: {} (OS error {}){}", *general,
+                      *response->errorCode, driveStateSuffix(*this, *response->errorCode)));
     }
     result.faultCode = response->errorCode;
     if (*response->errorCode <= static_cast<uint8_t>(somanet::OpenPhaseFault::kOpenFetCLow)) {
@@ -1186,6 +1221,32 @@ std::expected<PhaseInductanceResult, std::string> SomanetDrive::runPhaseInductan
     return std::unexpected(microhenries.error());
   }
   return PhaseInductanceResult{.microhenries = *microhenries};
+}
+
+std::string TorqueConstantResult::describe() const {
+  return std::format("torque constant {} mNm/A_rms", milliNewtonMetresPerAmpere);
+}
+
+void to_json(nlohmann::json& j, const TorqueConstantResult& result) {
+  j = nlohmann::json{{"milliNewtonMetresPerAmpere", result.milliNewtonMetresPerAmpere},
+                     {"description", result.describe()}};
+}
+
+std::expected<TorqueConstantResult, std::string> SomanetDrive::runTorqueConstantMeasurement(
+    const OsCommandConfig& config) {
+  static constexpr std::string_view kWhat = "torque constant measurement";
+  auto payload = runMotorMeasurement(*this, somanet::OsCommandId::kTorqueConstantMeasurement, kWhat,
+                                     CommandSpecificFault::kNone, config);
+  if (!payload) {
+    return std::unexpected(payload.error());
+  }
+  // Signed, where its siblings are not: the drive's own field is an int32_t and this command's
+  // arithmetic can reach below zero. See TorqueConstantResult.
+  auto torqueConstant = decodeBigEndian<int32_t>(*payload, kWhat);
+  if (!torqueConstant) {
+    return std::unexpected(torqueConstant.error());
+  }
+  return TorqueConstantResult{.milliNewtonMetresPerAmpere = *torqueConstant};
 }
 
 std::expected<void, std::string> SomanetDrive::setOperationMode(somanet::OperationMode mode) {

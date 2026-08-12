@@ -580,6 +580,46 @@ std::expected<void, std::string> runPhaseInductanceMeasurementProcedure(Device& 
                                                                         ProgressReporter& reporter,
                                                                         std::stop_token stop);
 
+/// @brief Procedure name for torque constant measurement, as it appears in its URL and its snapshot
+///        key.
+inline constexpr std::string_view kTorqueConstantMeasurementProcedure =
+    "torque-constant-measurement";
+
+/// @brief The step torque constant measurement's own measurement reports against.
+inline constexpr std::string_view kTorqueConstantMeasurementStep = "torque-constant-measurement";
+
+/// @brief Torque constant measurement's step template — prepare, release the brake, measure,
+///        restore.
+std::vector<ProgressStep> torqueConstantMeasurementSteps();
+
+/// @brief Runs torque constant measurement as a procedure body.
+///
+/// Four steps rather than the winding measurements' three: this command's restrictions require a
+/// disengaged brake, so the brake is released after Operation Enabled and put back by the restore
+/// on every path out, exactly as in @c runPolePairDetectionProcedure.
+///
+/// **The rotor turns for the whole run, which is the longest of these procedures** — the drive
+/// spins the motor up over about ten seconds and holds it at speed while it measures, because the
+/// constant is derived from the back-EMF the motor generates rather than from a torque nobody can
+/// measure. The shaft must be free and whatever it drives safe to keep moving.
+///
+/// **It measures against the drive's stored motor configuration, and this procedure does not check
+/// that.** The back-EMF is what is left after the winding impedance is subtracted from the applied
+/// voltage, and the drive takes that impedance and the pole pair count from 0x2003:01, :03 and :04.
+/// So the useful order is pole pair detection, phase resistance and phase inductance first, their
+/// results *written* into those objects, and this last — which is why it is **not** part of
+/// @c runOffsetDetectionProcedure: that sequence deliberately stores nothing, so a torque constant
+/// measured inside it would be measured against whatever the drive was configured with before.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; checked between steps and passed into the OS command so a
+///                 running measurement is aborted rather than abandoned.
+/// @return Void when the drive reported a torque constant, otherwise why it did not.
+std::expected<void, std::string> runTorqueConstantMeasurementProcedure(Device& device,
+                                                                       ProgressReporter& reporter,
+                                                                       std::stop_token stop);
+
 // ── Firmware installation ──────────────────────────────────────────────────────────────────────
 //
 // The one procedure here written against BusProcedureBody rather than ProcedureBody. Installing

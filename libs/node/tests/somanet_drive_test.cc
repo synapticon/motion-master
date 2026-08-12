@@ -1597,4 +1597,155 @@ TEST(RunPhaseInductanceMeasurement, SharesTheCurrentAmplitudeFaultTable) {
       << result.error();
 }
 
+// --- Torque constant measurement (command 10) ----------------------------------------------------
+
+TEST(RunTorqueConstantMeasurement, DecodesTheBigEndianValue) {
+  // The specification's example value, 1203210 mNm/A_rms — written here as the firmware packs it,
+  // most significant byte at byte 2, which is *not* how that document's worked example renders it.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0x00, 0x12, 0x5C, 0x0A, 0, 0}};
+  auto result = drive->runTorqueConstantMeasurement({.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->milliNewtonMetresPerAmpere, 1203210);
+  EXPECT_EQ(result->describe(), "torque constant 1203210 mNm/A_rms");
+}
+
+TEST(RunTorqueConstantMeasurement, IssuesCommandTen) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0, 0, 0, 1, 0, 0}};
+  ASSERT_TRUE(drive->runTorqueConstantMeasurement({.pollInterval = kNoDelay}).has_value());
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[0], 10);
+}
+
+TEST(RunTorqueConstantMeasurement, ReportsANegativeValueRatherThanAHugeUnsignedOne) {
+  // The one measurement here whose value is signed. The drive subtracts the configured winding
+  // impedance from the applied voltage to find the back-EMF, so a resistance or inductance
+  // configured far above the motor's real one drives the result below zero — and that is the
+  // signal the caller needs. Read unsigned it would come back as roughly 4.29 billion.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0xFF, 0xFF, 0xFF, 0xFE, 0, 0}};
+  auto result = drive->runTorqueConstantMeasurement({.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->milliNewtonMetresPerAmpere, -2);
+}
+
+TEST(RunTorqueConstantMeasurement, DoesNotReadCodeZeroAsACurrentAmplitudeFault) {
+  // Like motor phase order detection, this command defines no command-specific codes, so code 0
+  // means nothing here even though its siblings read it as "current amplitude error".
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = drive->runTorqueConstantMeasurement({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().find("current"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("OS error 0"), std::string::npos) << result.error();
+}
+
+TEST(RunTorqueConstantMeasurement, AGeneralOsErrorNamesItself) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};
+  auto result = drive->runTorqueConstantMeasurement({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("torque constant measurement"), std::string::npos)
+      << result.error();
+  EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
+}
+
+// --- What a general OS error says about the drive
+// -------------------------------------------------
+
+TEST(GeneralOsError, AnAbortNamesTheFaultTheDriveIsIn) {
+  // 0x0238 and "PuUv" are what a SOMANET Integro actually reported after a torque constant
+  // measurement tripped its DC-link under-voltage protection: the fault cleared Operation Enabled,
+  // the firmware re-checked the command's preconditions on the next cycle and aborted it, and the
+  // resulting 252 said only "command aborted". The fault is the answer, and it has to be in the
+  // message — it is two object reads away and nobody thinks to make them.
+  OsCommandFakeDriver driver;
+  driver.programObject(somanet::kErrorReport, somanet::kErrorReportDescription,
+                       ObjectDataType::VISIBLE_STRING, {'P', 'u', 'U', 'v', ' ', ' ', ' ', ' '});
+  Device device = makeOsCommandDevice(driver);
+  driver.store[OsCommandFakeDriver::key(Object::kStatusword, 0)] = {0x38, 0x02};
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 252, 0, 0, 0, 0, 0}};
+  auto result = drive->runTorqueConstantMeasurement({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("command aborted"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("the drive is in Fault"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("PuUv"), std::string::npos) << result.error();
+}
+
+TEST(GeneralOsError, AddsNothingWhenTheDriveIsStillEnabled) {
+  // The state is appended to explain the refusal, not to decorate it. A drive still in Operation
+  // Enabled rules nothing out — the cause is then the operation mode, a limit switch or the brake —
+  // so the message is left as it was.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  driver.store[OsCommandFakeDriver::key(Object::kStatusword, 0)] = {0x37, 0x02};
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};
+  auto result = drive->runTorqueConstantMeasurement({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
+  EXPECT_EQ(result.error().find("the drive is in"), std::string::npos) << result.error();
+}
+
+TEST(GeneralOsError, ACommandSpecificCodeIsLeftAlone) {
+  // Only 251 and 252 name a precondition. A command-specific code describes what the command found,
+  // so the drive's state explains nothing about it — and reading one would put a CiA402 state in
+  // front of a user who was told about a motor fault.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  driver.store[OsCommandFakeDriver::key(Object::kStatusword, 0)] = {0x38, 0x02};
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 0, 0, 0, 0, 0, 0}};  // current amplitude error
+  auto result = drive->runPhaseResistanceMeasurement({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("could not raise the motor phase currents"), std::string::npos)
+      << result.error();
+  EXPECT_EQ(result.error().find("the drive is in"), std::string::npos) << result.error();
+}
+
+TEST(GeneralOsError, OpenPhaseDetectionExplainsItsRefusalToo) {
+  // The one command whose failure is normally a *finding* rather than an error — which is exactly
+  // why a general code here needs explaining: it means the check never ran at all.
+  OsCommandFakeDriver driver;
+  driver.programObject(somanet::kErrorReport, somanet::kErrorReportDescription,
+                       ObjectDataType::VISIBLE_STRING, {'P', 'u', 'U', 'v', ' ', ' ', ' ', ' '});
+  Device device = makeOsCommandDevice(driver);
+  driver.store[OsCommandFakeDriver::key(Object::kStatusword, 0)] = {0x38, 0x02};
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 251, 0, 0, 0, 0, 0}};
+  auto result = drive->runOpenPhaseDetection({.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("the drive is in Fault"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("PuUv"), std::string::npos) << result.error();
+}
+
 }  // namespace

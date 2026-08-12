@@ -19,6 +19,17 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **Torque constant measurement is now a procedure** (`torque-constant-measurement`), alongside the other motor measurements on a device's Procedures page. It reports how much torque the motor produces per ampere of effective (RMS) current, in mNm/A_rms. The drive has no torque sensor, so it measures the same constant from the other side: it spins the motor up over about ten seconds, holds it at speed, and derives the constant from the voltage the motor generates. The drive is put into diagnostics mode, enabled and its brake released — which this command requires, unlike the winding measurements — and everything is restored afterwards however the run ends.
+  - **Measure and store pole pairs, phase resistance and phase inductance first.** Finding the back-EMF means subtracting the winding impedance from the applied voltage, and the drive takes that impedance and the pole pair count from `0x2003:01`, `:03` and `:04` rather than from anything it measures here. Stale values there give a wrong constant with nothing to indicate it; badly wrong ones give a negative result, which is why this measurement is reported signed where its siblings are not.
+  - For the same reason it is deliberately **not** part of the `offset-detection` sequence: that sequence reports its measurements without storing them, so a torque constant measured inside it would be measured against whatever the drive was configured with beforehand.
+  - The value is reported, not stored. `0x2003:02` is where a torque constant belongs if you want to keep it — but that object holds µNm/A_rms while the command answers in mNm/A_rms, so multiply by 1000 before writing it.
+
+### Changed
+
+- **A motor measurement that the drive refused or dropped now says what the drive is doing.** OS errors 251 ("command not allowed") and 252 ("command aborted") both name a *precondition* without naming which one, and the drive re-checks all of them — diagnostics mode, Operation Enabled, no limit switch, the brake — on every control cycle a command runs. So a drive that faults half way through a measurement reports exactly what a drive that was never enabled reports, and the fault appears nowhere. Those two codes now carry the drive's CiA402 state, and its own error report when it is faulted: `torque constant measurement was not performed: command aborted (OS error 252) — the drive is in Fault (drive error report: PuUv)`. Applies to every diagnostics-mode measurement — open phase, motor phase order, pole pair, phase resistance, phase inductance and torque constant. Nothing is added when the drive is still in Operation Enabled, since the state then rules nothing out.
+
 ## [6.0.0-alpha.70] - 2026-08-12
 
 ### Added

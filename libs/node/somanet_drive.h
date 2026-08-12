@@ -44,11 +44,15 @@ enum ErrorReportEntry : uint8_t {
 ///
 /// Types are the drive's own, read off a SOMANET Integro's object dictionary rather than assumed.
 /// Worth knowing that **this is where the motor measurements belong**: pole pair detection (7),
-/// phase resistance (8) and phase inductance (9) report a value without storing it, and :01, :03
-/// and :04 are the entries it goes in.
+/// phase resistance (8), phase inductance (9) and torque constant measurement (10) report a value
+/// without storing it, and :01, :02, :03 and :04 are the entries it goes in.
 enum MotorSetting : uint8_t {
-  kMotorPolePairs = 1,        ///< UNSIGNED8 — where a pole pair count (command 7) belongs.
-  kMotorTorqueConstant = 2,   ///< INTEGER32 — where a torque constant (command 10) belongs.
+  kMotorPolePairs = 1,  ///< UNSIGNED8 — where a pole pair count (command 7) belongs.
+
+  /// INTEGER32 — where a torque constant (command 10) belongs, **in µNm/A_rms**, which is not the
+  /// unit the command reports. The drive's own description of this entry names the unit; the
+  /// command answers in mNm/A_rms, a factor of 1000 coarser. See @c TorqueConstantResult.
+  kMotorTorqueConstant = 2,
   kMotorPhaseResistance = 3,  ///< INTEGER32 — where a phase resistance (command 8) belongs.
   kMotorPhaseInductance = 4,  ///< INTEGER32 — where a phase inductance (command 9) belongs.
   kMotorPhasesInverted = 5,   ///< BOOLEAN — the phase order motor phase order detection (4) writes.
@@ -410,6 +414,7 @@ enum class OsCommandId : uint8_t {
   kPolePairDetection = 7,             ///< Detects the motor's pole pair count. Rotates the rotor.
   kPhaseResistanceMeasurement = 8,    ///< Measures the motor's phase resistance, in milliohms.
   kPhaseInductanceMeasurement = 9,    ///< Measures the motor's phase inductance, in microhenries.
+  kTorqueConstantMeasurement = 10,    ///< Measures the motor's torque constant. Rotates the rotor.
   kSkippedCycleCounter = 13,          ///< Reads the drive's skipped-cycle counter. Harmless; no
                                       ///< motion.
 };
@@ -856,6 +861,28 @@ struct PhaseInductanceResult {
   std::string describe() const;
 };
 void to_json(nlohmann::json& j, const PhaseInductanceResult& result);
+
+/// @brief What torque constant measurement (command 10) measured.
+///
+/// **Signed, unlike its two siblings, and that is the firmware's arithmetic rather than a
+/// precaution.** The drive has no torque sensor, so it spins the motor and derives the constant
+/// from the back-EMF it generates: the applied voltage minus the drop across the winding
+/// impedance. That subtraction is done against the resistance and inductance *configured* in
+/// 0x2003:03 and :04, so values larger than the motor's real ones drive the result below zero — a
+/// number that is meaningless as a torque constant but is exactly the signal that the drive was
+/// measured against the wrong configuration. Reported as it comes rather than clamped or read as a
+/// four-billion unsigned value.
+///
+/// The unit is the drive's own, as with @c PhaseResistanceResult: **mNm per A_rms**, named in the
+/// member rather than converted. Note it is *not* the unit 0x2003:02 stores (µNm/A_rms), so
+/// keeping a measurement means multiplying by 1000 — see @c somanet::kMotorTorqueConstant.
+struct TorqueConstantResult {
+  int32_t milliNewtonMetresPerAmpere = 0;  ///< Torque constant in mNm/A_rms, as the drive reported.
+
+  /// @brief One line describing the measurement, ready to put in front of a user.
+  std::string describe() const;
+};
+void to_json(nlohmann::json& j, const TorqueConstantResult& result);
 
 /// @brief Borrowed view of a SOMANET drive — a CiA402 drive plus Synapticon-specific
 ///        object-dictionary access (encoder/motor configuration, custom OS commands, etc.).
@@ -1355,6 +1382,38 @@ class SomanetDrive : public Cia402Drive {
   /// @return The measured inductance, or why no measurement was produced.
   std::expected<PhaseInductanceResult, std::string> runPhaseInductanceMeasurement(
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(30),
+                                       .pollInterval = std::chrono::milliseconds(100)});
+
+  /// @brief Runs torque constant measurement (OS command 10) and decodes the value it reports.
+  ///
+  /// Measures how much torque the motor produces per ampere of effective (RMS) current. The drive
+  /// cannot measure torque, so it measures the back-EMF instead — which is the same constant seen
+  /// from the other side: it spins the motor open-loop up to a fixed electrical frequency, waits
+  /// for the load to settle, and works the constant out from the voltage the motor generates at
+  /// that speed.
+  ///
+  /// **The measurement is only as good as the drive's existing motor configuration.** Subtracting
+  /// the winding impedance from the applied voltage is what leaves the back-EMF, and the drive
+  /// takes the resistance, the inductance and the pole pair count from 0x2003:03, :04 and :01 —
+  /// not from anything measured during this command. Measure and *store* those first; a stale
+  /// value there produces a wrong constant, silently, and a badly wrong one produces a negative
+  /// (see @c TorqueConstantResult).
+  ///
+  /// Preconditions, all enforced by the drive refusing with OS error 251: operation mode
+  /// @c somanet::OperationMode::kDiagnostics, CiA402 state Operation Enabled, no limit switch
+  /// active, **and the brake disengaged** if one is configured — the firmware groups this command
+  /// with motor phase order and pole pair detection, not with the winding measurements.
+  ///
+  /// **This command turns the rotor, continuously and for the whole run.** It is not a step or a
+  /// fraction of a turn: the motor is spun up over about ten seconds and held there while the
+  /// measurement is taken, so it is the longest-moving of the diagnostics commands.
+  ///
+  /// The command has no command-specific error codes — a failure carries a general one, or none.
+  ///
+  /// @param config  Timing and cancellation. The default timeout is sized for this command.
+  /// @return The measured torque constant, or why no measurement was produced.
+  std::expected<TorqueConstantResult, std::string> runTorqueConstantMeasurement(
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(60),
                                        .pollInterval = std::chrono::milliseconds(100)});
 
   /// @brief Reads the requested operation mode (0x6060) as its raw value.

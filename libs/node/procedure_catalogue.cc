@@ -549,6 +549,48 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor torqueConstant;
+  torqueConstant.name = std::string(kTorqueConstantMeasurementProcedure);
+  torqueConstant.title = "Torque constant measurement";
+  torqueConstant.description =
+      "Measures how much torque the motor produces per ampere of effective (RMS) current, in "
+      "mNm/A_rms, and reports it. The drive has no torque sensor, so it measures the same constant "
+      "from the other side: it spins the motor up over about ten seconds, holds it at speed, and "
+      "works the constant out from the voltage the motor generates. The drive is put into "
+      "diagnostics mode, enabled, its brake released, and restored to exactly the state it was "
+      "found in afterwards.";
+  torqueConstant.caveats = {
+      "Measure and store pole pairs, phase resistance and phase inductance first. The drive "
+      "subtracts the winding impedance to find the back-EMF, and it takes that impedance and the "
+      "pole pair count from 0x2003:01, :03 and :04 — not from anything it measures here. Stale "
+      "values there give a wrong constant with no indication that anything went wrong; badly wrong "
+      "ones give a negative result.",
+      "The value is reported, not stored — nothing in the drive's configuration changes. Object "
+      "0x2003:02 is where a torque constant belongs if you want to keep it, but it is stored in "
+      "µNm/A_rms while this reports mNm/A_rms: multiply by 1000 before writing it.",
+      "The rotor turns continuously for the whole run, not by a step or a fraction of a turn, and "
+      "this is the longest-moving of these procedures. The shaft must be free and whatever it "
+      "drives safe to keep moving.",
+      "The brake is released, which this command requires — so anything it was holding is free to "
+      "move. Support the load first.",
+      "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
+      "The bus must be exchanging process data (OP state): the drive's state machine only advances "
+      "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
+  };
+  torqueConstant.movesMotor = true;
+  torqueConstant.requiresEnabled = false;
+  torqueConstant.steps = torqueConstantMeasurementSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(torqueConstant),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+          return runTorqueConstantMeasurementProcedure(device, reporter, std::move(stop));
+        };
+      },
+  });
+
   ProcedureDescriptor firmware;
   firmware.name = std::string(kFirmwareInstallationProcedure);
   firmware.title = "Firmware installation";

@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.70] - 2026-08-12
+
 ### Added
 
 - **The Console now tells you whether a firmware package fits the device before you install it.** Choose a package on a device's Procedures → Firmware installation page and it says, in one line, whether the package was built for that hardware — naming the descriptor the package carries and the ones the device accepts when it was not. It **warns rather than blocks**: a package can legitimately be renamed, the naming specification allows a descriptor nothing can decode, and the installation procedure still writes whatever it is given. The check reads the device's own `.hardware_description` (and, on an Integro, its `.variant`) over FoE and compares full firmware descriptors as whole strings, which is what makes it right for descriptors outside the numeric convention — and what catches the near-miss a comparison of decoded parts would wave through: the same hardware built for a different encryption key.
@@ -30,13 +32,13 @@ the HTTP/WebSocket API may break between any two alphas.
 - **Reading `.hardware_description` or `.variant` on the Files page now decodes it under the raw bytes**, so the two files that describe a device say something at a glance. The same decoded views are used by the Tools pages, and the parsing is the server's, so what you see is what a compatibility check reads.
 - **`apiErrorMessage()` in `@synapticon/motion-master-client`** turns a thrown request failure into the message the server actually sent. Worth having because the shape is not guessable: the generated client throws its own response object with the parsed body inside it, and Motion Master's body is `{"error": "…"}`, so the message sits two levels down and reading one level yields the string `[object Object]`. That is the generated client's shape, so unwrapping it belongs in the package that owns it rather than in every caller that catches a request.
 
-### Fixed
-
-- **Choosing a firmware package in the Console now always updates the package filename beside it.** It previously filled that field only when it was empty, so picking a second file left the first one's name in place — and the name is not cosmetic: it is what the package is cached as. A package could therefore be cached under the name of a different one, so a later re-install by filename alone would fetch the wrong bytes. It also made the new compatibility check report a verdict about the wrong hardware, which is how the bug was found. The picked file's own name is now always used; editing the field afterwards still works, and the check re-runs against whatever it then says.
-
 ### Changed
 
 - **`GET /api/firmware-package-name` now uses the naming specification's own terms**, which fixes a real collision rather than renaming for its own sake. `firmwareId` had been carrying the *whole* descriptor (`8500-04-2332`) while the specification uses that name for the hardware product alone (`8500`), and `firmwareVersion` had been the software version (`v5.6.10`) while the specification uses it for the hardware revision inside the descriptor (`04`). Reading a response therefore required knowing which of two vocabularies it was written in. The fields are now `fullFirmwareDescriptor`, `softwareName`, `softwareVersion` for the filename's parts, and `firmwareId`, `firmwareVersion`, `keyId`, `fieldbusProtocol` — plus `buildDescriptor` — for what the descriptor decodes to. The decoded fields are now strings rather than numbers, so `04` keeps its leading zero (as a number it printed back as `4`, and `8500-4` matches no package ever built) and a non-numeric key id such as `A` survives instead of becoming a failed number. The firmware installation procedure's package step reports `fullFirmwareDescriptor` and `softwareVersion` for the same reason.
+
+### Fixed
+
+- **Choosing a firmware package in the Console now always updates the package filename beside it.** It previously filled that field only when it was empty, so picking a second file left the first one's name in place — and the name is not cosmetic: it is what the package is cached as. A package could therefore be cached under the name of a different one, so a later re-install by filename alone would fetch the wrong bytes. It also made the new compatibility check report a verdict about the wrong hardware, which is how the bug was found. The picked file's own name is now always used; editing the field afterwards still works, and the check re-runs against whatever it then says.
 
 ## [6.0.0-alpha.69] - 2026-08-11
 
@@ -576,7 +578,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.69...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.70...HEAD
+[6.0.0-alpha.70]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.69...v6.0.0-alpha.70
 [6.0.0-alpha.69]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.68...v6.0.0-alpha.69
 [6.0.0-alpha.68]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.67...v6.0.0-alpha.68
 [6.0.0-alpha.67]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.66...v6.0.0-alpha.67

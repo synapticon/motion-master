@@ -284,6 +284,57 @@ std::expected<void, std::string> runHrdStreamingProcedure(Device& device,
                                                           std::stop_token stop,
                                                           const HrdStreamingRequest& request);
 
+/// @brief Procedure name for provoking a firmware error, as it appears in its URL and its snapshot
+///        key.
+inline constexpr std::string_view kTriggerErrorProcedure = "trigger-error";
+
+/// @brief The single step provoking a firmware error reports against.
+inline constexpr std::string_view kTriggerErrorStep = "trigger";
+
+/// @brief Which service to break, and how.
+struct TriggerErrorRequest {
+  somanet::FirmwareService service{somanet::FirmwareService::kDriveControl};
+
+  /// Which error to raise. No default a client can rely on — the value here is only what an unset
+  /// struct holds — because eight of the twelve types stop a service for good, and none of them is
+  /// a reasonable thing to do to a drive by accident.
+  somanet::FirmwareErrorType errorType{somanet::FirmwareErrorType::kResettableFirmwareError};
+};
+
+/// @brief Parses and validates a client's trigger-error request body.
+///
+/// Accepts `{"service": "drive-control", "errorType": "resettable-firmware-error"}`. @c errorType
+/// is required; @c service defaults to drive control.
+std::expected<TriggerErrorRequest, std::string> parseTriggerErrorRequest(
+    const nlohmann::json& body);
+
+/// @brief What provoking a firmware error accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> triggerErrorParameters();
+
+/// @brief The trigger-error procedure's step template — one step, idle.
+std::vector<ProgressStep> triggerErrorSteps();
+
+/// @brief Provokes a firmware error in a control service as a procedure body.
+///
+/// **The only deliberately destructive procedure in the catalogue.** It exists because the firmware
+/// has the command, and because the behaviour around a stopped control service — what the master
+/// sees, what the bus does, what the other devices do — cannot be tested without being able to stop
+/// one on purpose. It is a test instrument, not a commissioning step.
+///
+/// Prepares nothing and restores nothing. What it does depends entirely on the error type, and
+/// @c SomanetDrive::triggerError is where that is set out: seven types do nothing at all, four stop
+/// the addressed service until the drive is power-cycled, and one raises a resettable fault.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; passed into the command.
+/// @param request  Which service, and which error.
+/// @return Void once the command was issued and its outcome established, otherwise why not.
+std::expected<void, std::string> runTriggerErrorProcedure(Device& device,
+                                                          ProgressReporter& reporter,
+                                                          std::stop_token stop,
+                                                          const TriggerErrorRequest& request);
+
 /// @brief Procedure name for configuring a system identification run, as it appears in its URL and
 ///        its snapshot key.
 inline constexpr std::string_view kSystemIdentificationProcedure = "system-identification";

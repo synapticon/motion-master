@@ -1670,6 +1670,130 @@ TEST(RunTorqueConstantMeasurement, AGeneralOsErrorNamesItself) {
   EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
 }
 
+// --- Trigger error (command 16) ------------------------------------------------------------------
+
+TEST(FirmwareErrorEffect, MatchesWhatTheFirmwareActuallyDoes) {
+  // Taken from the firmware's own case bodies, not from the type names — seven of the twelve are
+  // named after an exception it never raises, and the specification marks those "(disabled)".
+  using somanet::effectOf;
+  using somanet::FirmwareErrorEffect;
+  using somanet::FirmwareErrorType;
+  for (const auto type : {FirmwareErrorType::kLinkError, FirmwareErrorType::kIllegalPc,
+                          FirmwareErrorType::kIllegalInstruction,
+                          FirmwareErrorType::kIllegalResource, FirmwareErrorType::kIllegalPs,
+                          FirmwareErrorType::kResourceDependency, FirmwareErrorType::kKcall}) {
+    EXPECT_EQ(effectOf(type), FirmwareErrorEffect::kNotImplemented) << somanet::toString(type);
+  }
+  for (const auto type : {FirmwareErrorType::kLoadStore, FirmwareErrorType::kArithmetic,
+                          FirmwareErrorType::kEcall, FirmwareErrorType::kEndlessLoop}) {
+    EXPECT_EQ(effectOf(type), FirmwareErrorEffect::kStopsService) << somanet::toString(type);
+  }
+  EXPECT_EQ(effectOf(FirmwareErrorType::kResettableFirmwareError),
+            FirmwareErrorEffect::kRaisesResettableError);
+}
+
+TEST(ParseFirmwareErrorType, RoundTripsEveryType) {
+  for (const auto type : somanet::kFirmwareErrorTypes) {
+    EXPECT_EQ(somanet::parseFirmwareErrorType(somanet::toString(type)), type)
+        << somanet::toString(type);
+  }
+  EXPECT_FALSE(somanet::parseFirmwareErrorType("").has_value());
+  EXPECT_FALSE(somanet::parseFirmwareErrorType("ET_ECALL").has_value());
+}
+
+TEST(TriggerError, PutsTheServiceAndTypeInBytesOneAndTwo) {
+  // The specification's example: ECALL on motion control is bytes 16, 1, 7.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{2, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = drive->triggerError(somanet::FirmwareService::kMotionControl,
+                                    somanet::FirmwareErrorType::kEcall, {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  ASSERT_EQ(written.size(), 8u);
+  EXPECT_EQ(written[0], 16);
+  EXPECT_EQ(written[1], 1);
+  EXPECT_EQ(written[2], 7);
+}
+
+TEST(TriggerError, AServiceThatAnswersDidNotStop) {
+  // For a type meant to stop the service, an answer is the interesting negative result: the drive
+  // is still running, so the error was not triggered.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{2, 0, 0, 0, 0, 0, 0, 0}};
+  auto result =
+      drive->triggerError(somanet::FirmwareService::kDriveControl,
+                          somanet::FirmwareErrorType::kEndlessLoop, {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_FALSE(result->serviceStopped);
+  EXPECT_NE(result->describe().find("did not stop it"), std::string::npos) << result->describe();
+}
+
+TEST(TriggerError, NoAnswerIsTheIntendedOutcomeForAStoppingType) {
+  // A service that executes an unaligned store never answers again. Reporting that timeout as a
+  // failure would call the command's success a fault — which is the whole reason this command
+  // needs a result type rather than a bare expected<void>.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{255, 0, 0, 0, 0, 0, 0, 0}};  // "in progress", for ever
+  auto result = drive->triggerError(somanet::FirmwareService::kDriveControl,
+                                    somanet::FirmwareErrorType::kLoadStore,
+                                    {.timeout = std::chrono::milliseconds(20),
+                                     .pollInterval = kNoDelay,
+                                     .abortTimeout = std::chrono::milliseconds(20)});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_TRUE(result->serviceStopped);
+  EXPECT_NE(result->describe().find("needs a power cycle"), std::string::npos)
+      << result->describe();
+}
+
+TEST(TriggerError, ANotImplementedTypeSaysNothingHappened) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{2, 0, 0, 0, 0, 0, 0, 0}};
+  auto result =
+      drive->triggerError(somanet::FirmwareService::kDriveControl,
+                          somanet::FirmwareErrorType::kIllegalPc, {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_NE(result->describe().find("not implemented"), std::string::npos) << result->describe();
+}
+
+TEST(TriggerError, TheResettableTypeIsReportedTheSameFromEitherService) {
+  // The two services disagree about the status byte for this type — motion control answers success,
+  // drive control answers failure — because of where each sets its default, and the error is raised
+  // either way. So the status must not be the verdict.
+  for (const auto service :
+       {somanet::FirmwareService::kDriveControl, somanet::FirmwareService::kMotionControl}) {
+    for (const uint8_t status : {uint8_t{0}, uint8_t{2}}) {
+      OsCommandFakeDriver driver;
+      Device device = makeOsCommandDevice(driver);
+      auto drive = createSomanetDrive(device);
+      ASSERT_TRUE(drive.has_value()) << drive.error();
+
+      driver.responses = {{status, 0, 0, 0, 0, 0, 0, 0}};
+      auto result =
+          drive->triggerError(service, somanet::FirmwareErrorType::kResettableFirmwareError,
+                              {.pollInterval = kNoDelay});
+      ASSERT_TRUE(result.has_value()) << result.error();
+      EXPECT_NE(result->describe().find("resettable DiagErr"), std::string::npos)
+          << result->describe();
+    }
+  }
+}
+
 // --- System identification (command 15) ----------------------------------------------------------
 
 TEST(SetSystemIdentificationParameter, PutsTheIndexInByteOneAndTheValueBigEndian) {

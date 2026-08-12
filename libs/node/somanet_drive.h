@@ -213,6 +213,110 @@ constexpr std::string_view toString(FirmwareService service) {
 ///        @c toString. Returns @c std::nullopt for any other token.
 std::optional<FirmwareService> parseFirmwareService(std::string_view token);
 
+/// @brief The errors OS command 16 can provoke in a firmware service. The enum value @b is the
+///        error-type byte the command carries.
+///
+/// **A test and diagnostic tool, and most of it is one-way.** The XMOS exception types are raised
+/// by executing genuinely faulty code — an unaligned store, a divide by zero, an out-of-bounds
+/// index — and the service that executes it does not come back. Only @c kResettableFirmwareError
+/// leaves a drive you can carry on using.
+enum class FirmwareErrorType : uint8_t {
+  kLinkError = 0,           ///< ET_LINK_ERROR. Not implemented by the firmware.
+  kIllegalPc = 1,           ///< ET_ILLEGAL_PC. Not implemented.
+  kIllegalInstruction = 2,  ///< ET_ILLEGAL_INSTRUCTION. Not implemented.
+  kIllegalResource = 3,     ///< ET_ILLEGAL_RESOURCE. Not implemented.
+  kLoadStore = 4,           ///< ET_LOAD_STORE, by an unaligned 64-bit store. Stops the service.
+  kIllegalPs = 5,           ///< ET_ILLEGAL_PS. Not implemented.
+  kArithmetic = 6,          ///< ET_ARITHMETIC, by dividing by zero. Stops the service.
+  kEcall = 7,               ///< ET_ECALL, by an out-of-bounds array index. Stops the service.
+  kResourceDependency = 8,  ///< ET_RESOURCE_DEP. Not implemented.
+  kKcall = 9,               ///< ET_KCALL. Not implemented.
+  kEndlessLoop = 10,        ///< Spins forever in the service loop. Stops the service.
+  /// Reports a resettable @c DiagErr with the drive's configured quick-stop reaction. **The only
+  /// type that leaves the drive usable** — it faults, and a fault reset clears it.
+  kResettableFirmwareError = 11,
+};
+
+/// @brief What a firmware error type actually does on this firmware — which is not what every one
+///        of them is named after.
+enum class FirmwareErrorEffect : uint8_t {
+  /// The firmware's case body is empty: the command is accepted, nothing happens, and the drive
+  /// answers that it failed. Seven of the twelve are like this, and the specification marks them
+  /// "(disabled)".
+  kNotImplemented,
+  /// The service executes faulty code or hangs, and stops answering for good. **Only a power cycle
+  /// brings it back**; the drive does not fault, it stops participating.
+  kStopsService,
+  /// A resettable error is reported and the drive reacts as 0x605A says. Recoverable.
+  kRaisesResettableError,
+};
+
+/// @brief What @p type does, from the firmware's own case bodies rather than from its name.
+constexpr FirmwareErrorEffect effectOf(FirmwareErrorType type) {
+  switch (type) {
+    case FirmwareErrorType::kLinkError:
+    case FirmwareErrorType::kIllegalPc:
+    case FirmwareErrorType::kIllegalInstruction:
+    case FirmwareErrorType::kIllegalResource:
+    case FirmwareErrorType::kIllegalPs:
+    case FirmwareErrorType::kResourceDependency:
+    case FirmwareErrorType::kKcall:
+      return FirmwareErrorEffect::kNotImplemented;
+    case FirmwareErrorType::kLoadStore:
+    case FirmwareErrorType::kArithmetic:
+    case FirmwareErrorType::kEcall:
+    case FirmwareErrorType::kEndlessLoop:
+      return FirmwareErrorEffect::kStopsService;
+    case FirmwareErrorType::kResettableFirmwareError:
+      return FirmwareErrorEffect::kRaisesResettableError;
+  }
+  return FirmwareErrorEffect::kNotImplemented;
+}
+
+/// @brief Name of a firmware error type (for logging / JSON). Never returns @c nullptr.
+constexpr std::string_view toString(FirmwareErrorType type) {
+  switch (type) {
+    case FirmwareErrorType::kLinkError:
+      return "link-error";
+    case FirmwareErrorType::kIllegalPc:
+      return "illegal-pc";
+    case FirmwareErrorType::kIllegalInstruction:
+      return "illegal-instruction";
+    case FirmwareErrorType::kIllegalResource:
+      return "illegal-resource";
+    case FirmwareErrorType::kLoadStore:
+      return "load-store";
+    case FirmwareErrorType::kIllegalPs:
+      return "illegal-ps";
+    case FirmwareErrorType::kArithmetic:
+      return "arithmetic";
+    case FirmwareErrorType::kEcall:
+      return "ecall";
+    case FirmwareErrorType::kResourceDependency:
+      return "resource-dependency";
+    case FirmwareErrorType::kKcall:
+      return "kcall";
+    case FirmwareErrorType::kEndlessLoop:
+      return "endless-loop";
+    case FirmwareErrorType::kResettableFirmwareError:
+      return "resettable-firmware-error";
+  }
+  return "unknown";
+}
+
+/// @brief Parses a firmware error type token — the inverse of @c toString.
+std::optional<FirmwareErrorType> parseFirmwareErrorType(std::string_view token);
+
+/// @brief Every firmware error type, ascending.
+inline constexpr FirmwareErrorType kFirmwareErrorTypes[] = {
+    FirmwareErrorType::kLinkError,          FirmwareErrorType::kIllegalPc,
+    FirmwareErrorType::kIllegalInstruction, FirmwareErrorType::kIllegalResource,
+    FirmwareErrorType::kLoadStore,          FirmwareErrorType::kIllegalPs,
+    FirmwareErrorType::kArithmetic,         FirmwareErrorType::kEcall,
+    FirmwareErrorType::kResourceDependency, FirmwareErrorType::kKcall,
+    FirmwareErrorType::kEndlessLoop,        FirmwareErrorType::kResettableFirmwareError,
+};
+
 /// @brief The settings of the system-identification chirp (OS command 15). The enum value @b is
 ///        the parameter index the command carries in byte 1.
 ///
@@ -546,6 +650,7 @@ enum class OsCommandId : uint8_t {
                                       ///< no motion.
   kIgnoreBissStatusBits = 14,         ///< Suppresses a BiSS encoder's own error and warning bits.
   kSystemIdentification = 15,         ///< Configures and triggers the system-identification chirp.
+  kTriggerError = 16,                 ///< Provokes a firmware error or exception. Test tool only.
 };
 
 /// @brief The faults open phase detection (command 6) reports, as its command-specific OS error
@@ -1095,6 +1200,21 @@ struct SkippedCyclesResult {
 };
 void to_json(nlohmann::json& j, const SkippedCyclesResult& result);
 
+/// @brief What one trigger-error run did (command 16).
+struct TriggerErrorResult {
+  somanet::FirmwareService service{somanet::FirmwareService::kDriveControl};  ///< Which service.
+  somanet::FirmwareErrorType type{somanet::FirmwareErrorType::kLinkError};    ///< What was asked.
+  somanet::FirmwareErrorEffect effect{somanet::FirmwareErrorEffect::kNotImplemented};
+
+  /// Whether the service stopped answering, which for @c kStopsService is the *intended* outcome
+  /// and for anything else means something went wrong beyond what was asked for.
+  bool serviceStopped = false;
+
+  /// @brief One line describing what happened, ready to put in front of a user.
+  std::string describe() const;
+};
+void to_json(nlohmann::json& j, const TriggerErrorResult& result);
+
 /// @brief Borrowed view of a SOMANET drive — a CiA402 drive plus Synapticon-specific
 ///        object-dictionary access (encoder/motor configuration, custom OS commands, etc.).
 ///
@@ -1626,6 +1746,40 @@ class SomanetDrive : public Cia402Drive {
   std::expected<TorqueConstantResult, std::string> runTorqueConstantMeasurement(
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(60),
                                        .pollInterval = std::chrono::milliseconds(100)});
+
+  /// @brief Provokes a firmware error or exception in a control service (OS command 16).
+  ///
+  /// **A destructive test tool.** Eight of the twelve error types do something a drive does not
+  /// recover from on its own — see @c somanet::FirmwareErrorEffect — and this issues whichever it
+  /// is asked for. It exists because the firmware does, and because reproducing a stopped service
+  /// on purpose is how the behaviour around one gets tested.
+  ///
+  /// What comes back depends on the type, and the result says which happened rather than guessing:
+  ///   - @c kNotImplemented — the firmware's case body is empty. The drive answers that the command
+  ///     failed and nothing has happened. Seven of the twelve.
+  ///   - @c kStopsService — the service executes faulty code or hangs and never answers again, so
+  ///     **the command timing out is the intended outcome**, reported as such rather than as a
+  ///     failure. The drive keeps its other services; the one addressed is gone until a power
+  ///     cycle. A drive that *does* answer means the error was not triggered.
+  ///   - @c kRaisesResettableError — a @c DiagErr is reported and the drive reacts per 0x605A. It
+  ///     faults and a fault reset clears it.
+  ///
+  /// **The two services do not answer this alike, and it is a firmware defect rather than a
+  /// design.** Motion control sets its failure status before the switch, so the resettable type
+  /// overwrites it and answers success; drive control sets the same status *after* the switch, so
+  /// it overwrites the success the resettable type just set and answers failure. The error is
+  /// raised either way — only the status byte differs — so this reports on what the drive did, not
+  /// on which byte came back.
+  ///
+  /// @param service Which control loop to provoke.
+  /// @param type    Which error to raise.
+  /// @param config  Timing and cancellation. For a @c kStopsService type the timeout is how long to
+  ///                wait before concluding the service is gone, so it should be short.
+  /// @return What happened, or why the command could not be issued at all.
+  std::expected<TriggerErrorResult, std::string> triggerError(
+      somanet::FirmwareService service, somanet::FirmwareErrorType type,
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(3),
+                                       .pollInterval = std::chrono::milliseconds(20)});
 
   /// @brief Reads a control loop's skipped-cycle counter (OS command 13).
   ///

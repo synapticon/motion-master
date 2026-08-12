@@ -390,6 +390,15 @@ std::optional<SystemIdentificationStart> parseSystemIdentificationStart(std::str
   return std::nullopt;
 }
 
+std::optional<FirmwareErrorType> parseFirmwareErrorType(std::string_view token) {
+  for (const auto type : kFirmwareErrorTypes) {
+    if (token == toString(type)) {
+      return type;
+    }
+  }
+  return std::nullopt;
+}
+
 std::optional<FirmwareService> parseFirmwareService(std::string_view token) {
   if (token == toString(FirmwareService::kDriveControl)) {
     return FirmwareService::kDriveControl;
@@ -1387,6 +1396,72 @@ std::expected<void, std::string> SomanetDrive::setIgnoreBissStatusBits(
   }
   // Status 0: completed with no reply, which is all this command ever answers on success.
   return {};
+}
+
+std::string TriggerErrorResult::describe() const {
+  switch (effect) {
+    case somanet::FirmwareErrorEffect::kNotImplemented:
+      return std::format(
+          "error type {} is not implemented in this firmware, so nothing was triggered in {}",
+          somanet::toString(type), somanet::toString(service));
+    case somanet::FirmwareErrorEffect::kStopsService:
+      return serviceStopped
+                 ? std::format(
+                       "{} stopped answering, as error type {} intends — the drive needs a power "
+                       "cycle to bring it back",
+                       somanet::toString(service), somanet::toString(type))
+                 : std::format("{} answered, so error type {} did not stop it as it was meant to",
+                               somanet::toString(service), somanet::toString(type));
+    case somanet::FirmwareErrorEffect::kRaisesResettableError:
+      return std::format(
+          "{} reported a resettable DiagErr; the drive reacted per 0x605A and a "
+          "fault reset clears it",
+          somanet::toString(service));
+  }
+  return "unknown outcome";
+}
+
+void to_json(nlohmann::json& j, const TriggerErrorResult& result) {
+  j = nlohmann::json{{"service", somanet::toString(result.service)},
+                     {"errorType", somanet::toString(result.type)},
+                     {"serviceStopped", result.serviceStopped},
+                     {"description", result.describe()}};
+}
+
+// Byte layout of the trigger-error request (command 16).
+constexpr size_t kTriggerErrorServiceByte = 1;
+constexpr size_t kTriggerErrorTypeByte = 2;
+
+std::expected<TriggerErrorResult, std::string> SomanetDrive::triggerError(
+    somanet::FirmwareService service, somanet::FirmwareErrorType type,
+    const OsCommandConfig& config) {
+  const auto effect = somanet::effectOf(type);
+
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(somanet::OsCommandId::kTriggerError);
+  command[kTriggerErrorServiceByte] = static_cast<uint8_t>(service);
+  command[kTriggerErrorTypeByte] = static_cast<uint8_t>(type);
+
+  TriggerErrorResult result{.service = service, .type = type, .effect = effect};
+
+  auto response = runOsCommand(command, config);
+  if (!response) {
+    // A service that executes an unaligned store never answers again, so no answer is exactly what
+    // was asked for. Reporting the timeout as a failure would call the command's success a fault.
+    if (effect == somanet::FirmwareErrorEffect::kStopsService) {
+      result.serviceStopped = true;
+      return result;
+    }
+    return std::unexpected(response.error());
+  }
+
+  // Answering at all means the service is still running. For the types meant to stop it, that is
+  // the interesting negative result; for the others it is simply what happens.
+  //
+  // The status byte is deliberately not read as the verdict: for the resettable error the two
+  // services disagree about it — motion control answers success, drive control answers failure for
+  // the identical outcome — because of where each sets its default. Both raise the error.
+  return result;
 }
 
 // Byte layout of the system identification request (command 15): a parameter index, then its value

@@ -61,6 +61,11 @@ constexpr auto kSkippedCyclesTimeout = std::chrono::seconds(30);
 // 253 can be decoded into what actually went wrong.
 constexpr auto kBissServiceTimeout = std::chrono::seconds(30);
 
+// How long to wait before concluding a service that was told to stop has stopped. Short on purpose:
+// for the four types that stop a service, no answer is the intended outcome, so this is the cost of
+// establishing it rather than a ceiling on real work. The types that do answer answer at once.
+constexpr auto kTriggerErrorTimeout = std::chrono::seconds(3);
+
 // What HRD streaming is sized for. Configuring is dominated by deleting the previous recording's
 // files, which the firmware specification allows around 5 s for in the worst case. Recording
 // occupies the whole requested duration, so its ceiling is that duration plus this margin for the
@@ -1476,6 +1481,107 @@ std::expected<uint32_t, std::string> readBoundedUint32(const nlohmann::json& bod
 }
 
 }  // namespace
+
+std::expected<TriggerErrorRequest, std::string> parseTriggerErrorRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  TriggerErrorRequest request;
+
+  if (auto service = body.find("service"); service != body.end() && !service->is_null()) {
+    if (!service->is_string()) {
+      return std::unexpected("'service' must be a string");
+    }
+    auto parsed = somanet::parseFirmwareService(service->get<std::string>());
+    if (!parsed) {
+      return std::unexpected(std::format(
+          "'service' must be {} or {}", somanet::toString(somanet::FirmwareService::kDriveControl),
+          somanet::toString(somanet::FirmwareService::kMotionControl)));
+    }
+    request.service = *parsed;
+  }
+
+  auto errorType = body.find("errorType");
+  if (errorType == body.end() || errorType->is_null()) {
+    return std::unexpected("'errorType' is required");
+  }
+  if (!errorType->is_string()) {
+    return std::unexpected("'errorType' must be a string");
+  }
+  auto parsed = somanet::parseFirmwareErrorType(errorType->get<std::string>());
+  if (!parsed) {
+    return std::unexpected(
+        std::format("'errorType' is not one this firmware defines; use one of {}",
+                    somanet::toString(somanet::FirmwareErrorType::kLoadStore)));
+  }
+  request.errorType = *parsed;
+  return request;
+}
+
+std::vector<ProcedureParameter> triggerErrorParameters() {
+  const TriggerErrorRequest defaults;
+  std::vector<ParameterOption> types;
+  for (const auto type : somanet::kFirmwareErrorTypes) {
+    // The title carries what the type actually does, because the name does not: seven of them are
+    // named after an exception the firmware never raises.
+    std::string title(somanet::toString(type));
+    switch (somanet::effectOf(type)) {
+      case somanet::FirmwareErrorEffect::kNotImplemented:
+        title += " — not implemented, does nothing";
+        break;
+      case somanet::FirmwareErrorEffect::kStopsService:
+        title += " — STOPS the service until power cycle";
+        break;
+      case somanet::FirmwareErrorEffect::kRaisesResettableError:
+        title += " — resettable fault";
+        break;
+    }
+    types.push_back(
+        ParameterOption{.value = std::string(somanet::toString(type)), .title = std::move(title)});
+  }
+  return {
+      enumParameter(
+          "service", "Firmware service", "Which control loop to provoke the error in.",
+          std::string(somanet::toString(defaults.service)),
+          {
+              ParameterOption{
+                  .value = std::string(somanet::toString(somanet::FirmwareService::kDriveControl)),
+                  .title = "Drive control"},
+              ParameterOption{
+                  .value = std::string(somanet::toString(somanet::FirmwareService::kMotionControl)),
+                  .title = "Motion control"},
+          }),
+      enumParameter("errorType", "Error type",
+                    "Which error to raise. Required, and chosen with care: four of these stop the "
+                    "service for good, seven do nothing at all, and one is recoverable.",
+                    nullptr, std::move(types)),
+  };
+}
+
+std::vector<ProgressStep> triggerErrorSteps() { return stepsFrom({kTriggerErrorStep}); }
+
+std::expected<void, std::string> runTriggerErrorProcedure(Device& device,
+                                                          ProgressReporter& reporter,
+                                                          std::stop_token stop,
+                                                          const TriggerErrorRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+
+  reporter.start(kTriggerErrorStep);
+  auto result = drive->triggerError(request.service, request.errorType,
+                                    {.timeout = kTriggerErrorTimeout,
+                                     .pollInterval = kEncoderRegisterPollInterval,
+                                     .stop = std::move(stop)});
+  if (!result) {
+    reporter.fail(kTriggerErrorStep, result.error());
+    return std::unexpected(result.error());
+  }
+  reporter.succeed(kTriggerErrorStep, *result);
+  return {};
+}
 
 std::expected<SystemIdentificationRequest, std::string> parseSystemIdentificationRequest(
     const nlohmann::json& body) {

@@ -777,6 +777,49 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor triggerError;
+  triggerError.name = std::string(kTriggerErrorProcedure);
+  triggerError.title = "Trigger error";
+  triggerError.description =
+      "Provokes a firmware error or exception in one of the drive's control services, for testing "
+      "and diagnostics. It exists because the firmware has the command, and because the behaviour "
+      "around a stopped control service cannot be tested without being able to stop one on "
+      "purpose. This is a test instrument, not a commissioning step.";
+  triggerError.caveats = {
+      "Four of the twelve error types stop the addressed service for good — load-store, "
+      "arithmetic, ecall and endless-loop. The drive does not fault, it stops participating, and "
+      "only a power cycle brings it back. Anything the drive was moving is uncontrolled from that "
+      "moment.",
+      "Seven types are named after exceptions this firmware never raises: the case bodies are "
+      "empty, so the command is accepted and nothing at all happens. The list marks which.",
+      "Only resettable-firmware-error leaves a usable drive: it reports a DiagErr and the drive "
+      "reacts as its quick stop option code (0x605A) says, which a fault reset then clears.",
+      "For the types that stop a service, the command never being answered is the intended "
+      "outcome, and this reports it as one after a short wait. A drive that answers means the "
+      "error was not triggered.",
+  };
+  triggerError.parameters = triggerErrorParameters();
+  // The service it stops may be the one driving the motor, so whatever was moving stops being
+  // controlled. That is not the motor being commanded to move, but it is not "moves nothing".
+  triggerError.movesMotor = true;
+  triggerError.requiresEnabled = false;
+  triggerError.steps = triggerErrorSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(triggerError),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
+        auto request = parseTriggerErrorRequest(body);
+        if (!request) {
+          return std::unexpected(request.error());
+        }
+        return
+            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+              return runTriggerErrorProcedure(device, reporter, std::move(stop), request);
+            };
+      },
+  });
+
   // Served in name order, whatever order the table happens to be written in. The rows above are
   // authored in this same order, so the two normally agree — but the sort is what *guarantees* it,
   // and it is what keeps a row appended in the wrong place from moving a procedure in the sidebar.

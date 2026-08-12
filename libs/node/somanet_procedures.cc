@@ -46,11 +46,12 @@ constexpr auto kMaxPollInterval = std::chrono::seconds(1);
 constexpr auto kEncoderRegisterTimeout = std::chrono::seconds(5);
 constexpr auto kEncoderRegisterPollInterval = std::chrono::milliseconds(20);
 
-// Reading a counter takes one control cycle, so the ceiling is not about how long the work takes:
-// it is deliberately longer than the drive's own ~5 s command timeout, so a firmware that has no
-// such service running lets the drive answer "timeout" — which names the real problem — rather than
-// being aborted from here first with a message about this master giving up.
-constexpr auto kSkippedCyclesTimeout = std::chrono::seconds(10);
+// Reading a counter takes one control cycle — a successful run finishes in about 20 ms — so this
+// ceiling is not about how long the work takes. It clears the drive's own ~20 s reception timeout
+// (measured at 20.04 s on an Integro), so a firmware that does not run the addressed service is
+// allowed to answer for itself: OS error 253, which this decodes as "no such service running".
+// Anything shorter aborts first and reports that this master gave up, which is true and useless.
+constexpr auto kSkippedCyclesTimeout = std::chrono::seconds(30);
 
 // What HRD streaming is sized for. Configuring is dominated by deleting the previous recording's
 // files, which the firmware specification allows around 5 s for in the worst case. Recording

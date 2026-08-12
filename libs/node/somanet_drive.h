@@ -667,9 +667,14 @@ enum class OsCommandStatus : uint8_t {
 ///        not here (open phase detection's 0 is "open terminal A", phase resistance's 0 is
 ///        "current amplitude error", ...).
 enum class OsCommandError : uint8_t {
-  kNotAllowed = 251,   ///< Preconditions not met (wrong mode of operation, say).
-  kAborted = 252,      ///< The abort the master requested via 0x1024 was carried out.
-  kTimeout = 253,      ///< No downstream service acknowledged the command (or the abort) in 5 s.
+  kNotAllowed = 251,  ///< Preconditions not met (wrong mode of operation, say).
+  kAborted = 252,     ///< The abort the master requested via 0x1024 was carried out.
+  /// No downstream service acknowledged the command (or the abort) within the drive's own
+  /// reception timeout — 20000 drive-control cycles, so **about 20 seconds** at a 1 ms loop, and it
+  /// scales with that loop's period. Measured at 20.04 s on a SOMANET Integro with the master
+  /// waiting 60 s. It means "no service recognised this", not "the drive was slow", so it is also
+  /// what a command addressed at a service the firmware does not run comes back as.
+  kTimeout = 253,
   kUnsupported = 254,  ///< The command ID does not exist on this drive.
   kReserved = 255,     ///< Reserved for future expansion of the feature.
 };
@@ -702,11 +707,16 @@ struct OsCommandResponse {
 /// @brief Timing and cancellation for @c SomanetDrive::runOsCommand.
 ///
 /// @c timeout is a ceiling on the whole command, not a liveness check — the drive fails a command
-/// no downstream service acknowledges within 5 s on its own — so size it for the command being
-/// run (milliseconds for a register read, tens of seconds for a measurement). Hitting it, or a
-/// stop request on @c stop, makes the master abort the running command; @c abortTimeout then
-/// bounds how long the drive is given to report that abort (its own internal abort path is
-/// bounded by 5 s).
+/// no downstream service acknowledges on its own, after about 20 s (see @c
+/// OsCommandError::kTimeout) — so size it for the command being run (milliseconds for a register
+/// read, tens of seconds for a measurement). Hitting it, or a stop request on @c stop, makes the
+/// master abort the running command; @c abortTimeout then bounds how long the drive is given to
+/// report that abort.
+///
+/// **A ceiling below the drive's own is a decision, not a safety margin**: it replaces whatever the
+/// drive was going to say with "this master gave up". For a command whose failure mode is a service
+/// that will never answer, waiting past 20 s is what turns a bare timeout into the drive's own
+/// verdict.
 struct OsCommandConfig {
   std::chrono::milliseconds timeout{1000};  ///< Ceiling on the whole command.
 
@@ -1537,13 +1547,15 @@ class SomanetDrive : public Cia402Drive {
   /// it moves nothing — it is a pure read, safe to run on a drive that is enabled and moving.
   ///
   /// @param service Which control loop to ask.
-  /// @param config  Timing and cancellation. The default timeout is deliberately longer than the
-  ///                drive's own ~5 s command timeout, so a firmware missing the addressed service
-  ///                answers "timeout" itself instead of being aborted from here first.
+  /// @param config  Timing and cancellation. The default timeout clears the drive's own ~20 s
+  ///                reception timeout (measured; see @c OsCommandError::kTimeout), so a firmware
+  ///                that does not run the addressed service answers for itself instead of being
+  ///                aborted from here first — which is the difference between "no such service" and
+  ///                a bare "this master gave up". The read itself takes one control cycle.
   /// @return The counter and the service it came from, or why it could not be read.
   std::expected<SkippedCyclesResult, std::string> readSkippedCycles(
       somanet::FirmwareService service,
-      const OsCommandConfig& config = {.timeout = std::chrono::seconds(10),
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(30),
                                        .pollInterval = std::chrono::milliseconds(20)});
 
   /// @brief Reads the requested operation mode (0x6060) as its raw value.

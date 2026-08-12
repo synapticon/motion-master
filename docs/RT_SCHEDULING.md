@@ -93,10 +93,10 @@ out, the next access triggers a **page fault** — potentially milliseconds of d
 which blows the cycle deadline and injects jitter. Fatal for a hard-RT EtherCAT loop.
 `mlockall` guarantees every page stays resident, so no page fault ever stalls the RT thread.
 
-This is also why the recorder ring (tens of MB per drive — ~128 B/cycle × the ring depth in
-cycles; ~38 MB for one drive at 300000 cycles (≈ 5 min at 1 ms) — `ProcessDataRing`) is
-pre-allocated **and** `mlock`'d at `configureProcessData`, off the RT path — so the RT loop
-never faults on it.
+This is also why the recorder ring (`ProcessDataRing`) is pre-allocated **and** `mlock`'d at
+`configureProcessData`, off the RT path, so the RT loop never faults on it. It is large: roughly
+128 B per cycle for a single drive, so the default depth of 300 000 cycles is ~38 MB — about
+5 minutes of history at a 1 ms period.
 
 ## Capabilities & limits
 

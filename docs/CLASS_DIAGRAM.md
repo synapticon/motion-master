@@ -291,15 +291,14 @@ points; the third is a stateless view chain:
 
 `SpoeFieldbusDriver` (SPoE) is a further `FieldbusDriver` implementation noted in the design docs.
 
-**The drive-profile chain is *not* `Device` inheritance.** `ProfileDevice` and its subclasses
-do **not** derive from `Device` and are not owned by `DeviceManager`; each *borrows* a `Device&`
-and carries no state beyond that reference (the drive's state lives in its statusword on the
-wire). A profile view is a thin, here-and-now view over a device's object dictionary —
-constructed for a single operation (a stack local in an HTTP handler, or a member scoped to a
-`CyclicTask`) and dropped. Because they are never stored base-typed (no `vector<ProfileDevice>`,
-no polymorphic container), `SomanetDrive → Cia402Drive → ProfileDevice` is a slicing-free is-a
-chain. Validate-then-bind via `createCia402Drive` / `createSomanetDrive`. See `NEXTGEN.md` for
-the rationale and the Somanet free-function design.
+**The drive-profile chain is *not* `Device` inheritance.** `ProfileDevice` and its subclasses do
+**not** derive from `Device` and are not owned by `DeviceManager`; each *borrows* a `Device&` and
+carries no state beyond that reference — the drive's state lives in its statusword on the wire. A
+profile view is a thin, here-and-now view over a device's object dictionary, constructed for a
+single operation (a stack local in an HTTP handler, or a member scoped to a `CyclicTask`) and
+dropped. Because they are never stored base-typed, `SomanetDrive → Cia402Drive → ProfileDevice` is a
+slicing-free is-a chain. Validate-then-bind via `createCia402Drive` / `createSomanetDrive`. See
+`NEXTGEN.md` for the rationale and the Somanet free-function design.
 
 ## Extension points
 
@@ -329,12 +328,10 @@ header-only) is the **only** layer that depends on uWebSockets besides the app i
 `libs/example` (`mm::example`, `GET /api/example/devices`) is the copy-me starter: HTTP-agnostic,
 unit-testable domain logic in `example_logic.{h,cc}` (`summarizeDevices`), thin
 request-parse/format glue in `example_routes.cc`. It is the server-side analogue of the
-`web/apps/example` PWA. A plug-in's `registerRoutes` runs once on the HTTP loop thread, and its
-handlers run on that same thread for each request (thread 2 — see [THREADS.md](THREADS.md)). The
-example plug-in stops there, but a plug-in is ordinary C++ holding `DeviceManager&` — it **may**
-spawn its own background `std::jthread` for off-RT work (a long-running procedure, a poller),
-exactly as `MonitoringManager` does. Such a thread is bound by the same rules as any non-RT thread:
-serialize all bus access through `FieldbusDriver::controlPlaneMutex_` and never touch the RT path.
+`web/apps/example` PWA. A plug-in is ordinary C++ holding `DeviceManager&`, so it **may** spawn its
+own background `std::jthread` for off-RT work (a long-running procedure, a poller), exactly as
+`MonitoringManager` does — bound by the same rules as any non-RT thread: serialize all bus access
+through `FieldbusDriver::controlPlaneMutex_` and never touch the RT path.
 
 ### Cyclic tasks, Tier 3 (`mm::core::CyclicTask`)
 
@@ -356,14 +353,16 @@ The whole surface is four rules, each visible in that `execute`:
    SDO in the background — so whether a signal is PDO-mapped stays a commissioning decision and does
    not change how the control program is written.
 
-Two consequences worth knowing. **Driving the CiA402 state machine from a cycle is the right place
-for it:** mode of operation, controlword and statusword are all exchanged every cycle, so the climb
-to Operation Enabled is one write per cycle with the wire doing the waiting, where an off-RT caller
-must sleep and poll. What stays off the RT thread is the EtherCAT **AL** state (INIT / PRE-OP /
-SAFE-OP / OP) — seconds of mailbox traffic, done through the HTTP API. And **an object that is not
-output-mapped is stored but never transmitted**: `setValue` writes the cell and returns, so reaching
-such an object needs `writeParameter` off the RT thread, just as reading a fresh SDO-only value needs
-`MonitoringManager::keepFresh`.
+Two consequences worth knowing:
+
+- **Driving the CiA402 state machine from a cycle is the right place for it.** Mode of operation,
+  controlword and statusword are all exchanged every cycle, so the climb to Operation Enabled is one
+  write per cycle with the wire doing the waiting, where an off-RT caller must sleep and poll. What
+  stays off the RT thread is the EtherCAT **AL** state (INIT / PRE-OP / SAFE-OP / OP) — seconds of
+  mailbox traffic, done through the HTTP API.
+- **An object that is not output-mapped is stored but never transmitted.** `setValue` writes the cell
+  and returns, so reaching such an object needs `writeParameter` off the RT thread, just as reading a
+  fresh SDO-only value needs `MonitoringManager::keepFresh`.
 
 ## Key value types
 
@@ -387,9 +386,8 @@ bytes — the same encoding an SDO transfer carries — in one of two fields cho
 `isScalarDataType(dataType)` picks the field. `currentValue()` reconstructs the variant on demand
 with one switch on `dataType` (off-RT — it may allocate); `std::visit` still dispatches on the
 result. The cell is a plain `uint64_t` reached through `std::atomic_ref` rather than an
-`std::atomic<uint64_t>` member so `DeviceParameter` stays copyable and movable — the lock-freedom
-goes on the *access*, and two `static_assert`s pin it (always-lock-free, and `atomic_ref`'s
-alignment requirement).
+`std::atomic<uint64_t>` member so `DeviceParameter` stays copyable and movable — see
+[LOCKING.md](LOCKING.md#the-parameter-cell) for that contract.
 
 `ObjectAddress<T>` carries an index, a subindex and the C++ type the object holds, so the three
 things easiest to get wrong travel together. Every `Device` accessor pair has an overload taking

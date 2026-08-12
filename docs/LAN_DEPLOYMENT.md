@@ -202,8 +202,8 @@ is no click-through for a cross-origin request.
 | Nothing to do. The startup self-heal fetches a fresh certificate when the current one is missing, expired, or within 7 days of expiring, and **Refresh certificate** on the Connection page does it on demand. | Copy `cert.pem` and `key.pem` next to the binary before the current one lapses, from `https://github.com/synapticon/motion-master/releases/download/tls-cert/`, and restart. |
 
 There is no way around the periodic copy for an air-gapped machine, and it is not worth trying:
-**no certificate authority can issue a long-lived certificate.** Public maximums are 398 days today
-and fall to 200 days in March 2026, 100 in 2027 and 47 in 2029. Even a private CA or a self-signed
+**no certificate authority can issue a long-lived certificate.** The public maximum is 200 days, and
+falls to 100 days in March 2027 and 47 in March 2029. Even a private CA or a self-signed
 certificate is capped, because Apple rejects *any* TLS server certificate valid for more than 825
 days regardless of who signed it. Two years is the ceiling anywhere, and only if every client
 machine has your root installed.

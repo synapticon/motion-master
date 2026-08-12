@@ -77,6 +77,31 @@ constexpr auto kFaultResetGrace = std::chrono::milliseconds(200);
 // cycle rather than the 1 ms default, since being early here costs the whole reset.
 constexpr auto kEdgeSettle = std::chrono::milliseconds(10);
 
+// Names the one explanation a bare timeout hides: a drive whose control service has stopped.
+//
+// The signature is narrow on purpose — a command was issued and the statusword did not move *once*
+// across the whole walk. An ordinary timeout has the statusword changing as the drive steps through
+// intermediate states, or has no command issued at all (waiting out a fault reaction). Neither
+// looks like this.
+//
+// It is a hint rather than a verdict because one other thing produces it: a drive that legitimately
+// refuses every transition from where it sits — safe torque off active, say, which blocks the climb
+// out of Switch On Disabled. So it says "may have stopped" and names what to check.
+std::string stoppedServiceHint(bool commandIssued, bool statuswordChanged) {
+  if (!commandIssued || statuswordChanged) {
+    return {};
+  }
+  return ". Its statusword did not change at all while the controlword was accepted, so the "
+         "drive's "
+         "control service may have stopped — a stopped service still answers reads and accepts "
+         "writes, "
+         "and the EtherCAT state stays OP with no error, so nothing on the bus shows it. Only a "
+         "power "
+         "cycle recovers one. The other thing that looks like this is a drive refusing every "
+         "transition "
+         "from where it is, such as one with safe torque off active";
+}
+
 }  // namespace
 
 std::expected<uint16_t, std::string> Cia402Drive::statusword() const {
@@ -293,6 +318,15 @@ std::expected<void, std::string> Cia402Drive::transitionToState(cia402::State ta
   // would mean reading it after the state it decides has already come and gone. A drive that will
   // not answer is treated as not holding, which is the reading that terminates.
   bool quickStopIssued = false;
+
+  // The first statusword seen, and whether any later one differed. A drive whose control service
+  // has stopped is the case this exists to name: it keeps accepting controlword writes — the ESC
+  // and the object dictionary are fine — while nothing steps the state machine, so the statusword
+  // never moves. Nothing at the EtherCAT level shows it either; the AL state stays OP with no
+  // error, which is why a timeout alone sends people looking at the bus.
+  std::optional<uint16_t> firstStatusword;
+  bool statuswordChanged = false;
+  bool commandIssued = false;
   const bool quickStopPassesThrough =
       target == cia402::State::kQuickStopActive &&
       !cia402::quickStopHolds(
@@ -300,10 +334,16 @@ std::expected<void, std::string> Cia402Drive::transitionToState(cia402::State ta
 
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   for (;;) {
-    auto current = state();
-    if (!current) {
-      return std::unexpected(current.error());
+    auto observed = statusword();
+    if (!observed) {
+      return std::unexpected(observed.error());
     }
+    if (!firstStatusword) {
+      firstStatusword = *observed;
+    } else if (*observed != *firstStatusword) {
+      statuswordChanged = true;
+    }
+    const auto current = std::expected<cia402::State, std::string>(cia402::decodeState(*observed));
 
     // Arrival, for a quick stop that completes into SwitchOnDisabled rather than staying. Checked
     // before the table, which knows the state machine but not this drive's configuration.
@@ -359,6 +399,7 @@ std::expected<void, std::string> Cia402Drive::transitionToState(cia402::State ta
         if (auto r = applyCommand(step.command); !r) {
           return std::unexpected(r.error());
         }
+        commandIssued = true;
         // Only a quick stop this walk issued counts as passed through. Starting in
         // SwitchOnDisabled and asking for a quick stop must still climb and perform one, rather
         // than reporting the state it was already in as success.
@@ -370,9 +411,11 @@ std::expected<void, std::string> Cia402Drive::transitionToState(cia402::State ta
     }
 
     if (std::chrono::steady_clock::now() >= deadline) {
-      return std::unexpected(std::format("reaching {} timed out after {} ms; the drive is in {}",
-                                         cia402::toString(target), timeout.count(),
-                                         cia402::toString(*current)));
+      auto reason =
+          std::format("reaching {} timed out after {} ms; the drive is in {}",
+                      cia402::toString(target), timeout.count(), cia402::toString(*current));
+      reason += stoppedServiceHint(commandIssued, statuswordChanged);
+      return std::unexpected(reason);
     }
     std::this_thread::sleep_for(kPollStep);
   }

@@ -97,6 +97,12 @@ class Cia402FakeDriver : public FieldbusDriver {
   /// Models quick stop option codes 0-4: the drive rides through Quick Stop Active into Switch On
   /// Disabled rather than staying there. Immediate here, where a real drive takes a ramp.
   bool quickStopPassesThrough = false;
+  /// Models a drive whose control service has stopped: writes are accepted and reads answer, but
+  /// nothing steps the state machine, so the statusword never changes.
+  bool acceptWritesWithoutAdvancing = false;
+  /// Advances normally for this many controlword writes and then stalls — a drive that got part of
+  /// the way and then stopped, whose statusword therefore *did* change during the walk.
+  int freezeAfterWrites = -1;
   bool completeAccessSupported = false;  ///< Whether readSdoComplete answers or aborts.
   int completeAccessAttempts = 0;        ///< readSdoComplete calls, successful or not.
   int sdoReads = 0;                      ///< Per-subindex readSdo calls.
@@ -148,6 +154,13 @@ class Cia402FakeDriver : public FieldbusDriver {
 
   // Applies one controlword edge to the modelled state machine.
   void advance(uint16_t controlword) {
+    if (acceptWritesWithoutAdvancing) {
+      return;
+    }
+    if (freezeAfterWrites >= 0 && freezeAfterWrites-- == 0) {
+      acceptWritesWithoutAdvancing = true;
+      return;
+    }
     const uint16_t cmd = controlword & mm::node::cia402::kCommandMask;
     if ((controlword & 0x0080) &&
         (machineState == State::kFault || machineState == State::kFaultReactionActive)) {
@@ -601,6 +614,58 @@ TEST(Cia402DriveTransitionToState, StartingInSwitchOnDisabledStillPerformsTheQui
            (static_cast<uint16_t>(w.data[0] | (w.data[1] << 8)) & mm::node::cia402::kCommandMask) ==
                0x0002;
   })) << "no quick stop command was issued";
+}
+
+TEST(Cia402DriveTransitionToState, NamesAStoppedControlServiceOnTimeout) {
+  // The failure this exists for, seen on device 2: the drive kept accepting controlword writes
+  // while nothing stepped its state machine, and the AL state stayed OP with no error — so a bare
+  // timeout sent us looking at the bus for half a dozen checks. A frozen statusword under an
+  // accepted command is the signature.
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  driver.acceptWritesWithoutAdvancing = true;
+  Cia402Drive drive(device);
+
+  auto result = drive.transitionToState(State::kOperationEnabled, std::chrono::milliseconds(30));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("control service may have stopped"), std::string::npos)
+      << result.error();
+  EXPECT_NE(result.error().find("power cycle"), std::string::npos) << result.error();
+  // The controlword was written, so this is not a case of nothing having been tried.
+  EXPECT_FALSE(driver.writes.empty());
+}
+
+TEST(Cia402DriveTransitionToState, DoesNotBlameTheServiceForAnOrdinaryTimeout) {
+  // A drive whose statusword *does* move is stepping its machine; it simply has not arrived. Saying
+  // "the service may have stopped" there would be a false lead, which is worse than a bare timeout.
+  // So the drive is made to advance one hop and then stall — the statusword changes during the
+  // walk, which is exactly what must suppress the hint.
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  driver.freezeAfterWrites = 1;
+  Cia402Drive drive(device);
+
+  auto result = drive.transitionToState(State::kOperationEnabled, std::chrono::milliseconds(30));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("timed out"), std::string::npos) << result.error();
+  EXPECT_EQ(result.error().find("control service"), std::string::npos) << result.error();
+  // It really did move: one hop up, then stuck there.
+  EXPECT_EQ(driver.machineState, State::kReadyToSwitchOn);
+}
+
+TEST(Cia402DriveTransitionToState, SaysNothingAboutTheServiceWhenNoCommandWasIssued) {
+  // Waiting out a fault reaction issues nothing, so a frozen statusword there proves nothing about
+  // the service — the drive is supposed to be moving on by itself.
+  Cia402FakeDriver driver;
+  driver.machineState = State::kFaultReactionActive;
+  Device device = makeCia402Device(driver);
+  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] =
+      u16le(statuswordFor(State::kFaultReactionActive));
+  Cia402Drive drive(device);
+
+  auto result = drive.transitionToState(State::kSwitchOnDisabled, std::chrono::milliseconds(30));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().find("control service"), std::string::npos) << result.error();
 }
 
 TEST(Cia402DriveTransitionToState, RejectsAStateTheDriveEntersOnItsOwn) {

@@ -491,11 +491,30 @@ std::expected<OsCommandResponse, std::string> SomanetDrive::runOsCommand(
   if (auto mode = setOsCommandMode(kModeExecuteImmediately); !mode) {
     return std::unexpected(mode.error());
   }
-  // Writing 0x1023:01 executes the command. The drive refuses the write while a command is still
-  // in progress (SDO abort 0x08000021, "local control"); that error already says so, so it is
-  // forwarded as-is rather than reinterpreted here.
+  // Writing 0x1023:01 executes the command. The drive refuses the write while a command is still in
+  // progress, and the abort code alone does not say which of two very different things happened —
+  // so the response register is read to tell them apart.
+  //
+  // **A channel stuck in progress cannot be recovered by a master.** The firmware's reception
+  // timeout only counts while it waits for a command to be picked up or aborted, never while one is
+  // executing, so a command whose service dies mid-flight hangs the channel for good: every later
+  // write is refused, and writing 0x1024 = 3 cannot help because the abort is carried out by the
+  // handler that is gone. Verified on a SOMANET Integro, where only a power cycle cleared it.
   if (auto written = setOsCommand(command); !written) {
-    return std::unexpected(written.error());
+    auto reason = written.error();
+    // 255 is "in progress". Seen together with a refused write it means a command is occupying the
+    // channel — most likely the caller's own previous one if it was abandoned, or another client's,
+    // or one whose service stopped. This cannot tell them apart and says so rather than guessing.
+    if (auto pending = osCommandResponse();
+        pending && !pending->empty() && (*pending)[0] == kExecuting) {
+      reason +=
+          " — a command is still in progress on this drive (0x1023:03 reads 255), so the channel "
+          "is "
+          "occupied. If it does not clear, the firmware service that was handling it has stopped "
+          "and "
+          "only a power cycle recovers the OS command channel";
+    }
+    return std::unexpected(reason);
   }
 
   std::string abortReason;

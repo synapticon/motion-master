@@ -42,9 +42,9 @@ nothing to install.
 
 ## Part 1 — the server machine
 
-Install as usual (see `SETUP-linux.md`; on a Raspberry Pi use the `-arm64.deb`, which needs
-Raspberry Pi OS **trixie** — the binaries require glibc 2.38). Then put a `motion-master.jsonc`
-next to the binary — it is auto-discovered, no flag needed:
+Install as usual (see [SETUP-linux.md](../SETUP-linux.md); on a Raspberry Pi use the `-arm64.deb`,
+which needs Raspberry Pi OS **trixie** — the binaries require glibc 2.38). Then put a
+`motion-master.jsonc` next to the binary — it is auto-discovered, no flag needed:
 
 ```jsonc
 {

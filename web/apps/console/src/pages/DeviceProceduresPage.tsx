@@ -10,6 +10,7 @@ import {
 import Callout from '../components/Callout'
 import DevicePageHeader from '../components/DevicePageHeader'
 import ProceduresExplainer from '../components/ProceduresExplainer'
+import KueblerRegisterPicker from '../components/KueblerRegisterPicker'
 import ProcedureParameters, {
   initialParameterValues,
   parseParameterValues,
@@ -356,6 +357,24 @@ function ProcedureDetail({
         {/* Parameters, rendered from what the descriptor declares rather than from a form written
             per procedure — so a new parameterized procedure is a row in the server's catalogue and
             nothing here. */}
+        {/* A picker over the encoder's register map, for the one procedure whose address and length
+            it can fill. It sits outside ProcedureParameters deliberately — the parameters are the
+            raw mechanism and remain editable, which is the only way to reach an address the
+            vendor's draft does not document, and the generic renderer stays free of any single
+            procedure's knowledge. */}
+        {descriptor.name === 'kuebler-register-communication' && (
+          <KueblerRegisterPicker
+            disabled={running}
+            onPick={(address, lengthBytes) =>
+              setValues(previous => ({
+                ...previous,
+                address: String(address),
+                length: String(lengthBytes),
+              }))
+            }
+          />
+        )}
+
         <ProcedureParameters
           parameters={descriptor.parameters}
           values={values}

@@ -17,6 +17,7 @@ import ReferenceApiDocsPage from './pages/ReferenceApiDocsPage'
 import MetaAlStatusCodesPage from './pages/MetaAlStatusCodesPage'
 import MetaEscRegistersPage from './pages/MetaEscRegistersPage'
 import MetaFoeErrorCodesPage from './pages/MetaFoeErrorCodesPage'
+import MetaKueblerRegistersPage from './pages/MetaKueblerRegistersPage'
 import MetaMailboxErrorCodesPage from './pages/MetaMailboxErrorCodesPage'
 import MetaObjectDataTypesPage from './pages/MetaObjectDataTypesPage'
 import MetaSdoAbortCodesPage from './pages/MetaSdoAbortCodesPage'
@@ -69,6 +70,7 @@ export default function App() {
           <Route path="al-status-codes" element={<MetaAlStatusCodesPage />} />
           <Route path="esc-registers" element={<MetaEscRegistersPage />} />
           <Route path="foe-error-codes" element={<MetaFoeErrorCodesPage />} />
+          <Route path="kuebler-registers" element={<MetaKueblerRegistersPage />} />
           <Route path="mailbox-error-codes" element={<MetaMailboxErrorCodesPage />} />
           <Route path="object-data-types" element={<MetaObjectDataTypesPage />} />
           <Route path="sdo-abort-codes" element={<MetaSdoAbortCodesPage />} />

@@ -1437,14 +1437,6 @@ std::expected<void, std::string> SomanetDrive::setOperationMode(somanet::Operati
   return setOperationModeValue(static_cast<int8_t>(mode));
 }
 
-std::expected<int8_t, std::string> SomanetDrive::operationModeValue() const {
-  return device_.readValue<int8_t>(cia402::kModeOfOperation, 0);
-}
-
-std::expected<void, std::string> SomanetDrive::setOperationModeValue(int8_t mode) {
-  return device_.writeValue<int8_t>(cia402::kModeOfOperation, 0, mode);
-}
-
 std::expected<SomanetDrive, std::string> createSomanetDrive(Device& device) {
   if (device.vendorId() != kSynapticonVendorId) {
     return std::unexpected(

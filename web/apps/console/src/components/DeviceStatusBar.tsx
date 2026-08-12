@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { apiErrorMessage, formatHex, type Cia402Status } from '@synapticon/motion-master-client'
 import SlavePositionBadge from './SlavePositionBadge'
@@ -38,6 +39,24 @@ const barBtnOutline = `${barBtn} border border-syn-red text-syn-red hover:bg-syn
 // and controlword are exchanging as process data, which happens in OP and nowhere else — an SDO
 // write to the controlword in PRE-OP lands in the object and is never acted on.
 const OP_STATE = 8
+
+// The CiA402 states a master may ask a drive to reach, ordered as the state machine climbs. The
+// other three — Not Ready To Switch On, Fault Reaction Active and Fault — are entered by the drive
+// itself and cannot be requested, so they are not offered.
+const CIA402_TARGETS = [
+  { value: 'SwitchOnDisabled', label: 'Switch On Disabled' },
+  { value: 'ReadyToSwitchOn', label: 'Ready To Switch On' },
+  { value: 'SwitchedOn', label: 'Switched On' },
+  { value: 'OperationEnabled', label: 'Operation Enabled' },
+  { value: 'QuickStopActive', label: 'Quick Stop Active' },
+] as const
+type Cia402TargetState = (typeof CIA402_TARGETS)[number]['value']
+
+// Selects share the buttons' explicit height for the reason in barBtn — a control pair that
+// derives its height from content does not agree with one that does not.
+const barSelect =
+  'h-[30px] border border-grey-300 bg-white px-2 text-xs disabled:opacity-50 ' +
+  'disabled:cursor-not-allowed'
 
 // Mailbox-carrying AL states (PRE-OP, SAFE-OP, OP). Reading the status needs one; INIT has no
 // mailbox and BOOT's is FoE-only. Mirrors the sidebar's own check.
@@ -96,6 +115,45 @@ export default function DeviceStatusBar({ slavePosition }: DeviceStatusBarProps)
       api.runCia402Command(slavePosition, { command }),
     onSuccess: (r) => queryClient.setQueryData(cia402StatusKey(slavePosition), r.data),
   })
+
+  // Both selects seed from what the drive currently reports and then belong to the user until they
+  // press the button beside them — the seed-once rule the Motion page's inputs follow. A select
+  // that rewrote itself under the cursor as the drive changed would be unusable.
+  const [selectedMode, setSelectedMode] = useState<number | null>(null)
+  const [selectedState, setSelectedState] = useState<Cia402TargetState | null>(null)
+  useEffect(() => {
+    if (selectedMode === null && status) setSelectedMode(status.modeOfOperation)
+  }, [status, selectedMode])
+  useEffect(() => {
+    if (selectedState !== null || !status) return
+    // Seed with where the drive is, when that is somewhere it could also be sent. From a state it
+    // cannot be sent to — Fault, or still starting up — seed with the one that gets it out.
+    setSelectedState(
+      CIA402_TARGETS.some((t) => t.value === status.state)
+        ? (status.state as Cia402TargetState)
+        : 'SwitchOnDisabled',
+    )
+  }, [status, selectedState])
+
+  const setModeMutation = useMutation({
+    mutationFn: (mode: number) => api.setCia402OperationMode(slavePosition, { mode }),
+    onSuccess: (r) => queryClient.setQueryData(cia402StatusKey(slavePosition), r.data),
+  })
+
+  const transitionMutation = useMutation({
+    // The server walks whatever transitions it takes and answers with where the drive landed, so
+    // there is nothing to sequence here.
+    mutationFn: (state: Cia402TargetState) =>
+      api.transitionToCia402State(slavePosition, { state }),
+    onSuccess: (r) => queryClient.setQueryData(cia402StatusKey(slavePosition), r.data),
+  })
+
+  // Writing 0x6060 is an SDO, so it needs a mailbox — PRE-OP or above. It does not need OP, unlike
+  // anything that moves the state machine: the drive adopts a requested mode without advancing.
+  const canSetMode = isCia402 && mailboxActive
+  const modes = modesQuery.data?.modes ?? []
+  const standardModes = modes.filter((m) => m.kind === 'standard')
+  const manufacturerModes = modes.filter((m) => m.kind === 'manufacturer')
 
   // Commanding needs OP, for the reason on OP_STATE. Disabled rather than hidden: a button that
   // vanishes leaves you wondering where it went, where a disabled one with a reason tells you what
@@ -160,6 +218,100 @@ export default function DeviceStatusBar({ slavePosition }: DeviceStatusBarProps)
 
       {isCia402 && (
         <div className="flex items-center gap-2">
+          {/* Mode, then state, then the two standing commands — separated by a divider because the
+              first two ask a question and wait, while the last two act at once. */}
+          <div className="flex items-center gap-1.5">
+            <select
+              aria-label="Operation mode"
+              className={barSelect}
+              disabled={!canSetMode || setModeMutation.isPending}
+              value={selectedMode ?? status?.modeOfOperation ?? 0}
+              onChange={(e) => setSelectedMode(Number(e.target.value))}
+              title={
+                canSetMode
+                  ? 'Operation mode (0x6060) to request. Unsupported standard modes are listed but cannot be chosen; the manufacturer modes are the drive vendor’s own.'
+                  : `Operation mode — unavailable: ${whyDisabled}.`
+              }
+            >
+              {/* Marked, not just disabled: a mode the drive does not advertise and one its
+                  vendor has deprecated both look like ordinary entries otherwise, and the second
+                  is not even disabled — deprecated is the vendor's label, not a refusal. */}
+              <optgroup label="Standard">
+                {standardModes.map((m) => (
+                  <option key={m.value} value={m.value} disabled={m.supported === false}>
+                    {m.name} ({m.value}){m.supported === false ? ' — not supported' : ''}
+                  </option>
+                ))}
+              </optgroup>
+              {manufacturerModes.length > 0 && (
+                <optgroup label="Manufacturer-specific">
+                  {manufacturerModes.map((m) => (
+                    <option key={m.value} value={m.value}>
+                      {m.name} ({m.value}){m.deprecated ? ' — deprecated' : ''}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+            </select>
+            <button
+              type="button"
+              className={barBtnOutline}
+              disabled={!canSetMode || selectedMode === null || setModeMutation.isPending}
+              onClick={() => selectedMode !== null && setModeMutation.mutate(selectedMode)}
+              title={
+                canSetMode
+                  ? 'Set mode — request this operation mode (0x6060). The drive adopts it, reflected as the active mode (0x6061), once accepted. Change it with the drive disabled.'
+                  : `Set mode — unavailable: ${whyDisabled}.`
+              }
+            >
+              Set mode
+            </button>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <select
+              aria-label="CiA402 state"
+              className={barSelect}
+              disabled={!canCommand || transitionMutation.isPending}
+              value={selectedState ?? 'SwitchOnDisabled'}
+              onChange={(e) => setSelectedState(e.target.value as Cia402TargetState)}
+              title={
+                canCommand
+                  ? 'CiA402 state to bring the drive to. The server walks whatever transitions that takes.'
+                  : `CiA402 state — unavailable: ${whyDisabled}.`
+              }
+            >
+              {CIA402_TARGETS.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className={barBtnOutline}
+              disabled={!canCommand || selectedState === null || transitionMutation.isPending}
+              onClick={() => selectedState !== null && transitionMutation.mutate(selectedState)}
+              title={
+                canCommand
+                  ? 'Transition — bring the drive to the chosen state, issuing every transition it takes and clearing a fault first if there is one. Asking for Operation Enabled from Quick Stop Active leaves that quick stop.'
+                  : `Transition — unavailable: ${whyDisabled}.`
+              }
+            >
+              Transition
+            </button>
+          </div>
+
+          <span className="mx-1 h-[22px] w-px shrink-0 bg-grey-200" aria-hidden="true" />
+
+          {(setModeMutation.isError || transitionMutation.isError) && (
+            <span
+              className="max-w-[28ch] truncate text-xs text-status-bad"
+              title={apiErrorMessage(setModeMutation.error ?? transitionMutation.error)}
+            >
+              {apiErrorMessage(setModeMutation.error ?? transitionMutation.error)}
+            </span>
+          )}
           {commandMutation.isError && (
             <span
               className="max-w-[28ch] truncate text-xs text-status-bad"

@@ -993,14 +993,23 @@ void HttpServer::run() {
                 if (body.is_discarded() || !body.contains("mode") || !body["mode"].is_number()) {
                   return mm::api::badRequest(R"(body must be {"mode": <CiA402 mode number>})");
                 }
-                auto mode = mm::node::cia402::toOperationMode(body["mode"].get<int>());
-                if (!mode) {
-                  return mm::api::badRequest("unknown CiA402 operation mode");
+                // Bounded by what 0x6060 can hold and nothing more. The negative half of that range
+                // is the vendor's, so filtering to the standard modes here would make a SOMANET's
+                // diagnostics (-2) or system identification (-4) unrequestable — modes the device
+                // has and GET /api/devices/{n}/operation-modes lists. Which values a given drive
+                // accepts is the drive's answer, visible in the modeOfOperation of the response.
+                const auto raw = body["mode"].get<int64_t>();
+                if (!body["mode"].is_number_integer() || raw < INT8_MIN || raw > INT8_MAX) {
+                  return mm::api::badRequest(std::format(
+                      "'mode' must be a whole number in the INTEGER8 range ({} to {}), which is "
+                      "what object 0x6060 holds",
+                      INT8_MIN, INT8_MAX));
                 }
                 if (!deviceManager_.hasDevice(*position)) {
                   return mm::api::notFound("no device at that bus position");
                 }
-                auto r = mm::node::setCia402OperationMode(deviceManager_, *position, *mode);
+                auto r = mm::node::setCia402OperationMode(deviceManager_, *position,
+                                                          static_cast<int8_t>(raw));
                 if (!r) {
                   return mm::api::error("409 Conflict", r.error());
                 }
@@ -1032,6 +1041,40 @@ void HttpServer::run() {
         }
         return mm::api::json(nlohmann::json(*r));
       });
+
+  router.post("/api/devices/:slavePosition/cia402/state",
+              [this](const mm::api::Request& req) -> mm::api::Response {
+                auto position = req.parameterAs<uint16_t>("slavePosition");
+                if (!position) {
+                  return mm::api::badRequest("slavePosition must be a number");
+                }
+                const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+                if (body.is_discarded() || !body.contains("state") || !body["state"].is_string()) {
+                  return mm::api::badRequest(R"(body must be {"state": "<name>"})");
+                }
+                auto target = mm::node::cia402::parseState(body["state"].get<std::string>());
+                if (!target) {
+                  return mm::api::badRequest(
+                      "unknown CiA402 state: use SwitchOnDisabled, ReadyToSwitchOn, SwitchedOn, "
+                      "OperationEnabled or QuickStopActive");
+                }
+                // Rejected here rather than by the walk, because it is a bad request rather than a
+                // failed operation: no command enters these states, so no drive could ever answer
+                // for one.
+                if (!mm::node::cia402::isCommandableState(*target)) {
+                  return mm::api::badRequest(std::format(
+                      "{} is not a state a master can ask for: the drive enters it on its own",
+                      mm::node::cia402::toString(*target)));
+                }
+                if (!deviceManager_.hasDevice(*position)) {
+                  return mm::api::notFound("no device at that bus position");
+                }
+                auto r = mm::node::transitionToCia402State(deviceManager_, *position, *target);
+                if (!r) {
+                  return mm::api::error("409 Conflict", r.error());
+                }
+                return mm::api::json(nlohmann::json(*r));
+              });
 
   router.post(
       "/api/devices/:slavePosition/cia402/target",

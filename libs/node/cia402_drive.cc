@@ -92,7 +92,48 @@ std::expected<cia402::OperationMode, std::string> Cia402Drive::operationMode() c
 }
 
 std::expected<void, std::string> Cia402Drive::setOperationMode(cia402::OperationMode mode) {
-  return device_.writeValue(Object::kModeOfOperation, 0, static_cast<int8_t>(mode));
+  return setOperationModeValue(static_cast<int8_t>(mode));
+}
+
+std::expected<int8_t, std::string> Cia402Drive::operationModeValue() const {
+  return device_.readValue<int8_t>(Object::kModeOfOperation, 0);
+}
+
+std::expected<int8_t, std::string> Cia402Drive::operationModeValueDisplay() const {
+  return device_.readValue<int8_t>(Object::kModeOfOperationDisplay, 0);
+}
+
+std::expected<void, std::string> Cia402Drive::setOperationModeValue(int8_t mode) {
+  return device_.writeValue<int8_t>(Object::kModeOfOperation, 0, mode);
+}
+
+std::expected<void, std::string> Cia402Drive::applyOperationMode(
+    int8_t mode, std::chrono::milliseconds timeout) {
+  if (auto r = setOperationModeValue(mode); !r) {
+    return r;
+  }
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  for (;;) {
+    auto active = operationModeValueDisplay();
+    if (!active) {
+      return std::unexpected(active.error());
+    }
+    // Mode 0 asks for no mode at all, so there is nothing to arrive at — see the header.
+    if (mode == 0 || *active == mode) {
+      return {};
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      auto reason =
+          std::format("the drive did not adopt operation mode {}; it is in {}", mode, *active);
+      // 0x603F is where this firmware puts its reason — 0x6320 (parameter error) for a mode it
+      // will not take. Best-effort: failing to read it must not cost the fact we already have.
+      if (auto code = device_.readValue<uint16_t>(Object::kErrorCode, 0)) {
+        reason += std::format(", and its error code is 0x{:04X}", *code);
+      }
+      return std::unexpected(reason);
+    }
+    std::this_thread::sleep_for(kPollStep);
+  }
 }
 
 std::expected<Cia402Status, std::string> Cia402Drive::readStatus() const {
@@ -195,64 +236,87 @@ std::expected<void, std::string> Cia402Drive::faultReset() {
 
 std::expected<void, std::string> Cia402Drive::disable() { return disableVoltage(); }
 
-std::expected<void, std::string> Cia402Drive::enable(std::chrono::milliseconds timeout) {
-  // Walk the state machine toward OperationEnabled, issuing one transition per observed state.
-  // We re-read the state each iteration rather than assuming the previous command took effect,
-  // so a drive that needs an extra cycle (or rejects a step) is handled by simply re-issuing.
+std::expected<void, std::string> Cia402Drive::transitionToState(cia402::State target,
+                                                                std::chrono::milliseconds timeout,
+                                                                bool allowQuickStopOverride) {
+  if (!cia402::isCommandableState(target)) {
+    return std::unexpected(
+        std::format("{} is not a state a master can ask for: the drive enters it on its own",
+                    cia402::toString(target)));
+  }
+
+  // Whether a fault reset has already been issued this walk. A drive that stays in Fault after one
+  // is a drive whose fault cause is still present — the firmware refuses transition 15 while the
+  // error is still reported — so saying so beats spending the whole timeout re-asserting bit 7.
+  bool faultResetIssued = false;
+
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   for (;;) {
-    auto st = state();
-    if (!st) {
-      return std::unexpected(st.error());
+    auto current = state();
+    if (!current) {
+      return std::unexpected(current.error());
     }
-    switch (*st) {
-      case State::kOperationEnabled:
+
+    const auto step = cia402::nextFsaTransition(*current, target, allowQuickStopOverride);
+    switch (step.action) {
+      case cia402::FsaAction::kArrived:
         return {};
-      case State::kFault:
-        if (auto r = faultReset(); !r) {
-          return r;
+
+      case cia402::FsaAction::kUnreachable:
+        // Reachable only from QuickStopActive toward OperationEnabled without the override, since
+        // the target was checked above — so the message names that, rather than staying abstract.
+        return std::unexpected(std::format(
+            "the drive is in {} and reaching {} from there means overriding the quick stop "
+            "(transition 16), which this operation was not asked to do",
+            cia402::toString(*current), cia402::toString(target)));
+
+      case cia402::FsaAction::kWait:
+        // Fault reaction or start-up: the drive moves on by itself. Issuing anything here is at
+        // best ignored.
+        break;
+
+      case cia402::FsaAction::kCommand: {
+        if (*current == cia402::State::kFault) {
+          if (faultResetIssued) {
+            // The firmware refuses transition 15 while the error is still reported, so a drive
+            // that stayed in Fault through a reset has a cause that has not gone away. 0x603F is
+            // the profile's own account of it — the vendor's fuller one lives outside this view.
+            auto reason = std::string(
+                "the drive is still in Fault after a fault reset, so its cause is still present");
+            if (auto code = device_.readValue<uint16_t>(Object::kErrorCode, 0)) {
+              reason += std::format(" (error code 0x{:04X})", *code);
+            }
+            return std::unexpected(reason);
+          }
+          // Through faultReset() rather than applyCommand: the edge it asserts is staged on the
+          // PDO path and must not be cleared in the same breath. See that method.
+          if (auto r = faultReset(); !r) {
+            return std::unexpected(r.error());
+          }
+          faultResetIssued = true;
+          break;
+        }
+        if (auto r = applyCommand(step.command); !r) {
+          return std::unexpected(r.error());
         }
         break;
-      case State::kFaultReactionActive:
-        // Wait for the drive to finish reacting and settle into Fault, then reset.
-        break;
-      case State::kSwitchOnDisabled:
-        if (auto r = shutdown(); !r) {
-          return r;
-        }
-        break;
-      case State::kReadyToSwitchOn:
-        if (auto r = switchOn(); !r) {
-          return r;
-        }
-        break;
-      case State::kSwitchedOn:
-        if (auto r = enableOperation(); !r) {
-          return r;
-        }
-        break;
-      // kQuickStopActive and kNotReadyToSwitchOn both wait, and they are kept apart because *why*
-      // they wait differs: one is a safety state the master must not override, the other is a
-      // device still coming up. Merging them into one fall-through label would delete the
-      // distinction that makes the first one auditable.
-      // NOLINTNEXTLINE(bugprone-branch-clone)
-      case State::kQuickStopActive:
-        // Deliberate safety state — do not auto-override it (CiA402 transition 16, enable-operation
-        // from quick stop, is "not recommended" per IEC 61800-7-201 Table 26). Just wait: with
-        // quick-stop option code 1-4 the drive auto-transitions to SwitchOnDisabled (transition 12)
-        // and the next poll continues the walk; with code 5-8 it holds here until the user releases
-        // it, and enable() times out.
-        break;
-      case State::kNotReadyToSwitchOn:
-        // Still initialising; wait.
-        break;
+      }
     }
+
     if (std::chrono::steady_clock::now() >= deadline) {
-      return std::unexpected(std::format("enable timed out after {} ms in state {}",
-                                         timeout.count(), cia402::toString(*st)));
+      return std::unexpected(std::format("reaching {} timed out after {} ms; the drive is in {}",
+                                         cia402::toString(target), timeout.count(),
+                                         cia402::toString(*current)));
     }
     std::this_thread::sleep_for(kPollStep);
   }
+}
+
+std::expected<void, std::string> Cia402Drive::enable(std::chrono::milliseconds timeout) {
+  // Without the quick-stop override, deliberately: this is what procedures call to prepare a
+  // drive, and a quick stop is somebody's decision that preparing for a measurement must not undo.
+  // A drive sitting in QuickStopActive therefore fails here rather than being forced out of it.
+  return transitionToState(cia402::State::kOperationEnabled, timeout, false);
 }
 
 std::expected<int32_t, std::string> Cia402Drive::targetPosition() const {

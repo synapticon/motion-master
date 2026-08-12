@@ -974,7 +974,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Writes the requested operation mode to 0x6060 and returns the resulting control snapshot. The drive reflects the accepted mode in 0x6061 (the modeOfOperation of the response) once it takes effect.
+   * @description Writes the requested operation mode to 0x6060 and returns the resulting control snapshot. The drive reflects the accepted mode in 0x6061 (the modeOfOperation of the response) once it takes effect. Any value object 0x6060 can hold is accepted, standard or manufacturer-specific — the negative half of that range belongs to the vendor, so a SOMANET's diagnostics (-2) or system identification (-4) go through here like any other. Whether a given drive has the mode is the drive's answer, seen in the modeOfOperation of the response; GET /api/devices/{slavePosition}/operation-modes is what lists them beforehand.
    *
    * @name SetCia402OperationMode
    * @summary Set a device's CiA402 operation mode
@@ -984,7 +984,9 @@ export class Api<
     slavePosition: number,
     data: {
       /**
-       * CiA402 operation mode (0x6060 value): 0 NoMode, 1 Profile Position, 3 Profile Velocity, 4 Profile Torque, 6 Homing, 8 Cyclic Sync Position, 9 Cyclic Sync Velocity, 10 Cyclic Sync Torque.
+       * Operation mode to request (the 0x6060 value). Standard modes are 0 NoMode, 1 Profile Position, 2 Velocity, 3 Profile Velocity, 4 Profile Torque, 6 Homing, 7 Interpolated Position, 8 Cyclic Sync Position, 9 Cyclic Sync Velocity, 10 Cyclic Sync Torque, 11 Cyclic Sync Torque with Commutation Angle; negative values are the vendor's.
+       * @min -128
+       * @max 127
        * @example 9
        */
       mode: number;
@@ -1000,7 +1002,38 @@ export class Api<
       ...params,
     });
   /**
-   * @description Drives the CiA402 device-control state machine. "enable" walks every intermediate transition to Operation Enabled (clearing a fault first if needed); "disable" goes to Switch On Disabled; "quickStop" triggers a quick stop; "faultReset" clears a latched fault. The device must be exchanging process data for "enable" to make progress. Returns the resulting control snapshot.
+   * @description Walks the CiA402 device-control state machine to the state you name, issuing whatever transitions that takes and re-reading the drive between each — so multi-hop paths are ordinary: Switch On Disabled up to Operation Enabled, Quick Stop Active back down to Ready To Switch On. Starting from Fault begins with a fault reset, and a fault whose cause is still present is reported as such (with the drive's 0x603F error code) rather than as a timeout. Only the five states a master can command are accepted. Not Ready To Switch On, Fault Reaction Active and Fault are entered by the drive itself and are rejected as a bad request. **Asking for Operation Enabled while the drive is in Quick Stop Active leaves that quick stop** (CiA402 transition 16), because naming the destination is an explicit instruction to go there. The "enable" command on the sibling endpoint deliberately does not, so a procedure preparing a drive cannot undo somebody's stop by accident. The device must be exchanging process data for any of this to progress — the statusword has to update between polls, and the firmware refuses Operation Enabled unless master communication is live. Returns the resulting control snapshot.
+   *
+   * @name TransitionToCia402State
+   * @summary Bring a drive to a CiA402 state
+   * @request POST:/api/devices/{slavePosition}/cia402/state
+   */
+  transitionToCia402State = (
+    slavePosition: number,
+    data: {
+      /**
+       * The state to bring the drive to.
+       * @example "OperationEnabled"
+       */
+      state:
+        | "SwitchOnDisabled"
+        | "ReadyToSwitchOn"
+        | "SwitchedOn"
+        | "OperationEnabled"
+        | "QuickStopActive";
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<Cia402Status, void>({
+      path: `/api/devices/${slavePosition}/cia402/state`,
+      method: "POST",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Drives the CiA402 device-control state machine. "enable" walks every intermediate transition to Operation Enabled (clearing a fault first if needed); "disable" goes to Switch On Disabled; "quickStop" triggers a quick stop; "faultReset" clears a latched fault. The device must be exchanging process data for "enable" to make progress. Returns the resulting control snapshot. Use POST /api/devices/{slavePosition}/cia402/state to name a destination instead of an action — it reaches states these four cannot, and it is the one that will leave a quick stop. "enable" here deliberately will not.
    *
    * @name RunCia402Command
    * @summary Run a CiA402 state-machine command

@@ -1,5 +1,6 @@
 #include "node/cia402_control.h"
 
+#include <chrono>
 #include <expected>
 #include <string>
 #include <type_traits>
@@ -33,11 +34,11 @@ std::expected<Cia402Status, std::string> cia402Status(DeviceManager& deviceManag
 }
 
 std::expected<Cia402Status, std::string> setCia402OperationMode(DeviceManager& deviceManager,
-                                                                uint16_t slavePosition,
-                                                                cia402::OperationMode mode) {
+                                                                uint16_t slavePosition, int8_t mode,
+                                                                std::chrono::milliseconds timeout) {
   return withDrive(deviceManager, slavePosition,
-                   [mode](Cia402Drive& drive) -> std::expected<Cia402Status, std::string> {
-                     if (auto r = drive.setOperationMode(mode); !r) {
+                   [mode, timeout](Cia402Drive& drive) -> std::expected<Cia402Status, std::string> {
+                     if (auto r = drive.applyOperationMode(mode, timeout); !r) {
                        return std::unexpected(r.error());
                      }
                      return drive.readStatus();
@@ -67,6 +68,21 @@ std::expected<Cia402Status, std::string> runCia402Command(DeviceManager& deviceM
             break;
         }
         if (!r) {
+          return std::unexpected(r.error());
+        }
+        return drive.readStatus();
+      });
+}
+
+std::expected<Cia402Status, std::string> transitionToCia402State(
+    DeviceManager& deviceManager, uint16_t slavePosition, cia402::State target,
+    std::chrono::milliseconds timeout) {
+  return withDrive(
+      deviceManager, slavePosition,
+      [target, timeout](Cia402Drive& drive) -> std::expected<Cia402Status, std::string> {
+        // The override is on: a caller naming Operation Enabled while the drive is in
+        // Quick Stop Active has asked to leave that stop.
+        if (auto r = drive.transitionToState(target, timeout, true); !r) {
           return std::unexpected(r.error());
         }
         return drive.readStatus();

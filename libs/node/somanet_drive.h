@@ -1719,17 +1719,6 @@ class SomanetDrive : public Cia402Drive {
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
                                        .pollInterval = std::chrono::milliseconds(20)});
 
-  /// @brief Reads the requested operation mode (0x6060) as its raw value.
-  ///
-  /// For saving a mode in order to put it back later, where the point is *not* to interpret it: the
-  /// drive may be in a standard mode or a vendor one, and a round trip through either enum would
-  /// have to decide which. Use @c operationMode() (inherited) or @c somanet::OperationMode when the
-  /// mode is being reasoned about rather than preserved.
-  std::expected<int8_t, std::string> operationModeValue() const;
-
-  /// @brief Writes a raw operation-mode value to 0x6060 — the counterpart of @c operationModeValue.
-  std::expected<void, std::string> setOperationModeValue(int8_t mode);
-
   // SOMANET-specific synchronous object-dictionary accessors are added here as their object
   // indices are confirmed (encoder type/resolution, motor pole pairs, commutation offset, ...).
   // Each is a thin typed read/write over device(); none holds state.

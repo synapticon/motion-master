@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -82,6 +83,12 @@ class Cia402FakeDriver : public FieldbusDriver {
   uint16_t alStatus = kPreOp;
   uint32_t vendorId = 0;
   State machineState = State::kSwitchOnDisabled;
+  /// When set, a fault reset is refused: the drive stays in Fault. That is what the firmware does
+  /// while the error is still reported (transition 15 is gated on the cause having gone away).
+  bool faultPersists = false;
+  /// Modes the modelled drive refuses, as SOMANET's opmode_update does for a mode it does not list
+  /// or for a non-dynamic change while enabled: the SDO write succeeds and 0x6061 never follows.
+  std::vector<int8_t> refusedModes;
   bool completeAccessSupported = false;  ///< Whether readSdoComplete answers or aborts.
   int completeAccessAttempts = 0;        ///< readSdoComplete calls, successful or not.
   int sdoReads = 0;                      ///< Per-subindex readSdo calls.
@@ -136,7 +143,12 @@ class Cia402FakeDriver : public FieldbusDriver {
     const uint16_t cmd = controlword & mm::node::cia402::kCommandMask;
     if ((controlword & 0x0080) &&
         (machineState == State::kFault || machineState == State::kFaultReactionActive)) {
-      machineState = State::kSwitchOnDisabled;
+      if (!faultPersists) {
+        machineState = State::kSwitchOnDisabled;
+      }
+    } else if ((cmd & 0x000F) == 0x000F && machineState == State::kQuickStopActive) {
+      // Transition 16, which this firmware implements and marks "forced".
+      machineState = State::kOperationEnabled;
     } else if (cmd == 0x0000 || cmd == 0x0002) {
       machineState = (cmd == 0x0002) ? State::kQuickStopActive : State::kSwitchOnDisabled;
     } else if ((cmd & 0x000F) == 0x0006) {  // shutdown
@@ -193,6 +205,14 @@ class Cia402FakeDriver : public FieldbusDriver {
     store[key(index, subindex)] = bytes;
     if (index == Object::kControlword && bytes.size() >= 2) {
       advance(static_cast<uint16_t>(bytes[0] | (bytes[1] << 8)));
+    }
+    // A real drive mirrors an accepted mode from 0x6060 into 0x6061 a cycle later, and simply does
+    // not mirror one it refuses.
+    if (index == Object::kModeOfOperation && !bytes.empty()) {
+      const auto requested = static_cast<int8_t>(bytes[0]);
+      if (std::ranges::find(refusedModes, requested) == refusedModes.end()) {
+        store[key(Object::kModeOfOperationDisplay, 0)] = {bytes[0]};
+      }
     }
     return {};
   }
@@ -355,16 +375,168 @@ TEST(Cia402Drive, FaultResetAssertsRisingEdgeWithoutClearing) {
   EXPECT_TRUE(controlwords.back() & 0x0080);
 }
 
-TEST(Cia402Drive, EnableTimesOutWhenStuck) {
+TEST(Cia402Drive, EnableRefusesToOverrideAQuickStop) {
+  // enable() is what procedures call to prepare a drive. A quick stop is somebody's decision, so
+  // preparing for a measurement must not undo one — and it says so rather than timing out.
   Cia402FakeDriver driver;
-  driver.machineState = State::kQuickStopActive;  // enable() deliberately will not override this
+  driver.machineState = State::kQuickStopActive;
   Device device = makeCia402Device(driver);
   driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] =
       u16le(statuswordFor(State::kQuickStopActive));
   Cia402Drive drive(device);
 
-  auto result = drive.enable(std::chrono::milliseconds(20));
-  EXPECT_FALSE(result.has_value());
+  auto result = drive.enable(std::chrono::milliseconds(500));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("overriding the quick stop"), std::string::npos) << result.error();
+  EXPECT_EQ(driver.machineState, State::kQuickStopActive);
+}
+
+// --- Walking to an arbitrary state ---------------------------------------------------------------
+
+TEST(Cia402DriveTransitionToState, ClimbsAndStopsAtTheTargetWithoutOvershooting) {
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  auto result = drive.transitionToState(State::kSwitchedOn, std::chrono::milliseconds(500));
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver.machineState, State::kSwitchedOn);
+
+  std::vector<uint16_t> commands;
+  for (const auto& w : driver.writes) {
+    if (w.index == Object::kControlword && w.data.size() >= 2) {
+      commands.push_back(static_cast<uint16_t>(w.data[0] | (w.data[1] << 8)) &
+                         mm::node::cia402::kCommandMask);
+    }
+  }
+  ASSERT_EQ(commands.size(), 2u) << "two hops, and no enable-operation past the target";
+  EXPECT_EQ(commands[0], 0x0006);
+  EXPECT_EQ(commands[1], 0x0007);
+}
+
+TEST(Cia402DriveTransitionToState, DescendsFromOperationEnabled) {
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+  ASSERT_TRUE(drive.enable(std::chrono::milliseconds(500)).has_value());
+  driver.writes.clear();
+
+  auto result = drive.transitionToState(State::kReadyToSwitchOn, std::chrono::milliseconds(500));
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver.machineState, State::kReadyToSwitchOn);
+}
+
+TEST(Cia402DriveTransitionToState, LeavesAQuickStopUpwardOnlyWhenAllowed) {
+  Cia402FakeDriver driver;
+  driver.machineState = State::kQuickStopActive;
+  Device device = makeCia402Device(driver);
+  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] =
+      u16le(statuswordFor(State::kQuickStopActive));
+  Cia402Drive drive(device);
+
+  auto refused =
+      drive.transitionToState(State::kOperationEnabled, std::chrono::milliseconds(500), false);
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_EQ(driver.machineState, State::kQuickStopActive) << "nothing may be issued when refused";
+
+  auto allowed =
+      drive.transitionToState(State::kOperationEnabled, std::chrono::milliseconds(500), true);
+  ASSERT_TRUE(allowed.has_value()) << allowed.error();
+  EXPECT_EQ(driver.machineState, State::kOperationEnabled);
+}
+
+TEST(Cia402DriveTransitionToState, LeavesAQuickStopDownwardWithoutTheOverride) {
+  // Descending out of a quick stop is transition 12 and needs no permission — it is the direction
+  // that makes the drive safer.
+  Cia402FakeDriver driver;
+  driver.machineState = State::kQuickStopActive;
+  Device device = makeCia402Device(driver);
+  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] =
+      u16le(statuswordFor(State::kQuickStopActive));
+  Cia402Drive drive(device);
+
+  auto result =
+      drive.transitionToState(State::kReadyToSwitchOn, std::chrono::milliseconds(500), false);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver.machineState, State::kReadyToSwitchOn);
+}
+
+TEST(Cia402DriveTransitionToState, RejectsAStateTheDriveEntersOnItsOwn) {
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  for (const auto target :
+       {State::kNotReadyToSwitchOn, State::kFaultReactionActive, State::kFault}) {
+    auto result = drive.transitionToState(target, std::chrono::milliseconds(500));
+    ASSERT_FALSE(result.has_value()) << mm::node::cia402::toString(target);
+    EXPECT_NE(result.error().find("enters it on its own"), std::string::npos) << result.error();
+  }
+  EXPECT_TRUE(driver.writes.empty()) << "a rejected target must not touch the drive";
+}
+
+TEST(Cia402DriveTransitionToState, AFaultThatWillNotClearSaysSoRatherThanTimingOut) {
+  // The firmware refuses transition 15 while the error is still reported, so re-asserting bit 7
+  // for the whole timeout would say nothing. One reset, then the diagnosis — with the profile's
+  // own error code (0x603F), which here is DC link under-voltage.
+  Cia402FakeDriver driver;
+  driver.machineState = State::kFault;
+  driver.faultPersists = true;
+  Device device = makeCia402Device(driver);
+  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] = u16le(statuswordFor(State::kFault));
+  driver.programObject(Object::kErrorCode, 0, ObjectDataType::UNSIGNED16, u16le(0x3220));
+  ASSERT_TRUE(device.initializeParameters().has_value());
+  Cia402Drive drive(device);
+
+  auto result = drive.transitionToState(State::kOperationEnabled, std::chrono::milliseconds(500));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("cause is still present"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("0x3220"), std::string::npos) << result.error();
+}
+
+TEST(Cia402DriveApplyOperationMode, ConfirmsTheDriveTookIt) {
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  ASSERT_TRUE(drive.applyOperationMode(8, std::chrono::milliseconds(200)).has_value());
+  EXPECT_EQ(drive.operationModeValueDisplay().value(), 8);
+}
+
+TEST(Cia402DriveApplyOperationMode, ReportsAModeTheDriveDeclined) {
+  // The failure this exists for: the SDO write succeeds and the drive simply does not adopt the
+  // mode, which without a read-back is indistinguishable from success. -4 is the real case — the
+  // firmware's opmode_update does not list deprecated system identification at all.
+  Cia402FakeDriver driver;
+  driver.refusedModes = {-4};
+  Device device = makeCia402Device(driver);
+  driver.programObject(Object::kErrorCode, 0, ObjectDataType::UNSIGNED16, u16le(0x6320));
+  ASSERT_TRUE(device.initializeParameters().has_value());
+  Cia402Drive drive(device);
+  ASSERT_TRUE(drive.applyOperationMode(8, std::chrono::milliseconds(200)).has_value());
+
+  auto result = drive.applyOperationMode(-4, std::chrono::milliseconds(20));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("did not adopt operation mode -4"), std::string::npos)
+      << result.error();
+  EXPECT_NE(result.error().find("it is in 8"), std::string::npos) << result.error();
+  // The drive's own reason, from the profile's error code object.
+  EXPECT_NE(result.error().find("0x6320"), std::string::npos) << result.error();
+  // The request still stands in 0x6060 — the master wrote it; the drive declined it.
+  EXPECT_EQ(drive.operationModeValue().value(), -4);
+}
+
+TEST(Cia402DriveApplyOperationMode, ModeZeroNeedsNoConfirmation) {
+  // Mode 0 requests no mode, so there is nothing to arrive at. This firmware ignores the request
+  // outright and keeps displaying the previous mode, which must not read as a refusal.
+  Cia402FakeDriver driver;
+  driver.refusedModes = {0};
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+  ASSERT_TRUE(drive.applyOperationMode(9, std::chrono::milliseconds(200)).has_value());
+
+  EXPECT_TRUE(drive.applyOperationMode(0, std::chrono::milliseconds(20)).has_value());
+  EXPECT_EQ(drive.operationModeValueDisplay().value(), 9) << "still showing the previous mode";
 }
 
 TEST(Cia402Drive, SetOperationModeAndSetpoints) {

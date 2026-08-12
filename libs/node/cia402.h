@@ -289,4 +289,141 @@ inline constexpr StandardOperationMode kStandardOperationModes[] = {
 /// @brief The first bit of 0x6502 that the profile leaves to the vendor (ETG.6010 Figure 15).
 inline constexpr int kFirstManufacturerDriveModeBit = 16;
 
+/// @brief Parses a state name as @c toString spells it. @c std::nullopt for anything else.
+constexpr std::optional<State> parseState(std::string_view token) {
+  for (const auto state : {State::kNotReadyToSwitchOn, State::kSwitchOnDisabled,
+                           State::kReadyToSwitchOn, State::kSwitchedOn, State::kOperationEnabled,
+                           State::kQuickStopActive, State::kFaultReactionActive, State::kFault}) {
+    if (token == toString(state)) {
+      return state;
+    }
+  }
+  return std::nullopt;
+}
+
+/// @brief Whether a master can ask a drive to reach @p state.
+///
+/// Three of the eight cannot be asked for, and each for its own reason: @c kNotReadyToSwitchOn and
+/// @c kFaultReactionActive are passed through automatically by the drive and have no command that
+/// enters them, and @c kFault is entered by something going wrong rather than by being requested.
+constexpr bool isCommandableState(State state) {
+  switch (state) {
+    case State::kSwitchOnDisabled:
+    case State::kReadyToSwitchOn:
+    case State::kSwitchedOn:
+    case State::kOperationEnabled:
+    case State::kQuickStopActive:
+      return true;
+    case State::kNotReadyToSwitchOn:
+    case State::kFaultReactionActive:
+    case State::kFault:
+      return false;
+  }
+  return false;
+}
+
+/// @brief What a master should do next, having observed one state and wanting another.
+enum class FsaAction : uint8_t {
+  kArrived,  ///< Already there; nothing to issue.
+  kCommand,  ///< Issue @c FsaTransition::command and look again.
+  kWait,     ///< The drive is mid-transition on its own; issue nothing and look again.
+  /// No path exists — only when the target is not a @c isCommandableState, or when a quick stop
+  /// must be overridden and the caller did not permit it.
+  kUnreachable,
+};
+
+/// @brief The next step of a walk toward a target state.
+struct FsaTransition {
+  FsaAction action{FsaAction::kUnreachable};
+  uint16_t command = 0;  ///< Meaningful only for @c FsaAction::kCommand.
+};
+
+/// @brief One step of the walk from @p from toward @p target — the CiA402 state machine as a
+///        next-hop table.
+///
+/// **A table rather than a search**, because the graph is eight states and fits on a page, and
+/// because the interesting part is not the pathfinding but the handful of states that behave
+/// unlike the rest. Iterating it is what produces a multi-hop walk: each call answers only "what
+/// now", so a caller re-reads the drive between steps and never assumes a command took effect.
+///
+/// The graph is ETG.6010 §5.1 Figure 2, checked against the SOMANET firmware's own
+/// @c get_next_state. Four rows are worth knowing:
+///
+///   - **@c kFault** — every target begins with a fault reset, which reaches @c kSwitchOnDisabled
+///     (transition 15) *and only if the cause is gone*; the firmware refuses while the error is
+///     still reported, so a caller must not read a reset as progress.
+///   - **@c kFaultReactionActive** and **@c kNotReadyToSwitchOn** — no command enters or leaves
+///     them; the drive moves on by itself (transitions 14 and 1), so the answer is to wait.
+///   - **@c kQuickStopActive** — leaving downward is @c kCmdDisableVoltage (transition 12), and
+///     leaving *upward* to @c kOperationEnabled is transition 16, which IEC 61800-7-201 calls not
+///     recommended and this firmware implements as "forced". It is offered only when
+///     @p allowQuickStopOverride, so that overriding a deliberate stop is a decision a caller
+///     makes rather than a side effect of asking to be enabled.
+///   - **@c kReadyToSwitchOn → @c kSwitchedOn** uses @c kCmdSwitchOn rather than the combined
+///     @c kCmdEnableOperation that ETG.6010 permits: the firmware answers both by moving one
+///     state, so the plain command reaches the same place while leaving the intermediate state
+///     observable.
+///
+/// @param from                    The state just read from the drive.
+/// @param target                  Where the caller wants it. See @c isCommandableState.
+/// @param allowQuickStopOverride  Whether transition 16 may be used.
+constexpr FsaTransition nextFsaTransition(State from, State target, bool allowQuickStopOverride) {
+  if (!isCommandableState(target)) {
+    return {FsaAction::kUnreachable, 0};
+  }
+  if (from == target) {
+    return {FsaAction::kArrived, 0};
+  }
+  switch (from) {
+    case State::kNotReadyToSwitchOn:
+    case State::kFaultReactionActive:
+      return {FsaAction::kWait, 0};
+
+    case State::kFault:
+      return {FsaAction::kCommand, Command::kCmdFaultReset};
+
+    case State::kSwitchOnDisabled:
+      // The only way out is upward, whatever the target beyond it.
+      return {FsaAction::kCommand, Command::kCmdShutdown};
+
+    case State::kReadyToSwitchOn:
+      if (target == State::kSwitchOnDisabled) {
+        return {FsaAction::kCommand, Command::kCmdDisableVoltage};
+      }
+      return {FsaAction::kCommand, Command::kCmdSwitchOn};
+
+    case State::kSwitchedOn:
+      if (target == State::kSwitchOnDisabled) {
+        return {FsaAction::kCommand, Command::kCmdDisableVoltage};
+      }
+      if (target == State::kReadyToSwitchOn) {
+        return {FsaAction::kCommand, Command::kCmdShutdown};
+      }
+      // Both kOperationEnabled and kQuickStopActive are reached through it.
+      return {FsaAction::kCommand, Command::kCmdEnableOperation};
+
+    case State::kOperationEnabled:
+      if (target == State::kSwitchOnDisabled) {
+        return {FsaAction::kCommand, Command::kCmdDisableVoltage};
+      }
+      if (target == State::kReadyToSwitchOn) {
+        return {FsaAction::kCommand, Command::kCmdShutdown};
+      }
+      if (target == State::kSwitchedOn) {
+        return {FsaAction::kCommand, Command::kCmdSwitchOn};
+      }
+      return {FsaAction::kCommand, Command::kCmdQuickStop};
+
+    case State::kQuickStopActive:
+      if (target == State::kOperationEnabled) {
+        return allowQuickStopOverride
+                   ? FsaTransition{FsaAction::kCommand, Command::kCmdEnableOperation}
+                   : FsaTransition{FsaAction::kUnreachable, 0};
+      }
+      // Everything else leaves through SwitchOnDisabled, which then continues the walk.
+      return {FsaAction::kCommand, Command::kCmdDisableVoltage};
+  }
+  return {FsaAction::kUnreachable, 0};
+}
+
 }  // namespace mm::node::cia402

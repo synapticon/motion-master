@@ -128,6 +128,43 @@ class Cia402Drive : public ProfileDevice {
   /// @brief Requests an operation mode (0x6060). The drive reflects it in 0x6061 once accepted.
   std::expected<void, std::string> setOperationMode(cia402::OperationMode mode);
 
+  /// @brief Reads the requested operation mode (0x6060) as its raw value.
+  ///
+  /// **The raw pair exists because the enum cannot hold every mode a drive has.** 0x6060 is an
+  /// INTEGER8 whose negative half the profile leaves entirely to the vendor, so a drive sitting in
+  /// one of those — a SOMANET in diagnostics (-2) — has a mode that @c cia402::OperationMode has no
+  /// name for and never will. Use these when the value is being *carried* (saved to put back, taken
+  /// from a client, written straight through) and the typed pair when it is being reasoned about.
+  std::expected<int8_t, std::string> operationModeValue() const;
+
+  /// @brief Reads the *active* operation mode (0x6061) as its raw value — the display counterpart
+  ///        of @c operationModeValue, and the one that says what the drive actually took.
+  std::expected<int8_t, std::string> operationModeValueDisplay() const;
+
+  /// @brief Writes a raw operation-mode value to 0x6060 — the counterpart of @c operationModeValue.
+  ///
+  /// Nothing is checked: whether the drive has this mode is the drive's answer, given by whether
+  /// 0x6061 comes to reflect it. Use @c applyOperationMode to wait for that answer.
+  std::expected<void, std::string> setOperationModeValue(int8_t mode);
+
+  /// @brief Writes @p mode to 0x6060 and waits until the drive reports it active in 0x6061.
+  ///
+  /// **A drive is free to ignore a mode request, and refusing is a successful write followed by
+  /// nothing happening** — which is indistinguishable from success unless someone looks. SOMANET
+  /// firmware refuses a change to a non-"dynamic" mode while in Operation Enabled, and refuses
+  /// outright any mode its @c opmode_update does not list (deprecated system identification, -4).
+  /// Both raise a warning the drive keeps to itself and answer the SDO with success.
+  ///
+  /// Mode 0 is exempt: it requests *no* mode, so there is nothing to arrive at, and a display
+  /// object still showing the previous mode is not a refusal.
+  ///
+  /// @param mode     The 0x6060 value to request.
+  /// @param timeout  How long to give 0x6061 to catch up.
+  /// @return Void once the drive reports @p mode active, otherwise why not — naming the mode it is
+  ///         in instead, with its 0x603F error code when that can be read.
+  std::expected<void, std::string> applyOperationMode(
+      int8_t mode, std::chrono::milliseconds timeout = std::chrono::milliseconds(200));
+
   /// @brief Reads state, statusword, controlword, and the active mode in one shot.
   std::expected<Cia402Status, std::string> readStatus() const;
 
@@ -161,13 +198,43 @@ class Cia402Drive : public ProfileDevice {
 
   // --- Convenience walks ---------------------------------------------------------------------
 
-  /// @brief Drives the state machine to OperationEnabled, walking every intermediate transition.
+  /// @brief Drives the state machine to @p target, walking every intermediate transition.
   ///
-  /// Reads the state, issues the single transition that advances toward OperationEnabled
-  /// (resetting first if faulted), and polls until the drive reaches it or @p timeout elapses.
-  /// Intended for the control-plane (HTTP) thread — it briefly sleeps between polls and must
-  /// never be called from the RT loop. For the drive to actually advance, process-data exchange
-  /// must be running (the statusword has to update between polls).
+  /// Reads the state, issues the one transition that advances toward @p target
+  /// (@c cia402::nextFsaTransition), and repeats until the drive arrives or @p timeout elapses. The
+  /// state is re-read every iteration rather than assumed, so a drive that needs an extra cycle,
+  /// or that moves on its own — out of @c kFaultReactionActive, or out of @c kQuickStopActive once
+  /// its quick-stop ramp finishes — is simply followed.
+  ///
+  /// Intended for the control-plane (HTTP) thread: it sleeps between polls and must never be
+  /// called from the RT loop. **Process data must be exchanging** for the drive to advance at all
+  /// — the statusword has to update between polls, and the firmware additionally refuses
+  /// @c kOperationEnabled unless master communication is live.
+  ///
+  /// Three outcomes are worth telling apart in the error, and this does:
+  ///   - a **fault that will not clear** — the reset was issued and the drive stayed in
+  ///     @c kFault, which the firmware does when the cause is still present. The drive's own error
+  ///     report is attached.
+  ///   - an **unreachable target** — asking for a state no command enters, or for
+  ///     @c kOperationEnabled out of a quick stop without @p allowQuickStopOverride.
+  ///   - a plain **timeout**, naming the state it was stuck in.
+  ///
+  /// @param target                 Where to bring the drive. Must be @c cia402::isCommandableState.
+  /// @param timeout                Maximum time to spend walking.
+  /// @param allowQuickStopOverride Whether transition 16 may be used to leave @c kQuickStopActive
+  ///                               upward. **False for anything that did not explicitly ask for
+  ///                               it**: a quick stop is a deliberate act, and a procedure that
+  ///                               merely wants an enabled drive must not undo one.
+  /// @return Void once @p target is reached, otherwise why not.
+  std::expected<void, std::string> transitionToState(
+      cia402::State target, std::chrono::milliseconds timeout = std::chrono::milliseconds(2000),
+      bool allowQuickStopOverride = false);
+
+  /// @brief Drives the state machine to OperationEnabled.
+  ///
+  /// @c transitionToState with that target, and **deliberately without the quick-stop override**:
+  /// this is what procedures call to prepare a drive, and one that overrode a quick stop on the
+  /// way to a measurement would be undoing a stop somebody asked for.
   ///
   /// @param timeout  Maximum time to wait for OperationEnabled.
   /// @return Void once OperationEnabled is reached, or an error string on a bus failure, a

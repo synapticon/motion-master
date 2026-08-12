@@ -213,6 +213,105 @@ constexpr std::string_view toString(FirmwareService service) {
 ///        @c toString. Returns @c std::nullopt for any other token.
 std::optional<FirmwareService> parseFirmwareService(std::string_view token);
 
+/// @brief The settings of the system-identification chirp (OS command 15). The enum value @b is
+///        the parameter index the command carries in byte 1.
+///
+/// **One command sets one of these**, so configuring a run means issuing the command once per
+/// setting. They are held on the drive until overwritten or it is power-cycled; nothing reads them
+/// back.
+enum class SystemIdentificationParameter : uint8_t {
+  kStartFrequency = 0,   ///< Where the sweep begins, in mHz.
+  kTargetFrequency = 1,  ///< Where it ends, in mHz. Must not be below the start frequency.
+  kTargetAmplitude = 2,  ///< Peak excitation, in per-mille of rated torque. See the note below.
+  kTransitionTime = 3,   ///< How long the sweep takes, in ms.
+  kSignalType = 4,       ///< Which chirp; see @c ChirpSignalType.
+  kStartProcedure = 5,   ///< Arms the run; see @c SystemIdentificationStart.
+};
+
+/// @brief Name of a system-identification parameter, as a message should render it. Never
+///        @c nullptr.
+constexpr std::string_view toString(SystemIdentificationParameter parameter) {
+  switch (parameter) {
+    case SystemIdentificationParameter::kStartFrequency:
+      return "start frequency";
+    case SystemIdentificationParameter::kTargetFrequency:
+      return "target frequency";
+    case SystemIdentificationParameter::kTargetAmplitude:
+      return "target amplitude";
+    case SystemIdentificationParameter::kTransitionTime:
+      return "transition time";
+    case SystemIdentificationParameter::kSignalType:
+      return "signal type";
+    case SystemIdentificationParameter::kStartProcedure:
+      return "start the procedure";
+  }
+  return "unknown parameter";
+}
+
+/// @brief Which excitation the system-identification run sweeps with (parameter 4).
+enum class ChirpSignalType : uint8_t {
+  /// Logarithmic frequency sweep whose amplitude rises with it, from half the target to the target.
+  kLogarithmic = 0,
+  /// Linear frequency sweep at a constant amplitude.
+  kLinear = 1,
+};
+
+/// @brief Name of a chirp signal type (for logging / JSON). Never returns @c nullptr.
+constexpr std::string_view toString(ChirpSignalType type) {
+  switch (type) {
+    case ChirpSignalType::kLogarithmic:
+      return "logarithmic";
+    case ChirpSignalType::kLinear:
+      return "linear";
+  }
+  return "unknown";
+}
+
+/// @brief Parses a signal-type token ("logarithmic" / "linear"). @c std::nullopt for any other.
+std::optional<ChirpSignalType> parseChirpSignalType(std::string_view token);
+
+/// @brief What writing parameter 5 does — arm the run, and on what trigger.
+enum class SystemIdentificationStart : uint8_t {
+  /// Do not arm. Writing this is also how an armed run is disarmed, which matters because the
+  /// drive starts on the **rising edge** of this parameter: re-arming without clearing first is a
+  /// write the firmware never sees as an edge.
+  kNone = 0,
+  kImmediately = 1,  ///< Start on the next control cycle.
+  /// Start when high resolution data streaming starts. This is the pairing that produces a usable
+  /// recording — see @c HrdData::kSystemIdentificationData.
+  kAfterHrdStreamStart = 2,
+};
+
+/// @brief Name of a start trigger (for logging / JSON). Never returns @c nullptr.
+constexpr std::string_view toString(SystemIdentificationStart start) {
+  switch (start) {
+    case SystemIdentificationStart::kNone:
+      return "none";
+    case SystemIdentificationStart::kImmediately:
+      return "immediately";
+    case SystemIdentificationStart::kAfterHrdStreamStart:
+      return "after-hrd-stream-start";
+  }
+  return "unknown";
+}
+
+/// @brief Parses a start token ("none" / "immediately" / "after-hrd-stream-start").
+std::optional<SystemIdentificationStart> parseSystemIdentificationStart(std::string_view token);
+
+/// @brief The bounds the firmware enforces on a chirp configuration.
+///
+/// **Taken from the firmware's own @c are_sinewave_config_parameters_valid, not from the OS command
+/// specification**, which says only that an out-of-range value raises an "Invalid Parameter" error
+/// and points at another document for the numbers. They are the range within which its fixed-point
+/// arithmetic does not overflow, which is why they are hard limits rather than advice.
+///
+/// The amplitude is deliberately absent: the firmware does not check it. See
+/// @c SomanetDrive::setSystemIdentificationParameter.
+inline constexpr uint32_t kMinChirpFrequencyMilliHz = 100;        ///< 0.1 Hz.
+inline constexpr uint32_t kMaxChirpFrequencyMilliHz = 1'000'000;  ///< 1000 Hz.
+inline constexpr uint32_t kMinChirpTransitionTimeMs = 1'000;      ///< 1 s.
+inline constexpr uint32_t kMaxChirpTransitionTimeMs = 20'000;     ///< 20 s.
+
 /// @brief The faults encoder register communication (command 0) reports as its command-specific OS
 ///        error code.
 ///
@@ -446,6 +545,7 @@ enum class OsCommandId : uint8_t {
   kSkippedCyclesCounter = 13,         ///< Reads a control loop's skipped-cycle counter. Harmless;
                                       ///< no motion.
   kIgnoreBissStatusBits = 14,         ///< Suppresses a BiSS encoder's own error and warning bits.
+  kSystemIdentification = 15,         ///< Configures and triggers the system-identification chirp.
 };
 
 /// @brief The faults open phase detection (command 6) reports, as its command-specific OS error
@@ -1590,6 +1690,33 @@ class SomanetDrive : public Cia402Drive {
   std::expected<void, std::string> setIgnoreBissStatusBits(
       somanet::EncoderOrdinal encoder, bool ignore,
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(30),
+                                       .pollInterval = std::chrono::milliseconds(20)});
+
+  /// @brief Writes one system-identification setting (OS command 15).
+  ///
+  /// The command carries a parameter index and a 32-bit value, so a configured run is this called
+  /// once per setting — there is no writing them together. The drive stores each as it arrives and
+  /// answers immediately; nothing is checked at this point and nothing reads them back.
+  ///
+  /// **Validation happens later, and its failure is a drive fault.** The firmware checks the
+  /// configuration on the rising edge of @c SystemIdentificationParameter::kStartProcedure, inside
+  /// the motion control loop — and a configuration outside
+  /// @c somanet::kMinChirpFrequencyMilliHz and friends does not merely fail to start: it raises
+  /// @c IvldPara with a quick-stop reaction. So every one of these writes succeeds, and a bad set
+  /// of numbers surfaces as a faulted drive when it is armed. Check before writing, which is what
+  /// @c parseSystemIdentificationRequest does.
+  ///
+  /// **The amplitude is not among the checked values** — neither here nor in the firmware — and it
+  /// is a torque command in per-mille of rated torque. Nothing will refuse an unreasonable one.
+  ///
+  /// @param parameter Which setting to write.
+  /// @param value     Its value, in the units @c SystemIdentificationParameter names.
+  /// @param config    Timing and cancellation.
+  /// @return Void once the drive stored it, otherwise why it did not. An unknown parameter index
+  ///         comes back as the drive's status 2, reported as such.
+  std::expected<void, std::string> setSystemIdentificationParameter(
+      somanet::SystemIdentificationParameter parameter, uint32_t value,
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
                                        .pollInterval = std::chrono::milliseconds(20)});
 
   /// @brief Reads the requested operation mode (0x6060) as its raw value.

@@ -66,6 +66,7 @@ using mm::node::parseHrdStreamingRequest;
 using mm::node::parseIcMuCalibrationModeRequest;
 using mm::node::parseIgnoreBissStatusBitsRequest;
 using mm::node::parseSkippedCyclesRequest;
+using mm::node::parseSystemIdentificationRequest;
 using mm::node::phaseInductanceMeasurementSteps;
 using mm::node::phaseResistanceMeasurementSteps;
 using mm::node::polePairDetectionSteps;
@@ -84,9 +85,11 @@ using mm::node::runPhaseInductanceMeasurementProcedure;
 using mm::node::runPhaseResistanceMeasurementProcedure;
 using mm::node::runPolePairDetectionProcedure;
 using mm::node::runSkippedCyclesProcedure;
+using mm::node::runSystemIdentificationProcedure;
 using mm::node::runTorqueConstantMeasurementProcedure;
 using mm::node::SkippedCyclesRequest;
 using mm::node::skippedCyclesSteps;
+using mm::node::systemIdentificationSteps;
 using mm::node::torqueConstantMeasurementSteps;
 namespace somanet = mm::node::somanet;
 using mm::node::cia402::Object;
@@ -107,6 +110,9 @@ class OsCommandFakeDriver : public FieldbusDriver {
   int commandWrites = 0;
   std::vector<uint8_t> brakeStatusWrites;
   std::vector<uint8_t> commandIds;
+  // The whole request of each command, for the procedures that care about its parameter bytes and
+  // not only which command was issued.
+  std::vector<std::vector<uint8_t>> commands;
   uint32_t vendorId = kSynapticonVendorId;
   uint16_t statusword = 0x0040;  // SwitchOnDisabled
   std::vector<std::pair<uint16_t, uint8_t>> writeLog;
@@ -196,6 +202,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
       awaitingCommand = false;
       if (!data.empty()) {
         commandIds.push_back(data[0]);
+        commands.emplace_back(data.begin(), data.end());
       }
       if (faultAfterCommands > 0 && commandWrites >= faultAfterCommands) {
         statusword = 0x0008;  // Fault
@@ -1465,6 +1472,149 @@ TEST(RunPhaseInductanceMeasurementProcedure, NeverTouchesTheBrake) {
       runPhaseInductanceMeasurementProcedure(device, reporter, std::stop_token{}).has_value());
 
   EXPECT_EQ(brakeWrites(driver), 0);
+}
+
+// --- System identification procedure -------------------------------------------------------------
+
+namespace {
+
+nlohmann::json validChirp() {
+  return nlohmann::json{{"startFrequencyMilliHz", 1000},
+                        {"targetFrequencyMilliHz", 100000},
+                        {"targetAmplitudePermil", 50},
+                        {"transitionTimeMs", 5000}};
+}
+
+}  // namespace
+
+TEST(SystemIdentificationSteps, DeclaresConfigureThenArm) {
+  auto steps = systemIdentificationSteps();
+  ASSERT_EQ(steps.size(), 2u);
+  EXPECT_EQ(steps[0].id, "configure-chirp");
+  EXPECT_EQ(steps[1].id, "arm");
+}
+
+TEST(ParseSystemIdentificationRequest, AcceptsAValidChirpAndDefaultsTheRest) {
+  auto request = parseSystemIdentificationRequest(validChirp());
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->startFrequencyMilliHz, 1000u);
+  EXPECT_EQ(request->targetFrequencyMilliHz, 100000u);
+  EXPECT_EQ(request->targetAmplitudePermil, 50u);
+  EXPECT_EQ(request->transitionTimeMs, 5000u);
+  EXPECT_EQ(request->signalType, somanet::ChirpSignalType::kLogarithmic);
+  // Not arming by default: a request that says nothing should not excite a motor.
+  EXPECT_EQ(request->start, somanet::SystemIdentificationStart::kNone);
+}
+
+TEST(ParseSystemIdentificationRequest, EnforcesTheFirmwaresOwnBounds) {
+  // Every one of these is rejected by the firmware too — but there it is rejected *when armed*,
+  // as an Invalid Parameter fault with a quick stop. Catching them here is the difference between
+  // a 400 and a faulted drive, which is the whole reason this validation exists.
+  auto tooSlow = validChirp();
+  tooSlow["startFrequencyMilliHz"] = somanet::kMinChirpFrequencyMilliHz - 1;
+  EXPECT_FALSE(parseSystemIdentificationRequest(tooSlow).has_value());
+
+  auto tooFast = validChirp();
+  tooFast["targetFrequencyMilliHz"] = somanet::kMaxChirpFrequencyMilliHz + 1;
+  EXPECT_FALSE(parseSystemIdentificationRequest(tooFast).has_value());
+
+  auto tooShort = validChirp();
+  tooShort["transitionTimeMs"] = somanet::kMinChirpTransitionTimeMs - 1;
+  EXPECT_FALSE(parseSystemIdentificationRequest(tooShort).has_value());
+
+  auto tooLong = validChirp();
+  tooLong["transitionTimeMs"] = somanet::kMaxChirpTransitionTimeMs + 1;
+  EXPECT_FALSE(parseSystemIdentificationRequest(tooLong).has_value());
+}
+
+TEST(ParseSystemIdentificationRequest, RejectsADescendingSweep) {
+  auto descending = validChirp();
+  descending["startFrequencyMilliHz"] = 100000;
+  descending["targetFrequencyMilliHz"] = 1000;
+  auto request = parseSystemIdentificationRequest(descending);
+  ASSERT_FALSE(request.has_value());
+  EXPECT_NE(request.error().find("runs upwards"), std::string::npos) << request.error();
+}
+
+TEST(ParseSystemIdentificationRequest, LeavesTheAmplitudeToTheCaller) {
+  // The firmware does not check it, so neither does this: a limit invented here would refuse a
+  // value some machine legitimately needs.
+  auto large = validChirp();
+  large["targetAmplitudePermil"] = 5000;
+  auto request = parseSystemIdentificationRequest(large);
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->targetAmplitudePermil, 5000u);
+}
+
+TEST(RunSystemIdentificationProcedure, DisarmsBeforeConfiguringAndArmsLast) {
+  // The order is the whole correctness argument: the drive starts on the *rising* edge of the arm
+  // parameter, so a run that did not disarm first would silently not start after a previous one.
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(systemIdentificationSteps());
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  auto request = parseSystemIdentificationRequest(validChirp());
+  ASSERT_TRUE(request.has_value()) << request.error();
+  request->start = somanet::SystemIdentificationStart::kAfterHrdStreamStart;
+
+  auto result = runSystemIdentificationProcedure(device, reporter, std::stop_token{}, *request);
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  // Seven writes: disarm, the five settings, then the arm.
+  ASSERT_EQ(driver.commandWrites, 7);
+  const auto& first = driver.commands.front();
+  EXPECT_EQ(first[1], 5) << "the first write must be the arm parameter";
+  EXPECT_EQ(first[5], 0) << "and it must clear it";
+  const auto& last = driver.commands.back();
+  EXPECT_EQ(last[1], 5);
+  EXPECT_EQ(last[5],
+            static_cast<uint8_t>(somanet::SystemIdentificationStart::kAfterHrdStreamStart));
+
+  for (auto id : {"configure-chirp", "arm"}) {
+    const auto step = stepById(reporter.steps(), id);
+    ASSERT_TRUE(step.has_value()) << id;
+    EXPECT_EQ(step->status, ProgressStatus::kSucceeded) << id;
+  }
+  // Nothing reads the settings back, so the step's record is the only account of them.
+  const auto configured = stepById(reporter.steps(), "configure-chirp");
+  EXPECT_EQ(configured->value.at("transitionTimeMs").get<uint32_t>(), 5000u);
+  EXPECT_EQ(configured->value.at("signalType").get<std::string>(), "logarithmic");
+  EXPECT_EQ(stepById(reporter.steps(), "arm")->value.at("start").get<std::string>(),
+            "after-hrd-stream-start");
+}
+
+TEST(RunSystemIdentificationProcedure, ConfiguringWithoutArmingWritesAZeroTrigger) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(systemIdentificationSteps());
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  auto request = parseSystemIdentificationRequest(validChirp());
+  ASSERT_TRUE(request.has_value()) << request.error();
+
+  ASSERT_TRUE(
+      runSystemIdentificationProcedure(device, reporter, std::stop_token{}, *request).has_value());
+  EXPECT_EQ(driver.commands.back()[1], 5);
+  EXPECT_EQ(driver.commands.back()[5], 0);
+  EXPECT_EQ(stepById(reporter.steps(), "arm")->value.at("start").get<std::string>(), "none");
+}
+
+TEST(RunSystemIdentificationProcedure, AFailedSettingStopsBeforeArming) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(systemIdentificationSteps());
+
+  driver.responses = {{2, 0, 0, 0, 0, 0, 0, 0}};  // the drive rejects the very first write
+  auto request = parseSystemIdentificationRequest(validChirp());
+  ASSERT_TRUE(request.has_value()) << request.error();
+  request->start = somanet::SystemIdentificationStart::kImmediately;
+
+  auto result = runSystemIdentificationProcedure(device, reporter, std::stop_token{}, *request);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(stepById(reporter.steps(), "configure-chirp")->status, ProgressStatus::kFailed);
+  // Never armed: a half-written chirp must not be started.
+  EXPECT_EQ(stepById(reporter.steps(), "arm")->status, ProgressStatus::kIdle);
 }
 
 // --- Ignore BiSS status bits procedure -----------------------------------------------------------

@@ -689,6 +689,52 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor systemIdentification;
+  systemIdentification.name = std::string(kSystemIdentificationProcedure);
+  systemIdentification.title = "System identification";
+  systemIdentification.description =
+      "Configures the chirp the drive excites the machine with for system identification, and "
+      "optionally arms it. The chirp is a torque sweep from a start to a target frequency over a "
+      "chosen time: logarithmic, whose amplitude rises with the frequency from half the target, or "
+      "linear at a constant amplitude. Recording the machine's response to it is what High "
+      "resolution data streaming does — start this with \"after HRD stream start\" and then run "
+      "that with its system identification format, and the recording captures the excitation and "
+      "the response together.";
+  systemIdentification.caveats = {
+      "Arming excites the motor. \"Immediately\" starts on the next control cycle if the drive is "
+      "enabled, so the shaft must be free and its load safe to move. \"None\" configures the drive "
+      "and excites nothing, which is the default.",
+      "The amplitude is a torque command in per-mille of rated torque, and neither this server nor "
+      "the drive checks it — the frequency and time bounds are enforced, this one is not.",
+      "The frequency and time bounds come from the firmware's own fixed-point arithmetic and are "
+      "checked before anything is written. That matters: the drive stores each setting without "
+      "looking at it and validates the set only when armed, where a bad one raises an Invalid "
+      "Parameter fault with a quick stop rather than simply refusing to start.",
+      "The settings live on the drive until overwritten or it is power-cycled, and nothing reads "
+      "them back — the run's own record is the only account of what the drive holds.",
+      "The drive starts on the rising edge of the arm parameter, so this disarms before "
+      "configuring. A run armed twice without that would silently not start the second time.",
+  };
+  systemIdentification.parameters = systemIdentificationParameters();
+  systemIdentification.movesMotor = true;
+  systemIdentification.requiresEnabled = false;
+  systemIdentification.steps = systemIdentificationSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(systemIdentification),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
+        auto request = parseSystemIdentificationRequest(body);
+        if (!request) {
+          return std::unexpected(request.error());
+        }
+        return
+            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+              return runSystemIdentificationProcedure(device, reporter, std::move(stop), request);
+            };
+      },
+  });
+
   ProcedureDescriptor torqueConstant;
   torqueConstant.name = std::string(kTorqueConstantMeasurementProcedure);
   torqueConstant.title = "Torque constant measurement";

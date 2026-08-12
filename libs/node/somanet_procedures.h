@@ -284,6 +284,77 @@ std::expected<void, std::string> runHrdStreamingProcedure(Device& device,
                                                           std::stop_token stop,
                                                           const HrdStreamingRequest& request);
 
+/// @brief Procedure name for configuring a system identification run, as it appears in its URL and
+///        its snapshot key.
+inline constexpr std::string_view kSystemIdentificationProcedure = "system-identification";
+
+/// @brief The step that writes the chirp's five settings.
+inline constexpr std::string_view kSystemIdConfigureStep = "configure-chirp";
+
+/// @brief The step that arms the run — or disarms it.
+inline constexpr std::string_view kSystemIdArmStep = "arm";
+
+/// @brief One system identification run, as a client describes it.
+struct SystemIdentificationRequest {
+  uint32_t startFrequencyMilliHz = 0;   ///< Where the sweep begins. Required.
+  uint32_t targetFrequencyMilliHz = 0;  ///< Where it ends. Required, and not below the start.
+  uint32_t targetAmplitudePermil = 0;   ///< Peak excitation, per-mille of rated torque. Required.
+  uint32_t transitionTimeMs = 0;        ///< How long the sweep takes. Required.
+  somanet::ChirpSignalType signalType{somanet::ChirpSignalType::kLogarithmic};  ///< Which chirp.
+
+  /// Whether to arm the run, and on what trigger. Defaults to not arming, so a request that says
+  /// nothing configures the drive and excites nothing.
+  somanet::SystemIdentificationStart start{somanet::SystemIdentificationStart::kNone};
+};
+
+/// @brief Parses and validates a client's system identification request body.
+///
+/// Accepts `{"startFrequencyMilliHz": 1000, "targetFrequencyMilliHz": 100000,
+/// "targetAmplitudePermil": 50, "transitionTimeMs": 5000, "signalType": "logarithmic",
+/// "start": "after-hrd-stream-start"}`. The four numbers are required; `signalType` and `start`
+/// default.
+///
+/// **The bounds checked here are the firmware's own, and checking them is not politeness.** The
+/// drive stores each setting without looking at it and validates the set on the rising edge of the
+/// start parameter — where a bad one raises @c IvldPara *with a quick-stop reaction*. Rejecting the
+/// request is the difference between a 400 and a faulted drive.
+///
+/// @param body  Parsed request JSON.
+/// @return The validated request, or a message naming what is wrong with it.
+std::expected<SystemIdentificationRequest, std::string> parseSystemIdentificationRequest(
+    const nlohmann::json& body);
+
+/// @brief What system identification accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> systemIdentificationParameters();
+
+/// @brief The system identification procedure's step template — configure, then arm.
+std::vector<ProgressStep> systemIdentificationSteps();
+
+/// @brief Configures and optionally arms a system identification run as a procedure body.
+///
+/// Two steps, because the drive has two distinct pieces of state and one is a trigger:
+///
+/// 1. **configure-chirp** — disarms first, then writes the five settings. Disarming is not
+///    housekeeping: the drive starts on the *rising edge* of the start parameter, so a run left
+///    armed by a previous one would never see an edge and would silently not start.
+/// 2. **arm** — writes the requested trigger. With @c SystemIdentificationStart::kNone this leaves
+///    the drive configured and idle, which is the default.
+///
+/// **What it does not do is excite the motor.** Arming with @c kImmediately does — on the next
+/// control cycle, if the drive is enabled — and arming with @c kAfterHrdStreamStart waits for a
+/// recording to begin. This procedure needs no operation mode, no CiA402 state and no brake,
+/// because configuring needs none of them; whether anything moves is decided by the drive's own
+/// state when the trigger fires.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; checked between writes and passed into each command.
+/// @param request  The chirp, and whether to arm it.
+/// @return Void once every setting was written, otherwise why it stopped.
+std::expected<void, std::string> runSystemIdentificationProcedure(
+    Device& device, ProgressReporter& reporter, std::stop_token stop,
+    const SystemIdentificationRequest& request);
+
 /// @brief Procedure name for ignoring a BiSS encoder's status bits, as it appears in its URL and
 ///        its snapshot key.
 inline constexpr std::string_view kIgnoreBissStatusBitsProcedure = "ignore-biss-status-bits";

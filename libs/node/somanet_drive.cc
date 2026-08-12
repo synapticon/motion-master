@@ -367,6 +367,29 @@ std::optional<HrdData> parseHrdData(std::string_view token) {
   return std::nullopt;
 }
 
+std::optional<ChirpSignalType> parseChirpSignalType(std::string_view token) {
+  if (token == toString(ChirpSignalType::kLogarithmic)) {
+    return ChirpSignalType::kLogarithmic;
+  }
+  if (token == toString(ChirpSignalType::kLinear)) {
+    return ChirpSignalType::kLinear;
+  }
+  return std::nullopt;
+}
+
+std::optional<SystemIdentificationStart> parseSystemIdentificationStart(std::string_view token) {
+  if (token == toString(SystemIdentificationStart::kNone)) {
+    return SystemIdentificationStart::kNone;
+  }
+  if (token == toString(SystemIdentificationStart::kImmediately)) {
+    return SystemIdentificationStart::kImmediately;
+  }
+  if (token == toString(SystemIdentificationStart::kAfterHrdStreamStart)) {
+    return SystemIdentificationStart::kAfterHrdStreamStart;
+  }
+  return std::nullopt;
+}
+
 std::optional<FirmwareService> parseFirmwareService(std::string_view token) {
   if (token == toString(FirmwareService::kDriveControl)) {
     return FirmwareService::kDriveControl;
@@ -1363,6 +1386,50 @@ std::expected<void, std::string> SomanetDrive::setIgnoreBissStatusBits(
         std::format("{} failed with OS error {} (command-specific)", what, code));
   }
   // Status 0: completed with no reply, which is all this command ever answers on success.
+  return {};
+}
+
+// Byte layout of the system identification request (command 15): a parameter index, then its value
+// big-endian across the next four bytes — the one command here that carries a 32-bit argument.
+constexpr size_t kSystemIdParameterByte = 1;
+constexpr size_t kSystemIdValueMsbByte = 2;
+
+std::expected<void, std::string> SomanetDrive::setSystemIdentificationParameter(
+    somanet::SystemIdentificationParameter parameter, uint32_t value,
+    const OsCommandConfig& config) {
+  const std::string what = std::format("setting the system identification {} to {}",
+                                       somanet::toString(parameter), value);
+
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(somanet::OsCommandId::kSystemIdentification);
+  command[kSystemIdParameterByte] = static_cast<uint8_t>(parameter);
+  command[kSystemIdValueMsbByte] = static_cast<uint8_t>(value >> 24);
+  command[kSystemIdValueMsbByte + 1] = static_cast<uint8_t>(value >> 16);
+  command[kSystemIdValueMsbByte + 2] = static_cast<uint8_t>(value >> 8);
+  command[kSystemIdValueMsbByte + 3] = static_cast<uint8_t>(value);
+
+  auto response = runOsCommand(command, config);
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+
+  if (response->failed()) {
+    if (!response->errorCode) {
+      // Status 2 is this command's own failure, and it has exactly one cause: the motion control
+      // service did not recognise the parameter index. Unreachable through the typed enum, so it
+      // means the firmware and this build disagree about the numbering.
+      return std::unexpected(
+          std::format("{} failed: the drive does not recognise parameter index {}", what,
+                      static_cast<int>(parameter)));
+    }
+    const uint8_t code = *response->errorCode;
+    if (auto general = osCommandErrorName(code)) {
+      return std::unexpected(
+          std::format("{} was not performed: {} (OS error {})", what, *general, code));
+    }
+    return std::unexpected(
+        std::format("{} failed with OS error {} (command-specific)", what, code));
+  }
   return {};
 }
 

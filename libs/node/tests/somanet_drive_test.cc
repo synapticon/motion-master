@@ -1670,6 +1670,84 @@ TEST(RunTorqueConstantMeasurement, AGeneralOsErrorNamesItself) {
   EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
 }
 
+// --- System identification (command 15) ----------------------------------------------------------
+
+TEST(SetSystemIdentificationParameter, PutsTheIndexInByteOneAndTheValueBigEndian) {
+  // The specification's worked example: transition time (index 3) = 10 ms.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive
+                  ->setSystemIdentificationParameter(
+                      somanet::SystemIdentificationParameter::kTransitionTime, 10,
+                      {.pollInterval = kNoDelay})
+                  .has_value());
+  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  ASSERT_EQ(written.size(), 8u);
+  EXPECT_EQ(written[0], 15);
+  EXPECT_EQ(written[1], 3);
+  EXPECT_EQ(written[2], 0x00);
+  EXPECT_EQ(written[3], 0x00);
+  EXPECT_EQ(written[4], 0x00);
+  EXPECT_EQ(written[5], 0x0A);
+}
+
+TEST(SetSystemIdentificationParameter, SpansAllFourValueBytes) {
+  // A frequency at the firmware's ceiling needs three of them, so a value truncated to one byte
+  // would pass the example above and fail here.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive
+                  ->setSystemIdentificationParameter(
+                      somanet::SystemIdentificationParameter::kTargetFrequency,
+                      somanet::kMaxChirpFrequencyMilliHz, {.pollInterval = kNoDelay})
+                  .has_value());
+  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  EXPECT_EQ(written[1], 1);
+  // 1000000 = 0x000F4240.
+  EXPECT_EQ(written[2], 0x00);
+  EXPECT_EQ(written[3], 0x0F);
+  EXPECT_EQ(written[4], 0x42);
+  EXPECT_EQ(written[5], 0x40);
+}
+
+TEST(SetSystemIdentificationParameter, StatusTwoNamesTheUnknownParameterIndex) {
+  // This command's own failure, and its only one: the motion control service did not recognise the
+  // index. It carries no error code, so a bare "failed" would say nothing.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{2, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = drive->setSystemIdentificationParameter(
+      somanet::SystemIdentificationParameter::kSignalType, 1, {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("does not recognise parameter index"), std::string::npos)
+      << result.error();
+}
+
+TEST(ParseChirpVocabulary, RoundTripsItsOwnTokens) {
+  EXPECT_EQ(somanet::parseChirpSignalType("logarithmic"), somanet::ChirpSignalType::kLogarithmic);
+  EXPECT_EQ(somanet::parseChirpSignalType("linear"), somanet::ChirpSignalType::kLinear);
+  EXPECT_FALSE(somanet::parseChirpSignalType("log").has_value());
+
+  EXPECT_EQ(somanet::parseSystemIdentificationStart("none"),
+            somanet::SystemIdentificationStart::kNone);
+  EXPECT_EQ(somanet::parseSystemIdentificationStart("immediately"),
+            somanet::SystemIdentificationStart::kImmediately);
+  EXPECT_EQ(somanet::parseSystemIdentificationStart("after-hrd-stream-start"),
+            somanet::SystemIdentificationStart::kAfterHrdStreamStart);
+  EXPECT_FALSE(somanet::parseSystemIdentificationStart("hrd").has_value());
+}
+
 // --- Ignore BiSS status bits (command 14) --------------------------------------------------------
 
 TEST(SetIgnoreBissStatusBits, PacksTheEncoderAboveTheTriggerBit) {

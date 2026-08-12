@@ -3,6 +3,7 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstdint>
 #include <expected>
@@ -10,6 +11,7 @@
 #include <format>
 #include <fstream>
 #include <initializer_list>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <span>
@@ -1448,6 +1450,228 @@ std::expected<void, std::string> runPhaseInductanceMeasurementProcedure(Device& 
                                  [](SomanetDrive& drive, const OsCommandConfig& config) {
                                    return drive.runPhaseInductanceMeasurement(config);
                                  });
+}
+
+namespace {
+
+// Reads a required unsigned 32-bit field, bounded. Shared by the four chirp numbers, whose limits
+// differ but whose failure messages should not.
+std::expected<uint32_t, std::string> readBoundedUint32(const nlohmann::json& body,
+                                                       const char* field, uint32_t minValue,
+                                                       uint32_t maxValue) {
+  auto it = body.find(field);
+  if (it == body.end() || it->is_null()) {
+    return std::unexpected(std::format("'{}' is required", field));
+  }
+  if (!it->is_number_integer()) {
+    return std::unexpected(
+        std::format("'{}' must be a whole number ({}-{})", field, minValue, maxValue));
+  }
+  const int64_t raw = it->get<int64_t>();
+  if (raw < static_cast<int64_t>(minValue) || raw > static_cast<int64_t>(maxValue)) {
+    return std::unexpected(
+        std::format("'{}' must be {}-{}, got {}", field, minValue, maxValue, raw));
+  }
+  return static_cast<uint32_t>(raw);
+}
+
+}  // namespace
+
+std::expected<SystemIdentificationRequest, std::string> parseSystemIdentificationRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  SystemIdentificationRequest request;
+
+  auto startFrequency =
+      readBoundedUint32(body, "startFrequencyMilliHz", somanet::kMinChirpFrequencyMilliHz,
+                        somanet::kMaxChirpFrequencyMilliHz);
+  if (!startFrequency) {
+    return std::unexpected(startFrequency.error());
+  }
+  request.startFrequencyMilliHz = *startFrequency;
+
+  auto targetFrequency =
+      readBoundedUint32(body, "targetFrequencyMilliHz", somanet::kMinChirpFrequencyMilliHz,
+                        somanet::kMaxChirpFrequencyMilliHz);
+  if (!targetFrequency) {
+    return std::unexpected(targetFrequency.error());
+  }
+  request.targetFrequencyMilliHz = *targetFrequency;
+
+  // The firmware's fourth rule, and the one a caller is most likely to trip: it sweeps upwards, so
+  // a descending pair is rejected rather than swept backwards.
+  if (request.startFrequencyMilliHz > request.targetFrequencyMilliHz) {
+    return std::unexpected(std::format(
+        "'startFrequencyMilliHz' ({}) must not be above 'targetFrequencyMilliHz' ({}) — the sweep "
+        "runs upwards",
+        request.startFrequencyMilliHz, request.targetFrequencyMilliHz));
+  }
+
+  auto transitionTime =
+      readBoundedUint32(body, "transitionTimeMs", somanet::kMinChirpTransitionTimeMs,
+                        somanet::kMaxChirpTransitionTimeMs);
+  if (!transitionTime) {
+    return std::unexpected(transitionTime.error());
+  }
+  request.transitionTimeMs = *transitionTime;
+
+  // Bounded only by the wire, deliberately: the firmware does not check the amplitude, and a limit
+  // invented here would refuse a value some machine legitimately needs. It is a torque command.
+  auto amplitude =
+      readBoundedUint32(body, "targetAmplitudePermil", 0, std::numeric_limits<uint32_t>::max());
+  if (!amplitude) {
+    return std::unexpected(amplitude.error());
+  }
+  request.targetAmplitudePermil = *amplitude;
+
+  if (auto signalType = body.find("signalType");
+      signalType != body.end() && !signalType->is_null()) {
+    if (!signalType->is_string()) {
+      return std::unexpected("'signalType' must be a string");
+    }
+    auto parsed = somanet::parseChirpSignalType(signalType->get<std::string>());
+    if (!parsed) {
+      return std::unexpected(std::format("'signalType' must be {} or {}",
+                                         somanet::toString(somanet::ChirpSignalType::kLogarithmic),
+                                         somanet::toString(somanet::ChirpSignalType::kLinear)));
+    }
+    request.signalType = *parsed;
+  }
+
+  if (auto start = body.find("start"); start != body.end() && !start->is_null()) {
+    if (!start->is_string()) {
+      return std::unexpected("'start' must be a string");
+    }
+    auto parsed = somanet::parseSystemIdentificationStart(start->get<std::string>());
+    if (!parsed) {
+      return std::unexpected(
+          std::format("'start' must be {}, {} or {}",
+                      somanet::toString(somanet::SystemIdentificationStart::kNone),
+                      somanet::toString(somanet::SystemIdentificationStart::kImmediately),
+                      somanet::toString(somanet::SystemIdentificationStart::kAfterHrdStreamStart)));
+    }
+    request.start = *parsed;
+  }
+
+  return request;
+}
+
+std::vector<ProcedureParameter> systemIdentificationParameters() {
+  const SystemIdentificationRequest defaults;
+  return {
+      integerParameter("startFrequencyMilliHz", "Start frequency (mHz)",
+                       "Where the sweep begins, in millihertz. Must not be above the target "
+                       "frequency — the sweep runs upwards.",
+                       nullptr, somanet::kMinChirpFrequencyMilliHz,
+                       somanet::kMaxChirpFrequencyMilliHz),
+      integerParameter("targetFrequencyMilliHz", "Target frequency (mHz)",
+                       "Where the sweep ends, in millihertz.", nullptr,
+                       somanet::kMinChirpFrequencyMilliHz, somanet::kMaxChirpFrequencyMilliHz),
+      integerParameter("targetAmplitudePermil", "Target amplitude (‰ of rated torque)",
+                       "Peak excitation, in per-mille of rated torque. The logarithmic chirp "
+                       "starts at half this and rises to it; the linear one holds it throughout. "
+                       "Neither this server nor the drive checks this value — it is a torque "
+                       "command, so choose it for the machine.",
+                       nullptr, 0, std::numeric_limits<uint32_t>::max()),
+      integerParameter("transitionTimeMs", "Transition time (ms)",
+                       "How long the sweep takes, in milliseconds.", nullptr,
+                       somanet::kMinChirpTransitionTimeMs, somanet::kMaxChirpTransitionTimeMs),
+      enumParameter(
+          "signalType", "Signal type",
+          "Logarithmic sweeps the frequency logarithmically and raises the amplitude "
+          "with it, from half the target; linear sweeps the frequency linearly at a "
+          "constant amplitude.",
+          std::string(somanet::toString(defaults.signalType)),
+          {
+              ParameterOption{
+                  .value = std::string(somanet::toString(somanet::ChirpSignalType::kLogarithmic)),
+                  .title = "Logarithmic, rising amplitude"},
+              ParameterOption{
+                  .value = std::string(somanet::toString(somanet::ChirpSignalType::kLinear)),
+                  .title = "Linear, constant amplitude"},
+          }),
+      enumParameter(
+          "start", "Start",
+          "Whether to arm the run. None configures the drive and excites "
+          "nothing. Immediately starts on the next control cycle if the drive is "
+          "enabled. After HRD stream start waits for a high resolution "
+          "recording to begin, which is the pairing that captures the response.",
+          std::string(somanet::toString(defaults.start)),
+          {
+              ParameterOption{.value = std::string(
+                                  somanet::toString(somanet::SystemIdentificationStart::kNone)),
+                              .title = "None — configure only"},
+              ParameterOption{.value = std::string(somanet::toString(
+                                  somanet::SystemIdentificationStart::kImmediately)),
+                              .title = "Immediately"},
+              ParameterOption{.value = std::string(somanet::toString(
+                                  somanet::SystemIdentificationStart::kAfterHrdStreamStart)),
+                              .title = "After HRD stream start"},
+          }),
+  };
+}
+
+std::vector<ProgressStep> systemIdentificationSteps() {
+  return stepsFrom({kSystemIdConfigureStep, kSystemIdArmStep});
+}
+
+std::expected<void, std::string> runSystemIdentificationProcedure(
+    Device& device, ProgressReporter& reporter, std::stop_token stop,
+    const SystemIdentificationRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+
+  const OsCommandConfig config{.timeout = kEncoderRegisterTimeout,
+                               .pollInterval = kEncoderRegisterPollInterval,
+                               .stop = std::move(stop)};
+
+  using Parameter = somanet::SystemIdentificationParameter;
+  // Disarm first, then the five settings. The disarm is what makes the arm below a rising edge,
+  // which is the only thing the firmware acts on.
+  const std::array<std::pair<Parameter, uint32_t>, 6> settings{{
+      {Parameter::kStartProcedure,
+       static_cast<uint32_t>(somanet::SystemIdentificationStart::kNone)},
+      {Parameter::kStartFrequency, request.startFrequencyMilliHz},
+      {Parameter::kTargetFrequency, request.targetFrequencyMilliHz},
+      {Parameter::kTargetAmplitude, request.targetAmplitudePermil},
+      {Parameter::kTransitionTime, request.transitionTimeMs},
+      {Parameter::kSignalType, static_cast<uint32_t>(request.signalType)},
+  }};
+
+  reporter.start(kSystemIdConfigureStep);
+  for (const auto& [parameter, value] : settings) {
+    if (config.stop.stop_requested()) {
+      const auto reason =
+          std::format("system identification was cancelled after {}", somanet::toString(parameter));
+      reporter.fail(kSystemIdConfigureStep, reason);
+      return std::unexpected(reason);
+    }
+    if (auto r = drive->setSystemIdentificationParameter(parameter, value, config); !r) {
+      reporter.fail(kSystemIdConfigureStep, r.error());
+      return std::unexpected(r.error());
+    }
+  }
+  // Nothing reads these back, so the step's record is the only account of what the drive holds.
+  reporter.succeed(kSystemIdConfigureStep,
+                   nlohmann::json{{"startFrequencyMilliHz", request.startFrequencyMilliHz},
+                                  {"targetFrequencyMilliHz", request.targetFrequencyMilliHz},
+                                  {"targetAmplitudePermil", request.targetAmplitudePermil},
+                                  {"transitionTimeMs", request.transitionTimeMs},
+                                  {"signalType", somanet::toString(request.signalType)}});
+
+  reporter.start(kSystemIdArmStep);
+  if (auto r = drive->setSystemIdentificationParameter(
+          Parameter::kStartProcedure, static_cast<uint32_t>(request.start), config);
+      !r) {
+    reporter.fail(kSystemIdArmStep, r.error());
+    return std::unexpected(r.error());
+  }
+  reporter.succeed(kSystemIdArmStep, nlohmann::json{{"start", somanet::toString(request.start)}});
+  return {};
 }
 
 std::expected<IgnoreBissStatusBitsRequest, std::string> parseIgnoreBissStatusBitsRequest(

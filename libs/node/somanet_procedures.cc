@@ -53,6 +53,12 @@ constexpr auto kEncoderRegisterPollInterval = std::chrono::milliseconds(20);
 // Anything shorter aborts first and reports that this master gave up, which is true and useless.
 constexpr auto kSkippedCyclesTimeout = std::chrono::seconds(30);
 
+// Same reasoning for the BiSS service commands whose precondition is "this encoder exists and is
+// BiSS": only the service instance owning the addressed encoder answers, so an encoder that is
+// neither is answered by nothing and the drive's own ~20 s timeout is the report. Clear it, and a
+// 253 can be decoded into what actually went wrong.
+constexpr auto kBissServiceTimeout = std::chrono::seconds(30);
+
 // What HRD streaming is sized for. Configuring is dominated by deleting the previous recording's
 // files, which the firmware specification allows around 5 s for in the worst case. Recording
 // occupies the whole requested duration, so its ceiling is that duration plus this margin for the
@@ -1442,6 +1448,71 @@ std::expected<void, std::string> runPhaseInductanceMeasurementProcedure(Device& 
                                  [](SomanetDrive& drive, const OsCommandConfig& config) {
                                    return drive.runPhaseInductanceMeasurement(config);
                                  });
+}
+
+std::expected<IgnoreBissStatusBitsRequest, std::string> parseIgnoreBissStatusBitsRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  IgnoreBissStatusBitsRequest request;
+
+  auto encoder = readEncoderOrdinal(body, request.encoder);
+  if (!encoder) {
+    return std::unexpected(encoder.error());
+  }
+  request.encoder = *encoder;
+
+  auto ignore = body.find("ignore");
+  if (ignore == body.end() || ignore->is_null()) {
+    return std::unexpected("'ignore' is required");
+  }
+  if (!ignore->is_boolean()) {
+    return std::unexpected("'ignore' must be a boolean");
+  }
+  request.ignore = ignore->get<bool>();
+  return request;
+}
+
+std::vector<ProcedureParameter> ignoreBissStatusBitsParameters() {
+  const IgnoreBissStatusBitsRequest defaults;
+  return {
+      encoderParameter(defaults.encoder),
+      booleanParameter("ignore", "Ignore",
+                       "On stops the firmware acting on the encoder's status bits; off restores "
+                       "the default. Required — the direction is the instruction, and nothing "
+                       "here restores it afterwards.",
+                       nullptr),
+  };
+}
+
+std::vector<ProgressStep> ignoreBissStatusBitsSteps() {
+  return stepsFrom({kIgnoreBissStatusBitsStep});
+}
+
+std::expected<void, std::string> runIgnoreBissStatusBitsProcedure(
+    Device& device, ProgressReporter& reporter, std::stop_token stop,
+    const IgnoreBissStatusBitsRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+
+  reporter.start(kIgnoreBissStatusBitsStep);
+  auto result = drive->setIgnoreBissStatusBits(request.encoder, request.ignore,
+                                               {.timeout = kBissServiceTimeout,
+                                                .pollInterval = kEncoderRegisterPollInterval,
+                                                .stop = std::move(stop)});
+  if (!result) {
+    reporter.fail(kIgnoreBissStatusBitsStep, result.error());
+    return std::unexpected(result.error());
+  }
+  // The command answers with no payload, so the step records what was asked for — which is also
+  // what a later reader needs, since nothing on the drive reports the flag back.
+  reporter.succeed(kIgnoreBissStatusBitsStep,
+                   nlohmann::json{{"encoder", static_cast<uint8_t>(request.encoder)},
+                                  {"ignore", request.ignore}});
+  return {};
 }
 
 std::expected<SkippedCyclesRequest, std::string> parseSkippedCyclesRequest(

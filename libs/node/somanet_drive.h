@@ -445,6 +445,7 @@ enum class OsCommandId : uint8_t {
   kTorqueConstantMeasurement = 10,    ///< Measures the motor's torque constant. Rotates the rotor.
   kSkippedCyclesCounter = 13,         ///< Reads a control loop's skipped-cycle counter. Harmless;
                                       ///< no motion.
+  kIgnoreBissStatusBits = 14,         ///< Suppresses a BiSS encoder's own error and warning bits.
 };
 
 /// @brief The faults open phase detection (command 6) reports, as its command-specific OS error
@@ -1555,6 +1556,39 @@ class SomanetDrive : public Cia402Drive {
   /// @return The counter and the service it came from, or why it could not be read.
   std::expected<SkippedCyclesResult, std::string> readSkippedCycles(
       somanet::FirmwareService service,
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(30),
+                                       .pollInterval = std::chrono::milliseconds(20)});
+
+  /// @brief Starts or stops ignoring a BiSS encoder's status bits (OS command 14).
+  ///
+  /// Every BiSS frame the encoder returns carries two status bits alongside the position, by which
+  /// the encoder reports on its own reading. The firmware checks them each cycle and acts:
+  /// a warning goes in the error report as @c BisWnBit, and an **error faults the drive into active
+  /// short circuit** (@c BisErBit, reaction ASC — the phases are shorted whatever 0x605A says), and
+  /// on an iC-MU it additionally reads the chip's status registers to find out why. Which bit
+  /// pattern means what depends on the encoder's configured active level (0x2110/0x2112).
+  ///
+  /// Ignoring them switches that whole check off for the addressed encoder: no warning, no fault,
+  /// no register read. **The drive then keeps running on an encoder that is saying its position is
+  /// unreliable**, which is why this exists for bringing up and diagnosing an encoder rather than
+  /// for running a machine.
+  ///
+  /// **There is nothing to restore and nothing restores it.** The flag lives in the BiSS service's
+  /// memory, so it holds until another run turns it back on or the drive is power-cycled — it is
+  /// not a mode that ends with the operation that set it.
+  ///
+  /// Preconditions: the addressed encoder must be **configured and be a BiSS encoder**, because the
+  /// BiSS service instance for that encoder is what answers. When it is not, *nothing* answers, and
+  /// the drive reports OS error 253 after its whole ~20 s reception timeout — which this decodes
+  /// into what actually happened rather than passing on a bare "timeout".
+  ///
+  /// @param encoder Which encoder's status bits to act on.
+  /// @param ignore  True to stop the firmware acting on them, false to restore the default.
+  /// @param config  Timing and cancellation. The default timeout clears the drive's own ~20 s
+  ///                reception timeout, so an encoder that is not BiSS is reported as such.
+  /// @return Void once the drive applied the change, otherwise why it did not.
+  std::expected<void, std::string> setIgnoreBissStatusBits(
+      somanet::EncoderOrdinal encoder, bool ignore,
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(30),
                                        .pollInterval = std::chrono::milliseconds(20)});
 

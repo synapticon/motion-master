@@ -49,6 +49,8 @@ using mm::node::hrdStreamingSteps;
 using mm::node::icMuCalibrationModeParameters;
 using mm::node::IcMuCalibrationModeRequest;
 using mm::node::icMuCalibrationModeSteps;
+using mm::node::IgnoreBissStatusBitsRequest;
+using mm::node::ignoreBissStatusBitsSteps;
 using mm::node::kEncoderRegisterStep;
 using mm::node::kOsCommand;
 using mm::node::kOsCommandMode;
@@ -62,6 +64,7 @@ using mm::node::osCommandSteps;
 using mm::node::parseEncoderRegisterRequest;
 using mm::node::parseHrdStreamingRequest;
 using mm::node::parseIcMuCalibrationModeRequest;
+using mm::node::parseIgnoreBissStatusBitsRequest;
 using mm::node::parseSkippedCyclesRequest;
 using mm::node::phaseInductanceMeasurementSteps;
 using mm::node::phaseResistanceMeasurementSteps;
@@ -72,6 +75,7 @@ using mm::node::runCommutationOffsetDetectionProcedure;
 using mm::node::runEncoderRegisterProcedure;
 using mm::node::runHrdStreamingProcedure;
 using mm::node::runIcMuCalibrationModeProcedure;
+using mm::node::runIgnoreBissStatusBitsProcedure;
 using mm::node::runMotorPhaseOrderDetectionProcedure;
 using mm::node::runOffsetDetectionProcedure;
 using mm::node::runOpenPhaseDetectionProcedure;
@@ -1461,6 +1465,75 @@ TEST(RunPhaseInductanceMeasurementProcedure, NeverTouchesTheBrake) {
       runPhaseInductanceMeasurementProcedure(device, reporter, std::stop_token{}).has_value());
 
   EXPECT_EQ(brakeWrites(driver), 0);
+}
+
+// --- Ignore BiSS status bits procedure -----------------------------------------------------------
+
+TEST(IgnoreBissStatusBitsSteps, DeclaresOneStep) {
+  auto steps = ignoreBissStatusBitsSteps();
+  ASSERT_EQ(steps.size(), 1u);
+  EXPECT_EQ(steps[0].id, "set-ignore");
+}
+
+TEST(ParseIgnoreBissStatusBitsRequest, RequiresTheDirection) {
+  // Defaulting it either way would let a run that named nothing change how the drive reacts to its
+  // encoder — in one direction, silently suppressing a fault.
+  auto missing = parseIgnoreBissStatusBitsRequest(nlohmann::json{{"encoder", 1}});
+  ASSERT_FALSE(missing.has_value());
+  EXPECT_NE(missing.error().find("'ignore' is required"), std::string::npos) << missing.error();
+
+  auto wrongType = parseIgnoreBissStatusBitsRequest(nlohmann::json{{"ignore", 1}});
+  ASSERT_FALSE(wrongType.has_value());
+  EXPECT_NE(wrongType.error().find("must be a boolean"), std::string::npos) << wrongType.error();
+}
+
+TEST(ParseIgnoreBissStatusBitsRequest, DefaultsToEncoderOne) {
+  auto request = parseIgnoreBissStatusBitsRequest(nlohmann::json{{"ignore", true}});
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->encoder, somanet::EncoderOrdinal::kEncoder1);
+  EXPECT_TRUE(request->ignore);
+}
+
+TEST(RunIgnoreBissStatusBitsProcedure, AppliesTheChangeAndTouchesNothingElse) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(ignoreBissStatusBitsSteps());
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};  // completed, no reply — all this command answers
+  auto result = runIgnoreBissStatusBitsProcedure(
+      device, reporter, std::stop_token{},
+      IgnoreBissStatusBitsRequest{.encoder = somanet::EncoderOrdinal::kEncoder2, .ignore = true});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto step = stepById(reporter.steps(), "set-ignore");
+  ASSERT_TRUE(step.has_value());
+  EXPECT_EQ(step->status, ProgressStatus::kSucceeded);
+  // Nothing on the drive reports the flag back, so the step's record of what was asked for is the
+  // only account of it.
+  EXPECT_EQ(step->value.at("encoder").get<uint8_t>(), 2);
+  EXPECT_TRUE(step->value.at("ignore").get<bool>());
+
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[1], 0b101);
+  // Prepares nothing: no operation mode, no controlword, no brake.
+  EXPECT_EQ(driver.lastWriteIndex(Object::kModeOfOperation, 0), -1);
+  EXPECT_EQ(driver.lastWriteIndex(Object::kControlword, 0), -1);
+  EXPECT_EQ(brakeWrites(driver), 0);
+}
+
+TEST(RunIgnoreBissStatusBitsProcedure, AFailedCommandFailsTheStep) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(ignoreBissStatusBitsSteps());
+
+  driver.responses = {{3, 0, 253, 0, 0, 0, 0, 0}};
+  auto result = runIgnoreBissStatusBitsProcedure(device, reporter, std::stop_token{},
+                                                 IgnoreBissStatusBitsRequest{.ignore = true});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("not a BiSS encoder"), std::string::npos) << result.error();
+
+  const auto step = stepById(reporter.steps(), "set-ignore");
+  ASSERT_TRUE(step.has_value());
+  EXPECT_EQ(step->status, ProgressStatus::kFailed);
 }
 
 // --- Skipped cycles counter procedure ------------------------------------------------------------

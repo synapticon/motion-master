@@ -1317,6 +1317,55 @@ std::expected<SkippedCyclesResult, std::string> SomanetDrive::readSkippedCycles(
   return SkippedCyclesResult{.service = service, .skippedCycles = *skipped};
 }
 
+// Byte layout of the ignore-BiSS-status-bits request (command 14). Its byte 1 packs the encoder
+// **above** a trigger bit, where command 0 puts the same ordinal in the low bits and command 1 puts
+// a mode above it — three commands, three packings of one byte, so none of them shares a constant.
+constexpr size_t kBissIgnoreByte = 1;
+constexpr unsigned kBissIgnoreEncoderShift = 1;
+constexpr uint8_t kBissIgnoreTrigger = 0x01;
+
+std::expected<void, std::string> SomanetDrive::setIgnoreBissStatusBits(
+    somanet::EncoderOrdinal encoder, bool ignore, const OsCommandConfig& config) {
+  const std::string what =
+      std::format("{} the status bits of {}", ignore ? "ignoring" : "stopping ignoring",
+                  somanet::toString(encoder));
+
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(somanet::OsCommandId::kIgnoreBissStatusBits);
+  command[kBissIgnoreByte] =
+      static_cast<uint8_t>((static_cast<uint8_t>(encoder) << kBissIgnoreEncoderShift) |
+                           (ignore ? kBissIgnoreTrigger : 0));
+
+  auto response = runOsCommand(command, config);
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+
+  if (response->failed()) {
+    if (!response->errorCode) {
+      return std::unexpected(std::format("{} failed and the drive reported no error code", what));
+    }
+    const uint8_t code = *response->errorCode;
+    // No command-specific codes, so anything here is general — and the timeout is the one that
+    // means something specific. Only the BiSS service instance owning the addressed encoder
+    // answers this command, so nothing answering at all *is* the precondition failing.
+    if (auto general = osCommandErrorName(code)) {
+      if (code == static_cast<uint8_t>(OsCommandError::kTimeout)) {
+        return std::unexpected(
+            std::format("{} was not answered by any BiSS service, so {} is either not configured "
+                        "or not a BiSS encoder (OS error {})",
+                        what, somanet::toString(encoder), code));
+      }
+      return std::unexpected(
+          std::format("{} was not performed: {} (OS error {})", what, *general, code));
+    }
+    return std::unexpected(
+        std::format("{} failed with OS error {} (command-specific)", what, code));
+  }
+  // Status 0: completed with no reply, which is all this command ever answers on success.
+  return {};
+}
+
 std::expected<void, std::string> SomanetDrive::setOperationMode(somanet::OperationMode mode) {
   return setOperationModeValue(static_cast<int8_t>(mode));
 }

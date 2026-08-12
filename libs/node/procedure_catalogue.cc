@@ -549,6 +549,51 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor ignoreBissStatusBits;
+  ignoreBissStatusBits.name = std::string(kIgnoreBissStatusBitsProcedure);
+  ignoreBissStatusBits.title = "Ignore BiSS status bits";
+  ignoreBissStatusBits.description =
+      "Stops the firmware acting on a BiSS encoder's status bits — or restores the default. Every "
+      "BiSS frame carries two bits by which the encoder reports on its own reading; the firmware "
+      "checks them each cycle, putting a warning in the error report and faulting the drive on an "
+      "error. Ignoring them switches that check off for the chosen encoder, which is a tool for "
+      "bringing up and diagnosing an encoder rather than for running a machine.";
+  ignoreBissStatusBits.caveats = {
+      "What this suppresses is a fault, not a nuisance: a BiSS error bit otherwise puts the drive "
+      "into active short circuit, whatever the quick stop option code says. With the bits ignored "
+      "the drive keeps running on an encoder that is reporting its own position as unreliable — so "
+      "the position it acts on may be wrong, with nothing to say so.",
+      "There is no restore. Ignoring holds until another run turns it back on or the drive is "
+      "power-cycled, and nothing on the drive reports the flag back, so what the run recorded is "
+      "the only account of it.",
+      "The encoder's warning and error reports (BisWnBit / BisErBit) both stop, and on an iC-MU "
+      "the "
+      "firmware also stops reading the chip's status registers to find out what went wrong.",
+      "Only the addressed encoder is affected; the other one goes on reporting.",
+      "The encoder must be configured and be a BiSS encoder. When it is not, nothing on the drive "
+      "answers the command at all and it fails after about 20 seconds — reported as exactly that "
+      "rather than as a timeout.",
+  };
+  ignoreBissStatusBits.parameters = ignoreBissStatusBitsParameters();
+  ignoreBissStatusBits.movesMotor = false;
+  ignoreBissStatusBits.requiresEnabled = false;
+  ignoreBissStatusBits.steps = ignoreBissStatusBitsSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(ignoreBissStatusBits),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
+        auto request = parseIgnoreBissStatusBitsRequest(body);
+        if (!request) {
+          return std::unexpected(request.error());
+        }
+        return
+            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+              return runIgnoreBissStatusBitsProcedure(device, reporter, std::move(stop), request);
+            };
+      },
+  });
+
   ProcedureDescriptor skippedCycles;
   skippedCycles.name = std::string(kSkippedCyclesProcedure);
   skippedCycles.title = "Skipped cycles counter";

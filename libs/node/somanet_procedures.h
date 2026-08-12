@@ -284,6 +284,60 @@ std::expected<void, std::string> runHrdStreamingProcedure(Device& device,
                                                           std::stop_token stop,
                                                           const HrdStreamingRequest& request);
 
+/// @brief Procedure name for ignoring a BiSS encoder's status bits, as it appears in its URL and
+///        its snapshot key.
+inline constexpr std::string_view kIgnoreBissStatusBitsProcedure = "ignore-biss-status-bits";
+
+/// @brief The single step ignoring BiSS status bits reports against.
+inline constexpr std::string_view kIgnoreBissStatusBitsStep = "set-ignore";
+
+/// @brief Which encoder's status bits to act on, and which way.
+struct IgnoreBissStatusBitsRequest {
+  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};  ///< Which encoder.
+
+  /// Whether to ignore them. Has no default in the request a client sends — the value here is only
+  /// what an unset struct holds — because the direction *is* the instruction, and defaulting it
+  /// either way would let a run that named nothing change how the drive reacts to its encoder.
+  bool ignore = false;
+};
+
+/// @brief Parses and validates a client's ignore-BiSS-status-bits request body.
+///
+/// Accepts `{"encoder": 1, "ignore": true}`. @c ignore is required; @c encoder defaults to
+/// encoder 1.
+///
+/// @param body  Parsed request JSON.
+/// @return The validated request, or a message naming what is wrong with it.
+std::expected<IgnoreBissStatusBitsRequest, std::string> parseIgnoreBissStatusBitsRequest(
+    const nlohmann::json& body);
+
+/// @brief What ignoring BiSS status bits accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> ignoreBissStatusBitsParameters();
+
+/// @brief The ignore-BiSS-status-bits procedure's step template — one step, idle.
+std::vector<ProgressStep> ignoreBissStatusBitsSteps();
+
+/// @brief Starts or stops ignoring a BiSS encoder's status bits as a procedure body.
+///
+/// Prepares nothing and moves nothing — the command needs only an active mailbox, and runs from
+/// PRE-OP up on a drive that may be exchanging process data. Like
+/// @c runIcMuCalibrationModeProcedure it has **no restore**: ignoring is a state the encoder is
+/// left in until another run ends it or the drive is power-cycled.
+///
+/// **What it suppresses is a fault, not a nuisance.** See
+/// @c SomanetDrive::setIgnoreBissStatusBits: a BiSS error bit otherwise faults the drive into
+/// active short circuit, and ignoring the bits means the drive keeps running on an encoder that is
+/// reporting its own position as unreliable.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; passed into the command so an in-flight change is aborted.
+/// @param request  Which encoder, and which way.
+/// @return Void once the drive applied the change, otherwise why it did not.
+std::expected<void, std::string> runIgnoreBissStatusBitsProcedure(
+    Device& device, ProgressReporter& reporter, std::stop_token stop,
+    const IgnoreBissStatusBitsRequest& request);
+
 /// @brief Procedure name for reading a skipped cycles counter, as it appears in its URL and its
 ///        snapshot key.
 inline constexpr std::string_view kSkippedCyclesProcedure = "skipped-cycles-counter";

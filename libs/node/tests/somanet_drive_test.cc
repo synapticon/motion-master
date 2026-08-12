@@ -1670,6 +1670,75 @@ TEST(RunTorqueConstantMeasurement, AGeneralOsErrorNamesItself) {
   EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
 }
 
+// --- Ignore BiSS status bits (command 14) --------------------------------------------------------
+
+TEST(SetIgnoreBissStatusBits, PacksTheEncoderAboveTheTriggerBit) {
+  // The specification's own example: encoder 1 with ignoring on is byte 1 = 3 (0b11). This byte is
+  // packed differently from commands 0 and 1, which put the same ordinal in the low bits — so it is
+  // pinned against that worked example rather than against the shape of its siblings.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive
+                  ->setIgnoreBissStatusBits(somanet::EncoderOrdinal::kEncoder1, true,
+                                            {.pollInterval = kNoDelay})
+                  .has_value());
+  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  ASSERT_EQ(written.size(), 8u);
+  EXPECT_EQ(written[0], 14);
+  EXPECT_EQ(written[1], 0b011);
+}
+
+TEST(SetIgnoreBissStatusBits, ClearsTheTriggerToStopIgnoring) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive
+                  ->setIgnoreBissStatusBits(somanet::EncoderOrdinal::kEncoder2, false,
+                                            {.pollInterval = kNoDelay})
+                  .has_value());
+  // Encoder 2, trigger clear: 0b100. The encoder must survive the trigger going to zero.
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[1], 0b100);
+}
+
+TEST(SetIgnoreBissStatusBits, ATimeoutSaysTheEncoderIsNotBiss) {
+  // Only the BiSS service instance owning the addressed encoder answers, so nothing answering is
+  // the precondition failing — not a slow drive. The bare "command timeout" would hide a
+  // misconfigured encoder behind a bus-shaped symptom.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 253, 0, 0, 0, 0, 0}};
+  auto result = drive->setIgnoreBissStatusBits(somanet::EncoderOrdinal::kEncoder2, true,
+                                               {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("not configured or not a BiSS encoder"), std::string::npos)
+      << result.error();
+  EXPECT_NE(result.error().find("encoder 2"), std::string::npos) << result.error();
+}
+
+TEST(SetIgnoreBissStatusBits, AnotherGeneralErrorIsReportedAsItself) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 254, 0, 0, 0, 0, 0}};
+  auto result = drive->setIgnoreBissStatusBits(somanet::EncoderOrdinal::kEncoder1, true,
+                                               {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("unsupported command"), std::string::npos) << result.error();
+  EXPECT_EQ(result.error().find("not a BiSS encoder"), std::string::npos) << result.error();
+}
+
 // --- Skipped cycles counter (command 13) ---------------------------------------------------------
 
 TEST(ReadSkippedCycles, DecodesTheBigEndianCounterAndEchoesTheService) {

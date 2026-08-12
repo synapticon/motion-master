@@ -284,6 +284,50 @@ std::expected<void, std::string> runHrdStreamingProcedure(Device& device,
                                                           std::stop_token stop,
                                                           const HrdStreamingRequest& request);
 
+/// @brief Procedure name for choosing the velocity feedback source, as it appears in its URL and
+///        its snapshot key.
+inline constexpr std::string_view kVelocitySourceProcedure = "velocity-source";
+
+/// @brief The single step choosing the velocity source reports against.
+inline constexpr std::string_view kVelocitySourceStep = "set-source";
+
+/// @brief Which velocity the control loop should use.
+struct VelocitySourceRequest {
+  /// Which source. No default a client can rely on — the value here is only what an unset struct
+  /// holds — because the source *is* the instruction, and which one is already active depends on
+  /// the product (see @c somanet::VelocitySource).
+  somanet::VelocitySource source{somanet::VelocitySource::kFirmware};
+};
+
+/// @brief Parses and validates a client's velocity source request body.
+///
+/// Accepts `{"source": "firmware"}` — or `encoder`. Required.
+std::expected<VelocitySourceRequest, std::string> parseVelocitySourceRequest(
+    const nlohmann::json& body);
+
+/// @brief What choosing the velocity source accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> velocitySourceParameters();
+
+/// @brief The velocity-source procedure's step template — one step, idle.
+std::vector<ProgressStep> velocitySourceSteps();
+
+/// @brief Chooses the velocity loop's feedback source as a procedure body.
+///
+/// Prepares nothing, restores nothing, and commands no motion — but it is not inert on a moving
+/// drive, since the velocity loop's feedback changes under it. See
+/// @c SomanetDrive::setVelocitySource, and note that which source is already active depends on the
+/// product rather than on the specification's claim.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; passed into the command.
+/// @param request  Which source to use.
+/// @return Void once the drive accepted the choice, otherwise why it did not.
+std::expected<void, std::string> runVelocitySourceProcedure(Device& device,
+                                                            ProgressReporter& reporter,
+                                                            std::stop_token stop,
+                                                            const VelocitySourceRequest& request);
+
 /// @brief Procedure name for provoking a firmware error, as it appears in its URL and its snapshot
 ///        key.
 inline constexpr std::string_view kTriggerErrorProcedure = "trigger-error";

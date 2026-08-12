@@ -67,6 +67,7 @@ using mm::node::parseIcMuCalibrationModeRequest;
 using mm::node::parseIgnoreBissStatusBitsRequest;
 using mm::node::parseSkippedCyclesRequest;
 using mm::node::parseSystemIdentificationRequest;
+using mm::node::parseVelocitySourceRequest;
 using mm::node::phaseInductanceMeasurementSteps;
 using mm::node::phaseResistanceMeasurementSteps;
 using mm::node::polePairDetectionSteps;
@@ -87,10 +88,13 @@ using mm::node::runPolePairDetectionProcedure;
 using mm::node::runSkippedCyclesProcedure;
 using mm::node::runSystemIdentificationProcedure;
 using mm::node::runTorqueConstantMeasurementProcedure;
+using mm::node::runVelocitySourceProcedure;
 using mm::node::SkippedCyclesRequest;
 using mm::node::skippedCyclesSteps;
 using mm::node::systemIdentificationSteps;
 using mm::node::torqueConstantMeasurementSteps;
+using mm::node::VelocitySourceRequest;
+using mm::node::velocitySourceSteps;
 namespace somanet = mm::node::somanet;
 using mm::node::cia402::Object;
 
@@ -1471,6 +1475,49 @@ TEST(RunPhaseInductanceMeasurementProcedure, NeverTouchesTheBrake) {
   ASSERT_TRUE(
       runPhaseInductanceMeasurementProcedure(device, reporter, std::stop_token{}).has_value());
 
+  EXPECT_EQ(brakeWrites(driver), 0);
+}
+
+// --- Velocity source procedure
+// --------------------------------------------------------------------
+
+TEST(VelocitySourceSteps, DeclaresOneStep) {
+  auto steps = velocitySourceSteps();
+  ASSERT_EQ(steps.size(), 1u);
+  EXPECT_EQ(steps[0].id, "set-source");
+}
+
+TEST(ParseVelocitySourceRequest, RequiresTheSource) {
+  // No default: which source is already active depends on the product, so a run that named nothing
+  // could not be said to be asking for a change at all.
+  auto missing = parseVelocitySourceRequest(nlohmann::json::object());
+  ASSERT_FALSE(missing.has_value());
+  EXPECT_NE(missing.error().find("'source' is required"), std::string::npos) << missing.error();
+
+  auto unknown = parseVelocitySourceRequest(nlohmann::json{{"source", "kuebler"}});
+  ASSERT_FALSE(unknown.has_value());
+  EXPECT_NE(unknown.error().find("firmware"), std::string::npos) << unknown.error();
+}
+
+TEST(RunVelocitySourceProcedure, AppliesTheChoiceAndTouchesNothingElse) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(velocitySourceSteps());
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = runVelocitySourceProcedure(
+      device, reporter, std::stop_token{},
+      VelocitySourceRequest{.source = somanet::VelocitySource::kFirmware});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto step = stepById(reporter.steps(), "set-source");
+  ASSERT_TRUE(step.has_value());
+  EXPECT_EQ(step->status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(step->value.at("source").get<std::string>(), "firmware");
+  EXPECT_EQ(driver.commandIds, std::vector<uint8_t>{18});
+  // Prepares nothing: no mode, no controlword, no brake.
+  EXPECT_EQ(driver.lastWriteIndex(Object::kModeOfOperation, 0), -1);
+  EXPECT_EQ(driver.lastWriteIndex(Object::kControlword, 0), -1);
   EXPECT_EQ(brakeWrites(driver), 0);
 }
 

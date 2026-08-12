@@ -823,6 +823,51 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor velocitySource;
+  velocitySource.name = std::string(kVelocitySourceProcedure);
+  velocitySource.title = "Velocity source";
+  velocitySource.description =
+      "Chooses where the velocity control loop takes its feedback from: the value the firmware "
+      "differentiates from encoder position, or the one the encoder integrated itself. Only the "
+      "Integro's internal encoder reports its own velocity, so this decides anything only for that "
+      "encoder, in the slot it is configured in. The velocity feedback filter is applied either "
+      "way — this chooses what goes into it.";
+  velocitySource.caveats = {
+      "Which source is already active depends on the product, and not as the OS command "
+      "specification says: it calls the firmware-computed value the default, but an Integro build "
+      "selects the encoder's own velocity at start-up. On an Integro the informative direction is "
+      "therefore towards the firmware value, not away from it.",
+      "It commands no motion, but it is not inert on a moving drive: the velocity loop's feedback "
+      "changes under it and the two sources do not agree exactly, so a closed loop can be "
+      "disturbed "
+      "by the switch. Prefer changing it on a stopped drive.",
+      "There is nothing to restore and nothing reports the choice back. It holds until another run "
+      "changes it or the drive is power-cycled, so the run's own record is the only account of it.",
+      "On a drive whose Kübler encoder is not configured for velocity control the command is "
+      "accepted and changes nothing.",
+  };
+  velocitySource.parameters = velocitySourceParameters();
+  // No motion is commanded; the caveat above covers the disturbance a switch can cause on a drive
+  // that is already moving, which is not the same thing as this procedure moving it.
+  velocitySource.movesMotor = false;
+  velocitySource.requiresEnabled = false;
+  velocitySource.steps = velocitySourceSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(velocitySource),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
+        auto request = parseVelocitySourceRequest(body);
+        if (!request) {
+          return std::unexpected(request.error());
+        }
+        return
+            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+              return runVelocitySourceProcedure(device, reporter, std::move(stop), request);
+            };
+      },
+  });
+
   // Served in name order, whatever order the table happens to be written in. The rows above are
   // authored in this same order, so the two normally agree — but the sort is what *guarantees* it,
   // and it is what keeps a row appended in the wrong place from moving a procedure in the sidebar.

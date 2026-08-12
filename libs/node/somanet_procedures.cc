@@ -1482,6 +1482,73 @@ std::expected<uint32_t, std::string> readBoundedUint32(const nlohmann::json& bod
 
 }  // namespace
 
+std::expected<VelocitySourceRequest, std::string> parseVelocitySourceRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  auto source = body.find("source");
+  if (source == body.end() || source->is_null()) {
+    return std::unexpected("'source' is required");
+  }
+  if (!source->is_string()) {
+    return std::unexpected("'source' must be a string");
+  }
+  auto parsed = somanet::parseVelocitySource(source->get<std::string>());
+  if (!parsed) {
+    return std::unexpected(std::format("'source' must be {} or {}",
+                                       somanet::toString(somanet::VelocitySource::kFirmware),
+                                       somanet::toString(somanet::VelocitySource::kEncoder)));
+  }
+  return VelocitySourceRequest{.source = *parsed};
+}
+
+std::vector<ProcedureParameter> velocitySourceParameters() {
+  return {
+      enumParameter(
+          "source", "Velocity source",
+          "Which velocity the control loop should use. Firmware differentiates it from encoder "
+          "position; encoder takes what the encoder integrated itself, which only the Integro's "
+          "internal encoder provides. Required — which one is already active depends on the "
+          "product, so there is no safe default to assume.",
+          nullptr,
+          {
+              ParameterOption{
+                  .value = std::string(somanet::toString(somanet::VelocitySource::kFirmware)),
+                  .title = "Firmware — differentiated from position"},
+              ParameterOption{
+                  .value = std::string(somanet::toString(somanet::VelocitySource::kEncoder)),
+                  .title = "Encoder — reported by the encoder itself"},
+          }),
+  };
+}
+
+std::vector<ProgressStep> velocitySourceSteps() { return stepsFrom({kVelocitySourceStep}); }
+
+std::expected<void, std::string> runVelocitySourceProcedure(Device& device,
+                                                            ProgressReporter& reporter,
+                                                            std::stop_token stop,
+                                                            const VelocitySourceRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+
+  reporter.start(kVelocitySourceStep);
+  auto result =
+      drive->setVelocitySource(request.source, {.timeout = kEncoderRegisterTimeout,
+                                                .pollInterval = kEncoderRegisterPollInterval,
+                                                .stop = std::move(stop)});
+  if (!result) {
+    reporter.fail(kVelocitySourceStep, result.error());
+    return std::unexpected(result.error());
+  }
+  // Nothing on the drive reports the choice back, so the step's record is the only account of it.
+  reporter.succeed(kVelocitySourceStep,
+                   nlohmann::json{{"source", somanet::toString(request.source)}});
+  return {};
+}
+
 std::expected<TriggerErrorRequest, std::string> parseTriggerErrorRequest(
     const nlohmann::json& body) {
   if (!body.is_object()) {

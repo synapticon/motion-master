@@ -221,6 +221,39 @@ constexpr std::string_view toString(FirmwareService service) {
 ///        @c toString. Returns @c std::nullopt for any other token.
 std::optional<FirmwareService> parseFirmwareService(std::string_view token);
 
+/// @brief Where the velocity control loop takes its feedback from (OS command 18). The enum value
+///        @b is the trigger bit the command carries.
+///
+/// **Only the Integro's internal (Kübler) encoder provides its own velocity**, so this decides
+/// anything only for that encoder, in the slot it is configured in. On a drive whose Kübler encoder
+/// is not configured for velocity control the command is accepted and changes nothing.
+///
+/// The velocity feedback filter is applied either way; this chooses what goes into it.
+enum class VelocitySource : uint8_t {
+  /// Differentiated from encoder position by the firmware. **The default on every build except
+  /// Integro** — and the OS command specification calls it the default outright, which is wrong for
+  /// the one product the command applies to.
+  kFirmware = 0,
+  /// Reported by the encoder itself, which integrates it in hardware. **The default on an Integro
+  /// build**, where the firmware sets the flag at start-up with a comment saying so — so on an
+  /// Integro the useful direction is towards @c kFirmware, not away from it.
+  kEncoder = 1,
+};
+
+/// @brief Name of a velocity source (for logging / JSON). Never returns @c nullptr.
+constexpr std::string_view toString(VelocitySource source) {
+  switch (source) {
+    case VelocitySource::kFirmware:
+      return "firmware";
+    case VelocitySource::kEncoder:
+      return "encoder";
+  }
+  return "unknown";
+}
+
+/// @brief Parses a velocity source token ("firmware" / "encoder"). @c std::nullopt otherwise.
+std::optional<VelocitySource> parseVelocitySource(std::string_view token);
+
 /// @brief The errors OS command 16 can provoke in a firmware service. The enum value @b is the
 ///        error-type byte the command carries.
 ///
@@ -659,6 +692,7 @@ enum class OsCommandId : uint8_t {
   kIgnoreBissStatusBits = 14,         ///< Suppresses a BiSS encoder's own error and warning bits.
   kSystemIdentification = 15,         ///< Configures and triggers the system-identification chirp.
   kTriggerError = 16,                 ///< Provokes a firmware error or exception. Test tool only.
+  kVelocitySource = 18,               ///< Chooses where the velocity loop's feedback comes from.
 };
 
 /// @brief The faults open phase detection (command 6) reports, as its command-specific OS error
@@ -1795,6 +1829,30 @@ class SomanetDrive : public Cia402Drive {
   std::expected<TriggerErrorResult, std::string> triggerError(
       somanet::FirmwareService service, somanet::FirmwareErrorType type,
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(3),
+                                       .pollInterval = std::chrono::milliseconds(20)});
+
+  /// @brief Chooses where the velocity control loop takes its feedback from (OS command 18).
+  ///
+  /// See @c somanet::VelocitySource for which source is the default, which is not what the OS
+  /// command specification says: on an Integro build the firmware selects the encoder's own
+  /// velocity at start-up, so a run asking for @c kEncoder there changes nothing and the
+  /// informative direction is @c kFirmware.
+  ///
+  /// **No preconditions and nothing to restore.** The command is accepted in any state, and the
+  /// choice holds until another run changes it or the drive is power-cycled — nothing reports it
+  /// back. It takes effect only for the encoder configured in the Kübler slot; on any other encoder
+  /// it is accepted and does nothing.
+  ///
+  /// It commands no motion, but it is not inert on a moving drive: the velocity loop's feedback
+  /// changes under it, and the two sources do not agree exactly, so a closed loop can be disturbed
+  /// by the switch.
+  ///
+  /// @param source Which velocity to feed the loop.
+  /// @param config Timing and cancellation.
+  /// @return Void once the drive accepted the choice, otherwise why it did not.
+  std::expected<void, std::string> setVelocitySource(
+      somanet::VelocitySource source,
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
                                        .pollInterval = std::chrono::milliseconds(20)});
 
   /// @brief Reads a control loop's skipped-cycle counter (OS command 13).

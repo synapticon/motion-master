@@ -1670,6 +1670,58 @@ TEST(RunTorqueConstantMeasurement, AGeneralOsErrorNamesItself) {
   EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
 }
 
+// --- Velocity source (command 18) ----------------------------------------------------------------
+
+TEST(SetVelocitySource, PutsTheSourceInBitZeroOfByteOne) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(
+      drive->setVelocitySource(somanet::VelocitySource::kEncoder, {.pollInterval = kNoDelay})
+          .has_value());
+  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  ASSERT_EQ(written.size(), 8u);
+  EXPECT_EQ(written[0], 18);
+  EXPECT_EQ(written[1], 1);
+}
+
+TEST(SetVelocitySource, ClearsTheBitForTheFirmwareValue) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(
+      drive->setVelocitySource(somanet::VelocitySource::kFirmware, {.pollInterval = kNoDelay})
+          .has_value());
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1))[1], 0);
+}
+
+TEST(SetVelocitySource, AGeneralOsErrorNamesItself) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 254, 0, 0, 0, 0, 0}};
+  auto result =
+      drive->setVelocitySource(somanet::VelocitySource::kEncoder, {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("unsupported command"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("velocity from the encoder"), std::string::npos) << result.error();
+}
+
+TEST(ParseVelocitySource, RoundTripsItsOwnTokens) {
+  EXPECT_EQ(somanet::parseVelocitySource("firmware"), somanet::VelocitySource::kFirmware);
+  EXPECT_EQ(somanet::parseVelocitySource("encoder"), somanet::VelocitySource::kEncoder);
+  EXPECT_FALSE(somanet::parseVelocitySource("").has_value());
+  EXPECT_FALSE(somanet::parseVelocitySource("kuebler").has_value());
+}
+
 // --- Trigger error (command 16) ------------------------------------------------------------------
 
 TEST(FirmwareErrorEffect, MatchesWhatTheFirmwareActuallyDoes) {

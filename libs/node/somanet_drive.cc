@@ -390,6 +390,16 @@ std::optional<SystemIdentificationStart> parseSystemIdentificationStart(std::str
   return std::nullopt;
 }
 
+std::optional<VelocitySource> parseVelocitySource(std::string_view token) {
+  if (token == toString(VelocitySource::kFirmware)) {
+    return VelocitySource::kFirmware;
+  }
+  if (token == toString(VelocitySource::kEncoder)) {
+    return VelocitySource::kEncoder;
+  }
+  return std::nullopt;
+}
+
 std::optional<FirmwareErrorType> parseFirmwareErrorType(std::string_view token) {
   for (const auto type : kFirmwareErrorTypes) {
     if (token == toString(type)) {
@@ -1445,6 +1455,39 @@ void to_json(nlohmann::json& j, const TriggerErrorResult& result) {
                      {"errorType", somanet::toString(result.type)},
                      {"serviceStopped", result.serviceStopped},
                      {"description", result.describe()}};
+}
+
+// Byte layout of the velocity-source request (command 18): the source is bit 0 of byte 1.
+constexpr size_t kVelocitySourceByte = 1;
+
+std::expected<void, std::string> SomanetDrive::setVelocitySource(somanet::VelocitySource source,
+                                                                 const OsCommandConfig& config) {
+  const std::string what =
+      std::format("taking the velocity from the {}", somanet::toString(source));
+
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(somanet::OsCommandId::kVelocitySource);
+  command[kVelocitySourceByte] = static_cast<uint8_t>(source);
+
+  auto response = runOsCommand(command, config);
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+
+  if (response->failed()) {
+    if (!response->errorCode) {
+      return std::unexpected(std::format("{} failed and the drive reported no error code", what));
+    }
+    const uint8_t code = *response->errorCode;
+    // No command-specific codes: the specification says status 3 can only ever carry a general one.
+    if (auto general = osCommandErrorName(code)) {
+      return std::unexpected(
+          std::format("{} was not performed: {} (OS error {})", what, *general, code));
+    }
+    return std::unexpected(
+        std::format("{} failed with OS error {} (command-specific)", what, code));
+  }
+  return {};
 }
 
 // Byte layout of the trigger-error request (command 16).

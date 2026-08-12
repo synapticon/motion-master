@@ -61,6 +61,22 @@ constexpr auto kSkippedCyclesTimeout = std::chrono::seconds(30);
 // 253 can be decoded into what actually went wrong.
 constexpr auto kBissServiceTimeout = std::chrono::seconds(30);
 
+// Each of command 22's three actions is a handful of assignments inside the drive control cycle, so
+// a successful one finishes in about a cycle. The ceiling clears the drive's own ~20 s reception
+// timeout for the same reason the counter read does: only the drive control service implements this
+// command, so a firmware without it running is answered by nothing at all, and letting the drive
+// report that itself is the difference between "no such service" and "this master gave up".
+constexpr auto kFirmwareLatencyTimeout = std::chrono::seconds(30);
+
+// Bounds on the observation window of a composite measurement. The floor is a handful of drive
+// control cycles — anything shorter measures almost nothing — and the ceiling is what a single
+// polled procedure run can reasonably occupy; a longer window is the start/read pair's job.
+// Milliseconds because that is the unit both bounds are published in: the descriptor advertises
+// .count() directly, so a ceiling declared in seconds would advertise 60 against a parse that
+// accepts 60000.
+constexpr auto kMinFirmwareLatencyDuration = std::chrono::milliseconds(100);
+constexpr auto kMaxFirmwareLatencyDuration = std::chrono::milliseconds(60'000);
+
 // How long to wait before concluding a service that was told to stop has stopped. Short on purpose:
 // for the four types that stop a service, no answer is the intended outcome, so this is the cost of
 // establishing it rather than a ceiling on real work. The types that do answer answer at once.
@@ -1651,6 +1667,178 @@ std::expected<void, std::string> runVelocitySourceProcedure(Device& device,
   // Nothing on the drive reports the choice back, so the step's record is the only account of it.
   reporter.succeed(kVelocitySourceStep,
                    nlohmann::json{{"source", somanet::toString(request.source)}});
+  return {};
+}
+
+std::optional<FirmwareLatencyAction> parseFirmwareLatencyAction(std::string_view token) {
+  for (const auto action : {FirmwareLatencyAction::kMeasure, FirmwareLatencyAction::kStart,
+                            FirmwareLatencyAction::kReadMaximum, FirmwareLatencyAction::kStop}) {
+    if (token == toString(action)) {
+      return action;
+    }
+  }
+  return std::nullopt;
+}
+
+std::expected<FirmwareLatencyRequest, std::string> parseFirmwareLatencyRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  FirmwareLatencyRequest request;
+
+  if (auto action = body.find("action"); action != body.end() && !action->is_null()) {
+    if (!action->is_string()) {
+      return std::unexpected("'action' must be a string");
+    }
+    auto parsed = parseFirmwareLatencyAction(action->get<std::string>());
+    if (!parsed) {
+      return std::unexpected(std::format(
+          "'action' must be {}, {}, {} or {}", toString(FirmwareLatencyAction::kMeasure),
+          toString(FirmwareLatencyAction::kStart), toString(FirmwareLatencyAction::kReadMaximum),
+          toString(FirmwareLatencyAction::kStop)));
+    }
+    request.action = *parsed;
+  }
+
+  if (auto latency = body.find("latency"); latency != body.end() && !latency->is_null()) {
+    if (!latency->is_string()) {
+      return std::unexpected("'latency' must be a string");
+    }
+    auto parsed = somanet::parseFirmwareLatency(latency->get<std::string>());
+    if (!parsed) {
+      return std::unexpected(std::format("'latency' must be {} or {}",
+                                         somanet::toString(somanet::FirmwareLatency::kSetpoint),
+                                         somanet::toString(somanet::FirmwareLatency::kFeedback)));
+    }
+    request.latency = *parsed;
+  }
+
+  auto duration = readMillis(body, "durationMs", request.duration, kMinFirmwareLatencyDuration,
+                             kMaxFirmwareLatencyDuration);
+  if (!duration) {
+    return std::unexpected(duration.error());
+  }
+  request.duration = *duration;
+  return request;
+}
+
+std::vector<ProcedureParameter> firmwareLatencyParameters() {
+  const FirmwareLatencyRequest defaults;
+  return {
+      enumParameter(
+          "action", "Action",
+          "What to do. Measure starts a measurement, lets the drive run for the duration below, "
+          "then reads the maximum — the only action that answers with a figure. Start and read "
+          "maximum are the same two halves as separate runs, for a window longer than one run can "
+          "wait: start now, run the machine, read afterwards. Stop ends measuring.",
+          std::string(toString(defaults.action)),
+          {
+              ParameterOption{.value = std::string(toString(FirmwareLatencyAction::kMeasure)),
+                              .title = "Measure"},
+              ParameterOption{.value = std::string(toString(FirmwareLatencyAction::kStart)),
+                              .title = "Start measurement"},
+              ParameterOption{.value = std::string(toString(FirmwareLatencyAction::kReadMaximum)),
+                              .title = "Read and clear maximum"},
+              ParameterOption{.value = std::string(toString(FirmwareLatencyAction::kStop)),
+                              .title = "Stop measurements"},
+          }),
+      enumParameter(
+          "latency", "Latency",
+          "Which duration inside the drive control cycle to measure. Setpoint latency runs from "
+          "the "
+          "start of the cycle until the setpoints are handed to the motion control service; "
+          "feedback latency from the request for control feedback until the end of the cycle. The "
+          "two are measured independently. Ignored when stopping, which stops both.",
+          std::string(somanet::toString(defaults.latency)),
+          {
+              ParameterOption{
+                  .value = std::string(somanet::toString(somanet::FirmwareLatency::kSetpoint)),
+                  .title = "Setpoint latency"},
+              ParameterOption{
+                  .value = std::string(somanet::toString(somanet::FirmwareLatency::kFeedback)),
+                  .title = "Feedback latency"},
+          }),
+      integerParameter(
+          "durationMs", "Duration (ms)",
+          "How long to let the measurement collect before reading it, for the measure action only. "
+          "What comes back is the worst case over this window, so it is only as informative as "
+          "what "
+          "the drive was doing during it — measuring an idle drive reports an idle drive.",
+          defaults.duration.count(), kMinFirmwareLatencyDuration.count(),
+          kMaxFirmwareLatencyDuration.count()),
+  };
+}
+
+std::vector<ProgressStep> firmwareLatencySteps() {
+  return stepsFrom({kFirmwareLatencyStartStep, kFirmwareLatencyObserveStep,
+                    kFirmwareLatencyReadStep, kFirmwareLatencyStopStep});
+}
+
+std::expected<void, std::string> runFirmwareLatencyProcedure(
+    Device& device, ProgressReporter& reporter, std::stop_token stop,
+    const FirmwareLatencyRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+
+  // One config for whichever commands this action issues, and the only holder of the stop token —
+  // the observation window checks config.stop rather than keeping a second copy of it.
+  const OsCommandConfig config{.timeout = kFirmwareLatencyTimeout,
+                               .pollInterval = kEncoderRegisterPollInterval,
+                               .stop = std::move(stop)};
+
+  const bool starts = request.action == FirmwareLatencyAction::kMeasure ||
+                      request.action == FirmwareLatencyAction::kStart;
+  const bool reads = request.action == FirmwareLatencyAction::kMeasure ||
+                     request.action == FirmwareLatencyAction::kReadMaximum;
+
+  if (starts) {
+    reporter.start(kFirmwareLatencyStartStep);
+    auto started = drive->startFirmwareLatencyMeasurement(request.latency, config);
+    if (!started) {
+      reporter.fail(kFirmwareLatencyStartStep, started.error());
+      return std::unexpected(started.error());
+    }
+    // What was started, because nothing on the drive reports it back — a later read is the only
+    // other account of it, and by then this run's record is what says which latency it began.
+    reporter.succeed(kFirmwareLatencyStartStep,
+                     nlohmann::json{{"latency", somanet::toString(request.latency)}});
+  }
+
+  if (request.action == FirmwareLatencyAction::kMeasure) {
+    reporter.start(kFirmwareLatencyObserveStep);
+    if (!sleepUnlessStopped(request.duration, config.stop)) {
+      // The measurement is running and stays running: cancelling the wait abandons the reading, and
+      // stopping here would stop the other latency's measurement too.
+      const auto reason = "the firmware latency measurement was cancelled while collecting";
+      reporter.fail(kFirmwareLatencyObserveStep, reason);
+      return std::unexpected(reason);
+    }
+    reporter.succeed(kFirmwareLatencyObserveStep,
+                     nlohmann::json{{"durationMs", request.duration.count()}});
+  }
+
+  if (reads) {
+    reporter.start(kFirmwareLatencyReadStep);
+    auto result = drive->readMaximumFirmwareLatency(request.latency, config);
+    if (!result) {
+      reporter.fail(kFirmwareLatencyReadStep, result.error());
+      return std::unexpected(result.error());
+    }
+    reporter.succeed(kFirmwareLatencyReadStep, *result);
+  }
+
+  if (request.action == FirmwareLatencyAction::kStop) {
+    reporter.start(kFirmwareLatencyStopStep);
+    auto stopped = drive->stopFirmwareLatencyMeasurements(config);
+    if (!stopped) {
+      reporter.fail(kFirmwareLatencyStopStep, stopped.error());
+      return std::unexpected(stopped.error());
+    }
+    reporter.succeed(kFirmwareLatencyStopStep);
+  }
   return {};
 }
 

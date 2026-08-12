@@ -401,6 +401,16 @@ std::optional<VelocitySource> parseVelocitySource(std::string_view token) {
   return std::nullopt;
 }
 
+std::optional<FirmwareLatency> parseFirmwareLatency(std::string_view token) {
+  if (token == toString(FirmwareLatency::kSetpoint)) {
+    return FirmwareLatency::kSetpoint;
+  }
+  if (token == toString(FirmwareLatency::kFeedback)) {
+    return FirmwareLatency::kFeedback;
+  }
+  return std::nullopt;
+}
+
 std::optional<FirmwareErrorType> parseFirmwareErrorType(std::string_view token) {
   for (const auto type : kFirmwareErrorTypes) {
     if (token == toString(type)) {
@@ -1578,6 +1588,161 @@ std::expected<void, std::string> SomanetDrive::setVelocitySource(somanet::Veloci
     }
     return std::unexpected(
         std::format("{} failed with OS error {} (command-specific)", what, code));
+  }
+  return {};
+}
+
+std::string FirmwareLatencyResult::describe() const {
+  if (maximumNanoseconds == 0 && configuredNanoseconds == 0) {
+    return std::format("no {} latency has been measured", somanet::toString(latency));
+  }
+  return std::format("maximum {} latency {} ns, against {} ns configured at the time",
+                     somanet::toString(latency), maximumNanoseconds, configuredNanoseconds);
+}
+
+void to_json(nlohmann::json& j, const FirmwareLatencyResult& result) {
+  j = nlohmann::json{{"latency", somanet::toString(result.latency)},
+                     {"maximumNanoseconds", result.maximumNanoseconds},
+                     {"configuredNanoseconds", result.configuredNanoseconds},
+                     {"description", result.describe()}};
+}
+
+// Byte layout of the firmware latency request (command 22) and of the reply to its read action.
+constexpr size_t kFirmwareLatencyActionByte = 1;
+constexpr size_t kFirmwareLatencyIndexByte = 2;
+constexpr size_t kFirmwareLatencyMaximumOffset = 0;
+constexpr size_t kFirmwareLatencyConfiguredOffset = 3;
+constexpr size_t kFirmwareLatencyValueBytes = 3;
+
+// The three actions, which are the command's own encoding rather than a vocabulary a caller picks
+// from — each has its own method, so the byte never comes from outside this file.
+constexpr uint8_t kStartLatencyMeasurement = 0;
+constexpr uint8_t kGetAndClearMaximumLatency = 1;
+constexpr uint8_t kStopLatencyMeasurements = 2;
+
+// A ns per 10 ns tick, which is what the drive counts in.
+constexpr uint32_t kLatencyTickNanoseconds = 10;
+
+namespace {
+
+// Names for the two command-specific codes. Both describe a request byte this file builds itself,
+// so neither should ever be seen — reported by name anyway, because a firmware that rejects a byte
+// we believe is valid is exactly the case where the code matters.
+std::optional<std::string_view> firmwareLatencyFaultName(uint8_t code) {
+  switch (code) {
+    case 0:
+      return "the drive rejected the action";
+    case 1:
+      return "the drive rejected the latency index";
+    default:
+      return std::nullopt;
+  }
+}
+
+// Builds one command 22 request. The latency index is ignored by the stop action, which is why it
+// is optional rather than defaulted to a latency the caller did not name.
+std::vector<uint8_t> firmwareLatencyCommand(uint8_t action,
+                                            std::optional<somanet::FirmwareLatency> latency) {
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(somanet::OsCommandId::kMeasureFirmwareLatency);
+  command[kFirmwareLatencyActionByte] = action;
+  if (latency) {
+    command[kFirmwareLatencyIndexByte] = static_cast<uint8_t>(*latency);
+  }
+  return command;
+}
+
+// Turns a failed command 22 response into a message. Shared by all three actions: they differ in
+// what they ask for, not in how a refusal reads.
+std::string firmwareLatencyFailure(const OsCommandResponse& response, std::string_view what) {
+  if (!response.errorCode) {
+    return std::format("{} failed and the drive reported no error code", what);
+  }
+  const uint8_t code = *response.errorCode;
+  // A timeout means no service picked the command up, and only the drive control service implements
+  // it — so for this command that is a statement about which firmware is running, not about speed.
+  if (auto general = osCommandErrorName(code)) {
+    if (code == static_cast<uint8_t>(OsCommandError::kTimeout)) {
+      return std::format(
+          "{} was not answered by any firmware service, so this drive's drive control service — "
+          "the "
+          "only one that implements the command — is not running (OS error {})",
+          what, code);
+    }
+    return std::format("{} was not performed: {} (OS error {})", what, *general, code);
+  }
+  if (auto fault = firmwareLatencyFaultName(code)) {
+    return std::format("{} failed: {} (OS error {})", what, *fault, code);
+  }
+  return std::format("{} failed with OS error {} (command-specific)", what, code);
+}
+
+// Decodes one of the reply's two 24-bit little-endian values into nanoseconds. Little-endian and 24
+// bits wide, so neither decodeBigEndian nor a fixed-width integer type fits it.
+uint32_t decodeLatencyNanoseconds(const std::vector<uint8_t>& payload, size_t offset) {
+  uint32_t ticks = 0;
+  for (size_t i = 0; i < kFirmwareLatencyValueBytes; ++i) {
+    ticks |= static_cast<uint32_t>(payload[offset + i]) << (8U * i);
+  }
+  return ticks * kLatencyTickNanoseconds;
+}
+
+}  // namespace
+
+std::expected<void, std::string> SomanetDrive::startFirmwareLatencyMeasurement(
+    somanet::FirmwareLatency latency, const OsCommandConfig& config) {
+  const std::string what =
+      std::format("starting the {} latency measurement", somanet::toString(latency));
+
+  auto response = runOsCommand(firmwareLatencyCommand(kStartLatencyMeasurement, latency), config);
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+  if (response->failed()) {
+    return std::unexpected(firmwareLatencyFailure(*response, what));
+  }
+  // Status 0: completed with no reply, which is all the start action ever answers on success.
+  return {};
+}
+
+std::expected<FirmwareLatencyResult, std::string> SomanetDrive::readMaximumFirmwareLatency(
+    somanet::FirmwareLatency latency, const OsCommandConfig& config) {
+  const std::string what =
+      std::format("reading the maximum {} latency", somanet::toString(latency));
+
+  auto response = runOsCommand(firmwareLatencyCommand(kGetAndClearMaximumLatency, latency), config);
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+  if (response->failed()) {
+    return std::unexpected(firmwareLatencyFailure(*response, what));
+  }
+
+  constexpr size_t kExpectedBytes = kFirmwareLatencyConfiguredOffset + kFirmwareLatencyValueBytes;
+  if (response->data.size() < kExpectedBytes) {
+    return std::unexpected(std::format("{} reported success with {} payload bytes, expected {}",
+                                       what, response->data.size(), kExpectedBytes));
+  }
+
+  return FirmwareLatencyResult{
+      .latency = latency,
+      .maximumNanoseconds = decodeLatencyNanoseconds(response->data, kFirmwareLatencyMaximumOffset),
+      .configuredNanoseconds =
+          decodeLatencyNanoseconds(response->data, kFirmwareLatencyConfiguredOffset)};
+}
+
+std::expected<void, std::string> SomanetDrive::stopFirmwareLatencyMeasurements(
+    const OsCommandConfig& config) {
+  const std::string what = "stopping the firmware latency measurements";
+
+  // No latency index: the stop action disables both, and the firmware does not read byte 2 for it.
+  auto response =
+      runOsCommand(firmwareLatencyCommand(kStopLatencyMeasurements, std::nullopt), config);
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+  if (response->failed()) {
+    return std::unexpected(firmwareLatencyFailure(*response, what));
   }
   return {};
 }

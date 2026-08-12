@@ -43,6 +43,10 @@ using mm::node::Device;
 using mm::node::encoderRegisterParameters;
 using mm::node::EncoderRegisterRequest;
 using mm::node::encoderRegisterSteps;
+using mm::node::FirmwareLatencyAction;
+using mm::node::firmwareLatencyParameters;
+using mm::node::FirmwareLatencyRequest;
+using mm::node::firmwareLatencySteps;
 using mm::node::hrdStreamingParameters;
 using mm::node::HrdStreamingRequest;
 using mm::node::hrdStreamingSteps;
@@ -62,6 +66,8 @@ using mm::node::openPhaseDetectionSteps;
 using mm::node::OsCommandRequest;
 using mm::node::osCommandSteps;
 using mm::node::parseEncoderRegisterRequest;
+using mm::node::parseFirmwareLatencyAction;
+using mm::node::parseFirmwareLatencyRequest;
 using mm::node::parseHrdStreamingRequest;
 using mm::node::parseIcMuCalibrationModeRequest;
 using mm::node::parseIgnoreBissStatusBitsRequest;
@@ -75,6 +81,7 @@ using mm::node::ProgressReporter;
 using mm::node::ProgressStatus;
 using mm::node::runCommutationOffsetDetectionProcedure;
 using mm::node::runEncoderRegisterProcedure;
+using mm::node::runFirmwareLatencyProcedure;
 using mm::node::runHrdStreamingProcedure;
 using mm::node::runIcMuCalibrationModeProcedure;
 using mm::node::runIgnoreBissStatusBitsProcedure;
@@ -1797,6 +1804,170 @@ TEST(RunSkippedCyclesProcedure, AFailedReadFailsTheStep) {
   const auto step = stepById(reporter.steps(), "read-counter");
   ASSERT_TRUE(step.has_value());
   EXPECT_EQ(step->status, ProgressStatus::kFailed);
+}
+
+// --- Firmware latency measurement procedure ------------------------------------------------------
+
+TEST(ParseFirmwareLatencyRequest, DefaultsToMeasuringTheSetpointLatency) {
+  auto request = parseFirmwareLatencyRequest(nlohmann::json::object());
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->action, FirmwareLatencyAction::kMeasure);
+  EXPECT_EQ(request->latency, somanet::FirmwareLatency::kSetpoint);
+  EXPECT_EQ(request->duration, std::chrono::milliseconds(2000));
+}
+
+TEST(ParseFirmwareLatencyRequest, ReadsEveryActionAndBothLatencies) {
+  for (auto action : {FirmwareLatencyAction::kMeasure, FirmwareLatencyAction::kStart,
+                      FirmwareLatencyAction::kReadMaximum, FirmwareLatencyAction::kStop}) {
+    auto request = parseFirmwareLatencyRequest(
+        nlohmann::json{{"action", mm::node::toString(action)}, {"latency", "feedback"}});
+    ASSERT_TRUE(request.has_value()) << request.error();
+    EXPECT_EQ(request->action, action);
+    EXPECT_EQ(request->latency, somanet::FirmwareLatency::kFeedback);
+  }
+}
+
+TEST(ParseFirmwareLatencyRequest, RejectsUnknownTokensAndAnOutOfRangeDuration) {
+  auto action = parseFirmwareLatencyRequest(nlohmann::json{{"action", "reset"}});
+  ASSERT_FALSE(action.has_value());
+  EXPECT_NE(action.error().find("read-maximum"), std::string::npos) << action.error();
+
+  auto latency = parseFirmwareLatencyRequest(nlohmann::json{{"latency", "cycle"}});
+  ASSERT_FALSE(latency.has_value());
+  EXPECT_NE(latency.error().find("setpoint"), std::string::npos) << latency.error();
+
+  auto tooShort = parseFirmwareLatencyRequest(nlohmann::json{{"durationMs", 10}});
+  ASSERT_FALSE(tooShort.has_value());
+
+  auto tooLong = parseFirmwareLatencyRequest(nlohmann::json{{"durationMs", 60001}});
+  ASSERT_FALSE(tooLong.has_value());
+}
+
+TEST(FirmwareLatencySteps, DeclaresOneStepPerAction) {
+  auto steps = firmwareLatencySteps();
+  ASSERT_EQ(steps.size(), 4u);
+  EXPECT_EQ(steps[0].id, "start-measurement");
+  EXPECT_EQ(steps[1].id, "observe");
+  EXPECT_EQ(steps[2].id, "read-maximum");
+  EXPECT_EQ(steps[3].id, "stop-measurements");
+}
+
+TEST(FirmwareLatencyDescriptor, EveryParameterHasABoundOrOptions) {
+  auto parameters = firmwareLatencyParameters();
+  ASSERT_EQ(parameters.size(), 3u);
+  EXPECT_EQ(parameters[0].name, "action");
+  EXPECT_EQ(parameters[0].options.size(), 4u);
+  EXPECT_EQ(parameters[1].name, "latency");
+  EXPECT_EQ(parameters[1].options.size(), 2u);
+  EXPECT_EQ(parameters[2].name, "durationMs");
+  EXPECT_EQ(parameters[2].minValue, 100);
+  EXPECT_EQ(parameters[2].maxValue, 60000);
+}
+
+TEST(RunFirmwareLatencyProcedure, MeasureStartsObservesAndReads) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(firmwareLatencySteps());
+
+  // Two commands: the start answers status 0, the read answers status 1 with 1234 and 3000 ticks
+  // little-endian — 12340 ns measured against 30000 ns configured.
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}, {1, 0, 0xD2, 0x04, 0x00, 0xB8, 0x0B, 0x00}};
+  auto result = runFirmwareLatencyProcedure(
+      device, reporter, std::stop_token{},
+      FirmwareLatencyRequest{.action = FirmwareLatencyAction::kMeasure,
+                             .latency = somanet::FirmwareLatency::kFeedback,
+                             .duration = std::chrono::milliseconds(100)});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto steps = reporter.steps();
+  for (auto id : {"start-measurement", "observe", "read-maximum"}) {
+    const auto step = stepById(steps, id);
+    ASSERT_TRUE(step.has_value()) << id;
+    EXPECT_EQ(step->status, ProgressStatus::kSucceeded) << id;
+  }
+  const auto read = stepById(steps, "read-maximum");
+  EXPECT_EQ(read->value.at("maximumNanoseconds").get<uint32_t>(), 12340u);
+  EXPECT_EQ(read->value.at("configuredNanoseconds").get<uint32_t>(), 30000u);
+  EXPECT_EQ(read->value.at("latency").get<std::string>(), "feedback");
+
+  // Left running on purpose: stopping is not per-latency, so ending this measurement would end a
+  // measurement of the other latency too.
+  const auto stopped = stepById(steps, "stop-measurements");
+  ASSERT_TRUE(stopped.has_value());
+  EXPECT_EQ(stopped->status, ProgressStatus::kIdle);
+
+  // Prepares nothing, like the counter read: no operation mode, no controlword, no brake.
+  EXPECT_EQ(driver.lastWriteIndex(Object::kModeOfOperation, 0), -1);
+  EXPECT_EQ(driver.lastWriteIndex(Object::kControlword, 0), -1);
+  EXPECT_EQ(brakeWrites(driver), 0);
+}
+
+TEST(RunFirmwareLatencyProcedure, StartOnlyStartsAndLeavesTheReadIdle) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(firmwareLatencySteps());
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  auto result =
+      runFirmwareLatencyProcedure(device, reporter, std::stop_token{},
+                                  FirmwareLatencyRequest{.action = FirmwareLatencyAction::kStart});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto steps = reporter.steps();
+  EXPECT_EQ(stepById(steps, "start-measurement")->status, ProgressStatus::kSucceeded);
+  for (auto id : {"observe", "read-maximum", "stop-measurements"}) {
+    EXPECT_EQ(stepById(steps, id)->status, ProgressStatus::kIdle) << id;
+  }
+  // One command, and it is the start action.
+  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  EXPECT_EQ(written[0], 22);
+  EXPECT_EQ(written[1], 0);
+}
+
+TEST(RunFirmwareLatencyProcedure, StopIssuesTheStopActionAlone) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(firmwareLatencySteps());
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  auto result =
+      runFirmwareLatencyProcedure(device, reporter, std::stop_token{},
+                                  FirmwareLatencyRequest{.action = FirmwareLatencyAction::kStop});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto steps = reporter.steps();
+  EXPECT_EQ(stepById(steps, "stop-measurements")->status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(stepById(steps, "start-measurement")->status, ProgressStatus::kIdle);
+  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  EXPECT_EQ(written[1], 2);
+}
+
+TEST(RunFirmwareLatencyProcedure, AFailedStartFailsTheStepAndSkipsTheRest) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(firmwareLatencySteps());
+
+  driver.responses = {{3, 0, 253, 0, 0, 0, 0, 0}};
+  auto result = runFirmwareLatencyProcedure(
+      device, reporter, std::stop_token{},
+      FirmwareLatencyRequest{.action = FirmwareLatencyAction::kMeasure,
+                             .duration = std::chrono::milliseconds(100)});
+  ASSERT_FALSE(result.has_value());
+
+  const auto steps = reporter.steps();
+  EXPECT_EQ(stepById(steps, "start-measurement")->status, ProgressStatus::kFailed);
+  // Never observed, so never waited the duration out — a failed start is not a measurement.
+  EXPECT_EQ(stepById(steps, "observe")->status, ProgressStatus::kIdle);
+  EXPECT_EQ(stepById(steps, "read-maximum")->status, ProgressStatus::kIdle);
+}
+
+TEST(ParseFirmwareLatencyAction, RoundTripsItsOwnTokens) {
+  EXPECT_EQ(parseFirmwareLatencyAction("measure"), FirmwareLatencyAction::kMeasure);
+  EXPECT_EQ(parseFirmwareLatencyAction("start"), FirmwareLatencyAction::kStart);
+  EXPECT_EQ(parseFirmwareLatencyAction("read-maximum"), FirmwareLatencyAction::kReadMaximum);
+  EXPECT_EQ(parseFirmwareLatencyAction("stop"), FirmwareLatencyAction::kStop);
+  EXPECT_FALSE(parseFirmwareLatencyAction("").has_value());
+  EXPECT_FALSE(parseFirmwareLatencyAction("read").has_value());
 }
 
 // --- Torque constant measurement procedure -------------------------------------------------------

@@ -2218,6 +2218,136 @@ TEST(ParseFirmwareService, RoundTripsItsOwnTokens) {
   EXPECT_FALSE(somanet::parseFirmwareService("0").has_value());
 }
 
+TEST(FirmwareLatency, StartPutsTheActionAndTheIndexInBytesOneAndTwo) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive
+                  ->startFirmwareLatencyMeasurement(somanet::FirmwareLatency::kFeedback,
+                                                    {.pollInterval = kNoDelay})
+                  .has_value());
+  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  ASSERT_EQ(written.size(), 8u);
+  EXPECT_EQ(written[0], 22);
+  EXPECT_EQ(written[1], 0);  // start measurement
+  EXPECT_EQ(written[2], 1);  // feedback latency
+}
+
+TEST(FirmwareLatency, TheStopActionCarriesNoLatencyIndex) {
+  // The firmware ignores byte 2 for this action, and the master has no latency to name — a run that
+  // stopped "the setpoint measurement" would misdescribe what the drive did, since it stops both.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(drive->stopFirmwareLatencyMeasurements({.pollInterval = kNoDelay}).has_value());
+  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  ASSERT_EQ(written.size(), 8u);
+  EXPECT_EQ(written[0], 22);
+  EXPECT_EQ(written[1], 2);  // stop all measurements
+  EXPECT_EQ(written[2], 0);
+}
+
+TEST(FirmwareLatency, DecodesBothTwentyFourBitLittleEndianValuesIntoNanoseconds) {
+  // Little-endian and 24 bits wide, so the shared big-endian decoder would read both backwards. The
+  // drive counts in 10 ns units: 0x0004D2 = 1234 ticks = 12340 ns, 0x000BB8 = 3000 ticks = 30000
+  // ns.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0xD2, 0x04, 0x00, 0xB8, 0x0B, 0x00}};
+  auto result = drive->readMaximumFirmwareLatency(somanet::FirmwareLatency::kSetpoint,
+                                                  {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->maximumNanoseconds, 12340u);
+  EXPECT_EQ(result->configuredNanoseconds, 30000u);
+  EXPECT_EQ(result->latency, somanet::FirmwareLatency::kSetpoint);
+  EXPECT_EQ(result->describe(),
+            "maximum setpoint latency 12340 ns, against 30000 ns configured at the time");
+}
+
+TEST(FirmwareLatency, ReadsTheFullTwentyFourBitRange) {
+  // The widest value the reply can carry — 0xFFFFFF ticks — which is also the firmware's silent
+  // ceiling, since it packs a uint32 into three bytes.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF}};
+  auto result = drive->readMaximumFirmwareLatency(somanet::FirmwareLatency::kFeedback,
+                                                  {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->maximumNanoseconds, 167'772'150u);
+  EXPECT_EQ(result->configuredNanoseconds, 167'772'150u);
+}
+
+TEST(FirmwareLatency, AZeroPairReadsAsNothingMeasured) {
+  // Zero is what a drive answers when the measurement was never started, and nothing reports
+  // whether it is running — so the description says that rather than presenting 0 ns as a
+  // measurement.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0, 0, 0, 0, 0, 0}};
+  auto result = drive->readMaximumFirmwareLatency(somanet::FirmwareLatency::kSetpoint,
+                                                  {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->maximumNanoseconds, 0u);
+  EXPECT_EQ(result->describe(), "no setpoint latency has been measured");
+}
+
+TEST(FirmwareLatency, ATimeoutSaysDriveControlIsNotRunning) {
+  // Only the drive control service implements this command, so nothing answering names which
+  // service is missing rather than reporting that the master gave up.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 253, 0, 0, 0, 0, 0}};
+  auto result = drive->readMaximumFirmwareLatency(somanet::FirmwareLatency::kSetpoint,
+                                                  {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("drive control service"), std::string::npos) << result.error();
+}
+
+TEST(FirmwareLatency, TheTwoCommandSpecificCodesAreNamed) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 0, 0, 0, 0, 0, 0}};
+  auto action = drive->startFirmwareLatencyMeasurement(somanet::FirmwareLatency::kSetpoint,
+                                                       {.pollInterval = kNoDelay});
+  ASSERT_FALSE(action.has_value());
+  EXPECT_NE(action.error().find("rejected the action"), std::string::npos) << action.error();
+
+  driver.responses = {{3, 0, 1, 0, 0, 0, 0, 0}};
+  auto index = drive->startFirmwareLatencyMeasurement(somanet::FirmwareLatency::kFeedback,
+                                                      {.pollInterval = kNoDelay});
+  ASSERT_FALSE(index.has_value());
+  EXPECT_NE(index.error().find("rejected the latency index"), std::string::npos) << index.error();
+}
+
+TEST(ParseFirmwareLatency, RoundTripsItsOwnTokens) {
+  EXPECT_EQ(somanet::parseFirmwareLatency("setpoint"), somanet::FirmwareLatency::kSetpoint);
+  EXPECT_EQ(somanet::parseFirmwareLatency("feedback"), somanet::FirmwareLatency::kFeedback);
+  EXPECT_FALSE(somanet::parseFirmwareLatency("").has_value());
+  EXPECT_FALSE(somanet::parseFirmwareLatency("0").has_value());
+  EXPECT_FALSE(somanet::parseFirmwareLatency("Setpoint").has_value());
+}
+
 // --- What a general OS error says about the drive
 // -------------------------------------------------
 

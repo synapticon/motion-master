@@ -378,6 +378,123 @@ std::expected<void, std::string> runVelocitySourceProcedure(Device& device,
                                                             std::stop_token stop,
                                                             const VelocitySourceRequest& request);
 
+/// @brief Procedure name for measuring a firmware latency, as it appears in its URL and its
+/// snapshot
+///        key.
+inline constexpr std::string_view kFirmwareLatencyProcedure = "firmware-latency-measurement";
+
+/// @brief The step that starts a measurement — clearing whatever the latency had recorded.
+inline constexpr std::string_view kFirmwareLatencyStartStep = "start-measurement";
+
+/// @brief The step that lets the drive run while the measurement collects. Occupies the whole
+///        requested duration, and only @c FirmwareLatencyAction::kMeasure performs it.
+inline constexpr std::string_view kFirmwareLatencyObserveStep = "observe";
+
+/// @brief The step that reads and clears the recorded maximum.
+inline constexpr std::string_view kFirmwareLatencyReadStep = "read-maximum";
+
+/// @brief The step that stops both measurements.
+inline constexpr std::string_view kFirmwareLatencyStopStep = "stop-measurements";
+
+/// @brief What one firmware latency run should do.
+///
+/// **Three of these are the firmware's own actions and the fourth is this master's.** OS command 22
+/// starts a measurement, reads its maximum, or stops measuring — a worthwhile figure therefore
+/// takes two commands with the drive running in between, which is a workflow rather than a command.
+/// @c kMeasure is that workflow performed as one run; the other three are the raw actions, kept
+/// because a measurement worth having may need to span a whole production cycle rather than the
+/// seconds a single procedure run can wait.
+enum class FirmwareLatencyAction : uint8_t {
+  /// Start, let the drive run for the requested duration, then read and clear the maximum. The one
+  /// action that answers with a number.
+  kMeasure,
+  /// Start measuring and leave it running, to be read by a later run.
+  kStart,
+  /// Read and clear the maximum of a measurement already running (or already stopped).
+  kReadMaximum,
+  /// Stop measuring — necessarily both latencies, as the command has no per-latency stop.
+  kStop,
+};
+
+/// @brief Name of a firmware latency action (for JSON). Never returns @c nullptr.
+constexpr std::string_view toString(FirmwareLatencyAction action) {
+  switch (action) {
+    case FirmwareLatencyAction::kMeasure:
+      return "measure";
+    case FirmwareLatencyAction::kStart:
+      return "start";
+    case FirmwareLatencyAction::kReadMaximum:
+      return "read-maximum";
+    case FirmwareLatencyAction::kStop:
+      return "stop";
+  }
+  return "unknown";
+}
+
+/// @brief Parses a firmware latency action token. @c std::nullopt if it names none of them.
+std::optional<FirmwareLatencyAction> parseFirmwareLatencyAction(std::string_view token);
+
+/// @brief What one firmware latency run was asked to do.
+struct FirmwareLatencyRequest {
+  /// What to do. Defaults to the composite measurement, which is the action that answers with a
+  /// figure and needs no follow-up run.
+  FirmwareLatencyAction action{FirmwareLatencyAction::kMeasure};
+
+  /// Which latency. Ignored by @c FirmwareLatencyAction::kStop, which stops both.
+  somanet::FirmwareLatency latency{somanet::FirmwareLatency::kSetpoint};
+
+  /// How long to let the measurement collect, used only by @c FirmwareLatencyAction::kMeasure.
+  std::chrono::milliseconds duration{2000};
+};
+
+/// @brief Parses and validates a client's firmware latency request body.
+///
+/// Accepts `{"action": "measure", "latency": "setpoint", "durationMs": 2000}`. Every field is
+/// optional and defaults as @c FirmwareLatencyRequest declares.
+///
+/// @param body  Parsed request JSON.
+/// @return The validated request, or a message naming what is wrong with it.
+std::expected<FirmwareLatencyRequest, std::string> parseFirmwareLatencyRequest(
+    const nlohmann::json& body);
+
+/// @brief What measuring a firmware latency accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> firmwareLatencyParameters();
+
+/// @brief The firmware latency procedure's step template — start, observe, read, stop.
+///
+/// **The union of four actions, and no run performs all of it.** A measurement performs the first
+/// three, a raw action performs the one that names it, and the rest stay idle — which is honest
+/// about a run that never attempted them, and is why the ids name the actions rather than
+/// positions.
+std::vector<ProgressStep> firmwareLatencySteps();
+
+/// @brief Measures one internal firmware latency as a procedure body.
+///
+/// Prepares nothing, restores nothing, needs no operation mode, no CiA402 state and no brake, and
+/// moves nothing — the measurement is two timer reads inside a cycle the drive control service was
+/// running anyway. It runs from PRE-OP up on a drive that may be exchanging process data.
+///
+/// **What the figure is worth depends on what the drive was doing while it collected**, which this
+/// procedure does not arrange: measuring an idle drive for two seconds reports the worst case of an
+/// idle drive. A maximum only means something over a window that contained the load it is meant to
+/// characterise — which is what @c FirmwareLatencyAction::kStart and @c kReadMaximum exist for.
+///
+/// **A measurement is left running.** The read action does not stop it and stopping is not
+/// per-latency, so a @c kMeasure run leaves the drive measuring rather than silently ending a
+/// measurement of the *other* latency that something else may be collecting. See
+/// @c SomanetDrive::readMaximumFirmwareLatency.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; checked during the observation window and passed into each
+///                 command.
+/// @param request  Which action, which latency, and for how long.
+/// @return Void once the requested action completed, otherwise why it did not.
+std::expected<void, std::string> runFirmwareLatencyProcedure(Device& device,
+                                                             ProgressReporter& reporter,
+                                                             std::stop_token stop,
+                                                             const FirmwareLatencyRequest& request);
+
 /// @brief Procedure name for provoking a firmware error, as it appears in its URL and its snapshot
 ///        key.
 inline constexpr std::string_view kTriggerErrorProcedure = "trigger-error";

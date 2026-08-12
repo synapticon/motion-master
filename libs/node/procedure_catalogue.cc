@@ -175,6 +175,52 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor firmwareLatency;
+  firmwareLatency.name = std::string(kFirmwareLatencyProcedure);
+  firmwareLatency.title = "Firmware latency measurement";
+  firmwareLatency.description =
+      "Measures how long two stages inside the drive control service's cycle actually take, which "
+      "is what the alignment between that cycle and the motion control cycle is configured from. "
+      "The drive keeps the maximum of every cycle while measuring, along with whatever latency was "
+      "configured at the moment that maximum happened — the pair is what says whether the "
+      "configured figure covers the worst case observed. Nothing here changes the drive: no "
+      "operation mode, no state, no brake, no motion.";
+  firmwareLatency.caveats = {
+      "A maximum is only as informative as what the drive was doing while it collected. Measuring "
+      "an idle drive reports the worst case of an idle drive; to characterise a machine, start the "
+      "measurement, run the machine, and read it afterwards.",
+      "Reading clears the maximum, so the figure cannot be read twice — each reading describes the "
+      "window since the previous one.",
+      "Nothing reports whether a measurement is running. Both numbers come back zero when none has "
+      "run, which is indistinguishable from a genuine zero, and starting a second time silently "
+      "discards what the first had collected.",
+      "Stopping stops both latencies — the command has no per-latency stop — so a measure run "
+      "deliberately leaves the drive measuring rather than ending a measurement of the other "
+      "latency that something else may be collecting.",
+      "Only the drive control service implements this command, and the two stages measured are "
+      "inside its cycle. This is the drive's own timing, unrelated to Motion Master's cycle on the "
+      "Server → Game Loop page.",
+  };
+  firmwareLatency.parameters = firmwareLatencyParameters();
+  firmwareLatency.movesMotor = false;
+  firmwareLatency.requiresEnabled = false;
+  firmwareLatency.steps = firmwareLatencySteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(firmwareLatency),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
+        auto request = parseFirmwareLatencyRequest(body);
+        if (!request) {
+          return std::unexpected(request.error());
+        }
+        return
+            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+              return runFirmwareLatencyProcedure(device, reporter, std::move(stop), request);
+            };
+      },
+  });
+
   ProcedureDescriptor hrdStreaming;
   hrdStreaming.name = std::string(kHrdStreamingProcedure);
   hrdStreaming.title = "HRD streaming";

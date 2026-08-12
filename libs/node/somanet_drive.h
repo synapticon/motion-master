@@ -288,6 +288,36 @@ constexpr std::string_view toString(VelocitySource source) {
 /// @brief Parses a velocity source token ("firmware" / "encoder"). @c std::nullopt otherwise.
 std::optional<VelocitySource> parseVelocitySource(std::string_view token);
 
+/// @brief Which internal firmware latency OS command 22 measures. The enum value @b is the latency
+///        index byte the command carries.
+///
+/// Both are durations inside the **drive control service's** cycle, which is the only service that
+/// implements the command; the drive keeps one maximum per latency and measures them independently.
+enum class FirmwareLatency : uint8_t {
+  /// From the start of the drive control service cycle until the setpoints are handed to the motion
+  /// control service. The specification's use for it: deciding how far ahead of the motion control
+  /// cycle the drive control cycle has to start.
+  kSetpoint = 0,
+  /// From the request for control feedback until the end of the drive control service cycle. The
+  /// specification's use for it: deciding whether there is time to wait for another motion control
+  /// cycle before taking the feedback.
+  kFeedback = 1,
+};
+
+/// @brief Name of a firmware latency (for logging / JSON). Never returns @c nullptr.
+constexpr std::string_view toString(FirmwareLatency latency) {
+  switch (latency) {
+    case FirmwareLatency::kSetpoint:
+      return "setpoint";
+    case FirmwareLatency::kFeedback:
+      return "feedback";
+  }
+  return "unknown";
+}
+
+/// @brief Parses a firmware latency token ("setpoint" / "feedback"). @c std::nullopt otherwise.
+std::optional<FirmwareLatency> parseFirmwareLatency(std::string_view token);
+
 /// @brief The errors OS command 16 can provoke in a firmware service. The enum value @b is the
 ///        error-type byte the command carries.
 ///
@@ -728,6 +758,7 @@ enum class OsCommandId : uint8_t {
   kTriggerError = 16,                 ///< Provokes a firmware error or exception. Test tool only.
   kVelocitySource = 18,               ///< Chooses where the velocity loop's feedback comes from.
   kKueblerRegisterCommunication = 19,  ///< Reads or writes an Integro internal encoder register.
+  kMeasureFirmwareLatency = 22,        ///< Measures a duration inside the drive control cycle.
 };
 
 /// @brief The faults open phase detection (command 6) reports, as its command-specific OS error
@@ -1308,10 +1339,10 @@ struct KueblerRegisterResult {
 
   /// The value's bytes as they came off the wire, least significant first.
   ///
-  /// **Little-endian, and this command is alone in that** — every other reply in this family puts
-  /// the most significant byte first. Kept alongside the assembled number because a bit field's
-  /// bytes are what a reader wants, and because a caller checking this against the specification's
-  /// worked example needs the raw order.
+  /// **Little-endian, which in this family only this command and command 22 are** — every
+  /// measurement reply puts the most significant byte first. Kept alongside the assembled number
+  /// because a bit field's bytes are what a reader wants, and because a caller checking this
+  /// against the specification's worked example needs the raw order.
   std::vector<uint8_t> bytes;
 
   /// The bytes assembled little-endian into one unsigned number. How to *read* it depends on the
@@ -1324,6 +1355,37 @@ struct KueblerRegisterResult {
   std::string describe() const;
 };
 void to_json(nlohmann::json& j, const KueblerRegisterResult& result);
+
+/// @brief The maximum one firmware latency reached, as command 22 reported it.
+///
+/// **A pair, and the second number is the point of it.** The drive records the latency's own
+/// maximum, and alongside it whatever latency was *configured* at the moment that maximum happened
+/// — so the two together say whether the configured figure covered the worst case actually
+/// observed. The configured number is taken from a different firmware variable for each latency
+/// (the DCS/MCS alignment offset for @c kSetpoint, the estimated upstream processing time for
+/// @c kFeedback), which is why it travels with the latency it belongs to rather than on its own.
+///
+/// **Both are zero on a drive that has not measured anything**, which is indistinguishable from a
+/// genuine zero: the firmware records a value only while the measurement is enabled, and nothing
+/// reports whether it is. A zero pair means "no measurement has run", in practice.
+struct FirmwareLatencyResult {
+  somanet::FirmwareLatency latency{somanet::FirmwareLatency::kSetpoint};  ///< Which latency.
+
+  /// The largest value measured since the measurement was started, in nanoseconds.
+  ///
+  /// The drive sends 10 ns units in 24 bits, multiplied out here because nanoseconds is exact for
+  /// every value it can send. That width is also a ceiling: a latency above 167.77 ms is truncated
+  /// by the firmware as it packs the reply, not reported as an overflow.
+  uint32_t maximumNanoseconds = 0;
+
+  /// The latency configured when that maximum was reached, in nanoseconds — same unit, same width,
+  /// same ceiling.
+  uint32_t configuredNanoseconds = 0;
+
+  /// @brief One line describing the reading, ready to put in front of a user.
+  std::string describe() const;
+};
+void to_json(nlohmann::json& j, const FirmwareLatencyResult& result);
 
 /// @brief Borrowed view of a SOMANET drive — a CiA402 drive plus Synapticon-specific
 ///        object-dictionary access (encoder/motor configuration, custom OS commands, etc.).
@@ -1897,9 +1959,9 @@ class SomanetDrive : public Cia402Drive {
   /// addresses any byte, so a register the draft does not document is read as an unnamed one rather
   /// than refused.
   ///
-  /// **The value is little-endian here, unlike every other command in this family.** The reply puts
-  /// the least significant byte first, and so does the write value. Reusing the big-endian decoder
-  /// the measurements share would read every multi-byte register backwards.
+  /// **The value is little-endian here, which of this family only this command and command 22
+  /// are.** The reply puts the least significant byte first, and so does the write value. Reusing
+  /// the big-endian decoder the measurements share would read every multi-byte register backwards.
   ///
   /// **@p length is bytes, 1 to 4, and it must match the register's real width** — the encoder
   /// answers a mismatch with @c KueblerRegisterFault::kWrongByteCount rather than truncating. Which
@@ -1943,6 +2005,58 @@ class SomanetDrive : public Cia402Drive {
   /// @return Void once the drive accepted the choice, otherwise why it did not.
   std::expected<void, std::string> setVelocitySource(
       somanet::VelocitySource source,
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
+                                       .pollInterval = std::chrono::milliseconds(20)});
+
+  /// @brief Starts measuring one internal firmware latency (OS command 22, action 0).
+  ///
+  /// Clears whatever that latency had recorded and enables its measurement. The drive then keeps
+  /// the maximum of every drive control cycle until @c stopFirmwareLatencyMeasurements ends it or
+  /// the drive is power-cycled; the other latency is untouched either way.
+  ///
+  /// **Nothing reports whether a measurement is running**, so starting one twice is
+  /// indistinguishable from starting it once, except that the second start throws away what the
+  /// first had collected.
+  ///
+  /// **No preconditions and nothing to restore.** The command is accepted in any state and moves
+  /// nothing — the measurement is two timer reads and a comparison inside a cycle the drive was
+  /// running anyway.
+  ///
+  /// @param latency Which latency to measure.
+  /// @param config  Timing and cancellation.
+  /// @return Void once the drive started measuring, otherwise why it did not.
+  std::expected<void, std::string> startFirmwareLatencyMeasurement(
+      somanet::FirmwareLatency latency,
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
+                                       .pollInterval = std::chrono::milliseconds(20)});
+
+  /// @brief Reads and clears one firmware latency's recorded maximum (OS command 22, action 1).
+  ///
+  /// **The read is destructive and the measurement survives it**: the drive answers with the
+  /// maximum, then zeroes it, and goes on measuring. So consecutive reads each describe the window
+  /// since the previous one rather than the whole run — which is what makes a maximum useful over
+  /// time, and what means a read cannot be repeated to double-check a surprising figure.
+  ///
+  /// Reading a latency that was never started answers zero for both numbers; see
+  /// @c FirmwareLatencyResult.
+  ///
+  /// @param latency Which latency to read.
+  /// @param config  Timing and cancellation.
+  /// @return The maximum and the latency configured when it happened, or why it could not be read.
+  std::expected<FirmwareLatencyResult, std::string> readMaximumFirmwareLatency(
+      somanet::FirmwareLatency latency,
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
+                                       .pollInterval = std::chrono::milliseconds(20)});
+
+  /// @brief Stops measuring **both** firmware latencies (OS command 22, action 2).
+  ///
+  /// The command has no per-latency stop — one action disables both — so stopping one measurement
+  /// necessarily ends the other. What each latency had recorded is left alone and can still be
+  /// read.
+  ///
+  /// @param config Timing and cancellation.
+  /// @return Void once the drive stopped measuring, otherwise why it did not.
+  std::expected<void, std::string> stopFirmwareLatencyMeasurements(
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
                                        .pollInterval = std::chrono::milliseconds(20)});
 

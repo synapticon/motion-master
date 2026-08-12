@@ -50,23 +50,32 @@ TEST(Cia402ToString, StatesAndModes) {
 
 TEST(Cia402ToOperationMode, AcceptsKnownRejectsUnknown) {
   using mm::node::cia402::toOperationMode;
+  // Every mode the profile defines, including the three this codebase cannot itself drive: whether
+  // a drive supports one is what its 0x6502 field answers, and a mode rejected here could never be
+  // named even on a drive that advertises it.
   EXPECT_EQ(toOperationMode(0), OperationMode::kNoMode);
   EXPECT_EQ(toOperationMode(1), OperationMode::kProfilePosition);
+  EXPECT_EQ(toOperationMode(2), OperationMode::kVelocity);
   EXPECT_EQ(toOperationMode(3), OperationMode::kProfileVelocity);
   EXPECT_EQ(toOperationMode(4), OperationMode::kProfileTorque);
   EXPECT_EQ(toOperationMode(6), OperationMode::kHoming);
+  EXPECT_EQ(toOperationMode(7), OperationMode::kInterpolatedPosition);
   EXPECT_EQ(toOperationMode(8), OperationMode::kCyclicSyncPosition);
   EXPECT_EQ(toOperationMode(9), OperationMode::kCyclicSyncVelocity);
   EXPECT_EQ(toOperationMode(10), OperationMode::kCyclicSyncTorque);
+  EXPECT_EQ(toOperationMode(11), OperationMode::kCyclicSyncTorqueCommutationAngle);
   // Unassigned / out-of-range values are rejected so an API boundary can 400 them.
-  EXPECT_FALSE(toOperationMode(2).has_value());  // "reserved" in the profile
-  EXPECT_FALSE(toOperationMode(7).has_value());  // interpolated position — not modelled
-  EXPECT_FALSE(toOperationMode(11).has_value());
+  EXPECT_FALSE(toOperationMode(5).has_value());    // the one value the profile reserves
+  EXPECT_FALSE(toOperationMode(12).has_value());   // past the end of the profile's modes
   EXPECT_FALSE(toOperationMode(200).has_value());  // beyond INT8 range of the enum
   // Out-of-INT8-range values must be rejected before the narrowing cast — otherwise 264 (0x108)
   // would alias to 8 (CSP) and slip past validation.
   EXPECT_FALSE(toOperationMode(264).has_value());  // ≡ 8 mod 256, but out of INT8 range
   EXPECT_FALSE(toOperationMode(256).has_value());  // ≡ 0 mod 256
+  // The negative half belongs to the vendor, so no value in it is a *standard* mode — including the
+  // ones SOMANET defines. Naming those is somanet::OperationMode's job, and joining the two halves
+  // is operation_modes.h's.
+  EXPECT_FALSE(toOperationMode(-2).has_value());   // SOMANET diagnostics, but not CiA402's
   EXPECT_FALSE(toOperationMode(-56).has_value());  // in-range but not a mode
 }
 

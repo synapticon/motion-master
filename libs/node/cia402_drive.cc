@@ -126,12 +126,21 @@ std::expected<Cia402Status, std::string> Cia402Drive::readStatus() const {
       break;
     case cia402::OperationMode::kCyclicSyncTorque:
     case cia402::OperationMode::kProfileTorque:
+    // Torque with commutation angle drives the same 0x6071 setpoint; the angle it adds rides in
+    // its own object, which is not a linear target and is not what this seeds.
+    case cia402::OperationMode::kCyclicSyncTorqueCommutationAngle:
       if (auto v = device_.readValue<int16_t>(cia402::Object::kTargetTorque, 0)) {
         target = *v;
       }
       break;
     case cia402::OperationMode::kNoMode:
     case cia402::OperationMode::kHoming:
+    // The remaining two have a setpoint, but not one of these three objects: vl commands 0x6042
+    // and interpolated position commands the 0x60C1 data record. Neither is read here rather than
+    // read wrongly — reporting 0x607A while the drive follows 0x60C1 would seed a UI with a number
+    // the drive is not acting on.
+    case cia402::OperationMode::kVelocity:
+    case cia402::OperationMode::kInterpolatedPosition:
       break;
   }
   return Cia402Status{cia402::decodeState(*sw), *sw, *cw, *mode, target};

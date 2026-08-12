@@ -38,6 +38,7 @@
 #include "node/device_parameter.h"
 #include "node/firmware_package.h"
 #include "node/monitoring_manager.h"
+#include "node/operation_modes.h"
 #include "node/pdo_mapping.h"
 #include "node/procedure_catalogue.h"
 #include "node/procedure_manager.h"
@@ -965,6 +966,20 @@ void HttpServer::run() {
                // layer's message says which, and the device's isCia402 flag lets a client not ask.
                return mm::api::timed(
                    [&] { return mm::node::cia402Status(deviceManager_, *position); },
+                   "409 Conflict");
+             });
+
+  router.get("/api/devices/:slavePosition/operation-modes",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               if (!deviceManager_.hasDevice(*position)) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               return mm::api::timed(
+                   [&] { return mm::node::operationModes(deviceManager_, *position); },
                    "409 Conflict");
              });
 

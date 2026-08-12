@@ -48,10 +48,70 @@ export interface Cia402Status {
    */
   modeName: string;
   /**
-   * The setpoint currently commanded for the active mode — target position 0x607A (PP/CSP), velocity 0x60FF (PV/CSV), or torque 0x6071 (PT/CST), widened to INTEGER32. 0 only when the active mode has no linear setpoint (NoMode / Homing).
+   * The setpoint currently commanded for the active mode — target position 0x607A (PP/CSP), velocity 0x60FF (PV/CSV), or torque 0x6071 (PT/CST), widened to INTEGER32. 0 only when the active mode has no linear setpoint (NoMode / Homing / vl / ip).
    * @example 100000
    */
   target: number;
+}
+
+/** Every operation mode a device has, with what its "Supported drive modes" field (0x6502) says about each. */
+export interface OperationModes {
+  /**
+   * Object 0x6502 verbatim, as an UNSIGNED32.
+   * @example 197549
+   */
+  supportedDriveModes: number;
+  /**
+   * The set bits of 0x6502 from bit 16 upwards, reported as bit numbers and nothing more. The profile leaves their meaning entirely to the vendor, so nothing here can decode them — a SOMANET drive sets bits 16 and 17 and publishes no definition for either.
+   * @example [16,17]
+   */
+  manufacturerBits: number[];
+  /** Every mode, ascending by value — manufacturer modes first, then standard. */
+  modes: OperationMode[];
+}
+
+/** One operation mode of one device. */
+export interface OperationMode {
+  /**
+   * The value written to 0x6060 / read from 0x6061. Negative for a vendor mode.
+   * @example -2
+   */
+  value: number;
+  /**
+   * PascalCase identifier, matching the modeName of GET /api/devices/{n}/cia402.
+   * @example "Diagnostics"
+   */
+  name: string;
+  /**
+   * The profile's or the vendor's own wording, for a user-facing list.
+   * @example "Diagnostics mode"
+   */
+  label: string;
+  /**
+   * Whether CiA402 or the vendor defines this mode.
+   * @example "manufacturer"
+   */
+  kind: "standard" | "manufacturer";
+  /**
+   * The bit of 0x6502 that advertises this mode. Null for every manufacturer mode, and for NoMode, which is always legal and so has no bit.
+   * @example 7
+   */
+  bit: number | null;
+  /**
+   * The profile's short form (pp, vl, pv, tq, hm, ip, csp, csv, cst, cstca).
+   * @example "csp"
+   */
+  abbreviation: string | null;
+  /**
+   * Whether the drive advertises this mode. Null for every manufacturer mode — 0x6502 has no bit a master could read for one — which means "the drive does not say", not "no".
+   * @example true
+   */
+  supported: boolean | null;
+  /**
+   * Present and true only for a mode the vendor's firmware marks deprecated.
+   * @example true
+   */
+  deprecated?: boolean;
 }
 
 /** Point-in-time health of the real-time game loop. Times are nanoseconds; rates are hertz. All fields are diagnostic (relaxed reads), not synchronised. */

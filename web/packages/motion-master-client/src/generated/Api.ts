@@ -31,6 +31,7 @@ import {
   MailboxErrorCode,
   Monitoring,
   ObjectDataTypeInfo,
+  OperationModes,
   OutputStageResult,
   ParameterCacheEntry,
   PdoMapping,
@@ -954,6 +955,20 @@ export class Api<
   getCia402Status = (slavePosition: number, params: RequestParams = {}) =>
     this.request<Cia402Status, void>({
       path: `/api/devices/${slavePosition}/cia402`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Every operation mode the device has, standard and manufacturer-specific, with what the drive says about each. The standard modes are CiA402's (ETG.6010 §6.8.1) and carry the bit of "Supported drive modes" (0x6502) that advertises them, decoded into `supported`. The manufacturer modes are the vendor's own — the negative half of 0x6060 — and are listed only for a device whose vendor this server knows; their `supported` is null, because 0x6502 reserves bits 16-31 for the vendor without defining them, so a drive has no way to advertise one that a master could read. That null means "the drive does not say", not "no". Read this once per device and cache it: it is a static property of the firmware, and the one thing that makes a negative value of 0x6061 nameable rather than "Unknown".
+   *
+   * @name GetOperationModes
+   * @summary List a device's operation modes
+   * @request GET:/api/devices/{slavePosition}/operation-modes
+   */
+  getOperationModes = (slavePosition: number, params: RequestParams = {}) =>
+    this.request<OperationModes, void>({
+      path: `/api/devices/${slavePosition}/operation-modes`,
       method: "GET",
       format: "json",
       ...params,

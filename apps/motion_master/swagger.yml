@@ -1395,6 +1395,47 @@ paths:
           headers:
             X-Wire-Us:
               $ref: "#/components/headers/WireTime"
+  /api/devices/{slavePosition}/operation-modes:
+    get:
+      summary: List a device's operation modes
+      description: >
+        Every operation mode the device has, standard and manufacturer-specific, with what the
+        drive says about each. The standard modes are CiA402's (ETG.6010 §6.8.1) and carry the bit
+        of "Supported drive modes" (0x6502) that advertises them, decoded into `supported`. The
+        manufacturer modes are the vendor's own — the negative half of 0x6060 — and are listed only
+        for a device whose vendor this server knows; their `supported` is null, because 0x6502
+        reserves bits 16-31 for the vendor without defining them, so a drive has no way to advertise
+        one that a master could read. That null means "the drive does not say", not "no".
+
+        Read this once per device and cache it: it is a static property of the firmware, and the one
+        thing that makes a negative value of 0x6061 nameable rather than "Unknown".
+      operationId: getOperationModes
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The device's operation modes
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OperationModes"
+        "400":
+          description: slavePosition is not a valid integer
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: The device is not a CiA402 drive, or its object dictionary is not enumerated
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
   /api/devices/{slavePosition}/cia402/mode:
     post:
       summary: Set a device's CiA402 operation mode
@@ -3542,8 +3583,77 @@ components:
           description: >-
             The setpoint currently commanded for the active mode — target position 0x607A (PP/CSP),
             velocity 0x60FF (PV/CSV), or torque 0x6071 (PT/CST), widened to INTEGER32. 0 only when
-            the active mode has no linear setpoint (NoMode / Homing).
+            the active mode has no linear setpoint (NoMode / Homing / vl / ip).
           example: 100000
+    OperationModes:
+      type: object
+      description: >-
+        Every operation mode a device has, with what its "Supported drive modes" field (0x6502)
+        says about each.
+      required: [supportedDriveModes, manufacturerBits, modes]
+      properties:
+        supportedDriveModes:
+          type: integer
+          description: Object 0x6502 verbatim, as an UNSIGNED32.
+          example: 197549
+        manufacturerBits:
+          type: array
+          description: >-
+            The set bits of 0x6502 from bit 16 upwards, reported as bit numbers and nothing more.
+            The profile leaves their meaning entirely to the vendor, so nothing here can decode
+            them — a SOMANET drive sets bits 16 and 17 and publishes no definition for either.
+          items: { type: integer }
+          example: [16, 17]
+        modes:
+          type: array
+          description: Every mode, ascending by value — manufacturer modes first, then standard.
+          items:
+            $ref: "#/components/schemas/OperationMode"
+    OperationMode:
+      type: object
+      description: One operation mode of one device.
+      required: [value, name, label, kind, bit, abbreviation, supported]
+      properties:
+        value:
+          type: integer
+          description: The value written to 0x6060 / read from 0x6061. Negative for a vendor mode.
+          example: -2
+        name:
+          type: string
+          description: PascalCase identifier, matching the modeName of GET /api/devices/{n}/cia402.
+          example: Diagnostics
+        label:
+          type: string
+          description: The profile's or the vendor's own wording, for a user-facing list.
+          example: Diagnostics mode
+        kind:
+          type: string
+          description: Whether CiA402 or the vendor defines this mode.
+          enum: [standard, manufacturer]
+          example: manufacturer
+        bit:
+          type: integer
+          nullable: true
+          description: >-
+            The bit of 0x6502 that advertises this mode. Null for every manufacturer mode, and for
+            NoMode, which is always legal and so has no bit.
+          example: 7
+        abbreviation:
+          type: string
+          nullable: true
+          description: The profile's short form (pp, vl, pv, tq, hm, ip, csp, csv, cst, cstca).
+          example: csp
+        supported:
+          type: boolean
+          nullable: true
+          description: >-
+            Whether the drive advertises this mode. Null for every manufacturer mode — 0x6502 has
+            no bit a master could read for one — which means "the drive does not say", not "no".
+          example: true
+        deprecated:
+          type: boolean
+          description: Present and true only for a mode the vendor's firmware marks deprecated.
+          example: true
     GameLoopHealth:
       type: object
       description: >-

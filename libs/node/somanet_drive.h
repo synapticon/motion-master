@@ -549,16 +549,73 @@ constexpr std::string_view describe(MotorMeasurementFault fault) {
 /// it does not know. Folding these in would make every vendor mode validate as a CiA402 mode
 /// everywhere the standard enum is used, including the console's mode list.
 enum class OperationMode : int8_t {
-  kCyclicSyncOutputTorque = -110,
-  kCyclicSyncOutputVelocity = -109,
-  kCyclicSyncOutputPosition = -108,
-  kProfileOutputVelocity = -103,
-  kProfileOutputPosition = -101,
-  kSystemIdentification = -4,
-  kOpenLoopField = -3,
-  kDiagnostics = -2,  ///< Where the master owns the brake and the measurement OS commands run.
-  kCoggingCompensationRecording = -1,
+  kImpedance = -6,             ///< Impedance mode.
+  kJointTorque = -5,           ///< Joint torque mode.
+  kSystemIdentification = -4,  ///< System identification mode. **Deprecated by the firmware.**
+  kOpenLoopField = -3,         ///< Open loop field control mode.
+  kDiagnostics = -2,           ///< Where the master owns the brake and the measurement OS
+                               ///< commands run.
+  kCoggingCompensationRecording = -1,  ///< Cogging torque table recording.
 };
+
+/// @brief Name of a SOMANET operation mode, in the same PascalCase spelling the standard modes use
+///        (@c cia402::toString), so the two halves of a mode list read alike. Never @c nullptr.
+constexpr std::string_view toString(OperationMode mode) {
+  switch (mode) {
+    case OperationMode::kImpedance:
+      return "Impedance";
+    case OperationMode::kJointTorque:
+      return "JointTorque";
+    case OperationMode::kSystemIdentification:
+      return "SystemIdentification";
+    case OperationMode::kOpenLoopField:
+      return "OpenLoopField";
+    case OperationMode::kDiagnostics:
+      return "Diagnostics";
+    case OperationMode::kCoggingCompensationRecording:
+      return "CoggingCompensationRecording";
+  }
+  return "Unknown";
+}
+
+/// @brief The drive's own wording for a mode, as its ESI documents 0x6060. Never @c nullptr.
+constexpr std::string_view describe(OperationMode mode) {
+  switch (mode) {
+    case OperationMode::kImpedance:
+      return "Impedance mode";
+    case OperationMode::kJointTorque:
+      return "Joint torque mode";
+    case OperationMode::kSystemIdentification:
+      return "System identification mode";
+    case OperationMode::kOpenLoopField:
+      return "Open loop field mode";
+    case OperationMode::kDiagnostics:
+      return "Diagnostics mode";
+    case OperationMode::kCoggingCompensationRecording:
+      return "Cogging compensation recording mode";
+  }
+  return "Unknown mode";
+}
+
+/// @brief Every SOMANET operation mode, ascending — the manufacturer half of a mode list.
+///
+/// Taken from two sources that agree exactly: the firmware's own @c state_modes.h and the enum the
+/// ESI publishes on 0x6060. Neither knows the -101/-103/-108/-109/-110 "output" modes an earlier
+/// table here carried, so they are not listed.
+inline constexpr OperationMode kOperationModes[] = {
+    OperationMode::kImpedance,
+    OperationMode::kJointTorque,
+    OperationMode::kSystemIdentification,
+    OperationMode::kOpenLoopField,
+    OperationMode::kDiagnostics,
+    OperationMode::kCoggingCompensationRecording,
+};
+
+/// @brief Whether the firmware marks @p mode as deprecated — true for system identification alone,
+///        which both the firmware header and the ESI label that way.
+constexpr bool isDeprecated(OperationMode mode) {
+  return mode == OperationMode::kSystemIdentification;
+}
 
 }  // namespace somanet
 

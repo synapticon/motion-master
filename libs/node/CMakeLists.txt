@@ -10,6 +10,7 @@ add_library(
   integro_variant.cc
   monitoring.cc
   monitoring_manager.cc
+  operation_modes.cc
   parameter_cache.cc
   parameter_refresher.cc
   pdo_mapping.cc

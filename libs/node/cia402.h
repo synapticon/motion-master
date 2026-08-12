@@ -89,15 +89,24 @@ enum Object : uint16_t {
 };
 
 /// @brief CiA402 operation modes (object 0x6060 / 0x6061 values).
+///
+/// Every mode the profile defines, whether or not this codebase can drive one: the set is what a
+/// device's 0x6502 capability field is read against, so a mode missing here would be a supported
+/// mode nothing could name. Mode 5 is absent because the profile reserves it — there is no mode 5.
+/// Vendors define their own modes in the negative half, which is a *manufacturer* vocabulary and
+/// therefore lives with the vendor (@c somanet::OperationMode), not here.
 enum class OperationMode : int8_t {
-  kNoMode = 0,              ///< No mode assigned.
-  kProfilePosition = 1,     ///< PP — trapezoidal point-to-point positioning.
-  kProfileVelocity = 3,     ///< PV — profiled velocity.
-  kProfileTorque = 4,       ///< PT — profiled torque.
-  kHoming = 6,              ///< HM — reference/homing run.
-  kCyclicSyncPosition = 8,  ///< CSP — interpolated cyclic position (the common SOMANET mode).
-  kCyclicSyncVelocity = 9,  ///< CSV — interpolated cyclic velocity.
-  kCyclicSyncTorque = 10,   ///< CST — interpolated cyclic torque.
+  kNoMode = 0,                             ///< No mode assigned. Always legal; has no 0x6502 bit.
+  kProfilePosition = 1,                    ///< PP — trapezoidal point-to-point positioning.
+  kVelocity = 2,                           ///< VL — the frequency-converter velocity mode.
+  kProfileVelocity = 3,                    ///< PV — profiled velocity.
+  kProfileTorque = 4,                      ///< PT — profiled torque.
+  kHoming = 6,                             ///< HM — reference/homing run.
+  kInterpolatedPosition = 7,               ///< IP — interpolated position.
+  kCyclicSyncPosition = 8,                 ///< CSP — cyclic position (the common SOMANET mode).
+  kCyclicSyncVelocity = 9,                 ///< CSV — cyclic velocity.
+  kCyclicSyncTorque = 10,                  ///< CST — cyclic torque.
+  kCyclicSyncTorqueCommutationAngle = 11,  ///< CSTCA — cyclic torque with commutation angle.
 };
 
 /// @brief Maps a raw mode value (as written to 0x6060 / read from 0x6061) to a known operation
@@ -112,12 +121,15 @@ constexpr std::optional<OperationMode> toOperationMode(int value) {
   switch (static_cast<OperationMode>(static_cast<int8_t>(value))) {
     case OperationMode::kNoMode:
     case OperationMode::kProfilePosition:
+    case OperationMode::kVelocity:
     case OperationMode::kProfileVelocity:
     case OperationMode::kProfileTorque:
     case OperationMode::kHoming:
+    case OperationMode::kInterpolatedPosition:
     case OperationMode::kCyclicSyncPosition:
     case OperationMode::kCyclicSyncVelocity:
     case OperationMode::kCyclicSyncTorque:
+    case OperationMode::kCyclicSyncTorqueCommutationAngle:
       return static_cast<OperationMode>(static_cast<int8_t>(value));
   }
   return std::nullopt;
@@ -219,20 +231,62 @@ constexpr std::string_view toString(OperationMode mode) {
       return "NoMode";
     case OperationMode::kProfilePosition:
       return "ProfilePosition";
+    case OperationMode::kVelocity:
+      return "Velocity";
     case OperationMode::kProfileVelocity:
       return "ProfileVelocity";
     case OperationMode::kProfileTorque:
       return "ProfileTorque";
     case OperationMode::kHoming:
       return "Homing";
+    case OperationMode::kInterpolatedPosition:
+      return "InterpolatedPosition";
     case OperationMode::kCyclicSyncPosition:
       return "CyclicSyncPosition";
     case OperationMode::kCyclicSyncVelocity:
       return "CyclicSyncVelocity";
     case OperationMode::kCyclicSyncTorque:
       return "CyclicSyncTorque";
+    case OperationMode::kCyclicSyncTorqueCommutationAngle:
+      return "CyclicSyncTorqueCommutationAngle";
   }
   return "Unknown";
 }
+
+/// @brief One row of the standard operation-mode table — a mode, the 0x6502 bit that advertises it,
+///        and the two names the profile gives it.
+struct StandardOperationMode {
+  OperationMode mode{OperationMode::kNoMode};
+  /// The bit of 0x6502 "Supported drive modes" that advertises this mode, or -1 for @c kNoMode,
+  /// which the capability field has no bit for because it is always legal.
+  int bit = -1;
+  std::string_view abbreviation;  ///< The profile's short form: "csp", "hm", …. Empty for kNoMode.
+  std::string_view label;         ///< The profile's own wording, for a user-facing list.
+};
+
+/// @brief Every standard operation mode, with its 0x6502 bit — ETG.6010 §6.8.1, Figure 15.
+///
+/// **The bit is listed rather than computed**, though `bit = value - 1` holds for all ten of them.
+/// The arithmetic is a coincidence of how the profile happened to allocate the field, not a rule it
+/// states, and a future mode that broke it would break silently. Reserved positions (bit 4, and
+/// 11-15) are simply absent, as is the manufacturer half (bits 16-31), which no standard table can
+/// name.
+inline constexpr StandardOperationMode kStandardOperationModes[] = {
+    {OperationMode::kNoMode, -1, "", "No mode selected"},
+    {OperationMode::kProfilePosition, 0, "pp", "Profile position mode"},
+    {OperationMode::kVelocity, 1, "vl", "Velocity mode (frequency converter)"},
+    {OperationMode::kProfileVelocity, 2, "pv", "Profile velocity mode"},
+    {OperationMode::kProfileTorque, 3, "tq", "Profile torque mode"},
+    {OperationMode::kHoming, 5, "hm", "Homing mode"},
+    {OperationMode::kInterpolatedPosition, 6, "ip", "Interpolated position mode"},
+    {OperationMode::kCyclicSyncPosition, 7, "csp", "Cyclic synchronous position mode"},
+    {OperationMode::kCyclicSyncVelocity, 8, "csv", "Cyclic synchronous velocity mode"},
+    {OperationMode::kCyclicSyncTorque, 9, "cst", "Cyclic synchronous torque mode"},
+    {OperationMode::kCyclicSyncTorqueCommutationAngle, 10, "cstca",
+     "Cyclic synchronous torque mode with commutation angle"},
+};
+
+/// @brief The first bit of 0x6502 that the profile leaves to the vendor (ETG.6010 Figure 15).
+inline constexpr int kFirstManufacturerDriveModeBit = 16;
 
 }  // namespace mm::node::cia402

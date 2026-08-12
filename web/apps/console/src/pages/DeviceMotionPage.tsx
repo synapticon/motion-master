@@ -2,19 +2,18 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type uPlot from 'uplot'
-import { formatHex, type Cia402Status } from '@synapticon/motion-master-client'
 import DevicePageHeader from '../components/DevicePageHeader'
 import MonitoringChart from '../components/MonitoringChart'
 import { useMonitoringSocket, type SampleRows } from '../contexts/MonitoringSocketContext'
 import { useConnection } from '../contexts/ConnectionContext'
+import { cia402StatusKey, useCia402Status } from '../hooks/useCia402Status'
+import { useOperationModes } from '../hooks/useOperationModes'
 
 // One shared control height for every interactive control — selects, inputs, and buttons — so a
 // button and its neighbouring input/select are always the exact same height, and standalone
 // buttons match too. Explicit px (not a spacing-scale step): this theme's spacing scale is
 // geometric (h-9 = 6rem = 96px!), so a numeric height utility would NOT be ~36px — see theme.css.
 const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm w-full bg-white'
-// Compact inline label for the sticky status strip, matching the device-header metadata style.
-const statLabelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display'
 // Buttons share the h-[38px] control height (above) and are inline-flex + centred so the label
 // stays vertically centred at that fixed height.
 const btnCls =
@@ -24,18 +23,6 @@ const btnGhostCls =
   'inline-flex items-center justify-center border border-grey-300 text-grey-700 px-4 h-[38px] ' +
   'text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ' +
   'transition-colors'
-
-// The operation modes offered in the dropdown (0x6060 values). Only the cyclic sync modes make
-// sense from this page for now — each follows a setpoint we write every cycle. Profile/Homing modes
-// generate their own trajectory on the drive and are left out until this page drives them.
-// Labels match the backend's cia402::toString spelling (PascalCase) so the dropdown and the status
-// strip's modeName read identically — e.g. "CyclicSyncVelocity (9)" in both places.
-const MODES: { value: number; label: string }[] = [
-  { value: 0, label: 'NoMode (0)' },
-  { value: 8, label: 'CyclicSyncPosition (8)' },
-  { value: 9, label: 'CyclicSyncVelocity (9)' },
-  { value: 10, label: 'CyclicSyncTorque (10)' },
-]
 
 type Quantity = 'position' | 'velocity' | 'torque'
 
@@ -119,36 +106,24 @@ function isConflict(err: unknown): boolean {
   return !!err && typeof err === 'object' && (err as { status?: number }).status === 409
 }
 
-// Per-state badge colour, mirroring the AL-state badges: green when fully enabled, amber for the
-// transient quick-stop / fault-reaction states, red for a latched fault, neutral otherwise.
-const STATE_BADGE: Record<Cia402Status['state'], string> = {
-  NotReadyToSwitchOn: 'bg-grey-200 text-grey-700',
-  SwitchOnDisabled: 'bg-grey-200 text-grey-700',
-  ReadyToSwitchOn: 'bg-ocean text-white',
-  SwitchedOn: 'bg-status-info text-white',
-  OperationEnabled: 'bg-green-600 text-white',
-  QuickStopActive: 'bg-status-warn text-grey-900',
-  FaultReactionActive: 'bg-status-warn text-grey-900',
-  Fault: 'bg-syn-red text-white',
-}
-
 export default function DeviceMotionPage() {
   const { deviceId } = useParams()
   const slavePosition = Number(deviceId)
   const { api } = useConnection()
   const queryClient = useQueryClient()
 
-  const statusKey = ['cia402', slavePosition]
-  const statusQuery = useQuery({
-    queryKey: statusKey,
-    queryFn: () => api.getCia402Status(slavePosition).then((r) => r.data),
-    // Poll a few times a second so the state/mode readout tracks the drive as commands land and as
-    // it reacts to faults out-of-band. Cheap: one small SDO/PDO read per poll.
-    refetchInterval: 300,
-    retry: false,
-  })
+  // The same query the sticky status bar reads, through the shared hook — this page reads the
+  // drive's state to decide which setpoint is live and to seed its inputs; the bar displays it.
+  const statusKey = cia402StatusKey(slavePosition)
+  const statusQuery = useCia402Status(slavePosition)
   const status = statusQuery.data
   const activeMode = status?.modeOfOperation ?? 0
+
+  // What the drive itself says it has, rather than a list written here. Split into the two groups
+  // the dropdown shows: CiA402's modes, and the vendor's negative ones.
+  const modesQuery = useOperationModes(slavePosition)
+  const standardModes = (modesQuery.data?.modes ?? []).filter((m) => m.kind === 'standard')
+  const manufacturerModes = (modesQuery.data?.modes ?? []).filter((m) => m.kind === 'manufacturer')
 
   // The mode dropdown selection. Seed it from the drive's active mode on first load, then it is the
   // user's to change until they press "Set mode".
@@ -191,37 +166,6 @@ export default function DeviceMotionPage() {
         title="Motion"
         description="Drive the CiA402 state machine, operation mode, and cyclic setpoints of this drive, and watch target vs. actual live."
       />
-      {/* Sticky status strip — no heading; pins to the top of the scroll area (below the page
-          header once it scrolls off) so the live state / mode / word readout stays in view while
-          you work the controls below. */}
-      <div className="sticky top-0 z-10 bg-white border-b border-grey-200 px-4 sm:px-8 py-3">
-        {statusQuery.isError ? (
-          <p className="text-sm text-syn-red">{apiError(statusQuery.error)}</p>
-        ) : !status ? (
-          <p className="text-sm text-grey-500">Reading…</p>
-        ) : (
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <span className={`inline-block rounded-sm px-3 py-1 text-sm ${STATE_BADGE[status.state]}`}>
-              {status.state}
-            </span>
-            <div className="flex items-baseline gap-1.5">
-              <span className={statLabelCls}>Mode</span>
-              <span className="text-sm">
-                {status.modeName} ({status.modeOfOperation})
-              </span>
-            </div>
-            <div className="flex items-baseline gap-1.5">
-              <span className={statLabelCls}>Statusword</span>
-              <span className="text-sm font-mono">{formatHex(status.statusword, 4)}</span>
-            </div>
-            <div className="flex items-baseline gap-1.5">
-              <span className={statLabelCls}>Controlword</span>
-              <span className="text-sm font-mono">{formatHex(status.controlword, 4)}</span>
-            </div>
-          </div>
-        )}
-      </div>
-
       <div className="p-4 sm:px-8 sm:py-7 space-y-6">
         {/* Row 1 — the three control cards (Mode, Operation, Target) across the top; the live
             graph gets its own full-width row below. Cards stretch to equal height (default grid
@@ -235,8 +179,11 @@ export default function DeviceMotionPage() {
                 <h3 className="text-sm font-display uppercase">Mode</h3>
                 <p className="text-xs text-grey-600">
                   Request an operation mode (0x6060). The drive adopts it — reflected in the status
-                  strip above as the active mode (0x6061) — once accepted. Change the mode with the
-                  drive disabled; the mode decides which setpoint is active.
+                  bar above as the active mode (0x6061) — once accepted. Change the mode with the
+                  drive disabled; the mode decides which setpoint is active. The list is the drive's
+                  own: a standard mode it does not advertise in 0x6502 is shown but cannot be
+                  selected, and the manufacturer modes are listed because the drive has no way to
+                  advertise those either way.
                 </p>
               </div>
               <div className="mt-auto pt-4 space-y-3">
@@ -249,11 +196,24 @@ export default function DeviceMotionPage() {
                       value={selectedMode ?? activeMode}
                       onChange={(e) => setSelectedMode(Number(e.target.value))}
                     >
-                      {MODES.map((m) => (
-                        <option key={m.value} value={m.value}>
-                          {m.label}
-                        </option>
-                      ))}
+                      {/* Unsupported modes stay in the list, disabled: seeing that this drive does
+                          not do `ip` is worth more than a shorter list you cannot ask about. */}
+                      <optgroup label="Standard">
+                        {standardModes.map((m) => (
+                          <option key={m.value} value={m.value} disabled={m.supported === false}>
+                            {m.label} ({m.value}){m.supported === false ? ' — not supported' : ''}
+                          </option>
+                        ))}
+                      </optgroup>
+                      {manufacturerModes.length > 0 && (
+                        <optgroup label="Manufacturer-specific">
+                          {manufacturerModes.map((m) => (
+                            <option key={m.value} value={m.value}>
+                              {m.label} ({m.value}){m.deprecated ? ' — deprecated' : ''}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
                     </select>
                   </div>
                   <button

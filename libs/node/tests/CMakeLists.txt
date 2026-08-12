@@ -13,6 +13,7 @@ add_executable(
   integro_variant_test.cc
   monitoring_test.cc
   monitoring_manager_test.cc
+  operation_modes_test.cc
   parameter_cache_test.cc
   parameter_refresher_test.cc
   procedure_catalogue_test.cc

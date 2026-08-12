@@ -185,6 +185,34 @@ constexpr std::string_view toString(IcMuCalibrationMode mode) {
 ///        Returns @c std::nullopt for any other token.
 std::optional<IcMuCalibrationMode> parseIcMuCalibrationMode(std::string_view token);
 
+/// @brief One of the drive's two independently-scheduled control loops, as the firmware's
+///        @c FirmwareServiceId names them. The enum value @b is the byte the command carries.
+///
+/// They are separate loops with separate periods and separate counters, so a command addressed at
+/// one says nothing about the other. **Each service answers only requests naming itself**: a byte
+/// naming neither leaves the command unanswered by anything, and the drive's OS command handler
+/// eventually fails it as a timeout rather than as a bad parameter — which is why a caller
+/// validates this rather than passing a number through.
+enum class FirmwareService : uint8_t {
+  kDriveControl = 0,   ///< The current/torque loop — the fast one, period per 0x60C2.
+  kMotionControl = 1,  ///< The position/velocity loop above it.
+};
+
+/// @brief Name of a firmware service (for logging / JSON). Never returns @c nullptr.
+constexpr std::string_view toString(FirmwareService service) {
+  switch (service) {
+    case FirmwareService::kDriveControl:
+      return "drive-control";
+    case FirmwareService::kMotionControl:
+      return "motion-control";
+  }
+  return "unknown";
+}
+
+/// @brief Parses a service token ("drive-control" / "motion-control") — the inverse of
+///        @c toString. Returns @c std::nullopt for any other token.
+std::optional<FirmwareService> parseFirmwareService(std::string_view token);
+
 /// @brief The faults encoder register communication (command 0) reports as its command-specific OS
 ///        error code.
 ///
@@ -415,8 +443,8 @@ enum class OsCommandId : uint8_t {
   kPhaseResistanceMeasurement = 8,    ///< Measures the motor's phase resistance, in milliohms.
   kPhaseInductanceMeasurement = 9,    ///< Measures the motor's phase inductance, in microhenries.
   kTorqueConstantMeasurement = 10,    ///< Measures the motor's torque constant. Rotates the rotor.
-  kSkippedCycleCounter = 13,          ///< Reads the drive's skipped-cycle counter. Harmless; no
-                                      ///< motion.
+  kSkippedCyclesCounter = 13,         ///< Reads a control loop's skipped-cycle counter. Harmless;
+                                      ///< no motion.
 };
 
 /// @brief The faults open phase detection (command 6) reports, as its command-specific OS error
@@ -940,6 +968,21 @@ struct TorqueConstantResult {
   std::string describe() const;
 };
 void to_json(nlohmann::json& j, const TorqueConstantResult& result);
+
+/// @brief What the skipped cycles counter (command 13) reported for one control loop.
+///
+/// **A single reading means very little on its own** — the counter is cumulative since the service
+/// started and nothing resets it, so what carries information is the difference between two
+/// readings and the time between them. That is why the service read is part of the result: two
+/// readings are only comparable when they addressed the same loop.
+struct SkippedCyclesResult {
+  somanet::FirmwareService service{somanet::FirmwareService::kDriveControl};  ///< Which loop.
+  uint32_t skippedCycles = 0;  ///< Cycles that loop has skipped since it started.
+
+  /// @brief One line describing the reading, ready to put in front of a user.
+  std::string describe() const;
+};
+void to_json(nlohmann::json& j, const SkippedCyclesResult& result);
 
 /// @brief Borrowed view of a SOMANET drive — a CiA402 drive plus Synapticon-specific
 ///        object-dictionary access (encoder/motor configuration, custom OS commands, etc.).
@@ -1472,6 +1515,36 @@ class SomanetDrive : public Cia402Drive {
   std::expected<TorqueConstantResult, std::string> runTorqueConstantMeasurement(
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(60),
                                        .pollInterval = std::chrono::milliseconds(100)});
+
+  /// @brief Reads a control loop's skipped-cycle counter (OS command 13).
+  ///
+  /// How many cycles @p service has failed to start on time since it began running. The firmware
+  /// counts a cycle as skipped when it starts late enough to miss its slot, and adds the whole
+  /// backlog when several are missed at once — so the figure is missed *cycles*, not missed
+  /// deadlines. **It is cumulative and nothing resets it**, so read it twice and subtract: a
+  /// counter that is large but unchanging describes a startup transient, and a small one that keeps
+  /// climbing describes a drive that is still missing cycles now.
+  ///
+  /// The two loops are counted separately and a request addressed at one says nothing about the
+  /// other, which is why the service is a parameter rather than a detail.
+  ///
+  /// **The drive reports the same event twice, and the other half is easier to miss**: when a cycle
+  /// is skipped while a controller is enabled, the firmware also raises a @c CtrlCyEx warning that
+  /// lands in the error report (0x203F). A rising counter with no warning means the cycles were
+  /// skipped while the drive was disabled.
+  ///
+  /// **No preconditions.** The command needs no operation mode, no CiA402 state and no brake, and
+  /// it moves nothing — it is a pure read, safe to run on a drive that is enabled and moving.
+  ///
+  /// @param service Which control loop to ask.
+  /// @param config  Timing and cancellation. The default timeout is deliberately longer than the
+  ///                drive's own ~5 s command timeout, so a firmware missing the addressed service
+  ///                answers "timeout" itself instead of being aborted from here first.
+  /// @return The counter and the service it came from, or why it could not be read.
+  std::expected<SkippedCyclesResult, std::string> readSkippedCycles(
+      somanet::FirmwareService service,
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(10),
+                                       .pollInterval = std::chrono::milliseconds(20)});
 
   /// @brief Reads the requested operation mode (0x6060) as its raw value.
   ///

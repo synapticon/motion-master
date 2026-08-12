@@ -46,6 +46,12 @@ constexpr auto kMaxPollInterval = std::chrono::seconds(1);
 constexpr auto kEncoderRegisterTimeout = std::chrono::seconds(5);
 constexpr auto kEncoderRegisterPollInterval = std::chrono::milliseconds(20);
 
+// Reading a counter takes one control cycle, so the ceiling is not about how long the work takes:
+// it is deliberately longer than the drive's own ~5 s command timeout, so a firmware that has no
+// such service running lets the drive answer "timeout" — which names the real problem — rather than
+// being aborted from here first with a message about this master giving up.
+constexpr auto kSkippedCyclesTimeout = std::chrono::seconds(10);
+
 // What HRD streaming is sized for. Configuring is dominated by deleting the previous recording's
 // files, which the firmware specification allows around 5 s for in the worst case. Recording
 // occupies the whole requested duration, so its ceiling is that duration plus this margin for the
@@ -1435,6 +1441,74 @@ std::expected<void, std::string> runPhaseInductanceMeasurementProcedure(Device& 
                                  [](SomanetDrive& drive, const OsCommandConfig& config) {
                                    return drive.runPhaseInductanceMeasurement(config);
                                  });
+}
+
+std::expected<SkippedCyclesRequest, std::string> parseSkippedCyclesRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  SkippedCyclesRequest request;
+
+  auto service = body.find("service");
+  if (service == body.end() || service->is_null()) {
+    return request;
+  }
+  if (!service->is_string()) {
+    return std::unexpected("'service' must be a string");
+  }
+  auto parsed = somanet::parseFirmwareService(service->get<std::string>());
+  if (!parsed) {
+    return std::unexpected(std::format(
+        "'service' must be {} or {}", somanet::toString(somanet::FirmwareService::kDriveControl),
+        somanet::toString(somanet::FirmwareService::kMotionControl)));
+  }
+  request.service = *parsed;
+  return request;
+}
+
+std::vector<ProcedureParameter> skippedCyclesParameters() {
+  const SkippedCyclesRequest defaults;
+  return {
+      enumParameter(
+          "service", "Firmware service",
+          "Which control loop to ask. The two are scheduled independently and counted separately, "
+          "so a reading from one says nothing about the other: drive control is the fast "
+          "current/torque loop, motion control the position/velocity loop above it.",
+          std::string(somanet::toString(defaults.service)),
+          {
+              ParameterOption{
+                  .value = std::string(somanet::toString(somanet::FirmwareService::kDriveControl)),
+                  .title = "Drive control"},
+              ParameterOption{
+                  .value = std::string(somanet::toString(somanet::FirmwareService::kMotionControl)),
+                  .title = "Motion control"},
+          }),
+  };
+}
+
+std::vector<ProgressStep> skippedCyclesSteps() { return stepsFrom({kSkippedCyclesStep}); }
+
+std::expected<void, std::string> runSkippedCyclesProcedure(Device& device,
+                                                           ProgressReporter& reporter,
+                                                           std::stop_token stop,
+                                                           const SkippedCyclesRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+
+  reporter.start(kSkippedCyclesStep);
+  auto result =
+      drive->readSkippedCycles(request.service, {.timeout = kSkippedCyclesTimeout,
+                                                 .pollInterval = kEncoderRegisterPollInterval,
+                                                 .stop = std::move(stop)});
+  if (!result) {
+    reporter.fail(kSkippedCyclesStep, result.error());
+    return std::unexpected(result.error());
+  }
+  reporter.succeed(kSkippedCyclesStep, *result);
+  return {};
 }
 
 std::vector<ProgressStep> torqueConstantMeasurementSteps() {

@@ -1670,6 +1670,98 @@ TEST(RunTorqueConstantMeasurement, AGeneralOsErrorNamesItself) {
   EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
 }
 
+// --- Skipped cycles counter (command 13) ---------------------------------------------------------
+
+TEST(ReadSkippedCycles, DecodesTheBigEndianCounterAndEchoesTheService) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0x00, 0x00, 0x01, 0x2C, 0, 0}};  // 300
+  auto result = drive->readSkippedCycles(somanet::FirmwareService::kMotionControl,
+                                         {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->skippedCycles, 300u);
+  // Echoed rather than assumed: two readings are only comparable when they addressed the same loop,
+  // and the drive's reply does not say which one answered.
+  EXPECT_EQ(result->service, somanet::FirmwareService::kMotionControl);
+  EXPECT_EQ(result->describe(), "motion-control skipped 300 cycles since it started");
+}
+
+TEST(ReadSkippedCycles, PutsTheServiceInByteOne) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0, 0, 0, 0, 0, 0}};
+  ASSERT_TRUE(
+      drive->readSkippedCycles(somanet::FirmwareService::kMotionControl, {.pollInterval = kNoDelay})
+          .has_value());
+  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  ASSERT_EQ(written.size(), 8u);
+  EXPECT_EQ(written[0], 13);
+  EXPECT_EQ(written[1], 1);
+}
+
+TEST(ReadSkippedCycles, AZeroCounterIsAReadingRatherThanAMissingPayload) {
+  // Unlike a measurement command, 0 here is the answer a healthy drive gives — so the four payload
+  // bytes must still be required (a short reply is an error) while their value may be zero.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0, 0, 0, 0, 0, 0}};
+  auto result =
+      drive->readSkippedCycles(somanet::FirmwareService::kDriveControl, {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->skippedCycles, 0u);
+  EXPECT_EQ(result->describe(), "drive-control skipped 0 cycles since it started");
+}
+
+TEST(ReadSkippedCycles, ATimeoutSaysTheServiceIsNotRunning) {
+  // Each firmware service answers only requests naming itself, so nothing answering at all is the
+  // drive saying it has no such service — not that it was slow. A bare "command timeout" would send
+  // a user looking at their bus.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 253, 0, 0, 0, 0, 0}};
+  auto result = drive->readSkippedCycles(somanet::FirmwareService::kMotionControl,
+                                         {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("no motion-control service running"), std::string::npos)
+      << result.error();
+}
+
+TEST(ReadSkippedCycles, AnotherGeneralErrorIsReportedAsItself) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 254, 0, 0, 0, 0, 0}};
+  auto result =
+      drive->readSkippedCycles(somanet::FirmwareService::kDriveControl, {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("unsupported command"), std::string::npos) << result.error();
+  EXPECT_EQ(result.error().find("not running"), std::string::npos) << result.error();
+}
+
+TEST(ParseFirmwareService, RoundTripsItsOwnTokens) {
+  EXPECT_EQ(somanet::parseFirmwareService("drive-control"),
+            somanet::FirmwareService::kDriveControl);
+  EXPECT_EQ(somanet::parseFirmwareService("motion-control"),
+            somanet::FirmwareService::kMotionControl);
+  EXPECT_FALSE(somanet::parseFirmwareService("").has_value());
+  EXPECT_FALSE(somanet::parseFirmwareService("drive").has_value());
+  EXPECT_FALSE(somanet::parseFirmwareService("0").has_value());
+}
+
 // --- What a general OS error says about the drive
 // -------------------------------------------------
 

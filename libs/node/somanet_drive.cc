@@ -367,6 +367,16 @@ std::optional<HrdData> parseHrdData(std::string_view token) {
   return std::nullopt;
 }
 
+std::optional<FirmwareService> parseFirmwareService(std::string_view token) {
+  if (token == toString(FirmwareService::kDriveControl)) {
+    return FirmwareService::kDriveControl;
+  }
+  if (token == toString(FirmwareService::kMotionControl)) {
+    return FirmwareService::kMotionControl;
+  }
+  return std::nullopt;
+}
+
 std::optional<IcMuCalibrationMode> parseIcMuCalibrationMode(std::string_view token) {
   if (token == toString(IcMuCalibrationMode::kConfiguration)) {
     return IcMuCalibrationMode::kConfiguration;
@@ -1247,6 +1257,64 @@ std::expected<TorqueConstantResult, std::string> SomanetDrive::runTorqueConstant
     return std::unexpected(torqueConstant.error());
   }
   return TorqueConstantResult{.milliNewtonMetresPerAmpere = *torqueConstant};
+}
+
+std::string SkippedCyclesResult::describe() const {
+  return std::format("{} skipped {} cycle{} since it started", somanet::toString(service),
+                     skippedCycles, skippedCycles == 1 ? "" : "s");
+}
+
+void to_json(nlohmann::json& j, const SkippedCyclesResult& result) {
+  j = nlohmann::json{{"service", somanet::toString(result.service)},
+                     {"skippedCycles", result.skippedCycles},
+                     {"description", result.describe()}};
+}
+
+// Byte layout of the skipped cycles counter request (command 13) — the ID and the service it asks.
+constexpr size_t kFirmwareServiceByte = 1;
+
+std::expected<SkippedCyclesResult, std::string> SomanetDrive::readSkippedCycles(
+    somanet::FirmwareService service, const OsCommandConfig& config) {
+  const std::string what =
+      std::format("reading the {} skipped cycles counter", somanet::toString(service));
+
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(somanet::OsCommandId::kSkippedCyclesCounter);
+  command[kFirmwareServiceByte] = static_cast<uint8_t>(service);
+
+  auto response = runOsCommand(command, config);
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+
+  if (response->failed()) {
+    if (!response->errorCode) {
+      return std::unexpected(std::format("{} failed and the drive reported no error code", what));
+    }
+    const uint8_t code = *response->errorCode;
+    // The command defines no command-specific codes, so anything here is general. A timeout is the
+    // one worth expanding: it is what a drive answers when *no* service recognised the request,
+    // which for this command means the addressed one is not running rather than that the drive is
+    // slow.
+    if (auto general = osCommandErrorName(code)) {
+      if (code == static_cast<uint8_t>(OsCommandError::kTimeout)) {
+        return std::unexpected(std::format(
+            "{} was not answered by any firmware service, so this drive has no {} service running "
+            "(OS error {})",
+            what, somanet::toString(service), code));
+      }
+      return std::unexpected(
+          std::format("{} was not performed: {} (OS error {})", what, *general, code));
+    }
+    return std::unexpected(
+        std::format("{} failed with OS error {} (command-specific)", what, code));
+  }
+
+  auto skipped = decodeBigEndian<uint32_t>(response->data, what);
+  if (!skipped) {
+    return std::unexpected(skipped.error());
+  }
+  return SkippedCyclesResult{.service = service, .skippedCycles = *skipped};
 }
 
 std::expected<void, std::string> SomanetDrive::setOperationMode(somanet::OperationMode mode) {

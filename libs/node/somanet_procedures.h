@@ -284,6 +284,58 @@ std::expected<void, std::string> runHrdStreamingProcedure(Device& device,
                                                           std::stop_token stop,
                                                           const HrdStreamingRequest& request);
 
+/// @brief Procedure name for reading a skipped cycles counter, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kSkippedCyclesProcedure = "skipped-cycles-counter";
+
+/// @brief The single step reading a skipped cycles counter reports against.
+inline constexpr std::string_view kSkippedCyclesStep = "read-counter";
+
+/// @brief Which control loop's counter to read.
+struct SkippedCyclesRequest {
+  /// The loop to ask. Defaults to the drive control service — the fast loop, and the one whose
+  /// skipped cycles a user is usually chasing.
+  somanet::FirmwareService service{somanet::FirmwareService::kDriveControl};
+};
+
+/// @brief Parses and validates a client's skipped cycles request body.
+///
+/// Accepts `{"service": "drive-control"}` — or `motion-control`. The field is optional.
+///
+/// **Validating it here is not ceremony**: each firmware service answers only requests naming
+/// itself, so a byte naming neither is answered by nothing at all and costs the drive's whole
+/// command timeout before surfacing as a timeout error that says nothing about the real mistake.
+///
+/// @param body  Parsed request JSON.
+/// @return The validated request, or a message naming what is wrong with it.
+std::expected<SkippedCyclesRequest, std::string> parseSkippedCyclesRequest(
+    const nlohmann::json& body);
+
+/// @brief What reading a skipped cycles counter accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> skippedCyclesParameters();
+
+/// @brief The skipped cycles procedure's step template — one step, idle.
+std::vector<ProgressStep> skippedCyclesSteps();
+
+/// @brief Reads one control loop's skipped-cycle counter as a procedure body.
+///
+/// **The most harmless procedure here**: no preparation, no operation mode, no CiA402 state, no
+/// brake, and nothing restored — a pure read, safe on a drive that is enabled and moving. It runs
+/// from PRE-OP up, needing only an active mailbox.
+///
+/// What it reports is cumulative since the addressed service started, so one run establishes a
+/// baseline and a later run establishes a rate. See @c SomanetDrive::readSkippedCycles.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; passed into the command so an in-flight read is aborted.
+/// @param request  Which control loop to ask.
+/// @return Void once the drive reported a counter, otherwise why it did not.
+std::expected<void, std::string> runSkippedCyclesProcedure(Device& device,
+                                                           ProgressReporter& reporter,
+                                                           std::stop_token stop,
+                                                           const SkippedCyclesRequest& request);
+
 /// @brief The step ids shared by every procedure that prepares a drive, measures, and puts it back.
 ///
 /// The preparation and its undoing are the *same work* in each of them — SOMANET's diagnostics

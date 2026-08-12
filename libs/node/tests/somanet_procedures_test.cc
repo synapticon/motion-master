@@ -62,6 +62,7 @@ using mm::node::osCommandSteps;
 using mm::node::parseEncoderRegisterRequest;
 using mm::node::parseHrdStreamingRequest;
 using mm::node::parseIcMuCalibrationModeRequest;
+using mm::node::parseSkippedCyclesRequest;
 using mm::node::phaseInductanceMeasurementSteps;
 using mm::node::phaseResistanceMeasurementSteps;
 using mm::node::polePairDetectionSteps;
@@ -78,7 +79,10 @@ using mm::node::runOsCommandProcedure;
 using mm::node::runPhaseInductanceMeasurementProcedure;
 using mm::node::runPhaseResistanceMeasurementProcedure;
 using mm::node::runPolePairDetectionProcedure;
+using mm::node::runSkippedCyclesProcedure;
 using mm::node::runTorqueConstantMeasurementProcedure;
+using mm::node::SkippedCyclesRequest;
+using mm::node::skippedCyclesSteps;
 using mm::node::torqueConstantMeasurementSteps;
 namespace somanet = mm::node::somanet;
 using mm::node::cia402::Object;
@@ -1457,6 +1461,72 @@ TEST(RunPhaseInductanceMeasurementProcedure, NeverTouchesTheBrake) {
       runPhaseInductanceMeasurementProcedure(device, reporter, std::stop_token{}).has_value());
 
   EXPECT_EQ(brakeWrites(driver), 0);
+}
+
+// --- Skipped cycles counter procedure ------------------------------------------------------------
+
+TEST(SkippedCyclesSteps, DeclaresOneStep) {
+  auto steps = skippedCyclesSteps();
+  ASSERT_EQ(steps.size(), 1u);
+  EXPECT_EQ(steps[0].id, "read-counter");
+}
+
+TEST(ParseSkippedCyclesRequest, DefaultsToTheDriveControlService) {
+  auto request = parseSkippedCyclesRequest(nlohmann::json::object());
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->service, somanet::FirmwareService::kDriveControl);
+}
+
+TEST(ParseSkippedCyclesRequest, RejectsAServiceTheFirmwareHasNoIdFor) {
+  // Not pedantry: each service answers only requests naming itself, so an unknown id is answered by
+  // nothing and costs the drive's whole command timeout before failing for a reason that says
+  // nothing about the actual mistake.
+  auto numeric = parseSkippedCyclesRequest(nlohmann::json{{"service", 2}});
+  ASSERT_FALSE(numeric.has_value());
+  EXPECT_NE(numeric.error().find("must be a string"), std::string::npos) << numeric.error();
+
+  auto unknown = parseSkippedCyclesRequest(nlohmann::json{{"service", "position-control"}});
+  ASSERT_FALSE(unknown.has_value());
+  EXPECT_NE(unknown.error().find("drive-control"), std::string::npos) << unknown.error();
+}
+
+TEST(RunSkippedCyclesProcedure, ReadsTheCounterAndTouchesNothingElse) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(skippedCyclesSteps());
+
+  driver.responses = {{1, 0, 0x00, 0x00, 0x01, 0x2C, 0, 0}};  // 300
+  auto result = runSkippedCyclesProcedure(
+      device, reporter, std::stop_token{},
+      SkippedCyclesRequest{.service = somanet::FirmwareService::kMotionControl});
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto step = stepById(reporter.steps(), "read-counter");
+  ASSERT_TRUE(step.has_value());
+  EXPECT_EQ(step->status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(step->value.at("skippedCycles").get<uint32_t>(), 300u);
+  EXPECT_EQ(step->value.at("service").get<std::string>(), "motion-control");
+
+  // The whole point of this procedure: it prepares nothing. No operation mode, no controlword, no
+  // brake — a pure read, safe on a drive that is enabled and moving.
+  EXPECT_EQ(driver.lastWriteIndex(Object::kModeOfOperation, 0), -1);
+  EXPECT_EQ(driver.lastWriteIndex(Object::kControlword, 0), -1);
+  EXPECT_EQ(brakeWrites(driver), 0);
+}
+
+TEST(RunSkippedCyclesProcedure, AFailedReadFailsTheStep) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(skippedCyclesSteps());
+
+  driver.responses = {{3, 0, 253, 0, 0, 0, 0, 0}};
+  auto result =
+      runSkippedCyclesProcedure(device, reporter, std::stop_token{}, SkippedCyclesRequest{});
+  ASSERT_FALSE(result.has_value());
+
+  const auto step = stepById(reporter.steps(), "read-counter");
+  ASSERT_TRUE(step.has_value());
+  EXPECT_EQ(step->status, ProgressStatus::kFailed);
 }
 
 // --- Torque constant measurement procedure -------------------------------------------------------

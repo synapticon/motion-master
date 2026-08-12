@@ -549,6 +549,46 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor skippedCycles;
+  skippedCycles.name = std::string(kSkippedCyclesProcedure);
+  skippedCycles.title = "Skipped cycles counter";
+  skippedCycles.description =
+      "Reads how many cycles one of the drive's two control loops has failed to start on time "
+      "since it began running. The firmware counts a cycle as skipped when it starts late enough "
+      "to miss its slot, and adds the whole backlog when several are missed at once — so this is "
+      "missed cycles, not missed deadlines. Nothing here changes the drive: no operation mode, no "
+      "state, no brake, no motion.";
+  skippedCycles.caveats = {
+      "The counter is cumulative since the loop started and nothing resets it, so a single reading "
+      "means little. Read it, wait, read it again: a large but unchanging number is a startup "
+      "transient, a small one that keeps climbing is a drive still missing cycles now.",
+      "The two loops are counted separately and a reading from one says nothing about the other.",
+      "Cycles skipped while a controller is enabled also raise a CtrlCyEx warning in the drive's "
+      "error report; ones skipped while it is disabled raise nothing, so the counter can climb "
+      "with no warning anywhere.",
+      "This counts the drive's own loop, not Motion Master's. The master's skipped cycles are on "
+      "the Server → Game Loop page, and the two are independent.",
+  };
+  skippedCycles.parameters = skippedCyclesParameters();
+  skippedCycles.movesMotor = false;
+  skippedCycles.requiresEnabled = false;
+  skippedCycles.steps = skippedCyclesSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(skippedCycles),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
+        auto request = parseSkippedCyclesRequest(body);
+        if (!request) {
+          return std::unexpected(request.error());
+        }
+        return
+            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+              return runSkippedCyclesProcedure(device, reporter, std::move(stop), request);
+            };
+      },
+  });
+
   ProcedureDescriptor torqueConstant;
   torqueConstant.name = std::string(kTorqueConstantMeasurementProcedure);
   torqueConstant.title = "Torque constant measurement";

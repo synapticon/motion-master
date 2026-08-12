@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.71] - 2026-08-12
+
 ### Added
 
 - **The drive's own internal latencies are measurable** with the `firmware-latency-measurement` procedure. Two stages inside the drive control service's cycle are timed — *setpoint* latency, from the start of the cycle until the setpoints are handed to the motion control service, and *feedback* latency, from the request for control feedback until the end of the cycle — which is what the alignment between that cycle and the motion control cycle is configured from. The drive keeps the maximum over every cycle **and the latency configured at the moment that maximum happened**; the pair is what says whether the configured figure covers the worst case actually observed. It changes nothing on the drive: no operation mode, no state, no brake, no motion.
@@ -635,7 +637,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.70...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.71...HEAD
+[6.0.0-alpha.71]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.70...v6.0.0-alpha.71
 [6.0.0-alpha.70]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.69...v6.0.0-alpha.70
 [6.0.0-alpha.69]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.68...v6.0.0-alpha.69
 [6.0.0-alpha.68]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.67...v6.0.0-alpha.68

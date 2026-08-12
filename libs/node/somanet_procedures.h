@@ -16,6 +16,7 @@
 #include "node/device.h"
 #include "node/device_manager.h"
 #include "node/firmware_package.h"
+#include "node/kuebler_registers.h"
 #include "node/procedure.h"
 #include "node/procedure_manager.h"
 #include "node/somanet_drive.h"
@@ -283,6 +284,55 @@ std::expected<void, std::string> runHrdStreamingProcedure(Device& device,
                                                           ProgressReporter& reporter,
                                                           std::stop_token stop,
                                                           const HrdStreamingRequest& request);
+
+/// @brief Procedure name for a Kübler encoder register access, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kKueblerRegisterProcedure = "kuebler-register-communication";
+
+/// @brief The single step a Kübler register access reports against.
+inline constexpr std::string_view kKueblerRegisterStep = "register-access";
+
+/// @brief What one Kübler register access was asked to do.
+struct KueblerRegisterRequest {
+  uint8_t address = 0;  ///< Which register; no default, so a request must name one.
+  uint8_t length = 1;   ///< Width in bytes, 1 to 4. Must match the register's real width.
+  bool write = false;   ///< Write @c value rather than read.
+  uint32_t value = 0;   ///< The value to write; ignored when reading.
+};
+
+/// @brief Parses and validates a client's Kübler register request body.
+///
+/// Accepts `{"address": 48, "length": 4, "write": false, "value": 0}`. @c address and @c length are
+/// required — the width is not inferred from the register map, because the map is a vendor draft
+/// and the command addresses bytes the draft does not document.
+///
+/// @c GET @c /api/meta/kuebler-registers is the map a client builds its picker from; it carries
+/// each register's width, so a picker fills both fields.
+std::expected<KueblerRegisterRequest, std::string> parseKueblerRegisterRequest(
+    const nlohmann::json& body);
+
+/// @brief What a Kübler register access accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> kueblerRegisterParameters();
+
+/// @brief The Kübler register procedure's step template — one step, idle.
+std::vector<ProgressStep> kueblerRegisterSteps();
+
+/// @brief Reads or writes one Integro internal-encoder register as a procedure body.
+///
+/// Prepares nothing and moves nothing, like @c runEncoderRegisterProcedure — its BiSS counterpart —
+/// and runs from PRE-OP up on a drive that may be exchanging process data. The step records the
+/// bytes as they came off the wire, the assembled value, and the register's name when the vendor's
+/// draft documents the address.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; passed into the command.
+/// @param request  Which register, how wide, and which direction.
+/// @return Void once the encoder performed the access, otherwise why it did not.
+std::expected<void, std::string> runKueblerRegisterProcedure(Device& device,
+                                                             ProgressReporter& reporter,
+                                                             std::stop_token stop,
+                                                             const KueblerRegisterRequest& request);
 
 /// @brief Procedure name for choosing the velocity feedback source, as it appears in its URL and
 ///        its snapshot key.

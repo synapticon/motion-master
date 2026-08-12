@@ -221,6 +221,40 @@ constexpr std::string_view toString(FirmwareService service) {
 ///        @c toString. Returns @c std::nullopt for any other token.
 std::optional<FirmwareService> parseFirmwareService(std::string_view token);
 
+/// @brief What the Kübler encoder reported when a register access failed (OS command 19).
+///
+/// Command-specific codes, so they mean nothing outside this command. **The specification numbers
+/// the last one 5; the firmware sends 4**, and there is no code 5 — @c OsCmd19ErrorCodes is the
+/// authority.
+enum class KueblerRegisterFault : uint8_t {
+  kAsyncInProgress = 0,        ///< The encoder's asynchronous channel is busy with something else.
+  kInvalidRegisterLength = 1,  ///< The length byte was below 1 or above 4.
+  kEncoderTimeout = 2,         ///< The encoder returned no value within 10 ms. Reads only.
+  kWrongByteCount = 3,  ///< It answered with a different width than was asked for. Reads only.
+  /// The encoder is writing flash and will not service the access. **Four addresses are exempt** —
+  /// 0x24, 0x25, 0x50 and 0x52, the POA and correction status/control pair — so those stay
+  /// reachable during a correction-table operation, which is when the encoder is most likely to be
+  /// busy.
+  kEncoderBusy = 4,
+};
+
+/// @brief Name of a Kübler register fault, as a message should render it. Never @c nullptr.
+constexpr std::string_view toString(KueblerRegisterFault fault) {
+  switch (fault) {
+    case KueblerRegisterFault::kAsyncInProgress:
+      return "the encoder's asynchronous channel is busy with another transaction";
+    case KueblerRegisterFault::kInvalidRegisterLength:
+      return "the register length must be 1 to 4 bytes";
+    case KueblerRegisterFault::kEncoderTimeout:
+      return "the encoder did not return a value within 10 ms";
+    case KueblerRegisterFault::kWrongByteCount:
+      return "the encoder answered with a different number of bytes than were asked for";
+    case KueblerRegisterFault::kEncoderBusy:
+      return "the encoder is accessing its flash memory and cannot service this register";
+  }
+  return "unknown fault";
+}
+
 /// @brief Where the velocity control loop takes its feedback from (OS command 18). The enum value
 ///        @b is the trigger bit the command carries.
 ///
@@ -693,6 +727,7 @@ enum class OsCommandId : uint8_t {
   kSystemIdentification = 15,         ///< Configures and triggers the system-identification chirp.
   kTriggerError = 16,                 ///< Provokes a firmware error or exception. Test tool only.
   kVelocitySource = 18,               ///< Chooses where the velocity loop's feedback comes from.
+  kKueblerRegisterCommunication = 19,  ///< Reads or writes an Integro internal encoder register.
 };
 
 /// @brief The faults open phase detection (command 6) reports, as its command-specific OS error
@@ -1265,6 +1300,31 @@ struct TriggerErrorResult {
 };
 void to_json(nlohmann::json& j, const TriggerErrorResult& result);
 
+/// @brief What one Kübler register access produced (command 19).
+struct KueblerRegisterResult {
+  uint8_t address = 0;  ///< The register accessed.
+  uint8_t length = 0;   ///< Bytes transferred, 1 to 4.
+  bool wrote = false;   ///< Whether this was a write; the drive echoes the value either way.
+
+  /// The value's bytes as they came off the wire, least significant first.
+  ///
+  /// **Little-endian, and this command is alone in that** — every other reply in this family puts
+  /// the most significant byte first. Kept alongside the assembled number because a bit field's
+  /// bytes are what a reader wants, and because a caller checking this against the specification's
+  /// worked example needs the raw order.
+  std::vector<uint8_t> bytes;
+
+  /// The bytes assembled little-endian into one unsigned number. How to *read* it depends on the
+  /// register — see @c somanet::KueblerFormat, which this deliberately does not apply: sign
+  /// extension and half-splitting are presentation, and the raw number plus the register's format
+  /// is the honest pair to hand over.
+  uint32_t value = 0;
+
+  /// @brief One line describing the access, ready to put in front of a user.
+  std::string describe() const;
+};
+void to_json(nlohmann::json& j, const KueblerRegisterResult& result);
+
 /// @brief Borrowed view of a SOMANET drive — a CiA402 drive plus Synapticon-specific
 ///        object-dictionary access (encoder/motor configuration, custom OS commands, etc.).
 ///
@@ -1829,6 +1889,37 @@ class SomanetDrive : public Cia402Drive {
   std::expected<TriggerErrorResult, std::string> triggerError(
       somanet::FirmwareService service, somanet::FirmwareErrorType type,
       const OsCommandConfig& config = {.timeout = std::chrono::seconds(3),
+                                       .pollInterval = std::chrono::milliseconds(20)});
+
+  /// @brief Reads or writes one register of the Integro's internal (Kübler) encoder (command 19).
+  ///
+  /// The register map is @c somanet::kKueblerRegisters — the vendor's own draft — and this command
+  /// addresses any byte, so a register the draft does not document is read as an unnamed one rather
+  /// than refused.
+  ///
+  /// **The value is little-endian here, unlike every other command in this family.** The reply puts
+  /// the least significant byte first, and so does the write value. Reusing the big-endian decoder
+  /// the measurements share would read every multi-byte register backwards.
+  ///
+  /// **@p length is bytes, 1 to 4, and it must match the register's real width** — the encoder
+  /// answers a mismatch with @c KueblerRegisterFault::kWrongByteCount rather than truncating. Which
+  /// means the 64-bit register 0x04 cannot be read at all: the length byte caps at 4. See
+  /// @c somanet::kMaxKueblerRegisterBytes.
+  ///
+  /// A write is answered the same way a read is, by echoing the register's value, so a write
+  /// confirms itself.
+  ///
+  /// Preconditions: an Integro, with its internal encoder configured and not in bootloader mode.
+  ///
+  /// @param address Register address.
+  /// @param length  Width in bytes, 1 to 4.
+  /// @param write   Write @p value rather than read.
+  /// @param value   The value to write, little-endian on the wire; ignored for a read.
+  /// @param config  Timing and cancellation.
+  /// @return What the encoder reported, or why the access did not happen.
+  std::expected<KueblerRegisterResult, std::string> accessKueblerRegister(
+      uint8_t address, uint8_t length, bool write = false, uint32_t value = 0,
+      const OsCommandConfig& config = {.timeout = std::chrono::seconds(5),
                                        .pollInterval = std::chrono::milliseconds(20)});
 
   /// @brief Chooses where the velocity control loop takes its feedback from (OS command 18).

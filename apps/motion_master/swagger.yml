@@ -743,6 +743,76 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SdoAbortCode"
+  /api/meta/kuebler-registers:
+    get:
+      summary: The Integro internal encoder's register map
+      description: >
+        The register map of the Integro's internal (Kübler) encoder — the reference table for
+        POST /api/devices/{slavePosition}/procedures/kuebler-register-communication, and
+        documentation in its own right. Static: it describes the encoder type, not any connected
+        device, so it needs no bus and no scan.
+
+
+        Transcribed from the vendor's own draft table. Each entry carries the width, the access type,
+        whether the encoder actually implements it — seven are documented but not implemented — and
+        the vendor's bit definitions verbatim, which for a bit-field register is the only place its
+        meaning is recorded.
+
+
+        `format` says how to read the assembled value, because signedness is not uniform and one
+        register is not a single number at all: `unsigned`, `signed`, `bitField` (the number means
+        nothing on its own), or `signedHalves` — two signed 16-bit values packed into 32 bits, which
+        register 0x3C is the only case of. `readableInOneCommand` is false for the one 64-bit
+        register, since the command's length byte caps at 4 bytes.
+      operationId: getKueblerRegisters
+      responses:
+        "200":
+          description: Every register the vendor's draft documents, ascending by address
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required:
+                    [address, bits, name, access, implemented, format, definition,
+                     readableInOneCommand]
+                  properties:
+                    address:
+                      type: integer
+                      description: Register address, as OS command 19 carries it.
+                      example: 48
+                    bits:
+                      type: integer
+                      description: Width in bits — 8, 16, 32, or 64.
+                      example: 32
+                    name:
+                      type: string
+                      description: The vendor's own name for the register.
+                      example: Absolute position ST
+                    access:
+                      type: string
+                      enum: [ro, wo, rw]
+                      example: ro
+                    implemented:
+                      type: boolean
+                      description: Whether the encoder implements it, per the vendor's draft.
+                      example: true
+                    format:
+                      type: string
+                      enum: [unsigned, signed, bitField, signedHalves]
+                      description: How to read the assembled value.
+                      example: unsigned
+                    definition:
+                      type: string
+                      description: The vendor's bit definitions, clauses joined with "; ".
+                      example: Left aligned 32 bit singleturn position
+                    readableInOneCommand:
+                      type: boolean
+                      description: >-
+                        False only for the 64-bit register, which exceeds the command's 4-byte
+                        length field.
+                      example: true
   /api/meta/mailbox-error-codes:
     get:
       summary: List all known CoE mailbox error codes

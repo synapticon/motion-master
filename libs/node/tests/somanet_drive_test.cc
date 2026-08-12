@@ -8,6 +8,7 @@
 #include <expected>
 #include <format>
 #include <map>
+#include <nlohmann/json.hpp>
 #include <span>
 #include <stop_token>
 #include <string>
@@ -1668,6 +1669,138 @@ TEST(RunTorqueConstantMeasurement, AGeneralOsErrorNamesItself) {
   EXPECT_NE(result.error().find("torque constant measurement"), std::string::npos)
       << result.error();
   EXPECT_NE(result.error().find("command not allowed"), std::string::npos) << result.error();
+}
+
+// --- Kübler register communication (command 19)
+// ---------------------------------------------------
+
+TEST(AccessKueblerRegister, DecodesTheValueLittleEndian) {
+  // **The one command in this family that is little-endian**, so this is the assertion that would
+  // catch someone reusing decodeBigEndian: 0x12345678 arrives LSB first.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0x78, 0x56, 0x34, 0x12, 0, 0}};
+  auto result = drive->accessKueblerRegister(0x30, 4, false, 0, {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(result->value, 0x12345678u);
+  EXPECT_EQ(result->bytes, (std::vector<uint8_t>{0x78, 0x56, 0x34, 0x12}));
+}
+
+TEST(AccessKueblerRegister, WritesTheSpecificationsWorkedExample) {
+  // The specification's own example: write 0x00C0 into register 0x50, length 2 — bytes
+  // 0x13 0x01 0x50 0x02 0xC0 0x00.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0xC0, 0x00, 0, 0, 0, 0}};
+  auto result = drive->accessKueblerRegister(0x50, 2, true, 0x00C0, {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  const auto written = driver.store.at(OsCommandFakeDriver::key(kOsCommand, 1));
+  ASSERT_EQ(written.size(), 8u);
+  EXPECT_EQ(written[0], 0x13);
+  EXPECT_EQ(written[1], 0x01);
+  EXPECT_EQ(written[2], 0x50);
+  EXPECT_EQ(written[3], 0x02);
+  EXPECT_EQ(written[4], 0xC0);
+  EXPECT_EQ(written[5], 0x00);
+  // The drive echoes the value, so a write confirms itself.
+  EXPECT_EQ(result->value, 0x00C0u);
+  EXPECT_TRUE(result->wrote);
+}
+
+TEST(AccessKueblerRegister, RefusesALengthTheCommandCannotCarry) {
+  // Refused here rather than by the encoder, whose kInvalidRegisterLength cannot distinguish a
+  // caller who asked for 5 bytes from one who asked for the 64-bit register.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  for (const uint8_t length : {uint8_t{0}, uint8_t{5}, uint8_t{8}}) {
+    auto result = drive->accessKueblerRegister(0x04, length, false, 0, {.pollInterval = kNoDelay});
+    ASSERT_FALSE(result.has_value()) << static_cast<int>(length);
+    EXPECT_NE(result.error().find("must be 1 to 4 bytes"), std::string::npos) << result.error();
+  }
+  // Nothing was issued for any of them.
+  EXPECT_EQ(driver.commandWrites, 0);
+}
+
+TEST(AccessKueblerRegister, NamesEachCommandSpecificFault) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  const std::pair<uint8_t, std::string_view> cases[] = {
+      {0, "asynchronous channel is busy"},        {1, "length must be 1 to 4"},
+      {2, "did not return a value within 10 ms"}, {3, "different number of bytes"},
+      {4, "accessing its flash memory"},
+  };
+  for (const auto& [code, fragment] : cases) {
+    driver.responses = {{3, 0, code, 0, 0, 0, 0, 0}};
+    driver.responseReads = 0;
+    driver.awaitingCommand = true;
+    auto result = drive->accessKueblerRegister(0x30, 4, false, 0, {.pollInterval = kNoDelay});
+    ASSERT_FALSE(result.has_value()) << static_cast<int>(code);
+    EXPECT_NE(result.error().find(fragment), std::string::npos)
+        << "code " << static_cast<int>(code) << ": " << result.error();
+  }
+}
+
+TEST(AccessKueblerRegister, CodeFiveIsReportedAsUnnamed) {
+  // The specification documents "encoder is accessing flash memory" as code 5; the firmware sends 4
+  // and never 5. So a 5 is a code this build cannot name, and reporting the number beats decoding
+  // it against a table the firmware does not use.
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{3, 0, 5, 0, 0, 0, 0, 0}};
+  auto result = drive->accessKueblerRegister(0x30, 4, false, 0, {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("OS error 5 (command-specific)"), std::string::npos)
+      << result.error();
+}
+
+TEST(AccessKueblerRegister, AShortPayloadIsAnErrorRatherThanAZero) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{0, 0, 0, 0, 0, 0, 0, 0}};  // completed with no reply at all
+  auto result = drive->accessKueblerRegister(0x30, 4, false, 0, {.pollInterval = kNoDelay});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("payload bytes"), std::string::npos) << result.error();
+}
+
+TEST(AccessKueblerRegister, ReportsTheRegistersNameWhenTheDraftKnowsIt) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.responses = {{1, 0, 0x2A, 0, 0, 0, 0, 0}};
+  auto result = drive->accessKueblerRegister(0x24, 1, false, 0, {.pollInterval = kNoDelay});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  nlohmann::json j = *result;
+  EXPECT_EQ(j.at("name").get<std::string>(), "POA status");
+  EXPECT_EQ(j.at("expectedBits").get<int>(), 8);
+
+  // An address the draft does not document is read as an unnamed register, not refused.
+  driver.responses = {{1, 0, 0x01, 0, 0, 0, 0, 0}};
+  driver.responseReads = 0;
+  driver.awaitingCommand = true;
+  auto unknown = drive->accessKueblerRegister(0x7F, 1, false, 0, {.pollInterval = kNoDelay});
+  ASSERT_TRUE(unknown.has_value()) << unknown.error();
+  nlohmann::json ju = *unknown;
+  EXPECT_FALSE(ju.contains("name"));
 }
 
 // --- Velocity source (command 18) ----------------------------------------------------------------

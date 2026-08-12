@@ -576,6 +576,61 @@ export class Api<
       ...params,
     });
   /**
+   * @description The register map of the Integro's internal (Kübler) encoder — the reference table for POST /api/devices/{slavePosition}/procedures/kuebler-register-communication, and documentation in its own right. Static: it describes the encoder type, not any connected device, so it needs no bus and no scan. Transcribed from the vendor's own draft table. Each entry carries the width, the access type, whether the encoder actually implements it — seven are documented but not implemented — and the vendor's bit definitions verbatim, which for a bit-field register is the only place its meaning is recorded. `format` says how to read the assembled value, because signedness is not uniform and one register is not a single number at all: `unsigned`, `signed`, `bitField` (the number means nothing on its own), or `signedHalves` — two signed 16-bit values packed into 32 bits, which register 0x3C is the only case of. `readableInOneCommand` is false for the one 64-bit register, since the command's length byte caps at 4 bytes.
+   *
+   * @name GetKueblerRegisters
+   * @summary The Integro internal encoder's register map
+   * @request GET:/api/meta/kuebler-registers
+   */
+  getKueblerRegisters = (params: RequestParams = {}) =>
+    this.request<
+      {
+        /**
+         * Register address, as OS command 19 carries it.
+         * @example 48
+         */
+        address: number;
+        /**
+         * Width in bits — 8, 16, 32, or 64.
+         * @example 32
+         */
+        bits: number;
+        /**
+         * The vendor's own name for the register.
+         * @example "Absolute position ST"
+         */
+        name: string;
+        /** @example "ro" */
+        access: "ro" | "wo" | "rw";
+        /**
+         * Whether the encoder implements it, per the vendor's draft.
+         * @example true
+         */
+        implemented: boolean;
+        /**
+         * How to read the assembled value.
+         * @example "unsigned"
+         */
+        format: "unsigned" | "signed" | "bitField" | "signedHalves";
+        /**
+         * The vendor's bit definitions, clauses joined with "; ".
+         * @example "Left aligned 32 bit singleturn position"
+         */
+        definition: string;
+        /**
+         * False only for the 64-bit register, which exceeds the command's 4-byte length field.
+         * @example true
+         */
+        readableInOneCommand: boolean;
+      }[],
+      any
+    >({
+      path: `/api/meta/kuebler-registers`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
    * @description Returns the static catalogue of CoE mailbox error codes defined in ETG.1000.4, Table 30 ("Error Reply Service Data").  A slave returns one of these when the mailbox layer (below a specific protocol such as CoE/FoE) rejects a transfer; the code is embedded in the error text the mailbox endpoints return.
    *
    * @name GetMailboxErrorCodes

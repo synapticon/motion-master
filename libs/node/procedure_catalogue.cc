@@ -309,6 +309,49 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor kueblerRegister;
+  kueblerRegister.name = std::string(kKueblerRegisterProcedure);
+  kueblerRegister.title = "Kübler register communication";
+  kueblerRegister.description =
+      "Reads or writes one register of the Integro's internal encoder. The register map is at "
+      "GET /api/meta/kuebler-registers — the vendor's own draft table, carrying each register's "
+      "width, access and bit definitions — and a picker built from it fills the address and length "
+      "here. Any address can be accessed, documented or not. Like its BiSS counterpart this "
+      "prepares nothing and moves nothing, so it runs on a drive that is exchanging process data.";
+  kueblerRegister.caveats = {
+      "The length must match the register's real width: the encoder refuses a mismatch rather than "
+      "truncating. A 64-bit register — 0x04, the firmware version — cannot be transferred at all, "
+      "because the command's length byte caps at 4 bytes.",
+      "A write reconfigures the encoder and nothing here checks what a value means. Seven "
+      "registers "
+      "in the map are documented but not implemented by the encoder, and the map says which.",
+      "The value is little-endian, alone among these commands: the reply's first byte is the least "
+      "significant. The assembled number is reported alongside the raw bytes, and how to read it "
+      "depends on the register — several are bit fields, and one packs two signed halves.",
+      "Only an Integro with its internal encoder configured, and not while that encoder is in "
+      "bootloader mode. While it is writing flash it refuses every register except the POA and "
+      "correction status/control pair (0x24, 0x25, 0x50, 0x52).",
+  };
+  kueblerRegister.parameters = kueblerRegisterParameters();
+  kueblerRegister.movesMotor = false;
+  kueblerRegister.requiresEnabled = false;
+  kueblerRegister.steps = kueblerRegisterSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(kueblerRegister),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
+        auto request = parseKueblerRegisterRequest(body);
+        if (!request) {
+          return std::unexpected(request.error());
+        }
+        return
+            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+              return runKueblerRegisterProcedure(device, reporter, std::move(stop), request);
+            };
+      },
+  });
+
   ProcedureDescriptor motorPhaseOrder;
   motorPhaseOrder.name = std::string(kMotorPhaseOrderDetectionProcedure);
   motorPhaseOrder.title = "Motor phase order detection";

@@ -1482,6 +1482,111 @@ std::expected<uint32_t, std::string> readBoundedUint32(const nlohmann::json& bod
 
 }  // namespace
 
+std::expected<KueblerRegisterRequest, std::string> parseKueblerRegisterRequest(
+    const nlohmann::json& body) {
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  KueblerRegisterRequest request;
+
+  auto address = readByte(body, "address", std::nullopt);
+  if (!address) {
+    return std::unexpected(address.error());
+  }
+  request.address = *address;
+
+  auto length = readByte(body, "length", std::nullopt);
+  if (!length) {
+    return std::unexpected(length.error());
+  }
+  if (*length < 1 || *length > somanet::kMaxKueblerRegisterBytes) {
+    return std::unexpected(
+        std::format("'length' must be 1 to {} bytes, got {} — the command's length byte caps "
+                    "there, so a 64-bit "
+                    "register cannot be transferred in one command",
+                    somanet::kMaxKueblerRegisterBytes, *length));
+  }
+  request.length = *length;
+
+  if (auto write = body.find("write"); write != body.end() && !write->is_null()) {
+    if (!write->is_boolean()) {
+      return std::unexpected("'write' must be a boolean");
+    }
+    request.write = write->get<bool>();
+  }
+
+  if (auto value = body.find("value"); value != body.end() && !value->is_null()) {
+    if (!value->is_number_integer()) {
+      return std::unexpected("'value' must be a whole number");
+    }
+    const int64_t raw = value->get<int64_t>();
+    if (raw < 0 || raw > static_cast<int64_t>(std::numeric_limits<uint32_t>::max())) {
+      return std::unexpected(std::format("'value' must be 0 to {}, got {}",
+                                         std::numeric_limits<uint32_t>::max(), raw));
+    }
+    request.value = static_cast<uint32_t>(raw);
+  }
+
+  // Checked here as well as in the request, because a value wider than the register is a caller
+  // mistake the encoder cannot report: it takes the low bytes and echoes them, so the run would
+  // look like it succeeded at writing something else.
+  if (request.write && request.length < 4 &&
+      request.value >= (uint32_t{1} << (8U * request.length))) {
+    return std::unexpected(
+        std::format("'value' {} does not fit {} byte{} — it would be silently truncated to {}",
+                    request.value, request.length, request.length == 1 ? "" : "s",
+                    request.value & ((uint32_t{1} << (8U * request.length)) - 1)));
+  }
+  return request;
+}
+
+std::vector<ProcedureParameter> kueblerRegisterParameters() {
+  return {
+      integerParameter("address", "Register address",
+                       "Which register of the encoder to access. The map is at "
+                       "GET /api/meta/kuebler-registers, which also gives each register's width.",
+                       nullptr, 0, 0xFF),
+      integerParameter("length", "Length (bytes)",
+                       "Width of the register in bytes, 1 to 4. It must match the register's real "
+                       "width — the encoder refuses a mismatch rather than truncating. A 64-bit "
+                       "register cannot be transferred in one command.",
+                       nullptr, 1, somanet::kMaxKueblerRegisterBytes),
+      booleanParameter(
+          "write", "Write",
+          "Off reads the register; on writes the value into it. Either way the encoder "
+          "answers with the register's value, so a write confirms itself.",
+          false),
+      integerParameter("value", "Value",
+                       "The value to write, ignored when reading. It must fit the chosen length; a "
+                       "wider one is refused rather than truncated.",
+                       0, 0, std::numeric_limits<uint32_t>::max()),
+  };
+}
+
+std::vector<ProgressStep> kueblerRegisterSteps() { return stepsFrom({kKueblerRegisterStep}); }
+
+std::expected<void, std::string> runKueblerRegisterProcedure(
+    Device& device, ProgressReporter& reporter, std::stop_token stop,
+    const KueblerRegisterRequest& request) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+
+  reporter.start(kKueblerRegisterStep);
+  auto result =
+      drive->accessKueblerRegister(request.address, request.length, request.write, request.value,
+                                   {.timeout = kEncoderRegisterTimeout,
+                                    .pollInterval = kEncoderRegisterPollInterval,
+                                    .stop = std::move(stop)});
+  if (!result) {
+    reporter.fail(kKueblerRegisterStep, result.error());
+    return std::unexpected(result.error());
+  }
+  reporter.succeed(kKueblerRegisterStep, *result);
+  return {};
+}
+
 std::expected<VelocitySourceRequest, std::string> parseVelocitySourceRequest(
     const nlohmann::json& body) {
   if (!body.is_object()) {

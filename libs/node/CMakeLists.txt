@@ -8,6 +8,7 @@ add_library(
   firmware_package.cc
   hardware_description.cc
   integro_variant.cc
+  kuebler_registers.cc
   monitoring.cc
   monitoring_manager.cc
   operation_modes.cc

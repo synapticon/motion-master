@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "core/util.h"
+#include "node/kuebler_registers.h"
 #include "node/synapticon.h"
 
 namespace mm::node {
@@ -1455,6 +1456,97 @@ void to_json(nlohmann::json& j, const TriggerErrorResult& result) {
                      {"errorType", somanet::toString(result.type)},
                      {"serviceStopped", result.serviceStopped},
                      {"description", result.describe()}};
+}
+
+std::string KueblerRegisterResult::describe() const {
+  return std::format("{} encoder register 0x{:02X} = {} (0x{:0{}X}, {} byte{})",
+                     wrote ? "wrote" : "read", address, value, value, length * 2, length,
+                     length == 1 ? "" : "s");
+}
+
+void to_json(nlohmann::json& j, const KueblerRegisterResult& result) {
+  j = nlohmann::json{{"address", result.address}, {"length", result.length},
+                     {"wrote", result.wrote},     {"bytes", result.bytes},
+                     {"value", result.value},     {"description", result.describe()}};
+  // The register's own metadata, when the vendor's draft documents this address — so a client that
+  // has not fetched /api/meta/kuebler-registers still knows what it just read, and one that has can
+  // see the two agree.
+  if (auto known = somanet::findKueblerRegister(result.address)) {
+    j["name"] = known->name;
+    j["expectedBits"] = known->bits;
+  }
+}
+
+// Byte layout of the Kübler register request (command 19).
+constexpr size_t kKueblerDirectionByte = 1;
+constexpr size_t kKueblerAddressByte = 2;
+constexpr size_t kKueblerLengthByte = 3;
+constexpr size_t kKueblerValueLsbByte = 4;
+
+std::expected<KueblerRegisterResult, std::string> SomanetDrive::accessKueblerRegister(
+    uint8_t address, uint8_t length, bool write, uint32_t value, const OsCommandConfig& config) {
+  const std::string what =
+      std::format("{} encoder register 0x{:02X}", write ? "writing" : "reading", address);
+
+  // Refused here rather than by the encoder, because the encoder's own complaint for this is
+  // kInvalidRegisterLength, which does not distinguish a caller who asked for 5 bytes from one who
+  // asked for a 64-bit register the command cannot reach.
+  if (length < 1 || length > somanet::kMaxKueblerRegisterBytes) {
+    return std::unexpected(std::format(
+        "{}: the length must be 1 to {} bytes, got {} — the command's length byte caps there, so a "
+        "64-bit register such as 0x04 cannot be transferred in one command",
+        what, somanet::kMaxKueblerRegisterBytes, length));
+  }
+
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(somanet::OsCommandId::kKueblerRegisterCommunication);
+  command[kKueblerDirectionByte] = write ? 1 : 0;
+  command[kKueblerAddressByte] = address;
+  command[kKueblerLengthByte] = length;
+  // Least significant byte first — see KueblerRegisterResult::bytes.
+  for (uint8_t i = 0; i < length; ++i) {
+    command[kKueblerValueLsbByte + i] = static_cast<uint8_t>(value >> (8U * i));
+  }
+
+  auto response = runOsCommand(command, config);
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+
+  if (response->failed()) {
+    if (!response->errorCode) {
+      return std::unexpected(std::format("{} failed and the drive reported no error code", what));
+    }
+    const uint8_t code = *response->errorCode;
+    if (auto general = osCommandErrorName(code)) {
+      return std::unexpected(
+          std::format("{} was not performed: {} (OS error {})", what, *general, code));
+    }
+    if (code <= static_cast<uint8_t>(somanet::KueblerRegisterFault::kEncoderBusy)) {
+      return std::unexpected(
+          std::format("{} failed: {}", what,
+                      somanet::toString(static_cast<somanet::KueblerRegisterFault>(code))));
+    }
+    // A command-specific code this build does not name — including 5, which the specification
+    // documents and the firmware does not send.
+    return std::unexpected(
+        std::format("{} failed with OS error {} (command-specific)", what, code));
+  }
+
+  if (response->data.size() < length) {
+    return std::unexpected(std::format("{} reported success with {} payload bytes, expected {}",
+                                       what, response->data.size(), length));
+  }
+
+  KueblerRegisterResult result;
+  result.address = address;
+  result.length = length;
+  result.wrote = write;
+  result.bytes.assign(response->data.begin(), std::next(response->data.begin(), length));
+  for (uint8_t i = 0; i < length; ++i) {
+    result.value |= static_cast<uint32_t>(result.bytes[i]) << (8U * i);
+  }
+  return result;
 }
 
 // Byte layout of the velocity-source request (command 18): the source is bit 0 of byte 1.

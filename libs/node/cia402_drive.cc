@@ -250,11 +250,27 @@ std::expected<void, std::string> Cia402Drive::transitionToState(cia402::State ta
   // error is still reported — so saying so beats spending the whole timeout re-asserting bit 7.
   bool faultResetIssued = false;
 
+  // Targeting a quick stop the drive does not hold: 0x605A codes 0-4 end it in SwitchOnDisabled, so
+  // that is where such a walk arrives. Read once, before anything is issued — reading it later
+  // would mean reading it after the state it decides has already come and gone. A drive that will
+  // not answer is treated as not holding, which is the reading that terminates.
+  bool quickStopIssued = false;
+  const bool quickStopPassesThrough =
+      target == cia402::State::kQuickStopActive &&
+      !cia402::quickStopHolds(
+          device_.readValue<int16_t>(Object::kQuickStopOptionCode, 0).value_or(0));
+
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   for (;;) {
     auto current = state();
     if (!current) {
       return std::unexpected(current.error());
+    }
+
+    // Arrival, for a quick stop that completes into SwitchOnDisabled rather than staying. Checked
+    // before the table, which knows the state machine but not this drive's configuration.
+    if (quickStopPassesThrough && *current == cia402::State::kSwitchOnDisabled && quickStopIssued) {
+      return {};
     }
 
     const auto step = cia402::nextFsaTransition(*current, target, allowQuickStopOverride);
@@ -298,6 +314,12 @@ std::expected<void, std::string> Cia402Drive::transitionToState(cia402::State ta
         }
         if (auto r = applyCommand(step.command); !r) {
           return std::unexpected(r.error());
+        }
+        // Only a quick stop this walk issued counts as passed through. Starting in
+        // SwitchOnDisabled and asking for a quick stop must still climb and perform one, rather
+        // than reporting the state it was already in as success.
+        if (step.command == Command::kCmdQuickStop) {
+          quickStopIssued = true;
         }
         break;
       }

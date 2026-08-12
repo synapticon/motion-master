@@ -219,6 +219,12 @@ class Cia402Drive : public ProfileDevice {
   ///     @c kOperationEnabled out of a quick stop without @p allowQuickStopOverride.
   ///   - a plain **timeout**, naming the state it was stuck in.
   ///
+  /// **Targeting @c kQuickStopActive may legitimately end in @c kSwitchOnDisabled.** Quick stop
+  /// option code 0x605A decides whether the drive stays in that state or passes through it, and
+  /// with codes 0-4 it passes through — so this reads the code and, when it says the drive does not
+  /// hold, accepts Switch On Disabled as arrival. Without that the walk would see the drive already
+  /// past its target, climb back up, quick-stop again, and loop until the timeout.
+  ///
   /// @param target                 Where to bring the drive. Must be @c cia402::isCommandableState.
   /// @param timeout                Maximum time to spend walking.
   /// @param allowQuickStopOverride Whether transition 16 may be used to leave @c kQuickStopActive

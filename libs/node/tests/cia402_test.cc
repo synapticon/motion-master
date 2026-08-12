@@ -222,6 +222,36 @@ TEST(Cia402NextFsaTransition, EveryPairEitherActsOrExplainsItself) {
   }
 }
 
+TEST(Cia402QuickStopHolds, OnlyTheProfilesHoldingBand) {
+  using mm::node::cia402::quickStopHolds;
+  // 0-4 end the quick stop in Switch On Disabled; 5-8 stay in Quick Stop Active.
+  for (int16_t code = 0; code <= 4; ++code) {
+    EXPECT_FALSE(quickStopHolds(code)) << code;
+  }
+  for (int16_t code = 5; code <= 8; ++code) {
+    EXPECT_TRUE(quickStopHolds(code)) << code;
+  }
+}
+
+TEST(Cia402QuickStopHolds, EverySomanetOptionCode) {
+  using mm::node::cia402::quickStopHolds;
+  // The four this vendor implements, from its ESI and its published object documentation — a
+  // sparse subset, not the profile's contiguous range. 9 is SOMANET's own and passes through via
+  // an active short circuit, which the closed 5-8 band answers correctly; pinned so that widening
+  // that band later cannot silently make a short-circuit stop look like one that holds.
+  EXPECT_FALSE(quickStopHolds(0)) << "disable drive function";
+  EXPECT_FALSE(quickStopHolds(2)) << "ramp down, transit into switch on disabled";
+  EXPECT_TRUE(quickStopHolds(6)) << "ramp down, stay in quick stop active";
+  EXPECT_FALSE(quickStopHolds(9)) << "active short circuit, then switch on disabled";
+}
+
+TEST(Cia402QuickStopHolds, TreatsAnUnplaceableCodeAsPassingThrough) {
+  using mm::node::cia402::quickStopHolds;
+  EXPECT_FALSE(quickStopHolds(-1));
+  EXPECT_FALSE(quickStopHolds(10));
+  EXPECT_FALSE(quickStopHolds(1000));
+}
+
 TEST(Cia402ParseState, RoundTripsEveryName) {
   for (const auto state : kEveryState) {
     EXPECT_EQ(mm::node::cia402::parseState(toString(state)), state) << toString(state);

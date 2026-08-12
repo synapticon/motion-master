@@ -89,6 +89,9 @@ class Cia402FakeDriver : public FieldbusDriver {
   /// Modes the modelled drive refuses, as SOMANET's opmode_update does for a mode it does not list
   /// or for a non-dynamic change while enabled: the SDO write succeeds and 0x6061 never follows.
   std::vector<int8_t> refusedModes;
+  /// Models quick stop option codes 0-4: the drive rides through Quick Stop Active into Switch On
+  /// Disabled rather than staying there. Immediate here, where a real drive takes a ramp.
+  bool quickStopPassesThrough = false;
   bool completeAccessSupported = false;  ///< Whether readSdoComplete answers or aborts.
   int completeAccessAttempts = 0;        ///< readSdoComplete calls, successful or not.
   int sdoReads = 0;                      ///< Per-subindex readSdo calls.
@@ -150,7 +153,8 @@ class Cia402FakeDriver : public FieldbusDriver {
       // Transition 16, which this firmware implements and marks "forced".
       machineState = State::kOperationEnabled;
     } else if (cmd == 0x0000 || cmd == 0x0002) {
-      machineState = (cmd == 0x0002) ? State::kQuickStopActive : State::kSwitchOnDisabled;
+      machineState = (cmd == 0x0002 && !quickStopPassesThrough) ? State::kQuickStopActive
+                                                                : State::kSwitchOnDisabled;
     } else if ((cmd & 0x000F) == 0x0006) {  // shutdown
       machineState = State::kReadyToSwitchOn;
     } else if ((cmd & 0x000F) == 0x0007) {  // switch on / disable operation
@@ -459,6 +463,59 @@ TEST(Cia402DriveTransitionToState, LeavesAQuickStopDownwardWithoutTheOverride) {
       drive.transitionToState(State::kReadyToSwitchOn, std::chrono::milliseconds(500), false);
   ASSERT_TRUE(result.has_value()) << result.error();
   EXPECT_EQ(driver.machineState, State::kReadyToSwitchOn);
+}
+
+TEST(Cia402DriveTransitionToState, AQuickStopThatPassesThroughArrivesInSwitchOnDisabled) {
+  // Quick stop option code 2: ramp down, then transit into Switch On Disabled. The drive does not
+  // stay in Quick Stop Active, so a walk targeting it must accept where the quick stop actually
+  // ends — otherwise it sees the drive past its target, climbs back up, quick-stops again, and
+  // loops until the timeout. Verified against a SOMANET Integro, which is configured this way.
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  driver.programObject(Object::kQuickStopOptionCode, 0, ObjectDataType::INTEGER16, u16le(2));
+  ASSERT_TRUE(device.initializeParameters().has_value());
+  driver.quickStopPassesThrough = true;
+  Cia402Drive drive(device);
+  ASSERT_TRUE(drive.enable(std::chrono::milliseconds(500)).has_value());
+
+  auto result = drive.transitionToState(State::kQuickStopActive, std::chrono::milliseconds(200));
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver.machineState, State::kSwitchOnDisabled);
+}
+
+TEST(Cia402DriveTransitionToState, AQuickStopThatHoldsStaysWhereItIs) {
+  // Option code 6: same ramp, but the drive stays. Nothing may be accepted early here.
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  driver.programObject(Object::kQuickStopOptionCode, 0, ObjectDataType::INTEGER16, u16le(6));
+  ASSERT_TRUE(device.initializeParameters().has_value());
+  Cia402Drive drive(device);
+  ASSERT_TRUE(drive.enable(std::chrono::milliseconds(500)).has_value());
+
+  auto result = drive.transitionToState(State::kQuickStopActive, std::chrono::milliseconds(200));
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver.machineState, State::kQuickStopActive);
+}
+
+TEST(Cia402DriveTransitionToState, StartingInSwitchOnDisabledStillPerformsTheQuickStop) {
+  // The acceptance is for a quick stop *this walk* issued. Starting in Switch On Disabled and
+  // asking for one must climb and perform it, not report the state it was already in as success.
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  driver.programObject(Object::kQuickStopOptionCode, 0, ObjectDataType::INTEGER16, u16le(2));
+  ASSERT_TRUE(device.initializeParameters().has_value());
+  driver.quickStopPassesThrough = true;
+  Cia402Drive drive(device);
+  ASSERT_EQ(driver.machineState, State::kSwitchOnDisabled);
+
+  ASSERT_TRUE(
+      drive.transitionToState(State::kQuickStopActive, std::chrono::milliseconds(500)).has_value());
+  // It climbed to Operation Enabled and quick-stopped from there, rather than returning at once.
+  EXPECT_TRUE(std::ranges::any_of(driver.writes, [](const Cia402FakeDriver::Write& w) {
+    return w.index == Object::kControlword && w.data.size() >= 2 &&
+           (static_cast<uint16_t>(w.data[0] | (w.data[1] << 8)) & mm::node::cia402::kCommandMask) ==
+               0x0002;
+  })) << "no quick stop command was issued";
 }
 
 TEST(Cia402DriveTransitionToState, RejectsAStateTheDriveEntersOnItsOwn) {

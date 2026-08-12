@@ -286,6 +286,26 @@ inline constexpr StandardOperationMode kStandardOperationModes[] = {
      "Cyclic synchronous torque mode with commutation angle"},
 };
 
+/// @brief Whether a quick stop configured with @p optionCode leaves the drive *in* Quick Stop
+///        Active, or passes through it into Switch On Disabled.
+///
+/// The distinction is why targeting Quick Stop Active is not simply "issue quick stop and wait".
+/// The profile's codes 0-4 all end the quick stop in Switch On Disabled — 0 disables the drive
+/// outright and 1-4 ramp down first — so on a drive configured that way Quick Stop Active is a
+/// state it *passes through*, sometimes for microseconds. Codes 5-8 ramp down the same ways but
+/// stay there. **Only that 5-8 band holds**, which is what this answers.
+///
+/// **A vendor may define values above 8, and one that does need not hold.** SOMANET implements a
+/// sparse subset — 0, 2, 6 and 9 — of which **9 is its own**: "transit into active short circuit
+/// and then into switch on disabled", so it passes through like 0 and 2 while shorting the motor
+/// phases on the way. It is outside the holding band and therefore already answered correctly, but
+/// the reason is that the band is *closed*, not that unknown values default to passing through.
+///
+/// Values this function cannot place are treated as passing through for a separate reason: a
+/// caller told the drive landed somewhere else recovers, where one waiting for a state that never
+/// comes only times out.
+constexpr bool quickStopHolds(int16_t optionCode) { return optionCode >= 5 && optionCode <= 8; }
+
 /// @brief The first bit of 0x6502 that the profile leaves to the vendor (ETG.6010 Figure 15).
 inline constexpr int kFirstManufacturerDriveModeBit = 16;
 

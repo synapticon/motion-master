@@ -53,9 +53,17 @@ enum MotorSetting : uint8_t {
   /// unit the command reports. The drive's own description of this entry names the unit; the
   /// command answers in mNm/A_rms, a factor of 1000 coarser. See @c TorqueConstantResult.
   kMotorTorqueConstant = 2,
-  kMotorPhaseResistance = 3,  ///< INTEGER32 — where a phase resistance (command 8) belongs.
-  kMotorPhaseInductance = 4,  ///< INTEGER32 — where a phase inductance (command 9) belongs.
-  kMotorPhasesInverted = 5,   ///< BOOLEAN — the phase order motor phase order detection (4) writes.
+  /// INTEGER32 — where a phase resistance (command 8) belongs, **in µΩ**, which is not the unit the
+  /// command reports either: it answers in mΩ, so this is the second of the three that needs
+  /// multiplying by 1000 before it is stored. The firmware reads this object into a variable it
+  /// calls @c phase_resistance_uOhm, which is what settles it.
+  kMotorPhaseResistance = 3,
+
+  /// INTEGER32 — where a phase inductance (command 9) belongs, in µH. **The one that matches its
+  /// command**, which also reports µH, so a measurement is stored as it comes. The firmware's
+  /// variable is @c phase_inductance_uH.
+  kMotorPhaseInductance = 4,
+  kMotorPhasesInverted = 5,  ///< BOOLEAN — the phase order motor phase order detection (4) writes.
 };
 
 /// @brief Sub-entries of 0x2009 (commutation offset detection). The enum value @b is the subindex.
@@ -1143,6 +1151,11 @@ void to_json(nlohmann::json& j, const PolePairResult& result);
 /// The drive reports a whole number of milliohms and that is what is stored: the unit is named in
 /// the member rather than applied to it, because scaling to ohms here would invent precision the
 /// drive never reported and force every consumer to scale back to compare two readings.
+///
+/// **Not the unit 0x2003:03 stores**, which is µΩ — so keeping a measurement means multiplying by
+/// 1000, exactly as for the torque constant. Two of the three winding objects differ from their
+/// command's unit this way and the third does not, which is why each says so on itself rather than
+/// relying on a rule; see @c somanet::kMotorPhaseResistance.
 struct PhaseResistanceResult {
   uint32_t milliohms = 0;  ///< Phase resistance in mΩ, exactly as the drive reported it.
 
@@ -1155,6 +1168,9 @@ void to_json(nlohmann::json& j, const PhaseResistanceResult& result);
 ///
 /// Microhenries as the drive reported them, for the same reason @c PhaseResistanceResult keeps
 /// milliohms: the unit belongs in the member name, not in a conversion that would invent precision.
+///
+/// **The one winding measurement whose unit matches its object**: 0x2003:04 is µH too, so unlike
+/// the resistance and the torque constant this value is stored exactly as measured.
 struct PhaseInductanceResult {
   uint32_t microhenries = 0;  ///< Phase inductance in µH, exactly as the drive reported it.
 

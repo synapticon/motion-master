@@ -492,7 +492,9 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "and restored to exactly the state it was found in afterwards.";
   phaseInductance.caveats = {
       "The value is reported, not stored — nothing in the drive's configuration changes. Object "
-      "0x2003:04 is where a phase inductance belongs if you want to keep it.",
+      "0x2003:04 is where a phase inductance belongs if you want to keep it, and it is the one "
+      "that "
+      "needs no conversion — the object holds µH, which is what this reports.",
       "The brake is left exactly as found — this command does not require it released, and an "
       "engaged brake steadying the shaft is the better state to measure in.",
       "The shaft can still turn if nothing holds it: no brake, or one already disengaged.",
@@ -525,7 +527,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "whatever is in series with it — your cabling and connectors included.";
   phaseResistance.caveats = {
       "The value is reported, not stored — nothing in the drive's configuration changes. Object "
-      "0x2003:03 is where a phase resistance belongs if you want to keep it.",
+      "0x2003:03 is where a phase resistance belongs if you want to keep it, but that object holds "
+      "µΩ while this reports mΩ: multiply by 1000 before writing it.",
       "The brake is left exactly as found — this command does not require it released, and an "
       "engaged brake steadying the shaft is the better state to measure in.",
       "The shaft can still turn if nothing holds it: no brake, or one already disengaged.",

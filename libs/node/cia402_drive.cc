@@ -65,6 +65,18 @@ using cia402::State;
 // plane. Not on the RT path — enable() runs on the HTTP thread.
 constexpr auto kPollStep = std::chrono::milliseconds(1);
 
+// How long a fault reset is given to take effect before the fault is called unclearable. Generous
+// against the two process-data cycles it actually needs, because the cost of being wrong is
+// asymmetric: waiting 200 ms too long is nothing, while giving up too early reports a drive that
+// recovered as one that did not — and sends someone looking for a fault cause that has gone.
+constexpr auto kFaultResetGrace = std::chrono::milliseconds(200);
+
+// How long to leave controlword bit 7 low before raising it again, when a previous reset left it
+// high. It has to outlast one process-data cycle for the low value to reach the drive at all —
+// otherwise the clear and the set collapse into one frame and there is no edge. Sized for a slow
+// cycle rather than the 1 ms default, since being early here costs the whole reset.
+constexpr auto kEdgeSettle = std::chrono::milliseconds(10);
+
 }  // namespace
 
 std::expected<uint16_t, std::string> Cia402Drive::statusword() const {
@@ -219,17 +231,39 @@ std::expected<void, std::string> Cia402Drive::quickStop() {
 
 std::expected<void, std::string> Cia402Drive::faultReset() {
   // Fault reset (CiA402 transition 15; ETG.6010 5.2, Table 3) is triggered by a *rising* edge of
-  // controlword bit 7 — the drive latches on the 0->1 transition. Assert the edge by setting bit 7,
-  // preserving every other bit, and do NOT clear it in the same call: on the PDO path each write
-  // only stages the value into the output slot, and the RT loop composes one frame per cycle, so a
-  // set+clear issued back to back collapses to last-writer-wins — the drive would see only the
-  // cleared value and never the edge. Bit 7 is driven low again by the next state-machine command
-  // (they all route through applyCommand, whose kCommandMask covers bit 7), which re-arms the reset
-  // for a later fault. This assumes bit 7 is currently low, which holds after any normal command (a
-  // drive faults from OperationEnabled with controlword 0x000F).
+  // controlword bit 7 — the drive latches on the 0->1 transition, so the bit must be low before it
+  // can be raised.
+  //
+  // **Which means finding it already high is the case that matters.** It is left high by any reset
+  // that did not end in a state-machine command: one abandoned, one that timed out, one whose fault
+  // did not clear. Simply OR-ing the bit again then produces no edge at all, and every subsequent
+  // reset is a silent no-op — a drive that sits in Fault for ever while each attempt reports having
+  // done something. Verified on a SOMANET Integro, which stayed faulted through three attempts with
+  // the controlword parked at 0x0080.
+  //
+  // So the bit is cleared first when it is already set, and the two writes are deliberately *not*
+  // issued back to back: on the PDO path each write only stages a value into the output slot and
+  // the RT loop composes one frame per cycle, so a clear and a set in the same cycle collapse to
+  // last-writer-wins and the drive sees no edge either. Waiting a poll between them is what makes
+  // the edge reach the wire.
+  //
+  // In the ordinary case — a drive that has just faulted out of OperationEnabled, controlword
+  // 0x000F — bit 7 is already low and this is one write, as before.
   auto current = controlword();
   if (!current) {
     return std::unexpected(current.error());
+  }
+  if ((*current & Command::kCmdFaultReset) != 0) {
+    if (auto cleared = setControlword(static_cast<uint16_t>(*current & ~Command::kCmdFaultReset));
+        !cleared) {
+      return cleared;
+    }
+    std::this_thread::sleep_for(kEdgeSettle);
+    auto reread = controlword();
+    if (!reread) {
+      return std::unexpected(reread.error());
+    }
+    current = reread;
   }
   return setControlword(static_cast<uint16_t>(*current | Command::kCmdFaultReset));
 }
@@ -248,7 +282,11 @@ std::expected<void, std::string> Cia402Drive::transitionToState(cia402::State ta
   // Whether a fault reset has already been issued this walk. A drive that stays in Fault after one
   // is a drive whose fault cause is still present — the firmware refuses transition 15 while the
   // error is still reported — so saying so beats spending the whole timeout re-asserting bit 7.
-  bool faultResetIssued = false;
+  // When a fault reset was issued, so the drive can be given time to act on it. A reset is not
+  // acted on within a poll: the controlword has to reach the drive and its next statusword has to
+  // come back, which is two process-data cycles at best. Concluding from the very next poll that
+  // the fault will not clear is how a reset that worked gets reported as one that did not.
+  std::optional<std::chrono::steady_clock::time_point> faultResetAt;
 
   // Targeting a quick stop the drive does not hold: 0x605A codes 0-4 end it in SwitchOnDisabled, so
   // that is where such a walk arrives. Read once, before anything is issued — reading it later
@@ -293,7 +331,8 @@ std::expected<void, std::string> Cia402Drive::transitionToState(cia402::State ta
 
       case cia402::FsaAction::kCommand: {
         if (*current == cia402::State::kFault) {
-          if (faultResetIssued) {
+          if (faultResetAt &&
+              std::chrono::steady_clock::now() - *faultResetAt >= kFaultResetGrace) {
             // The firmware refuses transition 15 while the error is still reported, so a drive
             // that stayed in Fault through a reset has a cause that has not gone away. 0x603F is
             // the profile's own account of it — the vendor's fuller one lives outside this view.
@@ -306,10 +345,15 @@ std::expected<void, std::string> Cia402Drive::transitionToState(cia402::State ta
           }
           // Through faultReset() rather than applyCommand: the edge it asserts is staged on the
           // PDO path and must not be cleared in the same breath. See that method.
-          if (auto r = faultReset(); !r) {
-            return std::unexpected(r.error());
+          // Issued once and not re-asserted: the firmware's transition 15 tests bit 7 as a level,
+          // and it stays set until the next command clears it, so the drive leaves Fault of its own
+          // accord the moment the cause goes away.
+          if (!faultResetAt) {
+            if (auto r = faultReset(); !r) {
+              return std::unexpected(r.error());
+            }
+            faultResetAt = std::chrono::steady_clock::now();
           }
-          faultResetIssued = true;
           break;
         }
         if (auto r = applyCommand(step.command); !r) {

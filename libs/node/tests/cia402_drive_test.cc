@@ -86,6 +86,11 @@ class Cia402FakeDriver : public FieldbusDriver {
   /// When set, a fault reset is refused: the drive stays in Fault. That is what the firmware does
   /// while the error is still reported (transition 15 is gated on the cause having gone away).
   bool faultPersists = false;
+  /// Statusword reads a fault reset takes to take effect, modelling the process-data round trip a
+  /// real drive needs — the drive acts on the latched bit on its own cycle, not on the master's
+  /// write. 0 clears on the write itself.
+  int faultResetDelay = 0;
+  bool pendingFaultReset = false;
   /// Modes the modelled drive refuses, as SOMANET's opmode_update does for a mode it does not list
   /// or for a non-dynamic change while enabled: the SDO write succeeds and 0x6061 never follows.
   std::vector<int8_t> refusedModes;
@@ -146,7 +151,10 @@ class Cia402FakeDriver : public FieldbusDriver {
     const uint16_t cmd = controlword & mm::node::cia402::kCommandMask;
     if ((controlword & 0x0080) &&
         (machineState == State::kFault || machineState == State::kFaultReactionActive)) {
-      if (!faultPersists) {
+      if (faultResetDelay > 0) {
+        // Latched, to be acted on over the next few of the drive's own cycles.
+        pendingFaultReset = true;
+      } else if (!faultPersists) {
         machineState = State::kSwitchOnDisabled;
       }
     } else if ((cmd & 0x000F) == 0x000F && machineState == State::kQuickStopActive) {
@@ -172,6 +180,15 @@ class Cia402FakeDriver : public FieldbusDriver {
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t index,
                                                            uint8_t subindex) override {
     ++sdoReads;
+    // A latched fault reset takes effect on the drive's own cycles, which a statusword read is the
+    // observable proxy for here.
+    if (index == Object::kStatusword && pendingFaultReset && --faultResetDelay <= 0) {
+      pendingFaultReset = false;
+      if (!faultPersists) {
+        machineState = State::kSwitchOnDisabled;
+        store[key(Object::kStatusword, 0)] = u16le(statuswordFor(machineState));
+      }
+    }
     auto it = store.find(key(index, subindex));
     if (it == store.end()) {
       return std::unexpected("no such object");
@@ -377,6 +394,74 @@ TEST(Cia402Drive, FaultResetAssertsRisingEdgeWithoutClearing) {
   }
   ASSERT_EQ(controlwords.size(), 1u);
   EXPECT_TRUE(controlwords.back() & 0x0080);
+}
+
+TEST(Cia402DriveFaultReset, ReassertsTheEdgeWhenBitSevenIsAlreadyHigh) {
+  // The bug this exists for: a reset that was abandoned or that timed out leaves bit 7 high, and
+  // OR-ing it again produces no edge — so every later reset is a silent no-op and the drive sits in
+  // Fault for ever. Seen on hardware, with the controlword parked at 0x0080 through three attempts.
+  Cia402FakeDriver driver;
+  driver.machineState = State::kFault;
+  Device device = makeCia402Device(driver);
+  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] = u16le(statuswordFor(State::kFault));
+  // Bit 7 left high by a previous attempt, and nothing else set.
+  driver.store[Cia402FakeDriver::key(Object::kControlword, 0)] = u16le(0x0080);
+  Cia402Drive drive(device);
+  driver.writes.clear();
+
+  ASSERT_TRUE(drive.faultReset().has_value());
+
+  std::vector<uint16_t> controlwords;
+  for (const auto& w : driver.writes) {
+    if (w.index == Object::kControlword && w.data.size() >= 2) {
+      controlwords.push_back(static_cast<uint16_t>(w.data[0] | (w.data[1] << 8)));
+    }
+  }
+  // Two writes, in this order: bit 7 low, then bit 7 high. That is the edge.
+  ASSERT_EQ(controlwords.size(), 2u);
+  EXPECT_EQ(controlwords[0] & 0x0080, 0u) << "bit 7 must go low first";
+  EXPECT_NE(controlwords[1] & 0x0080, 0u) << "and then high, to make the edge";
+}
+
+TEST(Cia402DriveFaultReset, IsOneWriteWhenBitSevenIsAlreadyLow) {
+  // The ordinary case — a drive that faulted out of OperationEnabled with controlword 0x000F — must
+  // not pay for the recovery above.
+  Cia402FakeDriver driver;
+  driver.machineState = State::kFault;
+  Device device = makeCia402Device(driver);
+  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] = u16le(statuswordFor(State::kFault));
+  driver.store[Cia402FakeDriver::key(Object::kControlword, 0)] = u16le(0x000F);
+  Cia402Drive drive(device);
+  driver.writes.clear();
+
+  ASSERT_TRUE(drive.faultReset().has_value());
+
+  std::vector<uint16_t> controlwords;
+  for (const auto& w : driver.writes) {
+    if (w.index == Object::kControlword && w.data.size() >= 2) {
+      controlwords.push_back(static_cast<uint16_t>(w.data[0] | (w.data[1] << 8)));
+    }
+  }
+  ASSERT_EQ(controlwords.size(), 1u);
+  EXPECT_NE(controlwords[0] & 0x0080, 0u);
+  // And the other command bits are preserved, as every transition does.
+  EXPECT_EQ(controlwords[0] & 0x000F, 0x000Fu);
+}
+
+TEST(Cia402DriveTransitionToState, GivesAFaultResetTimeBeforeCallingItUnclearable) {
+  // The other half of the same hardware failure: the walk concluded "the cause is still present"
+  // one poll after issuing the reset, before the drive could possibly have acted on it — and
+  // reported a drive that recovered as one that had not.
+  Cia402FakeDriver driver;
+  driver.machineState = State::kFault;
+  driver.faultResetDelay = 3;  // clears, but only after a few polls
+  Device device = makeCia402Device(driver);
+  driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] = u16le(statuswordFor(State::kFault));
+  Cia402Drive drive(device);
+
+  auto result = drive.transitionToState(State::kSwitchOnDisabled, std::chrono::milliseconds(500));
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(driver.machineState, State::kSwitchOnDisabled);
 }
 
 TEST(Cia402Drive, EnableRefusesToOverrideAQuickStop) {

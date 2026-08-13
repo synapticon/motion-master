@@ -19,6 +19,14 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.75] - 2026-08-13
+
+### Changed
+
+- **A refused mailbox write now says it was refused, and why.** A CoE transfer that fails with a working counter of 0 and nothing on the error queue was reported as a bare failure, because that is all SOEM says about it. It is in fact the most informative failure there is: the slave would not accept the request into its receive mailbox. The master now asks the slave — one register read, on the failure path only — and reports *"the slave's receive mailbox is full — it has not taken the previous message"*, which is the diagnosis rather than a symptom.
+  - This is not a rare corner. On a 28-drive chain where every parameter read was failing, **every** failure was this one, and the log said nothing more than `failed`. SOEM establishes the same fact internally (it polls the sync manager while waiting) and then discards it.
+- **A failed object-dictionary read is attempted once per scan, not once per state change.** The CoE mailbox is live from PRE-OP up, so a device whose enumeration failed used to pay for the attempt again on SAFE-OP and again on OP — three passes over a bus that had already said it could not answer, which on a large chain is minutes of bring-up. The explicit reads (`POST /api/devices/{slavePosition}/parameters/init`, `?readValues=true`) are unaffected and are the way to retry deliberately; they clear the mark on success.
+
 ### Added
 
 - **Cycles the bus did not fully answer are counted, and the log says so.** When a working counter comes back below the expected value, not every slave processed the frame — and until now nothing recorded it anywhere. The RT loop now counts those cycles and keeps the time of the first and last, and the count is reported at the moments that end a stretch of exchanging: a state change, a re-map, a reset. A healthy bus stays silent, and a fault is announced once rather than repeated.
@@ -670,7 +678,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.74...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.75...HEAD
+[6.0.0-alpha.75]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.74...v6.0.0-alpha.75
 [6.0.0-alpha.74]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.73...v6.0.0-alpha.74
 [6.0.0-alpha.73]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.71...v6.0.0-alpha.73
 [6.0.0-alpha.71]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.70...v6.0.0-alpha.71

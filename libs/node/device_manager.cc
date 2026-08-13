@@ -967,6 +967,18 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
       if (!device || !device->mailboxActive() || device->hasParameters()) {
         continue;
       }
+      // Attempted once per scan, not once per transition. The CoE mailbox is live from PRE-OP up,
+      // so without this a device whose enumeration failed pays for it again on SAFE-OP and again on
+      // OP — three passes over a bus that has already said it cannot answer, which on a large chain
+      // is minutes. Deliberately not a retry-with-backoff: the explicit reads (POST
+      // .../parameters/init) are the way back, and they clear this on success.
+      if (device->parametersUnavailable()) {
+        spdlog::debug(
+            "Device {}: skipping the object-dictionary read on reaching {} — an earlier "
+            "read failed; use POST /api/devices/{}/parameters/init to retry",
+            info.slavePosition, mm::comm::toString(targetState), info.slavePosition);
+        continue;
+      }
       if (auto r = device->initializeParameters(/*readValues=*/false); !r) {
         // Names the state actually reached: the CoE mailbox is live from PRE-OP up, so this block
         // runs on entry to SAFE-OP and OP too, and a failure that keeps parameters empty is retried

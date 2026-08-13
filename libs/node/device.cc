@@ -140,6 +140,14 @@ std::expected<void, std::string> Device::writeSii(std::span<const uint8_t> data)
 
 std::expected<void, std::string> Device::initializeParameters(bool readValues,
                                                               bool useCompleteAccess) {
+  // One place to record the outcome, so every early return inside the enumeration is covered.
+  auto result = readParameterDefinitions(readValues, useCompleteAccess);
+  parametersUnavailable_ = !result.has_value();
+  return result;
+}
+
+std::expected<void, std::string> Device::readParameterDefinitions(bool readValues,
+                                                                  bool useCompleteAccess) {
   // A slave with no CoE mailbox has no object dictionary to enumerate over SDO-Info. Its only
   // objects are the process-data entries described in its SII EEPROM — build the definitions from
   // there so PDO monitoring can resolve each object's data type (and the Parameters page can list

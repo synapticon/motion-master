@@ -336,6 +336,15 @@ class Device {
   /// entry), both of which copy under the lock.
   bool hasParameters() const;
 
+  /// @brief Whether an @c initializeParameters call on this device has failed since it was scanned.
+  ///
+  /// Set so the automatic read on reaching a mailbox-active state is attempted once rather than
+  /// repeated on every later AL transition. A bus that cannot answer the enumeration does not
+  /// answer it three times either, and paying for the discovery once is the difference between a
+  /// slow bring-up and a very slow one. An explicit read through the API is unaffected — it calls
+  /// @c initializeParameters directly and clears this on success.
+  bool parametersUnavailable() const { return parametersUnavailable_; }
+
   /// @brief Returns all parameters sorted ascending by @c (index, subindex).
   ///
   /// Copies the map into a vector and sorts on the packed key. O(N log N) — call
@@ -775,6 +784,16 @@ class Device {
   // into DeviceManager's std::vector<Device> (which relocates on growth). The indirection keeps
   // Device move-constructible (the pointer moves); a Device is never copied, only moved.
   std::unique_ptr<std::mutex> parametersMutex_;
+
+  /// @brief The object-dictionary enumeration itself; @c initializeParameters wraps it to record
+  ///        whether it succeeded.
+  std::expected<void, std::string> readParameterDefinitions(bool readValues,
+                                                            bool useCompleteAccess);
+
+  /// Whether an initializeParameters call has failed for this device. Written and read only on the
+  /// control plane (the automatic read runs under the exclusive bus lock, an explicit one under a
+  /// borrow), so it needs no synchronisation of its own.
+  bool parametersUnavailable_ = false;
   std::unordered_map<uint32_t, DeviceParameter> parameters_;
   FlatPdoMapping flatPdoMapping_;
   // Discovered Complete Access support (the probe outcome), shared by every grouped read for the

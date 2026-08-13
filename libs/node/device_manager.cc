@@ -920,8 +920,11 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
         continue;
       }
       if (auto r = device->initializeParameters(/*readValues=*/false); !r) {
-        spdlog::warn("Device {}: object-dictionary read on reaching PRE-OP failed: {}",
-                     info.slavePosition, r.error());
+        // Names the state actually reached: the CoE mailbox is live from PRE-OP up, so this block
+        // runs on entry to SAFE-OP and OP too, and a failure that keeps parameters empty is retried
+        // on each of them. Reporting "PRE-OP" for all three made a repeat read look like a stray.
+        spdlog::warn("Device {}: object-dictionary read on reaching {} failed: {}",
+                     info.slavePosition, mm::comm::toString(targetState), r.error());
       }
     }
   }

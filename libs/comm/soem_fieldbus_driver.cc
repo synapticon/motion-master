@@ -233,6 +233,25 @@ std::string sdoErrorSuffix(ecx_contextt* ctx, int wkc) {
   }
 }
 
+// Pops every error SOEM queued for one failed transfer, returning the decoded reason of the first.
+//
+// Draining matters because the error list is a fixed-size FIFO ring (EC_MAXELIST) that drops its
+// oldest entry on overflow, and ecx_poperror pops the *oldest*: an entry left behind is not merely
+// wasted, it is later popped by an unrelated transfer and reported as that transfer's reason. One
+// failed attempt can push more than one entry (a mailbox error and an SDO abort), and a retry loop
+// multiplies that, so leaving the queue dirty misattributes reasons across slaves and objects
+// arbitrarily far apart in time. Draining to empty keeps every reason attached to the transfer that
+// produced it. Called with controlPlaneMutex_ held, like sdoErrorSuffix.
+std::string drainSdoErrors(ecx_contextt* ctx, int wkc) {
+  std::string reason = sdoErrorSuffix(ctx, wkc);
+  ec_errort discarded{};
+  while (ecx_poperror(ctx, &discarded)) {
+    // Discarded on purpose: the first entry is the one that describes this transfer, and the rest
+    // must not survive to be blamed on the next one.
+  }
+  return reason;
+}
+
 }  // namespace
 
 std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
@@ -848,15 +867,100 @@ namespace {
 constexpr int kSdoInfoMaxRetries = 10;
 constexpr auto kSdoInfoRetryDelay = std::chrono::milliseconds(50);
 
+// What one SDO Info transfer (first attempt plus retries) did, beyond whether it worked.
+//
+// Every field is here to separate causes that otherwise print identically, because the distinction
+// decides where a fault actually lies: a slave that never answers (wkc EC_TIMEOUT, a full
+// EC_TIMEOUTRXM per attempt), a slave that refuses an entry (wkc 0 with an SDO abort queued,
+// immediate), a mailbox send that fails (wkc 0 with nothing queued), and a frame the master never
+// got back (wkc EC_NOFRAME, which no slave can cause). `attempts` and `elapsed` are what make the
+// first case unmistakable: the wall time of a timeout cannot be confused with that of a refusal.
+struct SdoInfoResult {
+  int wkc = 0;                           // the last attempt's return value
+  int attempts = 0;                      // 1 .. kSdoInfoMaxRetries + 1
+  std::string reason;                    // decoded from the first failing attempt
+  std::chrono::microseconds elapsed{0};  // wall time of the whole call, back-off included
+
+  bool ok() const { return wkc > 0; }
+};
+
+// Runs one SDO Info transfer, retrying with a short back-off, and reports what happened.
+//
+// The mutex is taken here rather than inside the caller's callable so that the error-queue drain
+// happens in the same critical section as the call that filled it — popping outside the lock would
+// let a concurrent control-plane transfer claim this transfer's reason as its own. The lock is
+// dropped across the back-off sleeps, so a multi-second enumeration still never blocks another
+// control-plane caller for longer than a single transfer.
 template <typename F>
-int retrySdoInfo(F&& call) {
-  int result = call();
-  for (int i = 0; result <= 0 && i < kSdoInfoMaxRetries; ++i) {
-    std::this_thread::sleep_for(kSdoInfoRetryDelay);
-    result = call();
+SdoInfoResult retrySdoInfo(ecx_contextt* ctx, std::mutex& mutex, F&& call) {
+  const auto started = std::chrono::steady_clock::now();
+  SdoInfoResult result;
+  for (int attempt = 0; attempt <= kSdoInfoMaxRetries; ++attempt) {
+    if (attempt > 0) {
+      std::this_thread::sleep_for(kSdoInfoRetryDelay);
+    }
+    {
+      const std::lock_guard<std::mutex> lock(mutex);
+      result.wkc = call();
+      ++result.attempts;
+      if (result.wkc <= 0) {
+        // Drained on every failing attempt, not just the first, so nothing is left for an unrelated
+        // transfer to inherit; the reason reported is the first one, which named the original
+        // fault.
+        std::string reason = drainSdoErrors(ctx, result.wkc);
+        if (result.reason.empty()) {
+          result.reason = std::move(reason);
+        }
+      }
+    }
+    if (result.ok()) {
+      break;
+    }
   }
+  result.elapsed = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::steady_clock::now() - started);
   return result;
 }
+
+// Renders the diagnostic tail shared by every SDO Info failure message.
+std::string sdoInfoFailureDetail(const SdoInfoResult& result) {
+  return std::format(" after {} attempt(s) in {} ms (wkc {}){}", result.attempts,
+                     result.elapsed.count() / 1000, result.wkc, result.reason);
+}
+
+// Counts one device's enumeration for its summary line. A degraded link produces hundreds of
+// individual warnings, and the loss rate — not any single one of them — is what identifies it, so
+// it is counted here rather than left to be inferred by reading the log.
+struct SdoInfoCounters {
+  int failed = 0;   // transfers that gave up after exhausting their retries
+  int retries = 0;  // attempts beyond the first, across every transfer
+  int noReply = 0;  // gave up with wkc EC_TIMEOUT — the slave never replied
+  int noFrame = 0;  // gave up with wkc EC_NOFRAME — the master never got its frame back
+  // Gave up with a working counter of 0, which is genuinely ambiguous: either the slave answered
+  // with an abort or the mailbox send failed. The per-object line's reason tells them apart.
+  int zeroWkc = 0;
+
+  void add(const SdoInfoResult& result) {
+    retries += result.attempts - 1;
+    if (result.ok()) {
+      return;
+    }
+    ++failed;
+    switch (result.wkc) {
+      case EC_TIMEOUT:
+        ++noReply;
+        break;
+      case EC_NOFRAME:
+        ++noFrame;
+        break;
+      case 0:
+        ++zeroWkc;
+        break;
+      default:
+        break;
+    }
+  }
+};
 
 // Decodes an ecx_FOEread/ecx_FOEwrite failure return value into a FoeError. SOEM reports the FoE
 // error kind as a negated ec_err_type in the return value (not via the error list, and without the
@@ -962,24 +1066,44 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
     }
   }
   spdlog::debug("readObjectDictionary slave {}", slavePosition);
+  const auto started = std::chrono::steady_clock::now();
+  SdoInfoCounters counters;
   ec_ODlistt odList{};
-  if (retrySdoInfo([&] {
-        std::lock_guard<std::mutex> lock(controlPlaneMutex_);
-        return ecx_readODlist(ctx_.get(), slavePosition, &odList);
-      }) <= 0) {
-    return std::unexpected(std::format("readODlist slave {} failed after retries", slavePosition));
+
+  // Reports the enumeration's cost and loss rate. Emitted on the way out of both exits below, since
+  // a run that aborted halfway is exactly when the rate matters most; a clean run keeps it at debug
+  // so a healthy bus does not pay a line per device.
+  auto logSummary = [&](size_t entriesRead) {
+    const auto elapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                               std::chrono::steady_clock::now() - started)
+                               .count();
+    spdlog::log(counters.failed > 0 ? spdlog::level::warn : spdlog::level::debug,
+                "Device {}: object dictionary read {} entries from {} object(s) in {} ms; "
+                "{} failed, {} retries consumed ({} no reply, {} zero wkc, {} no frame)",
+                slavePosition, entriesRead, odList.Entries, elapsedMs, counters.failed,
+                counters.retries, counters.noReply, counters.zeroWkc, counters.noFrame);
+  };
+
+  if (auto list = retrySdoInfo(ctx_.get(), controlPlaneMutex_,
+                               [&] { return ecx_readODlist(ctx_.get(), slavePosition, &odList); });
+      !list.ok()) {
+    // No summary here: nothing was enumerated, and this message already carries the same detail.
+    return std::unexpected(
+        std::format("readODlist slave {} failed{}", slavePosition, sdoInfoFailureDetail(list)));
   }
 
   std::vector<OdEntry> entries;
   entries.reserve(odList.Entries);
 
   for (uint16_t i = 0; i < odList.Entries; ++i) {
-    if (retrySdoInfo([&] {
-          std::lock_guard<std::mutex> lock(controlPlaneMutex_);
-          return ecx_readODdescription(ctx_.get(), i, &odList);
-        }) <= 0) {
-      return std::unexpected(std::format("readODdescription slave {} index 0x{:04X} failed",
-                                         slavePosition, odList.Index[i]));
+    auto description = retrySdoInfo(ctx_.get(), controlPlaneMutex_,
+                                    [&] { return ecx_readODdescription(ctx_.get(), i, &odList); });
+    counters.add(description);
+    if (!description.ok()) {
+      logSummary(entries.size());
+      return std::unexpected(std::format("readODdescription slave {} index 0x{:04X} failed{}",
+                                         slavePosition, odList.Index[i],
+                                         sdoInfoFailureDetail(description)));
     }
 
     // SOEM's ecx_readOEsingle issues a basic-info "Get Entry Description"
@@ -989,12 +1113,13 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
     // fields stay empty here; they are not available from this service.
     ec_OElistt oeList{};
     for (uint8_t sub = 0; sub <= odList.MaxSub[i]; ++sub) {
-      if (retrySdoInfo([&] {
-            std::lock_guard<std::mutex> lock(controlPlaneMutex_);
-            return ecx_readOEsingle(ctx_.get(), i, sub, &odList, &oeList);
-          }) <= 0) {
-        spdlog::warn("Device {}: readOEsingle 0x{:04X}:{:02X} failed", slavePosition,
-                     odList.Index[i], sub);
+      auto entry = retrySdoInfo(ctx_.get(), controlPlaneMutex_, [&] {
+        return ecx_readOEsingle(ctx_.get(), i, sub, &odList, &oeList);
+      });
+      counters.add(entry);
+      if (!entry.ok()) {
+        spdlog::warn("Device {}: readOEsingle 0x{:04X}:{:02X} failed{}", slavePosition,
+                     odList.Index[i], sub, sdoInfoFailureDetail(entry));
         continue;
       }
       entries.push_back(OdEntry{
@@ -1013,7 +1138,7 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
     }
   }
 
-  spdlog::debug("readObjectDictionary slave {} ok ({} entries)", slavePosition, entries.size());
+  logSummary(entries.size());
   return entries;
 }
 

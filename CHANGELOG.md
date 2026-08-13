@@ -19,6 +19,16 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.72] - 2026-08-13
+
+### Changed
+
+- **A failed object-dictionary read now says which kind of failure it was.** The four causes had printed identically as `readOEsingle 0x1700:04 failed`, and they call for opposite responses: a slave that never answered, a slave that refused the entry, a mailbox send that failed, and a frame the master never got back. Each failure now reports the attempts made, the wall time they took, the working counter, and the decoded reason — `failed after 11 attempt(s) in 736 ms (wkc -5) (no response — mailbox timeout)`.
+  - **The wall time is the part that settles it.** A refusal is immediate and a no-answer costs the full mailbox timeout per attempt, so the elapsed figure separates the two even when the working counter is the ambiguous `0`. On a link losing frames this is the difference between a dictionary gap in the firmware and a fault in the host's network path.
+  - **Each device's enumeration ends with one summary line** — entries read, objects failed, retries consumed, and the failures split by kind — so a loss rate can be read off a log without counting hundreds of individual warnings. A clean run keeps it at debug level.
+  - **A reason is no longer attributed to the wrong transfer.** SOEM queues the detail behind a fixed-size ring that drops its oldest entry on overflow and hands back the oldest on request; the dictionary read never emptied it, so a reason from one object could be reported minutes later against an unrelated object on a different slave. Every transfer now drains what it queued.
+- **The object-dictionary read reports the state it actually reached.** The CoE mailbox is live from PRE-OP up, so a read that failed and left a device without parameters is retried on entry to SAFE-OP and OP as well — each of which had announced itself as PRE-OP, making the repeats look like strays.
+
 ## [6.0.0-alpha.71] - 2026-08-12
 
 ### Added
@@ -637,7 +647,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.71...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.72...HEAD
+[6.0.0-alpha.72]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.71...v6.0.0-alpha.72
 [6.0.0-alpha.71]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.70...v6.0.0-alpha.71
 [6.0.0-alpha.70]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.69...v6.0.0-alpha.70
 [6.0.0-alpha.69]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.68...v6.0.0-alpha.69

@@ -12,7 +12,7 @@
 # is not an error), so the RT thread stays unpinned and the isolated core stays
 # idle — with GET /api/game-loop reporting no cpuAffinity field at all as the
 # only symptom. Never take this below alpha.62.
-motion_master_version: 6.0.0-alpha.71
+motion_master_version: 6.0.0-alpha.72
 motion_master_release_url: >-
   https://github.com/synapticon/motion-master/releases/download/v{{ motion_master_version }}
 

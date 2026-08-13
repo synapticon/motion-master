@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.74] - 2026-08-13
+
 ### Fixed
 
 - **A CoE read no longer accepts an answer meant for a different subindex.** The master asks a drive for one subindex at a time and the replies arrive through a shared mailbox; it checked that a reply named the right *object* but not the right *subindex within* it. On a link that loses frames the replies shift by one, and a stale reply is accepted as the answer to the next question — a wrong value, with nothing reported. It now compares both, and a mismatch is reported as a failed read instead.
@@ -659,7 +661,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.73...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.74...HEAD
+[6.0.0-alpha.74]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.73...v6.0.0-alpha.74
 [6.0.0-alpha.73]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.71...v6.0.0-alpha.73
 [6.0.0-alpha.71]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.70...v6.0.0-alpha.71
 [6.0.0-alpha.70]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.69...v6.0.0-alpha.70

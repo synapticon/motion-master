@@ -94,7 +94,11 @@ Options parseOptions(int argc, char** argv) {
 
   if (listAdapters) {
     for (const auto& adapter : mm::comm::enumerateNetworkAdapters()) {
-      std::cout << adapter.macLinux << "  " << adapter.name << "\n";
+      std::cout << adapter.macLinux << "  " << adapter.name;
+      if (!adapter.description.empty()) {
+        std::cout << "  " << adapter.description;
+      }
+      std::cout << "\n";
     }
     // NOLINTNEXTLINE(concurrency-mt-unsafe)
     std::exit(0);

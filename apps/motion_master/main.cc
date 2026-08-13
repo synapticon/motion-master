@@ -135,6 +135,16 @@ int main(int argc, char** argv) {
         return std::unexpected(resolved.error());
       }
       ifname = resolved->name;
+      // Recorded on every init, because a support log that never names the adapter cannot answer
+      // the first question any fieldbus fault raises — and on Windows the interface name is an NPF
+      // GUID path, so the description and the MAC (whose OUI names the vendor) are what identify
+      // the hardware. The description is empty where the interface name already does that.
+      if (resolved->description.empty()) {
+        spdlog::info("Fieldbus adapter: {} [{}]", resolved->name, resolved->macLinux);
+      } else {
+        spdlog::info("Fieldbus adapter: {} — {} [{}]", resolved->name, resolved->description,
+                     resolved->macLinux);
+      }
     }
     if (type != "soem") {
       // soem is the only driver implemented today (spoe is planned). Config validation accepts the

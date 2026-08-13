@@ -76,6 +76,11 @@ export class Api<
          * @example "eth0"
          */
         name: string;
+        /**
+         * Human-readable hardware description. Populated on Windows, where the interface name is a GUID device path that identifies nothing; empty on Linux and macOS, where the interface name is the identification. Clients must fall back to `name` when it is empty.
+         * @example "Realtek USB GbE Family Controller"
+         */
+        description: string;
       }[],
       any
     >({

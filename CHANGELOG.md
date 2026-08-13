@@ -19,6 +19,11 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **The log says which network adapter the fieldbus is running on.** One line at every init, naming the interface, its hardware description and its MAC — because a support log that never names the adapter cannot answer the first question a fieldbus fault raises, and until now none of them did.
+- **Adapters are listed by what they are, not by a GUID.** `GET /api/adapters` gained a `description` field carrying the hardware name — `Realtek USB GbE Family Controller` rather than `\Device\NPF_{3F2504E0-4F89-...}` — and the Console's adapter picker leads with it, keeping the device path underneath. `--list-adapters` prints it too. It is populated on Windows, where the interface name identifies nothing; on Linux and macOS it is empty, because there the interface name *is* the identification, so clients fall back to `name`.
+
 ## [6.0.0-alpha.74] - 2026-08-13
 
 ### Fixed

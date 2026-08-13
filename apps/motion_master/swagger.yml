@@ -127,7 +127,7 @@ paths:
                 type: array
                 items:
                   type: object
-                  required: [macLinux, macWindows, name]
+                  required: [macLinux, macWindows, name, description]
                   properties:
                     macLinux:
                       type: string
@@ -141,6 +141,14 @@ paths:
                       type: string
                       description: OS interface name (e.g. eth0 on Linux, \\Device\\NPF_{GUID} on Windows)
                       example: "eth0"
+                    description:
+                      type: string
+                      description: >
+                        Human-readable hardware description. Populated on Windows, where the
+                        interface name is a GUID device path that identifies nothing; empty on
+                        Linux and macOS, where the interface name is the identification. Clients
+                        must fall back to `name` when it is empty.
+                      example: "Realtek USB GbE Family Controller"
   /api/version:
     get:
       summary: Get Motion Master version

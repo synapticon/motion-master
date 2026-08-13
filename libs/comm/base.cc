@@ -53,8 +53,33 @@ void to_json(nlohmann::json& j, const NetworkAdapter& a) {
       {"macLinux", a.macLinux},
       {"macWindows", a.macWindows},
       {"name", a.name},
+      {"description", a.description},
   };
 }
+
+#ifdef _WIN32
+namespace {
+
+/// Converts a Win32 wide string to UTF-8, empty on null/empty input or on conversion failure.
+///
+/// GetAdaptersAddresses hands back PWCHAR fields while NetworkAdapter — and the JSON built from it
+/// — is std::string throughout. The count returned by the sizing call includes the terminator,
+/// which the string must not, hence the -1.
+std::string toUtf8(const wchar_t* wide) {
+  if (wide == nullptr || wide[0] == L'\0') {
+    return {};
+  }
+  const int bytes = WideCharToMultiByte(CP_UTF8, 0, wide, -1, nullptr, 0, nullptr, nullptr);
+  if (bytes <= 1) {
+    return {};
+  }
+  std::string utf8(static_cast<size_t>(bytes - 1), '\0');
+  WideCharToMultiByte(CP_UTF8, 0, wide, -1, utf8.data(), bytes, nullptr, nullptr);
+  return utf8;
+}
+
+}  // namespace
+#endif
 
 bool isMacAddress(const std::string& s) {
   // Six hex octets separated by a single, consistent delimiter: the first separator is captured and
@@ -120,7 +145,13 @@ std::vector<NetworkAdapter> enumerateNetworkAdapters() {
         }
         std::string mac = ss.str();
         std::string name = "\\Device\\NPF_" + std::string(pCurrAddresses->AdapterName);
-        adapters.push_back({.macLinux = mac, .macWindows = normalizeMac(mac, '-'), .name = name});
+        // Description, not FriendlyName: the former names the hardware ("Realtek USB GbE Family
+        // Controller"), which is what identifies an adapter in a fault report, while the latter is
+        // whatever the user called the connection ("Ethernet 2").
+        adapters.push_back({.macLinux = mac,
+                            .macWindows = normalizeMac(mac, '-'),
+                            .name = name,
+                            .description = toUtf8(pCurrAddresses->Description)});
         pCurrAddresses = pCurrAddresses->Next;
       }
     }
@@ -146,8 +177,11 @@ std::vector<NetworkAdapter> enumerateNetworkAdapters() {
       char mac[18];
       snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", hw[0], hw[1], hw[2], hw[3], hw[4],
                hw[5]);
-      adapters.push_back(
-          {.macLinux = mac, .macWindows = normalizeMac(mac, '-'), .name = ifa->ifa_name});
+      // No description: the interface name is the identification here (see NetworkAdapter).
+      adapters.push_back({.macLinux = mac,
+                          .macWindows = normalizeMac(mac, '-'),
+                          .name = ifa->ifa_name,
+                          .description = {}});
     }
     freeifaddrs(ifaddr);
   }
@@ -175,8 +209,11 @@ std::vector<NetworkAdapter> enumerateNetworkAdapters() {
     const auto* hw = reinterpret_cast<const unsigned char*>(ifr.ifr_hwaddr.sa_data);
     snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X", hw[0], hw[1], hw[2], hw[3], hw[4],
              hw[5]);
-    adapters.push_back(
-        {.macLinux = mac, .macWindows = normalizeMac(mac, '-'), .name = adapter->name});
+    // SOEM fills adapter->desc with the interface name on Linux, so it would only repeat `name`.
+    adapters.push_back({.macLinux = mac,
+                        .macWindows = normalizeMac(mac, '-'),
+                        .name = adapter->name,
+                        .description = {}});
 
     adapter = adapter->next;
   }

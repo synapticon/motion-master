@@ -17,11 +17,18 @@ struct NetworkAdapter {
   std::string macLinux;    ///< Colon-separated uppercase MAC, e.g. @c "AA:BB:CC:DD:EE:FF".
   std::string macWindows;  ///< Dash-separated uppercase MAC, e.g. @c "AA-BB-CC-DD-EE-FF".
   std::string name;        ///< OS interface name, e.g. @c "eth0" or @c "\\Device\\NPF_{GUID}".
+  /// Human-readable hardware description, e.g. @c "Realtek USB GbE Family Controller".
+  ///
+  /// Populated on Windows, where @c name is an NPF device path built from a GUID and identifies
+  /// nothing to a reader. Empty on Linux and macOS, where the interface name is the identification
+  /// (SOEM fills its own adapter description with the interface name there, so it carries nothing
+  /// extra) — so a consumer must treat this as optional and fall back to @c name.
+  std::string description;
 };
 
 /// @brief Serialises a NetworkAdapter to JSON.
 ///
-/// Produces an object with keys @c macLinux, @c macWindows, @c name.
+/// Produces an object with keys @c macLinux, @c macWindows, @c name, @c description.
 /// Participates in nlohmann ADL so that @c nlohmann::json(adapters) serialises a
 /// @c std::vector<NetworkAdapter> automatically.
 /// @param j  Output JSON value.

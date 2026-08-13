@@ -307,8 +307,11 @@ export default function FieldbusControlPage() {
                             onClick={() => setAdapter(a.name)}
                             className="w-full text-left px-3 py-2 text-xs hover:bg-grey-50 transition-colors"
                           >
-                            <span>{a.name}</span>
+                            <span>{a.description || a.name}</span>
                             <span className="text-grey-500 ml-2 font-mono">{a.macLinux}</span>
+                            {a.description && (
+                              <span className="block text-grey-500 font-mono">{a.name}</span>
+                            )}
                           </button>
                         </li>
                       ))}

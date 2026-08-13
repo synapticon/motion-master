@@ -128,6 +128,99 @@ vcpkg_replace_string(
                   worktodo = TRUE;
                   if (sendpacket)")
 
+# A CoE read accepts a reply meant for a different subindex.
+#
+# SOEM validates a read response against the request's *index* only (ecx_SDOread) or against the
+# service opcode alone (ecx_readODdescription, ecx_readOEsingle), while ecx_SDOwrite — three
+# functions away in the same file — checks "correct index and subindex". The read paths are simply
+# inconsistent with the write path, and every one of them walks subindices of a single index:
+# 0x1C12:00, :01, :02 ... for a PDO assignment, :00, :01 ... for each mapping object, one entry
+# description per subindex for a dictionary enumeration. So when a frame is lost, a reply arriving one
+# step late is read as the answer to the *next* request and accepted, because the index still
+# matches. Nothing reports an error: the caller receives another subindex's value.
+#
+# What that costs is not a wrong reading somewhere harmless. A stale reply accepted for 0x1C12:00 or
+# 0x16xx:00 is a wrong *entry count*, which truncates the mapping walk — and the master programs each
+# slave's SM lengths from its SII records while sizing its own process-data window from this CoE
+# figure (ec_config.c: ecx_map_sm, and ecx_map_sii's SII fallback only fires when both sizes come
+# back zero, never for a short read). A truncated read therefore yields a master exchanging a
+# narrower window than the drives were configured for, with every AL transition succeeding. This is
+# the leading explanation for a bus of 28 identical drives mapping 2212 process-data bytes where the
+# same bus mapped 3152 through a different adapter minutes later. ecx_readOEsingle is worse again: it
+# feeds DataType and BitLength, which the RT path reads off the parameter while decoding process
+# data.
+#
+# Fixed by comparing each response against what was requested. Two or three integer comparisons per
+# reply, and a mismatch falls into each function's existing "unexpected frame" branch — wkc 0 plus a
+# queued EC_ERR_TYPE_PACKET_ERROR, which the SDO Info retry already handles and
+# SoemFieldbusDriver's sdoErrorSuffix already decodes. Silent substitution becomes a named failure.
+#
+# The comparisons deliberately use each function's own parameters rather than the request buffer.
+# ecx_mbxsend ends with `if (mbx) ecx_dropmbx(context, mbx)` — it returns the request to the mailbox
+# pool — so upstream's `aSDOp->Index == SDOp->Index` reads a freed pool slot. It happens to hold the
+# right bytes, because ecx_getmbx serves that pool FIFO and will not hand the slot back within one
+# transaction, but it is a use-after-free either way and the parameters say the same thing without
+# one: `index` is untouched, and `subindex` has already been coerced for Complete Access two lines
+# above the send (`if (CA && (subindex > 1)) subindex = 1;`), so it holds exactly what went out.
+#
+# Three things this deliberately leaves alone, each because the check would carry risk without
+# buying anything:
+#
+#  - An SDO abort is unaffected. It does not satisfy the SDORES condition at all — which is why SOEM
+#    detects ECT_SDO_ABORT in the *else* branch below it — so abort codes still reach ecx_SDOerror
+#    and read back through sdoErrorSuffix exactly as before.
+#  - Complete Access skips the subindex comparison (`CA ||`). SOEM coerces the requested subindex to
+#    1 before sending, so the check would rest on the slave echoing that coercion, and a slave that
+#    echoed 0 would have every CA upload rejected and fall back to per-subindex reads. A CA transfer
+#    carries the whole object in one exchange, so there is no subindex walk for a stale reply to
+#    land in the middle of: the index comparison is the whole of what CA needs.
+#  - Segmented transfers keep their existing checks: only the initial response passes through these
+#    conditions, and the segment branches match on Command bits and carry no index. ecx_readODlist
+#    likewise keeps its opcode-only check, because a list response echoes no request field to
+#    compare against.
+#
+# The response layouts are read off SOEM's own field offsets rather than assumed: ecx_readOEsingle
+# takes ValueInfo from bdata[3], DataType from wdata[2] and the name from wdata[5], which places
+# Index at wdata[0] and SubIndex at bdata[2] — the ETG.1000.6 entry-description layout, and the same
+# offsets the request is built at. ecx_readODdescription takes DataType from wdata[1], MaxSub from
+# bdata[4] and ObjectCode from bdata[5], placing Index at wdata[0]. Both hold only if the slave
+# populates those leading fields, which every correct name and data type read from one already
+# demonstrates. If a device were to answer without echoing them, its dictionary read fails at the
+# first object rather than degrading quietly — loud on the first bus test, which is where this
+# belongs.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"         /* slave response should be CoE, SDO response and the correct index */
+         if (((aSDOp->MbxHeader.mbxtype & 0x0f) == ECT_MBXT_COE) &&
+             ((etohs(aSDOp->CANOpen) >> 12) == ECT_COES_SDORES) &&
+             (aSDOp->Index == SDOp->Index))"
+"         /* slave response should be CoE, SDO response and the requested index and subindex */
+         if (((aSDOp->MbxHeader.mbxtype & 0x0f) == ECT_MBXT_COE) &&
+             ((etohs(aSDOp->CANOpen) >> 12) == ECT_COES_SDORES) &&
+             (aSDOp->Index == htoes(index)) &&
+             (CA || (aSDOp->SubIndex == subindex)))")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"         aSDOp = (ec_SDOservicet *)MbxIn;
+         if (((aSDOp->MbxHeader.mbxtype & 0x0f) == ECT_MBXT_COE) &&
+             ((aSDOp->Opcode & 0x7f) == ECT_GET_OD_RES))"
+"         aSDOp = (ec_SDOservicet *)MbxIn;
+         if (((aSDOp->MbxHeader.mbxtype & 0x0f) == ECT_MBXT_COE) &&
+             ((aSDOp->Opcode & 0x7f) == ECT_GET_OD_RES) &&
+             (aSDOp->wdata[0] == htoes(pODlist->Index[Item])))")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"         aSDOp = (ec_SDOservicet *)MbxIn;
+         if (((aSDOp->MbxHeader.mbxtype & 0x0f) == ECT_MBXT_COE) &&
+             ((aSDOp->Opcode & 0x7f) == ECT_GET_OE_RES))"
+"         aSDOp = (ec_SDOservicet *)MbxIn;
+         if (((aSDOp->MbxHeader.mbxtype & 0x0f) == ECT_MBXT_COE) &&
+             ((aSDOp->Opcode & 0x7f) == ECT_GET_OE_RES) &&
+             (aSDOp->wdata[0] == htoes(Index)) &&
+             (aSDOp->bdata[2] == SubI))")
+
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS

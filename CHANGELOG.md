@@ -19,6 +19,14 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A CoE read no longer accepts an answer meant for a different subindex.** The master asks a drive for one subindex at a time and the replies arrive through a shared mailbox; it checked that a reply named the right *object* but not the right *subindex within* it. On a link that loses frames the replies shift by one, and a stale reply is accepted as the answer to the next question — a wrong value, with nothing reported. It now compares both, and a mismatch is reported as a failed read instead.
+  - **What made this worth fixing is which values travel that path.** Among them is each PDO mapping's entry count, which decides how much process data the master exchanges every cycle. Read short, and the master exchanges a narrower window than the drive was configured for — permanently, with every state transition succeeding and nothing amiss in any log. A bus of 28 identical drives mapping 2212 process-data bytes where the same bus mapped 3152 through a different network adapter is consistent with exactly that.
+  - Object-dictionary reads gained the same check, since they carry each object's data type and bit length — which is what process data is decoded with.
+  - Complete Access reads are deliberately exempt: one exchange carries the whole object, so there is no sequence for a stale reply to land in the middle of.
+  - This makes a failing network adapter report itself instead of quietly producing wrong numbers. It does not make one work — a master that loses frames still needs different hardware.
+
 ## [6.0.0-alpha.73] - 2026-08-13
 
 ### Fixed

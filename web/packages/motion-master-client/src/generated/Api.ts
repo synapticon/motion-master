@@ -1985,6 +1985,24 @@ export class Api<
          */
         healthy: boolean;
         /**
+         * Cycles that answered with a working counter below `expectedWkc` since this image was published. `healthy` is a sample of the most recent cycle and so cannot see a fault that has already cleared; this count can.
+         * @format int64
+         * @example 0
+         */
+        shortWkcCycles: number;
+        /**
+         * Epoch microseconds of the first such cycle, 0 if there has been none
+         * @format int64
+         * @example 0
+         */
+        firstShortWkcUs: number;
+        /**
+         * Epoch microseconds of the most recent such cycle, 0 if there has been none
+         * @format int64
+         * @example 0
+         */
+        lastShortWkcUs: number;
+        /**
          * Number of process images retained since the last reset
          * @example 1
          */

@@ -61,6 +61,17 @@ struct ProcessData {
   // recomputed by the control plane from current device states. healthy = last >= expected.
   std::atomic<int> lastWkc{0};
   std::atomic<int> expectedWkc{0};
+  // Cumulative record of the cycles the bus did not fully answer, written by the RT thread and
+  // cleared when an image is published (each count describes one generation).
+  //
+  // A boolean sampled off the RT path cannot see a fault that arrived and cleared between two
+  // samples, and nothing in this process samples continuously — so a count, plus the epoch
+  // nanoseconds of the first and last bad cycle, is what survives to be read afterwards. The
+  // timestamps are the point: they are what lets a process-data fault be lined up against whatever
+  // else the log shows at that moment, which a bare count cannot answer.
+  std::atomic<uint64_t> shortWkcCycles{0};
+  std::atomic<uint64_t> firstShortWkcNs{0};
+  std::atomic<uint64_t> lastShortWkcNs{0};
 
   /// @brief Control plane: unpublishes the image and waits out the RT cycle already in flight.
   ///

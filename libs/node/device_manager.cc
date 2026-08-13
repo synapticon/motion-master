@@ -181,6 +181,8 @@ void DeviceManager::reset() {
   // becomes a no-op, then reclaim every retained image generation (safe now that exchange is
   // gated off).
   stopExchange();
+  // Last chance to say it: the counters go with the image generations on the next line.
+  reportShortWkc("reset");
   pd_->generations.clear();
   pd_->ring.clear();  // teardown — free the recorder storage
   devices_.clear();   // drop device references to driver before stopping
@@ -262,6 +264,9 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
   // targets) are therefore sent on the very first cycle by construction, and a write that lands
   // while this re-map is running is picked up rather than lost between a seed and a publish.
 
+  // Whatever the outgoing generation recorded, said before its counters are cleared below.
+  reportShortWkc("re-mapping");
+
   // The publish window — the only part of a re-map that touches state a reader can see, and so the
   // only part that takes deviceSetMutex_ exclusively. Everything above (the IOmap rebuild, the
   // per-device PDO-mapping SDO reads and building the image) ran under busOperationMutex_ alone, so
@@ -282,6 +287,13 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
     // A new image is published: object offsets may differ from the previous one, so signal
     // consumers that captured the layout (the monitoring sampler) to re-capture it.
     processImageGeneration_.fetch_add(1, std::memory_order_relaxed);
+    // Each count describes one generation, and exchange is drained here, so the RT thread cannot be
+    // mid-increment. Clearing after updateExpectedWkc would be a race of its own: the first cycles
+    // of a new image are compared against the new expectation, and they belong to the new count.
+    pd_->shortWkcCycles.store(0, std::memory_order_relaxed);
+    pd_->firstShortWkcNs.store(0, std::memory_order_relaxed);
+    pd_->lastShortWkcNs.store(0, std::memory_order_relaxed);
+    reportedShortWkcCycles_ = 0;
     updateExpectedWkc();
   }
   spdlog::info("Process data configured: {} output bytes, {} input bytes, expected WKC {}",
@@ -348,6 +360,15 @@ void DeviceManager::exchangeProcessData() {
       static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                 std::chrono::system_clock::now().time_since_epoch())
                                 .count());
+  // Note a cycle the bus did not fully answer, with when it happened. At most three relaxed stores,
+  // on a path that has just blocked on a frame round trip — and the only place the fault is
+  // visible, since no other thread sees every cycle.
+  if (wkc < pd_->expectedWkc.load(std::memory_order_relaxed)) {
+    pd_->lastShortWkcNs.store(timestampNs, std::memory_order_relaxed);
+    if (pd_->shortWkcCycles.fetch_add(1, std::memory_order_relaxed) == 0) {
+      pd_->firstShortWkcNs.store(timestampNs, std::memory_order_relaxed);
+    }
+  }
   pd_->ring.write(timestampNs, wkc,
                   std::span<const uint8_t>(pd_->inScratch.bytes.data(), image->inputBytes),
                   std::span<const uint8_t>(pd_->outScratch.bytes.data(), outputBytes));
@@ -402,6 +423,29 @@ DeviceManager::CycleLock::~CycleLock() {
 }
 
 void DeviceManager::stopExchange() { pd_->pauseCycle(); }
+
+void DeviceManager::reportShortWkc(std::string_view occasion) {
+  const uint64_t cycles = pd_->shortWkcCycles.load(std::memory_order_relaxed);
+  if (cycles == reportedShortWkcCycles_) {
+    return;
+  }
+  reportedShortWkcCycles_ = cycles;
+  const auto nowNs = static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
+                                               std::chrono::system_clock::now().time_since_epoch())
+                                               .count());
+  const uint64_t firstNs = pd_->firstShortWkcNs.load(std::memory_order_relaxed);
+  const uint64_t lastNs = pd_->lastShortWkcNs.load(std::memory_order_relaxed);
+  // Reported as ages rather than absolute times, so the line is self-contained: it carries its own
+  // timestamp, and a reader adds these to it. An absolute time here would have to pick a zone,
+  // and formatting one in UTC beside spdlog's local-time prefix reads as a contradiction.
+  const auto secondsBefore = [nowNs](uint64_t thenNs) {
+    return thenNs == 0 || thenNs > nowNs ? 0.0 : static_cast<double>(nowNs - thenNs) / 1e9;
+  };
+  spdlog::warn(
+      "Process data: {} cycle(s) answered with a short working counter since this image was "
+      "published ({}); the first was {:.1f} s and the last {:.1f} s before this line",
+      cycles, occasion, secondsBefore(firstNs), secondsBefore(lastNs));
+}
 
 const ProcessImage* ProcessData::pauseCycle() {
   const ProcessImage* previous = image.exchange(nullptr, std::memory_order_seq_cst);
@@ -493,6 +537,10 @@ ProcessImageInfo DeviceManager::processImageInfo() const {
   info.lastWkc = pd_->lastWkc.load(std::memory_order_relaxed);
   info.expectedWkc = pd_->expectedWkc.load(std::memory_order_relaxed);
   info.generations = pd_->generations.size();
+  info.shortWkcCycles = pd_->shortWkcCycles.load(std::memory_order_relaxed);
+  // Reduced to microseconds at the JSON boundary, matching every other timestamp this API serves.
+  info.firstShortWkcUs = pd_->firstShortWkcNs.load(std::memory_order_relaxed) / 1000;
+  info.lastShortWkcUs = pd_->lastShortWkcNs.load(std::memory_order_relaxed) / 1000;
 
   const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
   info.configured = image != nullptr;
@@ -929,6 +977,9 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
     }
   }
 
+  // The interactive moment: whoever just changed state is the one who wants to know that the bus
+  // faltered while it was exchanging, and this is the boundary they created.
+  reportShortWkc("state change");
   return result;
 }
 
@@ -1334,6 +1385,9 @@ void to_json(nlohmann::json& j, const ProcessImageInfo& info) {
        {"expectedWkc", info.expectedWkc},
        {"lastWkc", info.lastWkc},
        {"healthy", info.healthy},
+       {"shortWkcCycles", info.shortWkcCycles},
+       {"firstShortWkcUs", info.firstShortWkcUs},
+       {"lastShortWkcUs", info.lastShortWkcUs},
        {"generations", info.generations},
        {"outputs", info.outputs},
        {"inputs", info.inputs}};

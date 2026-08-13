@@ -3137,7 +3137,7 @@ paths:
                 type: object
                 required:
                   [configured, outputBytes, inputBytes, expectedWkc, lastWkc, healthy,
-                   generations, outputs, inputs]
+                   shortWkcCycles, firstShortWkcUs, lastShortWkcUs, generations, outputs, inputs]
                 properties:
                   configured:
                     type: boolean
@@ -3163,6 +3163,24 @@ paths:
                     type: boolean
                     description: Whether the last working counter meets the expected value
                     example: true
+                  shortWkcCycles:
+                    type: integer
+                    format: int64
+                    description: >
+                      Cycles that answered with a working counter below `expectedWkc` since this
+                      image was published. `healthy` is a sample of the most recent cycle and so
+                      cannot see a fault that has already cleared; this count can.
+                    example: 0
+                  firstShortWkcUs:
+                    type: integer
+                    format: int64
+                    description: Epoch microseconds of the first such cycle, 0 if there has been none
+                    example: 0
+                  lastShortWkcUs:
+                    type: integer
+                    format: int64
+                    description: Epoch microseconds of the most recent such cycle, 0 if there has been none
+                    example: 0
                   generations:
                     type: integer
                     description: Number of process images retained since the last reset

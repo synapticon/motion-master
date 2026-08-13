@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <initializer_list>
 #include <nlohmann/json.hpp>
 #include <string>
 
@@ -84,9 +85,14 @@ TEST(KueblerRegisters, MarksTheOnesTheEncoderDoesNotImplement) {
   const auto notImplemented = std::ranges::count_if(
       kKueblerRegisters, [](const auto& entry) { return !entry.implemented; });
   EXPECT_EQ(notImplemented, 7);
-  for (const uint8_t address : {0x00, 0x04, 0x60, 0x61, 0x62, 0x66, 0x6A}) {
+  // Typed list, not a braced one of ints: the literals would deduce to int and narrow on the way
+  // into the loop variable, which MSVC treats as an error (C4244) while GCC and clang say nothing.
+  for (const uint8_t address :
+       std::initializer_list<uint8_t>{0x00, 0x04, 0x60, 0x61, 0x62, 0x66, 0x6A}) {
     auto entry = findKueblerRegister(address);
-    ASSERT_TRUE(entry.has_value()) << address;
+    // Cast to int, or the stream prints the address as an unprintable character rather than a
+    // number.
+    ASSERT_TRUE(entry.has_value()) << static_cast<int>(address);
     EXPECT_FALSE(entry->implemented) << entry->name;
   }
 }

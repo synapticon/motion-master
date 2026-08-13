@@ -19,7 +19,11 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
-## [6.0.0-alpha.72] - 2026-08-13
+## [6.0.0-alpha.73] - 2026-08-13
+
+### Fixed
+
+- **The Windows build is back**, and with it the `-windows-x64.zip` that `6.0.0-alpha.71` and `6.0.0-alpha.72` never produced. A narrowing conversion in a test compiled cleanly on GCC and clang and tripped MSVC's `C4244`, which is an error under `/WX` — so the Windows leg failed and, because the release is assembled from every leg, no release was published for either version at all.
 
 ### Changed
 
@@ -647,8 +651,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.72...HEAD
-[6.0.0-alpha.72]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.71...v6.0.0-alpha.72
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.73...HEAD
+[6.0.0-alpha.73]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.71...v6.0.0-alpha.73
 [6.0.0-alpha.71]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.70...v6.0.0-alpha.71
 [6.0.0-alpha.70]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.69...v6.0.0-alpha.70
 [6.0.0-alpha.69]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.68...v6.0.0-alpha.69

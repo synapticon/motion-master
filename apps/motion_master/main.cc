@@ -11,6 +11,7 @@
 #include <string>
 #include <utility>
 
+#include "bus_health_reporter.h"
 #include "cert_updater.h"
 #include "comm/base.h"
 #include "comm/soem_fieldbus_driver.h"
@@ -334,6 +335,11 @@ int main(int argc, char** argv) {
   // thread, as it must be — an ordinary call on an ordinary thread. Must name the same object as
   // ExampleCyclicTask::Config.
   // monitoringManager.keepFresh(1, 0x2031, 0x01, std::chrono::milliseconds{200});
+
+  // Says what the RT loop saw and cannot say itself — cycles the bus did not fully answer.
+  // Declared after deviceManager so it is destroyed first; see bus_health_reporter.h for why this
+  // is an app-layer policy rather than something DeviceManager does for itself.
+  BusHealthReporter busHealthReporter{deviceManager};
 
   if (opts.openBrowser) {
     mm::core::openInBrowser("https://motion-master.synapticon.com/apps/console/");

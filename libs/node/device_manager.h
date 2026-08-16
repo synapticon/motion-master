@@ -73,7 +73,7 @@ struct ProcessImageInfo {
   int expectedWkc = 0;       ///< Working counter expected from the devices currently exchanging.
   int lastWkc = 0;           ///< Working counter from the most recent exchange (0 before any).
   bool healthy = false;      ///< Whether the last working counter meets the expected value.
-  /// Cycles that answered short since this image was published. @c healthy is a sample and can miss
+  /// Cycles that answered short since the bus came up. @c healthy is a sample and can miss
   /// a fault that has already cleared; this cannot.
   uint64_t shortWkcCycles = 0;
   uint64_t firstShortWkcUs = 0;  ///< Epoch microseconds of the first such cycle (0 if none).
@@ -872,21 +872,6 @@ class DeviceManager {
   /// After this returns, @c exchangeProcessData is a no-op and the RT thread is no longer
   /// touching the driver's IOmap, so it is safe to re-map or tear down. Bounded wait.
   void stopExchange();
-
-  /// @brief Logs any short-working-counter cycles the RT loop has recorded since the last report.
-  ///
-  /// Called at the control-plane moments that end a stretch of exchanging — a state change, a
-  /// re-map, a reset — because the RT thread is the only one that sees a fault and it cannot log,
-  /// and no thread in this process polls often enough to be told to. Silent when nothing new has
-  /// been recorded, so a healthy bus never speaks.
-  ///
-  /// The counters themselves are *not* cleared here (@c processImageInfo serves them for the
-  /// lifetime of the image); only the already-reported mark moves, so a fault is announced once.
-  /// @param occasion  What prompted the report, named in the message.
-  void reportShortWkc(std::string_view occasion);
-
-  /// Short-working-counter cycles already announced by @c reportShortWkc. Control plane only.
-  uint64_t reportedShortWkcCycles_ = 0;
 
   // Two locks, two unrelated invariants. Keeping them apart is what stops any one lock from being
   // both long-held-shared and contended-exclusive — the state in which std::shared_mutex contention

@@ -237,7 +237,7 @@ export default function FieldbusProcessImagePage() {
                 label="Short cycles"
                 value={img.shortWkcCycles.toLocaleString()}
                 tone={img.shortWkcCycles > 0 ? 'text-status-bad' : 'text-status-good'}
-                hint="Cycles that came back with a working counter below the expected value since this image was published. The reading to the left describes the most recent cycle only, so a fault that has already cleared leaves it looking healthy; this count keeps it."
+                hint="Cycles that came back with a working counter below the expected value since the fieldbus was initialised — across every re-map, so bringing a device up or down does not erase it. The reading to the left describes the most recent cycle only, so a fault that has already cleared leaves it looking healthy; this count keeps it."
               />
             </div>
 
@@ -246,7 +246,7 @@ export default function FieldbusProcessImagePage() {
                 <p>
                   <strong>{img.shortWkcCycles.toLocaleString()}</strong>{' '}
                   {img.shortWkcCycles === 1 ? 'cycle' : 'cycles'} came back with a working counter
-                  below the expected value since this image was published — on each of them, at
+                  below the expected value since the fieldbus was initialised — on each of them, at
                   least one device did not process the frame. First at{' '}
                   <span className="font-mono">{formatEpochUs(img.firstShortWkcUs)}</span>, last at{' '}
                   <span className="font-mono">{formatEpochUs(img.lastShortWkcUs)}</span>.
@@ -254,8 +254,8 @@ export default function FieldbusProcessImagePage() {
                 <p className="mt-1.5 text-grey-600">
                   Cycles a device missed while you were deliberately taking it out of SAFE-OP/OP are
                   not counted here, so this is a fault the bus produced on its own — a cable, a
-                  connector, or a device dropping out. The count is cleared when the image is next
-                  rebuilt.
+                  connector, or a device dropping out. The count survives a re-map and is cleared
+                  only by <em>Reset</em>.
                 </p>
               </Callout>
             )}

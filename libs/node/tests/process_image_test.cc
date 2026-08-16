@@ -1054,6 +1054,20 @@ TEST(DeviceManagerProcessData, CountsCyclesTheBusDidNotFullyAnswer) {
   EXPECT_EQ(dm.processImageInfo().shortWkcCycles, 2u);
   EXPECT_GT(dm.processImageInfo().firstShortWkcUs, 0u);
   EXPECT_GE(dm.processImageInfo().lastShortWkcUs, dm.processImageInfo().firstShortWkcUs);
+
+  // A re-map does not erase it. Re-mapping happens whenever a device is brought into or out of
+  // SAFE-OP/OP, which is exactly when someone is chasing a fault — clearing per image generation
+  // erased the record at the moment it was most wanted.
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  ASSERT_EQ(dm.processImageInfo().generations, 2u);
+  EXPECT_EQ(dm.processImageInfo().shortWkcCycles, 2u);
+  EXPECT_GT(dm.processImageInfo().firstShortWkcUs, 0u);
+
+  // reset() ends the session the record describes, and is the only thing that clears it.
+  dm.reset();
+  EXPECT_EQ(dm.processImageInfo().shortWkcCycles, 0u);
+  EXPECT_EQ(dm.processImageInfo().firstShortWkcUs, 0u);
+  EXPECT_EQ(dm.processImageInfo().lastShortWkcUs, 0u);
 }
 
 TEST(DeviceManagerProcessData, RejectsIllegalAlStateTransitions) {

@@ -3185,9 +3185,18 @@ paths:
                     type: integer
                     format: int64
                     description: >
-                      Cycles that answered with a working counter below `expectedWkc` since this
-                      image was published. `healthy` is a sample of the most recent cycle and so
-                      cannot see a fault that has already cleared; this count can.
+                      Cycles that answered with a working counter below the value expected at the
+                      time, counted since `POST /api/init` and cleared only by `POST /api/reset`.
+                      `healthy` is a sample of the most recent cycle and so cannot see a fault that
+                      has already cleared; this count can.
+
+
+                      It spans every re-map rather than resetting per image, because a re-map
+                      happens whenever a device is brought into or out of SAFE-OP/OP — which is
+                      exactly when someone is chasing a fault. `generations` says how many images
+                      the count spans. Cycles missed while a device was being deliberately
+                      commanded out of an exchange state are not counted: the expectation is
+                      lowered before the transition is commanded.
                     example: 0
                   firstShortWkcUs:
                     type: integer

@@ -145,6 +145,10 @@ std::expected<int, std::string> DeviceManager::scan() {
   // driver rebuilds it. Then reclaim the now-stale image generations (safe once exchange is
   // gated off); a fresh image is published when the bus is next brought into SAFE-OP/OP.
   stopExchange();
+  // The fourth boundary that ends a stretch of exchanging, alongside a state change, a re-map and
+  // a reset. Said here because the device set is about to be rebuilt: a fault the bus showed just
+  // before a rescan would otherwise be recorded and never spoken.
+  reportShortWkc("scan");
   pd_->generations.clear();
   pd_->ring.clear();  // device set is being rebuilt — discard the recording (a new image follows)
   auto result = driver_->scan();

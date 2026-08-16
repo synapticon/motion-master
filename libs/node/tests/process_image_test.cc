@@ -957,6 +957,38 @@ TEST(DeviceManagerProcessData, DroppingOneDeviceIsNotCountedAsABusFault) {
   EXPECT_TRUE(dm.processImageInfo().healthy);
 }
 
+TEST(DeviceManagerProcessData, ADropAndAClimbInOneCallDoNotNetOut) {
+  // One call can carry both: {1, 2} -> SAFE-OP with device 1 in OP (dropping, 3 -> 1) and device 2
+  // in PRE-OP (climbing, 0 -> 1). Netted across the bus those cancel to 4 -> 2, a figure the bus
+  // does not answer until the climbing device arrives — so every cycle in between would be counted
+  // as a fault. The expectation has to take the lower of the two per device, not per bus.
+  const auto kTimeout = std::chrono::milliseconds(10);
+  auto bus = makeTwoAxisOpBus();
+  bus->slaveStates[2] = static_cast<uint16_t>(EtherCatState::PreOp);
+  bus->wkc = 3;  // only device 1 is exchanging
+  FakeBus* busPtr = bus.get();
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  dm.exchangeProcessData();
+  ASSERT_EQ(dm.processImageInfo().shortWkcCycles, 0u);
+
+  // Device 1 leaves at once; device 2 has not arrived yet, so the bus answers 1 for most of the
+  // transition and only reaches 2 at the end.
+  busPtr->whileTransitioning = [&] {
+    busPtr->slaveStates[1] = static_cast<uint16_t>(EtherCatState::SafeOp);
+    busPtr->wkc = 1;
+    dm.exchangeProcessData();
+    dm.exchangeProcessData();
+  };
+  ASSERT_TRUE(dm.transitionToState({1, 2}, EtherCatState::SafeOp, kTimeout).has_value());
+  busPtr->whileTransitioning = nullptr;
+
+  EXPECT_EQ(dm.processImageInfo().shortWkcCycles, 0u);
+}
+
 TEST(DeviceManagerProcessData, FailedObjectDictionaryReadIsAttemptedOncePerScan) {
   // The CoE mailbox is live from PRE-OP up, so the automatic read is reached on entry to PRE-OP,
   // SAFE-OP and OP alike. A bus that cannot answer the enumeration will not answer it three

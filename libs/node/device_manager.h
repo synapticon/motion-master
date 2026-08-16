@@ -834,13 +834,19 @@ class DeviceManager {
   std::expected<std::vector<uint16_t>, std::string> resolveTargets(
       const std::vector<uint16_t>& positions) const;
 
-  /// @brief Sums each non-errored device's working-counter contribution, taking the devices in
-  ///        @p anticipated to be in @p anticipatedState rather than in the state the bus reports.
+  /// @brief Sums each non-errored device's working-counter contribution, counting a device in
+  ///        @p transitioning for the *lower* of where it is and the @p target it is being
+  ///        commanded to.
   ///
-  /// The whole of the expectation arithmetic lives here so the live figure and the anticipated one
-  /// cannot drift apart. With an empty @p anticipated it is simply the live figure.
-  int expectedWkcAssuming(std::span<const uint16_t> anticipated,
-                          std::optional<mm::comm::EtherCatState> anticipatedState) const;
+  /// The whole of the expectation arithmetic lives here so the live figure and the mid-transition
+  /// one cannot drift apart. With an empty @p transitioning it is simply the live figure.
+  ///
+  /// The lower of the two per device, not per bus: one call can carry a drop and a climb at once
+  /// (`{1, 2} -> SAFE-OP` with 1 in OP and 2 in PRE-OP), and there the two would net out to a
+  /// figure the bus does not reach until the climbing device arrives — counting the seconds in
+  /// between as a fault, which is the very thing this exists to prevent.
+  int expectedWkcDuring(std::span<const uint16_t> transitioning,
+                        std::optional<mm::comm::EtherCatState> target) const;
 
   /// @brief Recomputes the expected working counter from the devices' current AL states and
   ///        PDO presence. Called after configure and after each state transition.

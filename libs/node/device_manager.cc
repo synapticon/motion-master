@@ -769,9 +769,8 @@ std::expected<std::vector<uint16_t>, std::string> DeviceManager::resolveTargets(
   return positions;
 }
 
-int DeviceManager::expectedWkcAssuming(
-    std::span<const uint16_t> anticipated,
-    std::optional<mm::comm::EtherCatState> anticipatedState) const {
+int DeviceManager::expectedWkcDuring(std::span<const uint16_t> transitioning,
+                                     std::optional<mm::comm::EtherCatState> target) const {
   // Sum each non-errored device's working-counter contribution for its AL state and PDO presence.
   // The protocol rule (how outputs/inputs and SAFE-OP/OP map to a WKC increment) lives in the comm
   // layer; here we only know each device's state and whether it maps any PDO, so the figure tracks
@@ -785,27 +784,33 @@ int DeviceManager::expectedWkcAssuming(
     if (mm::comm::alHasError(status)) {
       continue;  // error indicator set — treat as not contributing
     }
-    // A device we are about to command counts for where it is going, not where it still is. An
-    // errored device is left out either way: a transition is not a promise that the error clears.
-    const bool isAnticipated =
-        anticipatedState &&
-        std::ranges::find(anticipated, device.slavePosition()) != anticipated.end();
-    const auto state = isAnticipated ? *anticipatedState : mm::comm::alState(status);
-    expected += mm::comm::workingCounterContribution(state, device.flatPdoMapping().outputBits > 0,
-                                                     device.flatPdoMapping().inputBits > 0);
+    const bool hasOutputs = device.flatPdoMapping().outputBits > 0;
+    const bool hasInputs = device.flatPdoMapping().inputBits > 0;
+    int contribution =
+        mm::comm::workingCounterContribution(mm::comm::alState(status), hasOutputs, hasInputs);
+    // A device being commanded counts for the lower of where it is and where it is going. Down is
+    // immediate — it stops answering the moment it leaves — while up is not true until it arrives,
+    // and an errored device is left out either way: a transition is not a promise the error clears.
+    if (target && std::ranges::find(transitioning, device.slavePosition()) != transitioning.end()) {
+      contribution = std::min(contribution,
+                              mm::comm::workingCounterContribution(*target, hasOutputs, hasInputs));
+    }
+    expected += contribution;
   }
   return expected;
 }
 
 void DeviceManager::updateExpectedWkc() {
-  pd_->expectedWkc.store(expectedWkcAssuming({}, std::nullopt), std::memory_order_relaxed);
+  pd_->expectedWkc.store(expectedWkcDuring({}, std::nullopt), std::memory_order_relaxed);
 }
 
 void DeviceManager::lowerExpectedWkc(std::span<const uint16_t> positions,
                                      mm::comm::EtherCatState target) {
-  const int anticipated = expectedWkcAssuming(positions, target);
-  if (anticipated < pd_->expectedWkc.load(std::memory_order_relaxed)) {
-    pd_->expectedWkc.store(anticipated, std::memory_order_relaxed);
+  // expectedWkcDuring already never predicts a rise, so this can only go down; the comparison is
+  // here so that stays true of the *store* even if the live figure is recomputed in between.
+  const int duringTransition = expectedWkcDuring(positions, target);
+  if (duringTransition < pd_->expectedWkc.load(std::memory_order_relaxed)) {
+    pd_->expectedWkc.store(duringTransition, std::memory_order_relaxed);
   }
 }
 

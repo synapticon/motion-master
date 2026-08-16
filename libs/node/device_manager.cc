@@ -769,24 +769,44 @@ std::expected<std::vector<uint16_t>, std::string> DeviceManager::resolveTargets(
   return positions;
 }
 
-void DeviceManager::updateExpectedWkc() {
-  // Sum each non-errored device's working-counter contribution for its current AL state and PDO
-  // presence. The protocol rule (how outputs/inputs and SAFE-OP/OP map to a WKC increment) lives
-  // in the comm layer; here we only know each device's live state and whether it maps any PDO, so
-  // the figure tracks a partially-operational bus — what a health check compares against.
+int DeviceManager::expectedWkcAssuming(
+    std::span<const uint16_t> anticipated,
+    std::optional<mm::comm::EtherCatState> anticipatedState) const {
+  // Sum each non-errored device's working-counter contribution for its AL state and PDO presence.
+  // The protocol rule (how outputs/inputs and SAFE-OP/OP map to a WKC increment) lives in the comm
+  // layer; here we only know each device's state and whether it maps any PDO, so the figure tracks
+  // a partially-operational bus — what a health check compares against.
   int expected = 0;
-  if (driver_) {
-    for (const auto& device : devices_) {
-      const uint16_t status = driver_->slaveState(device.slavePosition());
-      if (mm::comm::alHasError(status)) {
-        continue;  // error indicator set — treat as not contributing
-      }
-      expected += mm::comm::workingCounterContribution(mm::comm::alState(status),
-                                                       device.flatPdoMapping().outputBits > 0,
-                                                       device.flatPdoMapping().inputBits > 0);
-    }
+  if (!driver_) {
+    return expected;
   }
-  pd_->expectedWkc.store(expected, std::memory_order_relaxed);
+  for (const auto& device : devices_) {
+    const uint16_t status = driver_->slaveState(device.slavePosition());
+    if (mm::comm::alHasError(status)) {
+      continue;  // error indicator set — treat as not contributing
+    }
+    // A device we are about to command counts for where it is going, not where it still is. An
+    // errored device is left out either way: a transition is not a promise that the error clears.
+    const bool isAnticipated =
+        anticipatedState &&
+        std::ranges::find(anticipated, device.slavePosition()) != anticipated.end();
+    const auto state = isAnticipated ? *anticipatedState : mm::comm::alState(status);
+    expected += mm::comm::workingCounterContribution(state, device.flatPdoMapping().outputBits > 0,
+                                                     device.flatPdoMapping().inputBits > 0);
+  }
+  return expected;
+}
+
+void DeviceManager::updateExpectedWkc() {
+  pd_->expectedWkc.store(expectedWkcAssuming({}, std::nullopt), std::memory_order_relaxed);
+}
+
+void DeviceManager::lowerExpectedWkc(std::span<const uint16_t> positions,
+                                     mm::comm::EtherCatState target) {
+  const int anticipated = expectedWkcAssuming(positions, target);
+  if (anticipated < pd_->expectedWkc.load(std::memory_order_relaxed)) {
+    pd_->expectedWkc.store(anticipated, std::memory_order_relaxed);
+  }
 }
 
 std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transitionToState(
@@ -871,6 +891,9 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
             "Re-map pauses the whole bus — dropping {} staying OP device(s) to SAFE-OP first to "
             "avoid a sync-manager watchdog fault",
             opStayers.size());
+        // These devices keep exchanging as they drop, so the expectation has to come down with
+        // them or the drop we just chose to perform is counted against the bus.
+        lowerExpectedWkc(opStayers, mm::comm::EtherCatState::SafeOp);
         driver_->transitionToState(opStayers, std::nullopt, mm::comm::EtherCatState::SafeOp,
                                    timeout);
       }
@@ -910,6 +933,10 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
 
   spdlog::debug("transitionToState -> 0x{:02X} for {} device(s)", static_cast<int>(targetState),
                 targets.size());
+  // A drop that leaves other devices exchanging keeps the image published, so the RT loop runs
+  // throughout the seconds this call takes. Bring the expectation down first: the targets stop
+  // answering the moment they leave, and updateExpectedWkc below only catches up once they have.
+  lowerExpectedWkc(targets, targetState);
   driver_->transitionToState(targets, std::nullopt, targetState, timeout);
 
   // The driver call only logs failures, so read the settled state back and return it.
@@ -981,10 +1008,13 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
       }
       if (auto r = device->initializeParameters(/*readValues=*/false); !r) {
         // Names the state actually reached: the CoE mailbox is live from PRE-OP up, so this block
-        // runs on entry to SAFE-OP and OP too, and a failure that keeps parameters empty is retried
-        // on each of them. Reporting "PRE-OP" for all three made a repeat read look like a stray.
-        spdlog::warn("Device {}: object-dictionary read on reaching {} failed: {}",
-                     info.slavePosition, mm::comm::toString(targetState), r.error());
+        // runs on entry to SAFE-OP and OP too. It also says that this was the only automatic
+        // attempt and how to ask for another, because that is the one thing the device cannot
+        // convey afterwards — from here on it simply looks like a device with no parameters.
+        spdlog::warn(
+            "Device {}: object-dictionary read on reaching {} failed: {}. It will not be "
+            "attempted again automatically — use POST /api/devices/{}/parameters/init to retry",
+            info.slavePosition, mm::comm::toString(targetState), r.error(), info.slavePosition);
       }
     }
   }

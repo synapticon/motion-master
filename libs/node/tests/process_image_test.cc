@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -133,7 +134,13 @@ class FakeBus : public FieldbusDriver {
                                             std::span<const uint8_t>) override {
     return {};
   }
+  int odReadCalls = 0;  // how many times the enumeration was attempted
+  std::string odError;  // non-empty makes every enumeration fail
   std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
+    ++odReadCalls;
+    if (!odError.empty()) {
+      return std::unexpected(odError);
+    }
     return ods;
   }
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
@@ -151,9 +158,18 @@ class FakeBus : public FieldbusDriver {
                                                  std::span<const uint8_t>) override {
     return {};
   }
+  // Runs while the transition is "in progress", standing in for the seconds a real one takes. It
+  // is the only way a test can observe what the RT loop sees mid-transition, which is where the
+  // working-counter expectation has to already be correct.
+  std::function<void()> whileTransitioning;
+
   void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
                          std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
-                         std::function<void()>, std::function<bool()>) override {}
+                         std::function<void()>, std::function<bool()>) override {
+    if (whileTransitioning) {
+      whileTransitioning();
+    }
+  }
 };
 
 // Programs a 6-byte-per-direction CiA402-style mapping: controlword + target position out,
@@ -881,6 +897,131 @@ TEST(DeviceManagerProcessData, SubsetDownKeepsOthersExchangingAndRejoinRemaps) {
   ASSERT_TRUE(dm.transitionToState({2}, EtherCatState::SafeOp, kTimeout).has_value());
   EXPECT_TRUE(dm.processDataConfigured());
   EXPECT_EQ(dm.processImageInfo().generations, 2u);
+}
+
+// Builds two OP devices exchanging a whole-bus image, each contributing 3 to the working counter.
+std::unique_ptr<FakeBus> makeTwoAxisOpBus() {
+  auto bus = std::make_unique<FakeBus>();
+  programMapping(*bus);
+  bus->slaves = 2;
+  bus->layout.outputBytes = 12;
+  bus->layout.inputBytes = 12;
+  bus->layout.expectedWkc = 6;
+  bus->layout.slaves = {SlaveIo{.slavePosition = 1,
+                                .outputOffset = 0,
+                                .outputBytes = 6,
+                                .inputOffset = 0,
+                                .inputBytes = 6},
+                        SlaveIo{.slavePosition = 2,
+                                .outputOffset = 6,
+                                .outputBytes = 6,
+                                .inputOffset = 6,
+                                .inputBytes = 6}};
+  bus->slaveStates[1] = static_cast<uint16_t>(EtherCatState::Op);
+  bus->slaveStates[2] = static_cast<uint16_t>(EtherCatState::Op);
+  bus->wkc = 6;
+  return bus;
+}
+
+TEST(DeviceManagerProcessData, DroppingOneDeviceIsNotCountedAsABusFault) {
+  // A drop that leaves another device exchanging keeps the image published, so the RT loop runs
+  // for the whole multi-second transition — during which the dropping device has already stopped
+  // answering. The expectation must come down before the drop is commanded, or every one of those
+  // cycles is counted against the bus and reported as a fault the user caused deliberately.
+  const auto kTimeout = std::chrono::milliseconds(10);
+  auto bus = makeTwoAxisOpBus();
+  FakeBus* busPtr = bus.get();
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  dm.exchangeProcessData();
+  ASSERT_EQ(dm.processImageInfo().expectedWkc, 6);
+  ASSERT_EQ(dm.processImageInfo().shortWkcCycles, 0u);
+
+  // Device 2 leaves as soon as it is commanded, so the bus answers 3 for the rest of the
+  // transition — exactly what the RT loop sees while the driver drives the AL state.
+  busPtr->whileTransitioning = [&] {
+    busPtr->slaveStates[2] = static_cast<uint16_t>(EtherCatState::PreOp);
+    busPtr->wkc = 3;
+    dm.exchangeProcessData();
+    dm.exchangeProcessData();
+  };
+  ASSERT_TRUE(dm.transitionToState({2}, EtherCatState::PreOp, kTimeout).has_value());
+  busPtr->whileTransitioning = nullptr;
+
+  EXPECT_TRUE(dm.processDataConfigured());
+  EXPECT_EQ(dm.processImageInfo().expectedWkc, 3);
+  EXPECT_EQ(dm.processImageInfo().shortWkcCycles, 0u);
+  EXPECT_TRUE(dm.processImageInfo().healthy);
+}
+
+TEST(DeviceManagerProcessData, FailedObjectDictionaryReadIsAttemptedOncePerScan) {
+  // The CoE mailbox is live from PRE-OP up, so the automatic read is reached on entry to PRE-OP,
+  // SAFE-OP and OP alike. A bus that cannot answer the enumeration will not answer it three
+  // times, and on a large chain each pass costs minutes — so a failure latches, and the explicit
+  // read is the deliberate way back.
+  const auto kTimeout = std::chrono::milliseconds(10);
+  auto bus = makeCia402Bus();
+  bus->slaveStates[1] = static_cast<uint16_t>(EtherCatState::Init);
+  bus->odError = "the slave did not answer";
+  FakeBus* busPtr = bus.get();
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  busPtr->slaveStates[1] = static_cast<uint16_t>(EtherCatState::PreOp);
+  ASSERT_TRUE(dm.transitionToState({1}, EtherCatState::PreOp, kTimeout).has_value());
+  EXPECT_EQ(busPtr->odReadCalls, 1);
+
+  // Climbing further must not pay for the same failure again.
+  ASSERT_TRUE(dm.transitionToState({1}, EtherCatState::SafeOp, kTimeout).has_value());
+  busPtr->slaveStates[1] = static_cast<uint16_t>(EtherCatState::SafeOp);
+  ASSERT_TRUE(dm.transitionToState({1}, EtherCatState::Op, kTimeout).has_value());
+  EXPECT_EQ(busPtr->odReadCalls, 1);
+
+  // The device says so, which is the only way a client can tell it apart from one that genuinely
+  // has no parameters — and offer the retry.
+  const Device* device = dm.findDevice(1);
+  ASSERT_NE(device, nullptr);
+  EXPECT_TRUE(device->parametersUnavailable());
+  EXPECT_TRUE(nlohmann::json(*device).at("parametersUnavailable").get<bool>());
+
+  // An explicit read is the way back, and a successful one clears the flag.
+  busPtr->odError.clear();
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, /*readValues=*/false).has_value());
+  EXPECT_EQ(busPtr->odReadCalls, 2);
+  EXPECT_FALSE(device->parametersUnavailable());
+}
+
+TEST(DeviceManagerProcessData, CountsCyclesTheBusDidNotFullyAnswer) {
+  // The other half of the same rule: with no transition in play, a working counter below the
+  // expectation is a real fault and must be recorded — including after it has cleared, which is
+  // the whole reason the count exists beside the point-in-time `healthy` flag.
+  auto bus = makeTwoAxisOpBus();
+  FakeBus* busPtr = bus.get();
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  dm.exchangeProcessData();
+  ASSERT_EQ(dm.processImageInfo().shortWkcCycles, 0u);
+
+  busPtr->wkc = 4;  // a device stopped processing the frame — nobody asked it to
+  dm.exchangeProcessData();
+  dm.exchangeProcessData();
+  EXPECT_EQ(dm.processImageInfo().shortWkcCycles, 2u);
+  EXPECT_FALSE(dm.processImageInfo().healthy);
+
+  busPtr->wkc = 6;  // and it cleared
+  dm.exchangeProcessData();
+  EXPECT_TRUE(dm.processImageInfo().healthy);
+  EXPECT_EQ(dm.processImageInfo().shortWkcCycles, 2u);
+  EXPECT_GT(dm.processImageInfo().firstShortWkcUs, 0u);
+  EXPECT_GE(dm.processImageInfo().lastShortWkcUs, dm.processImageInfo().firstShortWkcUs);
 }
 
 TEST(DeviceManagerProcessData, RejectsIllegalAlStateTransitions) {

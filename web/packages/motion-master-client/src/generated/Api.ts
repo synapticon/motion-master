@@ -406,6 +406,11 @@ export class Api<
          * @example true
          */
         isCia402: boolean;
+        /**
+         * Whether an object-dictionary read for this device has failed since it was scanned. The automatic read on reaching a mailbox-active state is attempted once, so a device flagged here keeps an empty parameter list until `POST /api/devices/{slavePosition}/parameters/init` is called; that clears the flag on success.
+         * @example false
+         */
+        parametersUnavailable: boolean;
       },
       void
     >({
@@ -1936,6 +1941,11 @@ export class Api<
          * @example true
          */
         isCia402: boolean;
+        /**
+         * Whether an object-dictionary read for this device has failed since it was scanned. The automatic read on reaching a mailbox-active state is attempted once, so a device flagged here keeps an empty parameter list until `POST /api/devices/{slavePosition}/parameters/init` is called; that clears the flag on success.
+         * @example false
+         */
+        parametersUnavailable: boolean;
       }[],
       any
     >({

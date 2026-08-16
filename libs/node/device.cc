@@ -141,8 +141,13 @@ std::expected<void, std::string> Device::writeSii(std::span<const uint8_t> data)
 std::expected<void, std::string> Device::initializeParameters(bool readValues,
                                                               bool useCompleteAccess) {
   // One place to record the outcome, so every early return inside the enumeration is covered.
+  // Taken after the enumeration rather than around it: readParameterDefinitions takes
+  // parametersMutex_ itself, and it is not recursive.
   auto result = readParameterDefinitions(readValues, useCompleteAccess);
-  parametersUnavailable_ = !result.has_value();
+  {
+    std::lock_guard<std::mutex> lock(*parametersMutex_);
+    parametersUnavailable_ = !result.has_value();
+  }
   return result;
 }
 
@@ -436,6 +441,11 @@ void Device::readParameterValues(std::vector<DeviceParameter>& defs, bool useCom
 bool Device::hasParameters() const {
   std::lock_guard<std::mutex> lock(*parametersMutex_);
   return !parameters_.empty();
+}
+
+bool Device::parametersUnavailable() const {
+  std::lock_guard<std::mutex> lock(*parametersMutex_);
+  return parametersUnavailable_;
 }
 
 namespace {
@@ -1212,10 +1222,15 @@ std::expected<void, std::string> Device::writeParameter(uint16_t index, uint8_t 
 
 void to_json(nlohmann::json& j, const Device& d) {
   j = nlohmann::json{
-      {"slavePosition", d.slavePosition()}, {"name", d.name()},
-      {"productName", d.productName()},     {"vendorId", d.vendorId()},
-      {"productCode", d.productCode()},     {"revisionNumber", d.revisionNumber()},
-      {"serialNumber", d.serialNumber()},   {"isCia402", d.isCia402()},
+      {"slavePosition", d.slavePosition()},
+      {"name", d.name()},
+      {"productName", d.productName()},
+      {"vendorId", d.vendorId()},
+      {"productCode", d.productCode()},
+      {"revisionNumber", d.revisionNumber()},
+      {"serialNumber", d.serialNumber()},
+      {"isCia402", d.isCia402()},
+      {"parametersUnavailable", d.parametersUnavailable()},
   };
 }
 

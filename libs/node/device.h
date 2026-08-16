@@ -336,14 +336,18 @@ class Device {
   /// entry), both of which copy under the lock.
   bool hasParameters() const;
 
-  /// @brief Whether an @c initializeParameters call on this device has failed since it was scanned.
+  /// @brief Whether an @c initializeParameters call on this device has failed since it was scanned
+  ///        (thread-safe; no bus access).
   ///
   /// Set so the automatic read on reaching a mailbox-active state is attempted once rather than
   /// repeated on every later AL transition. A bus that cannot answer the enumeration does not
   /// answer it three times either, and paying for the discovery once is the difference between a
   /// slow bring-up and a very slow one. An explicit read through the API is unaffected — it calls
   /// @c initializeParameters directly and clears this on success.
-  bool parametersUnavailable() const { return parametersUnavailable_; }
+  ///
+  /// Served on the device's JSON so a client can offer that retry, since a device latched here
+  /// otherwise presents as one with no parameters and no way to tell why.
+  bool parametersUnavailable() const;
 
   /// @brief Returns all parameters sorted ascending by @c (index, subindex).
   ///
@@ -790,9 +794,11 @@ class Device {
   std::expected<void, std::string> readParameterDefinitions(bool readValues,
                                                             bool useCompleteAccess);
 
-  /// Whether an initializeParameters call has failed for this device. Written and read only on the
-  /// control plane (the automatic read runs under the exclusive bus lock, an explicit one under a
-  /// borrow), so it needs no synchronisation of its own.
+  /// Whether an initializeParameters call has failed for this device. Guarded by parametersMutex_,
+  /// which is also what guards the map the flag describes: the automatic read runs under
+  /// DeviceManager's busOperationMutex_ and an explicit one under a *shared* deviceSetMutex_, and
+  /// those two do not exclude each other — so an AL transition and POST .../parameters/init can
+  /// reach this at the same time.
   bool parametersUnavailable_ = false;
   std::unordered_map<uint32_t, DeviceParameter> parameters_;
   FlatPdoMapping flatPdoMapping_;

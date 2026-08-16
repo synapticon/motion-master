@@ -834,9 +834,32 @@ class DeviceManager {
   std::expected<std::vector<uint16_t>, std::string> resolveTargets(
       const std::vector<uint16_t>& positions) const;
 
+  /// @brief Sums each non-errored device's working-counter contribution, taking the devices in
+  ///        @p anticipated to be in @p anticipatedState rather than in the state the bus reports.
+  ///
+  /// The whole of the expectation arithmetic lives here so the live figure and the anticipated one
+  /// cannot drift apart. With an empty @p anticipated it is simply the live figure.
+  int expectedWkcAssuming(std::span<const uint16_t> anticipated,
+                          std::optional<mm::comm::EtherCatState> anticipatedState) const;
+
   /// @brief Recomputes the expected working counter from the devices' current AL states and
   ///        PDO presence. Called after configure and after each state transition.
   void updateExpectedWkc();
+
+  /// @brief Lowers the expectation to what the bus will answer once @p positions reach @p target,
+  ///        if that is less than what is expected now.
+  ///
+  /// Called *before* commanding a drop, and it is what keeps a deliberate transition from being
+  /// counted as a bus fault. A device commanded out of OP stops answering the moment it leaves,
+  /// while @c updateExpectedWkc only runs once the transition has settled — so without this the RT
+  /// loop spends the whole multi-second transition comparing the bus against an expectation that
+  /// still includes a device we told to stop, and @c shortWkcCycles fills up with our own doing.
+  ///
+  /// Only ever *lowers*. Raising the expectation before the devices have got there would make
+  /// every climb read as short instead, which is the same bug in the other direction; a climb is
+  /// covered by @c updateExpectedWkc afterwards, and a bus answering more than expected is not
+  /// counted at all.
+  void lowerExpectedWkc(std::span<const uint16_t> positions, mm::comm::EtherCatState target);
 
   /// @brief Unpublishes the process image and waits for any in-flight exchange cycle to finish.
   ///

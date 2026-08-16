@@ -505,7 +505,7 @@ paths:
                 type: object
                 required:
                   [slavePosition, name, productName, vendorId, productCode, revisionNumber,
-                   serialNumber, isCia402]
+                   serialNumber, isCia402, parametersUnavailable]
                 properties:
                   slavePosition:
                     type: integer
@@ -551,6 +551,15 @@ paths:
                       0x6040 and statusword 0x6041 present in its object dictionary). Gates the
                       CiA402 motion-control endpoints under /api/devices/{slavePosition}/cia402.
                     example: true
+                  parametersUnavailable:
+                    type: boolean
+                    description: >
+                      Whether an object-dictionary read for this device has failed since it was
+                      scanned. The automatic read on reaching a mailbox-active state is attempted
+                      once, so a device flagged here keeps an empty parameter list until
+                      `POST /api/devices/{slavePosition}/parameters/init` is called; that clears
+                      the flag on success.
+                    example: false
         "400":
           description: slavePosition is not a valid integer
         "404":
@@ -3063,7 +3072,7 @@ paths:
                   type: object
                   required:
                     [slavePosition, name, productName, vendorId, productCode, revisionNumber,
-                     serialNumber, isCia402]
+                     serialNumber, isCia402, parametersUnavailable]
                   properties:
                     slavePosition:
                       type: integer
@@ -3110,6 +3119,15 @@ paths:
                         CiA402 motion-control endpoints under
                         /api/devices/{slavePosition}/cia402.
                       example: true
+                    parametersUnavailable:
+                      type: boolean
+                      description: >
+                        Whether an object-dictionary read for this device has failed since it was
+                        scanned. The automatic read on reaching a mailbox-active state is attempted
+                        once, so a device flagged here keeps an empty parameter list until
+                        `POST /api/devices/{slavePosition}/parameters/init` is called; that clears
+                        the flag on success.
+                      example: false
   /api/process-image:
     get:
       summary: Inspect the published EtherCAT process image

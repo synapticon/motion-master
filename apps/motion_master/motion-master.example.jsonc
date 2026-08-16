@@ -49,8 +49,31 @@
     "mailboxStatusFmmu": false
   },
 
-  // Log verbosity: trace | debug | info | warning | error | critical | off
-  "logLevel": "info",
+  // Logging. The console and GET /api/log share "level"; the log file keeps its own, so the
+  // terminal stays readable while the file holds the detail a support request needs.
+  "logging": {
+    // Console and GET /api/log verbosity: trace | debug | info | warning | error | critical | off
+    "level": "info",
+
+    // The rotating log file — the only copy that survives a crash or a restart. The console window
+    // and the in-memory ring behind GET /api/log both die with the process.
+    "file": {
+      "enabled": true,
+
+      // Verbosity of the file, independent of "level" above. Same values.
+      "level": "debug",
+
+      // "" = a "logs" subdirectory of the user-cache root, which puts the file under
+      // /api/user-cache — downloadable from the Console's Storage page instead of only from a
+      // shell on the host. Set an explicit path to write elsewhere; the API cannot reach it there.
+      "directory": "",
+
+      // Rotate at this size, keeping this many rotated files beside the active one. Disk use is
+      // bounded by maxSizeMb x (maxFiles + 1) — 60 MB with these defaults.
+      "maxSizeMb": 10,
+      "maxFiles": 5
+    }
+  },
 
   // Real-time cyclic loop.
   "gameLoop": {

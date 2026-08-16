@@ -32,5 +32,7 @@
     "cpuAffinity": {{ motion_master_cpu_affinity }}
   },
 
-  "logLevel": "{{ motion_master_log_level }}"
+  "logging": {
+    "level": "{{ motion_master_log_level }}"
+  }
 }

@@ -301,7 +301,7 @@ Every setting lives in a JSONC config file — comments are allowed, all keys ar
 | --- | --- |
 | `server` | `httpPort` (61447), `wsPort` (62281), `corsOrigin` |
 | `fieldbus` | `driver` + `adapter` to initialise at startup — omit the block to wait for `POST /api/init` instead. Also `mailboxStatusFmmu`, which must stay `false` on TI PRU-ICSS ESCs |
-| `logLevel` | `trace` … `critical` \| `off` (default `info`) |
+| `logging` | `level` for the console and `GET /api/log` (`trace` … `critical` \| `off`, default `info`), and `file` — the rotating log file that outlives the process: `enabled`, its own `level` (default `debug`, so the terminal stays readable while the file keeps the detail), `directory` (default: a `logs` subdirectory of the user-cache root, so it is downloadable from the Console), `maxSizeMb` and `maxFiles` |
 | `gameLoop` | `periodUs` — the real-time cycle period (1000 = 1 ms; the Windows release ships 4000) |
 | `recorder` | `capacity` of the lossless process-data ring in cycles (default 300000 ≈ 5 min at 1 ms for one drive, ≈ 38 MB) and `dumpDir` for `.mmpd` dumps |
 | `parameterCache` | On-disk cache of CoE object-dictionary *definitions* (never values) keyed by vendor/product/revision — `enabled`, `cacheAllVendors`, `directory` |

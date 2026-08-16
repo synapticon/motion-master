@@ -19,6 +19,18 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **Motion Master now writes a log file.** Until now the log existed in two places that both die with the process — the console window and an in-memory ring served by `GET /api/log` — so after a crash, or a restart, or on any Windows machine started from a console window, there was simply nothing to attach to a bug report. A rotating file now keeps a copy: `logs/motion-master.log` under the user-cache root, 10 MB × 5 files by default, which puts it in `GET /api/user-cache` and so a download away on the Console's **Storage → User Cache** page.
+  - **The file keeps its own verbosity, `debug` by default, while the console stays at `info`.** These are the two things you want at once and they used to be a single switch: a terminal you can read, and a log with enough detail to diagnose from. Both are under the new `logging` block.
+  - A directory it cannot write is not fatal — the file is skipped with a warning and everything else runs as before.
+  - Startup now records which config file is in effect and where the log is being written, neither of which was recoverable from a log afterwards.
+- **The Server → Log page has a Download button**, and says what it is giving you: the console-level buffer for the current run only. It points at the log file for the full `debug` history and for anything from a previous run.
+
+### Changed
+
+- **`logLevel` moved into the new `logging` block as `logging.level`.** Leaving it at the top level while the file settings sat in a block of their own would have split one concern across two places. Update `"logLevel": "info"` to `"logging": { "level": "info" }`.
+
 ## [6.0.0-alpha.76] - 2026-08-16
 
 ### Added

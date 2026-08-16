@@ -133,11 +133,49 @@ struct ParametersConfig {
   bool useCompleteAccess = true;
 };
 
+/// @brief @c "logging.file" block — the rotating log file.
+///
+/// The console and the in-memory ring behind @c GET @c /api/log both die with the process, which
+/// leaves nothing to attach to a bug report after a crash or a restart — and on Windows, where the
+/// binary is commonly run from a console window rather than under a service manager, nothing
+/// captures stdout either. This is the copy that survives.
+///
+/// It lives under the user-cache root by default, which is what makes it reachable: everything
+/// under that root is listed by @c GET @c /api/user-cache, so the file can be downloaded from the
+/// Console's Storage page rather than found on disk over someone's shoulder.
+struct FileLoggingConfig {
+  /// Write the log to a file at all. Disable for a read-only or air-gapped install; the console and
+  /// @c GET @c /api/log are unaffected.
+  bool enabled = true;
+  /// Verbosity of the *file*, independent of @c LoggingConfig::level so the console can stay
+  /// readable while the file keeps the detail a support request needs. Defaults to @c debug for
+  /// that reason. The logger itself runs at whichever of the two is more verbose, so this cannot
+  /// be starved by the console setting.
+  std::string level = "debug";
+  /// "" = a @c "logs" subdirectory of the user-cache root (so setting @c userCache.directory moves
+  /// the log with it, and it stays under @c /api/user-cache). Set to write elsewhere — a path
+  /// outside that root is not served by the API, so the file must then be fetched from the host.
+  std::string directory;
+  /// Rotate once the active file reaches this size. Total disk use is bounded by
+  /// @c maxSizeMb × (@c maxFiles + 1) — the active file plus its rotated siblings.
+  uint32_t maxSizeMb = 10;
+  /// How many rotated files to keep beside the active one.
+  uint32_t maxFiles = 5;
+};
+
+/// @brief @c "logging" block — verbosity and the log file.
+struct LoggingConfig {
+  /// Verbosity of the console and of the in-memory ring served by @c GET @c /api/log.
+  /// trace | debug | info | warning | error | critical | off.
+  std::string level = "info";
+  FileLoggingConfig file;
+};
+
 /// @brief The whole config file. Top-level keys map to these members.
 struct Config {
   ServerConfig server;
   FieldbusConfig fieldbus;
-  std::string logLevel = "info";  ///< trace | debug | info | warning | error | critical | off.
+  LoggingConfig logging;
   TlsConfig tls;
   GameLoopConfig gameLoop;
   RecorderConfig recorder;
@@ -157,13 +195,16 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParameterCacheConfig, enabled, c
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(UserCacheConfig, directory)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParametersConfig, readObjectDictionaryOnPreop,
                                                 useCompleteAccess)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logLevel, tls, gameLoop,
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FileLoggingConfig, enabled, level, directory,
+                                                maxSizeMb, maxFiles)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(LoggingConfig, level, file)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logging, tls, gameLoop,
                                                 recorder, parameterCache, userCache, parameters)
 
 /// @brief Deserialises a parsed JSONC document into a @c Config, applying defaults for absent keys.
 ///
 /// Pure: no file I/O, no process exit. Unknown keys are ignored (forward-compatible). nlohmann
-/// validates value *types*; this adds the enum and range checks it cannot (@c logLevel,
+/// validates value *types*; this adds the enum and range checks it cannot (@c logging.level,
 /// @c fieldbus.driver; @c gameLoop.periodUs and @c recorder.capacity must be > 0).
 ///
 /// @param doc A parsed JSON value (must be an object).

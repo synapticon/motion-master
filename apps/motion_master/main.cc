@@ -1,7 +1,9 @@
 #include <curl/curl.h>
+#include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
@@ -57,9 +59,57 @@ int main(int argc, char** argv) {
       std::make_shared<spdlog::logger>("", spdlog::sinks_init_list{consoleSink, ringSink}));
 
   auto opts = parseOptions(argc, argv);
-  spdlog::set_level(spdlog::level::from_str(opts.config.logLevel));
+
+  // Where everything Motion Master keeps on this machine's disk lives. Resolved here, before the
+  // log file that is the first thing to go under it, so the user-cache store, the recorder's dumps
+  // and the log cannot drift apart: pointing `userCache.directory` somewhere else moves all three,
+  // and each stays listable through /api/user-cache. An explicit per-feature path still wins.
+  const std::filesystem::path userCacheRoot =
+      opts.config.userCache.directory.empty()
+          ? mm::core::userCacheDir()
+          : std::filesystem::path{opts.config.userCache.directory};
+
+  // The console and the ring share the configured level; the file keeps its own, so the terminal
+  // can stay readable while the file holds the detail a support request needs. The logger gates
+  // before any sink does, so it has to run at whichever of the two is more verbose — otherwise the
+  // console setting would silently starve the file.
+  const auto consoleLevel = spdlog::level::from_str(opts.config.logging.level);
+  consoleSink->set_level(consoleLevel);
+  ringSink->set_level(consoleLevel);
+  auto loggerLevel = consoleLevel;
+  std::filesystem::path logFile;
+  if (opts.config.logging.file.enabled) {
+    const auto& fileConfig = opts.config.logging.file;
+    const std::filesystem::path logDir = fileConfig.directory.empty()
+                                             ? userCacheRoot / "logs"
+                                             : std::filesystem::path{fileConfig.directory};
+    logFile = logDir / "motion-master.log";
+    // spdlog signals a sink it cannot open by throwing, which is the one place this codebase has to
+    // catch rather than return — and it must not be fatal: a read-only or unwritable directory is a
+    // reason to run without a log file, not a reason not to run. The console and GET /api/log are
+    // unaffected either way.
+    try {
+      auto fileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+          logFile.string(), static_cast<std::size_t>(fileConfig.maxSizeMb) * 1024 * 1024,
+          fileConfig.maxFiles);
+      const auto fileLevel = spdlog::level::from_str(fileConfig.level);
+      fileSink->set_level(fileLevel);
+      spdlog::default_logger()->sinks().push_back(std::move(fileSink));
+      loggerLevel = std::min(loggerLevel, fileLevel);
+    } catch (const spdlog::spdlog_ex& e) {
+      logFile.clear();
+      spdlog::warn("Log file disabled — could not open {}: {}", (logDir).string(), e.what());
+    }
+  }
+  spdlog::set_level(loggerLevel);
 
   spdlog::info("Motion Master v{}", mm::core::kVersion);
+  // Named once the file sink is up, so a support log says which config was in effect and where the
+  // log itself is — neither of which is recoverable from the log's contents afterwards.
+  spdlog::info("Config: {}", opts.configPath.empty() ? "built-in defaults" : opts.configPath);
+  if (!logFile.empty()) {
+    spdlog::info("Logging to {} at level {}", logFile.string(), opts.config.logging.file.level);
+  }
 
   // Refuse to start a second instance: exactly one Motion Master per machine may own the EtherCAT
   // NIC, the RT loop, and the HTTP/WebSocket ports. Held for the whole of main() (the OS releases
@@ -82,15 +132,6 @@ int main(int argc, char** argv) {
     CurlGlobal(const CurlGlobal&) = delete;
     CurlGlobal& operator=(const CurlGlobal&) = delete;
   } curlGlobal;
-
-  // Where everything Motion Master keeps on this machine's disk lives. Resolved once, here, so the
-  // user-cache store and the recorder's dump directory cannot drift apart: pointing
-  // `userCache.directory` somewhere else moves the dumps with it, and they stay listable through
-  // /api/user-cache. An explicit `recorder.dumpDir` still wins for anyone who wants them elsewhere.
-  const std::filesystem::path userCacheRoot =
-      opts.config.userCache.directory.empty()
-          ? mm::core::userCacheDir()
-          : std::filesystem::path{opts.config.userCache.directory};
 
   mm::node::DeviceManager deviceManager;
   // The parameter cache is a process-level setting (its directory comes from the config file, like

@@ -189,7 +189,7 @@ paths:
         defaults — the same `Config` the server booted with. The config file is either the one passed
         via `--config` or a `motion-master.jsonc` auto-discovered next to the executable (`--config`
         wins). Read-only; changing it requires editing the config file and restarting. The shape
-        mirrors the config file (server, fieldbus, logLevel, tls, gameLoop, recorder, parameterCache,
+        mirrors the config file (server, fieldbus, logging, tls, gameLoop, recorder, parameterCache,
         parameters).
       operationId: getStartedConfig
       responses:
@@ -203,7 +203,7 @@ paths:
                 example:
                   server: { bindAddress: "127.0.0.1", httpPort: 61447, wsPort: 62281, corsOrigin: "https://motion-master.synapticon.com" }
                   fieldbus: { driver: "", adapter: "", mailboxStatusFmmu: false }
-                  logLevel: "info"
+                  logging: { level: "info", file: { enabled: true, level: "debug", directory: "", maxSizeMb: 10, maxFiles: 5 } }
                   tls: { certPath: "", keyPath: "", autoUpdate: true }
                   gameLoop: { periodUs: 1000 }
                   recorder: { capacity: 300000, dumpDir: "" }

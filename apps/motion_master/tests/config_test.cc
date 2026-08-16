@@ -13,7 +13,14 @@ TEST(ConfigTest, EmptyObjectYieldsDefaults) {
   EXPECT_EQ(r->server.httpPort, 61447);
   EXPECT_EQ(r->server.wsPort, 62281);
   EXPECT_EQ(r->server.corsOrigin, "https://motion-master.synapticon.com");
-  EXPECT_EQ(r->logLevel, "info");
+  EXPECT_EQ(r->logging.level, "info");
+  // The file keeps its own, more verbose level on purpose — the console stays readable while the
+  // file holds what a support request needs.
+  EXPECT_TRUE(r->logging.file.enabled);
+  EXPECT_EQ(r->logging.file.level, "debug");
+  EXPECT_TRUE(r->logging.file.directory.empty());
+  EXPECT_EQ(r->logging.file.maxSizeMb, 10u);
+  EXPECT_EQ(r->logging.file.maxFiles, 5u);
   EXPECT_TRUE(r->tls.autoUpdate);
   EXPECT_TRUE(r->tls.certPath.empty());
   EXPECT_TRUE(r->tls.keyPath.empty());
@@ -54,8 +61,8 @@ TEST(ConfigTest, PartialOverrideKeepsOtherDefaults) {
   auto r = parseConfig(json::parse(R"({"server": {"httpPort": 8080}})"));
   ASSERT_TRUE(r.has_value()) << r.error();
   EXPECT_EQ(r->server.httpPort, 8080);
-  EXPECT_EQ(r->server.wsPort, 62281);  // sibling key untouched
-  EXPECT_EQ(r->logLevel, "info");      // sibling section untouched
+  EXPECT_EQ(r->server.wsPort, 62281);   // sibling key untouched
+  EXPECT_EQ(r->logging.level, "info");  // sibling section untouched
 }
 
 TEST(ConfigTest, NestedPartialFieldbus) {
@@ -99,7 +106,28 @@ TEST(ConfigTest, EmptyBindAddressRejected) {
 }
 
 TEST(ConfigTest, InvalidLogLevelRejected) {
-  EXPECT_FALSE(parseConfig(json::parse(R"({"logLevel": "verbose"})")).has_value());
+  EXPECT_FALSE(parseConfig(json::parse(R"({"logging": {"level": "verbose"}})")).has_value());
+  // The file's level is validated in its own right — it is not derived from the console's.
+  EXPECT_FALSE(
+      parseConfig(json::parse(R"({"logging": {"file": {"level": "verbose"}}})")).has_value());
+}
+
+TEST(ConfigTest, InvalidLogRotationRejected) {
+  // Zero either way makes rotation meaningless: no size to fill, or nowhere to rotate to.
+  EXPECT_FALSE(parseConfig(json::parse(R"({"logging": {"file": {"maxSizeMb": 0}}})")).has_value());
+  EXPECT_FALSE(parseConfig(json::parse(R"({"logging": {"file": {"maxFiles": 0}}})")).has_value());
+}
+
+TEST(ConfigTest, PartialFileLoggingKeepsSiblingDefaults) {
+  // Two levels of nesting, so this pins that _WITH_DEFAULT recurses: naming one key of
+  // logging.file must not reset the others, nor logging.level above them.
+  auto r = parseConfig(json::parse(R"({"logging": {"file": {"maxFiles": 2}}})"));
+  ASSERT_TRUE(r.has_value()) << r.error();
+  EXPECT_EQ(r->logging.file.maxFiles, 2u);
+  EXPECT_EQ(r->logging.file.maxSizeMb, 10u);
+  EXPECT_EQ(r->logging.file.level, "debug");
+  EXPECT_TRUE(r->logging.file.enabled);
+  EXPECT_EQ(r->logging.level, "info");
 }
 
 TEST(ConfigTest, InvalidDriverRejected) {

@@ -29,9 +29,21 @@ std::expected<Config, std::string> parseConfig(const nlohmann::json& doc) {
 
   static constexpr std::array kLevels{"trace", "debug",    "info", "warning",
                                       "error", "critical", "off"};
-  if (std::find(kLevels.begin(), kLevels.end(), config.logLevel) == kLevels.end()) {
+  if (std::find(kLevels.begin(), kLevels.end(), config.logging.level) == kLevels.end()) {
     return std::unexpected(
-        "logLevel must be one of: trace, debug, info, warning, error, critical, off");
+        "logging.level must be one of: trace, debug, info, warning, error, critical, off");
+  }
+  if (std::find(kLevels.begin(), kLevels.end(), config.logging.file.level) == kLevels.end()) {
+    return std::unexpected(
+        "logging.file.level must be one of: trace, debug, info, warning, error, critical, off");
+  }
+  // Both must be positive or the rotation is meaningless: a zero size would rotate on every line,
+  // and zero files leaves nowhere to rotate to.
+  if (config.logging.file.maxSizeMb == 0) {
+    return std::unexpected("logging.file.maxSizeMb must be greater than 0");
+  }
+  if (config.logging.file.maxFiles == 0) {
+    return std::unexpected("logging.file.maxFiles must be greater than 0");
   }
 
   if (!config.fieldbus.driver.empty()) {

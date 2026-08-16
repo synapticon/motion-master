@@ -246,8 +246,8 @@ A React PWA at `https://motion-master.synapticon.com` provides UI for the above:
   system-wide search path. This is what lets the Windows release ship a config presetting a
   4 ms cycle out of the box.
 - **What is configurable** — HTTP and WebSocket ports plus the CORS origin (`server`), the
-  fieldbus driver and adapter to bring up at startup (`fieldbus`), log verbosity
-  (`logLevel`), the RT cycle period (`gameLoop`), recorder ring depth and dump directory
+  fieldbus driver and adapter to bring up at startup (`fieldbus`), log verbosity and the
+  rotating log file (`logging`), the RT cycle period (`gameLoop`), recorder ring depth and dump directory
   (`recorder`), the on-disk parameter-definition cache (`parameterCache`), object-dictionary
   read behaviour (`parameters`), and TLS paths plus cert auto-update (`tls`). See
   [`README.md`](./README.md#configuration) for the annotated block reference, and

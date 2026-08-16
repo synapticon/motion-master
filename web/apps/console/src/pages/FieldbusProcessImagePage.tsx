@@ -5,6 +5,7 @@ import PageHeader from '../components/PageHeader'
 import ProcessImageExplainer from '../components/ProcessImageExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
+import { formatEpochUs } from '../utils/format'
 import { btnOutline } from '../utils/styles'
 
 function Stat({
@@ -204,7 +205,7 @@ export default function FieldbusProcessImagePage() {
                 Working-counter health does not apply while the bus is idle.
               </Callout>
             )}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               <Stat
                 label="Output bytes"
                 value={String(img.outputBytes)}
@@ -232,7 +233,32 @@ export default function FieldbusProcessImagePage() {
                 }
                 hint="EtherCAT working counter: last observed vs expected. Each slave adds 2 for a successful write (outputs) and 1 for a successful read (inputs), so a drive doing both adds 3. A match means every device exchanged; a shortfall means one dropped out. Shows Idle when no device is in SAFE-OP/OP."
               />
+              <Stat
+                label="Short cycles"
+                value={img.shortWkcCycles.toLocaleString()}
+                tone={img.shortWkcCycles > 0 ? 'text-status-bad' : 'text-status-good'}
+                hint="Cycles that came back with a working counter below the expected value since this image was published. The reading to the left describes the most recent cycle only, so a fault that has already cleared leaves it looking healthy; this count keeps it."
+              />
             </div>
+
+            {img.shortWkcCycles > 0 && (
+              <Callout variant="warning">
+                <p>
+                  <strong>{img.shortWkcCycles.toLocaleString()}</strong>{' '}
+                  {img.shortWkcCycles === 1 ? 'cycle' : 'cycles'} came back with a working counter
+                  below the expected value since this image was published — on each of them, at
+                  least one device did not process the frame. First at{' '}
+                  <span className="font-mono">{formatEpochUs(img.firstShortWkcUs)}</span>, last at{' '}
+                  <span className="font-mono">{formatEpochUs(img.lastShortWkcUs)}</span>.
+                </p>
+                <p className="mt-1.5 text-grey-600">
+                  Cycles a device missed while you were deliberately taking it out of SAFE-OP/OP are
+                  not counted here, so this is a fault the bus produced on its own — a cable, a
+                  connector, or a device dropping out. The count is cleared when the image is next
+                  rebuilt.
+                </p>
+              </Callout>
+            )}
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
               <MappingTable title="Outputs · RxPDO" entries={img.outputs} deviceName={deviceName} />

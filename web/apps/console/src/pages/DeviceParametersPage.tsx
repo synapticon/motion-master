@@ -1,6 +1,7 @@
 import { memo, useState } from 'react'
 import { useParams } from 'react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import Callout from '../components/Callout'
 import Checkbox from '../components/Checkbox'
 import DevicePageHeader from '../components/DevicePageHeader'
 import HexDecInput from '../components/HexDecInput'
@@ -532,6 +533,19 @@ export default function DeviceParametersPage() {
     refetchInterval: (query) => ((query.state.data?.data?.length ?? 0) > 0 ? false : 2000),
   })
 
+  // The device carries parametersUnavailable — whether the automatic read on reaching PRE-OP has
+  // failed. Without it an empty list is ambiguous: a device that could not answer looks exactly
+  // like one that has not been asked yet, and the automatic read is attempted only once, so
+  // waiting for it to appear is waiting for something that will never happen. Polled on the same
+  // rule as the list, since either can settle after this page loads.
+  const deviceQuery = useQuery({
+    queryKey: ['device', slavePosition],
+    queryFn: () => api.getDevice(slavePosition),
+    retry: false,
+    refetchInterval: (query) => (query.state.data?.data?.parametersUnavailable ? false : 2000),
+  })
+  const parametersUnavailable = deviceQuery.data?.data?.parametersUnavailable === true
+
   const initMutation = useMutation({
     mutationFn: () =>
       bulkTiming.measure(() => api.initializeDeviceParameters(slavePosition, { readValues })),
@@ -897,7 +911,22 @@ export default function DeviceParametersPage() {
               </>
             )}
 
-            {params.length === 0 && !initMutation.isPending && (
+            {params.length === 0 && !initMutation.isPending && parametersUnavailable && (
+              <Callout variant="warning">
+                <p>
+                  This device's object dictionary could not be read. The automatic read on reaching
+                  PRE-OP failed, and it is attempted only once per scan — so nothing further will
+                  happen on its own.
+                </p>
+                <p className="mt-1.5 text-grey-600">
+                  Click <em>Initialize</em> above to try again. If it keeps failing, the device is
+                  not answering its CoE mailbox: check that it is in PRE-OP or higher, and look at
+                  the server log, which names the reason for each failed read.
+                </p>
+              </Callout>
+            )}
+
+            {params.length === 0 && !initMutation.isPending && !parametersUnavailable && (
               <p className="text-xs text-grey-500">
                 No parameters loaded. Click <em>Initialize</em> to enumerate the device's object dictionary
                 (requires the device to be in PRE-OP or higher).

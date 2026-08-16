@@ -19,6 +19,11 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **The Console shows cycles the bus did not fully answer.** The Process Image page gained a *Short cycles* figure beside the working counter, and a note naming when the first and last of them happened. The working-counter reading beside it describes the most recent cycle only, so a fault that has already cleared leaves it looking healthy — which is exactly the case this count exists for, and until now it was reachable only from the API and the server log.
+- **A device whose parameters could not be read says so, on its own page.** The Parameters page told you nothing when the automatic object-dictionary read had failed: an empty list looked the same as a device nobody had asked yet, and since the read is attempted once per scan, waiting for it to fill in was waiting for something that would never happen. It now explains what happened and points at *Initialize*.
+
 ### Fixed
 
 - **Taking a device out of OP is no longer reported as a bus fault.** The new short-working-counter count included the seconds of a transition the user had just asked for: a device stops answering the moment it is commanded down, while the master only recalculated what it expected once the transition had settled — so every cycle in between was counted, and warned about, on a bus behaving exactly as designed. Adding a device did the same, because the re-map deliberately drops the other devices to SAFE-OP first. The expectation now comes down before a drop is commanded and only goes back up once the devices are there, so a count means something actually went wrong.

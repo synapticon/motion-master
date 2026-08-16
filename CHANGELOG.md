@@ -19,6 +19,11 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A failed CoE transfer no longer explains itself repeatedly to no one.** When a read failed with a refused mailbox, the master asked the slave why on every one of its retry attempts while keeping only the first answer — extra traffic on the one bus least able to take it. It now asks only while it still has no reason to report.
+- **A failed SDO read or write no longer leaves error details behind for the next transfer to claim.** SOEM queues its reasons in a shared ring and one failure can queue more than one; the object-dictionary path drained it, but plain reads and writes popped a single entry. A leftover would surface later against an unrelated object on an unrelated slave. All of them drain now.
+
 ## [6.0.0-alpha.75] - 2026-08-13
 
 ### Changed

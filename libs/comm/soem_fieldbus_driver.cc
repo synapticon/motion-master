@@ -183,15 +183,7 @@ std::chrono::microseconds recommendedCyclePeriod(uint32_t processBytes, int slav
   return std::chrono::microseconds(static_cast<int64_t>((neededUs + 999.0) / 1000.0) * 1000);
 }
 
-// Explains a failed SDO transfer (wkc <= 0) as a short human-readable suffix. Prefers the specific
-// reason SOEM enqueues — SDO abort code, mailbox error — popped via ecx_poperror (" (SDO abort
-// 0x...)", " (mailbox error)", ...). When the queue is empty it falls back to the wkc return value,
-// which for CoE is a negative EC_* sentinel (e.g. EC_TIMEOUT when the slave never answers) rather
-// than a working counter, so a "no response" timeout reads differently from a bare failure. The one
-// case neither describes — wkc == 0 with nothing queued — is handed to mailboxRefusalSuffix, which
-// asks the slave. Never empty for a failed transfer. Called with controlPlaneMutex_ held (it
-// touches the SOEM context error stack, and mailboxRefusalSuffix reads a register). Explains a
-// working counter of 0 with nothing on the error queue by asking the slave why.
+// Explains a working counter of 0 with nothing on the error queue by asking the slave why.
 //
 // That combination is SOEM's one genuinely undescribed failure: ecx_mbxsend clamps its own
 // negatives to 0, so it means "the slave did not accept the write into its receive mailbox" and
@@ -199,7 +191,8 @@ std::chrono::microseconds recommendedCyclePeriod(uint32_t processBytes, int slav
 // not taken, and SOEM establishes exactly that — ecx_mbxempty polls SM0 for it — then discards it
 // and returns 0. One register read on the failure path recovers it, which is the difference between
 // a caller reading "failed" and reading why. Off the RT path, on a transfer that has already cost
-// tens of milliseconds, and only when a transfer has failed.
+// tens of milliseconds, and only when a transfer has failed — and, in a retry loop, only while
+// there is still no reason to report (see sdoErrorSuffix's explainRefusal).
 std::string mailboxRefusalSuffix(ecx_contextt* ctx, uint16_t slavePosition) {
   uint8_t status = 0;
   if (ecx_FPRD(&ctx->port, ctx->slavelist[slavePosition].configadr, ECT_REG_SM0STAT, sizeof(status),
@@ -216,7 +209,25 @@ std::string mailboxRefusalSuffix(ecx_contextt* ctx, uint16_t slavePosition) {
   return std::format(" (the slave did not accept the mailbox write; SM0 status 0x{:02X})", status);
 }
 
-std::string sdoErrorSuffix(ecx_contextt* ctx, uint16_t slavePosition, int wkc) {
+// Explains a failed SDO transfer (wkc <= 0) as a short human-readable suffix. Prefers the specific
+// reason SOEM enqueues — SDO abort code, mailbox error — popped via ecx_poperror (" (SDO abort
+// 0x...)", " (mailbox error)", ...). When the queue is empty it falls back to the wkc return value,
+// which for CoE is a negative EC_* sentinel (e.g. EC_TIMEOUT when the slave never answers) rather
+// than a working counter, so a "no response" timeout reads differently from a bare failure. The one
+// case neither describes — wkc == 0 with nothing queued — is handed to mailboxRefusalSuffix, which
+// asks the slave. Never empty for a failed transfer. Called with controlPlaneMutex_ held (it
+// touches the SOEM context error stack, and mailboxRefusalSuffix reads a register).
+//
+// Reached through drainSdoErrors, which is what every failing CoE path calls — popping one entry
+// and leaving the rest would hand them to the next transfer to report as its own.
+//
+// @param explainRefusal  Whether a working counter of 0 with nothing queued may be explained by
+//                        asking the slave. That costs a register read, so a retry loop passes
+//                        false once it already has a reason worth reporting — every later attempt
+//                        would read SM0 again and throw the answer away, which is the last thing a
+//                        bus already refusing its mailbox needs.
+std::string sdoErrorSuffix(ecx_contextt* ctx, uint16_t slavePosition, int wkc,
+                           bool explainRefusal) {
   ec_errort err{};
   if (ecx_poperror(ctx, &err)) {
     switch (err.Etype) {
@@ -257,7 +268,7 @@ std::string sdoErrorSuffix(ecx_contextt* ctx, uint16_t slavePosition, int wkc) {
     default:
       // The one case left: wkc == 0 with nothing queued, which SOEM leaves undescribed. Ask the
       // slave rather than reporting a bare failure.
-      return wkc == 0 ? mailboxRefusalSuffix(ctx, slavePosition) : std::string{};
+      return wkc == 0 && explainRefusal ? mailboxRefusalSuffix(ctx, slavePosition) : std::string{};
   }
 }
 
@@ -270,8 +281,13 @@ std::string sdoErrorSuffix(ecx_contextt* ctx, uint16_t slavePosition, int wkc) {
 // multiplies that, so leaving the queue dirty misattributes reasons across slaves and objects
 // arbitrarily far apart in time. Draining to empty keeps every reason attached to the transfer that
 // produced it. Called with controlPlaneMutex_ held, like sdoErrorSuffix.
-std::string drainSdoErrors(ecx_contextt* ctx, uint16_t slavePosition, int wkc) {
-  std::string reason = sdoErrorSuffix(ctx, slavePosition, wkc);
+//
+// Every failing CoE path goes through here — readSdo, readSdoComplete, writeSdo and the SDO Info
+// retry alike. A single-shot transfer can queue two entries just as a retried one can, so there is
+// no path for which popping one and leaving the rest is safe.
+std::string drainSdoErrors(ecx_contextt* ctx, uint16_t slavePosition, int wkc,
+                           bool explainRefusal = true) {
+  std::string reason = sdoErrorSuffix(ctx, slavePosition, wkc, explainRefusal);
   ec_errort discarded{};
   while (ecx_poperror(ctx, &discarded)) {
     // Discarded on purpose: the first entry is the one that describes this transfer, and the rest
@@ -797,7 +813,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
   if (wkc <= 0) {
     std::string msg =
         std::format("SDOread slave {} 0x{:04X}:{:02X} failed", slavePosition, index, subindex);
-    msg += sdoErrorSuffix(ctx_.get(), slavePosition, wkc);
+    msg += drainSdoErrors(ctx_.get(), slavePosition, wkc);
     spdlog::log(sdoLevel, "{}", msg);
     return std::unexpected(msg);
   }
@@ -848,7 +864,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComp
       ecx_SDOread(ctx_.get(), slavePosition, index, 0x00, TRUE, &size, data.data(), EC_TIMEOUTRXM);
   if (wkc <= 0) {
     std::string msg = std::format("SDOread(CA) slave {} 0x{:04X} failed", slavePosition, index);
-    msg += sdoErrorSuffix(ctx_.get(), slavePosition, wkc);
+    msg += drainSdoErrors(ctx_.get(), slavePosition, wkc);
     spdlog::log(sdoLevel, "{}", msg);
     return std::unexpected(msg);
   }
@@ -880,7 +896,7 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSdo(uint16_t slavePosi
   if (wkc <= 0) {
     std::string msg =
         std::format("SDOwrite slave {} 0x{:04X}:{:02X} failed", slavePosition, index, subindex);
-    msg += sdoErrorSuffix(ctx_.get(), slavePosition, wkc);
+    msg += drainSdoErrors(ctx_.get(), slavePosition, wkc);
     spdlog::debug("{}", msg);
     return std::unexpected(msg);
   }
@@ -934,9 +950,11 @@ SdoInfoResult retrySdoInfo(ecx_contextt* ctx, uint16_t slavePosition, std::mutex
       if (result.wkc <= 0) {
         // Drained on every failing attempt, not just the first, so nothing is left for an unrelated
         // transfer to inherit; the reason reported is the first one, which named the original
-        // fault.
-        std::string reason = drainSdoErrors(ctx, slavePosition, result.wkc);
-        if (result.reason.empty()) {
+        // fault. Once there is one, later attempts stop asking the slave to explain a refusal —
+        // the answer would be discarded, and it is not free.
+        const bool wantReason = result.reason.empty();
+        std::string reason = drainSdoErrors(ctx, slavePosition, result.wkc, wantReason);
+        if (wantReason) {
           result.reason = std::move(reason);
         }
       }

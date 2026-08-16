@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.76] - 2026-08-16
+
 ### Added
 
 - **The Console shows cycles the bus did not fully answer.** The Process Image page gained a *Short cycles* figure beside the working counter, and a note naming when the first and last of them happened. The working-counter reading beside it describes the most recent cycle only, so a fault that has already cleared leaves it looking healthy — which is exactly the case this count exists for, and until now it was reachable only from the API and the server log.
@@ -695,7 +697,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.75...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.76...HEAD
+[6.0.0-alpha.76]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.75...v6.0.0-alpha.76
 [6.0.0-alpha.75]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.74...v6.0.0-alpha.75
 [6.0.0-alpha.74]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.73...v6.0.0-alpha.74
 [6.0.0-alpha.73]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.71...v6.0.0-alpha.73

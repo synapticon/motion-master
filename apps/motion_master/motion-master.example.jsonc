@@ -61,6 +61,12 @@
       "enabled": true,
 
       // Verbosity of the file, independent of "level" above. Same values.
+      //
+      // Lines are buffered (spdlog hands each to fwrite at once but flushes only when the ~4 KB
+      // stdio buffer fills), except that a warning or error flushes immediately. Flushing does not
+      // reorder: everything buffered before it is written out too, so a warning checkpoints the
+      // debug lines that led up to it. On a hard crash only what was logged after the last warning
+      // can be lost.
       "level": "debug",
 
       // "" = a "logs" subdirectory of the user-cache root, which puts the file under

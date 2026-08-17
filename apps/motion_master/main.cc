@@ -102,6 +102,21 @@ int main(int argc, char** argv) {
     }
   }
   spdlog::set_level(loggerLevel);
+  // Make a warning durable the moment it is written. spdlog hands every line to fwrite immediately
+  // but never calls fflush of its own accord, so lines sit in the C stdio buffer (~4 KB, roughly 44
+  // of them) until it fills. A clean shutdown flushes that; a segfault or a SIGKILL does not —
+  // which would lose exactly the tail a crash investigation wants.
+  //
+  // Flushing does not reorder anything, and that is what makes this cheap rather than a compromise:
+  // every line goes into the same stream in the order it was logged, so a flush pushes out
+  // *everything buffered so far*, not just the line that triggered it. A warning therefore
+  // checkpoints the debug lines that led up to it as well. What can still be lost is only what was
+  // logged after the last warning.
+  //
+  // warn rather than info: it is the level that means something is wrong, and it is rare, so the
+  // extra fflush (~200 ns, measured) is paid on the lines that justify it instead of on the
+  // high-volume debug traffic — flushing every line costs closer to 330 ns against 200.
+  spdlog::default_logger()->flush_on(spdlog::level::warn);
 
   spdlog::info("Motion Master v{}", mm::core::kVersion);
   // Named once the file sink is up, so a support log says which config was in effect and where the

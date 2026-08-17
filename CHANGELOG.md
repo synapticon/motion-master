@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.77] - 2026-08-17
+
 ### Added
 
 - **Motion Master now writes a log file.** Until now the log existed in two places that both die with the process — the console window and an in-memory ring served by `GET /api/log` — so after a crash, or a restart, or on any Windows machine started from a console window, there was simply nothing to attach to a bug report. A rotating file now keeps a copy: `logs/motion-master.log` under the user-cache root, 10 MB × 5 files by default, which puts it in `GET /api/user-cache` and so a download away on the Console's **Storage → User Cache** page.
@@ -710,7 +712,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.76...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.77...HEAD
+[6.0.0-alpha.77]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.76...v6.0.0-alpha.77
 [6.0.0-alpha.76]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.75...v6.0.0-alpha.76
 [6.0.0-alpha.75]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.74...v6.0.0-alpha.75
 [6.0.0-alpha.74]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.73...v6.0.0-alpha.74

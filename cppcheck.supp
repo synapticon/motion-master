@@ -63,6 +63,7 @@ syntaxError:*/base64_test.cc
 syntaxError:*/firmware_package_test.cc
 syntaxError:*/hardware_description_test.cc
 syntaxError:*/integro_variant_test.cc
+syntaxError:*/ic_haus_registers_test.cc
 syntaxError:*/kuebler_registers_test.cc
 syntaxError:*/router_test.cc
 syntaxError:*/soem_fieldbus_driver_test.cc

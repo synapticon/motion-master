@@ -188,8 +188,9 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
 
 - **Log access** — retrieve recent server log output (`GET /api/log`).
 - **Reference tables** — AL status codes, ESC registers, FoE error codes, mailbox error
-  codes, SDO abort codes, and CoE object data types (`GET /api/meta/*`), each with a
-  matching console page.
+  codes, SDO abort codes, CoE object data types, and the internal encoders' register maps
+  (iC-Haus iC-MU and iC-PVL for a Circulo, Kübler for an Integro) (`GET /api/meta/*`), each
+  with a matching console page.
 - **System & version info** — Motion Master version (`GET /api/version`), startup
   configuration (`GET /api/config`), and host OS/hardware info (`GET /api/system-info`).
 - **Self-describing API** — the server serves its own OpenAPI spec at
@@ -213,8 +214,8 @@ A React PWA at `https://motion-master.synapticon.com` provides UI for the above:
 - **Game Loop** — RT loop health and runtime cycle-period control.
 - **Monitorings** — configure and plot live telemetry.
 - **Tools & reference** — SII parser, AL Status Codes, ESC Registers, FoE Error Codes,
-  Mailbox Error Codes, SDO Abort Codes, Data Types, HTTP request inspector, Log, Parameter
-  Caches, and bundled API Docs.
+  iC-Haus Registers, Kübler Registers, Mailbox Error Codes, SDO Abort Codes, Data Types,
+  HTTP request inspector, Log, Parameter Caches, and bundled API Docs.
 
 ## Security & Deployment
 

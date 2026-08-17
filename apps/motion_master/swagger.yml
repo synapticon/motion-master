@@ -760,6 +760,94 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SdoAbortCode"
+  /api/meta/ic-haus-registers:
+    get:
+      summary: The Circulo internal encoder's register maps
+      description: >
+        The register maps of the two iC-Haus chips inside a Circulo's internal encoder — the
+        reference tables for POST /api/devices/{slavePosition}/procedures/encoder-register-communication,
+        and documentation in their own right. Static: they describe the chips, not any connected
+        device, so no bus and no scan are needed.
+
+
+        Two chips, and the iC-MU is the one in charge. The iC-MU is the position encoder proper, a
+        magnetic off-axis absolute chip speaking BiSS-C to the drive. The iC-PVL is a
+        battery-buffered Hall multiturn counter behind it, reached over I2C through the iC-MU
+        rather than directly.
+
+
+        The response is a list of register *spaces*, not of registers, because an address alone
+        names nothing: the same iC-PVL address 0x00 is a configuration register in one space and
+        the status register in another, depending on which I2C device id addressed it. Each space
+        says which chip it belongs to and how it is reached.
+
+
+        A row is one address, or the range the datasheet prints as one row — `address` and
+        `lastAddress` are equal in the ordinary case. `fields` is the datasheet's bit layout, most
+        significant bit first, joined with " | "; it is empty exactly when `reserved` is true.
+        `spiOnly` marks the iC-MU's 0x80-0xAF, which is reachable over SPI only and so beyond the
+        drive's register communication service.
+
+
+        Transcribed from the vendors' datasheets: iC-MU Series Rev B1 (Tables 90 and 91) and iC-PVL
+        Rev F2 (Tables 5, 6 and 7). What a field means is not reproduced — that is the datasheets'
+        own CONFIGURATION PARAMETERS chapters.
+      operationId: getIcHausRegisters
+      responses:
+        "200":
+          description: Every register space of both chips, the iC-MU's first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [chip, name, addressing, registers]
+                  properties:
+                    chip:
+                      type: string
+                      enum: [iC-MU, iC-PVL]
+                      example: iC-MU
+                    name:
+                      type: string
+                      description: The datasheet's own name for the space.
+                      example: CONF, bank 0, addresses 0x00-0x3F
+                    addressing:
+                      type: string
+                      description: >-
+                        How the space is reached, which is what decides whether the register
+                        communication service can read it at all.
+                    registers:
+                      type: array
+                      items:
+                        type: object
+                        required: [address, lastAddress, fields, reserved, spiOnly]
+                        properties:
+                          address:
+                            type: integer
+                            description: The address, or the first of a printed range.
+                            example: 15
+                          lastAddress:
+                            type: integer
+                            description: >-
+                              The last address of the range; equal to address for a single-address
+                              row.
+                            example: 15
+                          fields:
+                            type: string
+                            description: >-
+                              The datasheet's bit layout, most significant bit first. Empty when
+                              reserved.
+                            example: SPO_MT(3:0) | MPC(3:0)
+                          reserved:
+                            type: boolean
+                            example: false
+                          spiOnly:
+                            type: boolean
+                            description: >-
+                              Reachable over SPI only, so the register communication service cannot
+                              touch it.
+                            example: false
   /api/meta/kuebler-registers:
     get:
       summary: The Integro internal encoder's register map

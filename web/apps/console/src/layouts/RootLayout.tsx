@@ -511,6 +511,7 @@ export default function RootLayout() {
               <NavItem to="/meta/al-status-codes" label="AL Status Codes" />
               <NavItem to="/meta/esc-registers" label="ESC Registers" />
               <NavItem to="/meta/foe-error-codes" label="FoE Error Codes" />
+              <NavItem to="/meta/ic-haus-registers" label="iC-Haus Registers" />
               <NavItem to="/meta/kuebler-registers" label="Kübler Registers" />
               <NavItem to="/meta/mailbox-error-codes" label="Mailbox Error Codes" />
               <NavItem to="/meta/object-data-types" label="Object Data Types" />

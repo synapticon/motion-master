@@ -17,6 +17,7 @@ import ReferenceApiDocsPage from './pages/ReferenceApiDocsPage'
 import MetaAlStatusCodesPage from './pages/MetaAlStatusCodesPage'
 import MetaEscRegistersPage from './pages/MetaEscRegistersPage'
 import MetaFoeErrorCodesPage from './pages/MetaFoeErrorCodesPage'
+import MetaIcHausRegistersPage from './pages/MetaIcHausRegistersPage'
 import MetaKueblerRegistersPage from './pages/MetaKueblerRegistersPage'
 import MetaMailboxErrorCodesPage from './pages/MetaMailboxErrorCodesPage'
 import MetaObjectDataTypesPage from './pages/MetaObjectDataTypesPage'
@@ -70,6 +71,7 @@ export default function App() {
           <Route path="al-status-codes" element={<MetaAlStatusCodesPage />} />
           <Route path="esc-registers" element={<MetaEscRegistersPage />} />
           <Route path="foe-error-codes" element={<MetaFoeErrorCodesPage />} />
+          <Route path="ic-haus-registers" element={<MetaIcHausRegistersPage />} />
           <Route path="kuebler-registers" element={<MetaKueblerRegistersPage />} />
           <Route path="mailbox-error-codes" element={<MetaMailboxErrorCodesPage />} />
           <Route path="object-data-types" element={<MetaObjectDataTypesPage />} />

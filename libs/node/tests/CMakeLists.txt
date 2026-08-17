@@ -11,6 +11,7 @@ add_executable(
   firmware_package_test.cc
   hardware_description_test.cc
   integro_variant_test.cc
+  ic_haus_registers_test.cc
   kuebler_registers_test.cc
   monitoring_test.cc
   monitoring_manager_test.cc

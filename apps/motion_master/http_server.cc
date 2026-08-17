@@ -37,6 +37,7 @@
 #include "node/device_manager.h"
 #include "node/device_parameter.h"
 #include "node/firmware_package.h"
+#include "node/ic_haus_registers.h"
 #include "node/kuebler_registers.h"
 #include "node/monitoring_manager.h"
 #include "node/operation_modes.h"
@@ -569,6 +570,9 @@ void HttpServer::run() {
   });
   router.get("/api/meta/sdo-abort-codes", [](const mm::api::Request&) {
     return mm::api::json(nlohmann::json(mm::comm::kSdoAbortCodes));
+  });
+  router.get("/api/meta/ic-haus-registers", [](const mm::api::Request&) {
+    return mm::api::json(nlohmann::json(mm::node::somanet::icHausRegisterSpaces()));
   });
   router.get("/api/meta/kuebler-registers", [](const mm::api::Request&) {
     return mm::api::json(nlohmann::json(mm::node::somanet::kKueblerRegisters));

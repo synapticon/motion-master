@@ -586,6 +586,57 @@ export class Api<
       ...params,
     });
   /**
+   * @description The register maps of the two iC-Haus chips inside a Circulo's internal encoder — the reference tables for POST /api/devices/{slavePosition}/procedures/encoder-register-communication, and documentation in their own right. Static: they describe the chips, not any connected device, so no bus and no scan are needed. Two chips, and the iC-MU is the one in charge. The iC-MU is the position encoder proper, a magnetic off-axis absolute chip speaking BiSS-C to the drive. The iC-PVL is a battery-buffered Hall multiturn counter behind it, reached over I2C through the iC-MU rather than directly. The response is a list of register *spaces*, not of registers, because an address alone names nothing: the same iC-PVL address 0x00 is a configuration register in one space and the status register in another, depending on which I2C device id addressed it. Each space says which chip it belongs to and how it is reached. A row is one address, or the range the datasheet prints as one row — `address` and `lastAddress` are equal in the ordinary case. `fields` is the datasheet's bit layout, most significant bit first, joined with " | "; it is empty exactly when `reserved` is true. `spiOnly` marks the iC-MU's 0x80-0xAF, which is reachable over SPI only and so beyond the drive's register communication service. Transcribed from the vendors' datasheets: iC-MU Series Rev B1 (Tables 90 and 91) and iC-PVL Rev F2 (Tables 5, 6 and 7). What a field means is not reproduced — that is the datasheets' own CONFIGURATION PARAMETERS chapters.
+   *
+   * @name GetIcHausRegisters
+   * @summary The Circulo internal encoder's register maps
+   * @request GET:/api/meta/ic-haus-registers
+   */
+  getIcHausRegisters = (params: RequestParams = {}) =>
+    this.request<
+      {
+        /** @example "iC-MU" */
+        chip: "iC-MU" | "iC-PVL";
+        /**
+         * The datasheet's own name for the space.
+         * @example "CONF, bank 0, addresses 0x00-0x3F"
+         */
+        name: string;
+        /** How the space is reached, which is what decides whether the register communication service can read it at all. */
+        addressing: string;
+        registers: {
+          /**
+           * The address, or the first of a printed range.
+           * @example 15
+           */
+          address: number;
+          /**
+           * The last address of the range; equal to address for a single-address row.
+           * @example 15
+           */
+          lastAddress: number;
+          /**
+           * The datasheet's bit layout, most significant bit first. Empty when reserved.
+           * @example "SPO_MT(3:0) | MPC(3:0)"
+           */
+          fields: string;
+          /** @example false */
+          reserved: boolean;
+          /**
+           * Reachable over SPI only, so the register communication service cannot touch it.
+           * @example false
+           */
+          spiOnly: boolean;
+        }[];
+      }[],
+      any
+    >({
+      path: `/api/meta/ic-haus-registers`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
    * @description The register map of the Integro's internal (Kübler) encoder — the reference table for POST /api/devices/{slavePosition}/procedures/kuebler-register-communication, and documentation in its own right. Static: it describes the encoder type, not any connected device, so it needs no bus and no scan. Transcribed from the vendor's own draft table. Each entry carries the width, the access type, whether the encoder actually implements it — seven are documented but not implemented — and the vendor's bit definitions verbatim, which for a bit-field register is the only place its meaning is recorded. `format` says how to read the assembled value, because signedness is not uniform and one register is not a single number at all: `unsigned`, `signed`, `bitField` (the number means nothing on its own), or `signedHalves` — two signed 16-bit values packed into 32 bits, which register 0x3C is the only case of. `readableInOneCommand` is false for the one 64-bit register, since the command's length byte caps at 4 bytes.
    *
    * @name GetKueblerRegisters

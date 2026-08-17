@@ -1808,8 +1808,18 @@ void HttpServer::run() {
   });
 
   router.del("/api/user-cache/*", [this](const mm::api::Request& req) -> mm::api::Response {
+    const auto relPath = userCacheRelPath(req.url());
+    // Asked before removing rather than read out of the failure: a retained path (the running
+    // server's own log file) is a conflict with the server's state, not a malformed request — the
+    // same path is a perfectly good GET. 409 says "not now" where 400 would say "never".
+    if (userCache_.isRetained(relPath)) {
+      return mm::api::error("409 Conflict",
+                            relPath +
+                                " is in use by Motion Master and cannot be deleted while it "
+                                "is running");
+    }
     const auto t0 = std::chrono::steady_clock::now();
-    auto removed = userCache_.remove(userCacheRelPath(req.url()));
+    auto removed = userCache_.remove(relPath);
     const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::steady_clock::now() - t0);
     if (!removed) {

@@ -3,7 +3,9 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <functional>
 #include <nlohmann/json_fwd.hpp>
+#include <set>
 #include <span>
 #include <string>
 #include <string_view>
@@ -18,6 +20,9 @@ struct UserCacheFile {
   std::string path;
   uint64_t size = 0;       ///< File size in bytes.
   int64_t modifiedMs = 0;  ///< Last-write time in milliseconds since the Unix epoch.
+  /// Whether @c remove will accept this path. False for a file this process holds open — see
+  /// @c UserCache::retain. A client uses it to not offer an action that would be refused.
+  bool deletable = true;
 };
 
 /// @brief Serialises a listing entry as it appears in `GET /api/user-cache`.
@@ -107,8 +112,36 @@ class UserCache {
   ///         maps that to 404); an error only when the path is invalid or the removal failed.
   std::expected<bool, std::string> remove(std::string_view relPath);
 
+  /// @brief Marks a path as one this process holds open, so @c remove refuses it and @c list
+  ///        reports it as not deletable.
+  ///
+  /// This does not make the store content-aware: it is told a path, not asked to recognise one.
+  /// Whoever opens the file says so — the composition root does it for the log file it just
+  /// opened — and the store keeps attaching no meaning to names or contents.
+  ///
+  /// It exists because deleting a file the server has open does not do what it looks like it does,
+  /// and the failure is silent on the platform where it is worse. On Windows the removal fails
+  /// outright. On Linux and macOS it appears to succeed and the entry disappears, while the server
+  /// goes on writing to the now-unlinked inode: no space is reclaimed and nothing written since is
+  /// reachable, until a restart opens a fresh file. Refusing is the only outcome that is the same
+  /// everywhere and the same as what the user sees.
+  ///
+  /// Retaining a path that is later rotated away or never created is harmless — this is a name, not
+  /// a handle. Call before serving, from one thread; the set is not synchronised.
+  ///
+  /// @param relPath Path relative to the root, as it appears in @c list.
+  void retain(std::string relPath);
+
+  /// @brief Whether @p relPath has been @c retain'd, and so will be refused by @c remove.
+  ///
+  /// Exposed so a caller can classify the refusal without matching on the message @c remove
+  /// returns. Purely lexical, like @c resolve — it compares names and does not touch the disk.
+  bool isRetained(std::string_view relPath) const;
+
  private:
   std::filesystem::path root_;
+  /// Paths @c retain has been told about. Small and fixed after startup, so a flat set is right.
+  std::set<std::string, std::less<>> retained_;
 };
 
 }  // namespace mm::core

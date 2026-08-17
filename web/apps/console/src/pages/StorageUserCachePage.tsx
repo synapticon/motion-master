@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { UserCacheFile } from '@synapticon/motion-master-client'
-import Callout from '../components/Callout'
 import FilePickerButton from '../components/FilePickerButton'
 import PageHeader from '../components/PageHeader'
 import UserCacheExplainer from '../components/UserCacheExplainer'
@@ -133,24 +132,6 @@ export default function StorageUserCachePage() {
       <div className="p-4 sm:px-8 sm:py-7 space-y-6">
         <UserCacheExplainer />
 
-        <Callout variant="info">
-          <p>
-            <span className="font-mono">logs/motion-master.log</span> is the server's own log, and
-            it is open for writing while the server runs — so deleting it here does not behave the
-            way deleting an ordinary file does.
-          </p>
-          <p className="mt-1.5 text-grey-600">
-            On <strong>Windows</strong> the delete fails outright: the file is locked while it is
-            open. On <strong>Linux and macOS</strong> it appears to succeed and vanishes from this
-            list, but the server keeps writing to it — the space is not freed and the entries are
-            not recoverable until the server restarts, which opens a fresh file. Rotated files
-            (<span className="font-mono">.1</span>, <span className="font-mono">.2</span>, …) are
-            closed and delete normally on every platform. To reclaim space, delete those, or lower{' '}
-            <span className="font-mono">logging.file.maxSizeMb</span> /{' '}
-            <span className="font-mono">maxFiles</span> in the config.
-          </p>
-        </Callout>
-
         {/* The destination reads as one path: a fixed, non-editable prefix showing where the store
             actually is on the server, then the folder you type. Composing them in a single bordered
             group is what makes "uploads land here" legible without a separate hint line. */}
@@ -253,13 +234,26 @@ export default function StorageUserCachePage() {
                         >
                           {busyPath === file.path ? 'Downloading…' : 'Download'}
                         </button>
-                        <button
-                          onClick={() => handleDelete(file)}
-                          disabled={deleteMutation.isPending}
-                          className="border border-grey-300 text-grey-700 px-3 py-1.5 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
-                        >
-                          Delete
-                        </button>
+                        {file.deletable ? (
+                          <button
+                            onClick={() => handleDelete(file)}
+                            disabled={deleteMutation.isPending}
+                            className="border border-grey-300 text-grey-700 px-3 py-1.5 text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                          >
+                            Delete
+                          </button>
+                        ) : (
+                          /* No Delete for a file the server holds open — it would be refused, and
+                             offering an action that cannot work is worse than not offering it. The
+                             label says why in place of the button rather than in a page-level note,
+                             so it is read by whoever is looking at that row. */
+                          <span
+                            title="Motion Master is writing to this file. It can be deleted after the server stops; rotated copies of it can be deleted now."
+                            className="text-[11px] text-grey-500 px-3 py-1.5 cursor-help"
+                          >
+                            In use
+                          </span>
+                        )}
                       </div>
                     </td>
                   </tr>

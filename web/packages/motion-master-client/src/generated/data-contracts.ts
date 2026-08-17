@@ -217,6 +217,11 @@ export interface UserCacheFile {
    * @example 1783968687738
    */
   modifiedMs: number;
+  /**
+   * Whether `DELETE` will accept this path. False for a file the running server holds open — today only its own log file, `logs/motion-master.log`. Deleting such a file cannot do what it appears to (Windows refuses; Linux and macOS unlink it while the server keeps writing to it, reclaiming nothing), so the request is refused with `409 Conflict` and a client should not offer the action. Rotated copies are closed and remain deletable, which is how the space is reclaimed.
+   * @example true
+   */
+  deletable: boolean;
 }
 
 /** Summary of one on-disk parameter-cache file (its identity, size, and count). */

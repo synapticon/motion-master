@@ -128,7 +128,8 @@ fs::path normalizeRoot(fs::path root) {
 }  // namespace
 
 void to_json(nlohmann::json& j, const UserCacheFile& f) {
-  j = nlohmann::json{{"path", f.path}, {"size", f.size}, {"modifiedMs", f.modifiedMs}};
+  j = nlohmann::json{
+      {"path", f.path}, {"size", f.size}, {"modifiedMs", f.modifiedMs}, {"deletable", f.deletable}};
 }
 
 UserCache::UserCache(fs::path root) : root_(normalizeRoot(std::move(root))) {}
@@ -183,6 +184,7 @@ std::expected<std::vector<UserCacheFile>, std::string> UserCache::list() const {
       }
       const auto written = entry.last_write_time(entryEc);
       file.modifiedMs = entryEc ? 0 : toEpochMs(written);
+      file.deletable = !isRetained(file.path);
       files.push_back(std::move(file));
     }
     // Anything not a readable regular file simply contributes no row: directories carry no entry of
@@ -262,10 +264,20 @@ std::expected<void, std::string> UserCache::write(std::string_view relPath,
   return {};
 }
 
+void UserCache::retain(std::string relPath) { retained_.insert(std::move(relPath)); }
+
+bool UserCache::isRetained(std::string_view relPath) const { return retained_.contains(relPath); }
+
 std::expected<bool, std::string> UserCache::remove(std::string_view relPath) {
   auto path = resolve(relPath);
   if (!path) {
     return std::unexpected(path.error());
+  }
+  // Refused rather than attempted: this process holds the file open, and removing it would fail on
+  // Windows and silently unlink-while-writing on Linux and macOS. See retain().
+  if (isRetained(relPath)) {
+    return std::unexpected(std::string(relPath) +
+                           " is in use by Motion Master and cannot be deleted while it is running");
   }
   std::error_code ec;
   if (!fs::exists(*path, ec)) {

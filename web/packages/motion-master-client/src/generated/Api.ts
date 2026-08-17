@@ -2345,7 +2345,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Removes a file, or a directory and everything under it. Directories left empty between the removed path and the cache root are pruned, so no husks remain.
+   * @description Removes a file, or a directory and everything under it. Directories left empty between the removed path and the cache root are pruned, so no husks remain. A file the running server holds open is refused — see `deletable` on `UserCacheFile`.
    *
    * @name DeleteUserCacheFile
    * @summary Delete a user-cache file or directory

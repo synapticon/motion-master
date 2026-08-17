@@ -3742,6 +3742,9 @@ paths:
       description: >
         Removes a file, or a directory and everything under it. Directories left empty between the
         removed path and the cache root are pruned, so no husks remain.
+
+
+        A file the running server holds open is refused — see `deletable` on `UserCacheFile`.
       responses:
         "204":
           description: The file or directory was removed.
@@ -3752,6 +3755,11 @@ paths:
           description: The path is invalid, or the removal failed.
         "404":
           description: No such file or directory.
+        "409":
+          description: >
+            The file is in use by the running server (`deletable` is false in the listing) — today
+            only its own log file. It can be deleted once the server stops; rotated copies of it can
+            be deleted now.
 components:
   schemas:
     Cia402Status:
@@ -3965,7 +3973,7 @@ components:
     UserCacheFile:
       type: object
       description: One file in the user cache.
-      required: [path, size, modifiedMs]
+      required: [path, size, modifiedMs, deletable]
       properties:
         path:
           type: string
@@ -3981,6 +3989,16 @@ components:
           type: integer
           description: Last-write time, in milliseconds since the Unix epoch.
           example: 1783968687738
+        deletable:
+          type: boolean
+          description: >
+            Whether `DELETE` will accept this path. False for a file the running server holds open —
+            today only its own log file, `logs/motion-master.log`. Deleting such a file cannot do
+            what it appears to (Windows refuses; Linux and macOS unlink it while the server keeps
+            writing to it, reclaiming nothing), so the request is refused with `409 Conflict` and a
+            client should not offer the action. Rotated copies are closed and remain deletable,
+            which is how the space is reclaimed.
+          example: true
     ParameterCacheEntry:
       type: object
       description: Summary of one on-disk parameter-cache file (its identity, size, and count).

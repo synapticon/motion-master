@@ -273,6 +273,44 @@ TEST_F(UserCacheTest, RootIsNormalisedSoInteriorDotsStillWork) {
   EXPECT_TRUE(cache.resolve("f.txt"));
 }
 
+TEST_F(UserCacheTest, RetainedPathIsRefusedByRemoveAndReportedInTheListing) {
+  // The server's own log file: it is held open for the life of the process, so removing it fails on
+  // Windows and silently unlinks-while-writing on Linux and macOS. Refusing is the only outcome
+  // that is the same everywhere.
+  UserCache cache{root_};
+  ASSERT_TRUE(cache.write("logs/motion-master.log", bytes("line")));
+  ASSERT_TRUE(cache.write("logs/motion-master.1.log", bytes("older")));
+  cache.retain("logs/motion-master.log");
+
+  EXPECT_TRUE(cache.isRetained("logs/motion-master.log"));
+  EXPECT_FALSE(cache.isRetained("logs/motion-master.1.log"));
+
+  auto removed = cache.remove("logs/motion-master.log");
+  EXPECT_FALSE(removed.has_value());
+  EXPECT_TRUE(fs::exists(root_ / "logs" / "motion-master.log")) << "the file must still be there";
+
+  // A rotated sibling is closed and deletes normally — that is how a user reclaims the space.
+  auto rotated = cache.remove("logs/motion-master.1.log");
+  ASSERT_TRUE(rotated) << rotated.error();
+  EXPECT_TRUE(*rotated);
+
+  // The listing says which is which, so a client need not offer an action that would be refused.
+  auto listed = cache.list();
+  ASSERT_TRUE(listed) << listed.error();
+  ASSERT_EQ(listed->size(), 1u);
+  EXPECT_EQ((*listed)[0].path, "logs/motion-master.log");
+  EXPECT_FALSE((*listed)[0].deletable);
+}
+
+TEST_F(UserCacheTest, UnretainedFilesAreDeletableByDefault) {
+  UserCache cache{root_};
+  ASSERT_TRUE(cache.write("notes.txt", bytes("hello")));
+  auto listed = cache.list();
+  ASSERT_TRUE(listed) << listed.error();
+  ASSERT_EQ(listed->size(), 1u);
+  EXPECT_TRUE((*listed)[0].deletable);
+}
+
 TEST(UserCacheDirTest, IsAbsoluteAndNamedForMotionMaster) {
   const auto dir = mm::core::userCacheDir();
   EXPECT_TRUE(dir.is_absolute()) << dir.string();

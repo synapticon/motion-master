@@ -267,6 +267,17 @@ int main(int argc, char** argv) {
   // root — the parameter cache's `parameters/` and the recorder's `dumps/` included — so the API
   // lists those too.
   mm::core::UserCache userCache{userCacheRoot};
+  // The log file is the one thing under this root that the server itself holds open, so deleting it
+  // through the API cannot do what it appears to. Say so here — the store is told a path, never
+  // asked to recognise one — and both the listing and DELETE then refuse it. Rotated siblings are
+  // closed and stay deletable, which is how a user reclaims the space. Skipped when the log was
+  // configured outside the root, where the API cannot reach it anyway.
+  if (!logFile.empty()) {
+    const auto relative = logFile.lexically_relative(userCacheRoot);
+    if (!relative.empty() && *relative.begin() != "..") {
+      userCache.retain(relative.generic_string());
+    }
+  }
 
   // Exchange process data every cycle. No-op until devices are mapped and brought into SAFE-OP/OP
   // via the API, at which point DeviceManager publishes the image and the loop begins driving PDO

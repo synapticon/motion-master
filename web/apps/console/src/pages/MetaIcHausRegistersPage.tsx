@@ -38,8 +38,10 @@ export default function MetaIcHausRegistersPage() {
             multiturn counter behind it, reached over I²C through the iC-MU rather than directly. An
             address alone names nothing, so the maps are grouped by <strong>space</strong>: the same
             iC-PVL address <span className="font-mono">0x00</span> is a configuration register in one
-            and the status register in another. Transcribed from iC-MU Series Rev B1 and iC-PVL Rev
-            F2; what a field <em>means</em> is in those datasheets, not here.
+            and the status register in another. Each field carries the datasheet's own one-line
+            description; <strong>bits</strong> is the field's own slice as the register map prints
+            it, not its position in the byte. Transcribed from iC-MU Series Rev B1 and iC-PVL Rev F2;
+            the prose behind each one-liner stays in those datasheets.
           </>
         }
       />
@@ -68,7 +70,7 @@ export default function MetaIcHausRegistersPage() {
                   <table className="w-full text-xs border-collapse">
                     <thead>
                       <tr className="border-b border-grey-200 bg-grey-50">
-                        {['Address', 'Bit layout', 'Reach'].map((h) => (
+                        {['Address', 'Field', 'Bits', 'Description', 'Reach'].map((h) => (
                           <th
                             key={h}
                             className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap"
@@ -79,31 +81,43 @@ export default function MetaIcHausRegistersPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {space.registers.map((r) => (
-                        <tr
-                          key={r.address}
-                          className={`border-b border-grey-100 last:border-0 ${r.reserved ? 'text-grey-500' : ''}`}
-                        >
-                          <td className="px-4 py-2 font-mono whitespace-nowrap">
-                            {addressLabel(r.address, r.lastAddress)}
-                          </td>
-                          <td className="px-4 py-2 font-mono">
-                            {r.reserved ? <span className="text-grey-500">reserved</span> : r.fields}
-                          </td>
-                          <td className="px-4 py-2 whitespace-nowrap">
-                            {r.spiOnly ? (
-                              <span
-                                className="text-status-warn"
-                                title="Reachable over SPI only, so the register communication service cannot touch it."
-                              >
-                                SPI only
-                              </span>
-                            ) : (
-                              <span className="text-grey-500">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
+                      {space.registers.map((r) => {
+                        const rows = r.reserved ? [null] : r.fields;
+                        return rows.map((field, index) => (
+                          <tr
+                            key={`${r.address}-${index}`}
+                            className={`border-grey-100 ${r.reserved ? 'text-grey-500' : ''} ${
+                              // Only the last field of a register closes it off, so the fields of one
+                              // register read as one block rather than as unrelated rows.
+                              index === rows.length - 1 ? 'border-b last:border-0' : ''
+                            }`}
+                          >
+                            <td className="px-4 py-2 font-mono whitespace-nowrap align-top">
+                              {index === 0 ? addressLabel(r.address, r.lastAddress) : ''}
+                            </td>
+                            <td className="px-4 py-2 font-mono whitespace-nowrap align-top">
+                              {field ? field.name : <span className="text-grey-500">reserved</span>}
+                            </td>
+                            <td className="px-4 py-2 font-mono whitespace-nowrap align-top text-grey-600">
+                              {field?.bits || ''}
+                            </td>
+                            <td className="px-4 py-2 align-top">{field?.description ?? ''}</td>
+                            <td className="px-4 py-2 whitespace-nowrap align-top">
+                              {index === 0 &&
+                                (r.spiOnly ? (
+                                  <span
+                                    className="text-status-warn"
+                                    title="Reachable over SPI only, so the register communication service cannot touch it."
+                                  >
+                                    SPI only
+                                  </span>
+                                ) : (
+                                  <span className="text-grey-500">—</span>
+                                ))}
+                            </td>
+                          </tr>
+                        ));
+                      })}
                     </tbody>
                   </table>
                 </div>

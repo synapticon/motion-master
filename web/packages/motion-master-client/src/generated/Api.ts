@@ -586,7 +586,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description The register maps of the two iC-Haus chips inside a Circulo's internal encoder — the reference tables for POST /api/devices/{slavePosition}/procedures/encoder-register-communication, and documentation in their own right. Static: they describe the chips, not any connected device, so no bus and no scan are needed. Two chips, and the iC-MU is the one in charge. The iC-MU is the position encoder proper, a magnetic off-axis absolute chip speaking BiSS-C to the drive. The iC-PVL is a battery-buffered Hall multiturn counter behind it, reached over I2C through the iC-MU rather than directly. The response is a list of register *spaces*, not of registers, because an address alone names nothing: the same iC-PVL address 0x00 is a configuration register in one space and the status register in another, depending on which I2C device id addressed it. Each space says which chip it belongs to and how it is reached. A row is one address, or the range the datasheet prints as one row — `address` and `lastAddress` are equal in the ordinary case. `fields` is the datasheet's bit layout, most significant bit first, joined with " | "; it is empty exactly when `reserved` is true. `spiOnly` marks the iC-MU's 0x80-0xAF, which is reachable over SPI only and so beyond the drive's register communication service. Transcribed from the vendors' datasheets: iC-MU Series Rev B1 (Tables 90 and 91) and iC-PVL Rev F2 (Tables 5, 6 and 7). What a field means is not reproduced — that is the datasheets' own CONFIGURATION PARAMETERS chapters.
+   * @description The register maps of the two iC-Haus chips inside a Circulo's internal encoder — the reference tables for POST /api/devices/{slavePosition}/procedures/encoder-register-communication, and documentation in their own right. Static: they describe the chips, not any connected device, so no bus and no scan are needed. Two chips, and the iC-MU is the one in charge. The iC-MU is the position encoder proper, a magnetic off-axis absolute chip speaking BiSS-C to the drive. The iC-PVL is a battery-buffered Hall multiturn counter behind it, reached over I2C through the iC-MU rather than directly. The response is a list of register *spaces*, not of registers, because an address alone names nothing: the same iC-PVL address 0x00 is a configuration register in one space and the status register in another, depending on which I2C device id addressed it. Each space says which chip it belongs to and how it is reached. A row is one address, or the range the datasheet prints as one row — `address` and `lastAddress` are equal in the ordinary case. `fields` lists the named pieces of the register, most significant bit first, each with the datasheet's own one-line description; it is empty exactly when `reserved` is true. `layout` is those same fields rendered as the datasheet prints the row, e.g. `GC_M(1:0) | GF_M(5:0)`, derived rather than stored so it cannot disagree with them. `spiOnly` marks the iC-MU's 0x80-0xAF, which is reachable over SPI only and so beyond the drive's register communication service. A field's `bits` is its own bit slice as the register map prints it, not its position within the byte: `GC_M(1:0)` occupies bits 7:6 of address 0x00 and reads "1:0" because those are the field's two bits. A value wider than one register is spread across several, which is why `RESABZ` reads "7:0" at 0x13 and "15:8" at 0x14. Granularity follows each datasheet's own register map. The iC-PVL prints its status registers bit by bit, so those arrive as eight fields; the iC-MU prints its own as `STATUS0(7:0)`, so that is one field. Transcribed from the vendors' datasheets: iC-MU Series Rev B1 (Tables 90 and 91) and iC-PVL Rev F2 (Tables 5, 6 and 7), with descriptions from their CONFIGURATION PARAMETERS indexes and, for the iC-PVL status bytes, its status tables. The prose behind those one-liners is not reproduced.
    *
    * @name GetIcHausRegisters
    * @summary The Circulo internal encoder's register maps
@@ -616,10 +616,28 @@ export class Api<
            */
           lastAddress: number;
           /**
-           * The datasheet's bit layout, most significant bit first. Empty when reserved.
+           * The fields rendered as the datasheet prints the row. "RESERVED" for a reserved row.
            * @example "SPO_MT(3:0) | MPC(3:0)"
            */
-          fields: string;
+          layout: string;
+          /** The named pieces of this register, most significant bit first. Empty when reserved. */
+          fields: {
+            /**
+             * The datasheet's own name for the field.
+             * @example "SPO_MT"
+             */
+            name: string;
+            /**
+             * The field's own bit slice as the register map prints it, empty where it prints a bare name. Not the position within the byte.
+             * @example "3:0"
+             */
+            bits: string;
+            /**
+             * The datasheet's one-line description of the field.
+             * @example "Offset external multiturn"
+             */
+            description: string;
+          }[];
           /** @example false */
           reserved: boolean;
           /**

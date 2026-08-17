@@ -783,15 +783,29 @@ paths:
 
 
         A row is one address, or the range the datasheet prints as one row — `address` and
-        `lastAddress` are equal in the ordinary case. `fields` is the datasheet's bit layout, most
-        significant bit first, joined with " | "; it is empty exactly when `reserved` is true.
-        `spiOnly` marks the iC-MU's 0x80-0xAF, which is reachable over SPI only and so beyond the
-        drive's register communication service.
+        `lastAddress` are equal in the ordinary case. `fields` lists the named pieces of the
+        register, most significant bit first, each with the datasheet's own one-line description;
+        it is empty exactly when `reserved` is true. `layout` is those same fields rendered as the
+        datasheet prints the row, e.g. `GC_M(1:0) | GF_M(5:0)`, derived rather than stored so it
+        cannot disagree with them. `spiOnly` marks the iC-MU's 0x80-0xAF, which is reachable over
+        SPI only and so beyond the drive's register communication service.
+
+
+        A field's `bits` is its own bit slice as the register map prints it, not its position within
+        the byte: `GC_M(1:0)` occupies bits 7:6 of address 0x00 and reads "1:0" because those are
+        the field's two bits. A value wider than one register is spread across several, which is why
+        `RESABZ` reads "7:0" at 0x13 and "15:8" at 0x14.
+
+
+        Granularity follows each datasheet's own register map. The iC-PVL prints its status
+        registers bit by bit, so those arrive as eight fields; the iC-MU prints its own as
+        `STATUS0(7:0)`, so that is one field.
 
 
         Transcribed from the vendors' datasheets: iC-MU Series Rev B1 (Tables 90 and 91) and iC-PVL
-        Rev F2 (Tables 5, 6 and 7). What a field means is not reproduced — that is the datasheets'
-        own CONFIGURATION PARAMETERS chapters.
+        Rev F2 (Tables 5, 6 and 7), with descriptions from their CONFIGURATION PARAMETERS indexes
+        and, for the iC-PVL status bytes, its status tables. The prose behind those one-liners is
+        not reproduced.
       operationId: getIcHausRegisters
       responses:
         "200":
@@ -821,7 +835,7 @@ paths:
                       type: array
                       items:
                         type: object
-                        required: [address, lastAddress, fields, reserved, spiOnly]
+                        required: [address, lastAddress, layout, fields, reserved, spiOnly]
                         properties:
                           address:
                             type: integer
@@ -833,12 +847,35 @@ paths:
                               The last address of the range; equal to address for a single-address
                               row.
                             example: 15
-                          fields:
+                          layout:
                             type: string
                             description: >-
-                              The datasheet's bit layout, most significant bit first. Empty when
-                              reserved.
+                              The fields rendered as the datasheet prints the row. "RESERVED" for a
+                              reserved row.
                             example: SPO_MT(3:0) | MPC(3:0)
+                          fields:
+                            type: array
+                            description: >-
+                              The named pieces of this register, most significant bit first. Empty
+                              when reserved.
+                            items:
+                              type: object
+                              required: [name, bits, description]
+                              properties:
+                                name:
+                                  type: string
+                                  description: The datasheet's own name for the field.
+                                  example: SPO_MT
+                                bits:
+                                  type: string
+                                  description: >-
+                                    The field's own bit slice as the register map prints it, empty
+                                    where it prints a bare name. Not the position within the byte.
+                                  example: "3:0"
+                                description:
+                                  type: string
+                                  description: The datasheet's one-line description of the field.
+                                  example: Offset external multiturn
                           reserved:
                             type: boolean
                             example: false

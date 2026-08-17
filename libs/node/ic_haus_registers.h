@@ -1,8 +1,11 @@
 #pragma once
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <nlohmann/json_fwd.hpp>
 #include <span>
+#include <string>
 #include <string_view>
 
 namespace mm::node::somanet {
@@ -27,10 +30,18 @@ namespace mm::node::somanet {
 /// @c PRESET/PDR/BAT_WRN/… in the limited I²C window — so an address alone names nothing.
 ///
 /// Transcribed from the vendors' datasheets: iC-MU Series Rev B1 (Tables 90 and 91) and iC-PVL
-/// Rev F2 (Tables 5, 6 and 7). Bit layouts are the datasheets' own field names, most significant
-/// bit first; a row spanning several addresses is kept as one row, exactly as the datasheets print
-/// it. What a field *means* is not reproduced here — that is the datasheets' CONFIGURATION
-/// PARAMETERS chapters, and this table is the map, not the manual.
+/// Rev F2 (Tables 5, 6 and 7). A register carries the datasheet's own fields, most significant bit
+/// first; a row spanning several addresses is kept as one row, exactly as the datasheets print it.
+///
+/// **Each field's description is the datasheet's own one-liner** for it, from the CONFIGURATION
+/// PARAMETERS index (iC-MU p. 18-19, iC-PVL p. 12) and, for the status registers the iC-PVL breaks
+/// out bit by bit, from its status byte tables. The prose *behind* those lines is not reproduced —
+/// this is the map with its legend, not the manual.
+///
+/// **Granularity follows each datasheet's own register map.** The iC-PVL prints its status
+/// registers bit by bit, so those appear here as eight fields; the iC-MU prints its own as
+/// @c STATUS0(7:0), so that is one field. Neither is re-cut to match the other, because the map is
+/// what a reader will have open beside this.
 
 /// @brief Which chip a register space belongs to.
 enum class IcHausChip : uint8_t {
@@ -49,6 +60,32 @@ constexpr std::string_view toString(IcHausChip chip) {
   return "unknown";
 }
 
+/// @brief One field of a register — a named piece of it, with what the datasheet calls it.
+struct IcHausField {
+  std::string_view name;  ///< The datasheet's own name, e.g. "GC_M".
+
+  /// The field's bit slice **as the register map prints it**, e.g. "1:0" — empty where the map
+  /// prints a bare name. This is the slice *of the field* the byte carries, not the field's
+  /// position within the byte: `GC_M(1:0)` occupies bits 7:6 of address 0x00 and says "1:0"
+  /// because those are the field's own two bits. A multi-byte field is how a value wider than a
+  /// register is spread across several, which is why `RESABZ` reads "7:0" at 0x13 and "15:8" at
+  /// 0x14.
+  std::string_view bits;
+
+  std::string_view description;  ///< The datasheet's own one-line description of the field.
+};
+
+/// @brief Serialises an @c IcHausField. Participates in nlohmann ADL.
+void to_json(nlohmann::json& j, const IcHausField& field);
+
+/// @brief How many fields one register row can name.
+///
+/// Eight: a status register the datasheet breaks out bit by bit is the widest case, and no register
+/// can name more than its own bits. A fixed array rather than a span so a register row and its
+/// fields are one literal — the alternative is a named array per register, which is 150 names for
+/// no gain.
+inline constexpr size_t kMaxFieldsPerRegister = 8;
+
 /// @brief One row of a register map — usually one address, sometimes a printed range.
 struct IcHausRegister {
   uint8_t address = 0;  ///< The address, or the first of a range.
@@ -59,21 +96,26 @@ struct IcHausRegister {
   /// transcription honest instead of inventing fifteen rows the vendor never wrote.
   uint8_t lastAddress = 0;
 
-  /// The datasheet's bit layout, most significant bit first, fields joined with " | ". Empty when
-  /// @c reserved. A field carries its own bit range where the datasheet gives one, so
-  /// `GC_M(1:0) | GF_M(5:0)` is read exactly as printed.
-  std::string_view fields;
-
-  bool reserved = false;  ///< The whole row is reserved; @c fields is empty.
+  bool reserved = false;  ///< The whole row is reserved and names no fields.
 
   /// Reachable over SPI only, so OS command 0 cannot touch it. True for the iC-MU's 0x80-0xAF,
   /// which the datasheet marks "access on address space SER > 0x7F only via SPI interface
   /// possible" — a client should show these rather than offer them.
   bool spiOnly = false;
+
+  std::array<IcHausField, kMaxFieldsPerRegister> fields{};  ///< Only the first @c fieldCount count.
+  uint8_t fieldCount = 0;  ///< How many of @c fields this row actually names.
+
+  /// @brief The fields this row names, most significant bit first.
+  std::span<const IcHausField> namedFields() const { return {fields.data(), fieldCount}; }
+
+  /// @brief The row as the datasheet prints it — field names with their bit slices, joined with
+  ///        " | ". Derived rather than stored, so it can never disagree with @c fields.
+  std::string layout() const;
 };
 
-/// @brief Serialises an @c IcHausRegister. Participates in nlohmann ADL, so a span of them
-///        converts on its own.
+/// @brief Serialises an @c IcHausRegister, @c layout() included. Participates in nlohmann ADL, so a
+///        span of them converts on its own.
 void to_json(nlohmann::json& j, const IcHausRegister& r);
 
 /// @brief One addressable register space of one chip.

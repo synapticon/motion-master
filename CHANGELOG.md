@@ -19,6 +19,14 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.78] - 2026-08-17
+
+### Fixed
+
+- **Every log line is now flushed to the log file as it is written**, so a crash can no longer take the record of what led to it. Lines were buffered until roughly 4 KB had accumulated: a clean shutdown wrote that out, a segfault did not, and what was lost was precisely the trail into the fault the log exists to explain.
+  - Flushing only warnings was tried first and rejected. It assumes a crash is preceded by a warning that carries the buffered lines out with it — and this project's crashes have been memory-corruption segfaults inside SOEM that log nothing at all before dying, so the policy would have dropped the very lines it was meant to keep.
+  - The cost is about a millisecond across a full parameter read of a drive, which spends seconds on the wire; nothing on the real-time path logs at all. Note that flushed means handed to the operating system, so this survives a process crash but not a power cut.
+
 ## [6.0.0-alpha.77] - 2026-08-17
 
 ### Added
@@ -26,7 +34,6 @@ the HTTP/WebSocket API may break between any two alphas.
 - **Motion Master now writes a log file.** Until now the log existed in two places that both die with the process — the console window and an in-memory ring served by `GET /api/log` — so after a crash, or a restart, or on any Windows machine started from a console window, there was simply nothing to attach to a bug report. A rotating file now keeps a copy: `logs/motion-master.log` under the user-cache root, 10 MB × 5 files by default, which puts it in `GET /api/user-cache` and so a download away on the Console's **Storage → User Cache** page.
   - **The file keeps its own verbosity, `debug` by default, while the console stays at `info`.** These are the two things you want at once and they used to be a single switch: a terminal you can read, and a log with enough detail to diagnose from. Both are under the new `logging` block.
   - A directory it cannot write is not fatal — the file is skipped with a warning and everything else runs as before.
-  - **Every line is flushed as it is written**, so a crash cannot take the log of what led to it. Without this, lines sit in a ~4 KB buffer until it fills — a clean shutdown flushes that, a segfault does not, and the tail lost would be exactly the trail into the fault. Flushing only warnings was considered and rejected: this project's crashes have been segfaults inside SOEM that log nothing before dying, so that policy would drop the very lines it was meant to keep. The cost is around a millisecond across a full parameter read, and nothing on the real-time path logs at all. (Flushed means handed to the operating system — this survives a process crash, not a power cut.)
   - **The active log file cannot be deleted while the server is running, and the Console no longer offers to.** Deleting a file the server holds open does not do what it looks like: Windows refuses outright, while Linux and macOS unlink it and let the server carry on writing to a file nobody can reach, reclaiming nothing. `DELETE /api/user-cache/...` now answers `409 Conflict` for it, `UserCacheFile` carries `deletable` so a client can tell, and the Storage page shows *In use* in place of the button. Rotated copies are closed and delete normally — that is how the space is reclaimed.
   - Startup now records which config file is in effect and where the log is being written, neither of which was recoverable from a log afterwards.
 - **The Server → Log page has a Download button**, and says what it is giving you: the console-level buffer for the current run only. It points at the log file for the full `debug` history and for anything from a previous run.
@@ -713,7 +720,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.77...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.78...HEAD
+[6.0.0-alpha.78]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.77...v6.0.0-alpha.78
 [6.0.0-alpha.77]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.76...v6.0.0-alpha.77
 [6.0.0-alpha.76]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.75...v6.0.0-alpha.76
 [6.0.0-alpha.75]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.74...v6.0.0-alpha.75

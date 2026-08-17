@@ -102,21 +102,27 @@ int main(int argc, char** argv) {
     }
   }
   spdlog::set_level(loggerLevel);
-  // Make a warning durable the moment it is written. spdlog hands every line to fwrite immediately
-  // but never calls fflush of its own accord, so lines sit in the C stdio buffer (~4 KB, roughly 44
-  // of them) until it fills. A clean shutdown flushes that; a segfault or a SIGKILL does not —
-  // which would lose exactly the tail a crash investigation wants.
+  // Every line, not just the alarming ones. spdlog hands each line to fwrite immediately but never
+  // calls fflush of its own accord, so without this they sit in the C stdio buffer (~4 KB, roughly
+  // 44 lines) until it fills. A clean shutdown flushes that; a segfault or a SIGKILL does not — and
+  // the log file exists precisely to outlive the crash it is describing, so a tail lost to the
+  // buffer is the one part that must not be missing.
   //
-  // Flushing does not reorder anything, and that is what makes this cheap rather than a compromise:
-  // every line goes into the same stream in the order it was logged, so a flush pushes out
-  // *everything buffered so far*, not just the line that triggered it. A warning therefore
-  // checkpoints the debug lines that led up to it as well. What can still be lost is only what was
-  // logged after the last warning.
+  // Flushing only on warn+ was the first attempt, on the assumption that a crash is preceded by a
+  // warning that checkpoints everything buffered before it. That assumption does not hold here:
+  // this codebase's crashes have been memory-corruption segfaults inside SOEM (the re-map FMMU
+  // overrun, the BOOT -> SAFE-OP mailbox read), which log nothing at all before dying — so the
+  // policy dropped exactly the trail into the fault it was meant to preserve.
   //
-  // warn rather than info: it is the level that means something is wrong, and it is rare, so the
-  // extra fflush (~200 ns, measured) is paid on the lines that justify it instead of on the
-  // high-volume debug traffic — flushing every line costs closer to 330 ns against 200.
-  spdlog::default_logger()->flush_on(spdlog::level::warn);
+  // Measured, in this three-sink layout: ~610 ns per line against ~240. The ratio is large and the
+  // number is not — the heaviest thing logged is a full parameter read at a few thousand lines, so
+  // roughly a millisecond across an operation that spends seconds in SDO round-trips. Nothing logs
+  // on the RT path (checked: exchangeProcessData and the cyclic tasks make no logging calls), so no
+  // deadline is exposed to it either.
+  //
+  // "Flushed" means handed to the OS, not on the platter — this survives a process crash, not a
+  // power cut. Guarding against that needs an fsync per line, which is milliseconds each.
+  spdlog::default_logger()->flush_on(spdlog::level::trace);
 
   spdlog::info("Motion Master v{}", mm::core::kVersion);
   // Named once the file sink is up, so a support log says which config was in effect and where the

@@ -69,7 +69,26 @@
       "directory": "",
 
       // Rotate at this size, keeping this many rotated files beside the active one. Disk use is
-      // bounded by maxSizeMb x (maxFiles + 1) — 60 MB with these defaults.
+      // bounded by maxSizeMb x (maxFiles + 1) — 60 MB with these defaults, six files:
+      //
+      //   motion-master.log     the active file, being written now
+      //   motion-master.1.log   most recently rotated
+      //   ...
+      //   motion-master.5.log   oldest kept
+      //
+      // The index goes before the extension, not after. When the active file fills up, the whole
+      // chain is renamed downward (.4 -> .5, .3 -> .4, ... active -> .1) and a fresh active file is
+      // opened, so the previous .5 is what falls off the end. A given file therefore changes name
+      // over time — today's .1 is tomorrow's .2 — so download a log rather than referring to it by
+      // name later.
+      //
+      // Restarting does not rotate: Motion Master appends to the existing active file, and runs are
+      // separated by the "Motion Master v..." line rather than by a file boundary. Rotating per run
+      // would spend a slot on every restart and lose the history after maxFiles of them.
+      //
+      // Only the active file is held open, so it cannot be deleted through /api/user-cache while
+      // the server runs (the Console shows "In use" instead of Delete). The rotated ones are closed
+      // and delete normally — that is how space is reclaimed without stopping the server.
       "maxSizeMb": 10,
       "maxFiles": 5
     }

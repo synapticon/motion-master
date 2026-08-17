@@ -136,10 +136,10 @@ constexpr bool requiresBrakeReleased(CommutationOffsetMethod method) {
 /// @brief Which of a drive's two encoders a command addresses. The enum value @b is the ordinal the
 ///        firmware expects.
 ///
-/// The ordinal selects a *configured slot*, not a kind of encoder: encoder 1 is whatever 0x2110
-/// configures and encoder 2 whatever 0x2112 does. A command addressed at an unconfigured slot — or
-/// at one holding an encoder whose service does not support the command — is refused by the drive
-/// rather than misapplied to the other one.
+/// The ordinal selects a *configuration object*, not a kind of encoder: encoder 1 is the encoder
+/// configured in 0x2110 and encoder 2 the one configured in 0x2112. A command addressed at an
+/// unconfigured encoder — or at one whose service does not support the command — is refused by the
+/// drive rather than misapplied to the other one.
 enum class EncoderOrdinal : uint8_t {
   kEncoder1 = 1,  ///< The encoder configured in 0x2110.
   kEncoder2 = 2,  ///< The encoder configured in 0x2112.
@@ -259,7 +259,7 @@ constexpr std::string_view toString(KueblerRegisterFault fault) {
 ///        @b is the trigger bit the command carries.
 ///
 /// **Only the Integro's internal (Kübler) encoder provides its own velocity**, so this decides
-/// anything only for that encoder, in the slot it is configured in. On a drive whose Kübler encoder
+/// anything only for that encoder, wherever it is configured. On a drive whose Kübler encoder
 /// is not configured for velocity control the command is accepted and changes nothing.
 ///
 /// The velocity feedback filter is applied either way; this chooses what goes into it.
@@ -1527,7 +1527,8 @@ class SomanetDrive : public Cia402Drive {
   /// The register communication the encoder's own service performs on the master's behalf —
   /// **only BiSS implements it today**, which is the command's one restriction along with the
   /// addressed encoder actually being configured. Both are enforced by the drive refusing the
-  /// command, so a non-BiSS or unconfigured slot comes back as an error rather than a bad reading.
+  /// command, so a non-BiSS or unconfigured encoder comes back as an error rather than a bad
+  /// reading.
   ///
   /// Unlike the motor measurements this needs **no preparation at all**: no diagnostics mode, no
   /// Operation Enabled, no brake, and the shaft does not move. It needs only an active mailbox, so
@@ -1572,7 +1573,7 @@ class SomanetDrive : public Cia402Drive {
   /// @brief Sets an iC-MU encoder's calibration mode (OS command 1).
   ///
   /// Restricted to a **Circulo internal encoder** — narrower than
-  /// @c readEncoderRegister's BiSS-only rule — and to a configured slot; the drive refuses
+  /// @c readEncoderRegister's BiSS-only rule — and to a configured encoder; the drive refuses
   /// anything else rather than misapplying it.
   ///
   /// Like the register accesses this prepares nothing and moves nothing, needing only an active
@@ -1993,8 +1994,8 @@ class SomanetDrive : public Cia402Drive {
   ///
   /// **No preconditions and nothing to restore.** The command is accepted in any state, and the
   /// choice holds until another run changes it or the drive is power-cycled — nothing reports it
-  /// back. It takes effect only for the encoder configured in the Kübler slot; on any other encoder
-  /// it is accepted and does nothing.
+  /// back. It takes effect only for a configured Kübler encoder; on any other encoder it is
+  /// accepted and does nothing.
   ///
   /// It commands no motion, but it is not inert on a moving drive: the velocity loop's feedback
   /// changes under it, and the two sources do not agree exactly, so a closed loop can be disturbed

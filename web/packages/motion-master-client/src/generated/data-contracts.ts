@@ -963,7 +963,7 @@ export interface ProcedureRequest {
    */
   pollIntervalMs?: number;
   /**
-   * `encoder-register-communication` and `ic-mu-calibration-mode`: which of the drive's encoders to address. Encoder 1 is whatever 0x2110 configures and encoder 2 whatever 0x2112 does, so the ordinal picks a configured slot rather than a kind of encoder.
+   * `encoder-register-communication` and `ic-mu-calibration-mode`: which of the drive's encoders to address. Encoder 1 is the encoder configured in 0x2110 and encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object rather than a kind of encoder.
    * @default 1
    * @example 1
    */

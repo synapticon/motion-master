@@ -149,14 +149,14 @@ std::expected<uint8_t, std::string> readByte(const nlohmann::json& body, const c
 }
 
 // Reads the "encoder" field, which both encoder commands take and describe identically — the
-// ordinal picks one of the drive's two configured slots and nothing else.
+// ordinal picks one of the drive's two encoder configuration objects and nothing else.
 std::expected<somanet::EncoderOrdinal, std::string> readEncoderOrdinal(
     const nlohmann::json& body, somanet::EncoderOrdinal fallback) {
   auto ordinal = readByte(body, "encoder", static_cast<uint8_t>(fallback));
   if (!ordinal) {
     return std::unexpected(ordinal.error());
   }
-  // Only the two configured slots exist. A third ordinal is rejected rather than passed through:
+  // Only the two ordinals exist. A third one is rejected rather than passed through:
   // the drive would refuse it anyway, and refusing here says which values are real.
   if (*ordinal != static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder1) &&
       *ordinal != static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder2)) {
@@ -170,9 +170,9 @@ std::expected<somanet::EncoderOrdinal, std::string> readEncoderOrdinal(
 ProcedureParameter encoderParameter(somanet::EncoderOrdinal defaultValue) {
   return enumParameter(
       "encoder", "Encoder",
-      "Which of the drive's encoders to address. Encoder 1 is whatever 0x2110 configures and "
-      "encoder 2 whatever 0x2112 does, so the ordinal picks a configured slot rather than a kind "
-      "of encoder.",
+      "Which of the drive's encoders to address. Encoder 1 is the encoder configured in 0x2110 and "
+      "encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object rather "
+      "than a kind of encoder.",
       static_cast<uint8_t>(defaultValue),
       {
           ParameterOption{.value = static_cast<uint8_t>(somanet::EncoderOrdinal::kEncoder1),

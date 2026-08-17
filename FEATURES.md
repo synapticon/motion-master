@@ -164,7 +164,7 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
   the control loop runs faster but the recording is decimated to 1 kHz),
   the motor measurements (**open phase detection**,
   **pole pair detection**, **phase resistance**, **phase inductance**), **motor phase order
-  detection**, **commutation offset detection**, and **offset detection** — the whole
+  detection**, **commutation offset measurement**, and **offset detection** — the whole
   commissioning sequence in one prepared session. The measurement procedures prepare the drive
   themselves (diagnostics mode, Operation Enabled, and the brake where its command requires it)
   and restore everything on every path out, including a failure or a cancellation. The two

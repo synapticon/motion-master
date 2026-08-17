@@ -853,9 +853,8 @@ std::expected<void, std::string> runMotorPhaseOrderDetectionProcedure(Device& de
 ///        snapshot key.
 ///
 /// *Offset detection* is what this sequence has always been called, and the name people will look
-/// for. Not to be confused with @c kCommutationOffsetDetectionProcedure, which is the last two
-/// commands of this sequence on their own — the pair an incremental-encoder axis repeats after
-/// every power-on, once a full offset detection has been done.
+/// for. Not to be confused with @c kCommutationOffsetMeasurementProcedure, which is the last
+/// command of this sequence on its own.
 inline constexpr std::string_view kOffsetDetectionProcedure = "offset-detection";
 
 /// @brief The commissioning sequence's step template — every command in the order it runs, plus the
@@ -901,8 +900,8 @@ std::expected<void, std::string> runOffsetDetectionProcedure(Device& device,
 
 /// @brief Procedure name for commutation offset measurement, as it appears in its URL and its
 ///        snapshot key.
-inline constexpr std::string_view kCommutationOffsetDetectionProcedure =
-    "commutation-offset-detection";
+inline constexpr std::string_view kCommutationOffsetMeasurementProcedure =
+    "commutation-offset-measurement";
 
 /// @brief The step commutation offset measurement's own measurement reports against.
 inline constexpr std::string_view kCommutationOffsetMeasurementStep =
@@ -910,53 +909,50 @@ inline constexpr std::string_view kCommutationOffsetMeasurementStep =
 
 /// @brief The step that puts the brake where the configured method needs it.
 ///
-/// Its own id rather than @c kReleaseBrakeStep, because this is the one procedure that may
-/// **engage** the brake instead of releasing it: the stationary method cannot hold the load, so it
-/// runs with the brake on. A step called "release-brake" that sometimes engages would be a lie in
-/// the step array.
+/// Its own id rather than @c kReleaseBrakeStep, because the commissioning sequence may **engage**
+/// the brake there instead of releasing it: it released the brake for motor phase order detection,
+/// and the stationary offset method that follows cannot hold the load, so the release has to be
+/// undone. A step called "release-brake" that sometimes engages would be a lie in the step array.
 inline constexpr std::string_view kSetBrakeStep = "set-brake";
 
-/// @brief Commutation offset detection's step template — prepare, release the brake, detect the
-/// phase
-///        order, set the brake, measure, restore.
-std::vector<ProgressStep> commutationOffsetDetectionSteps();
+/// @brief Commutation offset measurement's step template — prepare, release the brake, measure,
+///        restore.
+std::vector<ProgressStep> commutationOffsetMeasurementSteps();
 
-/// @brief Runs commutation offset detection as a procedure body — **motor phase order detection
-///        (command 4) followed by commutation offset measurement (command 5)**.
+/// @brief Runs commutation offset measurement as a procedure body — **OS command 5 and nothing
+///        else**.
 ///
-/// The pair is the unit, not two things a caller may sequence itself: command 5 is only meaningful
-/// once the phase order is known, the drive does not check that it has been, and an offset measured
-/// against an unknown phase order is simply wrong. Running command 4 here is what makes the result
-/// trustworthy — and it is also exactly the sequence an incremental-encoder axis repeats after
-/// every power-on.
+/// One command, like every other measurement procedure here. The pairing with motor phase order
+/// detection (4) lives in @c runOffsetDetectionProcedure, which runs the whole commissioning
+/// sequence; running the two on their own is the caller's to sequence.
+///
+/// **Command 5 is only meaningful once the phase order is established, and the drive does not check
+/// that it has been.** An offset measured against an unknown phase order is simply wrong, and
+/// nothing here can tell the difference — 0x2003:05 holds a valid value either way, so there is no
+/// "never established" to detect. Run motor phase order detection first, or run offset detection.
 ///
 /// **The one procedure whose physical behaviour is configured on the drive rather than fixed
-/// here**: the method in 0x2009:03 decides whether the offset measurement turns the rotor and which
-/// way the brake has to go. So the method is read first — before the drive is touched at all, since
-/// a method that cannot be read or is out of range means the brake would be handled by guesswork —
-/// and is reported with the result.
+/// here**: the method in 0x2009:03 decides whether the measurement turns the rotor and whether it
+/// needs the brake released. So the method is read first — before the drive is touched at all,
+/// since a method that cannot be read or is out of range means the brake would be handled by
+/// guesswork — and is reported with the result.
 ///
-/// Six steps: the shared **prepare**; **release-brake**, which command 4 requires unconditionally;
-/// **motor-phase-order-detection**; **set-brake**, which puts the brake where the offset *method*
-/// needs it (still released for the rotating methods, *engaged* for the stationary one, which
-/// cannot hold the load and so has to undo the release just made for command 4); the measurement;
-/// and the shared **restore**.
+/// **The brake is released only for the rotating methods** (0x2009:03 = 0 or 1), which the firmware
+/// refuses to run with it engaged. The stationary method (2) needs nothing of the brake, so the
+/// brake is never written and the load stays held; its **release-brake** step stays idle, and there
+/// is nothing about the brake to restore either.
 ///
-/// **The rotor turns whatever the method.** The stationary offset method does not turn it, but
-/// command 4 always does, so no configuration of this procedure leaves the shaft still.
-///
-/// **A successful run changes the drive's configuration twice over** — command 4 writes 0x2003:05,
-/// command 5 writes 0x2001 and sets 0x2009:01 to OFFSET_VALID — and the restore deliberately leaves
-/// both alone: they are the result, not side effects.
+/// **A successful run changes the drive's configuration** — 0x2001 written and 0x2009:01 set to
+/// OFFSET_VALID, in the object dictionary rather than in flash — and the restore deliberately
+/// leaves both alone: they are the result, not side effects.
 ///
 /// @param device   Device to run against, borrowed by the manager for this call.
 /// @param reporter Where step progress is recorded.
 /// @param stop     Cancellation token; checked between steps and passed into the OS command so a
 ///                 running measurement is aborted rather than abandoned.
 /// @return Void when the drive reported an offset, otherwise why it did not.
-std::expected<void, std::string> runCommutationOffsetDetectionProcedure(Device& device,
-                                                                        ProgressReporter& reporter,
-                                                                        std::stop_token stop);
+std::expected<void, std::string> runCommutationOffsetMeasurementProcedure(
+    Device& device, ProgressReporter& reporter, std::stop_token stop);
 
 /// @brief Procedure name for phase resistance measurement, as it appears in its URL and its
 ///        snapshot key.

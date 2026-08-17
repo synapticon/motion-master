@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Changed
+
+- **Commutation offset detection is now commutation offset measurement, and runs the one OS command its name promises.** `POST /api/devices/{slavePosition}/procedures/commutation-offset-detection` becomes `.../commutation-offset-measurement`, and it no longer runs motor phase order detection first. Every other measurement procedure is one command; this was the only one that quietly ran two, and folding phase order detection in defeated the stationary measurement method — command 4 always turns the rotor and always needs the brake released, so an axis configured for a stationary measurement still moved and still dropped its load, only to have the brake engaged again for the measurement itself. Now the brake is released **only** for the rotating methods (`0x2009:03` = 0 or 1), which the drive refuses to run with it engaged, and the stationary method (2) leaves the brake exactly as it was found. Four steps instead of six: prepare, release-brake, measure, restore — with release-brake left idle when the method does not need it. **The pairing has not gone anywhere**: `.../offset-detection` still runs the whole commissioning sequence, motor phase order detection then the offset measurement included, in one prepared session. Run them separately and the order is yours to get right — the offset is only meaningful once the phase order is established, and the drive does not check that it was.
+
 ## [6.0.0-alpha.78] - 2026-08-17
 
 ### Fixed

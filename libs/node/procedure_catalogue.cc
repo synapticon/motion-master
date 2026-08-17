@@ -33,54 +33,45 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   // is known as soon as the device is, which is what an `applies` predicate is allowed to
   // consult.
   ProcedureDescriptor commutationOffset;
-  commutationOffset.name = std::string(kCommutationOffsetDetectionProcedure);
-  commutationOffset.title = "Commutation offset detection";
+  commutationOffset.name = std::string(kCommutationOffsetMeasurementProcedure);
+  commutationOffset.title = "Commutation offset measurement";
   commutationOffset.description =
-      "Detects the motor phase order and then measures the commutation angle offset, storing both "
-      "in "
-      "the drive (0x2003:05, and 0x2001 marked valid in 0x2009:01). This is what commissions an "
-      "axis, "
-      "and the two commands are one unit rather than two you sequence yourself: an offset measured "
-      "against an unknown phase order is wrong, and the drive does not check that the phase order "
-      "was "
-      "established. It is also exactly the sequence an axis with an incremental encoder repeats "
-      "after "
-      "every power-on. On a new absolute-encoder axis, run open phase detection and pole pair "
-      "detection first. How the offset is measured is configured on the drive rather than chosen "
-      "here "
-      "— the method in 0x2009:03 decides whether that step turns the rotor and which way the "
-      "brake goes — and the method that ran is reported with the result.";
+      "Measures the commutation angle offset and writes it into the drive's object dictionary "
+      "(0x2001, marked valid in 0x2009:01). The measurement is only meaningful once the motor "
+      "phase order has been established, and the drive does not check that it has been — so run "
+      "motor phase order detection first, or run offset detection, which does the whole "
+      "commissioning sequence in one prepared session. How the offset is measured is configured on "
+      "the drive rather than chosen here: the method in 0x2009:03 decides whether the measurement "
+      "turns the rotor and whether it needs the brake released, and the method that ran is "
+      "reported with the result. Runs OS command 5.";
   commutationOffset.caveats = {
-      "This turns the rotor whatever the method is set to: the stationary offset method does not "
-      "turn "
-      "it, but phase order detection always does. The shaft must be free, and whatever it drives "
-      "must "
-      "be safe to move.",
-      "The brake is released for phase order detection, which requires that unconditionally — "
-      "so "
-      "anything it was holding is free to move, even under the stationary method. Support the load "
-      "first. It is engaged again before a stationary measurement, which cannot hold the load "
-      "itself.",
-      "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
-      "The rotating methods (0x2009:03 = 0 or 1) measure with the brake released; method 1 "
-      "additionally needs the gains in 0x2009:04-06 tuned. The stationary method (2) is less "
-      "precise.",
-      "A successful run changes the drive's configuration twice over, and the restore does not "
-      "undo "
-      "either — the phase order and the offset are the result, not side effects.",
+      "The rotating methods (0x2009:03 = 0 or 1) turn the rotor: the shaft must be free, and "
+      "whatever it drives must be safe to move. The stationary method (2) does not turn it.",
+      "The brake is released only for the rotating methods, which the drive refuses to run with it "
+      "engaged — so anything it was holding is free to move, and the load must be supported first. "
+      "The stationary method leaves the brake alone.",
+      "On the rotating methods, releasing a pin brake turns the motor by design, to lift the load "
+      "off the pin.",
+      "Method 1 additionally needs the gains in 0x2009:04-06 tuned. The stationary method (2) is "
+      "less precise.",
+      "The new offset replaces the old one and stays there. It is not saved to flash, so run "
+      "store parameters to keep it across a power cycle.",
+      "The drive marks the offset invalid again on its own whenever the commutation encoder's "
+      "source, type, resolution, polarity, singleturn offset or feedback type changes, or the pole "
+      "pair count in 0x2003:01 does. Any of those means measuring again.",
       "The bus must be exchanging process data (OP state): the drive's state machine only advances "
       "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
   };
   commutationOffset.movesMotor = true;
   commutationOffset.requiresEnabled = false;
-  commutationOffset.steps = commutationOffsetDetectionSteps();
+  commutationOffset.steps = commutationOffsetMeasurementSteps();
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(commutationOffset),
       .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
         return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-          return runCommutationOffsetDetectionProcedure(device, reporter, std::move(stop));
+          return runCommutationOffsetMeasurementProcedure(device, reporter, std::move(stop));
         };
       },
   });
@@ -91,11 +82,11 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   encoderRegister.description =
       "Reads or writes one register of an encoder, through the encoder's own register "
       "communication service. Only BiSS implements that today, so this addresses a BiSS encoder — "
-      "the internal encoder of a Circulo, say — and the register map is the encoder chip's rather "
-      "than the drive's: what a register means comes from its own documentation. Unlike the motor "
+      "a Circulo's internal encoder, for example. The registers belong to the encoder chip, not to "
+      "the drive, so what each one means comes from the chip's own documentation. Unlike the motor "
       "measurements this prepares nothing and moves nothing, so it can be run on a drive that is "
       "exchanging process data without disturbing it. A write is answered the same way a read is, "
-      "with what the register holds afterwards.";
+      "with what the register holds afterwards. Runs OS command 0.";
   encoderRegister.caveats = {
       "A write reconfigures the encoder, and nothing here checks what a value means — a wrong one "
       "can leave an encoder unable to report position. Read the encoder chip's own register "
@@ -184,7 +175,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "The drive keeps the maximum of every cycle while measuring, along with whatever latency was "
       "configured at the moment that maximum happened — the pair is what says whether the "
       "configured figure covers the worst case observed. Nothing here changes the drive: no "
-      "operation mode, no state, no brake, no motion.";
+      "operation mode, no state, no brake, no motion. Runs OS command 22.";
   firmwareLatency.caveats = {
       "A maximum is only as informative as what the drive was doing while it collected. Measuring "
       "an idle drive reports the worst case of an idle drive; to characterise a machine, start the "
@@ -232,7 +223,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "data captures the velocity and torque actual values. Arming the recording deletes the "
       "previous one, and recording occupies the whole requested duration. The recording stays on "
       "the drive — read it back from the device's HRD endpoint, which needs the same data "
-      "selection to decode it.";
+      "selection to decode it. Runs OS command 3.";
   hrdStreaming.caveats = {
       "Arming a recording deletes every high resolution data file already on the drive, so the "
       "previous "
@@ -278,10 +269,11 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "raised, which is what makes it possible to change the encoder's configuration registers "
       "with Encoder register communication. Raw clocks an encoder already configured for raw "
       "output and averages that data into 0x2704. Calibrating an encoder means moving between "
-      "these modes, not setting one switch.";
+      "these modes, not setting one switch. Runs OS command 1.";
   icMuCalibrationMode.caveats = {
-      "There is no restore: the encoder stays in the mode this sets until another run puts it back "
-      "to standard. Leaving one in configuration mode leaves the drive without a position update.",
+      "Nothing is put back afterwards: the encoder stays in the mode this sets until another "
+      "run puts it back to standard. Leaving one in configuration mode leaves the drive "
+      "without a position update.",
       "In configuration mode the encoder's position is not updated and the BiSS CRC error is "
       "suppressed, so the drive will not report a problem it would normally fault on.",
       "Entering configuration mode saves the current position, and entering raw mode counts from "
@@ -318,15 +310,16 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "BiSS frame carries two bits by which the encoder reports on its own reading; the firmware "
       "checks them each cycle, putting a warning in the error report and faulting the drive on an "
       "error. Ignoring them switches that check off for the chosen encoder, which is a tool for "
-      "bringing up and diagnosing an encoder rather than for running a machine.";
+      "bringing up and diagnosing an encoder rather than for running a machine. Runs OS "
+      "command 14.";
   ignoreBissStatusBits.caveats = {
       "What this suppresses is a fault, not a nuisance: a BiSS error bit otherwise puts the drive "
       "into active short circuit, whatever the quick stop option code says. With the bits ignored "
       "the drive keeps running on an encoder that is reporting its own position as unreliable — so "
       "the position it acts on may be wrong, with nothing to say so.",
-      "There is no restore. Ignoring holds until another run turns it back on or the drive is "
-      "power-cycled, and nothing on the drive reports the flag back, so what the run recorded is "
-      "the only account of it.",
+      "Nothing is put back afterwards. Ignoring holds until another run turns it back on or "
+      "the drive is power-cycled, and nothing on the drive reports the flag back, so what the "
+      "run recorded is the only account of it.",
       "The encoder's warning and error reports (BisWnBit / BisErBit) both stop, and on an iC-MU "
       "the "
       "firmware also stops reading the chip's status registers to find out what went wrong.",
@@ -363,7 +356,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "GET /api/meta/kuebler-registers — the vendor's own draft table, carrying each register's "
       "width, access and bit definitions — and a picker built from it fills the address and length "
       "here. Any address can be accessed, documented or not. Like its BiSS counterpart this "
-      "prepares nothing and moves nothing, so it runs on a drive that is exchanging process data.";
+      "prepares nothing and moves nothing, so it runs on a drive that is exchanging process "
+      "data. Runs OS command 19.";
   kueblerRegister.caveats = {
       "The length must match the register's real width: the encoder refuses a mismatch rather than "
       "truncating. A 64-bit register — 0x04, the firmware version — cannot be transferred at all, "
@@ -403,15 +397,13 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   motorPhaseOrder.title = "Motor phase order detection";
   motorPhaseOrder.description =
       "Works out whether the motor's phases are wired normally or inverted — whether the sensor "
-      "angle and the rotor angle move in the same direction — and stores the answer in the drive "
-      "(0x2003:05). Unlike the other detections this one reconfigures the drive, which is the "
-      "point "
-      "of running it: commutation offset measurement requires that it has been done, so it is the "
-      "step immediately before it, and it has to be repeated after every power-on on an axis with "
-      "an "
-      "incremental encoder. The drive is put into diagnostics mode, enabled, its brake released, "
-      "and "
-      "all of that restored afterwards.";
+      "angle and the rotor angle move in the same direction — and writes the answer into the "
+      "drive's object dictionary (0x2003:05). Unlike the other detections this one reconfigures "
+      "the drive, which is the point of running it: commutation offset measurement requires that "
+      "it has been done, so it is the step immediately before it, and it has to be repeated after "
+      "every power-on on an axis with an incremental encoder. The drive is put into diagnostics "
+      "mode, enabled, its brake released, and all of that restored afterwards. Runs OS "
+      "command 4.";
   motorPhaseOrder.caveats = {
       "This command turns the rotor. The shaft must be free to move, and whatever it drives must "
       "be "
@@ -419,8 +411,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "The brake is released while it runs, because this command requires that. Anything the brake "
       "was holding is free to move: on a vertical or loaded axis, support the load first.",
       "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
-      "A successful run changes the drive's configuration, and the restore does not undo it — the "
-      "new phase order is the result, not a side effect.",
+      "The detected phase order replaces the old one and stays there. It is not saved to "
+      "flash, so run store parameters to keep it across a power cycle.",
       "The bus must be exchanging process data (OP state): the drive's state machine only advances "
       "while its statusword is updating, so the procedure cannot enable the drive otherwise.",
   };
@@ -450,7 +442,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "is what makes the order impossible to get wrong, and each step reports its own result, so "
       "a run that stops half way still shows everything it established. The drive is put into "
       "diagnostics mode and enabled once, the brake is released once, and everything is restored "
-      "afterwards.";
+      "afterwards. Runs OS commands 6, 8, 9, 7, 4 and 5, in that order.";
   commissioning.caveats = {
       "This turns the rotor: pole pair detection and motor phase order detection both have to, and "
       "the offset measurement may. The shaft must be free, and whatever it drives must be safe to "
@@ -462,9 +454,9 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "Releasing a pin brake turns the motor by design, to lift the load off the pin.",
       "The measured resistance, inductance and pole pair count are reported but not stored — the "
       "drive does not write them, and this does not either. Objects 0x2003:03, :04 and :01 are "
-      "where "
-      "they belong. The phase order and the commutation offset the firmware does store itself, and "
-      "the restore does not undo those.",
+      "where they belong. The phase order and the commutation offset the firmware does write "
+      "itself: they replace the old values and stay there. Neither is saved to flash, so run "
+      "store parameters to keep them across a power cycle.",
       "A failing step stops the run rather than being skipped, because every step depends on the "
       "ones "
       "before it. An open phase stops it immediately.",
@@ -493,7 +485,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "it finds a fault. Worth running first when commissioning a motor: the measurements that "
       "follow all assume the three phases are actually connected, and each would otherwise fail in "
       "a way that points at the wrong thing. The drive is prepared and put back automatically — "
-      "diagnostics mode, Operation Enabled, then the mode restored as found.";
+      "diagnostics mode, Operation Enabled, then the mode restored as found. Runs OS command "
+      "6.";
   openPhase.caveats = {
       "The brake is left exactly as found — this command does not require it released, and an "
       "engaged brake simply keeps the shaft still while the check runs.",
@@ -578,7 +571,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "of phase resistance measurement: same preconditions, same preparation, and the brake "
       "handled "
       "the same way — only the quantity differs. The drive is put into diagnostics mode, enabled, "
-      "and restored to exactly the state it was found in afterwards.";
+      "and restored to exactly the state it was found in afterwards. Runs OS command 9.";
   phaseInductance.caveats = {
       "The value is reported, not stored — nothing in the drive's configuration changes. Object "
       "0x2003:04 is where a phase inductance belongs if you want to keep it, and it is the one "
@@ -613,7 +606,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "Measures the resistance of one motor phase, in milliohms, and reports it. The drive is put "
       "into diagnostics mode, enabled, and restored to exactly the state it was found in "
       "afterwards. Measured at the drive's own terminals, so what comes back is the winding plus "
-      "whatever is in series with it — your cabling and connectors included.";
+      "whatever is in series with it — your cabling and connectors included. Runs OS command "
+      "8.";
   phaseResistance.caveats = {
       "The value is reported, not stored — nothing in the drive's configuration changes. Object "
       "0x2003:03 is where a phase resistance belongs if you want to keep it, but that object holds "
@@ -648,7 +642,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "do so. Part of commissioning an absolute-encoder axis, where it is run after open phase "
       "detection and before motor phase order detection and commutation offset measurement. The "
       "drive is put into diagnostics mode, enabled, its brake released, and all of that restored "
-      "afterwards.";
+      "afterwards. Runs OS command 7.";
   polePair.caveats = {
       "This command turns the rotor — it has to, in order to count poles. The shaft must be free "
       "to "
@@ -720,7 +714,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "since it began running. The firmware counts a cycle as skipped when it starts late enough "
       "to miss its slot, and adds the whole backlog when several are missed at once — so this is "
       "missed cycles, not missed deadlines. Nothing here changes the drive: no operation mode, no "
-      "state, no brake, no motion.";
+      "state, no brake, no motion. Runs OS command 13.";
   skippedCycles.caveats = {
       "The counter is cumulative since the loop started and nothing resets it, so a single reading "
       "means little. Read it, wait, read it again: a large but unchanging number is a startup "
@@ -791,7 +785,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "linear at a constant amplitude. Recording the machine's response to it is what High "
       "resolution data streaming does — start this with \"after HRD stream start\" and then run "
       "that with its system identification format, and the recording captures the excitation and "
-      "the response together.";
+      "the response together. Runs OS command 15.";
   systemIdentification.caveats = {
       "Arming excites the motor. \"Immediately\" starts on the next control cycle if the drive is "
       "enabled, so the shaft must be free and its load safe to move. \"None\" configures the drive "
@@ -836,7 +830,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "from the other side: it spins the motor up over about ten seconds, holds it at speed, and "
       "works the constant out from the voltage the motor generates. The drive is put into "
       "diagnostics mode, enabled, its brake released, and restored to exactly the state it was "
-      "found in afterwards.";
+      "found in afterwards. Runs OS command 10.";
   torqueConstant.caveats = {
       "Measure and store pole pairs, phase resistance and phase inductance first. The drive "
       "subtracts the winding impedance to find the back-EMF, and it takes that impedance and the "
@@ -876,7 +870,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "Provokes a firmware error or exception in one of the drive's control services, for testing "
       "and diagnostics. It exists because the firmware has the command, and because the behaviour "
       "around a stopped control service cannot be tested without being able to stop one on "
-      "purpose. This is a test instrument, not a commissioning step.";
+      "purpose. This is a test instrument, not a commissioning step. Runs OS command 16.";
   triggerError.caveats = {
       "Four of the twelve error types stop the addressed service for good — load-store, "
       "arithmetic, ecall and endless-loop. The drive does not fault, it stops participating, and "
@@ -920,7 +914,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "differentiates from encoder position, or the one the encoder integrated itself. Only the "
       "Integro's internal encoder reports its own velocity, so this decides anything only for that "
       "encoder, in the slot it is configured in. The velocity feedback filter is applied either "
-      "way — this chooses what goes into it.";
+      "way — this chooses what goes into it. Runs OS command 18.";
   velocitySource.caveats = {
       "Which source is already active depends on the product, and not as the OS command "
       "specification says: it calls the firmware-computed value the default, but an Integro build "
@@ -930,8 +924,9 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "changes under it and the two sources do not agree exactly, so a closed loop can be "
       "disturbed "
       "by the switch. Prefer changing it on a stopped drive.",
-      "There is nothing to restore and nothing reports the choice back. It holds until another run "
-      "changes it or the drive is power-cycled, so the run's own record is the only account of it.",
+      "Nothing is put back afterwards, and nothing reports the choice back. It holds until "
+      "another run changes it or the drive is power-cycled, so the run's own record is the "
+      "only account of it.",
       "On a drive whose Kübler encoder is not configured for velocity control the command is "
       "accepted and changes nothing.",
   };

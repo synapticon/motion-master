@@ -72,9 +72,17 @@ void writeResponse(uWS::HttpResponse<true>* res, std::string_view corsOrigin, Re
 // way the Router exists to prevent, and silence would hide it.
 //
 // Edge-triggered, so a saturated pool logs twice rather than once per request.
+//
+// The condition is *unfinished tasks outnumber workers*, not a non-empty queue.
+// `get_tasks_queued()` counts tasks pushed but not yet popped, and the loop thread dispatching a
+// burst of requests always outruns a parked worker's wakeup — so two requests arriving in one loop
+// iteration leave a task momentarily queued with 31 workers idle. Measured: three of every four
+// requests in a burst of four see a non-empty queue while one worker is running.
+// `get_tasks_total()` is `running + queued`, so a just-pushed task reads as 1 against 32 while
+// genuine saturation reads as 33.
 void reportSaturation(const BS::light_thread_pool& pool) {
   static std::atomic<bool> saturated{false};
-  const bool queued = pool.get_tasks_queued() > 0;
+  const bool queued = pool.get_tasks_total() > pool.get_thread_count();
   bool was = saturated.load(std::memory_order_relaxed);
   if (queued == was || !saturated.compare_exchange_strong(was, queued)) {
     return;
@@ -227,7 +235,6 @@ void Router::add(std::string_view method, const std::string& pattern, Handler ha
                         std::string queryString,
                         std::vector<std::pair<std::string, std::string>> headers,
                         std::string body) {
-      reportSaturation(*pool);
       pool->detach_task([shared, loop, corsOrigin, res, aborted, url = std::move(url),
                          parameters = std::move(parameters), queryString = std::move(queryString),
                          headers = std::move(headers), body = std::move(body)]() mutable {
@@ -241,6 +248,8 @@ void Router::add(std::string_view method, const std::string& pattern, Handler ha
           writeResponse(res, corsOrigin, std::move(response));
         });
       });
+      // After the push, so the request being dispatched counts itself.
+      reportSaturation(*pool);
     };
 
     if (!hasBody) {

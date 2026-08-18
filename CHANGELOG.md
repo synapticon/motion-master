@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.79] - 2026-08-18
+
 ### Added
 
 - **The register maps of a Circulo's internal encoder, as reference data.** `GET /api/meta/ic-haus-registers` and an **iC-Haus Registers** page in the console's Meta group, alongside the Kübler map that does the same job for an Integro. A Circulo's internal encoder is two iC-Haus chips: the **iC-MU** is the position encoder proper, a magnetic off-axis absolute chip speaking BiSS-C to the drive, and the **iC-PVL** is a battery-buffered Hall multiturn counter behind it, reached over I²C through the iC-MU rather than directly. Five register spaces are covered — the iC-MU's bank 0 and its banked static part, and the iC-PVL's EEPROM plus its two I²C windows — because **an address alone names nothing**: the same iC-PVL address `0x00` is a configuration register in one window and the status register in the other, so the response is a list of spaces rather than of registers, each saying which chip it belongs to and how it is reached. Every register names its **fields**, each with the datasheet's own one-line description, so `0x00` reads as `GC_M` — master gain range selection — beside `GF_M`, master gain, rather than as `GC_M(1:0) | GF_M(5:0)`. A field's `bits` is its own slice as the register map prints it, not its position in the byte. Rows keep a printed address range as one row, and the iC-MU's `0x80`-`0xAF` is flagged SPI-only and so out of the register communication service's reach. Transcribed from iC-MU Series Rev B1 and iC-PVL Rev F2, with descriptions from their CONFIGURATION PARAMETERS indexes and the iC-PVL's status tables; the prose behind each one-liner stays in those datasheets.
@@ -728,7 +730,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.78...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.79...HEAD
+[6.0.0-alpha.79]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.78...v6.0.0-alpha.79
 [6.0.0-alpha.78]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.77...v6.0.0-alpha.78
 [6.0.0-alpha.77]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.76...v6.0.0-alpha.77
 [6.0.0-alpha.76]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.75...v6.0.0-alpha.76

@@ -1,7 +1,7 @@
 openapi: "3.1.0"
 info:
   title: Motion Master API
-  version: "6.0.0-alpha.78"
+  version: "6.0.0-alpha.79"
   description: |
     Motion Master is the motion-control software for Synapticon SOMANET servo
     drives. This HTTP API drives the EtherCAT fieldbus end to end: bring up a

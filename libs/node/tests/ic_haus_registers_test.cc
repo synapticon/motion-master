@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <nlohmann/json.hpp>
 #include <string>
 
@@ -147,7 +148,7 @@ TEST(IcHausRegisters, TheFirmwaresOwnIcMuAddressesAreAllPresent) {
   };
 
   EXPECT_TRUE(covers(*bank0, 0x0F));  // SPO_MT_MPC
-  for (uint8_t address : {0x5B, 0x5C, 0x5D, 0x5E, 0x75, 0x76, 0x77}) {
+  for (uint8_t address : std::array<uint8_t, 7>{0x5B, 0x5C, 0x5D, 0x5E, 0x75, 0x76, 0x77}) {
     EXPECT_TRUE(covers(*statics, address)) << "0x" << std::hex << int{address};
   }
   for (uint8_t address = 0x60; address <= 0x65; ++address) {

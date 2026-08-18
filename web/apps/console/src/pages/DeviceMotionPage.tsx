@@ -15,13 +15,17 @@ import { useOperationModes } from '../hooks/useOperationModes'
 // geometric (h-9 = 6rem = 96px!), so a numeric height utility would NOT be ~36px — see theme.css.
 const inputCls = 'border border-grey-300 px-3 h-[38px] text-sm w-full bg-white'
 // Buttons share the h-[38px] control height (above) and are inline-flex + centred so the label
-// stays vertically centred at that fixed height.
+// stays vertically centred at that fixed height. They also never wrap or shrink: a two-word label
+// ("Set mode", "Quick stop", "Reset fault") would otherwise break in two as its row narrowed —
+// beside a flex-1 select in the Mode card, and in the Operation card's wrapping button row.
 const btnCls =
-  'inline-flex items-center justify-center bg-syn-red text-white px-4 h-[38px] text-xs ' +
-  'hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer transition-colors'
+  'inline-flex shrink-0 items-center justify-center whitespace-nowrap bg-syn-red text-white px-4 ' +
+  'h-[38px] text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed ' +
+  'cursor-pointer transition-colors'
 const btnGhostCls =
-  'inline-flex items-center justify-center border border-grey-300 text-grey-700 px-4 h-[38px] ' +
-  'text-xs hover:bg-grey-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer ' +
+  'inline-flex shrink-0 items-center justify-center whitespace-nowrap border border-grey-300 ' +
+  'text-grey-700 px-4 h-[38px] text-xs hover:bg-grey-50 disabled:opacity-50 ' +
+  'disabled:cursor-not-allowed cursor-pointer ' +
   'transition-colors'
 
 type Quantity = 'position' | 'velocity' | 'torque'

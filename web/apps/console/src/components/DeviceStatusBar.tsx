@@ -29,9 +29,12 @@ const labelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display
 //
 // 30px, not the 38px used for form controls: this is always-on chrome above every device page, so
 // its height is permanently spent, and a button here sits beside a badge rather than an input.
+// A two-word label ("Set mode", "Quick stop", "Reset fault") would break across two lines inside a
+// 30px box the moment the flex row squeezed it, so the label stays on one line and the box keeps
+// its content width — the bar wraps whole controls onto a second row instead.
 const barBtn =
-  'inline-flex items-center justify-center h-[30px] px-4 text-xs cursor-pointer ' +
-  'transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+  'inline-flex shrink-0 items-center justify-center whitespace-nowrap h-[30px] px-4 text-xs ' +
+  'cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
 const barBtnPrimary = `${barBtn} bg-syn-red text-white hover:bg-ocean`
 const barBtnOutline = `${barBtn} border border-syn-red text-syn-red hover:bg-syn-red hover:text-white`
 

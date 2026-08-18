@@ -3,6 +3,18 @@ import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
+// One column set for all five tables. Widths are explicit so the tables line up with each other
+// rather than each sizing itself to its own longest field name; Description takes what is left.
+const COLUMNS = [
+  { label: 'Address', width: '7.5rem' },
+  // Wide enough for USER_EXCHANGE_REGISTERS, the longest field name in either chip.
+  { label: 'Field', width: '14rem' },
+  // Wide enough for "23:16 or 15:8", the widest slice — the iC-PVL prints two for its count bytes.
+  { label: 'Bits', width: '8.5rem' },
+  { label: 'Description', width: 'auto' },
+  { label: 'Reach', width: '7rem' },
+];
+
 function hex(value: number) {
   return `0x${value.toString(16).toUpperCase().padStart(2, '0')}`
 }
@@ -67,15 +79,22 @@ export default function MetaIcHausRegistersPage() {
                 </h3>
                 <p className="text-xs text-grey-600 mb-3 max-w-3xl">{space.addressing}</p>
                 <div className="border border-grey-200 overflow-x-auto">
-                  <table className="w-full text-xs border-collapse">
+                  <table className="w-full min-w-[48rem] text-xs border-collapse table-fixed">
+                    {/* Each space is its own table, so without fixed columns every one of the five
+                        would size itself to its own content and no two would line up. */}
+                    <colgroup>
+                      {COLUMNS.map((column) => (
+                        <col key={column.label} style={{ width: column.width }} />
+                      ))}
+                    </colgroup>
                     <thead>
                       <tr className="border-b border-grey-200 bg-grey-50">
-                        {['Address', 'Field', 'Bits', 'Description', 'Reach'].map((h) => (
+                        {COLUMNS.map((column) => (
                           <th
-                            key={h}
+                            key={column.label}
                             className="text-left px-4 py-2 font-display uppercase tracking-wide text-grey-600 font-medium whitespace-nowrap"
                           >
-                            {h}
+                            {column.label}
                           </th>
                         ))}
                       </tr>

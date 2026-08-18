@@ -233,13 +233,14 @@ export default function DeviceStatusBar({ slavePosition }: DeviceStatusBarProps)
                   : `Operation mode — unavailable: ${whyDisabled}.`
               }
             >
-              {/* Marked, not just disabled: a mode the drive does not advertise and one its
-                  vendor has deprecated both look like ordinary entries otherwise, and the second
-                  is not even disabled — deprecated is the vendor's label, not a refusal. */}
+              {/* Name and value only: a native select is as wide as its longest option, and this
+                  one sits in a status bar next to five other controls. A mode the drive does not
+                  advertise is greyed out, which is signal enough here; the vendor's deprecated
+                  flag is spelled out on the Motion page's Mode card, where there is room. */}
               <optgroup label="Standard">
                 {standardModes.map((m) => (
                   <option key={m.value} value={m.value} disabled={m.supported === false}>
-                    {m.name} ({m.value}){m.supported === false ? ' — not supported' : ''}
+                    {m.name} ({m.value})
                   </option>
                 ))}
               </optgroup>
@@ -247,7 +248,7 @@ export default function DeviceStatusBar({ slavePosition }: DeviceStatusBarProps)
                 <optgroup label="Manufacturer-specific">
                   {manufacturerModes.map((m) => (
                     <option key={m.value} value={m.value}>
-                      {m.name} ({m.value}){m.deprecated ? ' — deprecated' : ''}
+                      {m.name} ({m.value})
                     </option>
                   ))}
                 </optgroup>

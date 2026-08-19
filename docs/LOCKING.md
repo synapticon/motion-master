@@ -10,13 +10,20 @@
 Motion Master holds nine mutexes, two condition variables, and four lock-free protocols. Some
 standalone atomics sit beside them. This file lists all of them in one place.
 
-The four lock-free protocols are the cycle gate, the parameter cell, the recorder ring, and the
-AL-state mirror. They are not an optimisation of a design that uses mutexes. On the paths that
-matter, they **are** the design. Read only the mutex sections, and you learn nothing about how the
-real-time path stays safe.
+The real-time loop takes no lock. So no mutex can protect anything that the loop touches. Four
+lock-free protocols do that job instead:
+
+- **The cycle gate** stops the control plane from freeing the process image, a device, or a
+  parameter map while the real-time thread uses it.
+- **The parameter cell** is the single home of a scalar value. Any thread reads it or writes it with
+  one atomic access.
+- **The recorder ring** carries one record per cycle from the real-time thread to the monitoring
+  readers and to the dump.
+- **The AL-state mirror** reports the state of a device without the driver lock, which a firmware
+  transfer holds for several seconds.
 
 A cyclic task reads and writes device values inside the real-time loop, and it acquires nothing.
-The protocols below are what makes that surface safe. A change to `Device`, `DeviceParameter`, or
+Those four protocols are what makes that surface safe. A change to `Device`, `DeviceParameter`, or
 `ProcessData` is a change to this file.
 
 To find every primitive in the source, run:

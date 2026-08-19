@@ -1,0 +1,19 @@
+# ThreadSanitizer suppressions. Used by tools/tsan.sh; see docs/LOCKING.md for the design these
+# describe. Keep this file short: every entry hides real reports as well as false ones, so an entry
+# must name a protocol that TSan structurally cannot understand, not a race we have not got round to.
+
+# ProcessDataRing is a sequence lock, and TSan cannot see a sequence lock.
+#
+# The RT writer invalidates a slot's sequence word, memcpy's the payload, then release-stores the
+# real sequence. A reader checks the sequence, copies, and re-checks after an acquire fence — a
+# reader that was lapped mid-copy detects it and discards what it read. So the racing payload copies
+# are the mechanism, not a mistake: the reader's bytes are known to be untrustworthy until the second
+# check clears them.
+#
+# TSan sees two unsynchronised memcpys over the same bytes and reports six races per run. It has no
+# way to learn that the reader throws the result away. The alternative — copying the payload as
+# relaxed atomic words on both sides — would make the model strictly conformant at some cost on the
+# hottest RT write path; it is worth measuring before it is worth doing, and it is recorded in
+# NEXTGEN.md rather than done here.
+race:mm::node::ProcessDataRing::write
+race:mm::node::ProcessDataRing::readRecord

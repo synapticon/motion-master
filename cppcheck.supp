@@ -67,6 +67,7 @@ syntaxError:*/ic_haus_registers_test.cc
 syntaxError:*/kuebler_registers_test.cc
 syntaxError:*/router_test.cc
 syntaxError:*/game_loop_test.cc
+syntaxError:*/concurrency_test.cc
 syntaxError:*/soem_fieldbus_driver_test.cc
 
 // The ESI parser builds vectors by appending inside a range-for over an XML child range or a
@@ -142,3 +143,9 @@ constParameterReference:*/http_server.cc
 // announcing itself as taking a const device reads as exactly backwards. Same reasoning as the
 // cia402_control.cc and somanet_control.cc entries above.
 constParameterReference:*/somanet_procedures.cc
+
+// ScalarCell::operator= assigns its member through std::atomic_ref, inside store(). cppcheck does
+// not follow that and reports the member as unassigned. Writing `value = other.load()` directly
+// would silence it and reintroduce the very bug the type exists to prevent: a plain store racing the
+// RT thread's atomic one. The helper stays.
+operatorEqVarError:*/device_parameter.h

@@ -2727,3 +2727,15 @@ Few mechanisms, and each doing one job: the atomic cell; the refcount-plus-drain
 **7. An exception escaping a task kills the process.** The project is exception-free, but a user's task is ordinary C++. Declaring `execute()` `noexcept` makes the outcome deterministic and states the contract in the type. **Accepted 2026-08-19.**
 
 Still open and already tracked: output staging skew across two cycles, two concurrent `POST /api/init` answering 500 rather than 409, and free-run DC — which remains the real blocker for coordinated multi-axis motion.
+
+### Addendum, same day: what the concurrency harness found on its first run
+
+`libs/node/tests/concurrency_test.cc` and `tools/tsan.sh` landed as item 2 of the review above, and paid for themselves immediately. Four ThreadSanitizer reports, one root cause: **copying a `DeviceParameter` read its scalar value with an ordinary load**, racing the RT thread's `storeBits`. `Device::parameter` and `parametersOrdered` hand out copies, so every `GET .../parameters/...` and every `processImageInfo` did it. `docs/LOCKING.md` claimed the cell was touched "only through `loadBits` / `storeBits`", and the compiler-generated copy constructor had been quietly contradicting that since the cell was introduced.
+
+The fix is a `ScalarCell` wrapper whose own copy constructor does the atomic load. That was chosen over hand-writing `DeviceParameter`'s five special members for the reason the original design gave for `atomic_ref` in the first place: a field added later and forgotten in a hand-written copy constructor loses data silently, whereas a wrapper cannot be forgotten because the compiler still generates the outer copy.
+
+Worth keeping for the argument, not just the fix: this is precisely the class of defect review does not catch. It had survived every reading of the cell design, including three this week.
+
+Six reports remain and are suppressed in `tsan.supp`: `ProcessDataRing` is a sequence lock, the writer and a reader copy the same payload on purpose, and the reader's second sequence check is what makes the torn result safe to discard. TSan cannot see that protocol. Making it strictly conformant means copying the payload as relaxed atomic words on both sides — cheap in principle, on the hottest RT write path in practice, so it wants measurement before it wants doing.
+
+The `x64-linux-tsan` preset uses clang: Fedora ships clang's TSan runtime, while GCC's needs a `libtsan` package that is not installed. Coverage is four scenarios — rescan and re-map, re-enumeration, every read surface, and reset — against a thread standing in for the loop at ordinary priority, which is harsher than the real thing because it can be preempted anywhere.

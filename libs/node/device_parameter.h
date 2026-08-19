@@ -127,6 +127,64 @@ enum class ParameterOrigin : uint8_t {
 /// @brief Returns the string form of @p origin (@c "objectDictionary" / @c "sii").
 std::string_view parameterOriginName(ParameterOrigin origin);
 
+/// @brief One scalar value, and the only part of a @c DeviceParameter that two threads touch at
+/// once.
+///
+/// The value is a plain @c uint64_t reached through @c std::atomic_ref, so the lock-free guarantee
+/// sits on the *access* rather than on the storage. That is what keeps @c DeviceParameter copyable
+/// and movable — a @c std::atomic member would be neither, and the struct must be both, because
+/// @c Device::parameter and @c parametersOrdered hand out copies.
+///
+/// **The copy has to be atomic too, and this type is why.** A bare member would be read by the
+/// compiler-generated copy constructor as an ordinary load, racing the RT thread's store —
+/// undefined behaviour that ThreadSanitizer reports on every @c Device::parameter call, and that
+/// the concurrency tests found the first time they ran. Wrapping the value fixes it without writing
+/// @c DeviceParameter's five special members by hand: a field added to that struct later cannot
+/// break this, because the compiler still generates its copy and this type still does the atomic
+/// access. Hand-written special members are the hazard the wrapper avoids — a field added and
+/// forgotten in one of them loses data silently.
+///
+/// Relaxed ordering throughout, and that is the whole requirement: the value is self-contained with
+/// no companion state to order against, and a reader is by definition unsynchronised with the
+/// writer that published it. No torn or invented value, and the last store becomes visible — which
+/// is exactly what a cyclic task needs.
+///
+/// @c mutable because a load is a @c const operation while @c std::atomic_ref needs a non-const
+/// lvalue, and because an output cell is written through a @c const @c DeviceParameter*.
+struct ScalarCell {
+  mutable uint64_t value{0};
+
+  ScalarCell() = default;
+  ~ScalarCell() = default;
+  ScalarCell(const ScalarCell& other) : value(other.load()) {}
+  ScalarCell(ScalarCell&& other) noexcept : value(other.load()) {}
+  ScalarCell& operator=(const ScalarCell& other) {
+    if (this != &other) {
+      store(other.load());
+    }
+    return *this;
+  }
+  ScalarCell& operator=(ScalarCell&& other) noexcept {
+    store(other.load());
+    return *this;
+  }
+
+  /// @brief Reads the value. Lock-free, non-allocating — safe from the RT loop.
+  uint64_t load() const { return std::atomic_ref<uint64_t>(value).load(std::memory_order_relaxed); }
+  /// @brief Writes the value. Lock-free, non-allocating — safe from the RT loop.
+  void store(uint64_t v) const {
+    std::atomic_ref<uint64_t>(value).store(v, std::memory_order_relaxed);
+  }
+
+  // The two properties the cell's whole contract rests on. Lock-freedom is what makes a read safe
+  // from the RT loop at all; the alignment precondition is atomic_ref's, and a platform where a
+  // uint64_t member does not satisfy it must fail here rather than degrade silently.
+  static_assert(std::atomic_ref<uint64_t>::is_always_lock_free,
+                "the parameter cell must be lock-free so the RT path never blocks");
+  static_assert(alignof(uint64_t) >= std::atomic_ref<uint64_t>::required_alignment,
+                "the parameter cell must satisfy std::atomic_ref's alignment requirement");
+};
+
 /// @brief A single object dictionary entry held by a @c Device.
 ///
 /// Combines immutable schema (index, subindex, name, data type, bit length,
@@ -161,15 +219,8 @@ struct DeviceParameter {
   // lock-free guarantee on the access instead of the storage, which is the guarantee that matters;
   // @c loadBits / @c storeBits below are the only way the field is ever touched. @c mutable because
   // a load is a const operation but @c std::atomic_ref needs a non-const lvalue.
-  mutable uint64_t bits{0};         ///< Scalar value, LSB-aligned little-endian, zero-extended.
+  ScalarCell cell{};                ///< Scalar value, LSB-aligned little-endian, zero-extended.
   std::vector<uint8_t> rawValue{};  ///< Non-scalar value (string / byte array) as wire bytes.
-  // The two properties the cell's whole contract rests on. Lock-freedom is what makes a read safe
-  // from the RT loop at all; the alignment precondition is atomic_ref's, and a platform where a
-  // uint64_t member does not satisfy it must fail here rather than degrade silently.
-  static_assert(std::atomic_ref<uint64_t>::is_always_lock_free,
-                "the parameter cell must be lock-free so the RT path never blocks");
-  static_assert(alignof(uint64_t) >= std::atomic_ref<uint64_t>::required_alignment,
-                "the parameter cell must satisfy std::atomic_ref's alignment requirement");
   SyncState syncState{SyncState::Unknown};  ///< Freshness of the value relative to the device.
   std::optional<uint32_t> unit;             ///< ETG.1004 unit code, when reported.
   std::optional<DeviceParameterValue> defaultValue;  ///< Slave-reported default, when available.
@@ -185,14 +236,10 @@ struct DeviceParameter {
   /// to order against, and a reader is by definition unsynchronised with the writer that published
   /// it. What it guarantees — that a torn or invented value is impossible, and that the last store
   /// becomes visible — is exactly what a cyclic task needs.
-  uint64_t loadBits() const {
-    return std::atomic_ref<uint64_t>(bits).load(std::memory_order_relaxed);
-  }
+  uint64_t loadBits() const { return cell.load(); }
 
   /// @brief Stores the scalar cell. Lock-free, non-allocating, relaxed — safe from the RT loop.
-  void storeBits(uint64_t v) const {
-    std::atomic_ref<uint64_t>(bits).store(v, std::memory_order_relaxed);
-  }
+  void storeBits(uint64_t v) const { cell.store(v); }
 
   /// @brief Returns the current value as a @c DeviceParameterValue, built on the spot.
   ///

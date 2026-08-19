@@ -158,6 +158,25 @@
         "VCPKG_TARGET_TRIPLET": "arm64-linux-cross",
         "VCPKG_HOST_TRIPLET": "x64-linux"
       }
+    },
+    {
+      "name": "x64-linux-tsan",
+      "inherits": "base",
+      "displayName": "x64 Linux ThreadSanitizer",
+      "condition": {
+        "type": "equals",
+        "lhs": "${hostSystemName}",
+        "rhs": "Linux"
+      },
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "VCPKG_TARGET_TRIPLET": "x64-linux",
+        "CMAKE_CXX_FLAGS": "-fsanitize=thread -fno-omit-frame-pointer -g",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread",
+        "CMAKE_C_COMPILER": "clang",
+        "CMAKE_CXX_COMPILER": "clang++"
+      },
+      "description": "Debug build with ThreadSanitizer, for the concurrency tests. Uses clang because Fedora ships clang's TSan runtime while GCC's needs a separate libtsan package. Not a shipping configuration: TSan costs 5-15x and changes timing, so the RT loop under it is not representative. Build the test targets, not the server."
     }
   ],
   "buildPresets": [
@@ -200,6 +219,10 @@
     {
       "name": "arm64-linux-cross-release",
       "configurePreset": "arm64-linux-cross-release"
+    },
+    {
+      "name": "x64-linux-tsan",
+      "configurePreset": "x64-linux-tsan"
     }
   ]
 }

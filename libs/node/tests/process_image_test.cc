@@ -18,10 +18,22 @@
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
+#include "fake_bus.h"
 #include "node/device.h"
 #include "node/device_manager.h"
 
 namespace {
+
+using mm::node::testing::FakeBus;
+using mm::node::testing::kI32;
+using mm::node::testing::kU16;
+using mm::node::testing::kU8;
+using mm::node::testing::makeCia402Bus;
+using mm::node::testing::pdoEntry;
+using mm::node::testing::programMapping;
+using mm::node::testing::u16le;
+using mm::node::testing::u32le;
+using mm::node::testing::u8le;
 
 using mm::comm::EtherCatState;
 using mm::comm::FieldbusDriver;
@@ -37,155 +49,9 @@ using mm::node::extractBits;
 using mm::node::insertBits;
 using mm::node::ProcessDataRing;
 
-// ETG.1020 data type codes.
-constexpr uint16_t kU8 = 0x0005;
-constexpr uint16_t kU16 = 0x0006;
-constexpr uint16_t kI32 = 0x0004;
-
-std::vector<uint8_t> u8le(uint8_t v) { return {v}; }
-std::vector<uint8_t> u16le(uint16_t v) {
-  return {static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8)};
-}
-std::vector<uint8_t> u32le(uint32_t v) {
-  return {static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v >> 16),
-          static_cast<uint8_t>(v >> 24)};
-}
-std::vector<uint8_t> pdoEntry(uint16_t index, uint8_t subindex, uint8_t bits) {
-  return u32le((static_cast<uint32_t>(index) << 16) | (static_cast<uint32_t>(subindex) << 8) |
-               bits);
-}
-
 /// Fieldbus fake: serves canned SDO reads (so readFlatPdoMapping works), returns a programmed
 /// process-data layout, and on exchange records the outputs it received and copies a canned
 /// input image back. Position-agnostic SDO map — every slave reports the same mapping.
-class FakeBus : public FieldbusDriver {
- public:
-  std::map<uint32_t, std::vector<uint8_t>> reads;
-  std::vector<OdEntry> ods;  // returned by readObjectDictionary (for initializeParameters)
-  PdoLayout layout;
-  int slaves = 1;
-  std::vector<uint8_t> cannedInputs;  // copied back on each exchange
-  std::vector<uint8_t> lastOutputs;   // captured from the last exchange
-  int exchangeCalls = 0;
-  uint16_t state = 0;                        // default AL status returned by slaveState()
-  std::map<uint16_t, uint16_t> slaveStates;  // per-position override of state
-  int wkc = 0;                               // working counter returned by exchangeProcessData
-
-  static uint32_t key(uint16_t index, uint8_t sub) {
-    return (static_cast<uint32_t>(index) << 8) | sub;
-  }
-  void program(uint16_t index, uint8_t sub, std::vector<uint8_t> bytes) {
-    reads[key(index, sub)] = std::move(bytes);
-  }
-  void programOd(uint16_t index, uint8_t sub, uint16_t dataType) {
-    OdEntry e{};
-    e.index = index;
-    e.subindex = sub;
-    e.dataType = dataType;
-    ods.push_back(e);
-  }
-
-  std::expected<int, std::string> scan() override { return slaves; }
-  uint16_t slaveState(uint16_t position) const override {
-    auto it = slaveStates.find(position);
-    return it != slaveStates.end() ? it->second : state;
-  }
-  // CoE-capable stand-in: PDO mapping is read over the mailbox, not from SII.
-  uint16_t mailboxProtocols(uint16_t) const override {
-    return mm::comm::MailboxConfig::kProtocolCoe;
-  }
-  std::expected<void, std::string> configureProcessData() override { return {}; }
-  PdoLayout processDataLayout() override { return layout; }
-
-  int exchangeProcessData(std::span<const uint8_t> outputs, std::span<uint8_t> inputs) override {
-    ++exchangeCalls;
-    lastOutputs.assign(outputs.begin(), outputs.end());
-    for (size_t i = 0; i < inputs.size() && i < cannedInputs.size(); ++i) {
-      inputs[i] = cannedInputs[i];
-    }
-    return wkc;
-  }
-
-  std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t, uint16_t index,
-                                                           uint8_t sub) override {
-    auto it = reads.find(key(index, sub));
-    if (it == reads.end()) {
-      return std::unexpected("no such object");
-    }
-    return it->second;
-  }
-
-  // --- unused stubs ---------------------------------------------------------
-  std::expected<void, std::string> init() override { return {}; }
-  SlaveInfo slaveInfo(uint16_t) const override { return {}; }
-  void stop() override {}
-  std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
-      const std::vector<uint16_t>& p) override {
-    // Mirror slaveState() so the per-position state the test set up is what callers read back —
-    // the same source DeviceManager validates AL transitions against.
-    std::vector<SlaveStateRaw> out;
-    out.reserve(p.size());
-    for (uint16_t pos : p) {
-      out.push_back(SlaveStateRaw{.alStatus = slaveState(pos), .alStatusCode = 0});
-    }
-    return out;
-  }
-  std::expected<void, std::string> writeSdo(uint16_t, uint16_t, uint8_t,
-                                            std::span<const uint8_t>) override {
-    return {};
-  }
-  int odReadCalls = 0;  // how many times the enumeration was attempted
-  std::string odError;  // non-empty makes every enumeration fail
-  std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
-    ++odReadCalls;
-    if (!odError.empty()) {
-      return std::unexpected(odError);
-    }
-    return ods;
-  }
-  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
-                                                                   const std::string&) override {
-    return std::vector<uint8_t>{};
-  }
-  std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string&,
-                                                    std::span<const uint8_t>) override {
-    return {};
-  }
-  std::expected<void, std::string> readRegister(uint16_t, uint16_t, std::span<uint8_t>) override {
-    return {};
-  }
-  std::expected<void, std::string> writeRegister(uint16_t, uint16_t,
-                                                 std::span<const uint8_t>) override {
-    return {};
-  }
-  // Runs while the transition is "in progress", standing in for the seconds a real one takes. It
-  // is the only way a test can observe what the RT loop sees mid-transition, which is where the
-  // working-counter expectation has to already be correct.
-  std::function<void()> whileTransitioning;
-
-  void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
-                         std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
-                         std::function<void()>, std::function<bool()>) override {
-    if (whileTransitioning) {
-      whileTransitioning();
-    }
-  }
-};
-
-// Programs a 6-byte-per-direction CiA402-style mapping: controlword + target position out,
-// statusword + actual position in. Served for every slave position.
-void programMapping(FakeBus& bus) {
-  bus.program(0x1C12, 0x00, u8le(1));
-  bus.program(0x1C12, 0x01, u16le(0x1600));
-  bus.program(0x1600, 0x00, u8le(2));
-  bus.program(0x1600, 0x01, pdoEntry(0x6040, 0x00, 16));  // controlword @0
-  bus.program(0x1600, 0x02, pdoEntry(0x607A, 0x00, 32));  // target position @16
-  bus.program(0x1C13, 0x00, u8le(1));
-  bus.program(0x1C13, 0x01, u16le(0x1A00));
-  bus.program(0x1A00, 0x00, u8le(2));
-  bus.program(0x1A00, 0x01, pdoEntry(0x6041, 0x00, 16));  // statusword @0
-  bus.program(0x1A00, 0x02, pdoEntry(0x6064, 0x00, 32));  // actual position @16
-}
 
 TEST(BuildProcessImage, RebasesEntriesOntoEachSlaveWindow) {
   FakeBus bus;
@@ -410,23 +276,6 @@ TEST(ProcessImageBits, ShortSourceLeavesRemainderZero) {
 }
 
 // Builds a single-axis bus with the CiA402 mapping, object dictionary, and layout wired up.
-std::unique_ptr<FakeBus> makeCia402Bus() {
-  auto bus = std::make_unique<FakeBus>();
-  programMapping(*bus);
-  bus->programOd(0x6040, 0x00, kU16);  // controlword
-  bus->programOd(0x607A, 0x00, kI32);  // target position
-  bus->programOd(0x6041, 0x00, kU16);  // statusword
-  bus->programOd(0x6064, 0x00, kI32);  // actual position
-  bus->slaves = 1;
-  bus->layout.outputBytes = 6;
-  bus->layout.inputBytes = 6;
-  bus->layout.expectedWkc = 3;
-  bus->layout.slaves = {SlaveIo{
-      .slavePosition = 1, .outputOffset = 0, .outputBytes = 6, .inputOffset = 0, .inputBytes = 6}};
-  // Report OP so the device counts as exchanging and PDO-mapped access uses the buffers.
-  bus->state = static_cast<uint16_t>(EtherCatState::Op);
-  return bus;
-}
 
 // Builds a bus with two 4-bit outputs packed into a single output byte: 0x2001 in the low nibble
 // (bits 0..3), 0x2002 in the high nibble (bits 4..7). No inputs. Used to prove that two sub-byte

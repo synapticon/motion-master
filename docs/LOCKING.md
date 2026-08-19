@@ -469,12 +469,15 @@ Four properties make it work, and the cell needs all four:
   makes bit-packed objects that share a byte safe without a lock. `NEXTGEN.md` records this choice
   as "Design B", together with the alternatives.
 - **`atomic_ref`, not `std::atomic<uint64_t>`.** An atomic member makes `DeviceParameter` neither
-  copyable nor movable, and the struct must be both. `parameter()` and `parametersOrdered()` hand
-  out copies, and the code moves entries into the map and into vectors that grow. To hand-write all
-  five special members is the real hazard: a field that someone adds and forgets in the copy
-  constructor loses data silently. Lock-freedom on the *access* keeps the compiler-generated copies.
-  Two `static_assert` statements pin the contract: always lock-free, and the alignment requirement
-  of `atomic_ref`.
+  copyable nor movable, and the struct must be both: `parameter()` and `parametersOrdered()` hand
+  out copies. Putting the lock-freedom on the *access* keeps the compiler-generated copies, and
+  hand-writing all five special members is the hazard that avoids — a field added and forgotten in
+  one of them loses data silently. **The copy itself has to be atomic too.** A bare member is read
+  by the generated copy constructor as an ordinary load, which races the real-time thread's store;
+  the concurrency tests reported it on the first run, on every `Device::parameter` call.
+  `ScalarCell` wraps the value so its own copy does the atomic load, which fixes it without any
+  hand-written member on `DeviceParameter`. Two `static_assert` statements pin the rest: always
+  lock-free, and `atomic_ref`'s alignment requirement.
 - **`mutable`, and `storeBits` is `const`.** A writer writes the cell through a `const
   DeviceParameter*`. That is what lets `ProcessImageEntry::parameter` be `const`, and lets
   `buildProcessImage` take devices by const reference. The value is a mutable atomic, in the way
@@ -602,24 +605,42 @@ Each item below must stay true. Something in the code relies on each one today.
 
 ## How we check these rules
 
-**By review, and by nothing else. Know that before you trust a green test run.**
+**Partly by machine now, and mostly still by review. Know which is which.**
 
-About 95% of the test suite is single-threaded, so a locking mistake does not fail it. A race
-detector does not close the gap either. It sees only what truly runs in parallel, which here is the
-read surfaces of `DeviceManager` and the run lifecycle of `ProcedureManager`. It leaves the parts
-that matter most untouched. Nothing anywhere exercises `exchangeProcessData` against a concurrent
-re-map, or `busOperationMutex_` against anything, or `controlPlaneMutex_` of the real driver.
+`libs/node/tests/concurrency_test.cc` drives one `DeviceManager` from several threads: one standing
+in for the real-time loop, the others doing what an HTTP worker, a sampler and a procedure do. It
+runs in the ordinary build, and under ThreadSanitizer through `tools/tsan.sh`, which is where a data
+race that happens to be benign today gets caught. It found one the first time it ran — the parameter
+copy described above — which review had missed for months and which `LOCKING.md` claimed was
+impossible.
 
-So three practical rules apply to a change on this page:
+`tsan.supp` holds one suppression, for the recorder ring's sequence lock. TSan cannot see that
+protocol: the writer and a reader copy the same payload on purpose, and the reader's second sequence
+check is what makes the result safe to discard. Read that file before adding to it — every entry
+hides real reports as well as false ones.
+
+What is still review-only, and it is most of it:
+
+- the four scenarios in that file are a handful of schedules, not a proof. A race these
+  interleavings never produce is not caught;
+- nothing exercises the real driver's `controlPlaneMutex_`, `busOperationMutex_` under contention,
+  or the WebSocket path;
+- the rest of the suite is single-threaded, so a locking mistake outside those scenarios does not
+  fail it.
+
+So the practical rules for a change on this page:
 
 - Read the [invariants](#invariants) above. Name the one that your change relies on.
+- Run `tools/tsan.sh`, and widen `concurrency_test.cc` to cover what you changed. A green run of the
+  old scenarios says nothing about a new one.
 - Prefer a design where the mistake does not compile. Borrow-or-copy beats a raw accessor, because
-  it is the only enforcement here that does not depend on someone's memory. Where the real-time
-  path forces a raw accessor, as `findDevice` and `findParameter` do, move the obligation to an
-  object that the caller must construct — or, better still, to a caller that cannot forget.
-  `CycleGuard` is that object, and `GameLoop` is that caller: it enters the cycle around every task,
-  so a Tier-3 author cannot omit it. A sentence that the caller may never read is not enough.
-- Treat "the tests pass" as evidence about behaviour, not as evidence about synchronisation.
+  it is the only enforcement that does not depend on someone's memory. Where the real-time path
+  forces a raw accessor, as `findDevice` and `findParameter` do, move the obligation to an object
+  the caller must construct — or, better still, to a caller that cannot forget. `CycleGuard` is that
+  object, and `GameLoop` is that caller: it enters the cycle around every task, so a Tier-3 author
+  cannot omit it.
+- Treat "the tests pass" as evidence about behaviour, and "TSan is clean" as evidence about the
+  schedules you ran.
 
 ## Accepted trade-offs
 

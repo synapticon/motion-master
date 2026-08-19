@@ -24,6 +24,7 @@ add_executable(
   process_data_dump_test.cc
   process_data_ring_test.cc
   process_image_test.cc
+  concurrency_test.cc
   profile_device_test.cc
   profile_procedures_test.cc
   somanet_drive_test.cc

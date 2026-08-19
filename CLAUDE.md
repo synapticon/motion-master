@@ -786,7 +786,16 @@ Tests live in a `tests/` subdirectory beside their library. CTest discovers the 
 ```bash
 ./tools/test.sh
 ctest --test-dir build/x64-linux-debug -R VersionTest
+./tools/tsan.sh                       # the concurrency tests under ThreadSanitizer
 ```
+
+**`libs/node/tests/concurrency_test.cc` is the only machine check on the locking design.** It drives
+one `DeviceManager` from several threads — one standing in for the RT loop, the others as HTTP
+workers, samplers and a procedure. Run it under `tools/tsan.sh` after any change to `DeviceManager`,
+`Device`, `ProcessData`, the game loop or a lock, and widen it to cover what you changed. The
+`x64-linux-tsan` preset uses clang, because Fedora ships clang's TSan runtime and GCC's needs a
+separate `libtsan` package. `tsan.supp` holds one documented suppression, for the recorder ring's
+sequence lock; read it before adding to it.
 
 ## Hardware-in-the-Loop Tests
 

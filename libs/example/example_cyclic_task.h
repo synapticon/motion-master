@@ -92,7 +92,7 @@ class ExampleCyclicTask : public CyclicTask {
   ExampleCyclicTask(mm::node::DeviceManager& deviceManager, Config config);
 
   /// @brief Runs one cycle. Non-blocking, non-allocating, lock-free.
-  void execute(const CycleContext& ctx) override;
+  void execute(const CycleContext& ctx) noexcept override;
 
  private:
   mm::node::DeviceManager& deviceManager_;

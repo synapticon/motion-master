@@ -50,7 +50,16 @@ class CyclicTask {
   /// Must return before the next cycle deadline.  Blocking here stalls the
   /// entire RT loop.
   ///
+  /// **`noexcept` states the contract in the type.** This project returns
+  /// `std::expected` and throws nothing, but a task is ordinary C++ and may
+  /// call something that throws.  Left implicit, such an exception would
+  /// unwind out of the RT loop and reach `std::terminate` from wherever the
+  /// stack happened to be.  Declared here, the throw terminates at its own
+  /// site instead, so the report names the line that threw rather than the
+  /// loop that ran it.  A task that can fail reports it through its own
+  /// channel — a value it publishes, or a log line — never by throwing.
+  ///
   /// @param ctx  Per-cycle timing context (grid index + skipped count).  Tasks
   ///             that act only on the freshest state may ignore it.
-  virtual void execute(const CycleContext& ctx) = 0;
+  virtual void execute(const CycleContext& ctx) noexcept = 0;
 };

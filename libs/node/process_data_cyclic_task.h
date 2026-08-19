@@ -19,7 +19,7 @@ class ProcessDataCyclicTask : public CyclicTask {
   //
   // GameLoop has already entered the cycle, and exchangeProcessData raises the same depth counter
   // again for callers that invoke it directly. The nesting is what that counter is for.
-  void execute(const CycleContext&) override { deviceManager_.exchangeProcessData(); }
+  void execute(const CycleContext&) noexcept override { deviceManager_.exchangeProcessData(); }
 
  private:
   mm::node::DeviceManager& deviceManager_;

@@ -14,7 +14,9 @@ namespace {
 /// Counts how many times the loop called it.
 class CountingTask : public CyclicTask {
  public:
-  void execute(const CycleContext&) override { calls.fetch_add(1, std::memory_order_relaxed); }
+  void execute(const CycleContext&) noexcept override {
+    calls.fetch_add(1, std::memory_order_relaxed);
+  }
 
   std::atomic<uint64_t> calls{0};
 };

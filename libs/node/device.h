@@ -814,12 +814,27 @@ class Device {
   /// transition and POST .../parameters/init can reach this at the same time.
   bool parametersUnavailable_ = false;
   // The cells themselves, and they are never destroyed while this Device lives. A re-enumeration
-  // rebuilds the *map* above and appends whatever the new enumeration adds; it never erases a cell.
-  // So a DeviceParameter* — held by a published process image, or cached by a cyclic task — stays
-  // valid for the lifetime of the device, which is the lifetime of its DeviceSet.
+  // rebuilds the *map* above, reuses every cell whose declaration is unchanged, and appends a cell
+  // for anything new; it never erases one. So a DeviceParameter* held by a published process image
+  // stays valid across a re-enumeration — which is the point, because buildProcessImage resolves
+  // that pointer once and the RT decode dereferences it every cycle without re-checking anything.
+  // A cyclic task's own lookups are valid for the body of one cycle, not across cycles: the Device
+  // dies with its DeviceSet once the last holder releases it.
   //
-  // A deque because it never relocates the elements it already holds, and behind a unique_ptr so
-  // that moving a Device (into DeviceManager's vector) cannot be read as moving the cells.
+  // A deque because the standard says an insertion at either end invalidates iterators but leaves
+  // *references* to existing elements valid ([deque.modifiers]) — and pointers into it are exactly
+  // what everything above holds. It allocates in blocks, so a cell costs no allocation of its own.
+  //
+  // std::vector is not an option and reserve() does not rescue it: the count is unknown until the
+  // dictionary is read, a later enumeration can add objects a firmware update introduced, and the
+  // one growth past capacity would dangle every pointer at once, silently and far from the cause.
+  // std::list and vector<unique_ptr<DeviceParameter>> are address-stable too, at one allocation per
+  // cell and an extra indirection, for nothing gained: nothing indexes this container, and no code
+  // on the RT path iterates it (the decode walks the image's entries instead).
+  //
+  // Behind a unique_ptr so that moving a Device — DeviceManager builds its vector<Device> by
+  // emplacing — never moves the deque object itself, and the question of whether a moved deque
+  // preserves element addresses never has to be asked.
   std::unique_ptr<std::deque<DeviceParameter>> cells_;
   // (index, subindex) -> the cell that holds that object's value. Replaced wholesale by
   // publishParameters; the cells it points at outlive every replacement.

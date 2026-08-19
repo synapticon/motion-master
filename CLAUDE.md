@@ -1,63 +1,71 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code (claude.ai/code) working in this repository.
 
 ## Project Context
 
-**Motion Master v6.0.0** — next-generation motion control software for SOMANET servo drives. This project is a clean-sheet rewrite of the previous `motion_master` codebase; the design rationale and session notes live in `NEXTGEN.md`. Read that file for architectural decisions, class diagrams, and design rationale before making structural changes.
+**Motion Master v6.0.0** — motion control software for SOMANET servo drives. A clean-sheet
+rewrite of the previous codebase.
 
-Key design mandates from NEXTGEN.md:
+**`NEXTGEN.md` holds every design decision and its rationale, one section per session.**
+This file holds the rules. When you need to know *why* a rule exists, read the session
+`NEXTGEN.md` names. Read `NEXTGEN.md` before making a structural change.
 
-- No exceptions — use `std::expected<T, std::string>` (C++23 stdlib, no `tl::expected`). `std::string` is the default error type: use it everywhere a caller only logs, forwards, or shows the error. **Promote to a structured `Error` (`struct Error { ErrorKind kind; std::string message; }` — a POD enum + message, never a class hierarchy) only on the specific API surface where a caller demonstrably needs to *branch* on the failure reason** (retry-on-timeout-but-abort-on-not-found, re-auth-on-401, fall-back-on-a-particular-kind). String-matching an error message to decide control flow is the smell that says that surface has earned an `Error`. Keep the two interchangeable at call sites: give `Error` an `operator<<` and a `.message`/`.what()` so `ASSERT_TRUE(r) << r.error()` and `sendError(r.error())` keep working — so promoting one function does not ripple through its callers. Do **not** do a global sweep to a shared `Error` type; a per-surface enum earns its keep exactly where branching is real, and uniform `std::string` keeps `.and_then()` chains composing across layers everywhere else. `libs/comm/foe_error.h` is the canonical worked example of a promotion — a structured `FoeError` (kind + `Retry` tag + string-face `operator<<`/`.message`/`.what()`) that is **deliberately unused**: the FoE surface still returns `std::string` because no caller branches yet, and the header stands ready for the day one does (a firmware flasher retrying transient failures) without rippling through its forwarders. See NEXTGEN.md, Session 2026-07-17.
-- HTTP API (port 61447) + a single WebSocket on its own port (62281) and event loop — `HttpServer` and `WebSocketServer` are distinct, each with its own uWS app/loop/thread, so a slow or blocking HTTP handler (FoE, SDO, cert fetch) can never stall the WebSocket. The WebSocket is the bidirectional connection: server→client monitoring batches and notifications; client→server topic subscribe/unsubscribe and (planned) process-data output staging. Procedure progress is deliberately *not* on it — that surface is HTTP-poll-only (see `ProcedureManager`). No Protobuf. (The two-port split supersedes the original single-port mandate, which was a reaction to the old `motion_master`'s ZeroMQ request + pub/sub channels; a second TLS port for the same WebSocket is a far milder thing, and the isolation is worth it.)
-- Single `Device` abstraction (replaces `VirtualDevice` + `comm::base::Device` overlap from the old codebase)
-- `FieldbusDriver` interface abstracts SOEM and SPoE — `SoemFieldbusDriver` and `SpoeFieldbusDriver` are the concrete implementations; `FieldbusDriver` owns `controlPlaneMutex_`, which serializes the **control-plane** operations (mailbox/SDO, FoE, ESC register, state access) amongst non-RT callers. The **PDO path (`exchangeProcessData`) runs lock-free** — SOEM's port layer is internally thread-safe (per-datagram index allocation + tx/rx mutexes held only for a single non-blocking poll, with cooperative frame demux) and PDO touches disjoint state (the process-data IOmap) from the control plane, so the RT cycle is never blocked by a slow SDO or object-dictionary enumeration. The lock is held for one socket transaction only — never across a sleep, a blocking wait, or a user callback (so `readObjectDictionary` and `transitionToState` lock per transaction, not for their whole multi-second duration)
-- `DeviceManager` owns `FieldbusDriver` via `unique_ptr<FieldbusDriver>` (null until `init()` is called) — the driver is constructed by `main.cc` and transferred via `DeviceManager::init(unique_ptr<FieldbusDriver>)`; `DeviceManager` never references concrete driver types
-- No service layer — SDO read/write, file transfer, state control, and bus inspection (static SM/FMMU/DC config, process-image layout, and live per-slave ESC link diagnostics — error counters, port link state, watchdog expirations) are methods on `Device` and `DeviceManager`; `HttpServer` and `GameLoop` both take a `DeviceManager&` directly
-- **`Device` and `DeviceManager` are the base, and they are profile-ignorant.** They own one slave, and the set of slaves plus the driver, scanning, process data, and *lending locked access* — nothing more. Everything profile-shaped (`ProfileDevice`/`Cia402Drive`/`SomanetDrive`, their operations, `ProcedureManager`) builds **outward** from them, and `device_manager.h` names no profile type. The seam is `DeviceManager::withDevice(pos, fn)`: it takes `deviceSetMutex_` (shared), resolves the position, and hands `Device&` to a callable returning `std::expected<T, std::string>` — so code outside the class can hold a device safely for a whole operation without the private mutex ever leaving it. The lock is shared (borrowers and position-based reads run concurrently; only `scan`/`reset` wait) and holding it across a multi-second operation is *correct*, since a rescan midway would invalidate the device being worked on. **`fn` must not re-enter a `DeviceManager` control-plane operation (`scan`, `reset`, `init`, `configureProcessData`, `transitionToState`) — each takes `deviceSetMutex_` exclusively at some point and it is not recursive.** **`DeviceManager` holds two locks, and the division is the point** (NEXTGEN.md, Session 2026-08-09): `busOperationMutex_` (plain mutex) is a mutual-exclusion token over an *activity* — "one control-plane operation drives the bus at a time" — guarding no member and taken by no reader; `deviceSetMutex_` (shared) guards *lifetime* — `devices_` and the process-data runtime are not being rebuilt or freed — and is the only lock readers and borrowers take. Order: `busOperationMutex_ → deviceSetMutex_ → Device::parametersMutex_ → FieldbusDriver::controlPlaneMutex_`. Because only an operation holding `busOperationMutex_` can rebuild the device set, holding it alone keeps `devices_`/`driver_` stable — which is why `transitionToState` blocks no reader for its multi-second AL wait, and why a re-map takes the exclusive lock only for its publish window (slot swap, ring re-allocation, generation append). Consequence to know: **a borrow does not exclude an AL transition** — the two interleave, and the procedure's next bus transaction fails against the changed state rather than the transition's request hanging. The payoff, and the reason this is a layer rather than architecture for its own sake: **a new profile is "add a view class, add `X_control.h`, register routes" with `device_manager.{h,cc}` untouched.** See NEXTGEN.md, Session 2026-08-02
-- `GameLoop` calls `deviceManager_.exchangeProcessData()` — it has no knowledge of `FieldbusDriver`; `exchangeProcessData()` is a no-op when the driver is null so the loop always starts unconditionally
-- `DeviceManager` owns slave discovery and network scanning via `FieldbusDriver` — there is no separate `NetworkScanner`
-- `App` is the only place that instantiates concrete types (dependency injection at the composition root); `Server::Config` carries `std::function` callbacks wired in `main.cc` so `HttpServer` names no concrete collaborator — `initDeviceManager` (`POST /api/init` creates a driver), `getGameLoopHealth` (`GET /api/game-loop`), and `setGameLoopPeriod` (`PUT /api/game-loop` retimes the live RT loop) all reach `GameLoop`/`DeviceManager` without the server referencing either type
-- Namespaces mirror directory layout (`mm::core`, `mm::comm::soem`, `mm::node`, `mm::api`); do not use C++20 modules
-- C++ route plug-ins extend the HTTP API without touching `http_server.cc`. The transport glue lives in `mm::api` (`libs/api/web_api.h`): `RouteContext` (references to `DeviceManager`/`MonitoringManager` + `corsOrigin`), `RegisterRoutesFn`, and the `sendJson`/`sendError`/`sendStatus` helpers — this is the **only** layer that depends on uWebSockets, so `mm::node` stays transport-agnostic (do **not** add uWS/HTTP to `node`). A plug-in lib registers its own paths (`/api/yourapp/...`, never the `/api/*` or `/*` wildcards) via `HttpServer::addRoutes(fn)`, called from the composition root (`main.cc`) **before** `start()`; the registration fn runs once on the HTTP loop thread after the built-in routes and before the catch-all 404 (handlers then run on that loop thread per request — but a plug-in is ordinary C++ holding `DeviceManager&` and **may** spawn its own off-RT `std::jthread` for long-running work, like `MonitoringManager` does, subject to the same `controlPlaneMutex_`/no-RT-path rules). `libs/example` (`mm::example`, `GET /api/example/devices`) is the copy-me starter — domain logic in `*_logic.{h,cc}` (HTTP-agnostic, unit-testable), formatting in `*_routes.cc`. Plug-in routes are **not** added to `swagger.yml` (that documents the stable built-in API only). See NEXTGEN.md, Session 2026-06-29.
-- Config file format is JSONC — parse via `nlohmann::json::parse(stream, nullptr, false, true)` (third arg `allow_exceptions=false` per the no-exceptions mandate, check `is_discarded()`; the fourth `true` enables `ignore_comments`); config files use the `.jsonc` extension and may freely use `//` and `/* */` comments. **Config is loaded from one of two places (in `options.cc`):** an explicit `--config <path>` always wins; absent that, a `motion-master.jsonc` **auto-discovered next to the executable** (`mm::core::exeDir()`) is loaded. With neither, the in-code defaults apply — there is no system-wide (`/etc`) search path, only the next-to-binary lookup. This is what lets the **Windows release bundle a `motion-master.jsonc`** (from `apps/motion_master/motion-master.windows.jsonc`) that raises `gameLoop.periodUs` to 4000 (4 ms) out of the box, while Linux/macOS keep the 1000 (1 ms) built-in default and ship only the annotated `motion-master.example.jsonc`. The auto-discovery is cross-platform (same next-to-binary rule everywhere); only the shipped file differs per platform.
+## Writing
+
+**Read `docs/WRITING.md` before you write or edit any documentation, code comment, or
+commit message.** It is the style guide for everything written down in this repository.
+The base is ASD-STE100 Simplified Technical English: short sentences, active voice, one
+term per concept, plainest word available.
+
+Three rules that catch most of it:
+
+- **Clarity beats concision.** The sentence limits apply per sentence, not to the whole
+  text. Never drop a fact or a caveat to make something shorter. Split the sentence.
+- **Define a domain term at first use in documentation. Never define one in a code
+  comment.** A reader of `README.md` may be new. A reader of
+  `soem_fieldbus_driver.cc` is not.
+- **A comment says why and states the present.** Never write what the code used to be.
+
+Replies in an interactive session follow a different style. `docs/WRITING.md` does not
+govern them.
 
 ## Build System
 
-CMake 4.0+ with Ninja and vcpkg. Initialize the vcpkg submodule before the first build:
+CMake 4.0+, Ninja, vcpkg. Initialise the submodule before the first build:
 
 ```bash
 git submodule update --init --recursive
 ```
 
+Presets: `x64-linux-debug` (default), `x64-linux-release`, `x64-windows-debug`,
+`x64-windows-release`. Output goes to `build/<preset>/`.
+
+C++23. Warnings are errors: `-Wall -Wextra -Wpedantic -Werror`, or `/W4 /WX` on MSVC.
+
 ### Scripts
 
-All common tasks have wrapper scripts in `tools/`. They default to the `x64-linux-debug` preset; pass a preset name as the first argument to override.
+Wrapper scripts live in `tools/`. Each takes an optional preset name as the first argument.
 
-```bash
-./tools/install-deps.sh           # install all OS packages (Debian/Ubuntu + Fedora); --dry-run to preview
-./tools/configure.sh              # cmake --preset
-./tools/build.sh                  # cmake --build --preset (no setcap by default — needs no sudo)
-./tools/build.sh --setcap         # build, then sudo setcap for raw socket + RT access
-./tools/build-dev.sh              # build (with --setcap); --no-setcap skips sudo
-./tools/run.sh                    # generate a tmp self-signed cert and run the binary
-./tools/test.sh                   # ctest --output-on-failure
-./tools/format.sh                 # clang-format all sources
-./tools/format-cmake.sh           # cmake-format all CMake files (--check to verify; requires: pip install cmakelang)
-./tools/lint.sh                   # cpplint (requires: pip install cpplint)
-./tools/cppcheck.sh               # cppcheck static analysis
-./tools/tidy.sh                   # clang-tidy (bug-finding checks only; see .clang-tidy)
-./tools/shellcheck.sh             # shellcheck every tracked shell script (git-driven file list)
-./tools/check.sh                  # format + cppcheck + lint + cmake-lint + shellcheck in sequence
-./tools/clean.sh                  # remove build/<preset>
-./tools/package.sh [preset]       # build .deb and .rpm packages (cert.pem/key.pem must be in build dir)
+| Script | Does |
+| --- | --- |
+| `install-deps.sh` | Install OS packages (Debian/Ubuntu + Fedora). `--dry-run` to preview |
+| `configure.sh` | `cmake --preset` |
+| `build.sh` | Build. `--setcap` also grants raw socket + RT access via sudo |
+| `build-dev.sh` | Build with `--setcap`. `--no-setcap` skips sudo |
+| `run.sh` | Generate a temporary self-signed cert and run the binary |
+| `test.sh` | `ctest --output-on-failure` |
+| `format.sh` | clang-format all sources |
+| `format-cmake.sh` | cmake-format all CMake files. Needs `pip install cmakelang` |
+| `lint.sh` | cpplint. Needs `pip install cpplint` |
+| `cppcheck.sh` | cppcheck |
+| `tidy.sh` | clang-tidy, bug-finding checks only |
+| `shellcheck.sh` | shellcheck every tracked shell script |
+| `check.sh` | format + cppcheck + lint + cmake-lint + shellcheck |
+| `clean.sh` | Remove `build/<preset>` |
+| `package.sh` | Build .deb and .rpm. Needs cert.pem/key.pem in the build dir |
 
-# Use a different preset:
-./tools/configure.sh x64-linux-release
-./tools/build.sh x64-linux-release
-```
-
-### Raw CMake commands
+Raw equivalents:
 
 ```bash
 cmake --preset x64-linux-debug
@@ -65,54 +73,82 @@ cmake --build --preset x64-linux-debug
 ctest --test-dir build/x64-linux-debug --output-on-failure
 ```
 
-Available presets: `x64-linux-debug`, `x64-linux-release`, `x64-windows-debug`, `x64-windows-release`.
-
-Build output goes to `build/<preset>/`. Compiler requirements: C++23, warnings as errors (`-Wall -Wextra -Wpedantic -Werror` on GCC/Clang; `/W4 /WX` on MSVC).
-
 ## Versioning
 
-`VERSION` (repo root) is the single source of truth. CMake reads it and propagates the value into the generated `libs/core/version.h` and `Doxyfile` — do not edit those files directly. All other secondary locations are kept in sync by the bump script:
+`VERSION` at the repo root is the single source of truth. CMake reads it and generates
+`libs/core/version.h` and `Doxyfile`. Never edit those two by hand.
 
 ```bash
 ./tools/bump-version.sh 6.0.0-alpha.1
 ```
 
-Files updated by the script: `VERSION`, `vcpkg.json`, the root workspace `package.json`, `web/apps/console/package.json`, `web/apps/example/package.json`, `web/packages/motion-master-client/package.json`, `web/packages/ui/package.json`, `hil/api/package.json`, `apps/motion_master/swagger.yml`, the `StringConstant` assertion in `libs/core/tests/version_test.cc`, the sidebar badge in `web/apps/console/src/layouts/RootLayout.tsx`, and `motion_master_version` in `rt/provision/ansible/roles/motion-master/defaults/main.yml` (the release the Raspberry Pi appliance installs — a pin *at* the version rather than a copy *of* it, kept here because a stale value fails silently: the image just installs an old build).
+The script also updates `vcpkg.json`, the root and per-package `package.json` files,
+`hil/api/package.json`, `apps/motion_master/swagger.yml`, the assertion in
+`libs/core/tests/version_test.cc`, the sidebar badge in
+`web/apps/console/src/layouts/RootLayout.tsx`, and `motion_master_version` in
+`rt/provision/ansible/roles/motion-master/defaults/main.yml`.
 
-The generated HTTP API client (`web/packages/motion-master-client/src/generated/`) is produced from `swagger.yml` via `swagger-typescript-api` (`pnpm --filter @synapticon/motion-master-client generate`) and is **committed to the repo** — regenerate and commit it whenever the API shape changes. The `api-client-drift` job in `lint.yml` regenerates from `swagger.yml` and fails on any diff, so a stale committed client is caught in CI.
+After bumping: commit, then push a `v<version>` tag. That triggers `release.yml` and
+publishes `@synapticon/motion-master-client` to npm.
 
-After bumping, commit all changed files, then push a `v<version>` tag to trigger `release.yml` — which builds the binaries **and** publishes `@synapticon/motion-master-client@<version>` to npm (prereleases under the `next` dist-tag; needs the `NPM_TOKEN` repo secret).
+**Everything ships one version, on purpose.** The binary, the `web/apps/*` PWAs, and the
+TypeScript client all depend on one contract: the HTTP API plus the WebSocket protocol.
+One version number states they were built against the same contract, so there is no
+compatibility matrix. A web-only fix still needs a version bump and a tag, because the
+hosted PWAs are pinned to the latest tag rather than to `main`. To learn *what* changed,
+read the commit scopes, not the number. Rationale: `NEXTGEN.md`, Session 2026-07-16.
 
-**Everything ships one lockstep version, on purpose.** The `motion-master` binary, the `web/apps/*` PWAs (console, example), and the `@synapticon/motion-master-client` TS library all carry the **same** version and bump together — even a UI-only or client-only change bumps the binary. This is deliberate, not incidental: those three artifacts all depend on **one shared contract — the HTTP API (port 61447) + the WebSocket protocol (port 62281)**. The binary *implements* that surface, the client library *wraps* it, and the PWAs *consume* it through the client. Because they are bound to the same surface by construction, a single version number is an accurate statement that they were built and tested against the same contract: `console@X` is known-good against `binary@X` with **no compatibility matrix and no version mapping**. The alternative — independent per-component versions — would just re-encode by hand a compatibility fact you get for free by construction, and cost real operational overhead (a matrix, per-artifact "minimum server version" checks, users reasoning about combinations). An occasional no-op binary rebuild for a UI-only change is the cheap side of that trade — version numbers are free.
+**Any change to the HTTP API or its behaviour requires updating
+`apps/motion_master/swagger.yml` in the same change.** It is the spec the PWA's API Docs and
+the generated clients come from.
 
-The governing principle is **"same contract → same version,"** not "everything in the repo shares a version." Today (and for everything planned) all shipped artifacts touch the API surface, so all of them are lockstepped. The only thing that would justify an independent version is a future artifact that depends on *none* of the API/WS contract (e.g. a standalone offline tool) — for it a shared version would be pure noise with zero compatibility payoff. No such artifact exists yet; the principle is here so the one exception is recognisable if it ever appears. Two consequences worth internalising: **(1)** shipping a web-only fix still requires a version bump + `v*` tag (the hosted PWAs are pinned to the latest tag, never `main` — see CI/`deploy-pages.yml`); **(2)** because the version alone no longer tells you *what* changed, recover that signal from commit scopes (`style(console)`, `feat`, `fix(comm)`, …) and/or a changelog rather than from the number.
+The generated client in `web/packages/motion-master-client/src/generated/` comes from
+`swagger.yml` via `pnpm --filter @synapticon/motion-master-client generate` and **is
+committed**. Regenerate and commit it whenever the API shape changes. The `api-client-drift`
+CI job regenerates from `swagger.yml` and fails on any diff, so a stale client is caught.
 
 ## CI
 
-Four per-platform build workflows run on every push/PR — `build-linux-x64.yml`, `build-linux-arm64.yml`, `build-macos-arm64.yml`, `build-windows-x64.yml` (display names `Build & Test (Linux x64)` etc.). They cache vcpkg binaries with `actions/cache@v5` on the platform's archive dir (`~/.cache/vcpkg/archives`, or `~/AppData/Local/vcpkg/archives` on Windows), keyed on OS + `vcpkg.json` hash. The `x-gha` vcpkg binary caching backend was **removed** in the pinned vcpkg version (`56bb241`) — do not use `VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"` or the `actions/github-script` workaround. The Windows workflow splits the cache into `actions/cache/restore` + `actions/cache/save` (`if: always()`) so a failed build still persists the (slow) dependency cache.
+Four build workflows run on every push and PR: `build-linux-x64.yml`,
+`build-linux-arm64.yml`, `build-macos-arm64.yml`, `build-windows-x64.yml`. They cache
+vcpkg binaries with `actions/cache@v5`, keyed on OS plus the `vcpkg.json` hash.
 
-Four further workflows exist alongside the build set:
+**Do not use the `x-gha` vcpkg binary caching backend.** It was removed in the pinned
+vcpkg version.
 
-- **`cert-renewal.yml`** — runs on the 1st of every month. Uses `acme.sh` with the `dns_acmedns` plugin against `auth.acme-dns.io` to issue a fresh Let's Encrypt cert for `local.motion-master.synapticon.com` (DNS-01 via CNAME delegation — no manual DNS touch required after the one-time setup). Publishes the renewed cert/key to the rolling, fixed-tag `tls-cert` release — the **single source of truth** consumed by the binary's startup self-heal and every build-time bake. Requires only `ACMEDNS_CONFIG` (acme-dns credentials JSON) as a repository secret; the rolling-release publish uses the default `GITHUB_TOKEN` (`contents: write`). (There are no longer `TLS_CERT`/`TLS_KEY` secrets or a `GH_PAT_SECRETS` PAT — retired in favour of the rolling release.)
-- **`release.yml`** — triggered by `v*` tags. Four parallel build legs (`linux-x64` on `ubuntu-24.04`, `linux-arm64` on `ubuntu-24.04-arm` **inside a `debian:13` container**, `windows` on `windows-latest`, `macos` on `macos-14`) each fetch `cert.pem`/`key.pem` from the rolling `tls-cert` release into the build output; a final `release` job downloads every leg's artifacts and publishes one GitHub Release. Both Linux legs run `tools/package.sh <preset>` (needs `dpkg-dev` + `rpm`), which maps the preset to a package-architecture pair (`x64-linux-*` → `amd64`/`x86_64`, `arm64-linux-*` → `arm64`/`aarch64`) and passes `rpmbuild --target` so a cross preset can package too; the windows leg zips the exe with its vcpkg runtime DLLs (the `x64-windows` triplet is dynamic) plus an auto-loaded `motion-master.jsonc` (from `apps/motion_master/motion-master.windows.jsonc`) that presets `gameLoop.periodUs` to 4 ms. Eight artefacts: `motion-master-<version>-linux-x64.tar.gz`, `-amd64.deb`, `-x86_64.rpm`, `-linux-arm64.tar.gz`, `-arm64.deb`, `-aarch64.rpm`, `-windows-x64.zip`, and `-macos-arm64.tar.gz`. All packages install to `/opt/motion-master/`; `cert.pem` and `key.pem` are marked as conffiles (deb) / `%config(noreplace)` (rpm) so upgrades never silently overwrite them. On deb, `apt remove` leaves conffiles behind — `apt purge` is required for a full uninstall. On rpm, `dnf remove` removes unmodified config files automatically; modified ones are saved as `.rpmsave`. **The aarch64 leg builds inside `debian:13` (trixie), not on the runner's Ubuntu**, because Debian aarch64 (Raspberry Pi OS trixie included) is the target. **That costs no compatibility, and the reason is worth internalising: the glibc floor is set by the symbols the binary references, not by the build host's glibc version** — measured with `readelf -V`, both the Ubuntu-24.04-built x64 binary and the trixie-built arm64 binary top out at `GLIBC_2.38` + `GLIBCXX_3.4.32` (GCC 13.2), with only `libc`/`libm`/`libstdc++`/`libgcc_s` linked. So do **not** quote the container's distro version as the requirement (an earlier draft of these docs wrongly claimed a 2.41 floor for arm64); measure it. Debian 12 (2.36) remains too old either way. Its vcpkg cache key carries a `debian13` token so it never collides with the x64 leg or with `build-linux-arm64.yml`'s Ubuntu-toolchain archives (a shared key would make its cache saves silent no-ops). Still missing for the planned Pi appliance: a flashable Raspberry Pi **image** leg (NEXTGEN.md, Sessions 2026-06-12 and 2026-07-24).
-- **`lint.yml`** — runs clang-format and cpplint checks on every push and PR.
-- **`deploy-pages.yml`** — publishes the site at `motion-master.synapticon.com` (landing + `/docs` Doxygen + the `web/apps/*` PWAs, each at `/apps/<name>/`) to GitHub Pages, on every push to `main` **and** on `v*` tags. **Docs + landing track `main`** (rebuilt every push), but the **web apps are pinned to the latest `v*` tag**, not `main`, so the hosted PWA always matches a released server binary (both ship on tags) rather than running ahead of every release. The apps are built once per tag inside a `git worktree` checkout of that tag and their bundles are **cached (`actions/cache`, keyed on the tag)** and reused on ordinary pushes — a docs-only commit deploys without any `pnpm install`/Vite build. Pages publishes one artifact for the whole site, so every run reassembles the full tree (that's why the apps can't just be deployed on their own tag workflow — a push-triggered docs deploy would otherwise drop them). The site-root `swagger.yml` is the **tag's** spec (cached alongside the apps), while the `/docs` Doxygen reflects `main`. The workflow is app-agnostic — it iterates `web/apps/*`, so a new app is picked up with no workflow change. Practical consequence: **shipping a web-only fix now requires a version bump + tag** (`tools/bump-version.sh` + push `v<version>`), same as any release — `main` alone never changes the hosted apps.
+Four more workflows:
+
+- **`cert-renewal.yml`** — monthly. Issues a Let's Encrypt cert via acme.sh with the
+  `dns_acmedns` plugin and publishes it to the rolling `tls-cert` release. Needs only the
+  `ACMEDNS_CONFIG` secret.
+- **`release.yml`** — on `v*` tags. Four build legs produce eight artifacts (tar.gz, deb
+  and rpm for both Linux architectures, a Windows zip, a macOS tar.gz). Packages install
+  to `/opt/motion-master/`. Certs are marked as config files so an upgrade never
+  overwrites them.
+- **`lint.yml`** — clang-format, cpplint, and the API client drift check.
+- **`deploy-pages.yml`** — publishes `motion-master.synapticon.com`. Docs and landing
+  track `main`; the web apps are pinned to the latest `v*` tag and cached per tag.
+
+The arm64 release leg builds inside a `debian:13` container because Debian aarch64 is the
+target. **The glibc floor is set by the symbols the binary references, not by the build
+host.** Measure it with `readelf -V`. Both x64 and arm64 currently need `GLIBC_2.38` and
+`GLIBCXX_3.4.32`. Do not quote the container's distro version as the requirement.
 
 ## Docker
 
-The `Dockerfile` is a two-stage build (build on `ubuntu:24.04`, minimal runtime image). The binary lands in `/opt/motion-master/` — consistent with the deb/rpm install path. `docker-entrypoint.sh` mirrors the cert discovery order of `tools/run.sh`: CERT/KEY env vars → bundled cert baked into the image → acme.sh mount → self-signed fallback.
+Two-stage build. The binary lands in `/opt/motion-master/`, matching the deb and rpm path.
+`docker-entrypoint.sh` mirrors the cert discovery order of `tools/run.sh`.
 
-**Capabilities** — Docker drops most Linux capabilities by default. On bare-metal `setcap` stamps the binary so file capabilities are granted automatically; inside a container file capabilities are ignored and `--cap-add` is used instead:
+Docker ignores file capabilities, so `setcap` does nothing in a container. Use `--cap-add`:
 
-| Capability | Purpose |
+| Capability | For |
 | --- | --- |
-| `CAP_NET_RAW` + `CAP_NET_ADMIN` | SOEM EtherCAT raw sockets and NIC promiscuous mode |
-| `CAP_SYS_NICE` | `SCHED_FIFO` RT scheduling on the game loop thread |
-| `CAP_IPC_LOCK` + `--ulimit memlock=-1` | `mlockall()` to pin process memory for RT |
+| `CAP_NET_RAW` + `CAP_NET_ADMIN` | SOEM raw sockets and promiscuous mode |
+| `CAP_SYS_NICE` | `SCHED_FIFO` on the game loop thread |
+| `CAP_IPC_LOCK` + `--ulimit memlock=-1` | `mlockall()` to pin process memory |
 
-Missing RT caps produce a warning and the loop runs non-RT. Missing EtherCAT caps cause `POST /api/init` to fail when a SOEM driver is requested. `--privileged` also works but grants far more than necessary.
-
-**Cert baking** — the build stage fetches `cert.pem`/`key.pem` from the rolling `tls-cert` release (the single source of truth) and the runtime stage copies them into `/opt/motion-master/`, so every image ships with the current cert. An offline build bakes empty placeholders instead; the entrypoint detects them (non-empty `-s` check) and falls back to acme.sh or self-signed, and the binary's startup self-heal then fetches a real cert on first run. Users can override baked-in certs at runtime by mounting new ones over `/opt/motion-master/cert.pem` and `/opt/motion-master/key.pem` — the volume mount shadows the image file.
+Missing RT capabilities produce a warning and the loop runs non-RT. Missing EtherCAT
+capabilities make `POST /api/init` fail for a SOEM driver.
 
 ## Architecture
 
@@ -121,87 +157,119 @@ Missing RT caps produce a warning and the loop runs non-RT. Missing EtherCAT cap
 ```text
 motion-master/
   apps/
-    motion_master/     ← main executable (flat file layout); swagger.yml here is the OpenAPI spec — source for the PWA's bundled API Docs + generated API clients, not shipped with the binary
+    motion_master/     ← main executable; swagger.yml (the OpenAPI spec) lives here
     playground/        ← scratch binary
   libs/
-    core/              ← version, platform timers (CyclicTimer), the CyclicTask/CycleContext RT-task interface, cross-cutting utils
-    etg/               ← mm::etg: ESI (EtherCAT Slave Information) XML parser + flat object-dictionary flattener. Pure transform over mm::core; no fieldbus
-    comm/              ← fieldbus interfaces; soem.cc, spoe.cc, igh.cc alongside base
-    node/              ← Device, DeviceManager, CiA402, profiles, and RT CyclicTasks (ProcessDataCyclicTask; planned TrajectoryCyclicTask) (depends on mm::comm); transport-agnostic — no HTTP/uWS
-    api/               ← mm::api: HTTP-transport glue (web_api.h — RouteContext, RegisterRoutesFn, sendJson/Error/Status). Header-only; the only lib that knows uWebSockets
-    example/           ← mm::example: copy-me C++ route-plugin starter (/api/example/...); server-side analogue of web/apps/example
+    core/              ← version, CyclicTimer, CyclicTask/CycleContext, RT setup, utils
+    etg/               ← mm::etg: ESI XML parser + object-dictionary flattener. Offline
+    comm/              ← fieldbus interfaces; soem.cc, spoe.cc, igh.cc
+    node/              ← Device, DeviceManager, CiA402, profiles, RT tasks. No HTTP
+    api/               ← mm::api: HTTP glue. The only lib that knows uWebSockets
+    example/           ← copy-me starter: a route plug-in and a cyclic task
   hil/
-    jitter_bench/      ← RT scheduling jitter benchmark (Linux only); CSV output + Python plot script
-    api/               ← HTTP API + WebSocket integration tests (TypeScript / Vitest; Docker-managed)
-  cmake/
-    lint.cmake         ← lint, cppcheck, format CMake targets
-  packaging/
-    postinst           ← deb postinst script; sets capabilities on /opt/motion-master/motion-master (rpm uses an equivalent %post scriptlet inlined in tools/package.sh)
-  extern/
-    vcpkg/             ← git submodule
+    jitter_bench/      ← RT jitter benchmark (Linux only)
+    api/               ← HTTP + WebSocket integration tests (TypeScript / Vitest)
+  cmake/lint.cmake     ← lint, cppcheck, format targets
+  packaging/postinst   ← deb postinst; sets capabilities
+  extern/vcpkg/        ← git submodule
   tools/               ← developer scripts
 ```
 
-Flat layout within each lib/app is intentional — navigate by filename and grep, not nested folders.
+Flat layout inside each lib is intentional. Navigate by filename and grep.
 
-### Class Structure (from NEXTGEN.md)
+### Design Rules
+
+- **No exceptions.** Return `std::expected<T, std::string>`. `std::string` is the default
+  error type. Promote to a structured `Error` (a POD enum plus a message, never a class
+  hierarchy) only on the surface where a caller must *branch* on the failure reason.
+  String-matching an error message to pick a branch is the signal that a surface has
+  earned one. Do not sweep the codebase to a shared error type.
+  `libs/comm/foe_error.h` is the worked example, and is deliberately unused.
+  See `NEXTGEN.md`, Session 2026-07-17.
+- **Two servers, two ports, two threads.** HTTP on 61447, WebSocket on 62281. Separate
+  uWS apps and loops, so a slow HTTP handler cannot stall the WebSocket. No Protobuf.
+- **No service layer.** SDO, file transfer, state control, and bus inspection are methods
+  on `Device` and `DeviceManager`.
+- **`Device` and `DeviceManager` are profile-ignorant.** `device_manager.h` names no
+  profile type. Everything profile-shaped builds outward from them. The payoff: a new
+  profile is a view class, an `X_control.h`, and route registration, with
+  `device_manager.{h,cc}` untouched. See `NEXTGEN.md`, Session 2026-08-02.
+- **`main.cc` is the composition root.** It is the only place concrete types are
+  instantiated. `HttpServer::Config` carries `std::function` callbacks so the server names
+  no concrete collaborator.
+- **Namespaces mirror directories** (`mm::core`, `mm::comm::soem`, `mm::node`, `mm::api`).
+  Do not use C++20 modules.
+- **Config is JSONC.** Parse with `nlohmann::json::parse(stream, nullptr, false, true)` —
+  the third argument disables exceptions (check `is_discarded()`), the fourth enables
+  comments. Settings are config-file-only; there are no CLI flags for them.
+  `--config <path>` wins, otherwise a `motion-master.jsonc` next to the executable is
+  loaded, otherwise the built-in defaults apply. There is no `/etc` search path.
+
+### Extension Points
+
+Two tiers, both with a starter in `libs/example/`.
+
+**Tier 2 — HTTP route plug-in.** A plug-in lib registers its own paths
+(`/api/yourapp/...`, never `/api/*` or `/*`) via `HttpServer::addRoutes(fn)`, called from
+`main.cc` **before** `start()`. The transport glue is `libs/api/web_api.h` — `RouteContext`
+(references to `DeviceManager` and `MonitoringManager`, plus `corsOrigin`), `RegisterRoutesFn`,
+and the `sendJson`/`sendError`/`sendStatus` helpers. **That header is the only place that knows
+uWebSockets. Do not add HTTP or uWS to `mm::node`.** Keep domain logic in `*_logic.{h,cc}` (HTTP-agnostic and
+unit-testable) and formatting in `*_routes.cc`. A plug-in may spawn its own off-RT
+`std::jthread`. **Do not add plug-in routes to `swagger.yml`** — that documents the
+built-in API only. See `NEXTGEN.md`, Session 2026-06-29.
+
+**Tier 3 — cyclic task.** Add a `CyclicTask` and run control code inside the RT loop.
+See *Cyclic Tasks and RT Value Access* below. `main.cc` registers the example task behind
+three commented lines.
+
+### Class Structure
 
 ```text
-main.cc  (composition root — the only place concrete types are instantiated; no `App` class yet)
+main.cc  (composition root)
  ├── Config (CLI options)
- ├── mm::node::DeviceManager      (owns FieldbusDriver + Device[] + ProcessData + ParameterCache; drives scanning)
- │     ├── unique_ptr<FieldbusDriver>   ← SoemFieldbusDriver | SpoeFieldbusDriver (planned); owns controlPlaneMutex_
- │     │                                  null until init(); set via init(unique_ptr<FieldbusDriver>)
- │     ├── unique_ptr<ProcessData>      (published image + generations; per-output atomic staging
- │     │                                  slots; lossless recorder ring (every cycle); WKC health.
- │     │                                  Owned here, handed by raw pointer to each Device)
- │     ├── ParameterCache               (control-plane only; on-disk OD-definition cache keyed by
- │     │                                  identity. Direct member, created once + never replaced, so
- │     │                                  the pointer is stable across scans; handed by raw pointer
- │     │                                  to each Device. Best-effort file I/O; touched only on the
- │     │                                  HTTP/scan threads — outside the RT path entirely)
- │     ├── owns: std::vector<Device>    (each Device borrows FieldbusDriver& + ProcessData* + ParameterCache*)
- │     │     ├── slavePosition, name, vendorId, productCode, revisionNumber, serialNumber (immutable)
- │     │     ├── owns: parameters_  (index/subindex → DeviceParameter{ DeviceParameterValue variant })
- │     │     ├── owns: flatPdoMapping_ (FlatPdoMapping — cached flat view; grouped read/write via readPdoMapping/writePdoMapping)
- │     │     └── parametersMutex_  (guards parameters_ vs the off-RT monitoring threads)
- │     └── init(), scan(), reset(), configureProcessData(), exchangeProcessData(), transitionToState()
- ├── GameLoop  (RT thread, SCHED_FIFO, 1 ms default; the main thread blocks here)
- │     ├── period_ (atomic; setPeriod() retimes the live loop, health() snapshots RT counters — both any-thread)
- │     └── runs: CyclicTask[]  (fixed membership — all registered before run())
- │           └── ProcessDataCyclicTask → DeviceManager::exchangeProcessData()  (no-op until image published)
- │           └── [planned: one TrajectoryCyclicTask (mm::node CyclicTask; plays a precomputed setpoint buffer; sine/chirp/ramp are userspace-generated buffers + a repeat flag — no separate SineWaveTask), idle until activated; reads a composition-root-owned RtMailboxPool<TrajectoryRun> channel injected by ref (the launch writes it, the task reads it — neither owns it; nothing but main.cc names TrajectoryCyclicTask)]
- ├── HttpServer  (own port 61447 + loop/thread)
- │     ├── uses: DeviceManager      (SDO read/write, FoE, state control, bus inspection)
- │     ├── uses: MonitoringManager  (/api/monitorings routes)
- │     └── Config callbacks → main.cc (server names no concrete type — GameLoop/DeviceManager):
- │           ├── initDeviceManager  (POST /api/init; creates the concrete driver)
- │           ├── getGameLoopHealth  (GET /api/game-loop; GameLoop::health snapshot)
- │           └── setGameLoopPeriod  (PUT /api/game-loop; retimes the live RT loop)
- ├── WebSocketServer  (own port 62281 + loop/thread; WebSocket connection — monitoring batches out,
- │                     subscribe in; notifications / output-staging in as they land)
- ├── MonitoringManager  (off-RT; owns the monitoring registry, turns each into a lossless row stream)
- │     ├── owns: ParameterRefresher  (background thread polling SDO-only params into a cache)
- │     ├── owns: sampler thread        (per flush, ships every recorded cycle since each monitoring's
- │     │                                read cursor — reads the recorder ring, never the bus)
- │     └── setPublish(cb)              → WebSocketServer::publish(topic, json)
- └── ProcedureManager  (off-RT command-and-wait procedures; owns the cancellable std::jthreads, the
-                        per-device single-run busy token, and the retained ProcedureSnapshot a client
-                        polls. Poll-only — names no WebSocket, holds no publish callback. Profile-
-                        ignorant: it is handed a body, never a name it could resolve)
-
- [planned, not yet in code: NotificationBus (observer decoupling producers from servers; one off-RT poll
-  thread + a registry of Source{revision, render} polled by version counter, holding a std::function
-  publish callback — never a WebSocketServer reference; features self-register their Source)]
+ ├── mm::node::DeviceManager
+ │     ├── unique_ptr<FieldbusDriver>   ← SoemFieldbusDriver | SpoeFieldbusDriver
+ │     │                                  null until init(unique_ptr<FieldbusDriver>)
+ │     ├── unique_ptr<ProcessData>      published image + generations + recorder ring
+ │     ├── ParameterCache               on-disk OD cache, control-plane only, stable pointer
+ │     ├── vector<Device>               each borrows FieldbusDriver& + ProcessData*
+ │     │     ├── slavePosition, name, vendorId, productCode, revisionNumber, serialNumber
+ │     │     ├── parameters_            (index, subindex) → DeviceParameter
+ │     │     ├── flatPdoMapping_        cached flat view
+ │     │     └── parametersMutex_
+ │     └── init(), scan(), reset(), configureProcessData(), exchangeProcessData(),
+ │         transitionToState(), withDevice()
+ ├── GameLoop  (RT thread, SCHED_FIFO, 1 ms default; blocks the main thread)
+ │     └── CyclicTask[]  → ProcessDataCyclicTask
+ ├── HttpServer      (port 61447, own loop and thread)
+ ├── WebSocketServer (port 62281, own loop and thread)
+ ├── MonitoringManager  (off-RT; owns ParameterRefresher and a sampler thread)
+ └── ProcedureManager   (off-RT jthreads, busy token, retained snapshot; poll-only)
 ```
 
-**Device profile views are borrowed, not owned by `Device`.** The CiA402 / SOMANET behaviour lives in a
-shallow inheritance chain of *views* — `ProfileDevice ← Cia402Drive ← SomanetDrive` — each holding only a
-`Device&` (no `Cia402StateMachine` member on `Device`; that 2026-05-16 model was superseded). A view binds
-a device for the duration of one operation and is constructed via the validated factories
-`createCia402Drive(Device&)` / `createSomanetDrive(Device&)`. A view must never outlive its `Device&` or be
-cached across a rescan — long-running RT procedures re-resolve their `Device` via `DeviceManager::findDevice`
-each cycle.
+Planned, not in code: `TrajectoryCyclicTask` and `NotificationBus`.
+
+**Both directions already have a settled shape, so build to it rather than re-deriving one.**
+Inbound is a `RtMailboxPool<T>`: a depth-1 latest-wins mailbox per axis, where a newer intent
+supersedes an older one and nothing queues. The pool is **owned by the composition root** and
+injected by reference into the RT task (which reads) and the launch path (which writes), so
+producer and task never name each other and only `main.cc` names the concrete task. Outbound is
+the `NotificationBus` with a `Source{revision, render}` polled by version counter, reaching the
+WebSocket through a `std::function` publish callback wired in `main.cc`. **The RT thread never
+touches the WebSocket, and `node` never names `WebSocketServer`.** See `NEXTGEN.md`, Sessions
+2026-07-09, 2026-07-13, and 2026-07-14.
+
+**Profile views are borrowed, not owned.** `ProfileDevice ← Cia402Drive ← SomanetDrive`
+each hold only a `Device&`, which is the only data member permitted in the chain. Build
+one with `createCia402Drive(Device&)` or `createSomanetDrive(Device&)`; both validate
+before binding. A view must never outlive its `Device&` or be cached across a rescan.
+
+**Each view header has a control header, 1:1.** `profile_device.h` → `profile_control.h`,
+`cia402_drive.h` → `cia402_control.h`, `somanet_drive.h` → `somanet_control.h`. Domain
+logic lives on the view. A control function borrows, binds, delegates, and nothing else.
+Off-view code reaches a profile operation through a control free function, never through a
+`DeviceManager` method. See `NEXTGEN.md`, Session 2026-08-02.
 
 ### Key Types
 
@@ -213,150 +281,479 @@ using DeviceParameterValue = std::variant<
 >;
 ```
 
-Use `std::visit` for type dispatch on `DeviceParameterValue`. `DeviceParameter` holds index, subindex, and a value.
+`DeviceParameterValue` is the interchange type in signatures, not where the bytes live. A
+scalar lives in `DeviceParameter::bits`, a `uint64_t` of raw little-endian wire bytes read
+through `std::atomic_ref`. Strings and blobs live in `rawValue`. The immutable `dataType`
+decides which field holds the value, so a value has exactly one home. `currentValue()`
+rebuilds the variant on demand; `scalar<T>()` and `rawValueBytes()` read storage directly.
 
-`DeviceParameterValue` is the **interchange** type in signatures, not where the bytes sit. A scalar's storage is `DeviceParameter::bits`, a `uint64_t` of raw little-endian wire bytes reached through `std::atomic_ref`; strings and byte arrays live in `rawValue` as the same wire encoding, and the immutable `dataType` decides which field holds a value — so a value has exactly one home. `currentValue()` reconstructs the variant on demand with one `switch` on that `dataType`; `scalar<T>()` / `rawValueBytes()` read storage directly. See "Cyclic Tasks and RT Value Access" below.
+`ObjectAddress<T>` (`libs/node/device_parameter.h`) carries an index, a subindex, and the
+C++ type together, so a call site does not retype it.
 
-### Game Loop / RT Threading
+### Locking
 
-`GameLoop::run()` blocks the **main thread** — this IS the RT thread. All other subsystems start their own threads before `run()` is called. Shutdown via signal sets an atomic flag checked after each cycle. `GameLoop` exposes two relaxed-atomic diagnostic counters: `executedCycles()` (loop iterations run) and `skippedCycles()` (cycles the timer skipped after a stall — see the overrun policy below); both are for diagnostics/logging, not synchronisation, and their sum is the total cycles elapsed. `skippedCycles()` is the signal the planned master-side health timeline will sample. Each `CyclicTask::execute()` receives a `CycleContext { elapsed, skipped }` carrying that per-cycle timing, so a time-indexed task (planned trajectory playback) can stay on the real-time schedule across skips; `ProcessDataCyclicTask` ignores it.
+Four locks, one order:
 
-**The cycle period is runtime-adjustable, not fixed at construction.** `GameLoop::setPeriod()` stores the new period in a relaxed `std::atomic<microseconds>` (`period_`) that the RT loop reloads at the top of each iteration; any thread may call it and the RT loop is the sole reader, so no lock is needed. Applying a period also calls `CyclicTimer::setPeriod()`, which **re-anchors the deadline grid to that instant** on all three platforms — otherwise the old grid would read as a large backlog and the overrun policy would emit a phantom skip burst. It further starts a **fresh health epoch**: the RT loop resets its cumulative counters (executed/skipped, task-time max/avg) and re-anchors the `achievedHz` baseline, done **on the RT thread** (the single writer of those counters, so the reset never races a `fetch_add`), so `health()` reflects only the new period instead of masking the change under stale figures. The change is **transient** — it retimes the live loop but does not rewrite the config file — and the recorder ring is period-independent (sized in cycles, records carry absolute timestamps), so nothing else needs touching. The HTTP surface is `PUT /api/game-loop`, wired through the `setGameLoopPeriod` composition-root callback so `HttpServer` references neither `GameLoop` nor `DeviceManager`.
+```text
+busOperationMutex_ → deviceSetMutex_ → Device::parametersMutex_ → controlPlaneMutex_
+```
 
-At the top of `run()`, `mm::core::setRealtimePriority()` (`libs/core/realtime.{h,cc}`) prepares the calling thread for RT: it raises it to `SCHED_FIFO` priority `kRtThreadPriority` = 80 (`pthread_setschedparam`, non-Windows) so the cycle is never preempted by normal `SCHED_OTHER` work, then `mlockall(MCL_CURRENT | MCL_FUTURE)` (Linux only — macOS has no `mlockall`) pins all pages so a mid-cycle page fault can't inject an unbounded latency spike. The policy is ORed with `SCHED_RESET_ON_FORK` where the platform defines it (Linux; Darwin does not), so a child forked from the RT thread starts at `SCHED_OTHER`/nice 0 — a structural guarantee rather than relying on nobody forking from there. Both steps are **best-effort and independent**: the routine only *reports* which one took (`RtSetupResult`) and the caller logs the `spdlog::warn` (a `SCHED_FIFO` failure does not skip the `mlockall`), so a process lacking `CAP_SYS_NICE`/`CAP_IPC_LOCK` still runs — just non-deterministically. `hil/jitter_bench` calls the same `libs/core` routine, so it characterises the configuration that actually ships; the priority number lives in exactly one place.
+- **`busOperationMutex_`** (plain) is a token over an *activity*: one control-plane
+  operation drives the bus at a time. It guards no member and no reader takes it.
+- **`deviceSetMutex_`** (shared) guards *lifetime*: `devices_` and the process-data runtime
+  are not being rebuilt or freed. Readers and borrowers take it shared. Only `scan` and
+  `reset` need it exclusively.
+- **`Device::parametersMutex_`** guards `parameters_` against the off-RT monitoring
+  threads. **Never hold it across bus I/O** — snapshot, transfer, then re-find.
+- **`FieldbusDriver::controlPlaneMutex_`** serialises mailbox, SDO, FoE, ESC register, and
+  state access. Hold it for one socket transaction only, never across a sleep, a blocking
+  wait, or a user callback.
 
-**Priority 80 is a target-verification item for the PREEMPT_RT work, not a settled number.** On a stock kernel hardirqs/softirqs run in interrupt context and preempt `SCHED_FIFO` at *any* priority, so 80 cannot starve the NIC path the raw-socket master depends on. Under `CONFIG_PREEMPT_RT`, threaded IRQs default to ~50 and NAPI runs in the IRQ thread — so the loop does outrank the interface. That is the normal arrangement and is not itself a bug (the pinned SOEM's receive path blocks in `ppoll()` with a 50 µs timeout rather than busy-spinning, so the loop yields the core while waiting for the frame and cannot livelock a lower-priority IRQ thread), but it should be confirmed on the target — `ps -eo pid,cls,rtprio,comm | grep irq` — before DC SYNC0 activation relies on it. See the DC SYNC0 / locked-timer plan.
+**The PDO path runs lock-free.** `exchangeProcessData` touches the IOmap, which is disjoint
+from the control plane, and SOEM's port layer is internally thread-safe. A slow SDO never
+blocks the RT cycle.
 
-`GameLoop` calls `deviceManager_.exchangeProcessData()` each cycle via a `ProcessDataCyclicTask`. The `CyclicTask`/`CycleContext` interface lives in `libs/core` (beside its companion `CyclicTimer`), so a node-layer object can *be* a `CyclicTask` directly — `ProcessDataCyclicTask` is a `mm::node` task holding `DeviceManager&`, not an app-layer bridge. `GameLoop` (in `apps/`) stays ignorant of `DeviceManager`/`FieldbusDriver` because it only ever sees `std::vector<CyclicTask*>` — the isolation is the *interface*, never a wrapper class. It is a no-op until a process image is published, so the loop runs unconditionally. HTTP handlers call SDO methods on `DeviceManager`/`Device` from their own threads; `FieldbusDriver` serializes all socket access via its internal mutex. (The interface was hoisted `apps/ → libs/core` for exactly this reason — see NEXTGEN.md Session 2026-07-14 "Hoist `CyclicTask` into `libs/core`".)
+**`withDevice(pos, fn)` is the seam.** It takes `deviceSetMutex_` shared, resolves the
+position, and hands a `Device&` to a callable returning `std::expected<T, std::string>`.
+Holding it across a multi-second operation is correct: a rescan midway would invalidate the
+device being worked on.
 
-**Per-cycle "task time" is blocking wire I/O, not compute — expect ~100–300 µs on a stock laptop NIC.** `GameLoop::health()` reports the task-execution time (last/max/avg ns, surfaced by `GET /api/game-loop` and the console's Game Loop page) by bracketing the `CyclicTask::execute()` loop with two `steady_clock` reads. That loop is dominated by `SoemFieldbusDriver::exchangeProcessData()`, whose cost is **not** the two IOmap memcpys (a few µs) but the blocking EtherCAT frame round-trip: `ecx_send_processdata()` (a `sendto` syscall) then `ecx_receive_processdata(ctx, EC_TIMEOUTRET)`, which **blocks** until the frame has circulated through the whole daisy-chain and returned. So the measured window is syscall + NIC hardware/driver latency + wire round-trip + scheduler wakeup — the wire portion for a few drives is tiny; the OS/NIC path dominates. On a consumer laptop NIC (interrupt coalescing on, non-RT kernel, no CPU isolation) ~100–300 µs is normal and harmless — it is *budget consumed* (the core is parked on the wire, not spinning), so it still meets a 1 ms grid at ~999 Hz with 0 skips. The signature of a real problem is `max` approaching `EC_TIMEOUTRET` (2000 µs default) with `skippedCycles` climbing — a lost/late frame stretching one cycle past its deadline, not expensive process-data composition. To bring the figure down (only worth it if `max`/skips misbehave): a PREEMPT_RT kernel, an Intel server NIC (`igb`/`igc`/`e1000e`) over a laptop/USB adapter, **disabling interrupt coalescing on the EtherCAT NIC — `ethtool -C <iface> rx-usecs 0 tx-usecs 0`** (often the single biggest win on commodity hardware), and CPU isolation (`isolcpus`/`nohz_full`) for the RT thread.
+**`fn` must not re-enter a `DeviceManager` control-plane operation** (`scan`, `reset`,
+`init`, `configureProcessData`, `transitionToState`). Each takes `deviceSetMutex_`
+exclusively and it is not recursive.
 
-PDO data crosses the RT/non-RT boundary through `ProcessData` (`libs/node/process_data.h`, owned by `DeviceManager`, pointer handed to each `Device`):
+**A borrow does not exclude an AL transition.** The two interleave. The procedure's next
+bus transaction fails against the changed state, rather than the transition hanging.
 
-- **Inputs and the output read-back come from the recorder ring** (`ProcessDataRing`, `libs/node/process_data_ring.{h,cc}`) — a lock-free circular recorder the RT loop appends one record to **every cycle** (raw input + output IOmap, epoch-ns timestamp, working counter). It is the single RT-written structure and the source for the live monitoring stream, point reads of the freshest value (`head()-1`), and the `.mmpd` dump (`DeviceManager::dumpProcessData` / `POST /api/process-data/dump` — serializes the current `[oldestValidSeq, head)` span plus the process image as a header via `libs/node/process_data_dump.{h,cc}`, works in any state including OP); there are no separate whole-image snapshots. The RT `write()` is wait-free (a few `memcpy` + a per-slot release-stored absolute sequence number); readers re-check that sequence after copying to detect a write that raced the copy, which at a seconds-deep ring is effectively never. Allocated + `mlock`'d at `configureProcessData` for `recorder.capacity` cycles — a fixed row count, independent of the loop period (records carry absolute timestamps) (a per-cycle record is 28 B fixed + the whole-bus IOmap, ~82 B per SOMANET drive → ~128 B/cycle for a single drive, so the default 300000 cycles ≈ 38 MB per drive, ≈ 5 min at a 1 ms period), re-allocated on a layout-changing re-map (records under the old layout are undecodable), retained across image teardown, freed only by `reset()`/`scan()`.
-- **Outputs are written lock-free into the owning parameter's cell** (`DeviceParameter::bits`, ≤8 wire bytes packed little-endian). Any number of writers store into *different* objects' cells without contending; same-object writes are last-writer-wins. The RT loop is the only thread that *composes* those cells into the packed wire image each cycle, which is what makes bit-packed objects sharing a byte safe without a lock (NEXTGEN.md "Design B"). There is no separate staging vector, so a re-map seeds nothing and a write landing during one cannot be lost.
+Rationale and the full inventory: `NEXTGEN.md`, Sessions 2026-08-08 and 2026-08-09.
+Reference: `docs/LOCKING.md`, `docs/THREADS.md`.
 
-An atomically-published `image` pointer (with retained `generations`) gates the whole thing: readers load it lock-free and `readPdo` falls back to SDO when no image is published, nothing has been recorded yet (`head()==0`), or (inputs only) the bus is unhealthy (`lastWkc < expectedWkc`). *(Planned, NEXTGEN.md Session 2026-07-09 "profile view is RT-callable": a non-allocating `readPdo` overload + lock-free `Device` helpers move the fast path into the typed `readValue<T>`/`writeValue<T>` so the whole `Cia402Drive` view is safe to call from the RT loop. That makes the input health/WKC check **advisory** on the fast path — it serves the newest ring record unconditionally while exchanging rather than diverting into a blocking SDO — and the fast path stops writing the parameter cache.)*
+### Game Loop and RT
 
-**Monitoring runs off the RT loop and is lossless.** It is *not* a `CyclicTask`. `MonitoringManager` owns a background sampler thread; each monitoring holds a **read cursor** into the recorder ring, and on each flush ships **every** cycle recorded in `[cursor, head)` as one batch, then advances the cursor — so no cycle is dropped (`interval` is the flush *cadence*, not a sample rate; bounded 5–2000 ms). A cursor lapped by more than a whole ring is logged (not notified) and resynced to the oldest record. PDO-mapped parameters are decoded from each cycle's ring record; SDO-only parameters are polled in the background by the owned `ParameterRefresher` and read from its cache (one cached value per flush). Row timestamps on the wire are **epoch microseconds** (JS-exact, distinct per sub-ms cycle). `Device::parametersMutex_` guards the parameter map against these off-RT threads racing the control plane.
+`GameLoop::run()` blocks the main thread, and that thread *is* the RT thread. Every other
+subsystem starts its own threads first. A signal sets an atomic flag checked after each
+cycle.
 
-**`CyclicTask` membership is fixed.** All tasks are registered before `run()`; `GameLoop` never adds or removes tasks at runtime (the design rationale is in NEXTGEN.md, session 2026-06-05 — *RT tasks are fixed-membership*). Today only `ProcessDataCyclicTask` is registered (`main.cc`). This fixed-membership rule splits runtime procedures into two kinds:
+At the top of `run()`, `mm::core::setRealtimePriority()` (`libs/core/realtime.{h,cc}`)
+raises the thread to `SCHED_FIFO` priority 80 and calls `mlockall(MCL_CURRENT | MCL_FUTURE)`
+so a page fault cannot inject a latency spike. On Linux the policy is ORed with
+`SCHED_RESET_ON_FORK`. Both steps are best-effort and independent: the routine reports what
+succeeded and the caller warns, so a process without `CAP_SYS_NICE` or `CAP_IPC_LOCK` still
+runs, just non-deterministically. `hil/jitter_bench` calls the same routine, so it measures
+what ships.
 
-- **RT cyclic procedures** *(planned — not yet in code)*: a single `TrajectoryCyclicTask` that plays back a precomputed setpoint buffer one point per cycle — anything that must write a target into the output region every cycle. Sine/chirp/ramp/step are **userspace-generated buffers** (one testable function) fed to that one task, with a **`repeat` flag** looping a single stored period; there is **no separate `SineWaveTask`**, `SineWaveParams`, or `SeqLock<SineWaveParams>` transport (superseded — see NEXTGEN.md Session 2026-07-13). It is a `CyclicTask` (a `mm::node` object, now that the interface lives in `libs/core`) registered up front and *idle until activated* via a control block, exactly like `ProcessDataCyclicTask` is a no-op until an image is published. The control block is a **depth-1 latest-wins mailbox** (newest intent supersedes, never a FIFO — a chained/queued move, if ever needed, is a command queue added *beside* the slot, not a redesign of it), one per axis in a fixed `RtMailboxPool<TrajectoryRun>`; a program holds a single-axis buffer or a cross-device coordinated program (one immutable program, a column per axis, one shared cursor; an axis in at most one active program). **The mailbox is a decoupled channel, owned by neither end:** the `RtMailboxPool<TrajectoryRun>` is a **composition-root-owned** object (a `main.cc` local, like `gameLoop`), injected by reference into `TrajectoryCyclicTask` (the sole RT reader) and into the launch path (the writer) — the producer and the RT task never reference each other, and **nothing but `main.cc` names the concrete `TrajectoryCyclicTask`**. (This supersedes both the per-`Device`/on-`DeviceManager` split *and* the interim "task owns its inbox" idea — see NEXTGEN.md Session 2026-07-14 "Hoist `CyclicTask` into `libs/core`".) **The launch lives off the scheduler, not the HTTP handler, and names no task:** it is a node free function `startTrajectory(DeviceManager&, RtMailboxPool<TrajectoryRun>&, slavePos, TrajectoryRequest)` (with a coordinated multi-axis analogue) that resolves the device, uses a `Cia402Drive` view for the op-mode/enable handshake only (`Cia402Drive::prepareForTrajectory(request)` — the view never names the task), and validates the client `TrajectoryRequest` (the input DTO — matching the existing `OutputStageRequest`, the repo's `*Request` = client command / `*Spec` = internal descriptor convention) into the immutable `TrajectoryRun` it arms into a claimed slot. `HttpServer` reaches it through a `startTrajectory` composition-root callback (a `std::function` capturing the pool, mirroring `setGameLoopPeriod`), so the server references neither the task nor the pool. A coordinated program spans devices only in that the task re-resolves each axis via `findDevice` per cycle. The single task (holds `DeviceManager&` + the injected `RtMailboxPool&`) iterates the pool each cycle, runs after `ProcessDataCyclicTask`, and writes the output slots directly (on-RT); RT-only scratch (the playback cursor) stays off the published block. **Skips are normal here** (Windows/macOS userspace is the common deployment, not PREEMPT_RT) and are absorbed by a **user-chosen policy** per trajectory — *Sequential* (default: advance cursor by 1, preserve shape/smoothness, needs nothing from `GameLoop`) vs *Real-time* (advance by 1+skipped via a `CycleContext { elapsed, skipped }` passed to `execute()`, preserve timing, may jump; clamp as a safety net). Both directions generalize to two task-specific functions over shared plumbing — inbound `RtMailboxPool<T>` + `launchRtTask(validate, build)`, outbound the `NotificationBus` + `Source{revision, render}` (a version-counter poll; the task self-registers via `publishTo(bus)`); the RT thread never touches the WebSocket (the seam is a `std::function` publish callback wired in `main.cc`, like `MonitoringManager` — `node` never names `WebSocketServer`). See NEXTGEN.md Sessions 2026-07-09 ("Multi-axis coordinated trajectory … depth-1 latest-wins") and 2026-07-13 (SineWave folded into TrajectoryCyclicTask; skip policy).
-- **Off-RT procedures** (commutation/offset detection, auto-tuning, firmware — call a command and wait, not cycle-time-sensitive) are **not** `CyclicTask`s. They run on a cancellable background `std::jthread` owned by `ProcedureManager` (`libs/node/procedure_manager.{h,cc}`), which also holds the per-device busy token and the retained `ProcedureSnapshot` a client polls. A body is a plain callable `(Device&, ProgressReporter&, std::stop_token)`, passed to `start()` — so adding a procedure never touches the manager, and the manager names no profile type (a body needing a `SomanetDrive` binds one itself). **The registry is one table, `libs/node/procedure_catalogue.{h,cc}`, and it is what makes the HTTP surface generic.** Each `ProcedureCatalogueEntry` is a `ProcedureDescriptor` (name, title, description, caveats, `movesMotor`, `requiresEnabled`, step template), an `applies(Device&)` predicate, and a `makeBody(json)` factory; four handlers — `GET /api/devices/:pos/procedures` plus `POST`/`GET`/`DELETE` on `/api/devices/:pos/procedures/:name` — serve **every** procedure, so adding one is a row in that table and touches no route. The catalogue sits *outward* of `DeviceManager`/`ProcedureManager` and names profile types freely, which is why `http_server.cc` names none on this surface. Two rules it enforces: **`applies` may only consult state that exists as soon as the device does** (the vendor ID from SII, *not* `createSomanetDrive`, whose CiA402 check needs the object dictionary to have been enumerated — an opportunistic step, so binding to it would report a genuine drive as having no procedures at all), and **never-run is a state, not a 404** — the singleton `GET` returns `200` with `idleSnapshot(descriptor.steps)`, since the manager cannot invent one (it learns a template only when a run starts) but the catalogue holds it. `ProcedureError` carries four kinds mapped to status in one place: `kBusy`→409, `kUnknownDevice`→404 (the manager's two), `kUnknownProcedure`→404, `kInvalidRequest`→400 (the catalogue's). **A body cannot change AL state.** It runs inside `withDevice`, holding `deviceSetMutex_` *shared*, and a `transitionToState` that triggers a re-map needs that lock *exclusively* for its publish window with no upgrade path — so calling it would deadlock the body against itself. That is harmless for SDO/mailbox procedures (os-command, offset detection, store/restore, auto-tuning) and **fatal for firmware installation**, which is defined by its state transitions (BOOT → two FoE writes → PRE-OP; the SMM and Kübler variants likewise). Firmware installation therefore gets a **second body shape** — `(DeviceManager&, slavePos, ProgressReporter&, std::stop_token)`, spawned *without* a borrow, so it borrows per **step** (a `withDevice` around each FoE write) and transitions between steps while holding nothing. An added `start()` overload, not a redesign: same thread, busy token, snapshot and cancellation. Two things that variant must handle: a rescan can then interleave (the next borrow fails cleanly, but `discardIfRescanned` must skip entries still *running*, which today it need not because a rescan cannot overlap a whole-span borrow), and nothing blocks a concurrent `scan()` during the install (the busy token cannot prevent it without `DeviceManager` naming `ProcedureManager`). See NEXTGEN.md, Session 2026-08-02.
+**Priority 80 is unverified against threaded IRQs under PREEMPT_RT.** Confirm with
+`ps -eo pid,cls,rtprio,comm | grep irq` before DC SYNC0 relies on it. See `NEXTGEN.md`,
+Session 2026-07-30.
 
-**Reactive mapping.** Changing AL states is the user's job (via `POST /api/devices/state`); Motion Master *reacts* in `DeviceManager::transitionToState`. The process image is a single whole-bus layout (`ecx_config_map_group` maps the entire IOmap at once), but the reactive logic supports **partial-bus operations** so a subset can be serviced without disturbing the rest:
+**The period is runtime-adjustable.** `setPeriod()` stores it in a relaxed atomic the RT
+loop reloads each iteration. Applying it re-anchors the deadline grid (otherwise the old
+grid reads as a backlog and produces a phantom skip burst) and starts a fresh health epoch
+on the RT thread. The change is transient and does not rewrite the config file. The HTTP
+surface is `PUT /api/game-loop`.
 
-- *Entering SAFE-OP/OP* re-maps (`configureProcessData()`: `ecx_config_map_group` → read each device's PDO mapping → `buildProcessImage` → publish) when there is no published image yet, **or** when any targeted device is rejoining from a non-exchange state — its PDO mapping is re-read because a firmware update or manual re-map may have changed it. A device already exchanging that is merely re-commanded (SAFE-OP → OP) skips the re-map; the published image still describes it.
-- *Leaving SAFE-OP/OP* tears the image down **only when no device will remain exchanging**; if other devices stay in SAFE-OP/OP they keep running and the leaving device simply drops out (its working-counter share is removed by `updateExpectedWkc()`).
+**Task membership is fixed.** All tasks are registered before `run()`. `GameLoop` never
+adds or removes one at runtime. Today only `ProcessDataCyclicTask` is registered.
 
-So one or more devices can be taken to BOOT (firmware) or PRE-OP (re-map) while the others keep exchanging, and bringing them back re-maps the whole bus. Re-mapping briefly pauses exchange for the whole bus (the IOmap is rebuilt in one shot) — the accepted cost of bringing a device online; everything else continues.
+**Task time is blocking wire I/O, not compute.** `health()` brackets the `execute()` loop,
+which is dominated by the EtherCAT frame round-trip: a `sendto` syscall, then a blocking
+receive. On a consumer laptop NIC 100–300 µs is normal and harmless — the core is parked on
+the wire, not spinning. The signature of a real problem is `max` approaching `EC_TIMEOUTRET`
+(2000 µs) with `skippedCycles` climbing. To improve it: a PREEMPT_RT kernel, an Intel
+server NIC, `ethtool -C <iface> rx-usecs 0 tx-usecs 0`, and CPU isolation.
 
-**AL transition validity is enforced before the re-map.** `transitionToState` rejects illegal EtherCAT AL transitions up front (`kValidStateTransitions` in `device_manager.cc`: single-step climbs `INIT → PRE-OP → SAFE-OP → OP`, multi-step drops, BOOT only paired with INIT). This is not just UX — the re-map reads each device's PDO mapping over the **CoE mailbox**, which is only live from PRE-OP up, so a device commanded straight from BOOT (firmware-sized mailbox, no CoE) into an exchange state would otherwise reach that mailbox read while still in BOOT and **segfault inside SOEM** before the slave could reject it with AL status 0x0011. The guard keeps the bad jump away from the mapper entirely; it lives in the node layer because re-mapping is a Motion Master concern, not the fieldbus's (direct `FieldbusDriver` use is the caller's own risk).
+#### Cycle Timer
 
-**The re-map resets per-slave FMMU state first.** `configureProcessData()` runs `ecx_config_map_group` *without* an `ecx_config_init`, but SOEM's FMMU mappers start at `slavelist[i].FMMUunused` and append, trusting init's memset cleared it. So the driver zeroes each slave's `FMMU[]` + `FMMUunused` (and FPWR-clears the ESC FMMU registers) before every map — otherwise a re-map after a BOOT excursion writes a duplicate Outputs FMMU and then an out-of-bounds `ec_fmmut` past the `EC_MAXFMMU`-sized array, corrupting adjacent `ec_slavet` fields (the same memory smash behind the historical `PO2SOconfig` segfault).
+`CyclicTimer` (`libs/core/cyclic_timer.{h,*.cc}`) uses one absolute-deadline model on all
+three platforms, so per-cycle jitter never accumulates into drift. Linux uses
+`clock_nanosleep(TIMER_ABSTIME)`, macOS `mach_wait_until()`, Windows a per-cycle one-shot
+`CreateWaitableTimerEx` with a relative due time computed from a QPC grid. The QPC grid is
+what lets Windows honour non-integer-millisecond periods.
 
-**`init`/`reset`/`configureProcessData` vs `exchangeProcessData`:** the first three run on the HTTP thread and mutate `DeviceManager::driver_`/`devices_` and the IOmap; `exchangeProcessData()` runs on the RT loop. The boundary is guarded by an atomically-published process-image pointer (RT reads it lock-free; control-plane operations publish `nullptr` first so exchange becomes a no-op) plus `stopExchange()`, which drains an in-flight cycle (bounded wait on an `exchanging` flag) before re-mapping or tearing down. Published images are retained until `reset()` so the RT thread never reads a freed image.
+**Overrun policy is skip-to-grid, not catch-up.** When a deadline is already past,
+`waitForNextCycle()` fast-forwards to the next future grid point, preserves the phase, and
+returns how many cycles it skipped. A back-to-back burst would send stale frames the drives
+cannot use. `GameLoop` accumulates the count into `skippedCycles()` silently — no logging on
+the RT path.
 
-Cycle timer (`CyclicTimer`, `libs/core/cyclic_timer.{h,*.cc}`): all three platforms share one absolute-deadline model — a fixed deadline grid anchored at construction so per-cycle jitter never accumulates into drift. Linux uses `clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, ...)`; macOS `mach_wait_until()` against the same monotonic grid (Darwin has no `clock_nanosleep`), retrying on `KERN_ABORTED` as Linux retries `EINTR`; Windows a per-cycle one-shot `CreateWaitableTimerEx` (`CREATE_WAITABLE_TIMER_HIGH_RESOLUTION`) with a *relative* due time computed from a `QueryPerformanceCounter` grid (relative avoids the wall-clock dependency of an absolute FILETIME due time). The QPC grid is what lets Windows honour sub-/non-integer-millisecond periods — the previous periodic-timer impl set its cadence via the integer-ms `lPeriod` field, so a 1500 µs period ran at 1 ms and a 500 µs period degenerated to a one-shot. Windows is a dev target, not hard-RT: the rewrite is a correctness + overrun-observability change, **not** a jitter/latency improvement (same HIGH_RESOLUTION wake primitive), and stock-Windows determinism stays scheduler-bound. See NEXTGEN.md, Session 2026-07-13.
-
-**Overrun policy is skip-to-grid, not catch-up.** Ordinary jitter (a late wake whose cycle work still fits the budget) leaves the next deadline in the future and is absorbed drift-free in that cycle's slack — no special handling. But when a deadline is already in the past — a true overrun or a multi-cycle scheduling stall — `waitForNextCycle()` does **not** let the caller run the missed cycles back-to-back; it fast-forwards over the backlog to the next *future* grid point (preserving the original phase) and returns how many cycles it skipped. This is deliberate for EtherCAT: a back-to-back burst would spam **stale** process-data frames the drives can't use (under DC SYNC0 only the last frame before the pulse is latched anyway, and the missed real-world time can't be replayed) — one fresh frame on-grid beats a burst of old setpoints. `GameLoop` accumulates the returned skip count into `skippedCycles()` silently (no logging/notification on the RT path). The return value is not `[[nodiscard]]`, so `hil/jitter_bench` may ignore it.
-
-**Sustained overrun on coarse-timer machines — expect this on many Windows hosts.** The paragraph above is about *occasional* skips; this is the *steady-state* case, and it will be common because most users run on Windows userspace. Some machines simply cannot sustain a 1 ms cycle — the effective timer granularity is ~1.5 ms, so wakes land ~1.5 ms apart no matter what deadline is requested. Skip-to-grid degrades **gracefully** here (no drift, no burst, no runaway): the loop runs at the machine's achievable rate — ~667 Hz for a 1.5 ms floor against a 1 ms grid — with each executed cycle still phase-locked to a real 1 ms grid point, dropping the grid slots it can't reach (~1 skip per 2 executed cycles, so `skippedCycles()` climbs ~333/s). `elapsed` still advances at the true grid rate (`= executed + skipped`), so a *Real-time* trajectory stays on wall-clock time (dropping ~1/3 of its points as small jumps) while a *Sequential* one stretches smoothly (a 1 s move plays in ~1.5 s). EtherCAT drives then get a fresh frame in only ~2 of every 3 SYNC0 windows — acceptable only if their PDO/SM watchdog and sync tolerance allow it. The remedy is operational, not code: **a `skippedCycles()` that climbs steadily right after start means the configured period is too aggressive for that hardware — raise it (e.g. to 2 ms) so the loop actually meets its grid.** The timer cannot conjure resolution the OS does not provide; it only fails visibly and honestly instead of silently.
+**Sustained overrun is expected on coarse-timer machines**, which most Windows hosts are. A
+1.5 ms timer floor against a 1 ms grid runs at ~667 Hz with ~333 skips per second, each
+executed cycle still phase-locked. The fix is operational, not code: **a `skippedCycles()`
+that climbs steadily right after start means the period is too aggressive for that hardware.
+Raise it.**
 
 ### Cyclic Tasks and RT Value Access
 
-*(As built. Designed and landed in NEXTGEN.md Sessions 2026-08-10 — "The atomic cell **is** the value" for the reasoning, "The RT value path, as built" for what changed on the way and what is deferred.)*
+The Tier-3 surface, designed so control code can be written by a controls engineer rather
+than by someone who has read `docs/LOCKING.md`. See `NEXTGEN.md`, Session 2026-08-10.
 
-This is the **Tier 3** extension point (ANNOUNCEMENT.md): a user clones the repo, adds a `CyclicTask`, and runs real machine control inside the RT loop. The whole surface is designed so that control code is written by a controls engineer rather than by someone who has read `docs/LOCKING.md`.
+**The contract is one sentence, and the naming convention already encodes it.**
+`Device::value<T>()` and `setValue<T>()` are the entire RT surface. They never block, never
+allocate, and never touch the wire. `readParameter` and `writeParameter` are the
+synchronous control-plane calls. **A cyclic task cannot tell a PDO-mapped object from an
+SDO-polled one**, because whether a value is in the process image is a commissioning
+decision.
 
-**The contract is one sentence, and the existing naming convention already encodes it.** `Device::value<T>()` / `setValue<T>()` are the *entire* RT surface — they never block, never allocate, and never touch the wire; `readParameter` / `writeParameter` remain the synchronous control-plane calls. That is exactly the repo's *bare noun = named-property access, `read*`/`write*` = bus transfer* rule, so an author never has to ask which call is safe inside a cycle. **A cyclic task cannot tell a PDO-mapped object from an SDO-polled one** — whether a value is in the process image is a commissioning decision, and it must not leak into the control program.
+- **The cell is the storage.** Every `DeviceParameter` carries `std::atomic<uint64_t> bits`
+  plus a monotonic `stamp` (0 means never written). Strings and blobs sit behind an
+  `std::atomic<const std::string*>` into a per-device arena of retained immutable values, so
+  an RT reader gets a `string_view` with no lock and no copy.
+- **Use `std::optional<T>`, never `std::expected<T, std::string>`, on the RT path.**
+  Building the error string allocates. This is the one place the error convention does not
+  apply.
+- **A read of a non-exchanging device returns the last known value**, not `nullopt`.
+  `stamp` and `exchangesProcessData()` are there for a task that wants to decide otherwise.
+- **Lifetime: devices and parameters live until `scan()` or `reset()`.** Calling `scan()`,
+  `reset()`, or `initializeParameters()` while the loop runs invalidates every pointer a
+  task holds. That is out of contract, documented, and not defended against. It is why
+  `findDevice` and `findParameter` are public and non-locking.
+- **A device's parameter map is insert-only for that device's lifetime.**
+  `initializeParameters` adds missing keys and never erases or overwrites one, so held
+  pointers survive re-enumeration. This is not an optimisation: RT reads `dataType` and
+  `bitLength` while decoding, so rewriting them in place would be a data race.
+- **The RT loop does no lookups.** `ProcessImageEntry` carries the owning
+  `DeviceParameter*`, resolved at publish and refreshed on every re-map. A lookup per mapped
+  object per cycle is fatal at bus scale: 50 devices × 40 objects is 60–100 µs against a
+  1 ms grid. A task's own reads are per-signal, which is fine.
+- **The decode is eager.** Right after the frame arrives, the RT thread copies every mapped
+  object into its cell whether anything reads it or not. This is a read-path decision: it
+  makes `value<T>()` a hash lookup plus an atomic load, instead of making every reader
+  locate the object in the published image. Eager loses the sparse case. The escape hatch,
+  if it ever bites, is a per-entry "someone has bound this" flag.
+- **There are no output staging slots.** The composer reads each output entry's cell
+  directly, so a write reads back as itself and a re-map has nothing to seed.
+- **SDO objects are polled into their cells** by `ParameterRefresher`, owned by
+  `MonitoringManager`. `keepFresh(pos, index, subindex, period)` and `stopKeepingFresh` are
+  the Tier-3 door. Registration is off-RT; an RT task can never register.
+- **Writing a non-PDO-mapped object from a cycle is deferred.** `setValue<T>()` stores the
+  cell, and if the object is not output-mapped nothing transmits it. Use `writeParameter`
+  off the RT thread.
+- **CiA402 needs nothing new.** `libs/node/cia402.h` is pure `constexpr`, so a task reads
+  0x6041 from a cell and decodes inline.
+- **Position is not identity, and nothing enforces that.** Inserting a device shifts every
+  position after it, so a task pinned to position 4 can silently drive different hardware
+  after a rescan. `topologyGeneration()` is the mechanism. Inserting a node is a
+  commissioning act: rescan and restart.
 
-- **The cell is the storage.** Every `DeviceParameter` carries `std::atomic<uint64_t> bits` (raw little-endian wire bytes, LSB-aligned) plus a monotonic `stamp` (0 = never written); strings/blobs live behind an `std::atomic<const std::string*>` into a per-device arena of retained immutable values, so an RT reader gets a `string_view` with no lock or copy. There is no mirrored variant — see the Key Types note.
-- **`std::optional<T>`, never `std::expected<T, std::string>`, on the RT path** — building the error string allocates. This is the one place the codebase-wide error convention does not apply.
-- **A read of a non-exchanging device returns the last known value**, not `nullopt`. Silently swapping a real number for nothing is how a loop ends up acting on a fallback it never asked for; `stamp` and `exchangesProcessData()` are there for a task that wants to decide differently.
-- **Lifetime: devices and their parameters live until `scan()` or `reset()`.** Rescan gives a new device list; reset clears everything. A `Device*` / `DeviceParameter*` is valid until then, and **calling `scan()`, `reset()` or `initializeParameters()` while the game loop runs invalidates every pointer a task holds — out of contract, documented, not defended against.** This is what makes `findDevice` and `findParameter` public and non-locking (a cyclic task needs a device without taking a lock); `withDevice` stays for the control plane and procedures.
-- **A device's parameter map is insert-only for that device's lifetime.** `initializeParameters` adds keys it lacks and never erases or overwrites an existing definition, so held `DeviceParameter*`s survive re-enumeration (`unordered_map` insertion invalidates iterators, not references). Not an optimisation: RT reads `dataType`/`bitLength` off the parameter while decoding, so rewriting those non-atomic fields in place would be a data race.
-- **The RT loop does no lookups.** `ProcessImageEntry` carries the owning `DeviceParameter*`, resolved at publish in `buildProcessImage` and refreshed on every re-map. A lookup per mapped object per cycle is fine for one device (~1–2 µs) and **fatal at real bus size — 50 devices × 40 objects is 2000 lookups, 60–100 µs against a 1 ms grid.** A task's own reads *are* per-cycle lookups, which is fine: that is per signal read, not per mapped object.
-- **The decode is eager** — right after the frame arrives the RT thread copies every mapped object's bytes out of the image into its cell, whether anything reads it or not (~20–40 µs at 50 × 40). It is a **read-path** decision: `value<T>()` costs a hash lookup plus an atomic load, where decoding lazily would make every read load the published image, locate the object in it, and extract bits from the newest ring record. Paying a bounded cost once in the producer makes every consumer cheap — the RT task, HTTP reads, monitoring, and `readParameter`'s PDO branch all become a cell load instead of re-extracting from the ring. The trade is sparse-vs-dense and eager loses the sparse case (10 signals read off a 2000-object bus decodes 1990 values nobody wants); the escape hatch, if that ever bites, is a "someone has bound this" flag per entry so the loop skips unread objects. Not built — it would be speculation today.
-- **There are no output staging slots**: the composer reads each output entry's cell directly, so a write reads back as itself and a re-map has nothing to seed. `ProcessData::isOutputMapped` answers whether an object is driven cyclically; the value is already in the cell by the time it is asked.
-- **SDO objects are polled into their cells** by `ParameterRefresher`, which stays owned by `MonitoringManager` (a refresher is monitoring, only slower). `MonitoringManager::keepFresh(pos, index, subindex, period)` / `stopKeepingFresh` are the Tier-3 door, so an author need not fabricate a WebSocket topic to keep a temperature fresh; they share the refresher's reference counting with the monitorings. Registration is off-RT — before or during the loop; the RT task itself can never register. **Writing a non-PDO-mapped object from a cycle is deferred** (`writeValueAsync`): `setValue<T>()` stores the cell, and for anything not output-mapped nothing transmits it — use `writeParameter` off the RT thread. Both implementations are worked out in NEXTGEN.md Session 2026-08-10 (take the lock-free queue, not the `Pending` sweep).
-- **CiA402 needs nothing new.** `libs/node/cia402.h` is already pure `constexpr` (`decodeState`, the `Command` bits, `isFaulted`, `toOperationMode`), so a task reads `0x6041` from a cell and decodes the state inline. Making the `Cia402Drive` *view* RT-callable (NEXTGEN.md Session 2026-07-09) is deferred — the cells replace the bus-state dispatch that design was built around.
+### Process Data
 
-- **Position is not identity, and nothing enforces that.** Inserting a device into the chain shifts every position after it, so a task pinned to position 4 can silently drive different hardware after a rescan. `topologyGeneration()` is the mechanism and is documented on `findDevice`, but a Tier-3 program knows the machine it was written for — inserting a node is a commissioning act, after which you rescan and restart.
+`ProcessData` (`libs/node/process_data.h`) is owned by `DeviceManager` and handed to each
+`Device` by raw pointer.
 
-`libs/example/` holds the copy-me starter for **both** extension tiers — the Tier-2 HTTP route plug-in (`example_routes.cc`) and the Tier-3 cyclic task (`example_cyclic_task.cc`) — in one directory. `main.cc` registers the cyclic task behind three commented lines: construction, `gameLoop.addTask`, and the `keepFresh` its SDO-only object needs.
+**Inputs and output read-back come from the recorder ring** (`ProcessDataRing`), a lock-free
+circular recorder the RT loop appends to **every cycle**: raw input and output IOmap, an
+epoch-ns timestamp, and the working counter. It is the single RT-written structure and the
+source for live monitoring, point reads of the freshest value, and the `.mmpd` dump
+(`POST /api/process-data/dump`). The RT `write()` is wait-free; readers re-check a per-slot
+release-stored sequence number after copying.
 
-### Networking / TLS
+The ring is allocated and `mlock`'d at `configureProcessData` for `recorder.capacity`
+cycles. The size is a fixed row count, independent of the loop period, because records carry
+absolute timestamps. Roughly 128 bytes per cycle for a single drive, so the default 300000
+cycles is about 38 MB and about 5 minutes at 1 ms. It is re-allocated on a layout-changing
+re-map, retained across image teardown, and freed only by `reset()` or `scan()`.
 
-Motion Master binds to `127.0.0.1:61447` (HTTP API) and `127.0.0.1:62281` (WebSocket), on separate event loops/threads. The bind address is `server.bindAddress` in the config file (default `"127.0.0.1"`, threaded into both `HttpServer::Config` and `WebSocketServer::Config`); `"0.0.0.0"` serves the network for an off-loopback deployment. It is **validated non-empty** at the config root because uWebSockets reads an empty host as *every interface* — binding all interfaces must be spelled out, never fallen into, since the API is unauthenticated. The PWA at `https://motion-master.synapticon.com` connects to `https://local.motion-master.synapticon.com:61447` (HTTP API) and `wss://local.motion-master.synapticon.com:62281` (WebSocket). The WS port is configurable via `server.wsPort` in the JSONC config file (there is no `--ws-port` CLI flag — settings are config-file-only). The DNS record `local.motion-master.synapticon.com A 127.0.0.1` resolves to localhost. CORS is set to `Access-Control-Allow-Origin: https://motion-master.synapticon.com`.
+**Outputs are written lock-free into the owning parameter's cell.** Writers store into
+different objects without contending; same-object writes are last-writer-wins. The RT loop
+is the only thread that composes cells into the packed wire image, which is what makes
+bit-packed objects sharing a byte safe without a lock.
 
-**TLS certificate:** A real Let's Encrypt cert is bundled with every release. **One certificate carries both names Motion Master is reached by** — `local.motion-master.synapticon.com` (loopback) and the `*.ip.motion-master.synapticon.com` wildcard (off-loopback; `192.168.1.50` is reached as `192-168-1-50.ip.…`) — issued together as two SANs, so every host serves the same file and there is nothing per-deployment to configure, no second rolling release, and no per-host fetch URL. **The `ip.…` names are deliberately not published in DNS**: the client machine resolves them with a hosts-file entry, which is sufficient because TLS validates a certificate against the *name*, never against how that name was resolved. That keeps the whole scheme infrastructure-free (no synthesizing responder, no delegation, no per-device records — an earlier plan for a CoreDNS responder was dropped as unnecessary) and incidentally removes any abuse surface: a name that resolves nowhere cannot be pointed at an attacker's host to serve trusted HTTPS under a `synapticon.com` name, which matters because the private key ships in every public release. The cost is one hosts line **on each machine running a browser** — resolution happens at the requesting end, so the entry cannot be baked into the server image and three laptops reaching one appliance need it three times; it also rules out phones and tablets as clients. The console's Connection page shows the exact line to add, `add-host.sh`/`add-host.ps1` at the repo root write it (deliberately **not** bundled with the release — they run on the client, which may never download one; users fetch them from the public repo), and the plain-IP alternative (accept a certificate exception once per origin, on both ports) covers clients that cannot edit a hosts file at all. Both `_acme-challenge` names CNAME to the **same** acme-dns account, which keeps two rolling TXT records — exactly what this issuance needs, and also the ceiling: a third SAN would evict one and require a second account. Renewal is automated via `cert-renewal.yml` using DNS-01 with acme-dns delegation: `_acme-challenge.local.motion-master.synapticon.com` is a permanent CNAME to `4723b93a-99f5-43d7-93f1-195dbb4168ea.auth.acme-dns.io`; acme.sh updates the challenge record there via the `dns_acmedns` plugin without touching the main DNS zone. **acme.sh reads its acme-dns credentials from the `ACMEDNS_*` environment variables, not a file** — the workflow parses the `ACMEDNS_CONFIG` secret with `jq` and exports `ACMEDNS_USERNAME`/`PASSWORD`/`SUBDOMAIN`/`BASE_URL`, guarding that the parsed subdomain matches the CNAME target before any validation attempt. The renewed cert and key are published as `cert.pem`/`key.pem` assets on a rolling, fixed-tag `tls-cert` release (marked pre-release so it never shadows app releases) — the **single source of truth** for the certificate. That gives a stable, always-current fetch URL `https://github.com/synapticon/motion-master/releases/download/tls-cert/{cert,key}.pem`, decoupled from app-release cadence (a months-old release's bundled cert would already be expired). Everything reads from it: the running binary's startup self-heal, and every build-time bake (`Dockerfile` and `release.yml` both `curl` it into the artifact — no `TLS_CERT`/`TLS_KEY` secrets). Publishing the keypair is safe: `local.…` resolves only to `127.0.0.1`, and the `ip.…` names resolve nowhere at all unless a client has deliberately pointed them at a machine on its own network — so impersonating either requires already controlling that machine's name resolution.
+An atomically published `image` pointer gates all of it. Readers load it lock-free.
+`readPdo` falls back to SDO when no image is published, nothing has been recorded, or (for
+inputs) `lastWkc < expectedWkc`.
 
-**Cert self-heal.** The binary fetches a fresh cert itself rather than relying on the HTTP API, because an expired cert blocks the PWA's cross-origin `fetch()` (no browser click-through) — the API can't fix the very failure it would address — and terminal-only users never open the UI. `cert_updater.{h,cc}` (`fetchAndSwapCert`, libcurl + the already-linked OpenSSL) downloads cert+key, validates the pair (parses, **covers every name we serve** — `X509_check_host` per required name, the browser's own matcher including RFC 6125 wildcard semantics, rather than a CN string compare — not expired, key matches cert), then atomically installs them (temp + rename, key `0600`). At startup `main.cc` self-heals: a missing, expired, or expiring-soon (within `kCertExpiringSoonDays` = 7) cert triggers a fetch before binding TLS (missing + fetch-fail is fatal; a present cert that fails to refresh is still served). Refreshing on imminent expiry — not just after it lapses — is what lets an ephemeral container, and the Docker entrypoint's 1-day self-signed fallback (which reads as expiring soon), self-heal to a real cert on start; a cert with ample life left makes no network call. The `tls.autoUpdate: false` config opts out for air-gapped installs. `--update-cert` fetches, installs, and exits (the headless/CLI path); `--cert-url`/`--key-url` override the source. `GET /api/cert` reports the served cert's validity (`expiresSoon` within the same 7-day window) for the UI banner and the manual **Refresh certificate** button (`POST /api/cert/refresh`).
+**Control-plane versus RT.** `init`, `reset`, and `configureProcessData` run on the HTTP
+thread and mutate `driver_`, `devices_`, and the IOmap. `exchangeProcessData()` runs on the
+RT loop. The boundary is the published image pointer — control-plane operations publish
+`nullptr` first, so exchange becomes a no-op — plus `stopExchange()`, which drains an
+in-flight cycle. Published images are retained until `reset()`, so the RT thread never reads
+freed memory.
 
-On developer machines, `tools/run.sh` discovers the cert in this priority order: `cert.pem`/`key.pem` next to the binary (release install) → `~/.acme.sh/local.motion-master.synapticon.com_ecc/` (acme.sh local install, renewed automatically by cron) → self-signed fallback (requires accepting a browser security exception).
+### AL State and Re-mapping
 
-**Off-loopback deployment (Raspberry Pi appliance / any LAN host).** A server the browser reaches over the network can't use `local.…` (it pins to `127.0.0.1`), can't get a public cert for a private IP or `.local`, and can't fall back to self-signed (the PWA's cross-origin `fetch()` gives no click-through). The fix is the same trick one level up: the address is written into the leftmost label under `ip.motion-master.synapticon.com` (`192.168.1.50` → `192-168-1-50.ip.…`), the bundled cert's `*.ip.…` wildcard covers every such name, and the **client resolves it with a hosts-file entry** (see the TLS paragraph above — no DNS infrastructure exists or is planned for these names). **In code:** `server.bindAddress`, the two-SAN cert + SAN-based validation, a startup log line naming the URL shape and the hosts-entry requirement when bound off loopback (the machine's own addresses are deliberately *not* enumerated — a multi-homed host or a bridge-networked container would print plausible URLs that don't work; `mm::core::localIpv4Addresses()` was written for this, then removed as ~200 lines of two-platform code serving one log line), `isIpv4()`/`lanHostname()`/`lanAddress()` in `@synapticon/motion-master-client` (`src/lan.ts` — IPv4 ⇄ dashed name, hostnames pass through) surfaced by the console's `ConnectionPage` as a **Use hostname** button rather than an automatic substitution (connecting straight to the IP is a legitimate second path — it works once the user has opened that origin in a tab and accepted the warning, including on phones where no hosts file can be edited — so the page presents both and rewrites nothing), the console's unreachable-endpoint hint showing the hosts line with a copy button, and `dnsNames` on `GET /api/cert` surfaced as **Valid for**. **Outstanding:** one static `_acme-challenge.ip.motion-master` CNAME in the `synapticon.com` zone (to the existing acme-dns subdomain) so the wildcard can be issued — a one-time record, not per device. Discovery is deliberately **not** solved — nothing advertises itself on the network (no mDNS/Avahi), so the address is read off the device (`hostname -I`) or the router's lease list and typed into the Console; a `.local` name could not have been connected to anyway, since no CA issues for a reserved TLD. A flashable Pi image remains open, as does the certificate story for genuinely offline installs (Let's Encrypt is 90 days and no CA — public or private — can exceed ~825 days, since Apple caps *all* server certs there including self-signed). Full runbook: `docs/LAN_DEPLOYMENT.md`. See NEXTGEN.md Session 2026-07-31 (as-built) and 2026-07-24 / 2026-06-12 (design, rejected alternatives).
+Changing AL state is the user's job, via `POST /api/devices/state`. Motion Master reacts in
+`DeviceManager::transitionToState`. The image is one whole-bus layout, but the logic supports
+partial-bus operations.
 
-### Monitoring WebSocket Protocol
+- **Entering SAFE-OP or OP** re-maps when there is no published image, or when any targeted
+  device is rejoining from a non-exchange state. Its PDO mapping is re-read, because a
+  firmware update may have changed it. A device already exchanging that is merely
+  re-commanded skips the re-map.
+- **Leaving SAFE-OP or OP** tears the image down only when no device will remain exchanging.
+  Otherwise the leaving device drops out and `updateExpectedWkc()` removes its share.
 
-Two message types are sent over the WebSocket:
+So a device can go to BOOT or PRE-OP while the others keep exchanging. Re-mapping briefly
+pauses the whole bus, which is the accepted cost.
+
+**Two rules the re-map depends on:**
+
+1. **Illegal AL transitions are rejected up front** (`kValidStateTransitions` in
+   `device_manager.cc`). This is not UX. The re-map reads PDO mapping over the CoE mailbox,
+   which is only live from PRE-OP up, so a device commanded straight from BOOT would reach
+   that read while still in BOOT and **segfault inside SOEM** before the slave could reject
+   it.
+2. **Per-slave FMMU state is reset first.** `configureProcessData()` runs
+   `ecx_config_map_group` without an `ecx_config_init`, but SOEM's mappers start at
+   `FMMUunused` and append, trusting that init memset it. The driver zeroes each slave's
+   `FMMU[]` and `FMMUunused` and FPWR-clears the ESC registers before every map. Without it,
+   a re-map after a BOOT excursion writes an out-of-bounds `ec_fmmut` past the array and
+   corrupts adjacent `ec_slavet` fields.
+
+### Procedures
+
+Off-RT command-and-wait work (offset detection, auto-tuning, firmware) runs on a cancellable
+`std::jthread` owned by `ProcedureManager` (`libs/node/procedure_manager.{h,cc}`), which
+holds the per-device busy token and the retained `ProcedureSnapshot` a client polls.
+**Poll-only** — it names no WebSocket and holds no publish callback.
+
+A body is a plain callable `(Device&, ProgressReporter&, std::stop_token)`. Adding a
+procedure never touches the manager, and the manager names no profile type.
+
+**The registry is one table**, `libs/node/procedure_catalogue.{h,cc}`. Each
+`ProcedureCatalogueEntry` is a `ProcedureDescriptor` (name, title, description, caveats, `movesMotor`, `requiresEnabled`, step
+template), an `applies(Device&)` predicate, and a `makeBody(json)` factory. Four handlers
+serve every procedure, so **adding one is a row in that table and touches no route.**
+
+Two rules the catalogue enforces:
+
+- **`applies` may only consult state that exists as soon as the device does** — the vendor
+  ID from SII, not `createSomanetDrive`, whose CiA402 check needs the object dictionary to
+  have been enumerated. Binding to that would report a real drive as having no procedures.
+- **Never-run is a state, not a 404.** The singleton `GET` returns 200 with an idle
+  snapshot, because the manager learns a step template only when a run starts, but the
+  catalogue holds it.
+
+`ProcedureError` maps to status in one place: `kBusy`→409, `kUnknownDevice`→404,
+`kUnknownProcedure`→404, `kInvalidRequest`→400.
+
+**A normal body cannot change AL state.** It runs inside `withDevice` holding
+`deviceSetMutex_` shared, and a `transitionToState` needs it exclusively with no upgrade
+path, so calling it would deadlock the body against itself. Firmware installation is defined
+by its transitions, so it gets a **second body shape** —
+`(DeviceManager&, slavePos, ProgressReporter&, std::stop_token)` — spawned without a borrow,
+borrowing per step and transitioning while holding nothing. Two consequences: a rescan can
+interleave, so `discardIfRescanned` must skip running entries; and nothing blocks a
+concurrent `scan()` during an install. See `NEXTGEN.md`, Session 2026-08-02.
+
+### Networking and TLS
+
+Binds to `127.0.0.1:61447` (HTTP) and `127.0.0.1:62281` (WebSocket), separate loops and
+threads. `server.bindAddress` (default `"127.0.0.1"`) is **validated non-empty**, because
+uWebSockets reads an empty host as every interface. The API is unauthenticated, so binding
+all interfaces must be spelled out, never fallen into.
+
+CORS allows `https://motion-master.synapticon.com`. The PWA connects to
+`https://local.motion-master.synapticon.com:61447` and `wss://…:62281`.
+
+**One certificate carries both names**: `local.motion-master.synapticon.com` (loopback) and
+the `*.ip.motion-master.synapticon.com` wildcard (off-loopback; `192.168.1.50` is reached as
+`192-168-1-50.ip.…`), issued as two SANs. Every host serves the same file, so there is
+nothing per-deployment to configure.
+
+**The `ip.…` names are deliberately not in DNS.** The client resolves them with a hosts-file
+entry, which is sufficient because TLS validates a certificate against the *name*, never
+against how it was resolved. This keeps the scheme infrastructure-free and removes the abuse
+surface, which matters because the private key ships in every public release. The cost is one
+hosts line **on each machine running a browser**, so it rules out phones and tablets. The
+console's Connection page shows the line; `add-host.sh` and `add-host.ps1` write it. Clients
+that cannot edit a hosts file use the plain IP and accept an exception once per origin.
+
+Renewal is automated in `cert-renewal.yml` via DNS-01 with acme-dns delegation. acme.sh reads
+its credentials from `ACMEDNS_*` environment variables, not a file. The renewed pair is
+published to the rolling `tls-cert` release, which is **the single source of truth** — the
+binary's self-heal, the Dockerfile, and `release.yml` all read from it.
+
+**Cert self-heal.** An expired cert blocks the PWA's cross-origin `fetch()` with no browser
+click-through, so the API cannot fix the failure it would address. `cert_updater.{h,cc}`
+downloads a pair, validates it (parses, covers every name we serve via `X509_check_host`, not
+expired, key matches cert), and installs atomically. At startup a missing, expired, or
+expiring-soon cert (within 7 days) triggers a fetch before binding TLS. Missing plus
+fetch-failure is fatal; a present cert that fails to refresh is still served.
+`tls.autoUpdate: false` opts out. `--update-cert` fetches and exits. `GET /api/cert` reports
+validity for the UI banner; `POST /api/cert/refresh` is the manual button.
+
+`tools/run.sh` finds a cert in this order: next to the binary → `~/.acme.sh/…` → self-signed.
+
+Runbook: `docs/LAN_DEPLOYMENT.md`. **Discovery is a won't-do** — nothing advertises itself,
+so the address is read off the device and typed in.
+
+### WebSocket Protocol
+
+Two message types:
 
 ```json
-{"type": "monitoring", "topic": "left-leg", "data": [[1735821000123456, 39, 0, 12345], ...]}
+{"type": "monitoring", "topic": "left-leg", "data": [[1735821000123456, 39, 0, 12345]]}
 {"type": "notification", "data": {"event": "slaves_changed"}}
 ```
 
-`data` is an array of **cycle rows** (the stream is lossless — one row per recorded cycle since the monitoring's last flush). Each row is `[timestampUs, v0, v1, ...]`: epoch **microseconds** (JS-exact, distinct per sub-ms cycle) followed by one value per parameter, positionally ordered — no keys in the high-frequency path. A value is `null` while its device is not exchanging. Clients fetch the order (and how each value is sourced) once and cache it:
+`data` is an array of cycle rows, one per recorded cycle since the last flush. A row is
+`[timestampUs, v0, v1, ...]`: epoch **microseconds**, then one value per parameter in a fixed
+order. No keys in the high-frequency path. A value is `null` while its device is not
+exchanging.
+
+Clients fetch the order once and cache it:
 
 ```text
-GET /api/monitorings/{topic} → { ..., "parameters": [{"devicePosition":1,"index":24676,"subindex":0,"source":"pdo"}, ...] }
+GET /api/monitorings/{topic} → { "parameters": [{"devicePosition":1,"index":24676,"subindex":0,"source":"pdo"}] }
 ```
 
-The order is stable for the lifetime of a monitoring. `interval` is the flush **cadence** (bounded 5–2000 ms, not a sample rate): a longer interval ships more rows per message, never fewer cycles. Throughput is constant (~one row per cycle, ~450 bytes for ~40 × 32-bit values); interval only trades message size against frequency. Sized for ~5 simultaneous clients (a throughput budget, not an enforced cap — no connection limit in code).
+The order is stable for the lifetime of a monitoring.
 
-### Fieldbus Capability Surface
+**`interval` is the flush cadence, not a sample rate** (bounded 5–2000 ms). A longer interval
+ships more rows per message, never fewer cycles. Throughput is roughly constant. Sized for
+about 5 simultaneous clients, which is a budget rather than an enforced cap.
 
-What the fieldbus exposes today, and what is deliberately deferred. **Bus-level** (sidebar group *Fieldbus*): Control (AL state), Configuration (static SM/FMMU/DC/mailbox/addresses), Process Image (PDO layout + WKC health, plus a recorder dump to `.mmpd` via `POST /api/process-data/dump`), Diagnostics (live ESC error counters / link / watchdog), DC Sync (live distributed-clock deviation — system-time difference 0x092C). **Per-device**: FoE, Parameters (CoE object dictionary + SDO; both a `?readValues=true` init and the bulk value refresh `POST .../parameters/read` read multi-subindex ARRAY/RECORD objects with one CoE Complete Access upload — probed once per device, per-object fallback to per-subindex reads, the bulk path still preferring the live process image for PDO-mapped objects; the `parameters.useCompleteAccess` config knob, default on, gates it. Each slave's advertised mailbox capability bytes — `CoEdetails`/`FoEdetails`/`EoEdetails`/`SoEdetails` from EEPROM — are exposed **raw** on `GET /api/bus-config` (in `MailboxConfig`, alongside `protocols`) and decoded **client-side** by one shared `MailboxCapabilities` component used by both the **Configuration** and **SII** pages; they are a hint only, **not** used to gate CA — SOMANET advertises `completeAccess=false` while CA in fact works, so the runtime probe is authoritative. `SlaveConfigInfo` also denormalises device identity (vendor/product/rev/serial) so Configuration is self-contained. Configuration (master-programmed, cached, all slaves) and SII (raw EEPROM of one device, read live) stay separate — overlapping in category, not source), PDO Mapping (read + write the cyclic mapping over CoE — `GET`/`PUT /api/devices/:slavePosition/pdo-mapping`; write reconfigures 0x1C12/0x1C13 + 0x16xx/0x1Axx in PRE-OP), Registers (ESC read/write), SII (EEPROM read), Hardware description + Integro variant + firmware compatibility (`GET /api/devices/:slavePosition/{hardware-description,variant,firmware-compatibility}`).
+**Monitoring is lossless and off-RT.** It is not a `CyclicTask`. `MonitoringManager` owns a
+sampler thread; each monitoring holds a read cursor into the recorder ring and ships every
+cycle in `[cursor, head)`. A cursor lapped by more than a whole ring is logged and resynced
+to the oldest record. PDO parameters are decoded from each record; SDO-only parameters come
+from `ParameterRefresher`'s cache, one value per flush.
 
-**Which firmware belongs on a device is decided by comparing whole descriptor strings, and the terms are the *Hardware description specification*'s own.** `libs/node/hardware_description.{h,cc}` parses `.hardware_description` (JSON), `libs/node/integro_variant.{h,cc}` parses `.variant` (binary; layout taken from the firmware's `App_Utils.c`, not from any specification — there is none), and `checkFirmwareCompatibility` in `firmware_package.h` joins them: `<firmwareId>-<firmwareVersion>` from the **assembly** when there is one, `-<keyId>` always from the **device** (assemblies have no key), `-<fieldbusProtocol>` from `.variant` alone (§3.4.2.1 — the hardware description deliberately does not carry it, and EtherCAT wins when a file selects several). Both descriptors are accepted per §4.1, and which matched is reported, since the assembly's package is the one to prefer. Three rules worth keeping: **compare the whole descriptor, never its decoded parts** (the numeric convention is optional — the specification's own `MyProduct-v25-key3-ecat` example decodes to nothing — and a parts comparison waves through the same hardware built for a different encryption key); the decoded fields are **strings** (`"04"` as a number prints back as `4`, and `8500-4` matches no package; a real key id is `"A"`); and **nothing acts on the verdict** — the firmware installation procedure writes whatever it is given, so the check exists to tell a user before they start. Terminology is the specification's throughout (`fullFirmwareDescriptor`, `buildDescriptor`, `firmwareId` = the product, `firmwareVersion` = its hardware revision, `softwareName`/`softwareVersion` for the filename's last two fields); the "API identifier" and "FWID" names this string has carried elsewhere are not used. The old `package-motion-drive_Com…_Core…_Drive….zip` grammar with `stack_info.json` component matching is **not** supported and will not be.
+### Fieldbus Surface
 
-**An SDO read failure has two message shapes, and the difference is diagnostic — not cosmetic.** `SoemFieldbusDriver::readSdo` (raw `GET /api/devices/:slavePosition/sdo/:index/:subindex`) formats one base line `SDOread slave N 0xIIII:SS failed` and appends a suffix **only if** `sdoErrorSuffix()` → `ecx_poperror()` finds a queued error. So `… failed (SDO abort 0xCCCCCCCC: <reason>)` means the slave **answered** with a CoE Abort SDO Transfer frame (SOEM enqueued an `EC_ERR_TYPE_SDO_ERROR`) — a fast, definitive refusal (~ms). A **bare** `… failed` with no suffix means SOEM's mailbox receive **timed out with an empty error queue** — the slave sent *no CoE response at all*. **The CoE `wkc` return is a hybrid, and it already distinguishes these cases before `ecx_poperror` is even consulted:** `> 0` is the genuine working counter (success); `EC_TIMEOUT` (`-5`, one of the documented `EC_*` return codes in `ec_type.h` — `EC_NOFRAME -1` … `EC_TIMEOUT -5`) is returned *uncleared* by `ecx_mbxreceive` when the slave never answers, so a `-5` return **means "no response" on its own, no error queue needed**; `0` is the only ambiguous value — it's *either* a mailbox-send failure (`ecx_mbxsend` clamps its own negatives to `0`, `ec_main.c`) *or* the slave answering with an Abort/unexpected frame (which forces `wkc = 0` *and* enqueues the detail). So the error queue exists to explain the `0` case specifically; the timeout is self-describing in the return. `sdoErrorSuffix(ctx, wkc)` uses both: it prefers a queued reason (SDO abort / mailbox error) via `ecx_poperror`, and on an empty queue decodes the `wkc` sentinel — `EC_TIMEOUT (-5)` → `(no response — mailbox timeout)`, leaving only `wkc == 0` with nothing queued (a mailbox-send failure) as a bare `failed`. So `0x2345:01` reports `… failed (no response — mailbox timeout)` and `0x2345:00` reports `… failed (SDO abort 0x08000000: General error)`. **This working-counter reading is CoE-only.** FoE and EoE *overload* the identically-named return end-to-end: on failure SOEM sets it to a **negated `EC_ERR_TYPE_*`** (`ecx_FOEread` returns e.g. `-EC_ERR_TYPE_FOE_FILE_NOTFOUND` = `-10`, `-EC_ERR_TYPE_FOE_BUF2SMALL` = `-6`), so a negative FoE/EoE return is a specific error *code*, not a working counter, with nothing on the error queue — which is why `readFile`/`writeFile` decode it into a `FoeError` (`comm/foe_error.h`) via `switch (-wkc)`. FoE uses the same `EC_TIMEOUTRXM` (700 ms) as every other mailbox path, and that is per *packet acknowledgement* rather than per transfer, so a bare failure costs ~700 ms per attempt. **A bootloader that needs longer between packets is expected to say so with an `FOE_BUSY` reply rather than by going silent** — which is why the timeout does not need raising, and why `ports/soem` patches `ecx_FOEwrite`'s `FOE_BUSY` branch instead. Upstream 2.0 broke that branch in the refactor from a stack mailbox buffer to a pooled one: the resend is sent to the address of a NULL pointer variable, so a slave reporting itself busy mid-transfer stalled until the timeout, and a BUSY *before* the first data packet made the write return success having sent nothing. Raising the timeout to 10 s was tried first against exactly this symptom and changed nothing except how long each attempt took — the slave was not answering at all, which is what the BUSY handling fixes. Verified on a SOMANET Integro in PRE-OP: `0x2345:00` → `SDO abort 0x08000000: General error` in ~6 ms (slave recognises the object enough to refuse subindex 0 — always meaningful as the entry-count field — with the catch-all "General error", not the cleaner `0x06020000`/`0x06090011`); `0x2345:01` → `failed (no response — mailbox timeout)` in ~703 ms (slave doesn't answer the undefined subindex; the master waits out the timeout, `wkc == EC_TIMEOUT`). Deterministic, reproducible in any order. Practical upshot: probing unknown subindices is expensive, and a bare failure is "no answer" (timeout/mailbox), *not* the slave saying "no such object" — those are different failure classes. See NEXTGEN.md, Session 2026-07-20.
+**Bus-level:** AL state control, static configuration (SM/FMMU/DC/mailbox/addresses), process
+image and WKC health, `.mmpd` recorder dump, live ESC diagnostics (error counters, link
+state, watchdog), DC sync deviation (0x092C).
 
-Deferred fieldbus work is catalogued in NEXTGEN.md (session 2026-06-01), ranked by value-vs-effort — read it before adding a new fieldbus view rather than re-deriving the list. Top of the queue: a **topology / cabling map** (near-pure presentation of data SOEM already caches — `topology`/`activeports`/`parent`/`parentport` + the per-port link state Diagnostics already reads) and a **master-side frame/WKC health timeline** (catches intermittent faults a point-in-time WKC reading misses). Lower priority / higher risk: CoE Diagnosis History (0x10F3), device-locate blink, DC SYNC0 activation, SII write. **DC SYNC0 activation has no committed date** (deferred; NEXTGEN.md #5) — worth knowing why it's the missing tier: the stack runs DC in **free-run** today (`ecx_configdc` measures/elects a reference and disciplines the slaves' clocks, but `ecx_dcsync0` is deliberately *not* called), so drives act on **frame arrival**, which means the RT loop's wake jitter is the actuation jitter. The fixed absolute-deadline cyclic timer supplies master *cadence* (a fresh frame per grid point, drift-free) but **not** hardware synchronisation; SYNC0 activation would make each drive latch on a hardware pulse instead — necessary-but-not-sufficient for hard coordinated multi-axis (a PREEMPT_RT host is the other half). Out of scope for SOMANET: cable redundancy and the non-CoE mailbox protocols (EoE/SoE/AoE/VoE). PDO remapping shipped 2026-07-06 (see below).
+**Per-device:** FoE, CoE object dictionary and SDO, PDO mapping read and write
+(`GET`/`PUT /api/devices/:slavePosition/pdo-mapping`; the write reconfigures 0x1C12/0x1C13
+and 0x16xx/0x1Axx in PRE-OP), ESC registers, SII, hardware description, Integro variant, and
+firmware compatibility.
 
-### CiA402 / Somanet
+Multi-subindex objects are read with one CoE Complete Access upload, probed once per device,
+falling back to per-subindex reads. `parameters.useCompleteAccess` (default on) gates it.
+**The advertised mailbox capability bytes are a hint, not a gate** — SOMANET advertises
+`completeAccess=false` while CA works, so the runtime probe is authoritative. They are exposed
+raw on `GET /api/bus-config` and decoded client-side.
 
-Profiles are **borrowed views**, not subtypes of `Device`: the inheritance chain `ProfileDevice ← Cia402Drive ← SomanetDrive` holds only a `Device&` (the only data member permitted in the whole chain). A view binds a device for one operation and is built via the validated factories `createCia402Drive(Device&)` / `createSomanetDrive(Device&)` (offline-safe — they check the CiA402 implementation / immutable vendor ID before binding). The borrowed `Device&` must outlive the view; never cache one across a bus rescan (which rebuilds `DeviceManager`'s device vector). **A profile operation invoked from off-view code (an HTTP handler, a background job) reaches it through a free function in that profile's control header, never a `DeviceManager` method** — `withDevice(pos, fn)` to borrow the device under the shared bus lock → bind the view → run the op — because the borrowed `Device&` is valid only while that lock is held and the mutex is private to `DeviceManager`. **Each view header has a control header, 1:1:** `profile_device.h` → `profile_control.h` (`runStoreParameters`, `runRestoreDefaultParameters`), `cia402_drive.h` → `cia402_control.h` (`cia402Status`, `setCia402OperationMode`, `runCia402Command`, `setCia402Target`), `somanet_drive.h` → `somanet_control.h` when SOMANET operations arrive. The domain logic stays on the **view**; a control function is borrow-bind-delegate and nothing else, holding no state and owning nothing — not a service-layer method (the *no service layer* mandate holds). Each control `.cc` keeps a file-local `withDrive`/`withProfile` template folding the borrow-and-bind pair, so each public function is one line. This replaced six resolve-and-delegate methods on `DeviceManager` and the six profile type names its header carried for them; see NEXTGEN.md Session 2026-08-02 (and 2026-07-24, which predicted the trigger). SOMANET specifics are SOMANET-OD access on `SomanetDrive` plus free functions in `namespace somanet`. Multi-step procedures split by whether they need the per-cycle process image (see the `CyclicTask`-membership note under *Game Loop / RT Threading*): cycle-locked target generators (one `TrajectoryCyclicTask` playing a precomputed buffer; sine/chirp/ramp are userspace-generated buffers + a `repeat` flag, not a separate task — *planned*) will be fixed-membership RT `CyclicTask`s (`mm::node` objects — the interface lives in `libs/core`) gated active/idle by a **depth-1 latest-wins mailbox** — a **composition-root-owned** `RtMailboxPool<TrajectoryRun>` injected by reference into the task (reads) and the launch path (writes), so neither the view nor the server names `TrajectoryCyclicTask`. The launch is a node free function `startTrajectory(DeviceManager&, RtMailboxPool<TrajectoryRun>&, slavePos, TrajectoryRequest)` (with a coordinated multi-axis analogue) that uses a `Cia402Drive` view only for the op-mode/enable handshake (`prepareForTrajectory` — the view never takes a `TrajectoryCyclicTask&`), builds the immutable `TrajectoryRun` from the client `TrajectoryRequest`, and arms a claimed slot; command-and-wait procedures (encoder calibration / offset detection, auto-tuning) run off-RT on a background `std::jthread` calling `DeviceManager`. **The same profile view drives state in both the RT and non-RT context** — an RT `CyclicTask` builds a `Cia402Drive` each cycle and calls `state()`/`shutdown()`/`setTargetPosition()` exactly as an HTTP handler does, so the CiA402 bit/state-machine logic is written once. This works because RT-safety lives *below* the view, in `Device::readValue<T>`/`writeValue<T>` (dispatch by bus-state, lock-free fast path); only the *sequencing* differs — the RT task steps the state machine one transition per cycle rather than calling the sleep-polling `enable()`. Design + the three implementation pieces are in NEXTGEN.md Session 2026-07-09 ("profile view is RT-callable"); *planned, not yet in code.*
+Configuration (master-programmed, cached, all slaves) and SII (raw EEPROM of one device, read
+live) stay separate. They overlap in category, not in source.
+
+**DC runs in free-run.** `ecx_configdc` elects a reference and disciplines the slaves' clocks,
+but `ecx_dcsync0` is deliberately not called, so drives act on frame arrival and the RT loop's
+wake jitter is the actuation jitter. SYNC0 activation is deferred and has no committed date. It
+is necessary but not sufficient for hard coordinated multi-axis; a PREEMPT_RT host is the other
+half.
+
+Out of scope for SOMANET: cable redundancy, and the non-CoE mailbox protocols (EoE, SoE, AoE,
+VoE). Deferred work is ranked in `NEXTGEN.md`, Session 2026-06-01 — read it before adding a
+fieldbus view.
+
+#### Reading an SDO Failure
+
+The message shape is diagnostic. `SoemFieldbusDriver::readSdo` formats one base line and
+appends a suffix only if `ecx_poperror()` has something queued.
+
+- `… failed (SDO abort 0xCCCCCCCC: <reason>)` — the slave **answered** with a CoE abort. A
+  definitive refusal in about 6 ms.
+- `… failed (no response — mailbox timeout)` — the slave sent nothing. About 703 ms.
+- Bare `… failed` — a mailbox-send failure.
+
+**The CoE `wkc` return is a hybrid and already distinguishes these.** Greater than 0 is a real
+working counter. `EC_TIMEOUT` (`-5`) is returned uncleared when the slave never answers, so it
+is self-describing. `0` is the only ambiguous value: either a send failure, or the slave
+answering with an abort, which also enqueues the detail. `sdoErrorSuffix(ctx, wkc)` prefers the
+queued reason and decodes the sentinel otherwise.
+
+**This reading is CoE-only.** FoE and EoE overload the same return with a negated
+`EC_ERR_TYPE_*`, so a negative FoE return is an error *code*, not a working counter, with
+nothing queued. `readFile`/`writeFile` decode it into a `FoeError` via `switch (-wkc)`.
+
+FoE uses `EC_TIMEOUTRXM` (700 ms) per *packet acknowledgement*, not per transfer, so a bare
+failure costs about 700 ms per attempt. **A bootloader needing longer is expected to reply
+`FOE_BUSY` rather than go silent**, which is why the timeout does not need raising and why
+`ports/soem` patches the `FOE_BUSY` branch instead. Upstream 2.0 broke it: the resend went to
+the address of a NULL pointer, so a BUSY mid-transfer stalled until timeout, and a BUSY before
+the first data packet returned success having sent nothing.
+
+**Practical upshot: probing unknown subindices is expensive, and a bare failure means "no
+answer", not "no such object".** See `NEXTGEN.md`, Session 2026-07-20.
 
 ### ESI Parsing (`libs/etg`)
 
-`mm::etg` parses a vendor's **EtherCAT Slave Information** XML and flattens one device into a **flat `std::vector<EsiEntry>`** — one row per `(index, subindex)` carrying display name, default/min/max data, unit, every flag, data type, object code and description. It exists because the CoE SDO-Information service returns almost no metadata: `mm::comm::OdEntry`'s `unit`/`defaultValue`/`minValue`/`maxValue` are structurally supported and *always empty* (see the comment at `libs/comm/fieldbus_driver.h`), and descriptions and enum labels have no CoE representation at all. `parseEsi` / `parseEsiFile` produce the fidelity model; `buildDeviceEntries` produces the flat table; `buildEsiResponse` (`esi_request.h`) renders the `POST /api/esi/parse` view — **every device with its own assembled table, in one response; there is no device selector**. **The whole library is offline** — a pure transform over text, no fieldbus, deliberately not depending on `mm::comm` (which links SOEM). `node` may depend on `etg`, never the reverse.
+`mm::etg` parses a vendor's EtherCAT Slave Information XML and flattens one device into a flat
+`std::vector<EsiEntry>`, one row per `(index, subindex)`. It exists because CoE SDO-Information
+returns almost no metadata: `unit`, `defaultValue`, `minValue`, and `maxValue` are structurally
+supported and always empty, and descriptions and enum labels have no CoE representation at all.
 
-Points that are easy to get wrong and are pinned by tests:
+`parseEsi`/`parseEsiFile` produce the fidelity model, `buildDeviceEntries` the flat table, and
+`buildEsiResponse` the `POST /api/esi/parse` view — **every device with its own table in one
+response; there is no device selector.**
 
-- **Type structure mirrors the ESI element structure.** Nested where the parent owns the type (`EsiObject::Flags`, `EsiObject::Info::SubItem`, `EsiDataType::SubItem::Flags`, `EsiPdo::Entry`, `EsiSlots::Slot`, `EsiFile::Vendor`); namespace-scope and unprefixed for vocabulary with several parents (`AccessMode`, `Category`, `PdoMapping`, `SdoAccess`, `Access`, `Property`, `Text`, `UnitType`, `MailboxCoe`); flat and `Esi`-prefixed for the types that appear in public signatures (`EsiFile`, `EsiDevice`, `EsiObject`, …). The prefix survives on that last group because of `mm::node::Device` — `mm::etg::Device` alongside it would be a real trap.
-- **Flag inheritance (ETG.2000 §Fig. 37) is not per-flag fallback.** For a composite object, a `<Flags>` element on the `DataType/SubItem` shadows the object's block **wholesale**: a flag the SubItem does *not* carry falls back to the **spec default**, never to the object's value. `SdoAccess` is a carve-out — `SubItemType/Flags` has no such element, so every subindex inherits the object's, whose default comes from `Mailbox/CoE/@CompleteAccess`.
-- **Classify before pairing.** An ARRAY DataType has exactly two SubItems while its `<Info>` has N+1; pairing them positionally before classifying corrupts every array. ARRAY subindices are positional and subindex 0 is always `USINT`; RECORD subindices come from `<SubIdx>` and pair with `<Info>` **by name**.
-- **Object-level annotation lives on subindex 0 only** — that row *is* the object. A RECORD member keeps its own description on its own row; an ARRAY element has none, because the ESI describes an array once rather than per element. This is not a nicety: copying the object's description onto every subindex made a single device's JSON **4.7 MB, 83% of it the same HTML repeated**, which is why an earlier draft needed a `?device=` selector at all. With it stored once — and the raw `description` property dropped from `properties`, where it duplicated the decoded field byte for byte — all four devices of `v5.6.6.xml` cost **3.26 MB** instead of 18.1 MB, so the endpoint simply returns everything.
-- **Values are raw little-endian bytes plus an ETG.1020 code**, matching the documented `OdEntry` convention — decoding belongs to `mm::node::decodeSdoBytes`. A byte-wise `minData` vs `maxData` comparison is wrong for a signed type, hence `EsiEntry::isSigned`. **Padding a short value must be sign-aware for the same reason**, and `v5.6.6.xml` supplies the proof: `0x6086` Motion profile type is a 16-bit `INT` whose bounds are written `MinData=80 MaxData=00`. Zero-filled that reads 128…0 — minimum above maximum, nonsense; sign-extended it reads **−128…0**, which is linear ramp (0) plus the manufacturer-specific negative range CiA 402 reserves. Same bytes, and only one interpretation is a real range.
-- **`<UnitTypes>` is a dictionary-local override** of the ETG.1004 catalogue and wins over the built-in table — Synapticon's FSoE dictionaries redefine notation `0xB6` from `rpm` to `Bit`.
-- **Slot relocation has four interacting mechanisms**, and the naive `index + slot * increment` is wrong on all four: per-`<Slot>` attributes override the `<Slots>`-level ones; PDO-area objects use `SlotPdoIncrement` while everything else uses `SlotIndexIncrement`; ETG.2000 gates relocation on `Index/@DependOnSlot` (set on *nothing* in Synapticon ESIs, so the default `requireDependOnSlot` makes it a no-op there — which matches what the firmware answers to); and `<ModulePdoGroup>` is *not* a fourth relocation, despite looking like one — its `RxPdo`/`TxPdo` is an **additional** aligned PDO the group contributes, which the SMM device's `0x1C12` default proves by listing both `0x1700` (the module's own) and `0x1701` (the group's). A module's objects keep their declared indices. Both `rawIndex` and `index` are always recorded.
-- **Merging is last-wins by default**, over every `ModuleIdent` any slot references. That is deliberate for an offline tool: which module is fitted is unknowable without a bus, so the union of everything the device could expose is the honest answer. Where a slot offers mutually exclusive variants (the Circulo SMM's four FSoE modules) this collides, and last-wins lands on the richest variant. Collisions are **tallied per source pair**, not reported per entry. `Index/@OverwrittenByModule` — ETG.2000's own opt-in override — outranks the policy. Pass `EsiEntryOptions::moduleIdents` to model one concrete configuration instead.
-- **Tolerant, never fatal.** Only three things fail a parse: XML syntax, a non-`EtherCATInfo` root, and a missing `Descriptions/Devices`. Everything else is a warning — real vendor files have wrong-length `hexBinary` values, absent `<SubIdx>`, and both the current and obsolete `Min/MaxData` vs `Min/MaxValue` branches in the same document.
+**The library is offline.** A pure transform over text. It deliberately does not depend on
+`mm::comm`. `node` may depend on `etg`, never the reverse.
 
-`libs/etg/tests/data/somanet-v5.6.6.xml` is a real 1.9 MB Synapticon ESI committed as a fixture, reached through the `MM_ETG_TEST_DATA_DIR` compile definition. The hand-written fragments in the other test files pin one rule each; that file pins the parser against a document nobody shaped for it.
+Rules that are easy to get wrong and are pinned by tests:
+
+- **Type structure mirrors the ESI element structure.** Nested where the parent owns the type;
+  namespace-scope and unprefixed for vocabulary with several parents; flat and `Esi`-prefixed
+  for types in public signatures. The prefix survives on that last group because
+  `mm::etg::Device` next to `mm::node::Device` would be a trap.
+- **Flag inheritance is not per-flag fallback.** A `<Flags>` element on a `DataType/SubItem`
+  shadows the object's block wholesale. A flag the SubItem lacks falls back to the spec
+  default, never to the object's value. `SdoAccess` is the carve-out.
+- **Classify before pairing.** An ARRAY DataType has two SubItems while its `<Info>` has N+1.
+  Pairing positionally before classifying corrupts every array. ARRAY subindices are
+  positional and subindex 0 is `USINT`; RECORD subindices come from `<SubIdx>` and pair by
+  name.
+- **Object-level annotation lives on subindex 0 only.** That row *is* the object. Copying the
+  description onto every subindex made one device's JSON 4.7 MB, 83% of it the same HTML
+  repeated. Stored once, all four devices cost 3.26 MB instead of 18.1 MB, which is why the
+  endpoint can return everything.
+- **Values are raw little-endian bytes plus an ETG.1020 code.** Decoding belongs to
+  `mm::node::decodeSdoBytes`. A byte-wise comparison is wrong for a signed type, hence
+  `EsiEntry::isSigned`, and **padding a short value must be sign-aware**: 0x6086 is an `INT`
+  written `MinData=80 MaxData=00`, which zero-filled reads 128…0 (nonsense) and sign-extended
+  reads −128…0 (a real range).
+- **`<UnitTypes>` is a dictionary-local override** of the ETG.1004 catalogue and wins over the
+  built-in table.
+- **Slot relocation has four interacting mechanisms**, and `index + slot * increment` is wrong
+  on all four. Per-slot attributes override the `<Slots>`-level ones; PDO-area objects use
+  `SlotPdoIncrement` and everything else `SlotIndexIncrement`; relocation is gated on
+  `Index/@DependOnSlot`, set on nothing in Synapticon ESIs; and `<ModulePdoGroup>` is not a
+  relocation at all but an additional aligned PDO the group contributes. Both `rawIndex` and
+  `index` are always recorded.
+- **Merging is last-wins by default**, over every `ModuleIdent` any slot references. Which
+  module is fitted is unknowable without a bus, so the union is the honest answer for an
+  offline tool. Collisions are tallied per source pair. `Index/@OverwrittenByModule` outranks
+  the policy. Pass `EsiEntryOptions::moduleIdents` to model one concrete configuration.
+- **Tolerant, never fatal.** Only three things fail a parse: XML syntax, a non-`EtherCATInfo`
+  root, and a missing `Descriptions/Devices`. Everything else is a warning.
+
+`libs/etg/tests/data/somanet-v5.6.6.xml` is a real 1.9 MB Synapticon ESI, reached through the
+`MM_ETG_TEST_DATA_DIR` compile definition. It pins the parser against a document nobody shaped
+for it.
 
 ### Generated Object Addresses
 
-`ObjectAddress<T>` (`libs/node/device_parameter.h`) is an index, a subindex and the C++ type the object holds, travelling together instead of being retyped at every call site — `device.value(somanet::objects::kDriveTemperatureMeasuredTemperature)` in place of a raw index plus a hand-written `int32_t`. Three headers carry one constant for every entry of the SOMANET dictionary: `profile_device_objects.h` (0x1xxx + the standard MDP objects), `cia402_drive_objects.h` (0x6xxx), `somanet_drive_objects.h` (0x2xxx + FSoE). They are generated from the pinned `libs/etg/tests/data/somanet-v5.6.6.xml` by `motion-master generate-object-addresses --esi <file> --out libs/node`, **followed by `tools/format.sh`** — clang-format wraps the declarations that overrun 100 columns, context-sensitively enough that reproducing its choices in the generator would be guesswork. There is deliberately **no CI drift check**: the ESI is pinned and regenerated on request, so a check would fail exactly when the lag is intentional.
+Three headers carry one `ObjectAddress<T>` constant per SOMANET dictionary entry:
+`profile_device_objects.h` (0x1xxx and standard MDP), `cia402_drive_objects.h` (0x6xxx),
+`somanet_drive_objects.h` (0x2xxx and FSoE).
 
-**One header per index range — rather than per device — rests on a vendor convention, and it is worth knowing which one.** The generator merges every device in the ESI into a single table keyed by `(index, subindex)`, which is sound only if an address names the same quantity, with the same data type and the same unit, on every device in the family. For the communication area (0x1xxx) and the CiA 402 profile (0x6xxx) the standards guarantee it. For the **manufacturer-specific area (0x2xxx) nothing does** — ETG.1000.6 reserves the range for the vendor and says nothing about keeping it stable across devices — so the merge holds because *SOMANET* keeps it stable: Node, Circulo, Circulo SMM and Integro all draw the bulk of their dictionary from **one shared ESI module** (`0x04020001`, "Default CiA402 object dictionary"), so most of the union is the same text merged with itself rather than four descriptions that happen to agree. The genuinely per-device part is the SMM's four mutually exclusive FSoE safety modules, resolved last-wins by the merge policy above. The generator warns when two devices declare **different types** for one address and keeps the first; what it cannot see is one index reused for a different quantity of the *same* type — if that ever appears (a second vendor's ESI is the likely occasion), the family needs a header per device instead of one.
+Generated from the pinned `libs/etg/tests/data/somanet-v5.6.6.xml`:
+
+```bash
+motion-master generate-object-addresses --esi <file> --out libs/node
+./tools/format.sh   # required — clang-format wraps declarations over 100 columns
+```
+
+There is deliberately **no CI drift check**. The ESI is pinned and regenerated on request, so a
+check would fail exactly when the lag is intentional. Regenerate only when asked.
+
+**One header per index range rests on a vendor convention.** The generator merges every device
+into one table keyed by `(index, subindex)`, which is sound only if an address names the same
+quantity with the same type and unit on every device. The standards guarantee that for 0x1xxx
+and 0x6xxx. **Nothing guarantees it for the manufacturer-specific 0x2xxx range** — it holds
+because SOMANET devices draw the bulk of their dictionary from one shared ESI module, so most
+of the union is the same text merged with itself. The generator warns when two devices declare
+different types for one address and keeps the first. What it cannot see is one index reused for
+a different quantity of the same type. If that appears, the family needs a header per device.
 
 ## Dependencies
 
-Managed via vcpkg (`extern/vcpkg` submodule, pinned in `vcpkg.json`). To add a dependency: add it to `vcpkg.json`, then `find_package` + `target_link_libraries` in the relevant `CMakeLists.txt`.
+Managed by vcpkg (`extern/vcpkg` submodule, pinned in `vcpkg.json`). To add one: edit
+`vcpkg.json`, then `find_package` plus `target_link_libraries` in the relevant
+`CMakeLists.txt`.
 
 | Package | Version | Used in | CMake target |
 | --- | --- | --- | --- |
@@ -368,97 +765,153 @@ Managed via vcpkg (`extern/vcpkg` submodule, pinned in `vcpkg.json`). To add a d
 | `spdlog` | 1.17.0 | `motion_master` | `spdlog::spdlog` |
 | `uwebsockets` | 20.77.0 | `motion_master` | `unofficial::uwebsockets::uwebsockets` |
 
-Do not commit private keys or certificates (`*.key`, `*.pem`).
+**Never commit a private key or certificate** (`*.key`, `*.pem`).
 
 ## Testing
 
-Tests live alongside their library in a `tests/` subdirectory. The test binary is discovered automatically by CTest via `gtest_discover_tests`.
+Tests live in a `tests/` subdirectory beside their library. CTest discovers the binary via
+`gtest_discover_tests`.
 
 ```bash
-./tools/test.sh                          # run all tests
-ctest --test-dir build/x64-linux-debug -R VersionTest  # run a specific test by name
+./tools/test.sh
+ctest --test-dir build/x64-linux-debug -R VersionTest
 ```
 
 ## Hardware-in-the-Loop Tests
 
-The `hil/` directory contains standalone binaries that run on a pre-configured RT Linux machine. These are not CTest unit tests — they exercise real OS scheduling behaviour and require elevated privileges.
+`hil/` holds standalone binaries that run on a pre-configured RT machine. They are not CTest
+unit tests and need elevated privileges.
 
 ### jitter_bench
 
-Measures GameLoop scheduling jitter: how much each actual cycle interval deviates from the target period. Runs the same `CyclicTimer` loop the production `GameLoop` uses, sets `SCHED_FIFO` priority 80 + `mlockall`, and records a `clock_gettime(CLOCK_MONOTONIC)` timestamp immediately after each `waitForNextCycle()` returns.
+Measures how far each actual cycle interval deviates from the target period. Runs the same
+`CyclicTimer` loop `GameLoop` uses, with `SCHED_FIFO` 80 and `mlockall`.
 
 ```bash
-# Build
-./tools/build.sh
-
-# Run — requires root or CAP_SYS_NICE + CAP_IPC_LOCK for valid RT results
 sudo ./build/x64-linux-debug/hil/jitter_bench/jitter_bench [options]
+#   --duration <s>   run duration            (default: 30)
+#   --period <µs>    cycle period            (default: 1000)
+#   --workload <µs>  per-cycle busy-wait     (default: 0)
+#   --output <file>  CSV path                (default: jitter.csv)
 
-#   --duration <s>    run duration in seconds        (default: 30)
-#   --period <µs>     cycle period in microseconds   (default: 1000)
-#   --workload <µs>   per-cycle busy-wait to simulate task load  (default: 0)
-#   --output <file>   CSV output path                (default: jitter.csv)
-
-# Graph results (requires matplotlib)
-python3 hil/jitter_bench/plot_jitter.py jitter.csv
 python3 hil/jitter_bench/plot_jitter.py jitter.csv -o report.png
 ```
 
-`--workload` simulates per-cycle task execution with a CPU-bound spin-wait, so you can test whether a realistic task budget (e.g. `--workload 300` for 300 µs of work in a 1 ms cycle) causes jitter spikes or overruns on a given kernel. The CSV has columns `cycle`, `elapsed_ms`, `jitter_ns`; the plot script renders a time-series and histogram and prints min/max/mean/stddev/P50/P95/P99/P99.9.
+`--workload` simulates task load with a CPU-bound spin, so you can test whether a realistic
+budget causes overruns on a given kernel. The CSV has `cycle`, `elapsed_ms`, `jitter_ns`.
 
 ### api
 
-TypeScript integration tests for the HTTP API and monitoring WebSocket, using Vitest. They drive the published client library (`@synapticon/motion-master-client`, a `workspace:*` member) against a real server, so a run exercises Motion Master, the HTTP/WS contract, and the client together. The global setup manages the full Docker lifecycle automatically — no manual server startup required.
+TypeScript integration tests (Vitest) for the HTTP API and the WebSocket. They drive the
+published client library against a real server, so one run exercises the binary, the contract,
+and the client together. The global setup manages the Docker lifecycle.
 
 ```bash
-pnpm install                                 # from the repo root — first time only
-pnpm --filter motion-master-api-tests test   # build image → start container → run tests → stop & remove container
+pnpm install                                 # repo root, first time only
+pnpm --filter motion-master-api-tests test
 ```
 
-The `motion-master` Docker image is built from the repo root and run with `--network host` (required because the server binds to `127.0.0.1`). Set `MM_SKIP_DOCKER=1` to bypass Docker and test against an already-running instance (e.g. from `./tools/run.sh`).
+The image is built from the repo root and run with `--network host`, which is required because
+the server binds to `127.0.0.1`. Set `MM_SKIP_DOCKER=1` to test against an already-running
+instance.
 
 ## Code Style
 
-Formatting is enforced by `.clang-format` (Google layout, 100-column limit). Run `./tools/format.sh` or the CMake target:
+Enforced by `.clang-format`: Google layout, 100 columns. Run `./tools/format.sh` or
+`ninja -C build/<preset> format`.
 
-```bash
-ninja -C build/x64-linux-debug format
-```
+Headers use `.h`, sources use `.cc`. Always `#pragma once`, never include guards. Always brace
+an `if`, even a single statement.
 
 ### Naming Conventions
 
 | Category | Convention | Examples |
 | --- | --- | --- |
-| Classes, structs, enums, type aliases | `PascalCase` | `NetworkAdapter`, `GameLoop`, `SoemFieldbusDriver` |
-| Functions (free and member) | `camelCase` | `isMacAddress()`, `addTask()`, `resolveNetworkAdapter()` |
-| Variables, parameters, struct members | `camelCase` | `macLinux`, `adapterName`, `certFile` |
-| Private class data members | `camelCase_` (trailing `_`) | `period_`, `running_`, `tasks_` |
-| Files | `snake_case` | `game_loop.cc`, `soem_fieldbus_driver.h` |
+| Classes, structs, enums, aliases | `PascalCase` | `NetworkAdapter`, `GameLoop` |
+| Functions, free and member | `camelCase` | `isMacAddress()`, `addTask()` |
+| Variables, parameters, members | `camelCase` | `macLinux`, `adapterName` |
+| Private data members | `camelCase_` | `period_`, `running_`, `tasks_` |
+| Files | `snake_case` | `game_loop.cc` |
 | Namespaces | `snake_case` | `mm::comm`, `mm::core` |
 | Macros | `SCREAMING_SNAKE_CASE` | `MAX_RETRY_COUNT` |
 
-Headers use `.h`, sources use `.cc`. Repo/folder names use hyphens (`motion-master`) by GitHub convention. Naming conventions are enforced in code review — no automated tool checks them.
+Repo and folder names use hyphens. Naming is enforced in review; no tool checks it.
 
-**Class names encode the base only for polymorphic interface implementations.** A concrete class that is stored and passed as its abstract base — held interchangeably with siblings via `Base&`, `unique_ptr<Base>`, or `vector<Base*>` — embeds the **full** interface name: `SoemFieldbusDriver`/`SpoeFieldbusDriver` (`: FieldbusDriver`), `ProcessDataCyclicTask`/`TrajectoryCyclicTask` (`: CyclicTask`). A **specialization chain** — a domain concept refined through is-a for reuse and used as its own concrete type (never stored as a base pointer) — names the concept at each level with **no** ancestry: `ProfileDevice ← Cia402Drive ← SomanetDrive`. Standalone concept classes with no meaningful base just name the concept (`DeviceManager`, `HttpServer`, `GameLoop`, `Device`); test doubles use the `Fake*` prefix (`FakeDriver`). The deciding test: *held via its base pointer and swappable with siblings → embed the full base name; a refinement used as itself → name the concept.* Instance/variable names mirror the class in `camelCase` (`ProcessDataCyclicTask processDataCyclicTask`), abbreviating only where already conventional (`WebSocketServer wsServer`).
+**SOEM and SPoE casing:** uppercase in prose, `Soem` PascalCase in type names, lowercase in
+config tokens, filenames, and namespaces.
 
-**Accessors are bare nouns; mutators take the `set` prefix.** A getter is the noun alone — `period()`, `health()`, `statusword()`, `guardTime()` — never `get*`; a setter is `set` + the same noun — `setPeriod()`, `setControlword()`, `setGuardTime()`. This holds even when the pair wraps bus I/O rather than a member (a profile view's `setGuardTime()` is an SDO download that can fail and take milliseconds): the `set` prefix is what makes a hardware write read as an action at the call site, so iostream-style same-name get/set overloads (`str()`/`str(s)`) are **not** used — `guardTime(100)` hiding a flash/bus write is the failure mode this rule exists to prevent (and overload sets also break `&Class::name` in callbacks). The get/set pair is reserved for *named-object/property* access; raw or parameterized bus transfers use `read*`/`write*` verbs (`readSdo`, `writeValue`, `readFile`, `writeRegister`), and operations stay verbs (`scan()`, `reset()`, `enable()`, `transitionToState()`). One sanctioned `get*` exception, not a template for new names: `DeviceParameter::getValue<T>()` (bare `value()` would collide with the `value` data member). `DeviceManager`'s multi-device snapshot queries follow the bare-noun rule too (`deviceStates`, `deviceDiagnostics`, `dcSync`, `processDataWatchdog` — the latter paired with `setProcessDataWatchdog`). `HttpServer::Config`'s `std::function` members (`getGameLoopHealth`, `setGameLoopPeriod`, ...) are named as actions matching their HTTP verb — a callback field is an action, not a property, so the accessor rule does not apply to them.
+**Class names encode the base only for polymorphic interface implementations.** A class held
+and passed as its abstract base — via `Base&`, `unique_ptr<Base>`, or `vector<Base*>` — embeds
+the **full** interface name: `SoemFieldbusDriver`, `ProcessDataCyclicTask`. A **specialization
+chain**, refined by is-a and used as its own concrete type, names the concept with no ancestry:
+`ProfileDevice ← Cia402Drive ← SomanetDrive`. Standalone classes just name the concept. Test
+doubles take a `Fake` prefix.
+
+> Deciding test: held via its base pointer and swappable with siblings → embed the base name.
+> A refinement used as itself → name the concept.
+
+Instance names mirror the class in `camelCase`, abbreviating only where conventional
+(`WebSocketServer wsServer`).
+
+**Accessors are bare nouns; mutators take `set`.** `period()` / `setPeriod()`, never `get*`.
+This holds even when the pair wraps bus I/O, because the `set` prefix is what makes a hardware
+write read as an action. Same-name get/set overloads are **not** used — `guardTime(100)` hiding
+a flash write is the failure this rule prevents, and overload sets break `&Class::name` in
+callbacks.
+
+Raw or parameterised bus transfers use `read*`/`write*` (`readSdo`, `writeValue`, `readFile`).
+Operations stay verbs (`scan()`, `enable()`, `transitionToState()`).
+
+One sanctioned exception, not a template: `DeviceParameter::getValue<T>()`, because bare
+`value()` would collide with the data member. `HttpServer::Config`'s `std::function` members are
+named as actions matching their HTTP verb, because a callback field is an action, not a
+property.
 
 ## Static Analysis
 
-`lint`, `cppcheck`, `tidy`, and `format` are CMake custom targets defined in `cmake/lint.cmake`, callable via scripts or directly with ninja:
+`lint`, `cppcheck`, `tidy`, and `format` are CMake targets in `cmake/lint.cmake`.
 
 ```bash
-./tools/cppcheck.sh                            # or: ninja -C build/x64-linux-debug cppcheck
-./tools/lint.sh                                # or: ninja -C build/x64-linux-debug lint
-./tools/tidy.sh                                # or: ninja -C build/x64-linux-debug tidy
+./tools/cppcheck.sh    # or: ninja -C build/<preset> cppcheck
+./tools/lint.sh
+./tools/tidy.sh
 ```
 
-cpplint is configured via `CPPLINT.cfg` (`-legal/copyright`, `-build/c++11` suppressed; 100-column limit; `.h` treated as headers). cppcheck runs with `warning,style,performance,portability`, `--std=c++23`, exits non-zero on findings.
+cpplint is configured by `CPPLINT.cfg`. cppcheck runs `warning,style,performance,portability`
+with `--std=c++23` and exits non-zero on findings.
 
-clang-tidy is configured by `.clang-tidy` at the repo root and driven through `run-clang-tidy`, so every translation unit is analysed with the flags it is actually built with. **It runs only the bug-finding checks** — `bugprone-*`, `clang-analyzer-*`, `concurrency-*`, `performance-*` — and none of the style families, because layout is settled by `.clang-format`, includes and naming by `CPPLINT.cfg`, and the rest by `-Wall -Wextra -Wpedantic -Werror`. What it adds over all three is the path-sensitive analysis none of them can do. `misc-*` is off wholesale on measurement, not taste: over five files it produced 497 of 560 findings from three checks (`misc-include-cleaner`, `misc-non-private-member-variables-in-classes`, `misc-const-correctness`), none naming a defect. A handful of further checks are excluded by name, each with the reason written beside it in the file — mostly because the check is structurally wrong for this codebase, and in one case (`clang-analyzer-optin.core.EnumCastOutOfRange`) because its only remaining reports are in uWebSockets headers that the header filters cannot reach, since those filters do not apply to static-analyzer diagnostics; UBSan's `-fsanitize=enum` is where that coverage is meant to return. `WarningsAsErrors` is `'*'`, matching cppcheck's `--error-exitcode=1` — a finding is fixed or the check is argued off the list, never silently suppressed.
+**clang-tidy runs only the bug-finding checks** — `bugprone-*`, `clang-analyzer-*`,
+`concurrency-*`, `performance-*`. No style families, because `.clang-format` settles layout,
+`CPPLINT.cfg` settles includes and naming, and `-Werror` settles the rest. What it adds is
+path-sensitive analysis none of them can do. `misc-*` is off on measurement: over five files it
+produced 497 of 560 findings from three checks, none naming a defect. Further exclusions are
+named in `.clang-tidy` with the reason beside each.
 
-**Suppress with `// NOLINTNEXTLINE(check)` on its own line, never `NOLINTBEGIN`/`NOLINTEND`.** Two rules, both learned the hard way. First, the marker must be the **last** comment line before the code — clang-tidy applies `NOLINTNEXTLINE` to the line immediately after the line the marker sits on, so prose written *after* it on following lines pushes the code out of range and the suppression silently does nothing. Put the reason above, the marker last. Second, **cpplint parses `NOLINT` markers too**, and it rejects a `NOLINTEND` whose category it does not recognise (`Not in a NOLINT block`) — so a clang-tidy check name can never appear in the block form. Per-line markers are understood by both.
+`WarningsAsErrors` is `'*'`. **A finding is fixed, or the check is argued off the list. Never
+silently suppressed.** Ignore files are for third-party code only.
 
-Two build-system prerequisites exist for this target and are easy to undo by accident. `CMAKE_EXPORT_COMPILE_COMMANDS` is `ON` in the **base** preset, so every preset emits a compilation database. And `CMAKE_CXX_SCAN_FOR_MODULES` is `OFF` in the root `CMakeLists.txt` — this codebase does not use C++20 modules, and with GCC the scan injects `-fmodules-ts`, `-fdeps-format=` and `-fmodule-mapper=` into `compile_commands.json`, where clang-tidy rejects the translation unit outright. `.clang-tidy` also carries `ExtraArgs: ['-Wno-unknown-warning-option']` for the same class of problem one level down: the four test targets pass GCC-only `-Wno-stringop-overflow`, which clang does not recognise.
+## Gotchas
 
-Shell scripts are covered by `./tools/shellcheck.sh` (part of `check.sh`), which is **not** a CMake target — it needs no build directory. Its file list comes from `git ls-files`, so a new script is covered as soon as it is tracked and nothing under `build/` or `extern/` is ever picked up; `packaging/postinst` is added explicitly because dpkg requires that extensionless name. It runs with `-x` so the `rt/vm` scripts are checked against the `common.sh` they source. Two suppressions are deliberate and should stay: `# shellcheck disable=SC2034` in `rt/vm/common.sh` (a sourced config file — every variable is used by its consumers, which shellcheck cannot see) and `# shellcheck source=/dev/null` in `clients/python/setup.sh` (it sources a venv activator that the same line creates). Note that `tools/code-stats.sh` embeds a single-quoted `awk` program, so an apostrophe inside those comments would terminate the string — SC1112 there is a real trap, not a nit to "fix".
+Traps that have already cost time. Each is load-bearing.
+
+- **Suppress with `// NOLINTNEXTLINE(check)` on its own line, never `NOLINTBEGIN`/`NOLINTEND`.**
+  Two reasons. The marker must be the **last** comment line before the code, because
+  clang-tidy applies it to the very next line — prose written after it pushes the code out of
+  range and the suppression silently does nothing. And cpplint parses `NOLINT` markers too,
+  rejecting a `NOLINTEND` whose category it does not recognise, so a clang-tidy check name can
+  never appear in the block form.
+- **`CMAKE_CXX_SCAN_FOR_MODULES` is `OFF` in the root `CMakeLists.txt`.** With GCC the scan
+  injects `-fmodules-ts` and friends into `compile_commands.json`, where clang-tidy rejects the
+  translation unit outright. `CMAKE_EXPORT_COMPILE_COMMANDS` is `ON` in the base preset. Both
+  are easy to undo by accident.
+- **A `std::vector` of atomics cannot be reallocated or `shrink_to_fit`'d.** libstdc++ hides
+  this from a local Linux build; libc++ and MSVC do not.
+- **A queued CoE emergency fails the next SDO or FoE.** The signature is an operation that
+  always succeeds on the second attempt.
+- **Never assume a vendor object's type or name.** Read the live object dictionary or the ESI.
+- **`tools/code-stats.sh` embeds a single-quoted `awk` program**, so an apostrophe inside those
+  comments terminates the string. SC1112 there is real, not a nit.
+- **Two shellcheck suppressions are deliberate and should stay**: SC2034 in `rt/vm/common.sh`
+  (a sourced config file) and SC1112 source=/dev/null in `clients/python/setup.sh`.
+- **The running server instance is shared with the user's Console session.** Ask before
+  mutating its state.

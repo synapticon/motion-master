@@ -254,6 +254,32 @@ inline std::unexpected<std::string> deviceNotFound(uint16_t slavePosition) {
 
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.
 ///
+/// **The surface, grouped — every member is documented at its declaration below.** The
+/// documentation is long on purpose: it records why each lock exists and what breaks without it.
+/// This map is so a reader can find the part they need without reading all of it.
+///
+/// - *lifecycle:* @c init, @c scan, @c reset, @c initialised, @c topologyGeneration,
+///   @c configureParameterCache, @c parameterCache
+/// - *reaching a device:* @c deviceAt (a handle that owns its set), @c deviceSet (the whole set),
+///   @c hasDevice (a predicate, no device), @c findDevice (**real-time only**)
+/// - *process data:* @c configureProcessData, @c exchangeProcessData (**real-time**),
+///   @c processDataConfigured, @c processImageInfo, @c processImageGeneration,
+///   @c stageProcessDataOutputs, @c pdoSampleSpec, @c deviceExchangesProcessData
+/// - *health:* @c lastWorkingCounter, @c expectedWorkingCounter, @c processDataHealthy
+/// - *the recorder:* @c recorderHead, @c recorderOldestSeq, @c readRecord, @c dumpProcessData,
+///   @c dumpProcessDataBuffer
+/// - *the bus:* @c transitionToState, @c busConfig, @c deviceStates, @c deviceDiagnostics,
+///   @c dcSync, @c processDataWatchdog, @c setProcessDataWatchdog
+/// - *parameters, where this class adds something a device cannot:* @c initializeDeviceParameters
+///   and @c readAllDeviceParameters (they inject the manager's @c useCompleteAccess setting),
+///   @c writeDeviceParameter and @c deviceParameterView (they compose two steps into one call so a
+///   re-enumeration cannot land between them), @c writeDevicePdoMapping (it takes
+///   @c busOperationMutex_, because rewriting a mapping is a bus operation)
+/// - *the cycle:* @c CycleGuard (taken by @c GameLoop, never by a task)
+///
+/// Everything else about a device is on @c Device, reached through @c deviceAt. A method that would
+/// only resolve a position and forward does not belong here.
+///
 /// The driver is not required at construction — call @c init() to supply one.
 /// This allows the app to start without a driver and be initialised later via
 /// the HTTP API. Injected into @c GameLoop (for @c exchangeProcessData) and
@@ -647,21 +673,6 @@ class DeviceManager {
   ///         loaded yet.
   std::expected<void, std::string> readAllDeviceParameters(uint16_t slavePosition);
 
-  /// @brief Convenience: finds a device by position and reads one of its parameters.
-  ///
-  /// Equivalent to @c findDevice(slavePosition)->readParameter(index, subindex) — see
-  /// @c Device::readParameter for the online/offline semantics. Saves callers a manual
-  /// lookup when they only have a position.
-  ///
-  /// @param slavePosition  1-based bus position of the target device.
-  /// @param index          CoE object index.
-  /// @param subindex       CoE object subindex.
-  /// @return The value, or an error string if the device or parameter is unknown, or the
-  ///         (online) SDO upload fails.
-  std::expected<DeviceParameterValue, std::string> readDeviceParameter(uint16_t slavePosition,
-                                                                       uint16_t index,
-                                                                       uint8_t subindex);
-
   /// @brief Returns a full parameter struct (value + metadata), optionally refreshed from the bus.
   ///
   /// Backs the @c GET /api/devices/{pos}/parameters/{index}/{subindex} route. When
@@ -718,16 +729,6 @@ class DeviceManager {
   std::expected<void, std::string> writeDevicePdoMapping(uint16_t slavePosition,
                                                          const PdoMapping& mapping);
 
-  /// @brief Convenience: finds a device by position and reads its PDO mapping grouped by object.
-  ///
-  /// Equivalent to @c findDevice(slavePosition)->readPdoMapping() — see @c Device::readPdoMapping.
-  /// Reads fresh over SDO (mailbox must be active: PRE-OP/SAFE-OP/OP). Used by the read side of the
-  /// PDO-mapping route and to echo the verified read-back after a write.
-  ///
-  /// @param slavePosition  1-based bus position of the target device.
-  /// @return The grouped mapping, or an error string if the device is unknown or a read fails.
-  std::expected<PdoMapping, std::string> readDevicePdoMapping(uint16_t slavePosition);
-
   /// @brief Stages a batch of output objects into the process image in one call.
   ///
   /// Backs @c POST @c /api/process-data/outputs, the "send all" action of the Process Data page:
@@ -752,14 +753,6 @@ class DeviceManager {
   // on the bus: SDO objects from the (refresher-fed) cache via value(); PDO objects decoded by
   // the caller from recorder-ring records (recorderHead()/recorderOldestSeq()/readRecord()) using
   // the layout pdoSampleSpec() captures. Thread-safe; they hand back copies, never device pointers.
-
-  /// @brief Returns a copy of a parameter's cached value, no bus access. Thread-safe.
-  ///
-  /// For monitoring's SDO objects: the value the @c ParameterRefresher last wrote to the cache.
-  ///
-  /// @return The cached value, or @c nullopt if the device or parameter is unknown.
-  std::optional<DeviceParameterValue> value(uint16_t slavePosition, uint16_t index,
-                                            uint8_t subindex) const;
 
   /// @brief Everything needed to decode one PDO object from a raw process-image snapshot:
   ///        which image it lives in, where, and how wide / what type.

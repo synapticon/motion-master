@@ -1385,7 +1385,7 @@ TEST(DeviceParameterLocking, CachedReadProceedsWhileAnSdoUploadIsInFlight) {
   }
 
   EXPECT_TRUE(completesWithin(
-      std::chrono::seconds(5), [&] { (void)device.value(0x6065, 0x00); }, release))
+      std::chrono::seconds(5), [&] { (void)device.parameterValue(0x6065, 0x00); }, release))
       << "a cached read blocked behind an in-flight SDO upload";
   uploader.join();
 }
@@ -1415,7 +1415,7 @@ TEST(DeviceParameterLocking, CachedReadSeesTheNewValueWhileAnSdoDownloadIsInFlig
   // transfer sees the intended value rather than the stale one — and is not blocked to see it.
   std::optional<DeviceParameterValue> seen;
   EXPECT_TRUE(completesWithin(
-      std::chrono::seconds(5), [&] { seen = device.value(0x6065, 0x00); }, release))
+      std::chrono::seconds(5), [&] { seen = device.parameterValue(0x6065, 0x00); }, release))
       << "a cached read blocked behind an in-flight SDO download";
   downloader.join();
   ASSERT_TRUE(seen.has_value());

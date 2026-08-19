@@ -602,6 +602,11 @@ Each item below must stay true. Something in the code relies on each one today.
     built. The real-time exceptions read `publishedSet_`, guarded by the cycle gate instead.
 14. **`publishedSet_` is replaced only with the real-time cycle drained**, by `publishDeviceSet`,
     whose callers hold `busOperationMutex_` and have called `stopExchange`.
+15. **A published process image implies a published device set with a live driver.** Only
+    `remapProcessImage` publishes an image and it needs both, and every teardown unpublishes the image
+    before it drops a set. That is what lets `exchangeProcessData` dereference `publishedSet_` without
+    a null check once it has a non-null image — the one place on the real-time path that does. Publish
+    an image from anywhere else and this stops holding.
 
 ## How we check these rules
 

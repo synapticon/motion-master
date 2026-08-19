@@ -151,7 +151,9 @@ TEST(Concurrency, ReadSurfacesAgainstARunningCycle) {
         static_cast<void>(dm->deviceStates({}));
         static_cast<void>(dm->processImageInfo());
         static_cast<void>(dm->busConfig());
-        static_cast<void>(dm->value(1, 0x6041, 0x00));
+        if (const auto device = dm->deviceAt(1)) {
+          static_cast<void>(device->parameterValue(0x6041, 0x00));
+        }
         const uint64_t head = dm->recorderHead();
         if (head > 0) {
           mm::node::ProcessDataRing::Record record;

@@ -937,7 +937,7 @@ std::vector<DeviceParameter> Device::parametersOrdered() const {
   return ordered;
 }
 
-std::optional<DeviceParameterValue> Device::value(uint16_t index, uint8_t subindex) const {
+std::optional<DeviceParameterValue> Device::parameterValue(uint16_t index, uint8_t subindex) const {
   std::lock_guard<std::mutex> lock(*parametersMutex_);
   const DeviceParameter* p = findParameter(index, subindex);
   if (!p) {

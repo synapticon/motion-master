@@ -1298,16 +1298,6 @@ bool ProcessData::isOutputMapped(uint16_t slavePosition, uint16_t index, uint8_t
   return loc.has_value() && loc->isOutput;
 }
 
-std::optional<DeviceParameterValue> DeviceManager::value(uint16_t slavePosition, uint16_t index,
-                                                         uint8_t subindex) const {
-  const std::shared_ptr<DeviceSet> set = deviceSet();
-  const Device* device = set->find(slavePosition);
-  if (!device) {
-    return std::nullopt;
-  }
-  return device->value(index, subindex);
-}
-
 std::optional<DeviceManager::PdoSampleSpec> DeviceManager::pdoSampleSpec(uint16_t slavePosition,
                                                                          uint16_t index,
                                                                          uint8_t subindex) const {
@@ -1335,22 +1325,6 @@ bool DeviceManager::deviceExchangesProcessData(uint16_t slavePosition) const {
   const std::shared_ptr<DeviceSet> set = deviceSet();
   const Device* device = set->find(slavePosition);
   return device != nullptr && device->exchangesProcessData();
-}
-
-std::expected<DeviceParameterValue, std::string> DeviceManager::readDeviceParameter(
-    uint16_t slavePosition, uint16_t index, uint8_t subindex) {
-  // Shared lock: this is the entry point monitoring calls from its own threads, so it must be
-  // serialised against the exclusive mutators (init/scan/reset/…) that rebuild
-  // set->devices/set->driver.
-  const std::shared_ptr<DeviceSet> set = deviceSet();
-  Device* device = set->find(slavePosition);
-  if (!device) {
-    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
-  }
-  // Routing (live PDO image when exchanging + healthy, SDO otherwise) lives in Device, which holds
-  // the process-data runtime we injected at scan(). This entry point only resolves the position and
-  // takes the shared lock so an off-thread caller is serialised against a device-set rebuild.
-  return device->readParameter(index, subindex);
 }
 
 std::expected<DeviceParameter, std::string> DeviceManager::deviceParameterView(
@@ -1425,17 +1399,6 @@ std::expected<void, std::string> DeviceManager::writeDevicePdoMapping(uint16_t s
     return std::unexpected("device " + std::to_string(slavePosition) + " not found");
   }
   return device->writePdoMapping(mapping);
-}
-
-std::expected<PdoMapping, std::string> DeviceManager::readDevicePdoMapping(uint16_t slavePosition) {
-  // Shared lock: keep the device pointer valid against the exclusive rebuilders while the SDO reads
-  // are serialised per transaction by the driver's socket mutex.
-  const std::shared_ptr<DeviceSet> set = deviceSet();
-  Device* device = set->find(slavePosition);
-  if (!device) {
-    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
-  }
-  return device->readPdoMapping();
 }
 
 std::vector<OutputStageResult> DeviceManager::stageProcessDataOutputs(

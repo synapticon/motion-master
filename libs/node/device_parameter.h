@@ -203,22 +203,12 @@ struct DeviceParameter {
 
   // --- value -------------------------------------------------------------------------------
   // The last-known value, stored as its raw little-endian wire bytes — the same encoding an SDO
-  // transfer carries. @c isScalarDataType(dataType) picks the field; zero (an empty @c rawValue)
-  // is the type-appropriate default before the first read.
+  // transfer carries. @c isScalarDataType(dataType) picks which of the two fields holds it; zero
+  // (an empty @c rawValue) is the type-appropriate default before the first read.
   //
-  // The scalar cell is what a cyclic task reads: one relaxed atomic load, no lock, no allocation,
-  // and no way to tell whether the RT exchange or a background SDO poll put the value there.
-  //
-  // It is a plain @c uint64_t accessed through @c std::atomic_ref rather than a
-  // @c std::atomic<uint64_t> member, which would be neither copyable nor movable — and
-  // @c DeviceParameter is both (@c Device::parameter and @c parametersOrdered hand out copies, and
-  // entries are moved into the map and into growing vectors). That would force all five special
-  // members to be written by hand, and *those* are the real hazard: this struct gains fields over
-  // time, and a field added but forgotten in a hand-written copy constructor loses data silently
-  // with nothing to catch it. Compiler-generated copies never forget. @c atomic_ref puts the
-  // lock-free guarantee on the access instead of the storage, which is the guarantee that matters;
-  // @c loadBits / @c storeBits below are the only way the field is ever touched. @c mutable because
-  // a load is a const operation but @c std::atomic_ref needs a non-const lvalue.
+  // A cyclic task reads the scalar through @c loadBits: one relaxed atomic load, no lock, no
+  // allocation, and no way to tell whether the RT exchange or a background SDO poll put the value
+  // there. Why that is a @c ScalarCell rather than a bare @c uint64_t is documented on the type.
   ScalarCell cell{};                ///< Scalar value, LSB-aligned little-endian, zero-extended.
   std::vector<uint8_t> rawValue{};  ///< Non-scalar value (string / byte array) as wire bytes.
   SyncState syncState{SyncState::Unknown};  ///< Freshness of the value relative to the device.
@@ -230,12 +220,9 @@ struct DeviceParameter {
   /// @brief Returns the packed @c (index, subindex) key used in the parameter map.
   uint32_t key() const { return makeParameterKey(index, subindex); }
 
-  /// @brief Loads the scalar cell. Lock-free, non-allocating, relaxed — safe from the RT loop.
+  /// @brief Loads the scalar cell. Lock-free, non-allocating — safe from the RT loop.
   ///
-  /// Relaxed is the whole requirement: the cell is a self-contained value with no companion state
-  /// to order against, and a reader is by definition unsynchronised with the writer that published
-  /// it. What it guarantees — that a torn or invented value is impossible, and that the last store
-  /// becomes visible — is exactly what a cyclic task needs.
+  /// See @c ScalarCell for why relaxed ordering is the whole requirement here.
   uint64_t loadBits() const { return cell.load(); }
 
   /// @brief Stores the scalar cell. Lock-free, non-allocating, relaxed — safe from the RT loop.

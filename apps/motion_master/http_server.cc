@@ -911,8 +911,15 @@ void HttpServer::run() {
                  return mm::api::notFound("no device at that bus position");
                }
                // Read fresh over SDO, so the mailbox must be live: INIT/BOOT is a 409.
-               return mm::api::timed([&] { return deviceManager_.readDevicePdoMapping(*position); },
-                                     "409 Conflict");
+               return mm::api::timed(
+                   [&]() -> std::expected<mm::node::PdoMapping, std::string> {
+                     const auto device = deviceManager_.deviceAt(*position);
+                     if (!device) {
+                       return mm::node::deviceNotFound(*position);
+                     }
+                     return device->readPdoMapping();
+                   },
+                   "409 Conflict");
              });
 
   router.put("/api/devices/:slavePosition/pdo-mapping",
@@ -946,7 +953,12 @@ void HttpServer::run() {
                }
                // Echo the grouped read-back, whose entries carry the derived bitOffsets the
                // request did not specify.
-               auto readBack = deviceManager_.readDevicePdoMapping(*position);
+               const auto device = deviceManager_.deviceAt(*position);
+               if (!device) {
+                 return mm::api::withWireTime(
+                     mm::api::error("404 Not Found", "no device at that bus position"), elapsed());
+               }
+               auto readBack = device->readPdoMapping();
                if (!readBack) {
                  return mm::api::withWireTime(
                      mm::api::error("500 Internal Server Error", readBack.error()), elapsed());

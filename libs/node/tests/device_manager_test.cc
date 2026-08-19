@@ -274,7 +274,7 @@ TEST(DeviceManagerDelegates, UnknownDeviceErrors) {
   ASSERT_TRUE(dm.scan().has_value());
 
   // Position 99 does not exist — the find-and-delegate path must report it, not crash.
-  EXPECT_FALSE(dm.readDeviceParameter(99, 0x6064, 0x00).has_value());
+  EXPECT_FALSE(static_cast<bool>(dm.deviceAt(99)));
   EXPECT_FALSE(
       dm.writeDeviceParameter(99, 0x6064, 0x00, DeviceParameterValue{uint32_t{1}}).has_value());
   EXPECT_FALSE(dm.deviceParameterView(99, 0x6064, 0x00, /*refreshFromBus=*/true).has_value());

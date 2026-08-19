@@ -71,7 +71,8 @@ std::expected<Monitoring, std::string> MonitoringManager::create(Monitoring conf
     if (auto spec = deviceManager_.pdoSampleSpec(p.devicePosition, p.index, p.subindex)) {
       return ParamPlan{p.devicePosition, p.index, p.subindex, Source::Pdo, spec};
     }
-    if (deviceManager_.value(p.devicePosition, p.index, p.subindex).has_value()) {
+    const auto device = deviceManager_.deviceAt(p.devicePosition);
+    if (device && device->parameterValue(p.index, p.subindex).has_value()) {
       return ParamPlan{p.devicePosition, p.index, p.subindex, Source::Sdo, std::nullopt};
     }
     return std::nullopt;
@@ -355,7 +356,9 @@ void MonitoringManager::flushDetached(FlushState& state, const PublishFn& publis
   for (size_t i = 0; i < state.plans.size(); ++i) {
     const auto& plan = state.plans[i];
     if (plan.source == Source::Sdo && isExchanging(plan.devicePosition)) {
-      sdoValues[i] = deviceManager_.value(plan.devicePosition, plan.index, plan.subindex);
+      if (const auto device = deviceManager_.deviceAt(plan.devicePosition)) {
+        sdoValues[i] = device->parameterValue(plan.index, plan.subindex);
+      }
     }
   }
 

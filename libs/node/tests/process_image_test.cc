@@ -322,11 +322,11 @@ TEST(DeviceManagerProcessData, WriteStagesOutputAndReadPullsInput) {
   EXPECT_EQ(busPtr->lastOutputs[1], 0x00);
 
   // Reading a PDO input object pulls the live value from the input snapshot.
-  auto status = dm.readDeviceParameter(1, 0x6041, 0x00);
+  auto status = dm.deviceAt(1)->readParameter(0x6041, 0x00);
   ASSERT_TRUE(status.has_value());
   EXPECT_EQ(std::get<uint16_t>(*status), 0x0237);
   // The cached parameter now reflects the live value too.
-  EXPECT_EQ(std::get<uint16_t>(*dm.value(1, 0x6041, 0x00)), 0x0237);
+  EXPECT_EQ(std::get<uint16_t>(*dm.deviceAt(1)->parameterValue(0x6041, 0x00)), 0x0237);
 }
 
 // --- CycleGuard ---------------------------------------------------------------
@@ -453,7 +453,7 @@ TEST(CycleGuard, DeviceValueReadsScalarsWithoutALock) {
   // Seed the cell the way a control-plane read does — off the live image, which needs one recorded
   // cycle. The RT decode that fills every cell each cycle arrives in a later step.
   dm.exchangeProcessData();
-  ASSERT_TRUE(dm.readDeviceParameter(1, 0x6041, 0x00).has_value());
+  ASSERT_TRUE(dm.deviceAt(1)->readParameter(0x6041, 0x00).has_value());
 
   const DeviceManager::CycleGuard cycle(dm);
   ASSERT_TRUE(static_cast<bool>(cycle));
@@ -704,7 +704,7 @@ TEST(DeviceManagerProcessData, OutputReadBackServesStagedSlotNotSdoAndIgnoresHea
   // An output read returns the cell (0x000F) — our own setpoint, always valid and lock-free
   // — never the SDO value (0x1111). Unlike an input, it is NOT gated on bus health: a momentarily
   // short working counter must not push an RT caller onto a blocking SDO upload for its own output.
-  auto v = dm.readDeviceParameter(1, 0x6040, 0x00);
+  auto v = dm.deviceAt(1)->readParameter(0x6040, 0x00);
   ASSERT_TRUE(v.has_value());
   EXPECT_EQ(std::get<uint16_t>(*v), 0x000F);
 }
@@ -1071,12 +1071,12 @@ TEST(DeviceManagerProcessData, MixedStatesRoutePerDeviceBetweenPdoAndSdo) {
   dm.exchangeProcessData();
 
   // Device 2 (OP) reads its statusword from the process image.
-  auto s2 = dm.readDeviceParameter(2, 0x6041, 0x00);
+  auto s2 = dm.deviceAt(2)->readParameter(0x6041, 0x00);
   ASSERT_TRUE(s2.has_value());
   EXPECT_EQ(std::get<uint16_t>(*s2), 0x1234);
 
   // Device 1 (PRE-OP) reads over SDO — the live mailbox value, not its stale 0x9999 region.
-  auto s1 = dm.readDeviceParameter(1, 0x6041, 0x00);
+  auto s1 = dm.deviceAt(1)->readParameter(0x6041, 0x00);
   ASSERT_TRUE(s1.has_value());
   EXPECT_EQ(std::get<uint16_t>(*s1), 0xABCD);
 
@@ -1128,7 +1128,7 @@ TEST(DeviceManagerProcessData, UnhealthyWorkingCounterReadsFallBackToSdo) {
   ASSERT_FALSE(dm.processDataHealthy());
 
   // Unhealthy bus: the read ignores the stale 0x0237 snapshot and uses the SDO value.
-  auto stale = dm.readDeviceParameter(1, 0x6041, 0x00);
+  auto stale = dm.deviceAt(1)->readParameter(0x6041, 0x00);
   ASSERT_TRUE(stale.has_value());
   EXPECT_EQ(std::get<uint16_t>(*stale), 0xABCD);
 
@@ -1136,7 +1136,7 @@ TEST(DeviceManagerProcessData, UnhealthyWorkingCounterReadsFallBackToSdo) {
   busPtr->wkc = 3;
   dm.exchangeProcessData();
   ASSERT_TRUE(dm.processDataHealthy());
-  auto live = dm.readDeviceParameter(1, 0x6041, 0x00);
+  auto live = dm.deviceAt(1)->readParameter(0x6041, 0x00);
   ASSERT_TRUE(live.has_value());
   EXPECT_EQ(std::get<uint16_t>(*live), 0x0237);
 }
@@ -1213,12 +1213,14 @@ TEST(DeviceManagerSampling, ValueReturnsCachedValueWithoutBus) {
   ASSERT_TRUE(
       dm.writeDeviceParameter(1, 0x6041, 0x00, DeviceParameterValue{uint16_t{0xBEEF}}).has_value());
 
-  auto v = dm.value(1, 0x6041, 0x00);
+  const auto device = dm.deviceAt(1);
+  ASSERT_TRUE(static_cast<bool>(device));
+  auto v = device->parameterValue(0x6041, 0x00);
   ASSERT_TRUE(v.has_value());
   EXPECT_EQ(std::get<uint16_t>(*v), 0xBEEF);
 
-  EXPECT_FALSE(dm.value(1, 0x1234, 0x00).has_value());   // unknown parameter
-  EXPECT_FALSE(dm.value(99, 0x6041, 0x00).has_value());  // unknown device
+  EXPECT_FALSE(device->parameterValue(0x1234, 0x00).has_value());  // unknown parameter
+  EXPECT_FALSE(static_cast<bool>(dm.deviceAt(99)));                // unknown device
 }
 
 }  // namespace

@@ -1,6 +1,7 @@
 #include "node/parameter_refresher.h"
 
 #include <algorithm>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -144,7 +145,14 @@ void ParameterRefresher::pollDue() {
       subindex = it->second.subindex;
     }
 
-    const auto result = deviceManager_.readDeviceParameter(devicePosition, index, subindex);
+    // Resolved here rather than hidden behind a DeviceManager forwarder: the handle is what keeps
+    // the device alive across the upload, and a device that a rescan retired simply fails its next
+    // transfer.
+    std::expected<DeviceParameterValue, std::string> result =
+        mm::node::deviceNotFound(devicePosition);
+    if (const auto device = deviceManager_.deviceAt(devicePosition)) {
+      result = device->readParameter(index, subindex);
+    }
 
     std::lock_guard<std::mutex> lock(mutex_);
     auto it = entries_.find(key);

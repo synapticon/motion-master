@@ -68,6 +68,26 @@ struct ObjectValues {
 ///
 /// Holds the node's bus position, immutable identity read from EEPROM,
 /// and a reference to the fieldbus driver for SDO and state operations.
+///
+/// **The surface, grouped — every member is documented at its declaration below.** This map exists
+/// because that documentation is long: it records the traps, which is what makes it worth reading,
+/// and it makes the file hard to scan. Start here, then read the one you need.
+///
+/// - *identity, no bus access:* @c slavePosition, @c name, @c vendorId, @c productCode,
+///   @c revisionNumber, @c serialNumber, @c supportsCoe, @c mailboxActive
+/// - *the parameter index:* @c initializeParameters, @c hasParameters, @c findParameter,
+///   @c parameter, @c parametersOrdered, @c parameterValue
+/// - *one parameter over the bus:* @c readParameter, @c writeParameter, @c readObjectComplete,
+///   @c readAllParameters
+/// - *inside a cycle, no lock:* @c value<T>, @c setValue<T>, @c exchangesProcessData
+/// - *process data:* @c readFlatPdoMapping, @c flatPdoMapping, @c readPdoMapping, @c
+/// writePdoMapping
+/// - *files and EEPROM:* @c readFile, @c writeFile, @c readSii, @c writeSii
+/// - *ESC registers:* @c readRegister, @c writeRegister
+///
+/// Two rules the whole class rests on, and both are stated again where they apply:
+/// @c parametersMutex_ is never held across bus input or output, and @c value<T> / @c setValue<T>
+/// take no lock at all because a cyclic task calls them.
 class Device {
  public:
   /// @brief Constructs a device, reading identity from the driver at @p slavePosition.
@@ -371,17 +391,21 @@ class Device {
   /// @return A copy of the parameter, or @c nullopt if the parameter is unknown.
   std::optional<DeviceParameter> parameter(uint16_t index, uint8_t subindex) const;
 
-  /// @brief Returns a copy of a parameter's cached value (the typed cache getter), no bus access.
+  /// @brief Returns a copy of a parameter's last known value. No bus access.
   ///
-  /// The untyped, any-type read, thread-safe (taken under the cache lock) so the monitoring sampler
-  /// can read it concurrently with refresher/control-plane writes. Returns the last value stored by
-  /// a read/refresh; it does not itself touch the bus. For a scalar inside a cycle use the
-  /// lock-free @c value<T>() instead.
+  /// **The control-plane read, and the name says which one it is.** It serves every data type,
+  /// including strings and byte arrays, and it takes @c parametersMutex_ — so the monitoring
+  /// sampler may call it while the refresher and the control plane write. It returns what the last
+  /// read or refresh stored; it never touches the bus itself.
+  ///
+  /// The real-time counterpart is @c value<T>(), which takes no lock and serves scalars only. The
+  /// two deliberately do **not** share a name: they differed by one template argument until
+  /// 2026-08-19, which made "did this call lock?" invisible at the call site.
   ///
   /// @param index     CoE object index.
   /// @param subindex  CoE object subindex.
   /// @return The cached value, or @c nullopt if the parameter is unknown.
-  std::optional<DeviceParameterValue> value(uint16_t index, uint8_t subindex) const;
+  std::optional<DeviceParameterValue> parameterValue(uint16_t index, uint8_t subindex) const;
 
   /// @brief Returns a parameter's declared ETG.1020 data-type code, thread-safely (cache lock).
   ///

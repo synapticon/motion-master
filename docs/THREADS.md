@@ -27,7 +27,8 @@ path.
 Tier-3 extension surface (`libs/example/example_cyclic_task.cc`): a task's `execute()` is called from
 the RT loop between the timer wake and the next deadline, so everything it calls must be non-blocking
 and non-allocating. `Device::value<T>()` / `setValue<T>()` are that surface, and
-`DeviceManager::CycleGuard` is what makes reaching a `Device` from there safe — see
+`GameLoop` enters the cycle before it calls any task, which is what makes reaching a `Device` from
+there safe — a task writes no guard and checks nothing. See
 [LOCKING.md](LOCKING.md#the-cycle-gate).
 
 For the full synchronization inventory — every mutex, what it guards, the lock ordering, and the
@@ -87,7 +88,7 @@ compose the output image from every output object's cell, run the EtherCAT PDO s
 the cycle to the recorder ring, then decode every mapped input back into its cell. A user (Tier-3)
 task runs here too. The period is retimed live by reloading the relaxed atomic `period_` at the top
 of each iteration (`game_loop.cc`, `cyclic_timer_linux.cc`). The thread takes **no lock**: a
-`CycleGuard` (an atomic depth counter) around any body that resolves devices or parameters, relaxed
+`CycleGuard` (an atomic depth counter) that the loop itself takes around the task list, relaxed
 atomic loads and stores on the parameter cells, and a wait-free append to the ring. `running_` and
 the diagnostic counters `executedCycles_` / `skippedCycles_` are relaxed atomics — for logging, not
 synchronization.
@@ -119,7 +120,7 @@ protocol, the invariants — is in [LOCKING.md](LOCKING.md); the shape is:
 | PDO exchange | 1 | None. SOEM's port layer is internally thread-safe and PDO touches disjoint state (the IOmap) from the control plane |
 | Value read/write | any | None. Every object's value lives in its own `DeviceParameter` cell — a `uint64_t` of raw wire bytes reached through `std::atomic_ref`. Writers store into different objects' cells without contending; the RT loop is the sole composer of the wire image, which is what makes bit-packed objects sharing a byte safe |
 | Input decode | 1 | None. Each `ProcessImageEntry` carries the owning `DeviceParameter*`, resolved at publish time, so the decode is a walk over contiguous entries with **no lookups on the RT path** |
-| Reaching a `Device` from a cycle | 1 | `DeviceManager::CycleGuard` — one atomic increment and one atomic load, never a block. Falsy means no image is published, and the task does nothing that cycle |
+| Reaching a `Device` from a cycle | 1 | `DeviceManager::CycleGuard`, taken by `GameLoop` around the whole task list — one atomic increment and one atomic load, never a block. Falsy means no image is published, and no task runs that cycle |
 | Recorder ring | 1 writes, 2 & 4 read | Wait-free append; readers re-check a per-slot sequence after copying. A cursor lapped by more than a whole ring is detected and resynced |
 | SDO / FoE / registers / AL state | 2 & 5 | `FieldbusDriver::controlPlaneMutex_`, held for a single socket transaction — never across a sleep, a blocking wait, or a user callback |
 

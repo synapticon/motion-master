@@ -8,9 +8,11 @@ add_executable(
   monitoring_api_test.cc
   config_test.cc
   cert_info_test.cc
+  game_loop_test.cc
   ../monitoring_api.cc
   ../config.cc
-  ../cert_info.cc)
+  ../cert_info.cc
+  ../game_loop.cc)
 
 # App headers are included unprefixed (e.g. "ring_log_sink.h"), matching main.cc.
 target_include_directories(mm_app_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)

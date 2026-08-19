@@ -67,20 +67,13 @@ ExampleCyclicTask::ExampleCyclicTask(DeviceManager& deviceManager, Config config
     : deviceManager_(deviceManager), config_(config) {}
 
 void ExampleCyclicTask::execute(const CycleContext& /*ctx*/) {
-  // Rule 1 — hold the device set still for this cycle. Falsy means the bus is not activated (no
-  // image published) or is being reconfigured; either way there is nothing to drive.
-  const DeviceManager::CycleGuard cycle(deviceManager_);
-  if (!cycle) {
-    return;
-  }
-
-  // Rule 2 and 3 — resolve every cycle, and treat absence as "not this cycle" rather than an error.
+  // Rule 1 and 2 — resolve every cycle, and treat absence as "not this cycle" rather than an error.
   Device* drive = deviceManager_.findDevice(config_.slavePosition);
   if (drive == nullptr) {
     return;
   }
 
-  // Rule 4 — read through the cell. This is the live statusword: the RT exchange decoded it into
+  // Rule 3 — read through the cell. This is the live statusword: the RT exchange decoded it into
   // the cell earlier in this same cycle. nullopt means the object dictionary has not been
   // enumerated, or this is not a CiA402 drive — either way there is nothing to command.
   const auto statusword = drive->value<uint16_t>(cia402::kStatusword, 0);

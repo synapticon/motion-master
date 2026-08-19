@@ -320,7 +320,7 @@ int main(int argc, char** argv) {
   // callback can borrow it via a lambda. Its constructor is side-effect-free; RT setup and the
   // cycle loop happen in run() at the very end. Declared before httpServer so it outlives the HTTP
   // thread that may invoke the callback.
-  GameLoop gameLoop{std::chrono::microseconds{opts.config.gameLoop.periodUs},
+  GameLoop gameLoop{deviceManager, std::chrono::microseconds{opts.config.gameLoop.periodUs},
                     opts.config.gameLoop.cpuAffinity};
   gameLoop.addTask(&processDataCyclicTask);
   // Tier 3, line 2 of 3 — register the example task. Membership is fixed: every task is added

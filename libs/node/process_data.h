@@ -51,11 +51,12 @@ struct ProcessData {
   // How deep the RT thread currently is inside work that reads the device set or the IOmap; lets
   // stopExchange() drain an in-flight cycle before a re-map or teardown mutates either.
   //
-  // A depth counter rather than a flag because it is raised at two nesting levels: by
-  // DeviceManager::CycleGuard around a whole cyclic task body (which resolves devices and
-  // parameters of its own, so it must not run while the device vector is being rebuilt) and by
-  // exchangeProcessData around the exchange itself, which stays self-contained for callers that
-  // invoke it directly. Only the RT thread raises it, so the count is small and bounded by nesting.
+  // A depth counter rather than a flag because it is raised at two nesting levels. GameLoop takes a
+  // DeviceManager::CycleGuard around the whole task list, because a task resolves devices and
+  // parameters of its own and must not run while the device set is being replaced. Inside that,
+  // exchangeProcessData raises it again around the exchange, so it stays self-contained for a
+  // caller that invokes it directly. Only the RT thread raises it, so the count is small and
+  // bounded by nesting.
   std::atomic<int> inCycle{0};
   // Working-counter health. lastWkc is written by the RT thread each cycle; expectedWkc is
   // recomputed by the control plane from current device states. healthy = last >= expected.

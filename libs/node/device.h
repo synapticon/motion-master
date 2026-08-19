@@ -576,8 +576,8 @@ class Device {
   /// **Lifetime.** The returned pointer is invalidated by @c initializeParameters, which replaces
   /// the whole map, and by @c DeviceManager::scan / @c reset, which destroy the @c Device. Never
   /// carry one across cycles or across a release of @c parametersMutex_: re-resolve where you use
-  /// it. A cyclic task does its lookups inside a @c DeviceManager::CycleGuard, which is what keeps
-  /// the device (and therefore its map) alive for the body of the cycle.
+  /// it. A cyclic task does its lookups inside the cycle @c GameLoop has entered, which is what
+  /// keeps the device (and therefore its map) alive for the body of the cycle.
   ///
   /// **Locking.** A control-plane caller must hold @c parametersMutex_ for the lookup *and* for any
   /// access to @c value / @c syncState, which the refresher and the control plane both write.
@@ -604,9 +604,10 @@ class Device {
   /// returns a variant: that one serves every type and is for the control plane, this one serves
   /// scalars without a lock and is for a cycle.
   ///
-  /// @warning Call it from inside a @c DeviceManager::CycleGuard. The lookup walks a map that
-  ///          @c initializeParameters replaces, and the @c Device itself dies at the next
-  ///          @c scan / @c reset; the guard is what holds both still for the body of the cycle.
+  /// @warning Call it from a cyclic task's @c execute, or from a control-plane caller holding
+  ///          @c parametersMutex_. The lookup walks a map that @c initializeParameters replaces,
+  ///          and the @c Device belongs to a set that @c scan / @c reset retire; the cycle @c
+  ///          GameLoop has entered is what holds both still for the body of a cycle.
   ///
   /// @tparam T        The arithmetic type the parameter's data type maps to.
   /// @param index     CoE object index.
@@ -639,8 +640,7 @@ class Device {
   /// the declared width, @p T must already be the parameter's type — an RT path has no room for the
   /// variant machinery that coercion needs.
   ///
-  /// @warning Call it from inside a @c DeviceManager::CycleGuard, for the reason @c value<T>()
-  /// gives.
+  /// @warning Call it from a cyclic task's @c execute, for the reason @c value<T>() gives.
   ///
   /// @tparam T        The arithmetic type the parameter's data type maps to.
   /// @param index     CoE object index.

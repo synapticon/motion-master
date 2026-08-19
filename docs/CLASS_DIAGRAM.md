@@ -224,8 +224,7 @@ classDiagram
     GameLoop *-- CyclicTimer
     ProcessDataCyclicTask ..> DeviceManager : ref
     ExampleCyclicTask ..> DeviceManager : ref
-    ProcessDataCyclicTask ..> CycleGuard : holds per cycle
-    ExampleCyclicTask ..> CycleGuard : holds per cycle
+    GameLoop ..> CycleGuard : enters the cycle per iteration
     DeviceManager *-- CycleGuard : nested class
     CycleGuard ..> ProcessData : raises inCycle
     HttpServer ..> DeviceManager : ref
@@ -358,13 +357,13 @@ thermal interlock that brings one drive into CSV, enables it, runs it at a fixed
 quick-stops it if the temperature goes over a limit. `main.cc` registers it behind three commented
 lines: construction, `gameLoop.addTask`, and the `keepFresh` its SDO-only object needs.
 
-The whole surface is four rules, each visible in that `execute`:
+The whole surface is three rules, each visible in that `execute`:
 
-1. **Take a `DeviceManager::CycleGuard` first and do nothing if it is falsy.** It holds the device set
-   still for the body of the cycle; falsy means the bus is not activated (or is being reconfigured).
-2. **Resolve the device every cycle** with `findDevice`; never cache the pointer across cycles.
-3. **A device that is not there is not an error** — it simply is not driven this cycle.
-4. **Read and write through `Device::value<T>()` / `setValue<T>()`.** A hash lookup plus one atomic
+1. **Resolve the device every cycle** with `findDevice`; never cache the pointer across cycles.
+   `GameLoop` has already entered the cycle, which is what keeps the pointer valid for the body — a
+   task takes no guard and checks nothing. It runs only while the bus is activated.
+2. **A device that is not there is not an error** — it simply is not driven this cycle.
+3. **Read and write through `Device::value<T>()` / `setValue<T>()`.** A hash lookup plus one atomic
    load or store, and neither can tell whether the object rides the process image or is polled over
    SDO in the background — so whether a signal is PDO-mapped stays a commissioning decision and does
    not change how the control program is written.

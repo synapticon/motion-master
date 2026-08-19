@@ -27,17 +27,15 @@ namespace mm::example {
 /// @warning **Uncommenting this in @c main.cc will spin a motor.** It does not wait for anyone to
 ///          enable the drive; enabling is its job. Check @c Config against your bus first.
 ///
-/// **The four rules a cyclic task lives by**, each visible in @c execute:
+/// **The three rules a cyclic task lives by**, each visible in @c execute:
 ///
-/// 1. **Take a @c DeviceManager::CycleGuard first, and do nothing if it is falsy.** It holds the
-///    device set still for the body of the cycle. Falsy means the bus is not activated — nobody has
-///    brought it to SAFE-OP/OP yet, or a scan/re-map is in progress — so there is nothing to do.
-/// 2. **Resolve the device every cycle; never cache the pointer.** A rescan destroys every
-///    @c Device, and pointers held across cycles die with them. Resolving costs a walk over a
-///    handful of devices.
-/// 3. **A device that is not there is not an error.** It simply is not driven this cycle, and the
+/// 1. **Resolve the device every cycle; never cache the pointer.** A rescan publishes a new device
+///    set, and pointers held across cycles do not follow it. Resolving costs a walk over a handful
+///    of devices. @c GameLoop has already entered the cycle before it calls @c execute, which is
+///    what makes the pointer valid for the body — a task takes no guard and checks nothing.
+/// 2. **A device that is not there is not an error.** It simply is not driven this cycle, and the
 ///    task picks it up again when it returns. That is what lets a machine be powered up in stages.
-/// 4. **Read and write values through @c Device::value<T>() / @c setValue<T>().** Both are a hash
+/// 3. **Read and write values through @c Device::value<T>() / @c setValue<T>().** Both are a hash
 ///    lookup plus one atomic load or store, and neither can tell whether an object rides the
 ///    process image or is polled over SDO in the background. Whether the temperature is PDO-mapped
 ///    is a commissioning decision, and this code does not change if it flips.

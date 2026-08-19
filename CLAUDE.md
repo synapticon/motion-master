@@ -406,14 +406,16 @@ decision.
   apply.
 - **A read of a non-exchanging device returns the last known value**, not `nullopt`.
   `stamp` and `exchangesProcessData()` are there for a task that wants to decide otherwise.
-- **Lifetime: devices and parameters live until `scan()` or `reset()`.** Calling `scan()`,
-  `reset()`, or `initializeParameters()` while the loop runs invalidates every pointer a
-  task holds. That is out of contract, documented, and not defended against. It is why
-  `findDevice` and `findParameter` are public and non-locking.
-- **A device's parameter map is insert-only for that device's lifetime.**
-  `initializeParameters` adds missing keys and never erases or overwrites one, so held
-  pointers survive re-enumeration. This is not an optimisation: RT reads `dataType` and
-  `bitLength` while decoding, so rewriting them in place would be a data race.
+- **`GameLoop` enters the cycle; a task writes no guard.** The loop takes one
+  `DeviceManager::CycleGuard` around the whole task list each cycle and calls no task when it
+  is falsy. So a task's `findDevice` / `findParameter` results are valid for the body of its
+  `execute()` by construction, and a task cannot forget to make them so. `findDevice` and
+  `findParameter` stay public and non-locking because the RT thread must not block.
+- **Lifetime: a pointer is valid for one `execute()`, never across cycles.** `scan()`,
+  `reset()` and `initializeParameters()` each drain the cycle before they replace what a task
+  reads — the device set, or a device's parameter map — so none of them can pull the ground
+  out from under a running task. A task that caches a `Device*` across cycles is out of
+  contract.
 - **The RT loop does no lookups.** `ProcessImageEntry` carries the owning
   `DeviceParameter*`, resolved at publish and refreshed on every re-map. A lookup per mapped
   object per cycle is fatal at bus scale: 50 devices × 40 objects is 60–100 µs against a

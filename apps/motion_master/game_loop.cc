@@ -26,8 +26,9 @@ uint64_t nowEpochUs() {
 
 }  // namespace
 
-GameLoop::GameLoop(std::chrono::microseconds period, int cpuAffinity)
-    : period_(period), cpuAffinity_(cpuAffinity) {}
+GameLoop::GameLoop(mm::node::DeviceManager& deviceManager, std::chrono::microseconds period,
+                   int cpuAffinity)
+    : period_(period), cpuAffinity_(cpuAffinity), deviceManager_(deviceManager) {}
 
 void GameLoop::addTask(CyclicTask* task) { tasks_.push_back(task); }
 
@@ -98,8 +99,16 @@ void GameLoop::run() {
     // steady_clock::now() is a vDSO CLOCK_MONOTONIC read on Linux — cheap enough
     // for the RT path; the three stores below are relaxed and single-writer.
     const auto workStart = std::chrono::steady_clock::now();
-    for (CyclicTask* task : tasks_) {
-      task->execute(ctx);
+    {
+      // Enter the cycle once for the whole task list. Falsy means no process image is published —
+      // the bus is not activated, or a rescan or re-map is in flight — so there is nothing for a
+      // task to drive and every task is skipped. Two atomic operations, and it never waits.
+      const mm::node::DeviceManager::CycleGuard cycle(deviceManager_);
+      if (cycle) {
+        for (CyclicTask* task : tasks_) {
+          task->execute(ctx);
+        }
+      }
     }
     const auto workEnd = std::chrono::steady_clock::now();
     const uint64_t execNs = static_cast<uint64_t>(

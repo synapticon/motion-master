@@ -345,18 +345,19 @@ class DeviceManager {
 
   /// @brief Holds a cyclic task's whole body open against a device-set rebuild. RT-safe.
   ///
+  /// **`GameLoop` constructs one for you, around the whole task list, every cycle. A cyclic task
+  /// never writes one.** It is public because the loop lives in another library, not because a task
+  /// author has anything to do with it.
+  ///
   /// A cyclic task resolves its own devices and parameters (@c findDevice / @c
   /// Device::findParameter) rather than being handed them, so it must not run while @c scan or
-  /// @c reset is destroying the device vector it walks. Construct one at the top of @c
-  /// CyclicTask::execute and do nothing when it is falsy:
+  /// @c reset is replacing the device set it walks. The loop therefore enters the cycle first and
+  /// calls no task at all when the guard is falsy:
   ///
   /// @code
-  /// void execute(const CycleContext&) override {
-  ///   const DeviceManager::CycleGuard cycle(deviceManager_);
-  ///   if (!cycle) { return; }   // bus not activated, or being reconfigured — skip this cycle
-  ///   Device* drive = deviceManager_.findDevice(3);
-  ///   if (drive == nullptr) { return; }   // not on the bus — skip
-  ///   ...
+  /// const DeviceManager::CycleGuard cycle(deviceManager_);   // in GameLoop::run
+  /// if (cycle) {
+  ///   for (CyclicTask* task : tasks_) { task->execute(ctx); }
   /// }
   /// @endcode
   ///
@@ -371,7 +372,8 @@ class DeviceManager {
   /// Never blocks, never allocates: one atomic increment and one atomic load.
   ///
   /// @warning Holding one across a control-plane call (@c scan, @c reset, @c transitionToState)
-  ///          deadlocks that call against its own drain. A cyclic task does none of those.
+  ///          deadlocks that call against its own drain. A cyclic task makes no such call, and the
+  ///          loop holds the guard for nothing else.
   class CycleGuard {
    public:
     /// @brief Enters the cycle. Falsy if the bus is not activated — run no device work.
@@ -397,9 +399,9 @@ class DeviceManager {
   /// which hold the set alive by refcount.
   ///
   /// **Lifetime.** The returned pointer — and any @c DeviceParameter* obtained through it — is
-  /// valid for the body of one cycle, inside one @c CycleGuard. A @c scan or @c reset publishes a
-  /// new set and drops the RT reference to the old one, so a cyclic task must re-resolve each cycle
-  /// and never cache a @c Device* across cycles.
+  /// valid for the body of one cycle, which is the scope @c GameLoop already holds the cycle open
+  /// for. A @c scan or @c reset publishes a new set and drops the RT reference to the old one, so a
+  /// cyclic task must re-resolve each cycle and never cache a @c Device* across cycles.
   ///
   /// **Position is not identity.** Inserting a device into the chain shifts every position after
   /// it, so a task pinned to position 4 can silently find different hardware there after a rescan.

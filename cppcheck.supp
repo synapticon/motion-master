@@ -66,6 +66,7 @@ syntaxError:*/integro_variant_test.cc
 syntaxError:*/ic_haus_registers_test.cc
 syntaxError:*/kuebler_registers_test.cc
 syntaxError:*/router_test.cc
+syntaxError:*/game_loop_test.cc
 syntaxError:*/soem_fieldbus_driver_test.cc
 
 // The ESI parser builds vectors by appending inside a range-for over an XML child range or a
@@ -128,19 +129,16 @@ unreadVariable:*/somanet_drive.cc
 // nlohmann::json array, is obscure rather than clearer. The loops stay.
 useStlAlgorithm:*/somanet_procedures.cc
 
-// The same shape one layer out: every route that touches a device does it through
-// withDeviceOr404, and every monitoring classification through withDevice. Both lend a mutable
-// Device& — that is what a borrow is for — and cppcheck flags the three lambdas out of a dozen
-// whose bodies happen to call only const methods. Splitting those three off would make the
-// signature look like a deliberate statement about the endpoint rather than an artefact of which
-// accessors it reached for. The uniform Device& is the point.
+// Every route that touches a device does it through withDeviceOr404, which lends a mutable Device&
+// because that is what a route does with one. cppcheck flags the three lambdas out of a dozen whose
+// bodies happen to call only const methods. Splitting those three off would make the signature look
+// like a deliberate statement about the endpoint rather than an artefact of which accessors it
+// reached for. The uniform Device& is the point.
 constParameterReference:*/http_server.cc
-constParameterReference:*/monitoring_manager.cc
 
-// The firmware installation procedure borrows a device per step to perform one FoE transfer or an
+// The firmware installation procedure resolves a device per step to perform one FoE transfer or an
 // EEPROM write. Those Device methods are const (they mutate the drive, not the object), so cppcheck
-// suggests a const Device& — but a lambda that flashes firmware announcing itself as taking a
-// const device reads as exactly backwards, and it would differ from every sibling lambda in the
-// file for a reason that is an artefact of where const sits on the wrapper. Same reasoning as the
+// suggests a const Device& for the lambdas that pass one on — but a function that flashes firmware
+// announcing itself as taking a const device reads as exactly backwards. Same reasoning as the
 // cia402_control.cc and somanet_control.cc entries above.
 constParameterReference:*/somanet_procedures.cc

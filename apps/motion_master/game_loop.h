@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "core/cyclic_task.h"
+#include "node/device_manager.h"
 
 /// @brief Snapshot of game-loop real-time health for the GET /api/game-loop
 ///        diagnostic endpoint. All fields are read with relaxed ordering — for
@@ -46,6 +47,12 @@ void to_json(nlohmann::json& j, const GameLoopHealth& h);
 class GameLoop {
  public:
   /// @brief Constructs the loop with the given cycle period.
+  ///
+  /// @param deviceManager  The device manager the loop enters a cycle on. The loop takes a
+  ///                       @c DeviceManager::CycleGuard around the whole task list each cycle, so a
+  ///                       task's own @c findDevice / @c findParameter results are valid for its
+  ///                       @c execute() by construction and no task has to take one itself. Must
+  ///                       outlive the loop.
   /// @param period  Time between cycle starts.  Typical value: 1000 µs (1 ms).
   /// @param cpuAffinity  Core to pin the RT thread to once run() is called, or a
   ///                     negative value (the default) to leave it unpinned.  Set
@@ -53,7 +60,8 @@ class GameLoop {
   ///                     see mm::core::setRealtimePriority().  Fixed for the
   ///                     lifetime of the loop — unlike the period, it is a
   ///                     deployment property, not something to retune live.
-  explicit GameLoop(std::chrono::microseconds period, int cpuAffinity = -1);
+  GameLoop(mm::node::DeviceManager& deviceManager, std::chrono::microseconds period,
+           int cpuAffinity = -1);
 
   /// @brief Destructor.  Does not call stop() — the caller is responsible for
   ///        stopping the loop before destroying it.
@@ -69,6 +77,11 @@ class GameLoop {
   ///
   /// Tasks are called in registration order after each timer tick.  Must be
   /// called before run() — not safe to call concurrently with a running loop.
+  ///
+  /// **A task runs only while the bus is activated.** The loop enters the cycle before calling any
+  /// task and skips them all when no process image is published, which is the state a rescan or a
+  /// re-map passes through. So a task never sees a device set being replaced, and a task that wants
+  /// to compute without a bus cannot do it here.
   ///
   /// @param task  Non-owning pointer.  The task must outlive every call to
   ///              run() — its pointer is only dereferenced while the loop is
@@ -164,5 +177,8 @@ class GameLoop {
   std::atomic<bool> memLocked_{false};    // mlockall succeeded in run()
   std::atomic<bool> cpuPinned_{false};    // affinity applied in run()
   const int cpuAffinity_;                 // core to pin to; < 0 = leave unpinned
+  // The cycle the loop enters before calling any task. Held for the whole task list, so a task's
+  // device and parameter lookups stay valid without the task naming the guard at all.
+  mm::node::DeviceManager& deviceManager_;
   std::vector<CyclicTask*> tasks_;
 };

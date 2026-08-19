@@ -93,8 +93,9 @@ Six rules carry almost all of the correctness.
 2. **The real-time path reaches a device without a lock. Only a convention keeps that safe.**
    `DeviceManager::findDevice` and `Device::findParameter` are public and take no lock, because a
    cyclic task must resolve its signals without a block. The obligation that replaces the lock is
-   [`DeviceManager::CycleGuard`](#the-cycle-gate). A task holds one `CycleGuard` for its whole body,
-   and inside it the raw lookups are safe. Off the real-time thread, use `deviceAt` instead. A raw
+   [`DeviceManager::CycleGuard`](#the-cycle-gate), and **`GameLoop` takes it for the task**, around
+   the whole task list, every cycle. So the raw lookups inside `execute` are safe by construction
+   and a task author writes nothing. Off the real-time thread, use `deviceAt` instead. A raw
    `findDevice` there resolves a device from the raw published pointer, with nothing holding that
    set alive. This is the one place in this file where safety rests on a documented obligation.
    Everywhere else the design makes the mistake impossible to write. Both declarations carry the
@@ -241,7 +242,7 @@ is safe for the same reason. The two routes split by caller:
 | Caller | Route | What holds the device still |
 | --- | --- | --- |
 | control plane: HTTP worker, procedure, sampler | `deviceAt`, `deviceSet`, or a position-based method | a `shared_ptr` to the set. No lock |
-| real-time cyclic task | `findDevice` inside a `CycleGuard` | the published set pointer and the `inCycle` drain. No lock |
+| real-time cyclic task | `findDevice`, inside the cycle `GameLoop` has entered | the published set pointer and the `inCycle` drain. No lock |
 
 Anything else is a defect. A raw `findDevice` off the real-time thread resolves a `Device*` with
 nothing holding its set alive. That code compiles, so the warning lives on the declaration, and this
@@ -304,8 +305,8 @@ field. Each of the three takes the lock, and each is the right choice on the con
 `findParameter()` is the exception. It is **public**, for the same reason as `findDevice`. A cyclic
 task resolves its signals that way once per cycle. No lock it could take is real-time safe. Its
 contract splits by caller. A control-plane caller must hold `parametersMutex_` for the lookup *and*
-for every access to a non-atomic field. A cyclic task holds a `CycleGuard` and touches only the
-cell.
+for every access to a non-atomic field. A cyclic task runs inside the cycle the loop entered and
+touches only the cell.
 
 ### 5. `FieldbusDriver::controlPlaneMutex_` — one socket transaction
 
@@ -389,7 +390,8 @@ each side:
 
 - **Real-time side.** Raise `inCycle` **before** the load of the image. Then load the image. Back
   out if it is null. The code does this at two levels: `exchangeProcessData` around the exchange
-  itself, and `CycleGuard` one level up, around a whole cyclic-task body. That is the reason that
+  itself, and `CycleGuard` one level up, taken by `GameLoop` around the whole task list. That is the
+  reason that
   `inCycle` is a **depth counter and not a flag**.
 - **Control-plane side.** `ProcessData::pauseCycle` stores `nullptr`, **then** waits for `inCycle`
   to reach zero.
@@ -403,11 +405,11 @@ image for a mutation that is not a teardown. The swap of the parameter map of a 
 that needs it. A re-map or a rescan publishes a freshly built image instead, or publishes nothing at
 all.
 
-**The pause protects more than the IOmap.** A cyclic task inside a `CycleGuard` resolves devices
-through `publishedSet_` and dereferences `DeviceParameter` objects. So the same drain is what makes
-two other changes safe: the swap of `publishedSet_` in `scan` and `reset`, and the replacement of a
-parameter map in `initializeParameters`. Neither needs a lock that the real-time thread would also
-have to take.
+**The pause protects more than the IOmap.** A cyclic task, inside the cycle the loop entered,
+resolves devices through `publishedSet_` and dereferences `DeviceParameter` objects. So the same
+drain is what makes two other changes safe: the swap of `publishedSet_` in `scan` and `reset`, and
+the replacement of a parameter map in `initializeParameters`. Neither needs a lock that the
+real-time thread would also have to take.
 
 The bound on the drain is **200 ms** (`libs/node/device_manager.cc`). Expiry is not silent.
 `stopExchange` logs a warning, and it names the action that it takes next. It takes that action in
@@ -535,8 +537,8 @@ ill-formed on libc++ and on MSVC.
 Each item below must stay true. Something in the code relies on each one today.
 
 1. **The real-time thread acquires no mutex.** Verify it by inspection of `exchangeProcessData`, of
-   `CycleGuard`, and of everything a registered `CyclicTask` calls. `Device::value<T>()` and
-   `Device::setValue<T>()` are the only value access permitted there.
+   `CycleGuard`, of `GameLoop::run`, and of everything a registered `CyclicTask` calls.
+   `Device::value<T>()` and `Device::setValue<T>()` are the only value access permitted there.
 2. **No subsystem mutex is held during a call to a `DeviceManager` method.** This covers the
    monitoring, refresher, and procedure mutexes. It is what keeps the lock graph acyclic.
 3. **No caller holds `parametersMutex_` across a bus transfer.**
@@ -544,7 +546,7 @@ Each item below must stay true. Something in the code relies on each one today.
    There are two sanctioned exceptions, and both substitute the cycle gate for the mutex.
    `ProcessImageEntry::parameter` is one: every re-map rebuilds it, and every change that
    invalidates it pauses the cycle. The per-cycle lookup of a cyclic task is the other: it holds
-   inside one `CycleGuard`, never across cycles.
+   inside one cycle, never across cycles.
 5. **A published `DeviceSet` is never modified.** `init` and `scan` build a new one and publish it.
    A caller that holds a handle on a retired set may read it and may drive its device; the transfer
    fails on the bus rather than in memory.
@@ -553,9 +555,9 @@ Each item below must stay true. Something in the code relies on each one today.
    storage, `publishedSet_`, and the `parameters_` map of a device.** A cyclic task reads the last
    two, so the pause is not only about the IOmap.
 8. **`generations` retains every published `ProcessImage` until `reset()`.**
-9. **A cyclic task holds a `CycleGuard` for its whole body, and does nothing when the guard is
-   falsy.** On the real-time thread, no `findDevice` result, no `findParameter` result, and no cell
-   access is valid outside one.
+9. **`GameLoop` holds a `CycleGuard` around every call to `CyclicTask::execute`, and calls no task
+   when the guard is falsy.** On the real-time thread, no `findDevice` result, no `findParameter`
+   result, and no cell access is valid outside one. A task therefore takes none itself.
 10. **No code holds a `CycleGuard` across a control-plane call.** The drain of that call would wait
     on the guard forever.
 11. **A writer changes the non-atomic fields of an entry only under `parametersMutex_` *and* with
@@ -584,9 +586,9 @@ So three practical rules apply to a change on this page:
 - Prefer a design where the mistake does not compile. Borrow-or-copy beats a raw accessor, because
   it is the only enforcement here that does not depend on someone's memory. Where the real-time
   path forces a raw accessor, as `findDevice` and `findParameter` do, move the obligation to an
-  object that the caller must construct. `CycleGuard` is that object. A sentence that the caller may
-  never read is not enough. This is the weakest enforcement in the file, so keep it inside the
-  real-time surface.
+  object that the caller must construct — or, better still, to a caller that cannot forget.
+  `CycleGuard` is that object, and `GameLoop` is that caller: it enters the cycle around every task,
+  so a Tier-3 author cannot omit it. A sentence that the caller may never read is not enough.
 - Treat "the tests pass" as evidence about behaviour, not as evidence about synchronisation.
 
 ## Accepted trade-offs

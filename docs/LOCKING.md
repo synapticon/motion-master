@@ -121,6 +121,7 @@ This file uses the vocabulary of the code. Read this table first if the reposito
 | WKC | Working counter. The number of devices that answered a frame. |
 | `DeviceSet` | One published generation of the bus: the driver, the devices, and the topology generation. Immutable once published. |
 | `DeviceHandle` | A device plus a `shared_ptr` to the set that holds it alive. What `deviceAt` returns. |
+| Cell | Where one object's value lives: `DeviceParameter::bits`, read and written atomically. A device owns its cells and never destroys one. |
 | Procedure | Off-real-time command-and-wait work on one device, such as offset detection. |
 
 ## Which threads run at the same time
@@ -146,7 +147,7 @@ HTTP thread, so the two calls are serialised."
 | 1 | `DeviceManager::busOperationMutex_` | `std::mutex` | `libs/node/device_manager.h` | nothing. It is a token over an *activity* | `init`, `scan`, `reset`, `configureProcessData`, `transitionToState`, `writeDevicePdoMapping` | **yes**, for the whole operation, which can take seconds |
 | 2 | `DeviceManager::currentSetMutex_` | `std::mutex` | `libs/node/device_manager.h` | the `shared_ptr<DeviceSet>` itself, and nothing it points at | `deviceAt`, `deviceSet`, and `publishDeviceSet` | **no**. One pointer copy |
 | 3 | `DeviceManager::processDataMutex_` | `std::shared_mutex` | `libs/node/device_manager.h` | `pd_->ring`'s storage and `pd_->generations` | exclusive: `allocate` and `clear`, in the re-map publish window and in `scan`/`reset`. shared: the recorder accessors, `processImageInfo`, `serializeDump` | **no** |
-| 4 | `Device::parametersMutex_` | `std::mutex`, held through a `unique_ptr` | `libs/node/device.h` | the *structure* of `parameters_`, the non-atomic fields of an entry, and `caSupport_`. **Not** the atomic cell | every control-plane parameter read or write. **Not** `value<T>()` or `setValue<T>()` | **no**. It is released for every transfer |
+| 4 | `Device::parametersMutex_` | `std::mutex`, held through a `unique_ptr` | `libs/node/device.h` | the *structure* of `parameters_`, appends to the cell arena `cells_`, the mutable non-atomic fields of a cell, and `caSupport_`. **Not** the atomic value | every control-plane parameter read or write. **Not** `value<T>()` or `setValue<T>()` | **no**. It is released for every transfer |
 | 5 | `FieldbusDriver::controlPlaneMutex_` | `std::mutex` | `libs/comm/fieldbus_driver.h` | the SOEM context `ctx_` and the whole control plane: SDO, FoE, ESC registers, SII, AL state | every driver method except `exchangeProcessData` and `slaveState` | **yes**, for one transaction. FoE is the exception and holds it for the whole transfer |
 | 6 | `MonitoringManager::mutex_` and `cv_` | `std::mutex`, `std::condition_variable` | `libs/node/monitoring_manager.h` | `entries_`, `running_`, `nextEpoch_`, `publish_` | the sampler thread, the `/api/monitorings` handlers, `keepFresh`, `stopKeepingFresh` | **no**. It is dropped for the flush |
 | 7 | `ParameterRefresher::mutex_` and `cv_` | `std::mutex`, `std::condition_variable` | `libs/node/parameter_refresher.h` | `entries_`, `running_` | the refresher thread, and `acquire` or `release` from the sampler path | **no**. It is dropped for the poll |
@@ -236,10 +237,9 @@ remove even that mutex, but it is not lock-free, and libc++ does not implement i
 **A rescan neither waits for a holder nor invalidates one.** `scan` publishes a new set; the old one
 is freed when its last holder releases it. While a holder still has it, that device is *valid but no
 longer fed*: reads serve its last values, `exchangesProcessData()` is false, and a write reaches no
-wire. A procedure that was running keeps
-working against its own device. Because the retired set also owns the driver, that device's next
-transfer reaches a live driver object on a bus that has moved on, and fails as an error rather than
-a crash.
+wire. A procedure that was running keeps working against its own device. Because the retired set
+also owns the driver, that device's next transfer reaches a live driver object on a bus that has
+moved on, and fails as an error rather than a crash.
 
 **The real-time thread reads `publishedSet_`, not the `shared_ptr`.** The control plane replaces
 that raw pointer only with the cycle drained (`ProcessData::pauseCycle`), so a cyclic task inside a
@@ -291,21 +291,25 @@ FoE file transfer holds that lock for its whole duration of several seconds. So 
 background parameter refresh and a user on the FoE page, which is the ordinary configuration and
 not a rare one. A lock across the transfer stalls every cached read of the device.
 
-**The obligation on callers:** never carry a `DeviceParameter*` across the release, because
-`initializeParameters` replaces the whole map. Find the entry again after the transfer. Treat a
-miss, or a changed `dataType`, as re-enumeration in the middle of the transfer. Do not assume that
-the case cannot happen.
+**The obligation on callers:** find the entry again after the transfer, rather than carrying a
+`DeviceParameter*` across the release. The pointer does not dangle — a cell outlives every
+re-enumeration — but the map may no longer name it, because a re-declared object gets a new cell and
+the old one is orphaned. Treat a miss as re-enumeration in the middle of the transfer, and do not
+assume the case cannot happen.
 
 **This mutex does not guard the value.** The scalar value of a parameter lives in
 `DeviceParameter::bits`, a `uint64_t` reached through `std::atomic_ref`. Readers and writers touch
 it with no lock at all, as [the parameter cell](#the-parameter-cell) describes. This mutex guards
-the *structure* of the map and the *non-atomic* fields of an entry: `dataType`, `bitLength`,
-`syncState`, `rawValue`, and `name`. That split is what makes `Device::value<T>()` callable from
-the real-time loop while `readParameter` stays a locked control-plane call.
+the *structure* of the map, appends to the arena, and the mutable non-atomic fields of a cell:
+`syncState`, `rawValue`, `name`, and the annotation an enumeration brings. That split is what makes
+`Device::value<T>()` callable from the real-time loop while `readParameter` stays a locked
+control-plane call.
 
-The split also explains the hazard of re-enumeration. A rewrite of `dataType` under a concurrent
-real-time decode is a data race on a field that the decode reads. So `publishParameters` pauses
-the real-time cycle across the swap. This mutex alone is not enough.
+**`dataType` and `bitLength` never change once a cell is published.** The real-time decode reads
+both without a lock, so a re-declared object gets a *new* cell instead of a rewrite of the old one.
+What still needs the cycle paused is the map swap itself, because a cyclic task resolves its
+parameters by lookup — so `publishParameters` pauses across the swap and this mutex alone is not
+enough.
 
 **The map hands out copies, with one deliberate exception.** `parameter()` returns a copy of one
 entry. `parametersOrdered()` returns a snapshot of all entries. `value(index, subindex)` returns one
@@ -436,14 +440,14 @@ any case. The accepted trade is simple: a stalled real-time loop must never hang
 call. The log line is what keeps the trade visible. Memory corruption with nothing in the log to
 explain it is the failure mode that costs days.
 
-Note what the gate does **not** check: `driver_`. A test of it on the real-time thread is an
-unsynchronised read of a `unique_ptr`. `init` and `reset` write that pointer under a lock that the
-real-time thread never takes. A non-null image already implies a live driver. The memory ordering
-establishes that. A check is not an option, because the real-time thread has no safe way to make
-one.
+Note what the gate does **not** check: the driver. It lives in the published `DeviceSet`, which the
+real-time thread reaches only through `publishedSet_`. A non-null image already implies a live set
+with a live driver, because only `remapProcessImage` publishes an image and it needs both. The
+memory ordering establishes that, and the real-time thread has no safe way to check it directly.
 
-`generations` **retains** every published image until `reset()`. So a lock-free reader can never
-dereference a freed image after a re-map republishes.
+`generations` **retains** every published image until the next `scan()` or `reset()`, which clear it
+with the cycle already drained. So a lock-free reader can never dereference a freed image after a
+re-map republishes.
 
 ### The parameter cell
 
@@ -492,11 +496,13 @@ each exchange, in `decodeInputsIntoCells`. One hash lookup per mapped object cos
 device. At 50 devices and 40 objects each it costs **60 µs to 100 µs against a 1 ms grid**. So the
 decode walks contiguous entries and does no lookup at all.
 
-The validity of that pointer follows directly from the cycle gate. Only two things invalidate it:
-`initializeParameters`, which replaces the map, and `scan` or `reset`, which destroy the device.
-**All three pause the real-time cycle across the change**, and a re-map rebuilds every entry. A
-`nullptr` is legal. It means that the dictionary was not enumerated when the code built the image.
-The object still exchanges. It simply has nowhere to decode into.
+The validity of that pointer rests on the cell arena, not on the cycle gate. **A re-enumeration
+cannot invalidate it**: `publishParameters` keeps the cell whenever the declaration is unchanged,
+and allocates a new one otherwise, so the pointer keeps addressing a live cell either way. Only
+`scan` and `reset` end it, by retiring the device that owns the arena, and both drain the cycle
+first. A re-map rebuilds every entry in any case. A `nullptr` is legal. It means that the dictionary
+was not enumerated when the code built the image. The object still exchanges. It simply has nowhere
+to decode into.
 
 The eager decode is a **read-path** decision. It makes `value<T>()` one lookup plus one atomic load.
 The alternative is more work. It loads the published image, finds the object inside it, then
@@ -561,34 +567,37 @@ Each item below must stay true. Something in the code relies on each one today.
 2. **No subsystem mutex is held during a call to a `DeviceManager` method.** This covers the
    monitoring, refresher, and procedure mutexes. It is what keeps the lock graph acyclic.
 3. **No caller holds `parametersMutex_` across a bus transfer.**
-4. **A `DeviceParameter*` never crosses a release of `parametersMutex_`** on the control plane.
-   There are two sanctioned exceptions, and both substitute the cycle gate for the mutex.
-   `ProcessImageEntry::parameter` is one: every re-map rebuilds it, and every change that
-   invalidates it pauses the cycle. The per-cycle lookup of a cyclic task is the other: it holds
-   inside one cycle, never across cycles.
-5. **A published `DeviceSet` is never modified**, and it lives exactly as long as its holders.
+4. **A cell is never destroyed while its `Device` lives.** `publishParameters` reuses or appends;
+   it never erases. That is what lets `ProcessImageEntry::parameter` be resolved once at publish and
+   read every cycle afterwards. A cell dies with its device, when the retired `DeviceSet` is
+   released.
+5. **A control-plane caller re-finds a parameter after it releases `parametersMutex_`.** The pointer
+   stays valid, but the map may name a different cell after a re-enumeration.
+6. **A published `DeviceSet` is never modified**, and it lives exactly as long as its holders.
    `init` and `scan` build a new one and publish it. A caller holding a handle on a retired set may
    read it and may drive its device; the transfer fails on the bus rather than in memory. On the
    real-time thread the drain takes the place of the handle, so a task must not cache a pointer
    across cycles.
-6. **Every reader of `pd_->ring` or `pd_->generations` holds `processDataMutex_` shared.**
-7. **`pauseCycle()`, through `stopExchange()`, precedes every mutation of these: the IOmap, the ring
+7. **Every reader of `pd_->ring` or `pd_->generations` holds `processDataMutex_` shared.**
+8. **`pauseCycle()`, through `stopExchange()`, precedes every mutation of these: the IOmap, the ring
    storage, `publishedSet_`, and the `parameters_` map of a device.** A cyclic task reads the last
    two, so the pause is not only about the IOmap.
-8. **`generations` retains every published `ProcessImage` until `reset()`.**
-9. **`GameLoop` holds a `CycleGuard` around every call to `CyclicTask::execute`, and calls no task
-   when the guard is falsy.** On the real-time thread, no `findDevice` result, no `findParameter`
-   result, and no cell access is valid outside one. A task therefore takes none itself.
-10. **No code holds a `CycleGuard` across a control-plane call.** The drain of that call would wait
+9. **`generations` retains every published `ProcessImage` until the next `scan()` or `reset()`.**
+   Both clear it after `stopExchange()` has drained the cycle and unpublished the image.
+10. **`GameLoop` holds a `CycleGuard` around every call to `CyclicTask::execute`, and calls no task
+    when the guard is falsy.** On the real-time thread, no `findDevice` result, no `findParameter`
+    result, and no cell access is valid outside one. A task therefore takes none itself.
+11. **No code holds a `CycleGuard` across a control-plane call.** The drain of that call would wait
     on the guard forever.
-11. **A writer changes the non-atomic fields of an entry only under `parametersMutex_` *and* with
-    the real-time cycle paused.** The fields are `dataType`, `bitLength`, `rawValue`, `syncState`,
-    and `name`. The real-time decode reads `dataType` and `bitLength` without a lock.
-12. **Every read surface of `DeviceManager` works from a snapshot.** That includes `busConfig`,
+12. **`dataType` and `bitLength` are fixed when a cell is published**, because the real-time decode
+    reads both without a lock. A new declaration gets a new cell. The mutable non-atomic fields —
+    `rawValue`, `syncState`, `name`, and the annotation — change only under `parametersMutex_`, and
+    `publishParameters` swaps the map with the cycle paused.
+13. **Every read surface of `DeviceManager` works from a snapshot.** That includes `busConfig`,
     `initialised`, `deviceStates`, `deviceDiagnostics`, `dcSync`, and `processDataWatchdog`: each
     takes a `shared_ptr` to the current set and reads that, so none of them can observe a set being
     built. The real-time exceptions read `publishedSet_`, guarded by the cycle gate instead.
-13. **`publishedSet_` is replaced only with the real-time cycle drained**, by `publishDeviceSet`,
+14. **`publishedSet_` is replaced only with the real-time cycle drained**, by `publishDeviceSet`,
     whose callers hold `busOperationMutex_` and have called `stopExchange`.
 
 ## How we check these rules
@@ -624,9 +633,9 @@ Each item below is known and deliberate. None is a defect.
   for its latency. The fix, if that changes, is to chunk the dump. Take the lock per record.
   Tolerate a re-map that ends the span early, exactly as a lapped cursor already does.
 - **A retired `DeviceSet` lives until its last holder drops it.** A long procedure therefore keeps a
-  full device set — devices, parameter maps, and the driver — alive after a rescan has replaced it.
-  The memory is transient rather than retained, and the alternative is a rescan that waits minutes
-  for a procedure to finish.
+  full device set — devices, their parameter maps and cells, and the driver — alive after a rescan
+  has replaced it. The memory is transient rather than retained, and the alternative is a rescan
+  that waits minutes for a procedure to finish.
 - **`SoemFieldbusDriver::exchangeProcessData` reads `ctx_` lock-free**, while `closeContext` writes
   it under `controlPlaneMutex_`. This is correct only because `stopExchange()` orders the two
   upstream. The dependency is easy to miss, so this list names it. The alternative is a lock on the

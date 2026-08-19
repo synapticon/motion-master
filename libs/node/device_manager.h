@@ -908,10 +908,9 @@ class DeviceManager {
 
   /// @brief Publishes @p set as the current generation. Call with @c busOperationMutex_ held.
   ///
-  /// Swaps the shared pointer readers copy, then hands the RT thread the raw pointer. The caller
-  /// must have drained the RT cycle first (@c stopExchange), because that is what makes replacing
-  /// @c rtSet_ safe: no cyclic task can still be inside a @c CycleGuard reading the set it points
-  /// at.
+  /// Swaps the shared pointer readers copy, retains the set in @c setGenerations_, then hands the
+  /// RT thread the raw pointer. The caller must have drained the RT cycle first (@c stopExchange),
+  /// so no cyclic task is inside a @c CycleGuard reading the pointer this replaces.
   void publishDeviceSet(std::shared_ptr<DeviceSet> set);
 
   // busOperationMutex_ — "one control-plane operation drives the bus at a time". It guards no
@@ -944,13 +943,10 @@ class DeviceManager {
   // be left reading freed memory.
   std::vector<std::shared_ptr<DeviceSet>> setGenerations_;
 
-  // The same set as a raw pointer, for the RT thread, which must not touch a shared_ptr. Written by
-  // the control plane only with the RT cycle drained (ProcessData::pauseCycle), so a cyclic task
-  // inside a CycleGuard can dereference it for the whole body. rtSet_ is the strong reference that
-  // keeps that object alive; the control plane replaces it only after a drain, so the set the RT
-  // thread may still be reading is never the one being freed.
+  // The same set as a raw pointer, for the RT thread, which must not touch a shared_ptr. It needs
+  // no strong reference of its own: setGenerations_ above holds every published set until reset(),
+  // and reset() drains the cycle and clears this pointer before it drops them.
   std::atomic<DeviceSet*> publishedSet_{nullptr};
-  std::shared_ptr<DeviceSet> rtSet_;
 
   // processDataMutex_ — the two non-atomic members of ProcessData: the recorder ring's storage and
   // the retained image generations. The ring is lock-free for one writer and many readers, but

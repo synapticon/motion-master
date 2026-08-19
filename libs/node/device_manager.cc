@@ -40,7 +40,7 @@ DeviceManager::DeviceManager()
     : currentSet_(std::make_shared<DeviceSet>()), pd_(std::make_unique<ProcessData>()) {
   // An empty set from construction on, so deviceSet() never returns null and no reader needs a
   // "before init()" branch. The RT view stays null until something is published.
-  rtSet_ = currentSet_;
+  setGenerations_.push_back(currentSet_);
 }
 
 DeviceManager::~DeviceManager() = default;
@@ -211,6 +211,10 @@ void DeviceManager::reset() {
   // cycle, so no cyclic task is inside a body holding a pointer into one of them.
   {
     const std::lock_guard lock(currentSetMutex_);
+    // Clear the RT view before dropping the sets, so the pointer never names freed memory even for
+    // the instant between the two. The cycle is already drained and the image unpublished, so
+    // nothing is reading it.
+    publishedSet_.store(nullptr, std::memory_order_release);
     setGenerations_.clear();
   }
   // An empty set takes over, so every reader gets a set with no devices and no driver from here on.
@@ -256,10 +260,8 @@ void DeviceManager::publishDeviceSet(std::shared_ptr<DeviceSet> set) {
     // rather than merely lucky. Same policy, same sentence, as the retained process images.
     setGenerations_.push_back(set);
   }
-  // The RT view. Safe to replace because every caller drains the cycle first, so no cyclic task is
-  // inside a CycleGuard holding the set this drops.
+  // The RT view of the same object, which setGenerations_ keeps alive.
   publishedSet_.store(set.get(), std::memory_order_release);
-  rtSet_ = std::move(set);
 }
 
 Device* DeviceSet::find(uint16_t slavePosition) {

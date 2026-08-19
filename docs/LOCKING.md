@@ -7,29 +7,73 @@
 > [CLASS_DIAGRAM.md](CLASS_DIAGRAM.md) shows ownership. [RT_SCHEDULING.md](RT_SCHEDULING.md)
 > covers `SCHED_FIFO` and `mlockall`.
 
-Motion Master holds ten mutexes, two condition variables, and four lock-free protocols. Some
-standalone atomics sit beside them. This file lists all of them in one place.
+Motion Master holds ten mutexes, two condition variables, and four lock-free protocols. This file
+lists all of them. Read the page below and stop; the rest is reference for the moment you change
+something.
 
-**Device lifetime is not one of their jobs.** A published `DeviceSet` is owned by a `shared_ptr`, so
-every off-real-time caller keeps the devices it works with alive by holding a pointer, not a lock.
-Eight of the ten mutexes therefore guard one small thing each, and only one is ever held across bus
-input or output.
+## The model on one page
 
-The real-time loop takes no lock. So no mutex can protect anything that the loop touches. Four
-lock-free protocols do that job instead:
+**Who owns what.**
 
-- **The cycle gate** stops the control plane from freeing the process image, a device, or a
-  parameter map while the real-time thread uses it.
-- **The parameter cell** is the single home of a scalar value. Any thread reads it or writes it with
-  one atomic access.
-- **The recorder ring** carries one record per cycle from the real-time thread to the monitoring
-  readers and to the dump.
-- **The AL-state mirror** reports the state of a device without the driver lock, which a firmware
-  transfer holds for several seconds.
+```text
+DeviceManager
+ ├── shared_ptr<DeviceSet>          currentSet_       the live generation
+ ├── vector<shared_ptr<DeviceSet>>  setGenerations_   every generation published since reset()
+ ├── atomic<DeviceSet*>             publishedSet_     the live generation, for the RT thread
+ └── unique_ptr<ProcessData>        pd_               created once, never replaced
+      ├── atomic<const ProcessImage*>          image        the live layout
+      ├── vector<shared_ptr<const ProcessImage>> generations every layout since the last scan
+      ├── ProcessDataRing                      ring         one record per cycle
+      └── atomic<int>                          inCycle      how deep the RT thread is in a cycle
 
-A cyclic task reads and writes device values inside the real-time loop, and it acquires nothing.
-Those four protocols are what makes that surface safe. A change to `Device`, `DeviceParameter`, or
-`ProcessData` is a change to this file.
+DeviceSet — immutable once published
+ ├── shared_ptr<FieldbusDriver>  driver
+ └── vector<Device>              devices
+      └── Device
+           ├── deque<DeviceParameter>             cells_       the values. Never erased
+           └── map<key, DeviceParameter*>         parameters_  replaced by each enumeration
+```
+
+**Four rules.**
+
+1. **Published, immutable, retained.** A device set, a process image and a parameter cell are
+   published once and never modified afterwards. A change publishes a new one and keeps the old, so
+   a pointer into it stays valid — *valid but no longer fed*. Reads serve the last values; writes
+   reach no wire.
+2. **Off the real-time thread, hold a refcount, never a lock.** `deviceAt()` returns a
+   `DeviceHandle`; `deviceSet()` returns the set. Either keeps its devices alive for as long as you
+   hold it. Nothing waits for you, and no rescan can invalidate you.
+3. **The real-time thread holds neither.** `GameLoop` enters the cycle before it calls any task, and
+   every operation that frees something drains the cycle first. That is the whole real-time
+   contract.
+4. **Only `reset()` frees a device.** `scan()` publishes a new set and retains the old one, so
+   memory grows with rescans until `reset()`.
+
+**Who frees what.**
+
+| Operation | Frees | Safe because |
+| --- | --- | --- |
+| `scan()` | retained images, ring storage | the RT thread touches both only inside `exchangeProcessData`, which is drained first |
+| a re-map | ring storage, re-allocated for the new layout | the same drain |
+| a re-enumeration | nothing | a cell is reused or added, never erased |
+| `reset()` | every device set, every cell, the images, the ring | `stopExchange()` drains the cycle, so no task is inside one |
+| `~DeviceManager` | everything | the loop has stopped |
+
+**The locks, one line each.**
+
+| Lock | Covers | Longest hold |
+| --- | --- | --- |
+| `busOperationMutex_` | one control-plane operation drives the bus at a time | a whole scan or AL transition — seconds |
+| `Device::parametersMutex_` | the parameter map, and a cell's non-atomic fields | never across bus I/O |
+| `FieldbusDriver::controlPlaneMutex_` | one socket transaction | one FoE transfer — seconds |
+| `currentSetMutex_` | one `shared_ptr` copy | nanoseconds |
+| `processDataMutex_` | the ring storage and the retained images | one `.mmpd` dump |
+| monitoring, refresher, procedure | each subsystem's own registry | never across a `DeviceManager` call |
+
+Lock order is `busOperationMutex_` → `Device::parametersMutex_` →
+`FieldbusDriver::controlPlaneMutex_`. The bottom three rows are leaves: nothing is ever acquired
+while one of them is held. The [inventory](#mutex-inventory) below lists all ten, including the
+per-run procedure locks and the log sink that this summary folds together.
 
 To find every primitive in the source, run:
 
@@ -40,7 +84,6 @@ grep -rn 'std::mutex\|shared_mutex\|condition_variable\|std::atomic' libs apps
 ## Contents
 
 - [Terms](#terms)
-- [The six rules](#the-six-rules)
 - [Which threads run at the same time](#which-threads-run-at-the-same-time)
 - [Mutex inventory](#mutex-inventory)
 - [Lock order](#lock-order)
@@ -79,44 +122,6 @@ This file uses the vocabulary of the code. Read this table first if the reposito
 | `DeviceSet` | One published generation of the bus: the driver, the devices, and the topology generation. Immutable once published. |
 | `DeviceHandle` | A device plus a `shared_ptr` to the set that holds it alive. What `deviceAt` returns. |
 | Procedure | Off-real-time command-and-wait work on one device, such as offset detection. |
-
-## The six rules
-
-Six rules carry almost all of the correctness.
-
-1. **Off the real-time thread, device lifetime is a refcount.** `DeviceManager::deviceAt` returns a
-   `DeviceHandle`, and `deviceSet` returns a `shared_ptr<DeviceSet>`. Either one keeps its devices
-   constructed for as long as the caller holds it, and neither holds a lock. `init` and `scan`
-   publish a *new* set instead of rebuilding the old one, so a reader is never waited for and never
-   invalidated. `Device` still hands out no reference into `parameters_`: `parameter`,
-   `parametersOrdered`, and `value` return copies taken under its own mutex.
-2. **The real-time path reaches a device without a lock. Only a convention keeps that safe.**
-   `DeviceManager::findDevice` and `Device::findParameter` are public and take no lock, because a
-   cyclic task must resolve its signals without a block. The obligation that replaces the lock is
-   [`DeviceManager::CycleGuard`](#the-cycle-gate), and **`GameLoop` takes it for the task**, around
-   the whole task list, every cycle. So the raw lookups inside `execute` are safe by construction
-   and a task author writes nothing. Off the real-time thread, use `deviceAt` instead. A raw
-   `findDevice` there resolves a device from the raw published pointer, with nothing holding that
-   set alive. This is the one place in this file where safety rests on a documented obligation.
-   Everywhere else the design makes the mistake impossible to write. Both declarations carry the
-   warning. Keep the pattern inside the real-time surface.
-3. **The real-time thread takes no lock, ever.** An atomic image pointer and an atomic depth counter
-   gate `DeviceManager::exchangeProcessData` and `CycleGuard`. No mutex gates them. Everything the
-   real-time thread touches is lock-free by construction: the IOmap, the parameter cells, and the
-   recorder ring. `CycleGuard` is not a lock. It does one atomic increment and one atomic load, and
-   it never waits.
-4. **`FieldbusDriver::controlPlaneMutex_` covers one transaction.
-   `DeviceManager::busOperationMutex_` covers one operation.** The first serialises a single socket
-   round-trip. The second serialises a whole activity of many transactions, such as a scan, an AL
-   transition, or a re-map. They are not two tiers of one thing, and a caller often holds only one
-   of them.
-5. **The two leaf mutexes guard one small thing each, and nothing waits behind them.**
-   `currentSetMutex_` is held long enough to copy one `shared_ptr`. `processDataMutex_` guards the
-   recorder ring's storage and the retained image generations against `allocate` and `clear`.
-   Nothing is ever acquired while either is held.
-6. **A lock is never held across bus input or output, except `controlPlaneMutex_`.** That one lock
-   covers exactly one transfer. `Device::parametersMutex_` shows the pattern: take the lock, release
-   it for the transfer, then take it again to commit.
 
 ## Which threads run at the same time
 
@@ -238,9 +243,9 @@ a crash.
 
 **The real-time thread reads `publishedSet_`, not the `shared_ptr`.** The control plane replaces
 that raw pointer only with the cycle drained (`ProcessData::pauseCycle`), so a cyclic task inside a
-[`CycleGuard`](#the-cycle-gate) can dereference it for the whole body. `rtSet_` is the strong
-reference that keeps that object alive, and the control plane replaces it at the same moment, which
-is safe for the same reason. The two routes split by caller:
+[`CycleGuard`](#the-cycle-gate) can dereference it for the whole body. The set it names needs no
+strong reference of its own: `setGenerations_` holds every published set until `reset()`, and
+`reset()` clears this pointer before it drops them. The two routes split by caller:
 
 | Caller | Route | What holds the device still |
 | --- | --- | --- |
@@ -382,8 +387,19 @@ every run, because no run holds a lock. A `scan()` can land in the middle of one
 
 ## Lock-free protocols
 
-These four protocols carry the real-time path. Each one is a *protocol*, not merely an atomic. The
-memory ordering is the mechanism.
+The real-time loop takes no lock, so no mutex can protect what it touches. Four protocols do that
+job:
+
+- **The cycle gate** stops the control plane from freeing the process image, a device, or a
+  parameter map while the real-time thread uses it.
+- **The parameter cell** is the single home of a scalar value. Any thread reads it or writes it with
+  one atomic access.
+- **The recorder ring** carries one record per cycle from the real-time thread to the monitoring
+  readers and to the dump.
+- **The AL-state mirror** reports the state of a device without the driver lock, which a firmware
+  transfer holds for several seconds.
+
+Each one is a *protocol*, not merely an atomic. The memory ordering is the mechanism.
 
 ### The cycle gate
 
@@ -570,8 +586,8 @@ Each item below must stay true. Something in the code relies on each one today.
     `initialised`, `deviceStates`, `deviceDiagnostics`, `dcSync`, and `processDataWatchdog`: each
     takes a `shared_ptr` to the current set and reads that, so none of them can observe a set being
     built. The real-time exceptions read `publishedSet_`, guarded by the cycle gate instead.
-13. **`publishedSet_` and `rtSet_` are replaced only with the real-time cycle drained**, by
-    `publishDeviceSet`, whose callers hold `busOperationMutex_` and have called `stopExchange`.
+13. **`publishedSet_` is replaced only with the real-time cycle drained**, by `publishDeviceSet`,
+    whose callers hold `busOperationMutex_` and have called `stopExchange`.
 
 ## How we check these rules
 

@@ -12,7 +12,8 @@ standalone atomics sit beside them. This file lists all of them in one place.
 
 The four lock-free protocols are the cycle gate, the parameter cell, the recorder ring, and the
 AL-state mirror. They are not an optimisation of a design that uses mutexes. On the paths that
-matter, they **are** the design. A reader who skips them sees half of the machine.
+matter, they **are** the design. Read only the mutex sections, and you learn nothing about how the
+real-time path stays safe.
 
 A cyclic task reads and writes device values inside the real-time loop, and it acquires nothing.
 The protocols below are what makes that surface safe. A change to `Device`, `DeviceParameter`, or
@@ -153,8 +154,8 @@ FieldbusDriver::controlPlaneMutex_
 
 `libs/node/device_manager.h` declares this order. `libs/node/device.h` restates it.
 
-**No real-time lock appears in the chain, and that is the point.** `CycleLock` is not a mutex, and
-no order relates it to these four. A control-plane operation waits *for* it, through
+**No real-time lock appears in the chain, by design.** `CycleLock` is not a mutex, and no order
+relates it to these four. A control-plane operation waits *for* it, through
 `ProcessData::pauseCycle`. It never acquires it. For that reason a `CycleLock` held across a
 control-plane call deadlocks that call against its own drain. A cyclic task makes no such call.
 
@@ -164,10 +165,10 @@ released before any `DeviceManager` call, and `ParameterRefresher::mutex_` likew
 three while it acquires a `DeviceManager` lock, so none of them can join a cycle. To keep that
 true is the most important rule for anyone who extends those classes.
 
-`std::shared_mutex` has **no upgrade path**, and one consequence carries weight. A
-`ProcedureBody` runs inside `withDevice` and so holds `deviceSetMutex_` shared. It cannot call
-`transitionToState`, which needs the same mutex exclusively. That is the reason that
-`BusProcedureBody` exists as a second body shape (`libs/node/procedure_manager.h`).
+`std::shared_mutex` has **no upgrade path**, and one consequence shapes the code. A `ProcedureBody`
+runs inside `withDevice` and so holds `deviceSetMutex_` shared. It cannot call `transitionToState`,
+which needs the same mutex exclusively. That is the reason that `BusProcedureBody` exists as a
+second body shape (`libs/node/procedure_manager.h`).
 
 ## The mutexes in detail
 
@@ -414,7 +415,7 @@ plain `uint64_t` of raw little-endian wire bytes, aligned to the least significa
 **relaxed** ordering. There is one cell per object. So one cell holds both the setpoint that a
 writer stores, and the measured value that the real-time decode publishes.
 
-Four properties make it work, and each one carries weight:
+Four properties make it work, and the cell needs all four:
 
 - **Relaxed is correct, not a shortcut.** The cell is self-contained, with no companion state to
   order against, and a reader is by definition unsynchronised with the writer that published the
@@ -477,10 +478,9 @@ second check detects a producer that lapped the reader in the middle of the copy
 is a normal and detected outcome, not a defect. `readRecord` returns `false`, and the caller
 resyncs to `oldestValidSeq()`.
 
-**The guarantee covers `write()` only, and that scope is the whole point.** `allocate` and `clear`
-are a third kind of writer. They release the storage, so no sequence check on the reader side can
-make them safe. The owner must exclude readers around them, and `deviceSetMutex_` is what does
-that.
+**The guarantee covers `write()` only, and that scope is deliberate.** `allocate` and `clear` are a
+third kind of writer. They release the storage, so no sequence check on the reader side can make
+them safe. The owner must exclude readers around them, and `deviceSetMutex_` is what does that.
 
 ### The AL-state mirror
 
@@ -582,7 +582,7 @@ Each item below is known and deliberate. None is a defect.
   as a lapped cursor already does.
 - **`SoemFieldbusDriver::exchangeProcessData` reads `ctx_` lock-free**, while `closeContext` writes
   it under `controlPlaneMutex_`. This is correct only because `stopExchange()` orders the two
-  upstream. The dependency carries weight and deserves the mention. The alternative is a lock on the
+  upstream. The dependency is easy to miss, so this list names it. The alternative is a lock on the
   real-time path, which is worse.
 - **A cyclic task can drive hardware that a rescan renumbered.** After an insertion, `findDevice(4)`
   resolves whatever now sits at position 4. `topologyGeneration()` is the mechanism to notice it,

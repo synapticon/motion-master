@@ -29,7 +29,7 @@ namespace mm::example {
 ///
 /// **The four rules a cyclic task lives by**, each visible in @c execute:
 ///
-/// 1. **Take a @c DeviceManager::CycleLock first, and do nothing if it is falsy.** It holds the
+/// 1. **Take a @c DeviceManager::CycleGuard first, and do nothing if it is falsy.** It holds the
 ///    device set still for the body of the cycle. Falsy means the bus is not activated — nobody has
 ///    brought it to SAFE-OP/OP yet, or a scan/re-map is in progress — so there is nothing to do.
 /// 2. **Resolve the device every cycle; never cache the pointer.** A rescan destroys every

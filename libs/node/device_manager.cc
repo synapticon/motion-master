@@ -398,7 +398,7 @@ void DeviceManager::decodeInputsIntoCells(const ProcessImage& image) {
   }
 }
 
-DeviceManager::CycleLock::CycleLock(DeviceManager& deviceManager)
+DeviceManager::CycleGuard::CycleGuard(DeviceManager& deviceManager)
     : processData_(deviceManager.pd_.get()), held_(false) {
   // The same handshake exchangeProcessData uses, one level up so it covers the task's own device
   // and parameter lookups: raise the depth BEFORE loading the image, then load it. Both are
@@ -414,7 +414,7 @@ DeviceManager::CycleLock::CycleLock(DeviceManager& deviceManager)
   held_ = true;
 }
 
-DeviceManager::CycleLock::~CycleLock() {
+DeviceManager::CycleGuard::~CycleGuard() {
   if (held_) {
     processData_->inCycle.fetch_sub(1, std::memory_order_release);
   }
@@ -425,13 +425,13 @@ void DeviceManager::stopExchange() { pd_->pauseCycle(); }
 const ProcessImage* ProcessData::pauseCycle() {
   const ProcessImage* previous = image.exchange(nullptr, std::memory_order_seq_cst);
   // Drain whatever the RT thread has in flight — the exchange itself, and any cyclic task body
-  // holding a CycleLock (which resolves devices and parameters of its own, so it must be out before
-  // scan/reset destroy them). Both operations here are sequentially consistent so they pair with
-  // each raiser's seq_cst depth-increment / image-load: once we have stored the null image, any RT
-  // cycle that has already raised the depth is visible to this load, and any that has not yet
-  // raised it will observe the null image and back out. We therefore only wait out the at-most-one
-  // cycle already in flight. Bounded so a stalled/absent RT loop can never hang a control-plane
-  // call.
+  // holding a CycleGuard (which resolves devices and parameters of its own, so it must be out
+  // before scan/reset destroy them). Both operations here are sequentially consistent so they pair
+  // with each raiser's seq_cst depth-increment / image-load: once we have stored the null image,
+  // any RT cycle that has already raised the depth is visible to this load, and any that has not
+  // yet raised it will observe the null image and back out. We therefore only wait out the
+  // at-most-one cycle already in flight. Bounded so a stalled/absent RT loop can never hang a
+  // control-plane call.
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
   while (inCycle.load(std::memory_order_seq_cst) != 0 &&
          std::chrono::steady_clock::now() < deadline) {
@@ -439,7 +439,7 @@ const ProcessImage* ProcessData::pauseCycle() {
   }
   // Giving up is not free, and the caller proceeds regardless: it is about to free the recorder
   // ring and rewrite the IOmap that an RT cycle still inside exchangeProcessData is reading — or,
-  // for scan/reset, destroy the very devices a cyclic task still inside its CycleLock is reading.
+  // for scan/reset, destroy the very devices a cyclic task still inside its CycleGuard is reading.
   // That is the accepted price of never hanging a control-plane call on a stalled RT loop — but it
   // must not be silent, or the memory corruption it can cause arrives with nothing to explain it.
   // An RT thread preempted for a fifth of a second is itself the diagnosis worth reporting.

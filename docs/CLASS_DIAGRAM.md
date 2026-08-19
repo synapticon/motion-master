@@ -105,8 +105,8 @@ classDiagram
         -mutex busOperationMutex_
         -shared_mutex deviceSetMutex_
     }
-    class CycleLock {
-        <<DeviceManager::CycleLock — RT>>
+    class CycleGuard {
+        <<DeviceManager::CycleGuard — RT>>
         +operator bool()
         -ProcessData* processData_
     }
@@ -208,10 +208,10 @@ classDiagram
     GameLoop *-- CyclicTimer
     ProcessDataCyclicTask ..> DeviceManager : ref
     ExampleCyclicTask ..> DeviceManager : ref
-    ProcessDataCyclicTask ..> CycleLock : holds per cycle
-    ExampleCyclicTask ..> CycleLock : holds per cycle
-    DeviceManager *-- CycleLock : nested class
-    CycleLock ..> ProcessData : raises inCycle
+    ProcessDataCyclicTask ..> CycleGuard : holds per cycle
+    ExampleCyclicTask ..> CycleGuard : holds per cycle
+    DeviceManager *-- CycleGuard : nested class
+    CycleGuard ..> ProcessData : raises inCycle
     HttpServer ..> DeviceManager : ref
     HttpServer ..> MonitoringManager : ref
     HttpServer ..> ProcedureManager : ref
@@ -344,7 +344,7 @@ lines: construction, `gameLoop.addTask`, and the `keepFresh` its SDO-only object
 
 The whole surface is four rules, each visible in that `execute`:
 
-1. **Take a `DeviceManager::CycleLock` first and do nothing if it is falsy.** It holds the device set
+1. **Take a `DeviceManager::CycleGuard` first and do nothing if it is falsy.** It holds the device set
    still for the body of the cycle; falsy means the bus is not activated (or is being reconfigured).
 2. **Resolve the device every cycle** with `findDevice`; never cache the pointer across cycles.
 3. **A device that is not there is not an error** — it simply is not driven this cycle.

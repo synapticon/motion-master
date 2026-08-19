@@ -480,24 +480,24 @@ TEST(DeviceManagerProcessData, WriteStagesOutputAndReadPullsInput) {
   EXPECT_EQ(std::get<uint16_t>(*dm.value(1, 0x6041, 0x00)), 0x0237);
 }
 
-// --- CycleLock ---------------------------------------------------------------
+// --- CycleGuard ---------------------------------------------------------------
 
 // A cyclic task must do nothing before the bus is activated: no image is published, so there is
 // nothing to exchange and — more to the point — no promise that the device set is stable.
-TEST(CycleLock, IsFalsyBeforeAnImageIsPublished) {
+TEST(CycleGuard, IsFalsyBeforeAnImageIsPublished) {
   DeviceManager dm;
   {
-    const DeviceManager::CycleLock cycle(dm);  // no driver at all
+    const DeviceManager::CycleGuard cycle(dm);  // no driver at all
     EXPECT_FALSE(static_cast<bool>(cycle));
   }
   auto bus = makeCia402Bus();
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
-  const DeviceManager::CycleLock cycle(dm);  // scanned, but not yet mapped
+  const DeviceManager::CycleGuard cycle(dm);  // scanned, but not yet mapped
   EXPECT_FALSE(static_cast<bool>(cycle));
 }
 
-TEST(CycleLock, IsTruthyOnceTheBusIsActivatedAndDevicesResolve) {
+TEST(CycleGuard, IsTruthyOnceTheBusIsActivatedAndDevicesResolve) {
   auto bus = makeCia402Bus();
   bus->wkc = 3;
   DeviceManager dm;
@@ -506,7 +506,7 @@ TEST(CycleLock, IsTruthyOnceTheBusIsActivatedAndDevicesResolve) {
   ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
   ASSERT_TRUE(dm.configureProcessData().has_value());
 
-  const DeviceManager::CycleLock cycle(dm);
+  const DeviceManager::CycleGuard cycle(dm);
   ASSERT_TRUE(static_cast<bool>(cycle));
   // What the lock is for: resolving a device, and a parameter on it, without taking a lock.
   Device* device = dm.findDevice(1);
@@ -518,7 +518,7 @@ TEST(CycleLock, IsTruthyOnceTheBusIsActivatedAndDevicesResolve) {
 
 // What a cyclic task actually writes: resolve, read, act — no lock, no bus, and the same call
 // whether the object rides the process image or is polled over SDO in the background.
-TEST(CycleLock, DeviceValueReadsScalarsWithoutALock) {
+TEST(CycleGuard, DeviceValueReadsScalarsWithoutALock) {
   auto bus = makeCia402Bus();
   bus->cannedInputs = {0x37, 0x02, 0x44, 0x33, 0x22, 0x11};  // statusword, actual position
   bus->wkc = 3;
@@ -532,7 +532,7 @@ TEST(CycleLock, DeviceValueReadsScalarsWithoutALock) {
   dm.exchangeProcessData();
   ASSERT_TRUE(dm.readDeviceParameter(1, 0x6041, 0x00).has_value());
 
-  const DeviceManager::CycleLock cycle(dm);
+  const DeviceManager::CycleGuard cycle(dm);
   ASSERT_TRUE(static_cast<bool>(cycle));
   const Device* drive = dm.findDevice(1);
   ASSERT_NE(drive, nullptr);
@@ -546,7 +546,7 @@ TEST(CycleLock, DeviceValueReadsScalarsWithoutALock) {
 
 // The point of the whole value path: after an exchange, a cyclic task reads live process data with
 // no bus access and no prior control-plane read — the RT decode filled the cells.
-TEST(CycleLock, ExchangeDecodesInputsIntoCells) {
+TEST(CycleGuard, ExchangeDecodesInputsIntoCells) {
   auto bus = makeCia402Bus();
   bus->cannedInputs = {0x37, 0x02, 0x44, 0x33, 0x22, 0x11};  // statusword, actual position
   bus->wkc = 3;
@@ -575,7 +575,7 @@ TEST(CycleLock, ExchangeDecodesInputsIntoCells) {
 
 // The write half: a setpoint stored from inside a cycle reaches the wire on the next exchange, with
 // no staging step in between — the cell the task wrote is what the composer sends.
-TEST(CycleLock, SetValueFromACycleReachesTheWire) {
+TEST(CycleGuard, SetValueFromACycleReachesTheWire) {
   auto bus = makeCia402Bus();
   bus->wkc = 3;
   FakeBus* busPtr = bus.get();
@@ -586,7 +586,7 @@ TEST(CycleLock, SetValueFromACycleReachesTheWire) {
   ASSERT_TRUE(dm.configureProcessData().has_value());
 
   {
-    const DeviceManager::CycleLock cycle(dm);
+    const DeviceManager::CycleGuard cycle(dm);
     ASSERT_TRUE(static_cast<bool>(cycle));
     Device* drive = dm.findDevice(1);
     ASSERT_NE(drive, nullptr);
@@ -607,7 +607,7 @@ TEST(CycleLock, SetValueFromACycleReachesTheWire) {
 // A short working counter means the driver left the previous cycle's bytes in the IOmap. The decode
 // stores them anyway: "last known value" is what a control loop can act on, and diverting to a
 // blocking SDO upload is not available on this thread. Health is reported separately.
-TEST(CycleLock, DecodeIsNotGatedOnTheWorkingCounter) {
+TEST(CycleGuard, DecodeIsNotGatedOnTheWorkingCounter) {
   auto bus = makeCia402Bus();
   bus->cannedInputs = {0x37, 0x02, 0x44, 0x33, 0x22, 0x11};
   bus->wkc = 3;
@@ -632,7 +632,7 @@ TEST(CycleLock, DecodeIsNotGatedOnTheWorkingCounter) {
 
 // An ObjectAddress carries the type with the address, so a call site cannot disagree with the
 // object it names — which is the whole reason for generating dictionaries of them.
-TEST(CycleLock, ObjectAddressOverloadsCarryTheType) {
+TEST(CycleGuard, ObjectAddressOverloadsCarryTheType) {
   auto bus = makeCia402Bus();
   bus->cannedInputs = {0x37, 0x02, 0x44, 0x33, 0x22, 0x11};
   bus->wkc = 3;
@@ -646,7 +646,7 @@ TEST(CycleLock, ObjectAddressOverloadsCarryTheType) {
   constexpr mm::node::ObjectAddress<uint16_t> kStatusword{0x6041, 0x00};
   constexpr mm::node::ObjectAddress<int32_t> kTargetPosition{0x607A, 0x00};
 
-  const DeviceManager::CycleLock cycle(dm);
+  const DeviceManager::CycleGuard cycle(dm);
   ASSERT_TRUE(static_cast<bool>(cycle));
   Device* drive = dm.findDevice(1);
   ASSERT_NE(drive, nullptr);
@@ -665,7 +665,7 @@ TEST(CycleLock, ObjectAddressOverloadsCarryTheType) {
 // Re-enumerating replaces the parameter map, destroying every entry a task may be looking up. The
 // swap therefore pauses the RT cycle the same way a re-map does — and puts the image back, so the
 // loop resumes rather than stopping for good.
-TEST(CycleLock, ReEnumeratingKeepsTheImagePublished) {
+TEST(CycleGuard, ReEnumeratingKeepsTheImagePublished) {
   auto bus = makeCia402Bus();
   bus->wkc = 3;
   DeviceManager dm;
@@ -673,12 +673,12 @@ TEST(CycleLock, ReEnumeratingKeepsTheImagePublished) {
   ASSERT_TRUE(dm.scan().has_value());
   ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
   ASSERT_TRUE(dm.configureProcessData().has_value());
-  ASSERT_TRUE(static_cast<bool>(DeviceManager::CycleLock(dm)));
+  ASSERT_TRUE(static_cast<bool>(DeviceManager::CycleGuard(dm)));
 
   // The Console listing a device's parameters while the loop runs.
   ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
 
-  EXPECT_TRUE(static_cast<bool>(DeviceManager::CycleLock(dm)));
+  EXPECT_TRUE(static_cast<bool>(DeviceManager::CycleGuard(dm)));
   const Device* drive = dm.findDevice(1);
   ASSERT_NE(drive, nullptr);
   EXPECT_NE(drive->findParameter(0x6041, 0x00), nullptr);
@@ -689,7 +689,7 @@ TEST(CycleLock, ReEnumeratingKeepsTheImagePublished) {
 
 // reset() tears the image down, so the next cycle's lock fails and the task stops touching devices
 // before they are destroyed. This is the ordering scan()/reset() rely on.
-TEST(CycleLock, GoesFalsyAgainWhenTheImageIsTornDown) {
+TEST(CycleGuard, GoesFalsyAgainWhenTheImageIsTornDown) {
   auto bus = makeCia402Bus();
   bus->wkc = 3;
   DeviceManager dm;
@@ -697,10 +697,10 @@ TEST(CycleLock, GoesFalsyAgainWhenTheImageIsTornDown) {
   ASSERT_TRUE(dm.scan().has_value());
   ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
   ASSERT_TRUE(dm.configureProcessData().has_value());
-  ASSERT_TRUE(static_cast<bool>(DeviceManager::CycleLock(dm)));
+  ASSERT_TRUE(static_cast<bool>(DeviceManager::CycleGuard(dm)));
 
   dm.reset();
-  const DeviceManager::CycleLock cycle(dm);
+  const DeviceManager::CycleGuard cycle(dm);
   EXPECT_FALSE(static_cast<bool>(cycle));
   EXPECT_EQ(dm.findDevice(1), nullptr);
 }

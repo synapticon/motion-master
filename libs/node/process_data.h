@@ -52,8 +52,8 @@ struct ProcessData {
   // stopExchange() drain an in-flight cycle before a re-map or teardown mutates either.
   //
   // A depth counter rather than a flag because it is raised at two nesting levels: by
-  // DeviceManager::CycleLock around a whole cyclic task body (which resolves devices and parameters
-  // of its own, so it must not run while the device vector is being rebuilt) and by
+  // DeviceManager::CycleGuard around a whole cyclic task body (which resolves devices and
+  // parameters of its own, so it must not run while the device vector is being rebuilt) and by
   // exchangeProcessData around the exchange itself, which stays self-contained for callers that
   // invoke it directly. Only the RT thread raises it, so the count is small and bounded by nesting.
   std::atomic<int> inCycle{0};
@@ -81,7 +81,7 @@ struct ProcessData {
   ///
   /// The pause every mutation of shared state needs when it cannot take a lock the RT thread also
   /// takes — replacing a device's parameter map, rebuilding the device set, re-mapping the image.
-  /// Unpublishing is what stops a *new* cycle starting (@c DeviceManager::CycleLock and
+  /// Unpublishing is what stops a *new* cycle starting (@c DeviceManager::CycleGuard and
   /// @c exchangeProcessData both back out on a null image); the wait covers the one already
   /// running. Together they mean no RT thread is inside the cycle body when this returns.
   ///

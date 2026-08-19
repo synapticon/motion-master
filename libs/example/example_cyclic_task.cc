@@ -69,7 +69,7 @@ ExampleCyclicTask::ExampleCyclicTask(DeviceManager& deviceManager, Config config
 void ExampleCyclicTask::execute(const CycleContext& /*ctx*/) {
   // Rule 1 — hold the device set still for this cycle. Falsy means the bus is not activated (no
   // image published) or is being reconfigured; either way there is nothing to drive.
-  const DeviceManager::CycleLock cycle(deviceManager_);
+  const DeviceManager::CycleGuard cycle(deviceManager_);
   if (!cycle) {
     return;
   }

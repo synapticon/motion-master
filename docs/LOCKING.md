@@ -78,37 +78,37 @@ This file uses the vocabulary of the code. Read this table first if the reposito
 
 Six rules carry almost all of the correctness.
 
-1. **On the control plane, lock-protected state is unreachable without the lock.**
-   `DeviceManager` hands out no reference into `devices_`. `Device` hands out no reference into
-   `parameters_`. A caller borrows or takes a copy. `withDevice` and `withDevices` borrow, and
-   they hold the lock for the whole duration of the callable. `parameter`, `parametersOrdered`,
-   and `value` return a copy. The other rules rest on this one. It is the reason that the question
-   "which lock does this need?" has an answer at the call site.
+1. **On the control plane, lock-protected state is unreachable without the lock.** `DeviceManager`
+   hands out no reference into `devices_`. `Device` hands out no reference into `parameters_`. A
+   caller borrows or takes a copy. `withDevice` and `withDevices` borrow, and they hold the lock for
+   the whole duration of the callable. `parameter`, `parametersOrdered`, and `value` return a copy.
+   The other rules rest on this one. It is the reason that the question "which lock does this need?"
+   has an answer at the call site.
 2. **The real-time path reaches a device without a lock. Only a convention keeps that safe.**
    `DeviceManager::findDevice` and `Device::findParameter` are public and take no lock, because a
    cyclic task must resolve its signals without a block. The obligation that replaces the lock is
-   [`DeviceManager::CycleLock`](#the-cycle-gate). A task holds one `CycleLock` for its whole body,
+   [`DeviceManager::CycleGuard`](#the-cycle-gate). A task holds one `CycleGuard` for its whole body,
    and inside it the raw lookups are safe. Off the real-time thread, borrow instead. A raw
    `findDevice` there, with no borrow, is a use-after-free that compiles. This is the one place in
    this file where safety rests on a documented obligation. Everywhere else the design makes the
    mistake impossible to write. Both declarations carry the warning. Keep the pattern inside the
    real-time surface.
-3. **The real-time thread takes no lock, ever.** An atomic image pointer and an atomic depth
-   counter gate `DeviceManager::exchangeProcessData` and `CycleLock`. No mutex gates them.
-   Everything the real-time thread touches is lock-free by construction: the IOmap, the parameter
-   cells, and the recorder ring. `CycleLock` is a lock in name only. It does one atomic increment
-   and one atomic load, and it never waits.
+3. **The real-time thread takes no lock, ever.** An atomic image pointer and an atomic depth counter
+   gate `DeviceManager::exchangeProcessData` and `CycleGuard`. No mutex gates them. Everything the
+   real-time thread touches is lock-free by construction: the IOmap, the parameter cells, and the
+   recorder ring. `CycleGuard` is not a lock. It does one atomic increment and one atomic load, and
+   it never waits.
 4. **`FieldbusDriver::controlPlaneMutex_` covers one transaction.
    `DeviceManager::busOperationMutex_` covers one operation.** The first serialises a single socket
    round-trip. The second serialises a whole activity of many transactions, such as a scan, an AL
    transition, or a re-map. They are not two tiers of one thing, and a caller often holds only one
    of them.
-5. **`deviceSetMutex_` guards lifetime, not data.** Shared means one thing: no other thread frees
-   or rebuilds the `Device` objects and the process-data runtime while I hold this. A shared hold
-   of several minutes is legitimate, because the exclusive holders are rare and brief.
+5. **`deviceSetMutex_` guards lifetime, not data.** Shared means one thing: no other thread frees or
+   rebuilds the `Device` objects and the process-data runtime while I hold this. A shared hold of
+   several minutes is legitimate, because the exclusive holders are rare and brief.
 6. **A lock is never held across bus input or output, except `controlPlaneMutex_`.** That one lock
-   covers exactly one transfer. `Device::parametersMutex_` shows the pattern: take the lock,
-   release it for the transfer, then take it again to commit.
+   covers exactly one transfer. `Device::parametersMutex_` shows the pattern: take the lock, release
+   it for the transfer, then take it again to commit.
 
 ## Which threads run at the same time
 
@@ -161,9 +161,9 @@ FieldbusDriver::controlPlaneMutex_
 
 `libs/node/device_manager.h` declares this order. `libs/node/device.h` restates it.
 
-**No real-time lock appears in the chain, by design.** `CycleLock` is not a mutex, and no order
-relates it to these four. A control-plane operation waits *for* it, through
-`ProcessData::pauseCycle`. It never acquires it. For that reason a `CycleLock` held across a
+**No real-time primitive appears in the chain, by design.** `CycleGuard` is not a mutex, and no
+order relates it to these four. A control-plane operation waits *for* it, through
+`ProcessData::pauseCycle`. It never acquires it. For that reason a `CycleGuard` held across a
 control-plane call deadlocks that call against its own drain. A cyclic task makes no such call.
 
 The three subsystem mutexes (5, 6, and 7) sit **above** this chain. `MonitoringManager::mutex_` is
@@ -233,13 +233,13 @@ exactly what would dangle the reference.
 even shared, because the acquisition may block. Tier 3 exists for exactly that code. A design where
 a borrow is the only route to a `Device` puts device access out of its reach. The pointer carries an
 obligation instead: it is valid only until the next `scan()` or `reset()`.
-[`CycleLock`](#the-cycle-gate) carries that obligation. A task holds one for its whole body, and a
+[`CycleGuard`](#the-cycle-gate) carries that obligation. A task holds one for its whole body, and a
 rebuild waits it out. The two routes split by caller:
 
 | Caller | Route | What holds the device still |
 | --- | --- | --- |
 | control plane: HTTP worker, procedure, sampler | `withDevice`, `withDevices`, or a position-based method | `deviceSetMutex_` shared, for the whole duration of the call |
-| real-time cyclic task | `findDevice` inside a `CycleLock` | the published image and the `inCycle` drain. No lock |
+| real-time cyclic task | `findDevice` inside a `CycleGuard` | the published image and the `inCycle` drain. No lock |
 
 Anything else is a defect. A raw `findDevice` off the real-time thread, with no borrow, resolves a
 `Device*` that a concurrent `POST /api/scan` destroys before the caller uses it. That code
@@ -296,7 +296,8 @@ field. Each of the three takes the lock, and each is the right choice on the con
 `findParameter()` is the exception. It is **public**, for the same reason as `findDevice`. A cyclic
 task resolves its signals that way once per cycle. No lock it could take is real-time safe. Its
 contract splits by caller. A control-plane caller must hold `parametersMutex_` for the lookup *and*
-for every access to a non-atomic field. A cyclic task holds a `CycleLock` and touches only the cell.
+for every access to a non-atomic field. A cyclic task holds a `CycleGuard` and touches only the
+cell.
 
 ### 4. `FieldbusDriver::controlPlaneMutex_` — one socket transaction
 
@@ -380,7 +381,7 @@ each side:
 
 - **Real-time side.** Raise `inCycle` **before** the load of the image. Then load the image. Back
   out if it is null. The code does this at two levels: `exchangeProcessData` around the exchange
-  itself, and `CycleLock` one level up, around a whole cyclic-task body. That is the reason that
+  itself, and `CycleGuard` one level up, around a whole cyclic-task body. That is the reason that
   `inCycle` is a **depth counter and not a flag**.
 - **Control-plane side.** `ProcessData::pauseCycle` stores `nullptr`, **then** waits for `inCycle`
   to reach zero.
@@ -394,7 +395,7 @@ image for a mutation that is not a teardown. The swap of the parameter map of a 
 that needs it. A re-map or a rescan publishes a freshly built image instead, or publishes nothing at
 all.
 
-**The pause protects much more than the IOmap.** A cyclic task inside a `CycleLock` walks
+**The pause protects much more than the IOmap.** A cyclic task inside a `CycleGuard` walks
 `devices_` and dereferences `DeviceParameter` objects. So the same drain is what makes `scan` and
 `reset` safe, which destroy devices, and `initializeParameters` safe, which replaces a map. Neither
 needs a lock that the real-time thread would also have to take.
@@ -525,7 +526,7 @@ ill-formed on libc++ and on MSVC.
 Each item below must stay true. Something in the code relies on each one today.
 
 1. **The real-time thread acquires no mutex.** Verify it by inspection of `exchangeProcessData`, of
-   `CycleLock`, and of everything a registered `CyclicTask` calls. `Device::value<T>()` and
+   `CycleGuard`, and of everything a registered `CyclicTask` calls. `Device::value<T>()` and
    `Device::setValue<T>()` are the only value access permitted there.
 2. **No subsystem mutex is held during a call to a `DeviceManager` method.** This covers the
    monitoring, refresher, and procedure mutexes. It is what keeps the lock graph acyclic.
@@ -534,7 +535,7 @@ Each item below must stay true. Something in the code relies on each one today.
    There are two sanctioned exceptions, and both substitute the cycle gate for the mutex.
    `ProcessImageEntry::parameter` is one: every re-map rebuilds it, and every change that
    invalidates it pauses the cycle. The per-cycle lookup of a cyclic task is the other: it holds
-   inside one `CycleLock`, never across cycles.
+   inside one `CycleGuard`, never across cycles.
 5. **`deviceSetMutex_` is not recursive.** The callable of `withDevice` must not re-enter `scan`,
    `reset`, `init`, `configureProcessData`, or `transitionToState`.
 6. **Every reader of `pd_->ring` holds `deviceSetMutex_` shared.**
@@ -542,11 +543,11 @@ Each item below must stay true. Something in the code relies on each one today.
    storage, `driver_`, `devices_`, and the `parameters_` map of a device.** A cyclic task walks the
    last two, so the pause is not only about the IOmap.
 8. **`generations` retains every published `ProcessImage` until `reset()`.**
-9. **A cyclic task holds a `CycleLock` for its whole body, and does nothing when the lock is
+9. **A cyclic task holds a `CycleGuard` for its whole body, and does nothing when the guard is
    falsy.** On the real-time thread, no `findDevice` result, no `findParameter` result, and no cell
    access is valid outside one.
-10. **No code holds a `CycleLock` across a control-plane call.** The drain of that call would wait
-    on the lock forever.
+10. **No code holds a `CycleGuard` across a control-plane call.** The drain of that call would wait
+    on the guard forever.
 11. **A writer changes the non-atomic fields of an entry only under `parametersMutex_` *and* with
     the real-time cycle paused.** The fields are `dataType`, `bitLength`, `rawValue`, `syncState`,
     and `name`. The real-time decode reads `dataType` and `bitLength` without a lock.
@@ -571,7 +572,7 @@ So three practical rules apply to a change on this page:
 - Prefer a design where the mistake does not compile. Borrow-or-copy beats a raw accessor, because
   it is the only enforcement here that does not depend on someone's memory. Where the real-time
   path forces a raw accessor, as `findDevice` and `findParameter` do, move the obligation to an
-  object that the caller must construct. `CycleLock` is that object. A sentence that the caller may
+  object that the caller must construct. `CycleGuard` is that object. A sentence that the caller may
   never read is not enough. This is the weakest enforcement in the file, so keep it inside the
   real-time surface.
 - Treat "the tests pass" as evidence about behaviour, not as evidence about synchronisation.
@@ -620,6 +621,6 @@ Each item below is known and deliberate. None is a defect.
 5. Does it hand out a pointer or a reference to something that it protects? If yes, return a copy,
    or lend access under the lock with the `withDevice` pattern. There is one sanctioned alternative,
    the real-time one. Use a raw pointer whose lifetime the cycle gate holds. Document it at the
-   declaration. It is valid only inside a `CycleLock`.
+   declaration. It is valid only inside a `CycleGuard`.
 6. Add a row to the [inventory](#mutex-inventory). Add a paragraph under
    [the mutexes in detail](#the-mutexes-in-detail).

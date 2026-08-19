@@ -318,7 +318,7 @@ class DeviceManager {
   ///
   /// @code
   /// void execute(const CycleContext&) override {
-  ///   const DeviceManager::CycleLock cycle(deviceManager_);
+  ///   const DeviceManager::CycleGuard cycle(deviceManager_);
   ///   if (!cycle) { return; }   // bus not activated, or being reconfigured — skip this cycle
   ///   Device* drive = deviceManager_.findDevice(3);
   ///   if (drive == nullptr) { return; }   // not on the bus — skip
@@ -330,25 +330,25 @@ class DeviceManager {
   /// is the bus's "not activated" state — the same two-phase model every EtherCAT stack uses
   /// (configure, then activate; reconfiguring means deactivating first). Every control-plane
   /// operation that rebuilds the device set already unpublishes the image and then drains via
-  /// @c stopExchange, so a lock taken after the unpublish fails and one taken before is waited out.
-  /// The RT thread never blocks: it runs no tasks for those cycles, which is what the bus is doing
-  /// anyway.
+  /// @c stopExchange, so a guard taken after the unpublish fails and one taken before is waited
+  /// out. The RT thread never blocks: it runs no tasks for those cycles, which is what the bus is
+  /// doing anyway.
   ///
   /// Never blocks, never allocates: one atomic increment and one atomic load.
   ///
   /// @warning Holding one across a control-plane call (@c scan, @c reset, @c transitionToState)
   ///          deadlocks that call against its own drain. A cyclic task does none of those.
-  class CycleLock {
+  class CycleGuard {
    public:
-    /// @brief Takes the lock. Falsy if the bus is not activated — run no device work.
-    explicit CycleLock(DeviceManager& deviceManager);
-    /// @brief Releases the lock, if it was taken.
-    ~CycleLock();
+    /// @brief Enters the cycle. Falsy if the bus is not activated — run no device work.
+    explicit CycleGuard(DeviceManager& deviceManager);
+    /// @brief Leaves the cycle, if this guard entered it.
+    ~CycleGuard();
 
-    CycleLock(const CycleLock&) = delete;
-    CycleLock& operator=(const CycleLock&) = delete;
+    CycleGuard(const CycleGuard&) = delete;
+    CycleGuard& operator=(const CycleGuard&) = delete;
 
-    /// @brief Whether the lock was taken and device access is safe this cycle.
+    /// @brief Whether this guard entered the cycle and device access is safe now.
     explicit operator bool() const { return held_; }
 
    private:
@@ -364,7 +364,7 @@ class DeviceManager {
   ///
   /// **Lifetime.** The returned pointer — and any @c DeviceParameter* obtained through it — is
   /// valid only until the next @c scan() or @c reset(), which destroy every @c Device. A cyclic
-  /// task must therefore re-resolve each cycle inside a @c CycleLock and never cache a @c Device*
+  /// task must therefore re-resolve each cycle inside a @c CycleGuard and never cache a @c Device*
   /// across cycles; a control-plane caller uses @c withDevice, which holds @c deviceSetMutex_ for
   /// the borrow's whole duration.
   ///

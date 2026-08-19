@@ -129,7 +129,7 @@ protocol, the invariants — is in [LOCKING.md](LOCKING.md); the shape is:
 `DeviceHandle` for its whole duration, *including the sleeps between polls*. A handle is a
 `shared_ptr` to the published `DeviceSet`, not a lock, so it keeps the device constructed while
 nothing waits for it: a concurrent `scan` publishes a new set and the procedure finishes against the
-retired one. It still takes `controlPlaneMutex_` only per SDO transaction, so the RT loop is
+retired one, which lives until `reset()` in any case. It still takes `controlPlaneMutex_` only per SDO transaction, so the RT loop is
 untouched. It does **not** hold `busOperationMutex_`, so an
 AL transition can interleave with it.
 

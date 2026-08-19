@@ -934,6 +934,15 @@ class DeviceManager {
   // The published generation of the bus. Never null: an empty set stands in before the first
   // init(), so every reader can dereference the pointer it gets without a check.
   std::shared_ptr<DeviceSet> currentSet_;
+  // Every set ever published, retained so a pointer into a retired one stays valid. This is the
+  // same policy the process image already uses (ProcessData::generations) and it is stated the same
+  // way: published objects live until reset(). A retired device is valid but no longer fed — reads
+  // serve its last values, exchangesProcessData() is false, and a write reaches no wire.
+  //
+  // reset() drops these references; it is the only reclaim point. A holder of a DeviceHandle keeps
+  // its own set alive past that, and the RT thread is drained out before the drop, so neither can
+  // be left reading freed memory.
+  std::vector<std::shared_ptr<DeviceSet>> setGenerations_;
 
   // The same set as a raw pointer, for the RT thread, which must not touch a shared_ptr. Written by
   // the control plane only with the RT cycle drained (ProcessData::pauseCycle), so a cyclic task

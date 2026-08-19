@@ -406,16 +406,25 @@ decision.
   apply.
 - **A read of a non-exchanging device returns the last known value**, not `nullopt`.
   `stamp` and `exchangesProcessData()` are there for a task that wants to decide otherwise.
+- **The cells are the storage, and nothing destroys one while its device lives.** Each `Device`
+  owns a deque of `DeviceParameter` cells; `parameters_` maps `(index, subindex)` to a pointer
+  into it. A re-enumeration rebuilds the map and reuses every cell whose data type and bit
+  length are unchanged, so a held `DeviceParameter*` survives it and a value written before it
+  survives too. A changed declaration gets a new cell, because the RT decode reads `dataType`
+  and `bitLength` without a lock.
+- **One retention policy, one reclaim point.** Process images, recorder ring, device sets and
+  parameter cells all live until `reset()`. A retired object is valid but no longer fed: reads
+  serve the last values, and writes reach no wire. `topologyGeneration()` is how a holder
+  notices.
 - **`GameLoop` enters the cycle; a task writes no guard.** The loop takes one
   `DeviceManager::CycleGuard` around the whole task list each cycle and calls no task when it
   is falsy. So a task's `findDevice` / `findParameter` results are valid for the body of its
   `execute()` by construction, and a task cannot forget to make them so. `findDevice` and
   `findParameter` stay public and non-locking because the RT thread must not block.
-- **Lifetime: a pointer is valid for one `execute()`, never across cycles.** `scan()`,
-  `reset()` and `initializeParameters()` each drain the cycle before they replace what a task
-  reads — the device set, or a device's parameter map — so none of them can pull the ground
-  out from under a running task. A task that caches a `Device*` across cycles is out of
-  contract.
+- **Lifetime: a pointer stays valid until `reset()`.** `scan()` and `initializeParameters()`
+  make one stale, never dangling, so a task may cache a `Device*` or a `DeviceParameter*`
+  across cycles. `reset()` is the reclaim point, and it drains the cycle first, which is why
+  the loop's guard still matters.
 - **The RT loop does no lookups.** `ProcessImageEntry` carries the owning
   `DeviceParameter*`, resolved at publish and refreshed on every re-map. A lookup per mapped
   object per cycle is fatal at bus scale: 50 devices × 40 objects is 60–100 µs against a

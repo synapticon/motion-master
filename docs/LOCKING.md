@@ -228,10 +228,13 @@ Each copies the pointer under `currentSetMutex_`, which is held for that copy al
 caller holds no lock, for a millisecond or for ten minutes. `std::atomic<std::shared_ptr<T>>` would
 remove even that mutex, but it is not lock-free, and libc++ does not implement it.
 
-**A rescan neither waits for a holder nor invalidates one.** `scan` publishes a new set; the old one
-dies when its last holder drops it. A procedure that was running keeps working against its own
-device. Because the retired set also owns the driver, that device's next transfer reaches a live
-driver object on a bus that has moved on, and fails as an error rather than a crash.
+**A rescan neither waits for a holder nor invalidates one.** `scan` publishes a new set, and every
+set ever published is retained until `reset()` — the same policy, stated the same way, as the
+retained process images. A retired device is *valid but no longer fed*: reads serve its last values,
+`exchangesProcessData()` is false, and a write reaches no wire. A procedure that was running keeps
+working against its own device. Because the retired set also owns the driver, that device's next
+transfer reaches a live driver object on a bus that has moved on, and fails as an error rather than
+a crash.
 
 **The real-time thread reads `publishedSet_`, not the `shared_ptr`.** The control plane replaces
 that raw pointer only with the cycle drained (`ProcessData::pauseCycle`), so a cyclic task inside a

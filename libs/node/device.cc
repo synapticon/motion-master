@@ -31,7 +31,8 @@ Device::Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver, Process
       driver_(driver),
       processData_(processData),
       parameterCache_(parameterCache),
-      parametersMutex_(std::make_unique<std::mutex>()) {
+      parametersMutex_(std::make_unique<std::mutex>()),
+      cells_(std::make_unique<std::deque<DeviceParameter>>()) {
   auto info = driver_.slaveInfo(slavePosition);
   name_ = std::move(info.name);
   vendorId_ = info.vendorId;
@@ -253,18 +254,55 @@ std::expected<void, std::string> Device::readParameterDefinitions(bool readValue
 }
 
 void Device::publishParameters(std::unordered_map<uint32_t, DeviceParameter>&& built) {
-  // Replacing the map destroys every entry in it, and a cyclic task resolves its parameters by
-  // lookup each cycle — so the swap has to happen while no RT thread is inside a cycle body. That
-  // is the same pause a re-map or a rescan takes, and for the same reason; only the swap is inside
-  // it, never the multi-second enumeration that produced `built`, so the cost is a skipped cycle or
-  // two rather than a stalled bus.
+  // The map is replaced; the cells are not. Every object either keeps the cell it already had — so
+  // a published process image's DeviceParameter*, and any pointer a cyclic task cached, stay valid
+  // and keep addressing the same value — or gets a fresh cell appended to the arena. Nothing here
+  // destroys a cell, which is what makes re-enumerating a device while the bus exchanges safe.
+  //
+  // The swap of the map itself still needs the RT cycle paused, because a cyclic task resolves its
+  // parameters by lookup. Only the swap is inside the pause, never the multi-second enumeration
+  // that produced `built`, so the cost is a skipped cycle or two rather than a stalled bus.
   //
   // parametersMutex_ covers the other adversary — the refresher and the sampler, which are ordinary
   // threads and do take it.
   const ProcessImage* paused = processData_ ? processData_->pauseCycle() : nullptr;
   {
     const std::lock_guard<std::mutex> lock(*parametersMutex_);
-    parameters_ = std::move(built);
+    std::unordered_map<uint32_t, DeviceParameter*> next;
+    next.reserve(built.size());
+    for (auto& [key, definition] : built) {
+      auto existing = parameters_.find(key);
+      const bool reusable = existing != parameters_.end() &&
+                            existing->second->dataType == definition.dataType &&
+                            existing->second->bitLength == definition.bitLength;
+      if (reusable) {
+        DeviceParameter* cell = existing->second;
+        // The annotation may have changed (a cache hit carries no unit or limits, a live
+        // enumeration does), so adopt it. The value is adopted only when this enumeration read
+        // one: a definitions-only pass must not zero a setpoint written before it ran.
+        cell->name = std::move(definition.name);
+        cell->objectCode = definition.objectCode;
+        cell->access = definition.access;
+        cell->unit = std::move(definition.unit);
+        cell->defaultValue = std::move(definition.defaultValue);
+        cell->minValue = std::move(definition.minValue);
+        cell->maxValue = std::move(definition.maxValue);
+        if (definition.syncState != SyncState::Unknown) {
+          cell->storeBits(definition.loadBits());
+          cell->rawValue = std::move(definition.rawValue);
+          cell->syncState = definition.syncState;
+        }
+        next.emplace(key, cell);
+        continue;
+      }
+      // A new object, or one whose declared type changed under a firmware update. A changed type
+      // must not be written into the old cell: the RT decode reads dataType and bitLength without a
+      // lock, so a fresh cell is the only safe home for a new definition. The old cell stays alive
+      // and simply stops being addressed by this map.
+      cells_->push_back(std::move(definition));
+      next.emplace(key, &cells_->back());
+    }
+    parameters_ = std::move(next);
   }
   if (processData_) {
     processData_->resumeCycle(paused);
@@ -883,7 +921,7 @@ std::vector<DeviceParameter> Device::parametersOrdered() const {
   std::vector<DeviceParameter> ordered;
   ordered.reserve(parameters_.size());
   for (const auto& [key, p] : parameters_) {
-    ordered.push_back(p);
+    ordered.push_back(*p);
   }
   std::sort(ordered.begin(), ordered.end(),
             [](const DeviceParameter& a, const DeviceParameter& b) { return a.key() < b.key(); });
@@ -919,12 +957,12 @@ std::optional<uint16_t> Device::dataType(uint16_t index, uint8_t subindex) const
 
 DeviceParameter* Device::findParameter(uint16_t index, uint8_t subindex) {
   auto it = parameters_.find(makeParameterKey(index, subindex));
-  return it != parameters_.end() ? &it->second : nullptr;
+  return it != parameters_.end() ? it->second : nullptr;
 }
 
 const DeviceParameter* Device::findParameter(uint16_t index, uint8_t subindex) const {
   auto it = parameters_.find(makeParameterKey(index, subindex));
-  return it != parameters_.end() ? &it->second : nullptr;
+  return it != parameters_.end() ? it->second : nullptr;
 }
 
 std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t index,
@@ -1004,8 +1042,8 @@ std::expected<void, std::string> Device::readAllParameters(bool useCompleteAcces
           "device {}: no parameters loaded — initialise the parameter list first", slavePosition_));
     }
     for (const auto& [key, p] : parameters_) {
-      if (p.isReadable()) {
-        objects[p.index].push_back(p.subindex);
+      if (p->isReadable()) {
+        objects[p->index].push_back(p->subindex);
       }
     }
   }
@@ -1121,8 +1159,8 @@ std::expected<ObjectValues, std::string> Device::readObject(uint16_t index,
   {
     std::lock_guard<std::mutex> lock(*parametersMutex_);
     for (const auto& [key, p] : parameters_) {
-      if (p.index == index && p.isReadable()) {
-        subindices.push_back(p.subindex);
+      if (p->index == index && p->isReadable()) {
+        subindices.push_back(p->subindex);
       }
     }
   }

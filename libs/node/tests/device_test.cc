@@ -200,6 +200,64 @@ std::vector<uint8_t> ident(uint32_t v) {
           static_cast<uint8_t>(v >> 24)};
 }
 
+// ── Cell stability across re-enumeration ────────────────────────────────────────────────────────
+//
+// The cells are the storage, and re-enumeration must not destroy them. A published process image
+// holds a DeviceParameter* per mapped object, resolved once at publish; a cyclic task may cache one
+// too. If a second enumeration replaced the cells, every one of those pointers would address freed
+// memory on the next RT cycle — reachable by reading the object dictionary while the bus exchanges.
+// So publishParameters keeps the cell whenever the object's data type and bit length are unchanged.
+
+TEST(DeviceCells, ReEnumerationKeepsTheCellAddress) {
+  SdoFakeDriver driver;
+  driver.programOd(0x6040, 0, 0x0006, 0x3F, 16);
+  mm::node::Device device(1, driver);
+
+  ASSERT_TRUE(device.initializeParameters(false, false).has_value());
+  const mm::node::DeviceParameter* first = device.findParameter(0x6040, 0);
+  ASSERT_NE(first, nullptr);
+
+  ASSERT_TRUE(device.initializeParameters(false, false).has_value());
+  EXPECT_EQ(device.findParameter(0x6040, 0), first)
+      << "a published image's parameter pointer must survive a re-enumeration";
+}
+
+TEST(DeviceCells, ReEnumerationWithoutValuesKeepsTheLiveValue) {
+  SdoFakeDriver driver;
+  driver.programOd(0x6040, 0, 0x0006, 0x3F, 16);
+  mm::node::Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters(false, false).has_value());
+
+  // A setpoint written from a cycle, before the dictionary is read again.
+  device.setValue<uint16_t>(0x6040, 0, 0x000F);
+  ASSERT_TRUE(device.initializeParameters(false, false).has_value());
+
+  const auto value = device.value<uint16_t>(0x6040, 0);
+  ASSERT_TRUE(value.has_value());
+  EXPECT_EQ(*value, 0x000F) << "a definitions-only pass must not zero a written value";
+}
+
+TEST(DeviceCells, AChangedDataTypeGetsANewCell) {
+  SdoFakeDriver driver;
+  driver.programOd(0x2000, 0, 0x0006, 0x3F, 16);
+  mm::node::Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters(false, false).has_value());
+  const mm::node::DeviceParameter* first = device.findParameter(0x2000, 0);
+  ASSERT_NE(first, nullptr);
+
+  // A firmware update redeclares the object as 32-bit. Rewriting the old cell would race the RT
+  // decode, which reads dataType and bitLength without a lock, so the new definition gets its own.
+  driver.ods.clear();
+  driver.programOd(0x2000, 0, 0x0007, 0x3F, 32);
+  ASSERT_TRUE(device.initializeParameters(false, false).has_value());
+
+  const mm::node::DeviceParameter* second = device.findParameter(0x2000, 0);
+  ASSERT_NE(second, nullptr);
+  EXPECT_NE(second, first) << "a changed declaration must not be written into the old cell";
+  EXPECT_EQ(second->bitLength, 32);
+  EXPECT_EQ(first->bitLength, 16) << "the retired cell keeps its own definition";
+}
+
 TEST(ReconcileDetectedModules, NonModularDeviceIsNoOp) {
   // No 0xF050 list at all — readSdo returns an error for the count subindex.
   SdoFakeDriver driver;

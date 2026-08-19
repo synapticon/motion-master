@@ -19,8 +19,13 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Reading a device's object dictionary while the bus exchanges no longer corrupts memory.** `POST /api/devices/{slavePosition}/parameters/init` and `POST .../parameters/read` replaced every parameter cell of that device, while the published process image still pointed at the old ones — so the next real-time cycle read and wrote freed memory. Cells are now retained: a re-enumeration reuses each cell whose data type and bit length are unchanged, and a changed declaration gets a new cell instead of overwriting the old one. A value written before the enumeration also survives it now, rather than being zeroed.
+
 ### Changed
 
+- **A device set and its parameter cells live until `reset()`.** This is the policy the retained process images already used, and it now covers everything a real-time task can hold a pointer to. A pointer into a retired set stays valid and stops being updated, so a task may cache one across cycles; `topologyGeneration()` is how it notices the set it bound to is no longer the live one.
 - **A cyclic task no longer takes a `DeviceManager::CycleGuard`.** `GameLoop` enters the cycle around the whole task list each cycle, so a task's `findDevice` and `findParameter` results are valid for its `execute()` by construction. Delete the guard and the falsy check from your tasks; nothing replaces them. One consequence to know: a task runs only while the bus is activated, so a task that wants to compute without a bus cannot run in the loop.
 - **A device is now reached with `DeviceManager::deviceAt(position)`, which returns a `DeviceHandle`.** `withDevice` and `withDevices` are gone. The handle keeps its device alive by reference count instead of by lock, so a rescan no longer waits for whoever holds a device, and holding one no longer blocks a rescan. Use `deviceSet()` for work that spans several devices. A retired device stays readable and its next bus transfer fails cleanly, which is what a procedure interrupted by a rescan now sees.
 - **A procedure body has one shape: `(const ProcedureContext&, ProgressReporter&, std::stop_token)`.** `ProcedureContext` carries the manager, the device and its position. Any body may now change AL state, so the second body shape that firmware installation needed is gone.

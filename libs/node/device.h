@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <cstring>
+#include <deque>
 #include <expected>
 #include <format>
 #include <map>
@@ -677,7 +678,20 @@ class Device {
   }
 
  private:
-  /// @brief Publishes a freshly built @c parameters_ map, pausing the RT cycle across the swap.
+  /// @brief Publishes a freshly built parameter map, pausing the RT cycle across the swap.
+  ///
+  /// Every entry of @p built either **reuses the cell that already holds that object's value** —
+  /// when the object is known and its data type and bit length are unchanged — or gets a new cell
+  /// appended to the arena. No cell is ever destroyed, so a @c DeviceParameter* obtained before
+  /// this call stays valid after it, and a value written before the dictionary was enumerated
+  /// survives the enumeration.
+  ///
+  /// A reused cell adopts @p built's value only when the enumeration actually read one
+  /// (@c syncState other than @c Unknown). A definitions-only pass therefore leaves the live value
+  /// alone instead of zeroing it.
+  ///
+  /// The map itself is still replaced, and a cyclic task resolves parameters by lookup, so the swap
+  /// happens with the RT cycle paused.
   ///
   /// The one place the map is published, so the pause cannot be taken on one path and forgotten on
   /// another. See the definition for why the swap needs it and the enumeration does not.
@@ -799,7 +813,17 @@ class Device {
   /// DeviceManager's busOperationMutex_ and an explicit one holds no lock at all, so an AL
   /// transition and POST .../parameters/init can reach this at the same time.
   bool parametersUnavailable_ = false;
-  std::unordered_map<uint32_t, DeviceParameter> parameters_;
+  // The cells themselves, and they are never destroyed while this Device lives. A re-enumeration
+  // rebuilds the *map* above and appends whatever the new enumeration adds; it never erases a cell.
+  // So a DeviceParameter* — held by a published process image, or cached by a cyclic task — stays
+  // valid for the lifetime of the device, which is the lifetime of its DeviceSet.
+  //
+  // A deque because it never relocates the elements it already holds, and behind a unique_ptr so
+  // that moving a Device (into DeviceManager's vector) cannot be read as moving the cells.
+  std::unique_ptr<std::deque<DeviceParameter>> cells_;
+  // (index, subindex) -> the cell that holds that object's value. Replaced wholesale by
+  // publishParameters; the cells it points at outlive every replacement.
+  std::unordered_map<uint32_t, DeviceParameter*> parameters_;
   FlatPdoMapping flatPdoMapping_;
   // Discovered Complete Access support (the probe outcome), shared by every grouped read for the
   // device's lifetime. Read and written only under parametersMutex_.

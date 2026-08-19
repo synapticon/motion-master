@@ -2658,3 +2658,38 @@ The cost is transient memory: a retired set — devices, parameter maps, driver 
 ### What was not done
 
 `withDevice` was not kept as sugar over the handle. A one-line lookup that no longer holds anything is not worth a name, and keeping it would have kept the borrow vocabulary alive in the docs. `ProcessDataRing` was not converted to `shared_ptr` storage either: its lifetime problem is real but orthogonal, and one leaf `shared_mutex` states it more plainly than a second refcount would.
+
+## Session 2026-08-19 — One retention policy for everything the RT thread can point at, and the use-after-free it turned up (as-built)
+
+Asked for on coherence grounds rather than performance: the process image was already "published, immutable, retained until `reset()`", and the device set had just become "published, immutable, dies with its last holder". Two policies for the same kind of object is one policy too many to reason about. Making them identical turned out to fix a real defect.
+
+### The defect
+
+`Device::publishParameters` replaced `parameters_` wholesale, destroying every `DeviceParameter`. A published `ProcessImage` holds a `DeviceParameter*` per mapped object, resolved once in `buildProcessImage` and **never rebound afterwards** — nothing between a re-enumeration and the next cycle rebinds it. So this sequence corrupted memory on `main`:
+
+1. bus in OP, image published, entries pointing at the device's cells;
+2. `POST /api/devices/1/parameters/init` — the Console's "read parameters" button — replaces the map and destroys those cells;
+3. `resumeCycle` republishes the *same* image, whose entries now dangle;
+4. the next RT cycle decodes inputs into freed memory and composes outputs out of it.
+
+The pause around the swap was doing its job and was never the problem: it makes the swap atomic against a cycle, and says nothing about pointers that outlive it. Two of the three new `DeviceCells` tests fail against the old storage, which is how the diagnosis was confirmed rather than argued.
+
+### What the arena is
+
+Each `Device` owns `std::unique_ptr<std::deque<DeviceParameter>> cells_`, and `parameters_` maps `(index, subindex)` to a pointer into it. A deque because it never relocates elements it already holds; behind a `unique_ptr` so moving a `Device` into `DeviceManager`'s vector cannot be misread as moving the cells.
+
+`publishParameters` now reuses the existing cell whenever the object's `dataType` and `bitLength` are unchanged, adopting the new annotation and adopting the new *value* only when the enumeration actually read one (`syncState != Unknown`) — so a definitions-only pass no longer zeroes a setpoint written before it. A changed declaration allocates a fresh cell instead of rewriting the old one, which also closes the documented data race on `dataType`/`bitLength` against the lock-free RT decode. Nothing is ever erased.
+
+**The arena belongs to the `Device`, not to the manager.** That was the decision that kept the design small: cells live exactly as long as their device, which lives exactly as long as its `DeviceSet`, so there is no third lifetime to explain and no shared arena needing its own mutex for concurrent enumerations.
+
+### The other half: sets retained to `reset()`
+
+`publishDeviceSet` appends every published set to `setGenerations_`, and only `reset()` clears it. So the sentence is now the same for images, ring, sets and cells: **published, immutable, retained until `reset()`; a retired object is valid but no longer fed.** A holder's `shared_ptr` extends its own set past `reset()`, and `stopExchange()` drains the RT cycle before the drop, so neither side can be left reading freed memory.
+
+### Why this did not delete `CycleGuard`, and why that is fine
+
+`reset()` is still a reclaim point, and the RT thread still cannot hold a refcount, so something must guarantee no task is inside a body when the sets go. That is the loop-level guard, which `GameLoop` now takes for every task. What the arena removed is the *other two* reasons the guard existed — a `scan` freeing devices and a re-enumeration freeing cells — so the guard went from three jobs to one, and the Tier-3 rule "resolve every cycle, never cache a pointer" relaxed to "cache freely; a rescan makes it stale, not dangling".
+
+### The cost, stated plainly
+
+Memory grows with rescans until `reset()`: a retained set carries its devices and their cells, roughly the size of one enumeration per device per scan. The trap avoided on purpose: **cells are not keyed globally by `(position, index, subindex)` and reused across scans.** That would have made rescans free and memory flat, and it would also have let a retired device read the *new* drive's values through a shared cell — the "position is not identity" trap, made silent. Fresh cells per scan is what makes the memory cost real and the semantics honest.

@@ -108,7 +108,7 @@ classDiagram
         -shared_mutex processDataMutex_
     }
     class DeviceSet {
-        <<published generation, immutable>>
+        <<published generation, immutable, retained to reset()>>
         +shared_ptr~FieldbusDriver~ driver
         +vector~Device~ devices
         +uint64 topologyGeneration

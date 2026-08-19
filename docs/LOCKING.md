@@ -17,8 +17,7 @@ something.
 
 ```text
 DeviceManager
- ├── shared_ptr<DeviceSet>          currentSet_       the live generation
- ├── vector<shared_ptr<DeviceSet>>  setGenerations_   every generation published since reset()
+ ├── shared_ptr<DeviceSet>          currentSet_       the live generation, and its only owner
  ├── atomic<DeviceSet*>             publishedSet_     the live generation, for the RT thread
  └── unique_ptr<ProcessData>        pd_               created once, never replaced
       ├── atomic<const ProcessImage*>          image        the live layout
@@ -36,27 +35,28 @@ DeviceSet — immutable once published
 
 **Four rules.**
 
-1. **Published, immutable, retained.** A device set, a process image and a parameter cell are
-   published once and never modified afterwards. A change publishes a new one and keeps the old, so
-   a pointer into it stays valid — *valid but no longer fed*. Reads serve the last values; writes
-   reach no wire.
+1. **Published, then immutable.** A device set, a process image and a parameter cell are published
+   once and never modified afterwards. A change publishes a new one. While you still hold the old
+   one it is *valid but no longer fed*: reads serve the last values, writes reach no wire.
 2. **Off the real-time thread, hold a refcount, never a lock.** `deviceAt()` returns a
    `DeviceHandle`; `deviceSet()` returns the set. Either keeps its devices alive for as long as you
    hold it. Nothing waits for you, and no rescan can invalidate you.
 3. **The real-time thread holds neither.** `GameLoop` enters the cycle before it calls any task, and
    every operation that frees something drains the cycle first. That is the whole real-time
    contract.
-4. **Only `reset()` frees a device.** `scan()` publishes a new set and retains the old one, so
-   memory grows with rescans until `reset()`.
+4. **Freeing waits for two things, and nothing longer.** A retired set goes away when the last
+   `DeviceHandle` releases it *and* the cycle has been drained. Memory does not grow with rescans,
+   and the price is rule 2's other half: a cyclic task resolves its devices each cycle and caches
+   nothing across cycles.
 
 **Who frees what.**
 
 | Operation | Frees | Safe because |
 | --- | --- | --- |
-| `scan()` | retained images, ring storage | the RT thread touches both only inside `exchangeProcessData`, which is drained first |
-| a re-map | ring storage, re-allocated for the new layout | the same drain |
-| a re-enumeration | nothing | a cell is reused or added, never erased |
-| `reset()` | every device set, every cell, the images, the ring | `stopExchange()` drains the cycle, so no task is inside one |
+| a re-enumeration | nothing. A cell is reused or added, never erased | — |
+| a re-map | the ring storage, re-allocated for the new layout | `stopExchange()` drains the cycle first |
+| `scan()` | the retired device set and its cells once the last handle releases them, the retained images, the ring storage | the same drain, so no task is inside a cycle holding a pointer |
+| `reset()` | the same, and it stops the driver | the same drain |
 | `~DeviceManager` | everything | the loop has stopped |
 
 **The locks, one line each.**
@@ -233,10 +233,10 @@ Each copies the pointer under `currentSetMutex_`, which is held for that copy al
 caller holds no lock, for a millisecond or for ten minutes. `std::atomic<std::shared_ptr<T>>` would
 remove even that mutex, but it is not lock-free, and libc++ does not implement it.
 
-**A rescan neither waits for a holder nor invalidates one.** `scan` publishes a new set, and every
-set ever published is retained until `reset()` — the same policy, stated the same way, as the
-retained process images. A retired device is *valid but no longer fed*: reads serve its last values,
-`exchangesProcessData()` is false, and a write reaches no wire. A procedure that was running keeps
+**A rescan neither waits for a holder nor invalidates one.** `scan` publishes a new set; the old one
+is freed when its last holder releases it. While a holder still has it, that device is *valid but no
+longer fed*: reads serve its last values, `exchangesProcessData()` is false, and a write reaches no
+wire. A procedure that was running keeps
 working against its own device. Because the retired set also owns the driver, that device's next
 transfer reaches a live driver object on a bus that has moved on, and fails as an error rather than
 a crash.
@@ -244,8 +244,8 @@ a crash.
 **The real-time thread reads `publishedSet_`, not the `shared_ptr`.** The control plane replaces
 that raw pointer only with the cycle drained (`ProcessData::pauseCycle`), so a cyclic task inside a
 [`CycleGuard`](#the-cycle-gate) can dereference it for the whole body. The set it names needs no
-strong reference of its own: `setGenerations_` holds every published set until `reset()`, and
-`reset()` clears this pointer before it drops them. The two routes split by caller:
+reference of its own: `currentSet_` owns the object it names, and `publishDeviceSet` writes both
+with the cycle drained. The two routes split by caller:
 
 | Caller | Route | What holds the device still |
 | --- | --- | --- |
@@ -566,9 +566,11 @@ Each item below must stay true. Something in the code relies on each one today.
    `ProcessImageEntry::parameter` is one: every re-map rebuilds it, and every change that
    invalidates it pauses the cycle. The per-cycle lookup of a cyclic task is the other: it holds
    inside one cycle, never across cycles.
-5. **A published `DeviceSet` is never modified.** `init` and `scan` build a new one and publish it.
-   A caller that holds a handle on a retired set may read it and may drive its device; the transfer
-   fails on the bus rather than in memory.
+5. **A published `DeviceSet` is never modified**, and it lives exactly as long as its holders.
+   `init` and `scan` build a new one and publish it. A caller holding a handle on a retired set may
+   read it and may drive its device; the transfer fails on the bus rather than in memory. On the
+   real-time thread the drain takes the place of the handle, so a task must not cache a pointer
+   across cycles.
 6. **Every reader of `pd_->ring` or `pd_->generations` holds `processDataMutex_` shared.**
 7. **`pauseCycle()`, through `stopExchange()`, precedes every mutation of these: the IOmap, the ring
    storage, `publishedSet_`, and the `parameters_` map of a device.** A cyclic task reads the last

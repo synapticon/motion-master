@@ -2682,9 +2682,13 @@ Each `Device` owns `std::unique_ptr<std::deque<DeviceParameter>> cells_`, and `p
 
 **The arena belongs to the `Device`, not to the manager.** That was the decision that kept the design small: cells live exactly as long as their device, which lives exactly as long as its `DeviceSet`, so there is no third lifetime to explain and no shared arena needing its own mutex for concurrent enumerations.
 
-### The other half: sets retained to `reset()`
+### The other half: sets retained to `reset()` — tried, then reverted the same day
 
-`publishDeviceSet` appends every published set to `setGenerations_`, and only `reset()` clears it. So the sentence is now the same for images, ring, sets and cells: **published, immutable, retained until `reset()`; a retired object is valid but no longer fed.** A holder's `shared_ptr` extends its own set past `reset()`, and `stopExchange()` drains the RT cycle before the drop, so neither side can be left reading freed memory.
+`publishDeviceSet` appended every published set to a `setGenerations_` list that only `reset()` cleared, so one sentence covered images, ring, sets and cells. It read well and it was the wrong trade. Asked what this field normally does, the answer is: on the RT path take no lock and free nothing; off it use a reference count; and for memory, prefer freeing as soon as it is safe over retaining. The retention list was the only part of the design that grew memory without bound, and the only thing it bought was permission for a task to cache a pointer across cycles — a permission a controls engineer does not ask for, because "resolve your signals each cycle" is the rule they already expect.
+
+So it is gone. A retired set is freed when its last `DeviceHandle` releases it, which the reference count does on its own, and the RT side stays covered by the drain that every publisher already performs. `currentSet_` is the single owner; `publishedSet_` carries no reference and is written first, while the argument still owns the object. Memory is flat across rescans again.
+
+**What that decision cost:** the "one policy everywhere" sentence. Images are still retained to `reset()`, because a recorded row can only be decoded against the layout it was written under, so the ring's history needs its layouts kept. Devices are not, because nothing needs a retired device after its holder is done. Two policies, each for a stated reason, rather than one policy for symmetry.
 
 ### Why this did not delete `CycleGuard`, and why that is fine
 

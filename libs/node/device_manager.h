@@ -908,9 +908,9 @@ class DeviceManager {
 
   /// @brief Publishes @p set as the current generation. Call with @c busOperationMutex_ held.
   ///
-  /// Swaps the shared pointer readers copy, retains the set in @c setGenerations_, then hands the
-  /// RT thread the raw pointer. The caller must have drained the RT cycle first (@c stopExchange),
-  /// so no cyclic task is inside a @c CycleGuard reading the pointer this replaces.
+  /// Hands the RT thread the raw pointer, then swaps the shared pointer readers copy — which is
+  /// what drops the previous set. The caller must have drained the RT cycle first (@c
+  /// stopExchange), so no cyclic task is inside a @c CycleGuard reading the set being dropped.
   void publishDeviceSet(std::shared_ptr<DeviceSet> set);
 
   // busOperationMutex_ — "one control-plane operation drives the bus at a time". It guards no
@@ -930,22 +930,20 @@ class DeviceManager {
   // lock-free (libc++ does not implement it at all). Device *lifetime* is the refcount's job, not
   // this lock's.
   mutable std::mutex currentSetMutex_;
-  // The published generation of the bus. Never null: an empty set stands in before the first
-  // init(), so every reader can dereference the pointer it gets without a check.
-  std::shared_ptr<DeviceSet> currentSet_;
-  // Every set ever published, retained so a pointer into a retired one stays valid. This is the
-  // same policy the process image already uses (ProcessData::generations) and it is stated the same
-  // way: published objects live until reset(). A retired device is valid but no longer fed — reads
-  // serve its last values, exchangesProcessData() is false, and a write reaches no wire.
+  // The published generation of the bus, and the reference that keeps it alive. Never null: an
+  // empty set stands in before the first init(), so every reader can dereference the pointer it
+  // gets without a check.
   //
-  // reset() drops these references; it is the only reclaim point. A holder of a DeviceHandle keeps
-  // its own set alive past that, and the RT thread is drained out before the drop, so neither can
-  // be left reading freed memory.
-  std::vector<std::shared_ptr<DeviceSet>> setGenerations_;
+  // A retired set is freed as soon as that is safe, and not retained beyond it: the last
+  // DeviceHandle holding it frees it, so memory does not grow with rescans. The RT side is covered
+  // by the drain — every publisher calls stopExchange() first, so no cyclic task is inside a cycle
+  // body holding a pointer into the set being dropped. A task must therefore resolve its devices
+  // each cycle and never cache one across cycles.
+  std::shared_ptr<DeviceSet> currentSet_;
 
-  // The same set as a raw pointer, for the RT thread, which must not touch a shared_ptr. It needs
-  // no strong reference of its own: setGenerations_ above holds every published set until reset(),
-  // and reset() drains the cycle and clears this pointer before it drops them.
+  // The same set as a raw pointer, for the RT thread, which must not touch a shared_ptr. It carries
+  // no reference of its own: currentSet_ owns the object it names, and publishDeviceSet writes both
+  // with the cycle drained.
   std::atomic<DeviceSet*> publishedSet_{nullptr};
 
   // processDataMutex_ — the two non-atomic members of ProcessData: the recorder ring's storage and

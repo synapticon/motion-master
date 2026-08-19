@@ -412,19 +412,19 @@ decision.
   length are unchanged, so a held `DeviceParameter*` survives it and a value written before it
   survives too. A changed declaration gets a new cell, because the RT decode reads `dataType`
   and `bitLength` without a lock.
-- **One retention policy, one reclaim point.** Process images, recorder ring, device sets and
-  parameter cells all live until `reset()`. A retired object is valid but no longer fed: reads
-  serve the last values, and writes reach no wire. `topologyGeneration()` is how a holder
-  notices.
+- **Freed as soon as it is safe, never retained beyond that.** A retired device set goes away
+  when its last `DeviceHandle` releases it, so memory does not grow with rescans. While a
+  holder has it, the device is valid but no longer fed: reads serve the last values, writes
+  reach no wire. `topologyGeneration()` is how a holder notices.
 - **`GameLoop` enters the cycle; a task writes no guard.** The loop takes one
   `DeviceManager::CycleGuard` around the whole task list each cycle and calls no task when it
   is falsy. So a task's `findDevice` / `findParameter` results are valid for the body of its
   `execute()` by construction, and a task cannot forget to make them so. `findDevice` and
   `findParameter` stay public and non-locking because the RT thread must not block.
-- **Lifetime: a pointer stays valid until `reset()`.** `scan()` and `initializeParameters()`
-  make one stale, never dangling, so a task may cache a `Device*` or a `DeviceParameter*`
-  across cycles. `reset()` is the reclaim point, and it drains the cycle first, which is why
-  the loop's guard still matters.
+- **Lifetime: a pointer is valid for one `execute()`.** Resolve each cycle and cache nothing
+  across cycles. A re-enumeration keeps the cells, so it cannot dangle a pointer; a `scan()` or
+  `reset()` frees the retired devices once their holders let go, and the loop's cycle guard is
+  what keeps a task out of that window.
 - **The RT loop does no lookups.** `ProcessImageEntry` carries the owning
   `DeviceParameter*`, resolved at publish and refreshed on every re-map. A lookup per mapped
   object per cycle is fatal at bus scale: 50 devices × 40 objects is 60–100 µs against a

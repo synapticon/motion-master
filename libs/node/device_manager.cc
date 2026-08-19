@@ -40,7 +40,6 @@ DeviceManager::DeviceManager()
     : currentSet_(std::make_shared<DeviceSet>()), pd_(std::make_unique<ProcessData>()) {
   // An empty set from construction on, so deviceSet() never returns null and no reader needs a
   // "before init()" branch. The RT view stays null until something is published.
-  setGenerations_.push_back(currentSet_);
 }
 
 DeviceManager::~DeviceManager() = default;
@@ -206,18 +205,10 @@ void DeviceManager::reset() {
     pd_->ring.clear();  // teardown — free the recorder storage
   }
   topologyGeneration_.fetch_add(1, std::memory_order_relaxed);
-  // The one reclaim point. Dropping our references here is safe on both sides: an off-RT holder of
-  // a DeviceHandle keeps its own set alive past this, and stopExchange() above drained the RT
-  // cycle, so no cyclic task is inside a body holding a pointer into one of them.
-  {
-    const std::lock_guard lock(currentSetMutex_);
-    // Clear the RT view before dropping the sets, so the pointer never names freed memory even for
-    // the instant between the two. The cycle is already drained and the image unpublished, so
-    // nothing is reading it.
-    publishedSet_.store(nullptr, std::memory_order_release);
-    setGenerations_.clear();
-  }
   // An empty set takes over, so every reader gets a set with no devices and no driver from here on.
+  // Publishing it is what drops this manager's reference to the old one. Whoever still holds a
+  // DeviceHandle keeps their own copy alive until they are done with it, and the drain above means
+  // no cyclic task can be inside a cycle holding a pointer into it.
   auto set = std::make_shared<DeviceSet>();
   set->topologyGeneration = topologyGeneration_.load(std::memory_order_relaxed);
   publishDeviceSet(std::move(set));
@@ -253,15 +244,12 @@ std::shared_ptr<DeviceSet> DeviceManager::deviceSet() const {
 }
 
 void DeviceManager::publishDeviceSet(std::shared_ptr<DeviceSet> set) {
-  {
-    const std::lock_guard lock(currentSetMutex_);
-    currentSet_ = set;
-    // Retained until reset(), so a Device* or DeviceParameter* into a retired set stays valid
-    // rather than merely lucky. Same policy, same sentence, as the retained process images.
-    setGenerations_.push_back(set);
-  }
-  // The RT view of the same object, which setGenerations_ keeps alive.
+  // The RT view first, while the argument still keeps the new set alive. Assigning currentSet_ is
+  // what drops the previous set, so doing that second means publishedSet_ never names an object
+  // that nothing owns.
   publishedSet_.store(set.get(), std::memory_order_release);
+  const std::lock_guard lock(currentSetMutex_);
+  currentSet_ = std::move(set);
 }
 
 Device* DeviceSet::find(uint16_t slavePosition) {

@@ -638,6 +638,12 @@ paths:
         cannot distinguish a bus with no devices powered from a disconnected one, and the
         user recovers by powering devices on and scanning again. A 500 is returned only on
         a genuine driver failure (e.g. no driver initialised).
+
+
+        A scan does not wait for work already in flight. A procedure that is running keeps
+        running against the devices it started on, and fails at its next bus transfer.
+        Retained procedure snapshots are discarded, because a position may name different
+        hardware after a scan.
       responses:
         "200":
           description: Scan successful; returns the number of slaves found (0 for an empty or unpowered bus)

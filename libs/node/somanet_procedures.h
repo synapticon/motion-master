@@ -1057,16 +1057,15 @@ std::expected<void, std::string> runTorqueConstantMeasurementProcedure(Device& d
 
 // ── Firmware installation ──────────────────────────────────────────────────────────────────────
 //
-// The one procedure here written against BusProcedureBody rather than ProcedureBody. Installing
-// firmware *is* a sequence of AL state transitions, and a body holding the bus lock shared for
-// its whole run cannot make them — see BusProcedureBody.
+// The one procedure here that changes AL state. Installing firmware *is* a sequence of transitions
+// (BOOT, write the files, back), so it takes the manager and the position rather than one device.
 
 /// @file
 /// @brief Firmware installation, the one procedure that changes AL state.
 ///
-/// It is written against @c BusProcedureBody rather than @c ProcedureBody, and that is not a detail
-/// of taste: installing firmware *is* a sequence of state transitions (BOOT, write, back), and a
-/// body holding the bus lock shared for its whole run cannot make them. See @c BusProcedureBody.
+/// It takes @c DeviceManager& and a position rather than a @c Device&, because @c transitionToState
+/// is a whole-bus operation and this procedure is defined by its transitions. It resolves the
+/// device again for each step, so a rescan mid-install ends the run cleanly at the next step.
 
 /// @brief Procedure name, as it appears in its URL and its snapshot key.
 inline constexpr std::string_view kFirmwareInstallationProcedure = "firmware-installation";

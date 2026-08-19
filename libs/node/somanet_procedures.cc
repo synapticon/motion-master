@@ -477,14 +477,6 @@ using mm::comm::EtherCatState;
 using mm::comm::FoeError;
 using mm::comm::Retry;
 
-/// The result of borrowing a device to perform one FoE transfer: the **outer** error is the borrow
-/// itself (a string, which is what @c withDevice requires so it can report "device not found"), and
-/// the **inner** one is the transfer. Nesting them keeps the FoE error kind intact across the
-/// borrow, which is the whole reason this procedure can tell a transient failure worth retrying
-/// from a permanent one worth aborting on.
-template <typename T>
-using Borrowed = std::expected<std::expected<T, FoeError>, std::string>;
-
 constexpr std::string_view kPackageStep = "package";
 constexpr std::string_view kCacheStep = "cache";
 constexpr std::string_view kBootStep = "boot";
@@ -556,17 +548,17 @@ std::expected<void, std::string> writeFileWithRetry(DeviceManager& deviceManager
     if (stop.stop_requested()) {
       return std::unexpected(cancelled(std::format("before writing '{}'", filename)));
     }
-    auto written = deviceManager.withDevice(devicePosition, [&](Device& device) -> Borrowed<void> {
-      return device.writeFile(filename, content);
-    });
-    // The outer expected reports a borrow failure (a string); the inner one the transfer itself.
-    if (!written) {
-      return std::unexpected(written.error());
+    // Resolved per attempt, so a rescan mid-install ends the run at the next step rather than
+    // writing to a device that has moved.
+    const auto device = deviceManager.deviceAt(devicePosition);
+    if (!device) {
+      return std::unexpected(std::format("device {} not found", devicePosition));
     }
-    if (*written) {
+    const std::expected<void, FoeError> written = device->writeFile(filename, content);
+    if (written) {
       return {};
     }
-    const FoeError& error = written->error();
+    const FoeError& error = written.error();
     lastError = error.message;
     if (error.retry == Retry::Permanent) {
       return std::unexpected(lastError);
@@ -587,17 +579,16 @@ std::expected<void, std::string> writeFileWithRetry(DeviceManager& deviceManager
 /// precisely the outcome the caller wanted.
 std::expected<void, std::string> removeFile(DeviceManager& deviceManager, uint16_t devicePosition,
                                             const std::string& filename) {
-  auto removed = deviceManager.withDevice(
-      devicePosition, [&](Device& device) -> Borrowed<std::vector<uint8_t>> {
-        return device.readFile(std::string(kRemoveFilePrefix) + filename);
-      });
-  if (!removed) {
-    return std::unexpected(removed.error());
+  const auto device = deviceManager.deviceAt(devicePosition);
+  if (!device) {
+    return std::unexpected(std::format("device {} not found", devicePosition));
   }
-  if (*removed || removed->error().kind == mm::comm::FoeErrorKind::FileNotFound) {
+  const std::expected<std::vector<uint8_t>, FoeError> removed =
+      device->readFile(std::string(kRemoveFilePrefix) + filename);
+  if (removed || removed.error().kind == mm::comm::FoeErrorKind::FileNotFound) {
     return {};
   }
-  return std::unexpected(removed->error().message);
+  return std::unexpected(removed.error().message);
 }
 
 std::expected<void, std::string> transitionTo(DeviceManager& deviceManager, uint16_t devicePosition,
@@ -2546,10 +2537,11 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
   if (!package->sii) {
     reporter.succeed(kSiiStep, "the package carries no SII image");
   } else {
-    auto written = deviceManager.withDevice(
-        devicePosition, [&](Device& device) -> std::expected<void, std::string> {
-          return device.writeSii(package->sii->content);
-        });
+    const auto device = deviceManager.deviceAt(devicePosition);
+    std::expected<void, std::string> written = deviceNotFound(devicePosition);
+    if (device) {
+      written = device->writeSii(package->sii->content);
+    }
     if (!written) {
       failure = std::format("writing the SII failed: {}", written.error());
       reporter.fail(kSiiStep, *failure);

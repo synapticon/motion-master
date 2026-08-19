@@ -29,12 +29,6 @@ namespace mm::node {
 /// both of those stay profile-ignorant. It is also where the two error kinds those classes cannot
 /// judge come from: whether a procedure exists at all, and whether a request for it validates.
 
-/// @brief Either body shape, as a catalogue entry produces it.
-///
-/// A variant rather than two factories on the entry, so "which shape" is one answer per procedure
-/// that cannot be given twice or not at all, and @c startProcedure resolves it with a single visit.
-using ProcedureWork = std::variant<ProcedureBody, BusProcedureBody>;
-
 /// @brief One procedure, as the catalogue knows it: what it is, who has it, and how to run it.
 struct ProcedureCatalogueEntry {
   ProcedureDescriptor descriptor;  ///< What a client is told about it.
@@ -54,9 +48,8 @@ struct ProcedureCatalogueEntry {
   ///
   /// The variant is which of the two body shapes the procedure needs: almost all take a borrowed
   /// @c Device&, while one that must change AL state takes the manager and borrows per step (see
-  /// @c BusProcedureBody). @c startProcedure dispatches to the matching @c ProcedureManager::start
   /// overload, so the choice costs an entry nothing but naming the right signature.
-  std::function<std::expected<ProcedureWork, std::string>(const nlohmann::json& request)> makeBody;
+  std::function<std::expected<ProcedureBody, std::string>(const nlohmann::json& request)> makeBody;
 };
 
 /// @brief Every procedure the server knows, in the order a client should present them.

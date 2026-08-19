@@ -1093,10 +1093,11 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
   // Accepted caveat — this method does NOT hold ctx_ stable for its whole duration. Because
   // controlPlaneMutex_ is dropped between transactions, a concurrent scan()/reset()/stop() landing
   // in one of those gaps frees ctx_, and the next transaction then dereferences a dangling context:
-  // a use-after-free. Within Motion Master this cannot happen — both callers of this exclude a
-  // rescan for the call's entire duration: DeviceManager::initializeDeviceParameters holds
-  // deviceSetMutex_ shared and transitionToState holds busOperationMutex_, and scan()/reset() need
-  // both. An embedder driving SoemFieldbusDriver directly MUST provide the
+  // a use-after-free. Within Motion Master this cannot happen — the callers of this hold a
+  // DeviceHandle on the device for the call's entire duration, and the handle owns the device set,
+  // which owns this driver: a concurrent scan()/reset() publishes a new set and stops the bus, but
+  // the context this transaction uses stays constructed. An embedder driving SoemFieldbusDriver
+  // directly MUST provide the
   // same guarantee: do not call scan()/reset()/stop() while a readObjectDictionary() is in flight
   // on another thread. This is not a wart unique to this method — it is the driver's uniform
   // lifetime contract: exchangeProcessData() carries the identical one on the RT path, reading ctx_

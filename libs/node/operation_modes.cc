@@ -109,8 +109,11 @@ std::expected<OperationModes, std::string> deviceOperationModes(Device& device) 
 
 std::expected<OperationModes, std::string> operationModes(DeviceManager& deviceManager,
                                                           uint16_t slavePosition) {
-  return deviceManager.withDevice(slavePosition,
-                                  [](Device& device) { return deviceOperationModes(device); });
+  const auto device = deviceManager.deviceAt(slavePosition);
+  if (!device) {
+    return deviceNotFound(slavePosition);
+  }
+  return deviceOperationModes(*device);
 }
 
 }  // namespace mm::node

@@ -9,19 +9,21 @@ namespace mm::node {
 
 namespace {
 
-// The two steps every function here repeats: borrow the device under the bus lock, then bind a
-// validated SOMANET view to it. What is left at each call site is the operation itself.
+// The two steps every function here repeats: take a handle on the device, then bind a validated
+// SOMANET view to it. What is left at each call site is the operation itself. The handle keeps the
+// device alive for the call, so a concurrent rescan cannot pull it out from under the view.
 template <typename Fn>
 auto withSomanetDrive(DeviceManager& deviceManager, uint16_t slavePosition, Fn&& fn)
     -> std::invoke_result_t<Fn, SomanetDrive&> {
-  return deviceManager.withDevice(slavePosition,
-                                  [&fn](Device& device) -> std::invoke_result_t<Fn, SomanetDrive&> {
-                                    auto drive = createSomanetDrive(device);
-                                    if (!drive) {
-                                      return std::unexpected(drive.error());
-                                    }
-                                    return std::forward<Fn>(fn)(*drive);
-                                  });
+  const auto device = deviceManager.deviceAt(slavePosition);
+  if (!device) {
+    return deviceNotFound(slavePosition);
+  }
+  auto drive = createSomanetDrive(*device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+  return std::forward<Fn>(fn)(*drive);
 }
 
 }  // namespace

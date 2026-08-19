@@ -185,6 +185,73 @@ struct DeviceManagerConfig {
   uint32_t recorderCapacity = 300000;
 };
 
+/// @brief One published generation of the bus: the driver that owns the socket, and the devices
+///        found on it.
+///
+/// A set is built by @c init or @c scan, published once, and never modified after that. Publishing
+/// freezes the @c devices vector, not the devices in it — each @c Device guards its own parameter
+/// map with its own mutex.
+///
+/// **The set is what makes device lifetime a refcount rather than a lock.** Every off-RT caller
+/// works through a @c std::shared_ptr to one (@c DeviceManager::deviceSet), so a @c Device& stays
+/// valid for as long as the caller holds that pointer. A concurrent @c scan does not wait for the
+/// caller and does not invalidate the reference: it publishes a *new* set, and the old one dies
+/// when its last holder drops it. The retired devices keep working against their own driver, which
+/// the set also owns, so a transfer against hardware that is no longer on the bus fails cleanly
+/// instead of touching freed memory.
+///
+/// The RT thread does not touch the @c shared_ptr, because @c std::atomic<std::shared_ptr<T>> is
+/// not lock-free (and libc++ does not implement it at all). It reads a raw published pointer
+/// instead, drained by @c ProcessData::pauseCycle exactly as the process image is.
+struct DeviceSet {
+  /// The driver every device in this set talks through. Shared, so a retired set keeps it alive.
+  std::shared_ptr<mm::comm::FieldbusDriver> driver;
+  /// The devices in bus order: index 0 is position 1. Frozen once the set is published.
+  std::vector<Device> devices;
+  /// The value @c DeviceManager::topologyGeneration reported when this set was published.
+  uint64_t topologyGeneration = 0;
+
+  /// @brief Device at @p slavePosition, or @c nullptr when the set holds none.
+  Device* find(uint16_t slavePosition);
+  /// @brief Const overload of @c find. Same contract.
+  const Device* find(uint16_t slavePosition) const;
+};
+
+/// @brief One device, plus the set that keeps it alive.
+///
+/// What @c DeviceManager::deviceAt hands back. The handle *is* the lifetime: while you hold it, the
+/// @c Device it names stays constructed and its parameter map stays put, whatever @c scan or
+/// @c reset do meanwhile. A bare @c deviceSet()->find(pos) would dangle the moment the temporary
+/// set pointer died, which is the mistake this type exists to make unwritable.
+///
+/// Falsy when the position resolved to no device. Dereferencing then is undefined, exactly as for a
+/// null pointer.
+class DeviceHandle {
+ public:
+  DeviceHandle() = default;
+  DeviceHandle(std::shared_ptr<DeviceSet> set, Device* device)
+      : set_(std::move(set)), device_(device) {}
+
+  /// @brief Whether a device was found.
+  explicit operator bool() const { return device_ != nullptr; }
+  Device& operator*() const { return *device_; }
+  Device* operator->() const { return device_; }
+  /// @brief The device, or @c nullptr. For a caller that must pass it on as a pointer.
+  Device* get() const { return device_; }
+
+ private:
+  std::shared_ptr<DeviceSet> set_;
+  Device* device_ = nullptr;
+};
+
+/// @brief The error to return when a bus position resolves to no device.
+///
+/// One wording, so every surface answers the same way. Converts to any
+/// @c std::expected<T, std::string>.
+inline std::unexpected<std::string> deviceNotFound(uint16_t slavePosition) {
+  return std::unexpected(std::format("device {} not found", slavePosition));
+}
+
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.
 ///
 /// The driver is not required at construction — call @c init() to supply one.
@@ -248,66 +315,33 @@ class DeviceManager {
   ///
   /// For the caller that only needs to tell "no such device" from a failure of the operation
   /// itself — an HTTP route answering 404 before it starts. It is a point-in-time answer, so it
-  /// does not entitle the caller to a @c Device&: use @c withDevice for that.
+  /// does not entitle the caller to a @c Device&: use @c deviceAt for that.
   bool hasDevice(uint16_t slavePosition) const;
 
-  /// @brief Runs @p fn against every discovered device, holding the device-set lock throughout.
+  /// @brief The device at @p slavePosition, as a handle that keeps it alive. Falsy if absent.
   ///
-  /// The whole-set counterpart of @c withDevice, and it exists for the same reason: returning
-  /// @c const @c std::vector<Device>& would hand a caller a reference that @c scan / @c reset
-  /// invalidates, and the lock that would make it safe is private. @p fn receives the vector in
-  /// bus order (index 0 = position 1, empty before @c scan) and may return anything, including
-  /// @c void.
+  /// The way to reach a device from outside @c DeviceManager. It resolves the position in the
+  /// current @c DeviceSet and hands back a @c DeviceHandle holding both. Keep the handle for as
+  /// long as you work with the device — a millisecond or ten minutes, it makes no difference, and
+  /// no lock is held either way.
   ///
-  /// The same re-entrancy rule as @c withDevice applies: @p fn must not call back into a
-  /// @c DeviceManager control-plane operation.
-  template <typename Fn>
-  auto withDevices(Fn&& fn) const -> std::invoke_result_t<Fn, const std::vector<Device>&> {
-    const std::shared_lock lock(deviceSetMutex_);
-    return std::forward<Fn>(fn)(devices_);
-  }
+  /// A @c scan that lands while you hold one publishes a *new* set. Your device keeps working, and
+  /// its next bus transaction fails against hardware that has moved or gone. That is the intended
+  /// outcome: a rescan never waits for a procedure, and a procedure never reads freed memory.
+  ///
+  /// @code
+  /// const auto device = deviceManager.deviceAt(slavePosition);
+  /// if (!device) { return deviceNotFound(slavePosition); }
+  /// return device->readParameter(index, subindex);
+  /// @endcode
+  DeviceHandle deviceAt(uint16_t slavePosition) const;
 
-  /// @brief Runs @p fn against the device at @p slavePosition, holding the bus lock throughout.
+  /// @brief The current device set, as a pointer that keeps it alive. Never @c nullptr.
   ///
-  /// The safe way to *borrow* a device from outside @c DeviceManager. @c findDevice hands back a
-  /// pointer that @c scan / @c reset can dangle, and the lock that would make it safe
-  /// (@c deviceSetMutex_) is private — so code living outside this class previously had no way to
-  /// hold a @c Device& for the length of an operation, and every such operation had to be added
-  /// here as another method. This lends locked access instead of adding a verb: @c DeviceManager's
-  /// job stays "own the devices, lend safe access to them", and it never has to name what the
-  /// caller intends to do with one.
-  ///
-  /// The lock is @c deviceSetMutex_ held **shared**, so any number of borrowers (and every
-  /// position-based read/write method) proceed concurrently; only @c scan and @c reset wait, and
-  /// they are exactly the operations that would invalidate the borrowed @c Device&. Holding it for
-  /// a multi-second operation is therefore correct rather than merely tolerable.
-  ///
-  /// @warning A borrow does **not** exclude @c transitionToState or @c configureProcessData —
-  ///          those take @c busOperationMutex_, which a borrower never holds. A long procedure and
-  ///          a user-driven AL transition can therefore interleave: the transition proceeds and the
-  ///          procedure's next bus transaction fails against the changed state, rather than the
-  ///          transition's HTTP request hanging for the procedure's whole duration. Only the
-  ///          *lifetime* of the borrowed reference is guaranteed, which is what @c Device& needs.
-  ///
-  /// @warning @p fn must not call back into @c DeviceManager's control plane (@c scan, @c reset,
-  ///          @c init, @c configureProcessData, @c transitionToState): each takes
-  ///          @c deviceSetMutex_ exclusively at some point, it is not recursive, and the wait would
-  ///          never end.
-  ///
-  /// @param slavePosition  1-based position of the device on the fieldbus.
-  /// @param fn             Callable taking @c Device& and returning @c std::expected<T,
-  /// std::string>.
-  /// @return Whatever @p fn returns, or an error if no device holds that position.
-  template <typename Fn>
-    requires std::same_as<typename std::invoke_result_t<Fn, Device&>::error_type, std::string>
-  auto withDevice(uint16_t slavePosition, Fn&& fn) -> std::invoke_result_t<Fn, Device&> {
-    const std::shared_lock lock(deviceSetMutex_);
-    Device* device = findDevice(slavePosition);
-    if (device == nullptr) {
-      return std::unexpected(std::format("device {} not found", slavePosition));
-    }
-    return std::forward<Fn>(fn)(*device);
-  }
+  /// One mutex acquisition, long enough to copy a @c shared_ptr, then nothing. For work that spans
+  /// several devices — a JSON listing, a bus-wide walk. @c deviceAt is the one-device form. Before
+  /// the first @c init the set is empty, not absent.
+  std::shared_ptr<DeviceSet> deviceSet() const;
 
   /// @brief Holds a cyclic task's whole body open against a device-set rebuild. RT-safe.
   ///
@@ -358,15 +392,14 @@ class DeviceManager {
 
   /// @brief Device lookup by bus position. O(N) over a handful of devices; @c nullptr if absent.
   ///
-  /// Takes no lock, which is what makes it callable from a cyclic task. @c withDevice is the
-  /// counterpart for the control plane, where an operation must hold its device across seconds of
-  /// bus traffic.
+  /// **For the RT thread.** It reads the raw published device set and takes no lock, which is what
+  /// makes it callable from a cyclic task. Off the RT thread use @c deviceAt or @c deviceSet,
+  /// which hold the set alive by refcount.
   ///
   /// **Lifetime.** The returned pointer — and any @c DeviceParameter* obtained through it — is
-  /// valid only until the next @c scan() or @c reset(), which destroy every @c Device. A cyclic
-  /// task must therefore re-resolve each cycle inside a @c CycleGuard and never cache a @c Device*
-  /// across cycles; a control-plane caller uses @c withDevice, which holds @c deviceSetMutex_ for
-  /// the borrow's whole duration.
+  /// valid for the body of one cycle, inside one @c CycleGuard. A @c scan or @c reset publishes a
+  /// new set and drops the RT reference to the old one, so a cyclic task must re-resolve each cycle
+  /// and never cache a @c Device* across cycles.
   ///
   /// **Position is not identity.** Inserting a device into the chain shifts every position after
   /// it, so a task pinned to position 4 can silently find different hardware there after a rescan.
@@ -414,9 +447,9 @@ class DeviceManager {
   /// @warning @c exchangeProcessData() runs on the RT GameLoop thread while @c init(),
   ///          @c scan(), @c reset(), and @c configureProcessData() may be called from the
   ///          HTTP server thread.  The published-image pointer gates exchange off during a
-  ///          re-map, but @c driver_ / @c devices_ themselves are not otherwise locked across
-  ///          that boundary.  Stop the loop (or drain one cycle) before calling @c init() /
-  ///          @c reset() / @c configureProcessData() via the API.
+  ///          re-map, and the device set it reads is the raw published pointer, which the control
+  ///          plane replaces only with the cycle drained.  Every control-plane operation drains
+  ///          before it mutates, so no caller has to stop the loop first.
   void exchangeProcessData();
 
   /// @brief Whether @c configureProcessData has published a process image for exchange.
@@ -653,10 +686,10 @@ class DeviceManager {
   ///
   /// **The updated parameter is returned rather than left for the caller to read back**, because
   /// the write coerces the value to the declared type and moves @c syncState: a caller that wants
-  /// either has to ask, and asking in a second call would drop @c deviceSetMutex_ in between. A
-  /// @c scan or @c reset landing in that gap rebuilds @c devices_, so the read-back would fail for
-  /// a write that succeeded — leaving the caller to answer with something other than the parameter
-  /// it is expected to produce. One shared lock over both halves removes the gap.
+  /// either has to ask, and asking in a second call would resolve the position again. A @c scan
+  /// landing in that gap publishes a new set, so the read-back would fail for a write that
+  /// succeeded — leaving the caller to answer with something other than the parameter it is
+  /// expected to produce. One call over both halves removes the gap.
   ///
   /// @param slavePosition  1-based bus position of the target device.
   /// @param index          CoE object index.
@@ -756,11 +789,10 @@ class DeviceManager {
   ///
   /// Thread-safe against both writers of the ring, which are not the same adversary and do not
   /// need the same protection. @c ProcessDataRing is lock-free against the RT producer's
-  /// @c write(); this and the two accessors below additionally take @c deviceSetMutex_ shared,
+  /// @c write(); this and the two accessors below additionally take @c processDataMutex_ shared,
   /// because the *control plane* also writes the ring — @c allocate / @c clear release its storage
-  /// on a re-map, @c scan and @c reset — under the exclusive lock. Reading it without the lock is a
-  /// use-after-free rather than a torn read. Callers need not (and must not) hold
-  /// @c deviceSetMutex_.
+  /// on a re-map, @c scan and @c reset — and those take it exclusively. Reading it without that
+  /// lock is a use-after-free rather than a torn read.
   uint64_t recorderHead() const;
 
   /// @brief The oldest sequence number still present in the ring (@c max(0, head - capacity)).
@@ -802,8 +834,8 @@ class DeviceManager {
   /// @brief Serialises the current recorder span as a `.mmpd` byte stream to @p out.
   ///
   /// Shared by @c dumpProcessData (file) and @c dumpProcessDataBuffer (in-memory). Holds @c
-  /// deviceSetMutex_ in shared mode for the whole serialisation (the ring is read while held; the
-  /// RT producer appends lock-free and is never blocked). @p out must be seekable — @c
+  /// processDataMutex_ shared for the whole serialisation (the ring is read while held; the RT
+  /// producer appends lock-free and is never blocked). @p out must be seekable — @c
   /// writeProcessDataDump patches the row count after streaming the rows.
   std::expected<DumpSpan, std::string> serializeDump(std::ostream& out);
 
@@ -812,10 +844,9 @@ class DeviceManager {
   /// The core mapping primitive: drains exchange, has the driver map the IOmap, re-reads each
   /// device's PDO mapping, builds the @c ProcessImage, and publishes it — with nothing to seed,
   /// since each output object's value already lives in its own parameter's cell, which is what the
-  /// composer reads. **The caller must hold @c busOperationMutex_**
-  /// (which is what keeps @c driver_ and @c devices_ stable here); this takes @c deviceSetMutex_
-  /// exclusively itself, for the brief publish window only, so a re-map never blocks a reader for
-  /// longer than the ring re-allocation takes. Two callers compose it: the public
+  /// composer reads. **The caller must hold @c busOperationMutex_**, which is what keeps the
+  /// published set from changing underneath it; the ring re-allocation takes @c processDataMutex_
+  /// exclusively for its own brief window. Two callers compose it: the public
   /// @c configureProcessData and @c transitionToState (when a (re)joining device requires a
   /// re-map).
   std::expected<void, std::string> remapProcessImage();
@@ -873,45 +904,58 @@ class DeviceManager {
   /// touching the driver's IOmap, so it is safe to re-map or tear down. Bounded wait.
   void stopExchange();
 
-  // Two locks, two unrelated invariants. Keeping them apart is what stops any one lock from being
-  // both long-held-shared and contended-exclusive — the state in which std::shared_mutex contention
-  // behaviour decides the outcome, and that behaviour is unspecified by the standard and opposite
-  // across our platforms (glibc's pthread_rwlock_t is reader-preferring and can starve a writer
-  // indefinitely; Windows SRWLOCK is documented unfair and can instead convoy readers behind a
-  // pending writer).
-  //
+  /// @brief Publishes @p set as the current generation. Call with @c busOperationMutex_ held.
+  ///
+  /// Swaps the shared pointer readers copy, then hands the RT thread the raw pointer. The caller
+  /// must have drained the RT cycle first (@c stopExchange), because that is what makes replacing
+  /// @c rtSet_ safe: no cyclic task can still be inside a @c CycleGuard reading the set it points
+  /// at.
+  void publishDeviceSet(std::shared_ptr<DeviceSet> set);
+
   // busOperationMutex_ — "one control-plane operation drives the bus at a time". It guards no
   // member: it is a mutual-exclusion token over an *activity*, which is what distinguishes it from
   // the driver's controlPlaneMutex_ (that one serialises a single socket transaction; this one
   // serialises a whole multi-transaction operation). Held for their entire duration by
   // init/scan/reset/configureProcessData/transitionToState/writeDevicePdoMapping, the only
-  // operations that rebuild the device set, re-map the process image, drive AL state, or rewrite a
-  // device's PDO mapping. No reader and no borrower ever takes it, so a multi-second AL transition
-  // excludes only other control-plane callers — never the monitoring sampler. Because the device
-  // set can only be rebuilt by an operation holding this, holding it is itself sufficient to keep
-  // devices_ and driver_ stable.
+  // operations that publish a device set, re-map the process image, drive AL state, or rewrite a
+  // device's PDO mapping. No reader ever takes it, so a multi-second AL transition excludes only
+  // other control-plane callers — never the monitoring sampler, and never a procedure that is
+  // already running.
   mutable std::mutex busOperationMutex_;
 
-  // deviceSetMutex_ — "devices_ and the process-data runtime are not being rebuilt or freed".
-  // The only lock readers and borrowers take, and the reason it can be held shared for minutes
-  // (withDevice) is that its exclusive holders are brief: init/scan/reset, which genuinely
-  // invalidate every Device& in flight, plus the publish window inside remapProcessImage() that
-  // re-allocates the recorder ring / appends a generation / publishes the image. Neither the RT
-  // exchangeProcessData() nor a cyclic task takes it (both are gated by the atomic image pointer
-  // and the inCycle drain instead), so the lock never touches the real-time path.
-  //
-  // Lock order: busOperationMutex_ -> deviceSetMutex_ -> Device::parametersMutex_ ->
-  // FieldbusDriver::controlPlaneMutex_.
-  mutable std::shared_mutex deviceSetMutex_;
-  // Bumped under the exclusive lock on every scan()/reset(); see topologyGeneration().
+  // currentSetMutex_ — guards the shared_ptr below, and nothing it points to. Held for exactly one
+  // pointer copy, which is why a reader can never be delayed by an operation: a shared_ptr copy is
+  // not atomic against an assignment to the same object, and std::atomic<std::shared_ptr<T>> is not
+  // lock-free (libc++ does not implement it at all). Device *lifetime* is the refcount's job, not
+  // this lock's.
+  mutable std::mutex currentSetMutex_;
+  // The published generation of the bus. Never null: an empty set stands in before the first
+  // init(), so every reader can dereference the pointer it gets without a check.
+  std::shared_ptr<DeviceSet> currentSet_;
+
+  // The same set as a raw pointer, for the RT thread, which must not touch a shared_ptr. Written by
+  // the control plane only with the RT cycle drained (ProcessData::pauseCycle), so a cyclic task
+  // inside a CycleGuard can dereference it for the whole body. rtSet_ is the strong reference that
+  // keeps that object alive; the control plane replaces it only after a drain, so the set the RT
+  // thread may still be reading is never the one being freed.
+  std::atomic<DeviceSet*> publishedSet_{nullptr};
+  std::shared_ptr<DeviceSet> rtSet_;
+
+  // processDataMutex_ — the two non-atomic members of ProcessData: the recorder ring's storage and
+  // the retained image generations. The ring is lock-free for one writer and many readers, but
+  // ProcessDataRing::allocate and ::clear are a third kind of writer: they free the buffer, which
+  // no sequence check on the reader side can survive. The generations vector has the same shape — a
+  // re-map appends, scan/reset clear. Readers take this shared, those writers exclusively. A leaf:
+  // nothing is ever acquired while it is held.
+  mutable std::shared_mutex processDataMutex_;
+
+  // Bumped on every scan()/reset(); see topologyGeneration().
   std::atomic<uint64_t> topologyGeneration_{0};
   // Bumped every time remapProcessImage() publishes a new image; see processImageGeneration().
   std::atomic<uint64_t> processImageGeneration_{0};
-  std::unique_ptr<mm::comm::FieldbusDriver> driver_;
-  std::vector<Device> devices_;
   std::unique_ptr<ProcessData> pd_;
   // On-disk parameter-definition cache, shared by every Device (handed to each by pointer at
-  // scan()). Outlives the device set, which is rebuilt on every scan/reset. Configured at init().
+  // scan()). Outlives every device set. Configured at init().
   ParameterCache parameterCache_;
   // Runtime tuning captured at init(); drives recorder-ring sizing at configureProcessData.
   DeviceManagerConfig config_;

@@ -28,15 +28,10 @@ using mm::comm::SlaveInfo;
 using mm::node::DeviceManager;
 using mm::node::DeviceParameterValue;
 
-// Reads one device's mailboxActive() through the borrow, which is the only way in — findDevice is
-// private precisely so a Device& can never outlive the lock that keeps it alive.
+// Reads one device's mailboxActive() through a handle, which is how off-RT code reaches a device.
 bool mailboxActive(DeviceManager& dm, uint16_t slavePosition) {
-  return dm
-      .withDevice(slavePosition,
-                  [](mm::node::Device& device) -> std::expected<bool, std::string> {
-                    return device.mailboxActive();
-                  })
-      .value_or(false);
+  const auto device = dm.deviceAt(slavePosition);
+  return device ? device->mailboxActive() : false;
 }
 
 /// Minimal FieldbusDriver test double. init() returns a configurable result;
@@ -564,97 +559,76 @@ TEST(DeviceManagerPositions, BulkMethodsRejectUnknownPosition) {
   EXPECT_TRUE(dm.deviceStates({1}).has_value());
 }
 
-// --- withDevice ----------------------------------------------------------------------------------
+// --- device() and deviceSet()
+// ---------------------------------------------------------------------
 
-TEST(DeviceManagerWithDevice, RunsTheCallbackAgainstTheAddressedDevice) {
+TEST(DeviceManagerDevice, ResolvesTheAddressedDevice) {
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true, 3)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
-  auto position = dm.withDevice(2, [](mm::node::Device& device) -> std::expected<int, std::string> {
-    return device.slavePosition();
-  });
-  ASSERT_TRUE(position.has_value()) << position.error();
-  EXPECT_EQ(*position, 2);
+  const auto device = dm.deviceAt(2);
+  ASSERT_TRUE(static_cast<bool>(device));
+  EXPECT_EQ(device->slavePosition(), 2);
 }
 
-TEST(DeviceManagerWithDevice, PassesTheCallbackErrorThrough) {
+TEST(DeviceManagerDevice, IsFalsyForAnUnknownPosition) {
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
-  auto result = dm.withDevice(1, [](mm::node::Device&) -> std::expected<void, std::string> {
-    return std::unexpected("the operation itself failed");
-  });
+  EXPECT_FALSE(static_cast<bool>(dm.deviceAt(99)));
+  EXPECT_EQ(dm.deviceAt(99).get(), nullptr);
+}
+
+TEST(DeviceManagerDevice, ReportsOneWordingForAnUnknownPosition) {
+  const std::expected<void, std::string> result = mm::node::deviceNotFound(99);
   ASSERT_FALSE(result.has_value());
-  EXPECT_EQ(result.error(), "the operation itself failed");
+  EXPECT_EQ(result.error(), "device 99 not found");
 }
 
-TEST(DeviceManagerWithDevice, RejectsAnUnknownPositionWithoutRunningTheCallback) {
+TEST(DeviceManagerDeviceSet, IsEmptyRatherThanNullBeforeInit) {
+  const DeviceManager dm;
+  const auto set = dm.deviceSet();
+  ASSERT_NE(set, nullptr);
+  EXPECT_TRUE(set->devices.empty());
+  EXPECT_EQ(set->driver, nullptr);
+}
+
+// The point of the DeviceSet: a handle keeps its device alive across a rescan, and the rescan does
+// not wait for the holder. Both halves matter — the old design guaranteed the first by blocking the
+// second, which is what made a long procedure and a rescan mutually exclusive.
+TEST(DeviceManagerDeviceSet, ARescanNeitherWaitsForAHolderNorInvalidatesIt) {
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true, 2)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  const auto held = dm.deviceAt(1);
+  ASSERT_TRUE(static_cast<bool>(held));
+  const uint16_t position = held->slavePosition();
+  const uint64_t generation = dm.topologyGeneration();
+
+  // No thread and no timing: if the rescan waited for the handle, this call would never return.
+  ASSERT_TRUE(dm.scan().has_value());
+  EXPECT_GT(dm.topologyGeneration(), generation);
+
+  // The retired device is still there to be read. It is no longer the device at that position.
+  EXPECT_EQ(held->slavePosition(), position);
+  EXPECT_NE(held.get(), dm.deviceAt(1).get());
+}
+
+TEST(DeviceManagerDeviceSet, AResetLeavesAHeldDeviceReadable) {
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
-  bool ran = false;
-  auto result = dm.withDevice(99, [&ran](mm::node::Device&) -> std::expected<void, std::string> {
-    ran = true;
-    return {};
-  });
-  ASSERT_FALSE(result.has_value());
-  EXPECT_FALSE(ran);
-  EXPECT_NE(result.error().find("device 99 not found"), std::string::npos) << result.error();
-}
+  const auto held = dm.deviceAt(1);
+  ASSERT_TRUE(static_cast<bool>(held));
+  dm.reset();
 
-TEST(DeviceManagerWithDevice, HoldsTheBusLockForTheWholeCallback) {
-  DeviceManager dm;
-  ASSERT_TRUE(dm.init(std::make_unique<FakeDriver>(true)).has_value());
-  ASSERT_TRUE(dm.scan().has_value());
-
-  // The whole point of the primitive: a borrowed Device& stays valid for a multi-second operation
-  // because the exclusive rebuilders cannot run meanwhile. Proving that needs the rescan to be
-  // observed *blocked* — hence the one grace period below, which is the only way to distinguish
-  // "waiting on the lock" from "has not started yet".
-  std::mutex mutex;
-  std::condition_variable inCallback;
-  std::condition_variable release;
-  bool entered = false;
-  bool released = false;
-  std::atomic<bool> rescanFinished{false};
-
-  std::thread borrower([&] {
-    (void)dm.withDevice(1, [&](mm::node::Device&) -> std::expected<void, std::string> {
-      {
-        const std::lock_guard lock(mutex);
-        entered = true;
-      }
-      inCallback.notify_one();
-      std::unique_lock lock(mutex);
-      release.wait(lock, [&] { return released; });
-      return {};
-    });
-  });
-
-  {
-    std::unique_lock lock(mutex);
-    inCallback.wait(lock, [&] { return entered; });
-  }
-
-  std::thread rescanner([&] {
-    (void)dm.scan();
-    rescanFinished.store(true);
-  });
-
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  EXPECT_FALSE(rescanFinished.load()) << "scan() ran while a device was borrowed";
-
-  {
-    const std::lock_guard lock(mutex);
-    released = true;
-  }
-  release.notify_one();
-  borrower.join();
-  rescanner.join();
-  EXPECT_TRUE(rescanFinished.load()) << "scan() never completed after the borrow ended";
+  EXPECT_EQ(held->slavePosition(), 1);
+  EXPECT_FALSE(dm.initialised());
+  EXPECT_FALSE(static_cast<bool>(dm.deviceAt(1)));
 }
 
 }  // namespace

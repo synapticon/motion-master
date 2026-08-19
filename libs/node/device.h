@@ -782,7 +782,7 @@ class Device {
   // The rule this imposes on callers: a DeviceParameter* must never be carried across the release,
   // because initializeParameters replaces the whole map. Re-find after the transfer, and treat a
   // miss (or a changed dataType) as "re-enumerated mid-transfer" rather than assuming it cannot
-  // happen. Lock order, where both are taken: DeviceManager::deviceSetMutex_ before this.
+  // happen.
   //
   // Held by unique_ptr because std::mutex is neither movable nor copyable, and Device is moved
   // into DeviceManager's std::vector<Device> (which relocates on growth). The indirection keeps
@@ -796,9 +796,8 @@ class Device {
 
   /// Whether an initializeParameters call has failed for this device. Guarded by parametersMutex_,
   /// which is also what guards the map the flag describes: the automatic read runs under
-  /// DeviceManager's busOperationMutex_ and an explicit one under a *shared* deviceSetMutex_, and
-  /// those two do not exclude each other — so an AL transition and POST .../parameters/init can
-  /// reach this at the same time.
+  /// DeviceManager's busOperationMutex_ and an explicit one holds no lock at all, so an AL
+  /// transition and POST .../parameters/init can reach this at the same time.
   bool parametersUnavailable_ = false;
   std::unordered_map<uint32_t, DeviceParameter> parameters_;
   FlatPdoMapping flatPdoMapping_;

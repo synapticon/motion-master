@@ -229,8 +229,8 @@ three commented lines.
 main.cc  (composition root)
  ├── Config (CLI options)
  ├── mm::node::DeviceManager
- │     ├── unique_ptr<FieldbusDriver>   ← SoemFieldbusDriver | SpoeFieldbusDriver
- │     │                                  null until init(unique_ptr<FieldbusDriver>)
+ │     ├── shared_ptr<DeviceSet>        published generation: driver + devices + generation
+ │     │     └── shared_ptr<FieldbusDriver>  SoemFieldbusDriver | SpoeFieldbusDriver
  │     ├── unique_ptr<ProcessData>      published image + generations + recorder ring
  │     ├── ParameterCache               on-disk OD cache, control-plane only, stable pointer
  │     ├── vector<Device>               each borrows FieldbusDriver& + ProcessData*
@@ -239,7 +239,7 @@ main.cc  (composition root)
  │     │     ├── flatPdoMapping_        cached flat view
  │     │     └── parametersMutex_
  │     └── init(), scan(), reset(), configureProcessData(), exchangeProcessData(),
- │         transitionToState(), withDevice()
+ │         transitionToState(), deviceAt(), deviceSet()
  ├── GameLoop  (RT thread, SCHED_FIFO, 1 ms default; blocks the main thread)
  │     └── CyclicTask[]  → ProcessDataCyclicTask
  ├── HttpServer      (port 61447, own loop and thread)
@@ -292,41 +292,44 @@ C++ type together, so a call site does not retype it.
 
 ### Locking
 
-Four locks, one order:
+**Device lifetime is a refcount, not a lock.** `DeviceSet` holds the driver, the devices, and
+the topology generation. `init` and `scan` publish a new one; nothing modifies a published
+set. Off the RT thread, `deviceAt(pos)` returns a `DeviceHandle` and `deviceSet()` returns a
+`shared_ptr<DeviceSet>` — either one keeps its devices constructed for as long as the caller
+holds it, with no lock held. The RT thread reads a raw published pointer instead, replaced
+only with the cycle drained, because `std::atomic<std::shared_ptr<T>>` is not lock-free.
+
+**A rescan never waits for a reader, and never invalidates one.** `scan` publishes a new set;
+the old set dies when its last holder drops it. A procedure that was running keeps working
+against its own device, and its next bus transaction fails against hardware that has moved.
+That replaced a design in which a long borrow and a rescan excluded each other.
+
+Three locks, one order:
 
 ```text
-busOperationMutex_ → deviceSetMutex_ → Device::parametersMutex_ → controlPlaneMutex_
+busOperationMutex_ → Device::parametersMutex_ → controlPlaneMutex_
 ```
 
 - **`busOperationMutex_`** (plain) is a token over an *activity*: one control-plane
-  operation drives the bus at a time. It guards no member and no reader takes it.
-- **`deviceSetMutex_`** (shared) guards *lifetime*: `devices_` and the process-data runtime
-  are not being rebuilt or freed. Readers and borrowers take it shared. Only `scan` and
-  `reset` need it exclusively.
+  operation drives the bus at a time. It guards no member and no reader takes it. Holding it
+  is what keeps the published set from changing under an operation.
 - **`Device::parametersMutex_`** guards `parameters_` against the off-RT monitoring
   threads. **Never hold it across bus I/O** — snapshot, transfer, then re-find.
 - **`FieldbusDriver::controlPlaneMutex_`** serialises mailbox, SDO, FoE, ESC register, and
   state access. Hold it for one socket transaction only, never across a sleep, a blocking
   wait, or a user callback.
 
+Two leaf locks sit outside that order and are never held while anything else is acquired:
+`DeviceManager::currentSetMutex_`, held only long enough to copy a `shared_ptr`, and
+`processDataMutex_`, which guards the recorder ring's storage and the retained image
+generations against `allocate`/`clear`.
+
 **The PDO path runs lock-free.** `exchangeProcessData` touches the IOmap, which is disjoint
 from the control plane, and SOEM's port layer is internally thread-safe. A slow SDO never
 blocks the RT cycle.
 
-**`withDevice(pos, fn)` is the seam.** It takes `deviceSetMutex_` shared, resolves the
-position, and hands a `Device&` to a callable returning `std::expected<T, std::string>`.
-Holding it across a multi-second operation is correct: a rescan midway would invalidate the
-device being worked on.
-
-**`fn` must not re-enter a `DeviceManager` control-plane operation** (`scan`, `reset`,
-`init`, `configureProcessData`, `transitionToState`). Each takes `deviceSetMutex_`
-exclusively and it is not recursive.
-
-**A borrow does not exclude an AL transition.** The two interleave. The procedure's next
-bus transaction fails against the changed state, rather than the transition hanging.
-
-Rationale and the full inventory: `NEXTGEN.md`, Sessions 2026-08-08 and 2026-08-09.
-Reference: `docs/LOCKING.md`, `docs/THREADS.md`.
+Rationale and the full inventory: `NEXTGEN.md`, Sessions 2026-08-08, 2026-08-09 and
+2026-08-19. Reference: `docs/LOCKING.md`, `docs/THREADS.md`.
 
 ### Game Loop and RT
 
@@ -526,14 +529,11 @@ Two rules the catalogue enforces:
 `ProcedureError` maps to status in one place: `kBusy`→409, `kUnknownDevice`→404,
 `kUnknownProcedure`→404, `kInvalidRequest`→400.
 
-**A normal body cannot change AL state.** It runs inside `withDevice` holding
-`deviceSetMutex_` shared, and a `transitionToState` needs it exclusively with no upgrade
-path, so calling it would deadlock the body against itself. Firmware installation is defined
-by its transitions, so it gets a **second body shape** —
-`(DeviceManager&, slavePos, ProgressReporter&, std::stop_token)` — spawned without a borrow,
-borrowing per step and transitioning while holding nothing. Two consequences: a rescan can
-interleave, so `discardIfRescanned` must skip running entries; and nothing blocks a
-concurrent `scan()` during an install. See `NEXTGEN.md`, Session 2026-08-02.
+**There is one body shape, and a body may do anything.** It takes a `ProcedureContext`
+(`manager`, `device`, `devicePosition`), and the run holds a `DeviceHandle` rather than a
+lock — so a body may call `transitionToState`, which firmware installation is defined by.
+Two consequences: a rescan can interleave any run, so `discardIfRescanned` must skip running
+entries; and nothing blocks a concurrent `scan()`. See `NEXTGEN.md`, Session 2026-08-02.
 
 ### Networking and TLS
 

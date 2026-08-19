@@ -2628,3 +2628,33 @@ E-stop and STO are hardwired or FSoE, and nothing here is a safety controller �
 ### Where it stands
 
 As a **commissioning and diagnostics tool** — parameters, monitoring and the lossless recorder, firmware, ESC diagnostics, PDO mapping — production-ready, which is what it was built to be first. For **motion**, pilot grade: a single axis or loosely-coupled axes, your own control task, on a tuned PREEMPT_RT host with `skippedCycles()` observed flat over hours, safety wired in hardware. Four things would change the verdict, in this order: SYNC0 plus the DC-locked timer; a trajectory task so the motion path is shared and tested rather than per-site; a real soak on the target hardware; and the alpha line settling, since the changelog's own promise is that the API may break between any two alphas.
+
+## Session 2026-08-19 — Device lifetime is a refcount, not a lock: `DeviceSet` replaces the borrow, and the second procedure body shape disappears with it (as-built)
+
+Asked as a challenge to the locking design: nine mutexes to be correct looked excessive, and `BusProcedureBody` plus the whole `withDevice`/`withDevices` apparatus looked like complexity for its own sake. Both readings were right, and they had one cause: **`devices_` was a `std::vector<Device>` that `scan()` destroyed, so lifetime was solved with a lock.** Everything that felt heavy followed from that line — the borrow (34 call sites), the "must not re-enter a control-plane operation" trap, the two-lock split in `DeviceManager`, and the second procedure body shape.
+
+### What replaced it
+
+`DeviceSet` — driver, devices, topology generation — built by `init`/`scan`, published once, never modified. Off the RT thread every caller holds a `shared_ptr` to one: `deviceAt(pos)` returns a `DeviceHandle` (device plus set), `deviceSet()` returns the set. The RT thread reads a raw `publishedSet_` pointer instead, swapped only with the cycle drained, because `std::atomic<std::shared_ptr<T>>` is not lock-free and libc++ does not implement it at all. **This is the pattern the process image already used** (`image` plus retained `generations`), applied to the device set — which is why it needed no new mechanism, only a different owner for the lifetime.
+
+`deviceSetMutex_` is gone. Two leaves took its two unrelated jobs: `currentSetMutex_` (one `shared_ptr` copy) and `processDataMutex_` (the recorder storage and the retained generations, against `allocate`/`clear`). The count went from nine mutexes to ten, and that is the honest number — but the order chain went from four deep to three, no lock is held across a callable any more, and the only lock held across bus I/O is the driver's own.
+
+### The behaviour that changed, and it is a real change
+
+**A rescan no longer waits for whoever holds a device, and no longer invalidates them.** `scan` publishes a new set; the old one dies with its last holder. A procedure interrupted by a rescan keeps working against its retired device and fails on its next transfer, because the retired set still owns the driver object while `reset` has stopped the bus. The old design guaranteed validity by making the two mutually exclusive — a rescan blocked for the length of a procedure, or the procedure's `Device&` dangled. Both halves are now true at once, which is the point.
+
+The cost is transient memory: a retired set — devices, parameter maps, driver — lives as long as its last holder. Bounded by the holder, not retained to `reset()` like image generations.
+
+### Why the second body shape existed, and why it does not now
+
+`ProcedureBody` ran inside `withDevice` holding `deviceSetMutex_` shared; `transitionToState` needs it exclusively; `std::shared_mutex` has no upgrade. So a body that installed firmware — a procedure *defined* by its AL transitions — could not be written in the ordinary shape, and `BusProcedureBody` was added for the one row of 23 that needed it. With no lock behind a held device, that constraint evaporated. One shape now: `(const ProcedureContext&, ProgressReporter&, std::stop_token)`, where the context carries the manager, the device, and the position. Any body may transition.
+
+### Two smaller findings worth keeping
+
+**`CycleLock` was renamed `CycleGuard`.** It never blocks, never waits, and can fail to enter the cycle, so "lock" claimed mutual exclusion it does not provide — and it contradicted the rule it exists to serve ("the RT thread acquires no lock"). Three documents carried a disclaimer explaining the name away; the rename deleted the disclaimer instead.
+
+**`device(pos)` became `deviceAt(pos)`** because a member function named `device` shadows the local variable name `device` in nineteen of `DeviceManager`'s own methods, which cppcheck reports and which reads badly. The accessor was the cheaper thing to rename.
+
+### What was not done
+
+`withDevice` was not kept as sugar over the handle. A one-line lookup that no longer holds anything is not worth a name, and keeping it would have kept the borrow vocabulary alive in the docs. `ProcessDataRing` was not converted to `shared_ptr` storage either: its lifetime problem is real but orthogonal, and one leaf `shared_mutex` states it more plainly than a second refcount would.

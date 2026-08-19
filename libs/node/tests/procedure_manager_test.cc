@@ -28,6 +28,7 @@ using mm::comm::OdEntry;
 using mm::comm::SlaveInfo;
 using mm::node::Device;
 using mm::node::DeviceManager;
+using mm::node::ProcedureContext;
 using mm::node::ProcedureError;
 using mm::node::ProcedureManager;
 using mm::node::ProcedureStatus;
@@ -168,9 +169,9 @@ TEST(ProcedureManagerStart, RunsTheBodyAndRecordsSuccess) {
   std::atomic<uint16_t> sawPosition{0};
   auto started =
       manager.start(2, "demo", oneStep(),
-                    [&sawPosition](Device& device, ProgressReporter& reporter,
+                    [&sawPosition](const ProcedureContext& ctx, ProgressReporter& reporter,
                                    const std::stop_token&) -> std::expected<void, std::string> {
-                      sawPosition.store(device.slavePosition());
+                      sawPosition.store(ctx.device.slavePosition());
                       reporter.start("work");
                       reporter.succeed("work", 42);
                       return {};
@@ -197,7 +198,7 @@ TEST(ProcedureManagerStart, RecordsAFailureReturnedOutsideAnyStep) {
 
   ASSERT_TRUE(manager
                   .start(1, "demo", oneStep(),
-                         [](Device&, ProgressReporter&,
+                         [](const ProcedureContext&, ProgressReporter&,
                             const std::stop_token&) -> std::expected<void, std::string> {
                            return std::unexpected("not the right kind of device");
                          })
@@ -217,7 +218,7 @@ TEST(ProcedureManagerStart, RejectsASecondRunOnABusyDevice) {
 
   ASSERT_TRUE(manager
                   .start(1, "slow", oneStep(),
-                         [&gate](Device&, ProgressReporter&,
+                         [&gate](const ProcedureContext&, ProgressReporter&,
                                  const std::stop_token& stop) -> std::expected<void, std::string> {
                            gate.markEntered();
                            gate.waitUntilOpen(stop);
@@ -230,7 +231,7 @@ TEST(ProcedureManagerStart, RejectsASecondRunOnABusyDevice) {
   // procedure name — the drive can only be doing one thing at a time.
   auto rejected =
       manager.start(1, "other", oneStep(),
-                    [](Device&, ProgressReporter&,
+                    [](const ProcedureContext&, ProgressReporter&,
                        const std::stop_token&) -> std::expected<void, std::string> { return {}; });
   ASSERT_FALSE(rejected.has_value());
   EXPECT_EQ(rejected.error().kind, ProcedureError::Kind::kBusy);
@@ -247,7 +248,7 @@ TEST(ProcedureManagerStart, AllowsConcurrentRunsOnDifferentDevices) {
 
   ASSERT_TRUE(manager
                   .start(1, "slow", oneStep(),
-                         [&gate](Device&, ProgressReporter&,
+                         [&gate](const ProcedureContext&, ProgressReporter&,
                                  const std::stop_token& stop) -> std::expected<void, std::string> {
                            gate.markEntered();
                            gate.waitUntilOpen(stop);
@@ -260,7 +261,7 @@ TEST(ProcedureManagerStart, AllowsConcurrentRunsOnDifferentDevices) {
   // genuinely overlap.)
   auto second =
       manager.start(2, "quick", oneStep(),
-                    [](Device&, ProgressReporter&,
+                    [](const ProcedureContext&, ProgressReporter&,
                        const std::stop_token&) -> std::expected<void, std::string> { return {}; });
   ASSERT_TRUE(second.has_value()) << second.error();
   EXPECT_EQ(awaitCompletion(manager, 2, "quick"), ProcedureStatus::kSucceeded);
@@ -275,7 +276,7 @@ TEST(ProcedureManagerStart, RejectsAnUnknownDeviceBeforeSpawning) {
 
   bool ran = false;
   auto rejected = manager.start(99, "demo", oneStep(),
-                                [&ran](Device&, ProgressReporter&,
+                                [&ran](const ProcedureContext&, ProgressReporter&,
                                        const std::stop_token&) -> std::expected<void, std::string> {
                                   ran = true;
                                   return {};
@@ -290,7 +291,7 @@ TEST(ProcedureManagerStart, CountsAcceptedRunsOnly) {
   Bus bus;
   ProcedureManager manager(bus.dm);
 
-  auto body = [](Device&, ProgressReporter&,
+  auto body = [](const ProcedureContext&, ProgressReporter&,
                  const std::stop_token&) -> std::expected<void, std::string> { return {}; };
   for (int run = 0; run < 3; ++run) {
     ASSERT_TRUE(manager.start(1, "demo", oneStep(), body).has_value());
@@ -303,7 +304,7 @@ TEST(ProcedureManagerStart, CountsAcceptedRunsOnly) {
   Gate gate;
   ASSERT_TRUE(manager
                   .start(1, "slow", oneStep(),
-                         [&gate](Device&, ProgressReporter&,
+                         [&gate](const ProcedureContext&, ProgressReporter&,
                                  const std::stop_token& stop) -> std::expected<void, std::string> {
                            gate.markEntered();
                            gate.waitUntilOpen(stop);
@@ -324,7 +325,7 @@ TEST(ProcedureManagerCancel, StopsARunningProcedure) {
 
   ASSERT_TRUE(manager
                   .start(1, "slow", oneStep(),
-                         [&gate](Device&, ProgressReporter& reporter,
+                         [&gate](const ProcedureContext&, ProgressReporter& reporter,
                                  const std::stop_token& stop) -> std::expected<void, std::string> {
                            reporter.start("work");
                            gate.markEntered();
@@ -355,7 +356,7 @@ TEST(ProcedureManagerCancel, ReportsNothingToCancel) {
 
   ASSERT_TRUE(manager
                   .start(1, "demo", oneStep(),
-                         [](Device&, ProgressReporter&, const std::stop_token&)
+                         [](const ProcedureContext&, ProgressReporter&, const std::stop_token&)
                              -> std::expected<void, std::string> { return {}; })
                   .has_value());
   ASSERT_EQ(awaitCompletion(manager, 1, "demo"), ProcedureStatus::kSucceeded);
@@ -368,7 +369,7 @@ TEST(ProcedureManagerSnapshot, IsRetainedAfterTheRunEnds) {
 
   ASSERT_TRUE(manager
                   .start(1, "demo", oneStep(),
-                         [](Device&, ProgressReporter& reporter,
+                         [](const ProcedureContext&, ProgressReporter& reporter,
                             const std::stop_token&) -> std::expected<void, std::string> {
                            reporter.succeed("work", 7);
                            return {};
@@ -389,7 +390,7 @@ TEST(ProcedureManagerSnapshot, IsDiscardedWhenTheDeviceSetIsRebuilt) {
 
   ASSERT_TRUE(manager
                   .start(1, "demo", oneStep(),
-                         [](Device&, ProgressReporter&, const std::stop_token&)
+                         [](const ProcedureContext&, ProgressReporter&, const std::stop_token&)
                              -> std::expected<void, std::string> { return {}; })
                   .has_value());
   ASSERT_EQ(awaitCompletion(manager, 1, "demo"), ProcedureStatus::kSucceeded);
@@ -411,7 +412,7 @@ TEST(ProcedureManagerDestruction, CancelsAndJoinsRunningProcedures) {
     ProcedureManager manager(bus.dm);
     ASSERT_TRUE(manager
                     .start(1, "slow", oneStep(),
-                           [&](Device&, ProgressReporter&,
+                           [&](const ProcedureContext&, ProgressReporter&,
                                const std::stop_token& stop) -> std::expected<void, std::string> {
                              gate.markEntered();
                              gate.waitUntilOpen(stop);
@@ -426,32 +427,27 @@ TEST(ProcedureManagerDestruction, CancelsAndJoinsRunningProcedures) {
   EXPECT_TRUE(observedStop.load()) << "the destructor must request cancellation before joining";
 }
 
-// ── The second body shape ──────────────────────────────────────────────────────────────────────
+// ── AL state from inside a body ────────────────────────────────────────────────────────────────
 
-// The whole reason BusProcedureBody exists. transitionToState takes the bus lock exclusively, and a
-// borrowing body already holds it shared with no way to upgrade — so the same call from a
-// ProcedureBody would deadlock the run against itself and this test would hang rather than fail.
-// What the transition *returns* is beside the point (the fake driver reports no meaningful AL
-// state); that the call returns at all is the property under test.
-TEST(ProcedureManagerBusBody, CanChangeAlStateWithoutDeadlocking) {
+// A body holds a DeviceHandle, not a lock, so it may call transitionToState — which takes
+// busOperationMutex_. Under the old borrow this deadlocked the run against itself and a test like
+// this hung rather than failed. What the transition *returns* is beside the point (the fake driver
+// reports no meaningful AL state); that the call returns at all is the property under test.
+TEST(ProcedureManagerBody, CanChangeAlStateWithoutDeadlocking) {
   Bus bus;
   ProcedureManager manager(bus.dm);
 
   std::atomic<bool> transitioned{false};
   auto started = manager.start(
       1, "flash", oneStep(),
-      [&transitioned](DeviceManager& deviceManager, uint16_t position, ProgressReporter& reporter,
+      [&transitioned](const ProcedureContext& ctx, ProgressReporter& reporter,
                       const std::stop_token&) -> std::expected<void, std::string> {
         reporter.start("work");
-        // Borrow for one step, then let go before changing state — the pattern a firmware install
-        // follows around each FoE write.
-        auto borrowed = deviceManager.withDevice(
-            position, [](Device&) -> std::expected<void, std::string> { return {}; });
-        if (!borrowed) {
-          return std::unexpected(borrowed.error());
-        }
-        auto transition = deviceManager.transitionToState({position}, EtherCatState::Init,
-                                                          std::chrono::milliseconds(50));
+        // A body may change AL state while holding its device, because holding it holds no lock —
+        // the property this test pins.
+        const uint16_t position = ctx.devicePosition;
+        auto transition = ctx.manager.transitionToState({position}, EtherCatState::Init,
+                                                        std::chrono::milliseconds(50));
         transitioned.store(true);
         // Recorded rather than asserted on: the fake driver reports no meaningful AL state, so the
         // transition may well be refused. Reaching this line at all is the property under test.
@@ -463,7 +459,7 @@ TEST(ProcedureManagerBusBody, CanChangeAlStateWithoutDeadlocking) {
   EXPECT_TRUE(transitioned.load());
 }
 
-TEST(ProcedureManagerBusBody, ReceivesTheAddressedPosition) {
+TEST(ProcedureManagerBody, ReceivesTheAddressedPosition) {
   Bus bus;
   ProcedureManager manager(bus.dm);
 
@@ -471,9 +467,9 @@ TEST(ProcedureManagerBusBody, ReceivesTheAddressedPosition) {
   ASSERT_TRUE(
       manager
           .start(2, "flash", oneStep(),
-                 [&sawPosition](DeviceManager&, uint16_t position, ProgressReporter&,
+                 [&sawPosition](const ProcedureContext& ctx, ProgressReporter&,
                                 const std::stop_token&) -> std::expected<void, std::string> {
-                   sawPosition.store(position);
+                   sawPosition.store(ctx.devicePosition);
                    return {};
                  })
           .has_value());
@@ -481,11 +477,11 @@ TEST(ProcedureManagerBusBody, ReceivesTheAddressedPosition) {
   EXPECT_EQ(sawPosition.load(), 2);
 }
 
-// A bus body holds no lock between steps, so unlike every borrowing procedure a scan() *can* land
-// while it runs. The retained entry must survive that: dropping it would release the last reference
-// the map holds to a Run whose jthread the running thread is executing on, and the thread would
-// then destroy and join itself on the way out. It is collected on a later sweep instead.
-TEST(ProcedureManagerBusBody, SurvivesARescanWhileRunningAndIsCollectedAfterwards) {
+// A run holds no lock, so a scan() can land while it runs. The retained entry must survive that:
+// dropping it would release the last reference the map holds to a Run whose jthread the running
+// thread is executing on, and the thread would then destroy and join itself on the way out. It is
+// collected on a later sweep instead.
+TEST(ProcedureManagerBody, SurvivesARescanWhileRunningAndIsCollectedAfterwards) {
   Bus bus;
   Gate gate;
   ProcedureManager manager(bus.dm);
@@ -493,7 +489,7 @@ TEST(ProcedureManagerBusBody, SurvivesARescanWhileRunningAndIsCollectedAfterward
   std::atomic<bool> finished{false};
   ASSERT_TRUE(manager
                   .start(1, "flash", oneStep(),
-                         [&](DeviceManager&, uint16_t, ProgressReporter&,
+                         [&](const ProcedureContext&, ProgressReporter&,
                              const std::stop_token& stop) -> std::expected<void, std::string> {
                            gate.markEntered();
                            gate.waitUntilOpen(stop);

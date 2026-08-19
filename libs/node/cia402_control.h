@@ -15,11 +15,12 @@ namespace mm::node {
 /// @brief CiA402 drive control by bus position — resolve, bind a view, run one operation.
 ///
 /// These are free functions over @c DeviceManager& rather than methods on it, because owning the
-/// device set and knowing the CiA402 vocabulary are different jobs: @c DeviceManager lends locked
-/// access through @c withDevice and never names a profile type, and the profile layer builds on
-/// top of it. Each function is the same three lines — @c withDevice to hold the bus lock and
-/// resolve, @c createCia402Drive to validate the device really is a drive, then one call on the
-/// view — so the domain logic stays on @c Cia402Drive and these are only the lifetime-safe way in.
+/// device set and knowing the CiA402 vocabulary are different jobs: @c DeviceManager hands out a
+/// @c DeviceHandle and never names a profile type, and the profile layer builds on top of it. Each
+/// function is the same three lines — @c DeviceManager::deviceAt to resolve the position and hold
+/// the device alive, @c createCia402Drive to validate the device really is a drive, then one call
+/// on the view — so the domain logic stays on @c Cia402Drive and these are only the lifetime-safe
+/// way in.
 ///
 /// The bus lock is held (shared) for each call's whole duration, including @c runCia402Command's
 /// multi-second enable walk. That blocks only the exclusive rebuilders (@c scan / @c reset), never

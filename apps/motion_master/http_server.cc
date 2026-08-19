@@ -52,30 +52,23 @@ namespace {
 // Runs @p fn against the device at @p position with the device set held stable for the whole call,
 // answering 404 when no device holds that position.
 //
-// **The only way a route may reach a Device.** Every handler runs on its own worker thread (see
-// mm::api::Router, which dispatches to a pool), so two requests genuinely run at once — and one of
-// them may be POST /api/scan or POST /api/reset, which destroy every Device. A bare pointer into
-// the device vector is therefore dangling from the instant it is obtained.
-// DeviceManager::withDevice holds deviceSetMutex_ shared for the callable's whole duration, which
-// is precisely the lock a rescan needs exclusively, so the borrowed Device& stays valid for as long
-// as the handler uses it.
+// Resolves a bus position to a device, or answers 404. Every handler runs on its own worker thread
+// (see mm::api::Router, which dispatches to a pool), so two requests genuinely run at once — and
+// one of them may be POST /api/scan or POST /api/reset. The DeviceHandle is what makes that
+// harmless: it keeps the device alive for as long as the handler holds it, and a rescan publishes a
+// new device set rather than waiting for this request or invalidating its device.
 //
 // @p fn shapes its own Response — timed or not, JSON or bytes — because these endpoints do not
 // agree on one (content negotiation, FoE's octet-stream, the 409-on-state-precondition cases). Only
-// the not-found answer is common, and it is the one thing withDevice itself reports.
+// the not-found answer is common.
 template <typename Fn>
 mm::api::Response withDeviceOr404(mm::node::DeviceManager& deviceManager, uint16_t position,
                                   Fn&& fn) {
-  auto response = deviceManager.withDevice(
-      position, [&fn](mm::node::Device& device) -> std::expected<mm::api::Response, std::string> {
-        return fn(device);
-      });
-  if (!response) {
-    // withDevice's own and only failure is an unresolved position — fn's outcome, success or not,
-    // arrives as a Response.
+  const auto device = deviceManager.deviceAt(position);
+  if (!device) {
     return mm::api::notFound("no device at that bus position");
   }
-  return std::move(*response);
+  return fn(*device);
 }
 
 // Parses the optional comma-separated "positions" query into 1-based slave positions. An absent
@@ -1453,12 +1446,12 @@ void HttpServer::run() {
                       !r) {
                     return std::unexpected(r.error());
                   }
-                  // Re-borrowed rather than reusing a pointer: the read above released the lock.
-                  return deviceManager_.withDevice(
-                      *position,
-                      [](mm::node::Device& device) -> std::expected<nlohmann::json, std::string> {
-                        return nlohmann::json(device.parametersOrdered());
-                      });
+                  // Resolved again rather than reused: the read above may have re-enumerated.
+                  const auto device = deviceManager_.deviceAt(*position);
+                  if (!device) {
+                    return mm::node::deviceNotFound(*position);
+                  }
+                  return nlohmann::json(device->parametersOrdered());
                 });
               });
 
@@ -1472,12 +1465,12 @@ void HttpServer::run() {
                   if (auto r = deviceManager_.readAllDeviceParameters(*position); !r) {
                     return std::unexpected(r.error());
                   }
-                  // Re-borrowed rather than reusing a pointer: the read above released the lock.
-                  return deviceManager_.withDevice(
-                      *position,
-                      [](mm::node::Device& device) -> std::expected<nlohmann::json, std::string> {
-                        return nlohmann::json(device.parametersOrdered());
-                      });
+                  // Resolved again rather than reused: the read above may have re-enumerated.
+                  const auto device = deviceManager_.deviceAt(*position);
+                  if (!device) {
+                    return mm::node::deviceNotFound(*position);
+                  }
+                  return nlohmann::json(device->parametersOrdered());
                 });
               });
 

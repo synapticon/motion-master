@@ -87,11 +87,8 @@ std::expected<Monitoring, std::string> MonitoringManager::create(Monitoring conf
       // its data type and an SDO object its entry. A device that is already enumerated has a
       // non-empty map and is skipped, so a genuinely-absent object errors immediately instead of
       // triggering a wasteful re-read.
-      const auto enumerated = deviceManager_.withDevice(
-          p.devicePosition, [](Device& device) -> std::expected<bool, std::string> {
-            return device.hasParameters();
-          });
-      if (enumerated && !*enumerated) {
+      const auto device = deviceManager_.deviceAt(p.devicePosition);
+      if (device && !device->hasParameters()) {
         if (auto r = deviceManager_.initializeDeviceParameters(p.devicePosition, false); !r) {
           spdlog::debug("monitoring '{}': object-dictionary read of device {} failed: {}",
                         config.topic, p.devicePosition, r.error());

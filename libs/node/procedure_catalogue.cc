@@ -70,7 +70,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       .descriptor = std::move(commutationOffset),
       .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
-        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+        return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
+          Device& device = ctx.device;
           return runCommutationOffsetMeasurementProcedure(device, reporter, std::move(stop));
         };
       },
@@ -111,7 +112,9 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
         if (!spec) {
           return std::unexpected(spec.error());
         }
-        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+        return [spec = *spec](const ProcedureContext& ctx, ProgressReporter& reporter,
+                              std::stop_token stop) {
+          Device& device = ctx.device;
           return runEncoderRegisterProcedure(device, reporter, std::move(stop), spec);
         };
       },
@@ -150,19 +153,18 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(firmware),
       .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
-      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureWork, std::string> {
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
         auto spec = parseFirmwareInstallationRequest(request);
         if (!spec) {
           return std::unexpected(spec.error());
         }
-        // The only BusProcedureBody in the table: this one changes AL state, so it is handed the
-        // manager and borrows per step rather than being given a device for the whole run.
-        return BusProcedureBody{
-            [spec = std::move(*spec)](DeviceManager& deviceManager, uint16_t devicePosition,
-                                      ProgressReporter& reporter, std::stop_token stop) {
-              return runFirmwareInstallationProcedure(deviceManager, devicePosition, reporter,
-                                                      std::move(stop), spec);
-            }};
+        // The one body in the table that changes AL state, which is why it works through the
+        // manager in its context rather than through the device alone.
+        return [spec = std::move(*spec)](const ProcedureContext& ctx, ProgressReporter& reporter,
+                                         std::stop_token stop) {
+          return runFirmwareInstallationProcedure(ctx.manager, ctx.devicePosition, reporter,
+                                                  std::move(stop), spec);
+        };
       },
   });
 
@@ -205,10 +207,11 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
         if (!request) {
           return std::unexpected(request.error());
         }
-        return
-            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-              return runFirmwareLatencyProcedure(device, reporter, std::move(stop), request);
-            };
+        return [request = *request](const ProcedureContext& ctx, ProgressReporter& reporter,
+                                    std::stop_token stop) {
+          Device& device = ctx.device;
+          return runFirmwareLatencyProcedure(device, reporter, std::move(stop), request);
+        };
       },
   });
 
@@ -253,7 +256,9 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
         if (!spec) {
           return std::unexpected(spec.error());
         }
-        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+        return [spec = *spec](const ProcedureContext& ctx, ProgressReporter& reporter,
+                              std::stop_token stop) {
+          Device& device = ctx.device;
           return runHrdStreamingProcedure(device, reporter, std::move(stop), spec);
         };
       },
@@ -296,7 +301,9 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
         if (!spec) {
           return std::unexpected(spec.error());
         }
-        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+        return [spec = *spec](const ProcedureContext& ctx, ProgressReporter& reporter,
+                              std::stop_token stop) {
+          Device& device = ctx.device;
           return runIcMuCalibrationModeProcedure(device, reporter, std::move(stop), spec);
         };
       },
@@ -341,10 +348,11 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
         if (!request) {
           return std::unexpected(request.error());
         }
-        return
-            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-              return runIgnoreBissStatusBitsProcedure(device, reporter, std::move(stop), request);
-            };
+        return [request = *request](const ProcedureContext& ctx, ProgressReporter& reporter,
+                                    std::stop_token stop) {
+          Device& device = ctx.device;
+          return runIgnoreBissStatusBitsProcedure(device, reporter, std::move(stop), request);
+        };
       },
   });
 
@@ -385,10 +393,11 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
         if (!request) {
           return std::unexpected(request.error());
         }
-        return
-            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-              return runKueblerRegisterProcedure(device, reporter, std::move(stop), request);
-            };
+        return [request = *request](const ProcedureContext& ctx, ProgressReporter& reporter,
+                                    std::stop_token stop) {
+          Device& device = ctx.device;
+          return runKueblerRegisterProcedure(device, reporter, std::move(stop), request);
+        };
       },
   });
 
@@ -424,7 +433,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       .descriptor = std::move(motorPhaseOrder),
       .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
-        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+        return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
+          Device& device = ctx.device;
           return runMotorPhaseOrderDetectionProcedure(device, reporter, std::move(stop));
         };
       },
@@ -471,7 +481,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       .descriptor = std::move(commissioning),
       .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
-        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+        return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
+          Device& device = ctx.device;
           return runOffsetDetectionProcedure(device, reporter, std::move(stop));
         };
       },
@@ -508,7 +519,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
       // Takes no parameters: the timings are properties of the command, not a caller's choice.
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
-        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+        return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
+          Device& device = ctx.device;
           return runOpenPhaseDetectionProcedure(device, reporter, std::move(stop));
         };
       },
@@ -557,7 +569,9 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
         if (!spec) {
           return std::unexpected(spec.error());
         }
-        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+        return [spec = *spec](const ProcedureContext& ctx, ProgressReporter& reporter,
+                              std::stop_token stop) {
+          Device& device = ctx.device;
           return runOsCommandProcedure(device, reporter, std::move(stop), spec);
         };
       },
@@ -593,7 +607,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       .descriptor = std::move(phaseInductance),
       .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
-        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+        return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
+          Device& device = ctx.device;
           return runPhaseInductanceMeasurementProcedure(device, reporter, std::move(stop));
         };
       },
@@ -628,7 +643,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       .descriptor = std::move(phaseResistance),
       .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
-        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+        return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
+          Device& device = ctx.device;
           return runPhaseResistanceMeasurementProcedure(device, reporter, std::move(stop));
         };
       },
@@ -665,7 +681,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       .descriptor = std::move(polePair),
       .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
-        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+        return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
+          Device& device = ctx.device;
           return runPolePairDetectionProcedure(device, reporter, std::move(stop));
         };
       },
@@ -700,7 +717,9 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
         if (!spec) {
           return std::unexpected(spec.error());
         }
-        return [spec = *spec](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+        return [spec = *spec](const ProcedureContext& ctx, ProgressReporter& reporter,
+                              std::stop_token stop) {
+          Device& device = ctx.device;
           return runRestoreDefaultParametersProcedure(device, reporter, std::move(stop), spec);
         };
       },
@@ -739,10 +758,11 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
         if (!request) {
           return std::unexpected(request.error());
         }
-        return
-            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-              return runSkippedCyclesProcedure(device, reporter, std::move(stop), request);
-            };
+        return [request = *request](const ProcedureContext& ctx, ProgressReporter& reporter,
+                                    std::stop_token stop) {
+          Device& device = ctx.device;
+          return runSkippedCyclesProcedure(device, reporter, std::move(stop), request);
+        };
       },
   });
 
@@ -769,7 +789,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       .descriptor = std::move(storeParameters),
       .applies = [](Device& device) { return device.supportsCoe(); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
-        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+        return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
+          Device& device = ctx.device;
           return runStoreParametersProcedure(device, reporter, std::move(stop));
         };
       },
@@ -814,10 +835,11 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
         if (!request) {
           return std::unexpected(request.error());
         }
-        return
-            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-              return runSystemIdentificationProcedure(device, reporter, std::move(stop), request);
-            };
+        return [request = *request](const ProcedureContext& ctx, ProgressReporter& reporter,
+                                    std::stop_token stop) {
+          Device& device = ctx.device;
+          return runSystemIdentificationProcedure(device, reporter, std::move(stop), request);
+        };
       },
   });
 
@@ -857,7 +879,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       .descriptor = std::move(torqueConstant),
       .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
-        return [](Device& device, ProgressReporter& reporter, std::stop_token stop) {
+        return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
+          Device& device = ctx.device;
           return runTorqueConstantMeasurementProcedure(device, reporter, std::move(stop));
         };
       },
@@ -899,10 +922,11 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
         if (!request) {
           return std::unexpected(request.error());
         }
-        return
-            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-              return runTriggerErrorProcedure(device, reporter, std::move(stop), request);
-            };
+        return [request = *request](const ProcedureContext& ctx, ProgressReporter& reporter,
+                                    std::stop_token stop) {
+          Device& device = ctx.device;
+          return runTriggerErrorProcedure(device, reporter, std::move(stop), request);
+        };
       },
   });
 
@@ -945,10 +969,11 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
         if (!request) {
           return std::unexpected(request.error());
         }
-        return
-            [request = *request](Device& device, ProgressReporter& reporter, std::stop_token stop) {
-              return runVelocitySourceProcedure(device, reporter, std::move(stop), request);
-            };
+        return [request = *request](const ProcedureContext& ctx, ProgressReporter& reporter,
+                                    std::stop_token stop) {
+          Device& device = ctx.device;
+          return runVelocitySourceProcedure(device, reporter, std::move(stop), request);
+        };
       },
   });
 
@@ -972,24 +997,20 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
 // The procedures @p devicePosition supports, as pointers into the immortal catalogue.
 //
-// The borrow is released before this returns, and that is deliberate rather than incidental: every
-// caller below goes on to call something that borrows again (ProcedureManager::start does its own
-// withDevice), and deviceSetMutex_ is shared but not recursive — a second shared acquisition can
-// deadlock behind a writer that arrived between the two. So applicability is decided under the lock
-// and nothing else is done while holding it.
 std::expected<std::vector<const ProcedureCatalogueEntry*>, ProcedureError> applicableEntries(
     DeviceManager& deviceManager, uint16_t devicePosition) {
   using Entries = std::vector<const ProcedureCatalogueEntry*>;
-  auto found = deviceManager.withDevice(devicePosition,
-                                        [](Device& device) -> std::expected<Entries, std::string> {
-                                          Entries entries;
-                                          for (const auto& entry : procedureCatalogue()) {
-                                            if (entry.applies(device)) {
-                                              entries.push_back(&entry);
-                                            }
-                                          }
-                                          return entries;
-                                        });
+  const auto device = deviceManager.deviceAt(devicePosition);
+  std::expected<Entries, std::string> found = deviceNotFound(devicePosition);
+  if (device) {
+    Entries entries;
+    for (const auto& entry : procedureCatalogue()) {
+      if (entry.applies(*device)) {
+        entries.push_back(&entry);
+      }
+    }
+    found = std::move(entries);
+  }
   if (!found) {
     return std::unexpected(
         ProcedureError{.kind = ProcedureError::Kind::kUnknownDevice, .message = found.error()});
@@ -1077,14 +1098,8 @@ std::expected<ProcedureSnapshot, ProcedureError> startProcedure(DeviceManager& d
         ProcedureError{.kind = ProcedureError::Kind::kInvalidRequest, .message = body.error()});
   }
   const auto& descriptor = (*entry)->descriptor;
-  // One visit picks the ProcedureManager::start overload matching the shape the entry produced.
-  // The two body types differ in arity, so neither converts to the other and the overload is exact.
-  auto started = std::visit(
-      [&](auto&& work) {
-        return procedureManager.start(devicePosition, descriptor.name, descriptor.steps,
-                                      std::forward<decltype(work)>(work));
-      },
-      std::move(*body));
+  auto started =
+      procedureManager.start(devicePosition, descriptor.name, descriptor.steps, std::move(*body));
   if (!started) {
     return std::unexpected(started.error());
   }

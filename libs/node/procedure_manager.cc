@@ -57,27 +57,20 @@ std::expected<void, ProcedureError> ProcedureManager::start(uint16_t devicePosit
                                                             std::string name,
                                                             std::vector<ProgressStep> steps,
                                                             ProcedureBody body) {
-  // Borrowed for the run's whole duration: the body is handed a Device& that stays valid
-  // throughout, at the cost of holding the bus lock shared and so being unable to change AL state.
   return startRun(devicePosition, std::move(name), std::move(steps),
                   [this, devicePosition, body = std::move(body)](ProgressReporter& reporter,
                                                                  std::stop_token stop) {
-                    return deviceManager_.withDevice(devicePosition, [&](Device& device) {
-                      return body(device, reporter, stop);
-                    });
-                  });
-}
-
-std::expected<void, ProcedureError> ProcedureManager::start(uint16_t devicePosition,
-                                                            std::string name,
-                                                            std::vector<ProgressStep> steps,
-                                                            BusProcedureBody body) {
-  // Nothing borrowed: the body takes the manager and borrows per step, which is what lets it call
-  // transitionToState in between.
-  return startRun(devicePosition, std::move(name), std::move(steps),
-                  [this, devicePosition, body = std::move(body)](ProgressReporter& reporter,
-                                                                 std::stop_token stop) {
-                    return body(deviceManager_, devicePosition, reporter, std::move(stop));
+                    // The handle is the run's hold on its device: it keeps the device constructed
+                    // for the whole body without keeping any lock, so a concurrent scan publishes a
+                    // new set and this run keeps working against the one it started on.
+                    const auto device = deviceManager_.deviceAt(devicePosition);
+                    if (!device) {
+                      return std::expected<void, std::string>(deviceNotFound(devicePosition));
+                    }
+                    const ProcedureContext context{.manager = deviceManager_,
+                                                   .device = *device,
+                                                   .devicePosition = devicePosition};
+                    return body(context, reporter, std::move(stop));
                   });
 }
 
@@ -86,17 +79,14 @@ std::expected<void, ProcedureError> ProcedureManager::startRun(uint16_t devicePo
                                                                std::vector<ProgressStep> steps,
                                                                ResolvedWork work) {
   // Resolve now rather than inside the thread, so an unknown position is reported to the caller
-  // instead of surfacing later as a run that failed immediately — and do it *before* taking mutex_.
-  // withDevice takes DeviceManager's device-set lock, so holding ours across it would stall every
-  // procedure endpoint (start, poll, cancel) behind whatever holds that lock. Capturing the
-  // topology generation here rather than after the lock is also the more accurate reading: it is
-  // the generation the device was actually resolved under, and a rescan landing between here and
-  // the insert below simply makes discardIfRescanned() collect the run on a later pass.
-  if (auto found = deviceManager_.withDevice(
-          devicePosition, [](Device&) -> std::expected<void, std::string> { return {}; });
-      !found) {
+  // instead of surfacing later as a run that failed immediately. Capturing the topology generation
+  // here is the accurate reading: it is the generation the device was resolved under, and a rescan
+  // landing between here and the insert below simply makes discardIfRescanned() collect the run on
+  // a later pass.
+  if (!deviceManager_.deviceAt(devicePosition)) {
     return std::unexpected(
-        ProcedureError{.kind = ProcedureError::Kind::kUnknownDevice, .message = found.error()});
+        ProcedureError{.kind = ProcedureError::Kind::kUnknownDevice,
+                       .message = std::format("device {} not found", devicePosition)});
   }
   const uint64_t topologyGeneration = deviceManager_.topologyGeneration();
 

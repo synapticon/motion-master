@@ -95,15 +95,31 @@ classDiagram
         +configureProcessData()
         +transitionToState()
         +exchangeProcessData() «RT, lock-free»
-        +withDevice(pos, fn) / withDevices(fn)
+        +deviceAt(pos) : DeviceHandle
+        +deviceSet() : shared_ptr~DeviceSet~
         +findDevice(pos) «RT, no lock»
         +topologyGeneration()
-        -unique_ptr~FieldbusDriver~ driver_
-        -vector~Device~ devices_
+        -shared_ptr~DeviceSet~ currentSet_
+        -atomic~DeviceSet*~ publishedSet_ «RT view»
         -unique_ptr~ProcessData~ pd_
         -ParameterCache parameterCache_
         -mutex busOperationMutex_
-        -shared_mutex deviceSetMutex_
+        -mutex currentSetMutex_
+        -shared_mutex processDataMutex_
+    }
+    class DeviceSet {
+        <<published generation, immutable>>
+        +shared_ptr~FieldbusDriver~ driver
+        +vector~Device~ devices
+        +uint64 topologyGeneration
+        +find(pos) : Device*
+    }
+    class DeviceHandle {
+        <<a device plus the set that keeps it alive>>
+        +operator bool()
+        +operator*() / operator->()
+        -shared_ptr~DeviceSet~ set_
+        -Device* device_
     }
     class CycleGuard {
         <<DeviceManager::CycleGuard — RT>>

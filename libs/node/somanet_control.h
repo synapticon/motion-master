@@ -14,10 +14,11 @@ namespace mm::node {
 /// @file
 /// @brief SOMANET drive control by bus position — resolve, bind the vendor view, run one operation.
 ///
-/// The SOMANET sibling of @c cia402_control.h, and the same three lines each: @c withDevice to hold
-/// the bus lock and resolve the position, @c createSomanetDrive to validate the device really is a
-/// SOMANET drive, then one call on the view. The domain logic stays on @c SomanetDrive; these are
-/// only the lifetime-safe way in for code that has a bus position rather than a borrowed device.
+/// The SOMANET sibling of @c cia402_control.h, and the same three lines each:
+/// @c DeviceManager::deviceAt to resolve the position and hold the device alive, @c
+/// createSomanetDrive to validate the device really is a SOMANET drive, then one call on the view.
+/// The domain logic stays on @c SomanetDrive; these are only the lifetime-safe way in for code that
+/// has a bus position rather than a device.
 ///
 /// **These are not procedures**, for the reason spelled out in @c cia402_control.h: they are short
 /// interactive control, and they are what procedures are *built from*. A diagnostics procedure

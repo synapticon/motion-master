@@ -123,13 +123,13 @@ protocol, the invariants — is in [LOCKING.md](LOCKING.md); the shape is:
 | Recorder ring | 1 writes, 2 & 4 read | Wait-free append; readers re-check a per-slot sequence after copying. A cursor lapped by more than a whole ring is detected and resynced |
 | SDO / FoE / registers / AL state | 2 & 5 | `FieldbusDriver::controlPlaneMutex_`, held for a single socket transaction — never across a sleep, a blocking wait, or a user callback |
 
-**The one long hold worth knowing.** A multi-second command-and-wait procedure —
-`runStoreParameters`, `runRestoreDefaultParameters`, the `runCia402Command` `enable()` walk — holds
-`DeviceManager::deviceSetMutex_` in **shared** mode for its whole duration, *including the sleeps
-between polls*, because that is what keeps the borrowed `Device&` valid against the exclusive
-rebuilders. It still takes `controlPlaneMutex_` only per SDO transaction, so the RT loop is
-untouched, and because the lock is shared, other readers and borrowers run alongside it — only
-`scan` / `reset` and a re-map's publish window wait. It does **not** hold `busOperationMutex_`, so an
+**No long hold, and that is the design.** A multi-second command-and-wait procedure —
+`runStoreParameters`, `runRestoreDefaultParameters`, the `runCia402Command` `enable()` walk — holds a
+`DeviceHandle` for its whole duration, *including the sleeps between polls*. A handle is a
+`shared_ptr` to the published `DeviceSet`, not a lock, so it keeps the device constructed while
+nothing waits for it: a concurrent `scan` publishes a new set and the procedure finishes against the
+retired one. It still takes `controlPlaneMutex_` only per SDO transaction, so the RT loop is
+untouched. It does **not** hold `busOperationMutex_`, so an
 AL transition can interleave with it.
 
 The boundary between control-plane mutation (`init` / `reset` / `configureProcessData`, and a
@@ -168,7 +168,8 @@ ordering.
 | `ProcessData::image` + `inCycle` | `libs/node/process_data.h` | The cycle gate — how a control-plane mutation waits out the RT thread without a shared lock |
 | `FieldbusDriver::controlPlaneMutex_` | `libs/comm/fieldbus_driver.h` | Control-plane socket access, one transaction at a time |
 | `DeviceManager::busOperationMutex_` | `libs/node/device_manager.h` | A token over an *activity*: one control-plane operation drives the bus at a time |
-| `DeviceManager::deviceSetMutex_` | `libs/node/device_manager.h` | *Lifetime*: `devices_`, `driver_`, the retained generations and ring storage are not being rebuilt or freed |
+| `DeviceManager::currentSetMutex_` | `libs/node/device_manager.h` | The published `shared_ptr<DeviceSet>` itself — held for one pointer copy. Device lifetime is the refcount's job |
+| `DeviceManager::processDataMutex_` | `libs/node/device_manager.h` | The recorder ring's storage and the retained image generations, against `allocate` / `clear` |
 | `Device::parametersMutex_` | `libs/node/device.h` | The per-device parameter map's structure and its entries' non-atomic fields — not the cell |
 | `GameLoop::period_` | `apps/motion_master/game_loop.h` | The live cycle period; the one cross-thread write *into* the RT loop |
 | `MonitoringManager::mutex_` + `cv_` | `libs/node/monitoring_manager.h` | Monitoring registry + sampling schedule |

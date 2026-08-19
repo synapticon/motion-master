@@ -2697,3 +2697,33 @@ So it is gone. A retired set is freed when its last `DeviceHandle` releases it, 
 ### The cost, stated plainly
 
 Memory grows with rescans until `reset()`: a retained set carries its devices and their cells, roughly the size of one enumeration per device per scan. The trap avoided on purpose: **cells are not keyed globally by `(position, index, subindex)` and reused across scans.** That would have made rescans free and memory flat, and it would also have let a retired device read the *new* drive's values through a shared cell — the "position is not identity" trap, made silent. Fresh cells per scan is what makes the memory cost real and the semantics honest.
+
+## Session 2026-08-19 — Honest review of the RT loop, device, parameter and locking design, with a ten-year horizon (review)
+
+Asked directly: is this the best way forward for software that many stakeholders will use for ten years? The shape is right and it is better than most EtherCAT masters manage — one junction between the two worlds, no long-held locks, and a value path a controls engineer can use without reading `docs/LOCKING.md`. It is not yet rock solid, and the gap is not the architecture.
+
+### The design in five sentences
+
+One RT thread, which the main thread becomes, woken by an absolute-deadline timer that skips to the grid rather than catching up. That thread never waits, never allocates and never frees; everything it touches is an atomic cell, a published immutable object reached by a raw pointer, or a buffer covered by the drain. Off the RT thread, lifetime is a reference count — `deviceAt()` hands out a handle that owns what it points at — so no lock is held while a caller works and a rescan neither waits for anyone nor invalidates them. Between the two worlds there is exactly one mechanism: **publish a replacement, then drain the cycle** (`ProcessData::pauseCycle`). Five locks carry the rest: a token so one operation drives the bus at a time, one per device for its parameter index, one in the driver per socket transaction, and two leaves.
+
+### What is worth keeping exactly as it is
+
+Few mechanisms, and each doing one job: the atomic cell; the refcount-plus-drain split; one procedure body shape; the loop-level cycle gate, which made the RT contract structural rather than remembered; the deque cell arena; `busOperationMutex_` as an activity token; per-record locking in `readRecord`. The diagnostics deserve naming too — skipped cycles, execution time, working-counter faults with timestamps, and the lossless recorder mean RT health is observable rather than inferred.
+
+### The risks, worst first
+
+**1. A failed drain corrupts memory on purpose.** `pauseCycle` waits 200 ms and then *proceeds anyway* — freeing the ring, rewriting the IOmap, destroying devices — while the RT thread may still be reading them. The trade was "never hang an HTTP request on a stalled loop", and it is backwards: the trigger conditions are CPU contention, a task overrun, a debugger, a hypervisor stall, and the failure class is heap corruption or wrong values on the wire, surfacing later somewhere unrelated. Two fixes, both wanted: **fail the operation** rather than proceed, and **defer the reclaim** so a failed drain costs memory rather than integrity. Same function, smaller bug: the wait is a `yield()` spin, which on a non-isolated core burns CPU and can delay the very thread it waits for. **Accepted 2026-08-19.**
+
+**2. Correctness lives in prose and review.** No automated test runs the control plane against the loop, and the hardware checks were one hand-run per scenario. Over ten years this is the largest risk, because the next maintainer has no net. The fix is a deterministic harness — the fake driver, the real `GameLoop`, threads hammering scan / reset / `parameters/init` / monitoring create-destroy — under ThreadSanitizer. It needs no hardware. **Accepted 2026-08-19.**
+
+**3. Two rules a compiler cannot check.** A task must not cache a device pointer across cycles, and must not block or allocate. The first could be made structural by passing a `Cycle&` into `execute()` and vending lookups from it, so a pointer's lifetime is tied to an object rather than to a sentence. **Deferred 2026-08-19**, on the grounds that no Tier-3 users exist before mid-2027 and the tasks that exist (process data, the trajectory task to come) are written in-house. Revisit before the surface is opened to others; it is far cheaper to change now than later.
+
+**4. A task overrun has no guard.** `execute()` may spin forever; there is no budget check and no per-task timing, only the aggregate. **Won't do 2026-08-19.** The owner's reading: a Tier-3 author watching `GET /api/game-loop` sees `skippedCycles` climb and `maxExecNs` blow out, which is diagnosis enough, and every task in the tree is written in-house for now. Recorded because the argument changes the day a third party ships a task.
+
+**5. Position is treated as identity.** A task binds to a bus position, and after a topology change that position may be different hardware. `topologyGeneration()` exists and nothing enforces it. Binding by serial number or an operator-assigned name, verified on every rescan, is the ten-year answer.
+
+**6. A task cannot report a fault.** `execute()` returns `void`, so a control task that sees an over-temperature has nowhere to raise it. The planned notification bus covers it.
+
+**7. An exception escaping a task kills the process.** The project is exception-free, but a user's task is ordinary C++. Declaring `execute()` `noexcept` makes the outcome deterministic and states the contract in the type. **Accepted 2026-08-19.**
+
+Still open and already tracked: output staging skew across two cycles, two concurrent `POST /api/init` answering 500 rather than 409, and free-run DC — which remains the real blocker for coordinated multi-axis motion.

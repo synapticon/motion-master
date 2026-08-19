@@ -644,6 +644,15 @@ paths:
         running against the devices it started on, and fails at its next bus transfer.
         Retained procedure snapshots are discarded, because a position may name different
         hardware after a scan.
+
+
+        A scan frees the recording, the retained process images and the previous device set,
+        so it first waits up to 200 ms for the real-time loop to leave the cycle it is in.
+        If the loop is stalled — a cyclic task that overruns, or severe CPU contention — the
+        scan fails with 500 and changes nothing, rather than freeing memory the loop is still
+        reading. `GET /api/game-loop` shows the stall. The same applies to
+        `POST /api/process-data`, which re-allocates the recorder. `POST /api/reset` never
+        fails this way: it holds the memory back instead and reclaims it later.
       responses:
         "200":
           description: Scan successful; returns the number of slaves found (0 for an empty or unpowered bus)

@@ -21,6 +21,7 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Fixed
 
+- **A stalled real-time loop no longer costs memory integrity.** Draining the cycle before freeing the recording, the retained process images or a device set waits up to 200 ms; on expiry the code used to proceed anyway and free what the loop was still reading. `POST /api/scan` and `POST /api/process-data` now fail with 500 and change nothing, `POST /api/reset` holds the memory back and reclaims it at the next successful drain, and a parameter re-enumeration keeps the old index alive. The wait also sleeps instead of spinning, which no longer steals CPU from the loop it is waiting for.
 - **Reading a device's object dictionary while the bus exchanges no longer corrupts memory.** `POST /api/devices/{slavePosition}/parameters/init` and `POST .../parameters/read` replaced every parameter cell of that device, while the published process image still pointed at the old ones — so the next real-time cycle read and wrote freed memory. Cells are now retained: a re-enumeration reuses each cell whose data type and bit length are unchanged, and a changed declaration gets a new cell instead of overwriting the old one. A value written before the enumeration also survives it now, rather than being zeroed.
 
 ### Changed

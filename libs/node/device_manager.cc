@@ -122,7 +122,9 @@ std::expected<void, std::string> DeviceManager::init(
   auto set = std::make_shared<DeviceSet>();
   set->driver = std::move(shared);
   set->topologyGeneration = topologyGeneration_.load(std::memory_order_relaxed);
-  stopExchange();  // nothing to drain on a first init; correct and cheap if a previous run left one
+  // Nothing to drain on a first init, and nothing here frees anything the RT thread can reach, so
+  // the outcome is not load-bearing.
+  static_cast<void>(stopExchange());
   publishDeviceSet(std::move(set));
   spdlog::debug("FieldbusDriver initialised");
   return result;
@@ -150,7 +152,15 @@ std::expected<int, std::string> DeviceManager::scan() {
   // exchangeProcessData() is a no-op and the RT loop is no longer touching the IOmap while the
   // driver rebuilds it. Then reclaim the now-stale image generations (safe once exchange is
   // gated off); a fresh image is published when the bus is next brought into SAFE-OP/OP.
-  stopExchange();
+  if (!stopExchange()) {
+    // Refused rather than forced. A scan frees the recording, the retained images and — once this
+    // set is replaced — every device and cell in it, and the RT thread is demonstrably still
+    // reading them. Nothing has been touched yet, so the bus is exactly as it was and the caller
+    // may retry.
+    return std::unexpected(
+        "the real-time loop did not leave its cycle within 200 ms, so nothing was changed — check "
+        "GET /api/game-loop for a stalled loop or a cyclic task that overruns");
+  }
   {
     // The recording and the retained images describe a device set that is about to be replaced, so
     // both are discarded. Exclusive, because readers hold this shared while they walk either one.
@@ -193,7 +203,11 @@ void DeviceManager::reset() {
   // Unpublish the image and drain any in-flight cycle so a concurrent exchangeProcessData
   // becomes a no-op, then reclaim every retained image generation (safe now that exchange is
   // gated off).
-  stopExchange();
+  // reset() never refuses. It is the operation an operator reaches for *because* something is
+  // wrong, so a stalled cycle must not block it. It holds the memory back instead: the retired set
+  // and the retained images move to abandoned_, the ring keeps its storage, and the next successful
+  // drain reclaims all of it.
+  const bool drained = stopExchange();
   // The end of the session the short-working-counter record describes: the driver is about to go,
   // and a later init() starts a new bus. The only place these are cleared.
   pd_->shortWkcCycles.store(0, std::memory_order_relaxed);
@@ -201,8 +215,20 @@ void DeviceManager::reset() {
   pd_->lastShortWkcNs.store(0, std::memory_order_relaxed);
   {
     const std::unique_lock processDataLock(processDataMutex_);
-    pd_->generations.clear();
-    pd_->ring.clear();  // teardown — free the recorder storage
+    if (drained) {
+      pd_->generations.clear();
+      pd_->ring.clear();  // teardown — free the recorder storage
+    } else {
+      // Moved rather than copied out: abandoned_ takes over every reference, and clearing then
+      // drops only ours.
+      abandoned_.insert(abandoned_.end(), pd_->generations.begin(), pd_->generations.end());
+      pd_->generations.clear();
+    }
+  }
+  if (!drained) {
+    // The set is about to be replaced, and dropping the last reference to it would free the devices
+    // and cells the RT thread is still reading.
+    abandoned_.push_back(previous);
   }
   topologyGeneration_.fetch_add(1, std::memory_order_relaxed);
   // An empty set takes over, so every reader gets a set with no devices and no driver from here on.
@@ -295,8 +321,14 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
     return std::unexpected("configureProcessData: no devices — call scan() first");
   }
   // Unpublish first and drain any in-flight cycle so the RT thread is not touching the IOmap
-  // while we re-map it.
-  stopExchange();
+  // while we re-map it. Refused rather than forced: this re-allocates the ring and has the driver
+  // rewrite the IOmap, both of which the RT thread is still reading if the drain failed. Nothing
+  // has changed yet at this point.
+  if (!stopExchange()) {
+    return std::unexpected(
+        "the real-time loop did not leave its cycle within 200 ms, so the process image was not "
+        "re-mapped — check GET /api/game-loop for a stalled loop or a cyclic task that overruns");
+  }
 
   if (auto r = set->driver->configureProcessData(); !r) {
     return std::unexpected(r.error());
@@ -470,9 +502,23 @@ DeviceManager::CycleGuard::~CycleGuard() {
   }
 }
 
-void DeviceManager::stopExchange() { pd_->pauseCycle(); }
+bool DeviceManager::stopExchange() {
+  const ProcessData::PauseResult paused = pd_->pauseCycle();
+  if (!paused.drained) {
+    return false;
+  }
+  // The drain succeeded, so the RT thread is out of the cycle and anything an earlier failed drain
+  // left alive is now unreachable by it. This is the only reclaim point for that backlog, and it is
+  // empty unless a drain has failed before.
+  if (!abandoned_.empty()) {
+    spdlog::info("Reclaiming {} object(s) held back by an earlier stalled cycle",
+                 abandoned_.size());
+    abandoned_.clear();
+  }
+  return true;
+}
 
-const ProcessImage* ProcessData::pauseCycle() {
+ProcessData::PauseResult ProcessData::pauseCycle() {
   const ProcessImage* previous = image.exchange(nullptr, std::memory_order_seq_cst);
   // Drain whatever the RT thread has in flight — the exchange itself, and any cyclic task body
   // holding a CycleGuard (which resolves devices and parameters of its own, so it must be out
@@ -482,24 +528,26 @@ const ProcessImage* ProcessData::pauseCycle() {
   // yet raised it will observe the null image and back out. We therefore only wait out the
   // at-most-one cycle already in flight. Bounded so a stalled/absent RT loop can never hang a
   // control-plane call.
+  // Sleep rather than spin. A yield loop burns a core for the whole wait, and if the RT thread is
+  // not pinned to one of its own it can delay the very thread being waited for. 50 µs is short
+  // against the 200 ms bound and long enough to cost nothing.
   const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
   while (inCycle.load(std::memory_order_seq_cst) != 0 &&
          std::chrono::steady_clock::now() < deadline) {
-    std::this_thread::yield();
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
   }
-  // Giving up is not free, and the caller proceeds regardless: it is about to free the recorder
-  // ring and rewrite the IOmap that an RT cycle still inside exchangeProcessData is reading — or,
-  // for scan/reset, destroy the very devices a cyclic task still inside its CycleGuard is reading.
-  // That is the accepted price of never hanging a control-plane call on a stalled RT loop — but it
-  // must not be silent, or the memory corruption it can cause arrives with nothing to explain it.
-  // An RT thread preempted for a fifth of a second is itself the diagnosis worth reporting.
+  // Expiry is reported, never papered over. The RT thread is still inside a cycle, so everything
+  // this caller was about to free — the ring storage, the IOmap, a device set, a parameter map — is
+  // still being read. A caller that sees drained == false must free nothing: it either refuses the
+  // operation or keeps the object alive for a later reclaim. An RT thread preempted for a fifth of
+  // a second is itself the diagnosis worth reporting.
   if (inCycle.load(std::memory_order_seq_cst) != 0) {
     spdlog::warn(
-        "RT cycle did not drain within 200 ms — proceeding anyway. The RT loop is stalled or "
-        "descheduled; a re-map, teardown, rescan or re-enumeration now races the cycle still in "
-        "flight.");
+        "RT cycle did not drain within 200 ms. The RT loop is stalled or descheduled; nothing will "
+        "be freed while that is true.");
+    return PauseResult{.previous = previous, .drained = false};
   }
-  return previous;
+  return PauseResult{.previous = previous, .drained = true};
 }
 
 void ProcessData::resumeCycle(const ProcessImage* previous) {
@@ -960,7 +1008,9 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
     } else {
       spdlog::info("Stopping process data exchange before transition to 0x{:02X}",
                    static_cast<int>(targetState));
-      stopExchange();
+      // Unpublishing is the point here; nothing is freed, so a stalled cycle changes nothing about
+      // the safety of what follows. The image stays retained either way.
+      static_cast<void>(stopExchange());
     }
   }
 

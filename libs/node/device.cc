@@ -265,7 +265,13 @@ void Device::publishParameters(std::unordered_map<uint32_t, DeviceParameter>&& b
   //
   // parametersMutex_ covers the other adversary — the refresher and the sampler, which are ordinary
   // threads and do take it.
-  const ProcessImage* paused = processData_ ? processData_->pauseCycle() : nullptr;
+  // A failed drain means the RT thread is still walking the map this is about to replace, so the
+  // old map is kept alive instead of freed. Publishing the new one is still right: the enumeration
+  // cost seconds of bus traffic and the cells it names are all live either way.
+  ProcessData::PauseResult paused;
+  if (processData_ != nullptr) {
+    paused = processData_->pauseCycle();
+  }
   {
     const std::lock_guard<std::mutex> lock(*parametersMutex_);
     std::unordered_map<uint32_t, DeviceParameter*> next;
@@ -302,10 +308,13 @@ void Device::publishParameters(std::unordered_map<uint32_t, DeviceParameter>&& b
       cells_->push_back(std::move(definition));
       next.emplace(key, &cells_->back());
     }
+    if (!paused.drained) {
+      retiredMaps_.push_back(std::move(parameters_));
+    }
     parameters_ = std::move(next);
   }
-  if (processData_) {
-    processData_->resumeCycle(paused);
+  if (processData_ != nullptr) {
+    processData_->resumeCycle(paused.previous);
   }
 }
 

@@ -839,6 +839,10 @@ class Device {
   // (index, subindex) -> the cell that holds that object's value. Replaced wholesale by
   // publishParameters; the cells it points at outlive every replacement.
   std::unordered_map<uint32_t, DeviceParameter*> parameters_;
+  // Maps kept alive because the RT cycle did not drain before they were replaced. A cyclic task may
+  // still have been walking one, and freeing it then is a use-after-free. They are only ever added
+  // to, which is bounded by how many times a drain fails — an emergency that is logged each time.
+  std::vector<std::unordered_map<uint32_t, DeviceParameter*>> retiredMaps_;
   FlatPdoMapping flatPdoMapping_;
   // Discovered Complete Access support (the probe outcome), shared by every grouped read for the
   // device's lifetime. Read and written only under parametersMutex_.

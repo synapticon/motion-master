@@ -89,8 +89,16 @@ struct ProcessData {
   /// Bounded, so a stalled or absent RT loop can never hang a control-plane call; giving up is
   /// logged rather than silent.
   ///
-  /// @return The image that was published, to hand back to @c resumeCycle. @c nullptr if none was.
-  const ProcessImage* pauseCycle();
+  /// @return What was published, to hand back to @c resumeCycle, and whether the drain succeeded.
+  struct PauseResult {
+    /// The image that was published, or @c nullptr if none was.
+    const ProcessImage* previous = nullptr;
+    /// False when the wait expired with the RT thread still inside a cycle. **A caller that sees
+    /// false must free nothing**: the RT thread may still be reading whatever it was about to
+    /// release. Keep it alive instead, or refuse the operation.
+    bool drained = true;
+  };
+  PauseResult pauseCycle();
 
   /// @brief Control plane: republishes @p previous, letting RT work resume.
   ///

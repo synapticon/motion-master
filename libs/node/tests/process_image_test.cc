@@ -497,6 +497,80 @@ TEST(CycleGuard, IsFalsyBeforeAnImageIsPublished) {
   EXPECT_FALSE(static_cast<bool>(cycle));
 }
 
+// ── A stalled cycle must cost integrity nothing ─────────────────────────────────────────────────
+//
+// pauseCycle waits 200 ms for the RT thread to leave its cycle. It used to proceed regardless,
+// freeing the ring, the retained images and the devices a cyclic task was still reading — memory
+// corruption by design, triggered exactly when a machine is already in trouble. Now the drain
+// reports failure and no caller frees anything: scan refuses outright, reset holds the objects
+// back.
+//
+// A held CycleGuard stands in for a stalled loop: it is precisely the state the drain waits out.
+
+TEST(StalledCycle, ScanRefusesRatherThanFreeWhatTheCycleIsReading) {
+  auto bus = makeCia402Bus();
+  bus->wkc = 3;
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+
+  const DeviceManager::CycleGuard cycle(dm);
+  ASSERT_TRUE(static_cast<bool>(cycle)) << "the guard must hold the cycle open for this test";
+
+  const auto scanned = dm.scan();
+  ASSERT_FALSE(scanned.has_value()) << "scan must refuse while the cycle is held";
+  EXPECT_NE(scanned.error().find("did not leave its cycle"), std::string::npos) << scanned.error();
+
+  // Refused means nothing changed: the device the guard resolved is still there and still resolves.
+  Device* device = dm.findDevice(1);
+  ASSERT_NE(device, nullptr);
+  EXPECT_EQ(device->slavePosition(), 1);
+}
+
+TEST(StalledCycle, ReMapRefusesRatherThanReallocateTheRing) {
+  auto bus = makeCia402Bus();
+  bus->wkc = 3;
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+
+  const DeviceManager::CycleGuard cycle(dm);
+  ASSERT_TRUE(static_cast<bool>(cycle));
+
+  const auto remapped = dm.configureProcessData();
+  ASSERT_FALSE(remapped.has_value()) << "a re-map must refuse while the cycle is held";
+  EXPECT_NE(remapped.error().find("did not leave its cycle"), std::string::npos)
+      << remapped.error();
+}
+
+// reset() is the operation an operator reaches for because something is already wrong, so it never
+// refuses. It keeps the memory instead: the held device stays readable, and a later successful
+// drain reclaims the backlog.
+TEST(StalledCycle, ResetHoldsMemoryBackInsteadOfRefusing) {
+  auto bus = makeCia402Bus();
+  bus->wkc = 3;
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+
+  Device* held = nullptr;
+  {
+    const DeviceManager::CycleGuard cycle(dm);
+    ASSERT_TRUE(static_cast<bool>(cycle));
+    held = dm.findDevice(1);
+    ASSERT_NE(held, nullptr);
+    dm.reset();  // must not block, must not refuse, must not free the device above
+    EXPECT_EQ(held->slavePosition(), 1) << "a retired device stays readable after a stalled reset";
+    EXPECT_FALSE(dm.initialised());
+  }
+  // The next drain succeeds (the guard is gone), which is where the backlog is reclaimed. Nothing
+  // to assert beyond it running clean under the sanitizers; the log line names the count.
+  ASSERT_TRUE(dm.init(makeCia402Bus()).has_value());
+}
+
 TEST(CycleGuard, IsTruthyOnceTheBusIsActivatedAndDevicesResolve) {
   auto bus = makeCia402Bus();
   bus->wkc = 3;

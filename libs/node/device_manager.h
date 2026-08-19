@@ -904,7 +904,9 @@ class DeviceManager {
   ///
   /// After this returns, @c exchangeProcessData is a no-op and the RT thread is no longer
   /// touching the driver's IOmap, so it is safe to re-map or tear down. Bounded wait.
-  void stopExchange();
+  /// @return False when the wait expired with the RT thread still inside a cycle. The caller must
+  ///         then free nothing — see @c ProcessData::PauseResult.
+  [[nodiscard]] bool stopExchange();
 
   /// @brief Publishes @p set as the current generation. Call with @c busOperationMutex_ held.
   ///
@@ -940,6 +942,13 @@ class DeviceManager {
   // body holding a pointer into the set being dropped. A task must therefore resolve its devices
   // each cycle and never cache one across cycles.
   std::shared_ptr<DeviceSet> currentSet_;
+
+  // What a failed drain held back. When @c stopExchange times out, the RT thread is still inside a
+  // cycle and may be reading a device set, a process image or a parameter map that the operation
+  // was about to release — so the operation keeps it here instead of freeing it, and the next
+  // successful drain clears the list. Empty unless a drain has failed, which is an emergency and is
+  // logged.
+  std::vector<std::shared_ptr<const void>> abandoned_;
 
   // The same set as a raw pointer, for the RT thread, which must not touch a shared_ptr. It carries
   // no reference of its own: currentSet_ owns the object it names, and publishDeviceSet writes both

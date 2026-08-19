@@ -7,9 +7,9 @@
 > [CLASS_DIAGRAM.md](CLASS_DIAGRAM.md) shows ownership. [RT_SCHEDULING.md](RT_SCHEDULING.md)
 > covers `SCHED_FIFO` and `mlockall`.
 
-Motion Master holds ten mutexes, two condition variables, and four lock-free protocols. This file
-lists all of them. Read the page below and stop; the rest is reference for the moment you change
-something.
+Motion Master holds ten mutexes, two condition variables, and four lock-free protocols. The page
+below is the whole model. The sections after it are the detail behind it: every primitive, what each
+one guards, and the invariants they hold up.
 
 ## The model on one page
 

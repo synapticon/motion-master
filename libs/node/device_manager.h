@@ -349,11 +349,11 @@ class DeviceManager {
     CycleGuard& operator=(const CycleGuard&) = delete;
 
     /// @brief Whether this guard entered the cycle and device access is safe now.
-    explicit operator bool() const { return held_; }
+    explicit operator bool() const { return entered_; }
 
    private:
     ProcessData* processData_;
-    bool held_;
+    bool entered_;
   };
 
   /// @brief Device lookup by bus position. O(N) over a handful of devices; @c nullptr if absent.

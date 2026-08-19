@@ -399,7 +399,7 @@ void DeviceManager::decodeInputsIntoCells(const ProcessImage& image) {
 }
 
 DeviceManager::CycleGuard::CycleGuard(DeviceManager& deviceManager)
-    : processData_(deviceManager.pd_.get()), held_(false) {
+    : processData_(deviceManager.pd_.get()), entered_(false) {
   // The same handshake exchangeProcessData uses, one level up so it covers the task's own device
   // and parameter lookups: raise the depth BEFORE loading the image, then load it. Both are
   // sequentially consistent so they cannot be reordered against stopExchange()'s image-store /
@@ -411,11 +411,11 @@ DeviceManager::CycleGuard::CycleGuard(DeviceManager& deviceManager)
     processData_->inCycle.fetch_sub(1, std::memory_order_release);
     return;
   }
-  held_ = true;
+  entered_ = true;
 }
 
 DeviceManager::CycleGuard::~CycleGuard() {
-  if (held_) {
+  if (entered_) {
     processData_->inCycle.fetch_sub(1, std::memory_order_release);
   }
 }

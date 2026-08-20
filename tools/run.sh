@@ -38,12 +38,30 @@ else
         2>/dev/null
 fi
 
+# Find the auto-tuning executable. Motion Master looks for it next to itself, which is where every
+# install path puts it — but a development build lives under build/<preset>/, and
+# install-auto-tuning.sh downloads into the directory it sits in, which is the repository root. So
+# name the path explicitly for this run. An absent file needs no entry: Motion Master then warns
+# about the path it looked at, which is the same message a real install would give.
+auto_tuning_path=""
+for candidate in "$binary_dir/auto-tuning" "auto-tuning"; do
+    if [[ -x "$candidate" ]]; then
+        auto_tuning_path="$(cd "$(dirname "$candidate")" && pwd)/$(basename "$candidate")"
+        break
+    fi
+done
+auto_tuning_config=""
+if [[ -n "$auto_tuning_path" ]]; then
+    auto_tuning_config="\"autoTuning\": { \"binaryPath\": \"$auto_tuning_path\" },"
+fi
+
 # Settings now live only in a JSONC config file (no CLI flags), so synthesise one for this run.
 config_path="$tmpdir/config.jsonc"
 cat > "$config_path" <<EOF
 {
   "server": { "corsOrigin": "$cors_origin" },
-  "logLevel": "$log_level",
+  "logging": { "level": "$log_level" },
+  $auto_tuning_config
   "tls": { "certPath": "$cert_path", "keyPath": "$key_path" }
 }
 EOF

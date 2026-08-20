@@ -80,6 +80,10 @@ Testing/
 node_modules/
 .pnpm-store/
 
+# The auto-tuning executable, which install-auto-tuning.sh downloads into the directory it sits in
+# — the repository root, in a checkout. It is about 65 MB and comes from its own release.
+/auto-tuning
+
 # TLS certificates / private keys — never commit these (they belong in the rolling tls-cert
 # release; a stray repo-root cert.pem is also the Docker bind-mount footgun, see .dockerignore).
 *.pem

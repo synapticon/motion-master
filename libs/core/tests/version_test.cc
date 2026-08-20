@@ -5,7 +5,7 @@
 #include <semver.hpp>
 #include <string>
 
-TEST(VersionTest, StringConstant) { EXPECT_EQ(mm::core::kVersion, "6.0.0-alpha.80"); }
+TEST(VersionTest, StringConstant) { EXPECT_EQ(mm::core::kVersion, "6.0.0-alpha.81"); }
 
 TEST(VersionTest, SemverComponents) {
   semver::version<> v{};

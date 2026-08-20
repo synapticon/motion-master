@@ -19,6 +19,12 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.81] - 2026-08-20
+
+### Fixed
+
+- **`@synapticon/motion-master-client` is on npm again.** The `6.0.0-alpha.80` server binaries shipped, but the client library of that version never reached the registry: the release workflow moved to npm trusted publishing and the publish step authenticated with a placeholder credential instead of the token it exchanges for. Install `6.0.0-alpha.81` or later; there is no `6.0.0-alpha.80` on npm.
+
 ## [6.0.0-alpha.80] - 2026-08-20
 
 ### Fixed
@@ -749,7 +755,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.80...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.81...HEAD
+[6.0.0-alpha.81]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.80...v6.0.0-alpha.81
 [6.0.0-alpha.80]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.79...v6.0.0-alpha.80
 [6.0.0-alpha.79]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.78...v6.0.0-alpha.79
 [6.0.0-alpha.78]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.77...v6.0.0-alpha.78

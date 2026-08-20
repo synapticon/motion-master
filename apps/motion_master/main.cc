@@ -1,4 +1,3 @@
-#include <curl/curl.h>
 #include <spdlog/sinks/rotating_file_sink.h>
 #include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
@@ -24,6 +23,7 @@
 #include "example/example_routes.h"
 #include "game_loop.h"
 #include "http_server.h"
+#include "net/http_client.h"
 #include "node/device_manager.h"
 #include "node/monitoring_manager.h"
 #include "node/procedure_manager.h"
@@ -142,17 +142,10 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  // libcurl global state is process-wide and must be initialised exactly once, before any other
-  // thread starts — curl_global_init also initialises libraries (OpenSSL) that are unsafe to set up
-  // concurrently, so it belongs here at the composition root rather than lazily inside any one cURL
-  // user. Every cURL caller (today only the certificate fetch paths) then shares this single
-  // init/cleanup. RAII so it is torn down on every return path.
-  struct CurlGlobal {
-    CurlGlobal() { curl_global_init(CURL_GLOBAL_DEFAULT); }
-    ~CurlGlobal() { curl_global_cleanup(); }
-    CurlGlobal(const CurlGlobal&) = delete;
-    CurlGlobal& operator=(const CurlGlobal&) = delete;
-  } curlGlobal;
+  // The HTTP client's process-wide state must be initialised exactly once, before any other thread
+  // starts, which is why it is constructed here at the composition root and nowhere else.
+  // http_client.h explains what breaks otherwise. RAII, so it is torn down on every return path.
+  const mm::net::HttpGlobal httpGlobal;
 
   mm::node::DeviceManager deviceManager;
   // The parameter cache is a process-level setting (its directory comes from the config file, like

@@ -1,6 +1,5 @@
 #include "cert_updater.h"
 
-#include <curl/curl.h>
 #include <openssl/bio.h>
 #include <openssl/evp.h>
 #include <openssl/pem.h>
@@ -20,6 +19,7 @@
 #include <system_error>
 
 #include "cert_info.h"
+#include "net/http_client.h"
 
 namespace mm {
 
@@ -40,46 +40,19 @@ constexpr const char* kCertRequiredNames[] = {
     "127-0-0-1.ip.motion-master.synapticon.com",
 };
 
-size_t appendToString(char* ptr, size_t size, size_t nmemb, void* userdata) {
-  auto* out = static_cast<std::string*>(userdata);
-  const size_t bytes = size * nmemb;
-  out->append(ptr, bytes);
-  return bytes;
-}
-
-// Downloads @p url over HTTPS, following redirects (release asset URLs 302 to a separate host) and
-// failing on any HTTP status >= 400. Returns the response body, or an error string.
-std::expected<std::string, std::string> httpGet(const std::string& url) {
-  // curl_global_init runs once at the composition root (main.cc) before any thread starts; here we
-  // only create per-call easy handles, which is safe from any thread.
-  CURL* curl = curl_easy_init();
-  if (curl == nullptr) {
-    return std::unexpected("failed to initialise HTTP client");
+// Downloads @p url and returns the body. A status other than 200 is a failure here: this path only
+// ever asks for a release asset that must exist, so anything else means the release moved or the
+// download host answered with an error page, and neither is a certificate.
+std::expected<std::string, std::string> download(const std::string& url) {
+  auto response = mm::net::httpGet(url);
+  if (!response) {
+    return std::unexpected(response.error());
   }
-  const std::unique_ptr<CURL, decltype(&curl_easy_cleanup)> guard{curl, curl_easy_cleanup};
-
-  std::string body;
-  char errbuf[CURL_ERROR_SIZE] = {0};
-  curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-  curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-  curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
-  curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, appendToString);
-  curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
-  curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
-  curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, errbuf);
-  curl_easy_setopt(curl, CURLOPT_TIMEOUT, 30L);
-  curl_easy_setopt(curl, CURLOPT_USERAGENT, "motion-master");
-  // httpGet also runs off the main thread (POST /api/cert/refresh). With the synchronous resolver
-  // libcurl may raise signals (SIGPIPE on a dead socket, historically SIGALRM around timeouts),
-  // which is unsafe off the main thread — disable them.
-  curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-
-  const CURLcode rc = curl_easy_perform(curl);
-  if (rc != CURLE_OK) {
-    const std::string detail = errbuf[0] != '\0' ? errbuf : curl_easy_strerror(rc);
-    return std::unexpected("download failed for " + url + ": " + detail);
+  if (response->status != 200) {
+    return std::unexpected("download failed for " + url + ": HTTP " +
+                           std::to_string(response->status));
   }
-  return body;
+  return response->body;
 }
 
 std::string subjectCommonName(X509* cert) {
@@ -168,11 +141,11 @@ std::expected<void, std::string> fetchAndSwapCert(const std::string& certPath,
                                                   const std::string& keyPath,
                                                   const std::string& certUrl,
                                                   const std::string& keyUrl) {
-  auto certPem = httpGet(certUrl);
+  auto certPem = download(certUrl);
   if (!certPem) {
     return std::unexpected(certPem.error());
   }
-  auto keyPem = httpGet(keyUrl);
+  auto keyPem = download(keyUrl);
   if (!keyPem) {
     return std::unexpected(keyPem.error());
   }

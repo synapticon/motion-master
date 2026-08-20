@@ -42,19 +42,18 @@ find_package(nlohmann_json CONFIG REQUIRED)
 find_package(spdlog CONFIG REQUIRED)
 find_package(unofficial-uwebsockets CONFIG REQUIRED)
 find_package(OpenSSL REQUIRED)
-find_package(CURL REQUIRED)
 
 target_link_libraries(
   motion_master
   PRIVATE mm::node
           mm::etg
           mm::example
+          mm::net
           CLI11::CLI11
           nlohmann_json::nlohmann_json
           spdlog::spdlog
           unofficial::uwebsockets::uwebsockets
-          OpenSSL::Crypto
-          CURL::libcurl)
+          OpenSSL::Crypto)
 
 if(NOT WIN32)
   find_package(Threads REQUIRED)

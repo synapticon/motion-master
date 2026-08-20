@@ -72,5 +72,12 @@ std::expected<Config, std::string> parseConfig(const nlohmann::json& doc) {
     return std::unexpected("recorder.capacity must be greater than 0");
   }
 
+  // 0 is a valid port to bind, and the auto-tuning program reads it as "take any free port" — it
+  // then prints the port it got and Motion Master, which does not read its output, would have no
+  // way to reach it.
+  if (config.autoTuning.port == 0) {
+    return std::unexpected("autoTuning.port must be greater than 0");
+  }
+
   return config;
 }

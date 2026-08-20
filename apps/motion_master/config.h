@@ -133,6 +133,25 @@ struct ParametersConfig {
   bool useCompleteAccess = true;
 };
 
+/// @brief @c "autoTuning" block — the auto-tuning child process.
+///
+/// The auto-tuning and system-identification functions are a separate executable, which Motion
+/// Master starts at startup and reaches over HTTP on loopback. It is downloaded by the install
+/// scripts rather than shipped in a release, so a machine may not have it. That is not an error:
+/// Motion Master runs, and only the auto-tuning endpoints fail.
+struct AutoTuningConfig {
+  /// Start the executable at all. Set false to leave it alone on a machine that has the file but
+  /// should not run it — a real-time appliance where no tuning is done, for example.
+  bool enabled = true;
+  /// "" = @c auto-tuning next to the Motion Master binary, which is where every install path puts
+  /// it. Set an absolute path to run a copy from somewhere else.
+  std::string binaryPath;
+  /// Loopback port the child serves on. The default is the auto-tuning program's own, so a child
+  /// started by hand and one started here answer on the same port. Must not be 0: the program reads
+  /// 0 as "take any free port", and Motion Master would never learn which one it took.
+  uint16_t port = 63528;
+};
+
 /// @brief @c "logging.file" block — the rotating log file.
 ///
 /// The console and the in-memory ring behind @c GET @c /api/log both die with the process, which
@@ -182,6 +201,7 @@ struct Config {
   ParameterCacheConfig parameterCache;
   UserCacheConfig userCache;
   ParametersConfig parameters;
+  AutoTuningConfig autoTuning;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ServerConfig, bindAddress, httpPort, wsPort,
@@ -195,17 +215,20 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParameterCacheConfig, enabled, c
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(UserCacheConfig, directory)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ParametersConfig, readObjectDictionaryOnPreop,
                                                 useCompleteAccess)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(AutoTuningConfig, enabled, binaryPath, port)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FileLoggingConfig, enabled, level, directory,
                                                 maxSizeMb, maxFiles)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(LoggingConfig, level, file)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, logging, tls, gameLoop,
-                                                recorder, parameterCache, userCache, parameters)
+                                                recorder, parameterCache, userCache, parameters,
+                                                autoTuning)
 
 /// @brief Deserialises a parsed JSONC document into a @c Config, applying defaults for absent keys.
 ///
 /// Pure: no file I/O, no process exit. Unknown keys are ignored (forward-compatible). nlohmann
 /// validates value *types*; this adds the enum and range checks it cannot (@c logging.level,
-/// @c fieldbus.driver; @c gameLoop.periodUs and @c recorder.capacity must be > 0).
+/// @c fieldbus.driver; @c gameLoop.periodUs, @c recorder.capacity and @c autoTuning.port must
+/// be > 0).
 ///
 /// @param doc A parsed JSON value (must be an object).
 /// @return The populated @c Config, or an error string on a wrong top-level type, a field type

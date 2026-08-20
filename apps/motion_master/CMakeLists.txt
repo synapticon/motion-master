@@ -49,6 +49,7 @@ target_link_libraries(
           mm::etg
           mm::example
           mm::net
+          mm::auto_tuning
           CLI11::CLI11
           nlohmann_json::nlohmann_json
           spdlog::spdlog

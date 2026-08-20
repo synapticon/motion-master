@@ -70,6 +70,7 @@ syntaxError:*/game_loop_test.cc
 syntaxError:*/concurrency_test.cc
 syntaxError:*/soem_fieldbus_driver_test.cc
 syntaxError:*/http_client_test.cc
+syntaxError:*/process_test.cc
 
 // The ESI parser builds vectors by appending inside a range-for over an XML child range or a
 // parsed collection. cppcheck suggests std::transform/std::copy_if for each; rewriting them would

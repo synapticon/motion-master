@@ -74,6 +74,7 @@ endif()
 # needs no fieldbus. mm::node is where the two meet.
 add_subdirectory(libs/core)
 add_subdirectory(libs/net)
+add_subdirectory(libs/auto_tuning)
 add_subdirectory(libs/etg)
 add_subdirectory(libs/comm)
 add_subdirectory(libs/node)

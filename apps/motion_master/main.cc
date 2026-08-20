@@ -12,6 +12,7 @@
 #include <string>
 #include <utility>
 
+#include "auto_tuning/process.h"
 #include "bus_health_reporter.h"
 #include "cert_updater.h"
 #include "comm/base.h"
@@ -265,6 +266,39 @@ int main(int argc, char** argv) {
   if (!mm::healCertIfNeeded(opts.config.tls.certPath, opts.config.tls.keyPath,
                             opts.config.tls.autoUpdate, opts.certUrl, opts.keyUrl)) {
     return 1;
+  }
+
+  // Auto-tuning and system identification run in a separate executable, started here as a child
+  // process. Started before the servers, and long before GameLoop::run() raises this thread to
+  // SCHED_FIFO, because a child inherits the scheduling policy of the thread that spawned it and
+  // this one runs a spin-waiting numerical worker per core.
+  //
+  // Not having it is a supported state, so every failure here is a warning. The install scripts
+  // download the executable, and a machine that could not reach the release, or that was installed
+  // from a tarball nobody ran setup.sh on, simply has no auto-tuning.
+  mm::auto_tuning::ProcessOptions autoTuningOptions;
+  autoTuningOptions.binary = opts.config.autoTuning.binaryPath.empty()
+                                 ? mm::core::exeDir() / mm::auto_tuning::defaultBinaryName()
+                                 : std::filesystem::path{opts.config.autoTuning.binaryPath};
+  autoTuningOptions.port = opts.config.autoTuning.port;
+  // Beside Motion Master's own log file, so the child's output is listed and downloadable through
+  // /api/user-cache like everything else this process writes. Without a log file of our own there
+  // is nowhere better than our streams, which is what an empty path selects.
+  if (!logFile.empty()) {
+    autoTuningOptions.logFile = logFile.parent_path() / "auto-tuning.log";
+  }
+  mm::auto_tuning::Process autoTuning{autoTuningOptions};
+  if (!opts.config.autoTuning.enabled) {
+    spdlog::info("Auto-tuning is disabled by the configuration");
+  } else if (!std::filesystem::exists(autoTuningOptions.binary)) {
+    spdlog::warn("Auto-tuning is not installed at {} — the auto-tuning endpoints will fail",
+                 autoTuningOptions.binary.string());
+  } else if (auto started = autoTuning.start(); !started) {
+    spdlog::warn("Auto-tuning did not start: {}", started.error());
+  } else {
+    spdlog::info("Auto-tuning {} on port {} (pid {})",
+                 autoTuning.version().empty() ? "of an unknown version" : autoTuning.version(),
+                 autoTuning.options().port, autoTuning.pid());
   }
 
   // Owns the monitoring registry plus its background SDO-refresher and sampler threads. The HTTP

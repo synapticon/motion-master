@@ -280,10 +280,12 @@ jobs:
 
   # ── Publish @synapticon/motion-master-client to npm ────────────────────────
   # Independent of the binary build legs: a version bump → v* tag publishes the client library
-  # at the same version as the server. Authentication is npm trusted publishing: pnpm exchanges
-  # the GitHub Actions OIDC token for a short-lived npm credential, so there is no publish token
-  # to store or rotate. npm accepts the exchange only for the trusted publisher registered on the
+  # at the same version as the server. Authentication is npm trusted publishing: the OIDC token
+  # of this job is exchanged for a short-lived npm credential, so there is no publish token to
+  # store or rotate. npm accepts the exchange only for the trusted publisher registered on the
   # package, which names this repository and this workflow file, so renaming the file breaks it.
+  #
+  # Two steps below exist only to make that exchange possible; both are easy to read as noise.
   publish-client:
     runs-on: ubuntu-24.04
     permissions:
@@ -301,6 +303,19 @@ jobs:
           node-version: '22'
           cache: pnpm
           registry-url: 'https://registry.npmjs.org'
+
+      # `registry-url` above makes setup-node write `_authToken=${NODE_AUTH_TOKEN}` into the job's
+      # .npmrc and export NODE_AUTH_TOKEN with the placeholder `XXXXX-XXXXX-XXXXX-XXXXX`. That
+      # counts as configured authentication, so npm publishes with a credential the registry
+      # rejects instead of exchanging the OIDC token, and the registry answers 404 on PUT. The
+      # `registry-url` input is still needed: it is what points the publish at npmjs.org.
+      - name: Clear the placeholder credential that would suppress the OIDC exchange
+        run: sed -i '/_authToken/d' "${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
+
+      # The upload itself is made by the npm CLI, which learned trusted publishing in 11.5.1. The
+      # runner image ships an older npm alongside Node 22.
+      - name: Install an npm that can exchange the OIDC token
+        run: npm install -g npm@latest
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile

@@ -1821,3 +1821,316 @@ export interface EsiParseResult {
   /** Recoverable problems in the document itself — a skipped malformed object, an unparsable value. A file with warnings still parses. Per-device assembly problems are reported on the device instead. */
   warnings?: string[];
 }
+
+/** What Motion Master knows about the auto-tuning process, as a startup snapshot. */
+export interface AutoTuningStatus {
+  /**
+   * The `autoTuning.enabled` setting from the configuration file.
+   * @example true
+   */
+  enabled: boolean;
+  /**
+   * The executable Motion Master looked for, as an absolute path.
+   * @example "/opt/motion-master/auto-tuning"
+   */
+  binaryPath: string;
+  /**
+   * Whether a file exists at that path.
+   * @example true
+   */
+  installed: boolean;
+  /**
+   * Whether the process started and answered its health endpoint. Not a liveness check: nothing polls the process after startup.
+   * @example true
+   */
+  started: boolean;
+  /**
+   * The version the process reported, empty unless it started. A build older than that program's version reporting starts and reports nothing, which is why an empty string here does not mean it failed.
+   * @example "3.1.1"
+   */
+  version: string;
+  /**
+   * The loopback port the process was told to serve on.
+   * @example 63528
+   */
+  port: number;
+  /**
+   * Why it is not running. Empty when it is.
+   * @example ""
+   */
+  error: string;
+}
+
+/** The auto-tuning program's error shape. Returned with 200 when a function rejected its inputs, and with 404 or 500 for an unknown function or an unhandled exception. */
+export interface AutoTuningError {
+  error: {
+    /** @example "A linear model can't be fit in the recorded data." */
+    message: string;
+  };
+}
+
+/**
+ * Transfer function coefficients, highest order first.
+ * @example {"numerator":[1],"denominator":[0.00015,0.000206]}
+ */
+export interface PlantModel {
+  numerator: number[];
+  denominator: number[];
+}
+
+/** One controller's gains. */
+export interface Pid {
+  kp?: number;
+  ki?: number;
+  kd?: number;
+}
+
+/** Controller gains. A function that tunes only the velocity loop leaves the position gains at zero. */
+export interface Gains {
+  /** One controller's gains. */
+  position?: Pid;
+  /** One controller's gains. */
+  velocity?: Pid;
+}
+
+/**
+ * Bode diagram data, keyed by column name, every array the same length. This comes back in the response body instead of a written CSV, which is why no auto-tuning call needs a shared filesystem. A non-finite value is null.
+ * @example {"Frequency_Hz":[0.5,1],"Plant_Mag_dB":[65.77570877159437,59.79191013147556],"Plant_Phase_deg":[-66.38766900151838,-76.55997369096534]}
+ */
+export type Bode = Record<string, (number | null)[]>;
+
+/** Drive configuration, as read from the drive. */
+export interface DriveConfig {
+  vel_lp_type?: number;
+  vel_lp_fc?: number;
+  pos_lp_type?: number;
+  pos_lp_fc?: number;
+  notch_en?: number;
+  notch_fw?: number;
+  notch_fc?: number;
+  notch_dp?: number;
+  vel_ff_gain?: number;
+  vel_ff_fc?: number;
+  /** Winding inductance. */
+  L?: number;
+  /** Winding resistance. */
+  R?: number;
+  /** DC link voltage. */
+  vdc?: number;
+  current_ratio?: number;
+  tc_kp?: number;
+  tc_ki?: number;
+  switch_F?: number;
+  tc_st?: number;
+  tc_damping?: number;
+  software_version?: string;
+  rated_torque?: number;
+  max_vel_noise?: number;
+}
+
+/** The `data` schema depends on the value of `run`. Each variant pairs one `run` value with the inputs that function reads. `run: exit` is deliberately absent: it shuts the process down, and this endpoint refuses it with 400. */
+export type AutoTuningRunRequest =
+  | AutoTuneVelocityController
+  | AutoTunePositionController
+  | FullAutoTuneVelocityController
+  | FullAutoTunePositionController
+  | AutoTuneNotch
+  | AutoTuneFeedbackFilters
+  | ComputePositionControllerGains
+  | IdentifyPlantModel
+  | GeneratePlantBode;
+
+export interface AutoTuneVelocityController {
+  run: "auto_tune_velocity_controller";
+  data: {
+    /** Transfer function coefficients, highest order first. */
+    plant_model: PlantModel;
+    /** Damping ratio. */
+    zeta: number;
+    /** Demanded bandwidth in Hz. */
+    demanded_bw: number;
+  };
+}
+
+export interface AutoTunePositionController {
+  run: "auto_tune_position_controller";
+  data: {
+    /** Transfer function coefficients, highest order first. */
+    plant_model: PlantModel;
+    /** @example "PI-P" */
+    controller_type: string;
+    zeta: number;
+    /** Demanded settling time in seconds. */
+    demanded_st: number;
+    /** Optional. Absent means the standard tuning rule. */
+    highFrictionGain?: number;
+  };
+}
+
+export interface FullAutoTuneVelocityController {
+  run: "full_auto_tune_velocity_controller";
+  data: {
+    /** Transfer function coefficients, highest order first. */
+    plant_model: PlantModel;
+    /** Drive configuration, as read from the drive. */
+    drive_config: DriveConfig;
+  };
+}
+
+export interface FullAutoTunePositionController {
+  run: "full_auto_tune_position_controller";
+  data: {
+    /** Transfer function coefficients, highest order first. */
+    plant_model: PlantModel;
+    /** @example "PI-P" */
+    controller_type: string;
+    /** Drive configuration, as read from the drive. */
+    drive_config: DriveConfig;
+    highFriction: 0 | 1;
+  };
+}
+
+export interface AutoTuneNotch {
+  run: "auto_tune_notch";
+  data: {
+    /** Transfer function coefficients, highest order first. */
+    plant_model: PlantModel;
+  };
+}
+
+export interface AutoTuneFeedbackFilters {
+  run: "auto_tune_feedback_filters";
+  data: {
+    sigma_v: number;
+    sigma_p: number;
+    resVel: number;
+    resPos: number;
+    gearRatio: number;
+  };
+}
+
+export interface ComputePositionControllerGains {
+  run: "compute_position_controller_gains";
+  data: {
+    pk: number;
+    pt: number;
+    omega: number;
+    alpha: number;
+    zeta: number;
+    /** @example "PI-P" */
+    controller_type: string;
+  };
+}
+
+/** Identifies a plant model from chirp measurements. The measurements are uploaded in `data.csv`; `data.filepath` names a file on the auto-tuning process's own machine instead, and is a fallback that Motion Master has no use for. */
+export interface IdentifyPlantModel {
+  run: "identify_plant_model" | "identify_plant_model_inline";
+  data: {
+    /** Contents of the measurement CSV. Three columns, no header: time, torque in Nm, velocity in rad/s, sampled at 1000 Hz. */
+    csv?: string;
+    /** Path to that CSV instead of its contents. */
+    filepath?: string;
+    /** Chirp start frequency in Hz. */
+    f0: number;
+    /** Chirp end frequency in Hz. */
+    f1: number;
+  };
+}
+
+/** Computes the bode data of a plant model and returns it inline. */
+export interface GeneratePlantBode {
+  run: "generate_plant_bode_file" | "generate_plant_bode";
+  data: {
+    /** Transfer function coefficients, highest order first. */
+    plant_model: PlantModel;
+  };
+}
+
+/** Which variant comes back depends on the request's `run`. Every result carries `duration`, the function's execution time in seconds. A function that rejected its inputs answers with `AutoTuningError` and status 200. */
+export type AutoTuningRunResponse =
+  | GainsResult
+  | FullVelocityResult
+  | FullPositionResult
+  | NotchResult
+  | FeedbackFiltersResult
+  | IdentifyPlantModelResult
+  | BodeResult
+  | AutoTuningError;
+
+export interface GainsResult {
+  /** Controller gains. A function that tunes only the velocity loop leaves the position gains at zero. */
+  gains?: Gains;
+  duration?: number;
+}
+
+export interface FullVelocityResult {
+  /** Controller gains. A function that tunes only the velocity loop leaves the position gains at zero. */
+  gains?: Gains;
+  demanded_bw?: number;
+  demanded_zeta?: number;
+  /** Stability margins and closed-loop metrics. */
+  state?: {
+    gm?: number;
+    pm?: number;
+    msens?: number;
+    act_bw?: number;
+    vel_cl?: number;
+    noise_resp?: number;
+    max_KS?: number;
+  };
+  duration?: number;
+}
+
+export interface FullPositionResult {
+  /** Controller gains. A function that tunes only the velocity loop leaves the position gains at zero. */
+  gains?: Gains;
+  demanded_st?: number;
+  demanded_zeta?: number;
+  highFrictionGain?: number;
+  /** Stability margins and closed-loop metrics, position and velocity loop. */
+  state?: {
+    gm_p?: number;
+    pm_p?: number;
+    msens_p?: number;
+    gm_v?: number;
+    pm_v?: number;
+    msens_v?: number;
+    noise_resp?: number;
+    max_KS?: number;
+    bw_p?: number;
+    bw_v?: number;
+    act_st?: number;
+    pos_cl?: number;
+  };
+  duration?: number;
+}
+
+export interface NotchResult {
+  notch_en?: boolean;
+  notch_fc?: number | null;
+  notch_fw?: number | null;
+  notch_dp?: number | null;
+  duration?: number;
+}
+
+export interface FeedbackFiltersResult {
+  /** Velocity feedback filter cut-off in Hz. */
+  fcv?: number;
+  /** Position feedback filter cut-off in Hz. */
+  fcp?: number;
+  duration?: number;
+}
+
+export interface IdentifyPlantModelResult {
+  numerators?: number[];
+  denominators?: number[];
+  /** Bode diagram data, keyed by column name, every array the same length. This comes back in the response body instead of a written CSV, which is why no auto-tuning call needs a shared filesystem. A non-finite value is null. */
+  bode?: Bode;
+  duration?: number;
+}
+
+export interface BodeResult {
+  /** Bode diagram data, keyed by column name, every array the same length. This comes back in the response body instead of a written CSV, which is why no auto-tuning call needs a shared filesystem. A non-finite value is null. */
+  bode?: Bode;
+  duration?: number;
+}

@@ -9,9 +9,11 @@
 #include <filesystem>
 #include <memory>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <string>
 #include <utility>
 
+#include "auto_tuning/client.h"
 #include "auto_tuning/process.h"
 #include "bus_health_reporter.h"
 #include "cert_updater.h"
@@ -288,14 +290,32 @@ int main(int argc, char** argv) {
     autoTuningOptions.logFile = logFile.parent_path() / "auto-tuning.log";
   }
   mm::auto_tuning::Process autoTuning{autoTuningOptions};
+  // The snapshot GET /api/auto-tuning serves. A page needs to tell the four states apart — switched
+  // off, not installed, would not start, running — because each asks something different of the
+  // person reading it.
+  mm::auto_tuning::Status autoTuningStatus;
+  autoTuningStatus.enabled = opts.config.autoTuning.enabled;
+  autoTuningStatus.binaryPath = autoTuningOptions.binary.string();
+  autoTuningStatus.installed = std::filesystem::exists(autoTuningOptions.binary);
+  autoTuningStatus.port = autoTuningOptions.port;
+  // Bound to the running process, and left empty when there is none: an unset callback below is how
+  // the routes answer 503 without naming any of this.
+  std::optional<mm::auto_tuning::Client> autoTuningClient;
+
   if (!opts.config.autoTuning.enabled) {
+    autoTuningStatus.error = "disabled by the configuration";
     spdlog::info("Auto-tuning is disabled by the configuration");
-  } else if (!std::filesystem::exists(autoTuningOptions.binary)) {
+  } else if (!autoTuningStatus.installed) {
+    autoTuningStatus.error = "not installed at " + autoTuningStatus.binaryPath;
     spdlog::warn("Auto-tuning is not installed at {} — the auto-tuning endpoints will fail",
-                 autoTuningOptions.binary.string());
+                 autoTuningStatus.binaryPath);
   } else if (auto started = autoTuning.start(); !started) {
+    autoTuningStatus.error = started.error();
     spdlog::warn("Auto-tuning did not start: {}", started.error());
   } else {
+    autoTuningStatus.started = true;
+    autoTuningStatus.version = autoTuning.version();
+    autoTuningClient.emplace(autoTuning.baseUrl());
     spdlog::info("Auto-tuning {} on port {} (pid {})",
                  autoTuning.version().empty() ? "of an unknown version" : autoTuning.version(),
                  autoTuning.options().port, autoTuning.pid());
@@ -381,6 +401,18 @@ int main(int argc, char** argv) {
             gameLoop.setPeriod(std::chrono::microseconds{periodUs});
             return {};
           },
+          // Unset when nothing is running, which is what makes the routes answer 503 rather than
+          // ask a client to interpret a status snapshot before every call.
+          .runAutoTuning = autoTuningClient
+                               ? HttpServer::AutoTuningRunFn{[&autoTuningClient](std::string body) {
+                                   return autoTuningClient->run(body);
+                                 }}
+                               : HttpServer::AutoTuningRunFn{},
+          .autoTuningStatus = [&autoTuningStatus] { return autoTuningStatus; },
+          .autoTuningSpec = autoTuningClient ? HttpServer::AutoTuningSpecFn{[&autoTuningClient] {
+            return autoTuningClient->spec();
+          }}
+                                             : HttpServer::AutoTuningSpecFn{},
           .corsOrigin = opts.config.server.corsOrigin,
       },
       deviceManager, monitoringManager, procedureManager, userCache};

@@ -12,6 +12,10 @@
 
 import {
   AlStatusCode,
+  AutoTuningError,
+  AutoTuningRunRequest,
+  AutoTuningRunResponse,
+  AutoTuningStatus,
   BrakeState,
   Cia402Status,
   DcSyncStatus,
@@ -526,6 +530,60 @@ export class Api<
   getLog = (params: RequestParams = {}) =>
     this.request<string, any>({
       path: `/api/log`,
+      method: "GET",
+      ...params,
+    });
+  /**
+   * @description Reports what Motion Master knows about the auto-tuning process. Auto-tuning and system identification run in a separate executable, which Motion Master starts at startup and reaches over loopback. That executable is downloaded by the install scripts rather than shipped in a release, so a machine may not have it — this endpoint is how a client tells the four cases apart: switched off in the configuration, not installed, installed but would not start, or running. The values are a startup snapshot. `started` says the process answered when Motion Master waited for it, not that it is alive now. Nothing polls it: a call is the honest test, and `POST /api/auto-tuning/run` makes one.
+   *
+   * @name GetAutoTuning
+   * @summary Auto-tuning process status
+   * @request GET:/api/auto-tuning
+   */
+  getAutoTuning = (params: RequestParams = {}) =>
+    this.request<AutoTuningStatus, any>({
+      path: `/api/auto-tuning`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Forwards the request to the auto-tuning process and returns its reply unchanged. The body is a JSON object with `run`, naming the function, and `data`, holding that function's inputs — the same shape the auto-tuning program takes on its own API. **A rejected input is reported with 200 and an `error` property**, not with a 4xx. The auto-tuning program keeps 4xx and 5xx for a malformed request, an unknown function name, and a routine that threw, so a client tests for `error` in the body rather than relying on the status alone. Motion Master passes both through untouched; only 400, 502 and 503 below are its own. Measurement data travels in the body. `identify_plant_model` takes the chirp measurements as `data.csv` text, and the bode data comes back inline as `bode`, so no file is written and nothing needs a shared filesystem view. The schemas here are a copy of the auto-tuning program's own, taken from version 3.1.1, and they exist so that the generated clients are typed. That program's current description is served verbatim at `GET /api/auto-tuning/swagger.yml`, which is the authority if the two ever disagree.
+   *
+   * @name RunAutoTuning
+   * @summary Run an auto-tuning function
+   * @request POST:/api/auto-tuning/run
+   */
+  runAutoTuning = (data: AutoTuningRunRequest, params: RequestParams = {}) =>
+    this.request<
+      AutoTuningRunResponse,
+      | AutoTuningError
+      | {
+          error: string;
+        }
+    >({
+      path: `/api/auto-tuning/run`,
+      method: "POST",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Serves the OpenAPI document the auto-tuning process carries, fetched from it on each request. The schemas under `/api/auto-tuning/run` above are a copy of these, so this is where to look when a version of the program disagrees with them.
+   *
+   * @name GetAutoTuningSpec
+   * @summary The auto-tuning program's own API description
+   * @request GET:/api/auto-tuning/swagger.yml
+   */
+  getAutoTuningSpec = (params: RequestParams = {}) =>
+    this.request<
+      string,
+      {
+        error: string;
+      }
+    >({
+      path: `/api/auto-tuning/swagger.yml`,
       method: "GET",
       ...params,
     });

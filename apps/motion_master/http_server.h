@@ -17,7 +17,9 @@
 
 #include "api/router.h"
 #include "api/web_api.h"
-#include "game_loop.h"  // GameLoopHealth (returned by the GET /api/game-loop callback)
+#include "auto_tuning/status.h"  // Status (returned by the GET /api/auto-tuning callback)
+#include "game_loop.h"           // GameLoopHealth (returned by the GET /api/game-loop callback)
+#include "net/http_client.h"     // net::Response (an auto-tuning reply, passed through verbatim)
 
 namespace mm::core {
 class UserCache;
@@ -81,6 +83,28 @@ class HttpServer {
   /// value.
   using SetGameLoopPeriodFn = std::function<std::expected<void, std::string>(uint32_t periodUs)>;
 
+  /// @brief Callback type for `POST /api/auto-tuning/run` and `GET /api/auto-tuning/swagger.yml`.
+  ///
+  /// Forwards a request to the auto-tuning process and hands back its reply, status and body
+  /// together, so the route can pass both through. An error means the request never reached the
+  /// process. Unset when there is nothing to forward to, which the route answers with 503 —
+  /// so the server needs to know neither the process nor the client. Wired in main.cc.
+  using AutoTuningRunFn =
+      std::function<std::expected<mm::net::Response, std::string>(std::string body)>;
+
+  /// @brief Callback type for `GET /api/auto-tuning`.
+  ///
+  /// Returns what Motion Master knows about the auto-tuning process, which is the startup snapshot
+  /// it logged. Separate from @c AutoTuningRunFn because it answers when nothing is running, which
+  /// is exactly when a client needs it.
+  using AutoTuningStatusFn = std::function<mm::auto_tuning::Status()>;
+
+  /// @brief Callback type for `GET /api/auto-tuning/swagger.yml`.
+  ///
+  /// Fetches the auto-tuning program's own OpenAPI document. Same contract as
+  /// @c AutoTuningRunFn: the reply passes through, an error means the process is unreachable.
+  using AutoTuningSpecFn = std::function<std::expected<mm::net::Response, std::string>()>;
+
   /// @brief Server configuration.
   struct Config {
     /// Local address to bind. Loopback serves only this machine; "0.0.0.0" serves the network.
@@ -98,7 +122,11 @@ class HttpServer {
     GetGameLoopHealthFn
         getGameLoopHealth;  ///< Handler for `GET /api/game-loop`; RT loop health snapshot.
     SetGameLoopPeriodFn
-        setGameLoopPeriod;  ///< Handler for `PUT /api/game-loop`; retimes the RT loop.
+        setGameLoopPeriod;          ///< Handler for `PUT /api/game-loop`; retimes the RT loop.
+    AutoTuningRunFn runAutoTuning;  ///< Handler for `POST /api/auto-tuning/run`; forwards a call.
+    AutoTuningStatusFn
+        autoTuningStatus;             ///< Handler for `GET /api/auto-tuning`; the startup snapshot.
+    AutoTuningSpecFn autoTuningSpec;  ///< Handler for `GET /api/auto-tuning/swagger.yml`.
     /// Value sent in `Access-Control-Allow-Origin`. Defaults to the production PWA origin.
     std::string corsOrigin{"https://motion-master.synapticon.com"};
   };

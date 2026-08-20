@@ -10,16 +10,17 @@ else()
   set(AUTO_TUNING_PLATFORM_SRC process_posix.cc)
 endif()
 
-add_library(auto_tuning STATIC process.cc ${AUTO_TUNING_PLATFORM_SRC})
+add_library(auto_tuning STATIC process.cc client.cc ${AUTO_TUNING_PLATFORM_SRC})
 add_library(mm::auto_tuning ALIAS auto_tuning)
 
 target_include_directories(auto_tuning PUBLIC ${CMAKE_SOURCE_DIR}/libs)
 
-# mm::net is an implementation detail: it appears in no header here. mm::core is used for its
-# platform helpers. nlohmann is PUBLIC because the tuning calls exchange JSON documents.
+# mm::net is PUBLIC because client.h returns its Response type: a caller needs both the status and
+# the body of a reply, and duplicating that pair to keep the dependency private would buy nothing.
+# nlohmann is PUBLIC for the same reason, through status.h. mm::core is used only inside.
 target_link_libraries(
   auto_tuning
-  PUBLIC nlohmann_json::nlohmann_json
-  PRIVATE mm::net mm::core)
+  PUBLIC nlohmann_json::nlohmann_json mm::net
+  PRIVATE mm::core)
 
 add_subdirectory(tests)

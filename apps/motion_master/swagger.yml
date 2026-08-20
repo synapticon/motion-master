@@ -704,6 +704,148 @@ paths:
             text/plain:
               schema:
                 type: string
+  /api/auto-tuning:
+    get:
+      summary: Auto-tuning process status
+      operationId: getAutoTuning
+      description: >
+        Reports what Motion Master knows about the auto-tuning process. Auto-tuning and
+        system identification run in a separate executable, which Motion Master starts at
+        startup and reaches over loopback. That executable is downloaded by the install
+        scripts rather than shipped in a release, so a machine may not have it — this
+        endpoint is how a client tells the four cases apart: switched off in the
+        configuration, not installed, installed but would not start, or running.
+
+
+        The values are a startup snapshot. `started` says the process answered when Motion
+        Master waited for it, not that it is alive now. Nothing polls it: a call is the
+        honest test, and `POST /api/auto-tuning/run` makes one.
+      responses:
+        "200":
+          description: The status snapshot. Always 200, including when nothing is running.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoTuningStatus"
+  /api/auto-tuning/run:
+    post:
+      summary: Run an auto-tuning function
+      operationId: runAutoTuning
+      description: >
+        Forwards the request to the auto-tuning process and returns its reply unchanged.
+        The body is a JSON object with `run`, naming the function, and `data`, holding that
+        function's inputs — the same shape the auto-tuning program takes on its own API.
+
+
+        **A rejected input is reported with 200 and an `error` property**, not with a 4xx.
+        The auto-tuning program keeps 4xx and 5xx for a malformed request, an unknown
+        function name, and a routine that threw, so a client tests for `error` in the body
+        rather than relying on the status alone. Motion Master passes both through
+        untouched; only 400, 502 and 503 below are its own.
+
+
+        Measurement data travels in the body. `identify_plant_model` takes the chirp
+        measurements as `data.csv` text, and the bode data comes back inline as `bode`, so
+        no file is written and nothing needs a shared filesystem view.
+
+
+        The schemas here are a copy of the auto-tuning program's own, taken from version
+        3.1.1, and they exist so that the generated clients are typed. That program's
+        current description is served verbatim at `GET /api/auto-tuning/swagger.yml`, which
+        is the authority if the two ever disagree.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutoTuningRunRequest"
+      responses:
+        "200":
+          description: >
+            The function ran, or refused its inputs. The body is its result with a
+            `duration` added, or an `error` object.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoTuningRunResponse"
+        "400":
+          description: >
+            The request names `run: exit`, which this endpoint refuses. Shutting the process
+            down would break auto-tuning for every client until Motion Master restarts.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoTuningError"
+        "404":
+          description: No auto-tuning function matches `run`. Answered by the process.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoTuningError"
+        "500":
+          description: The function raised an unhandled exception. Answered by the process.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutoTuningError"
+        "502":
+          description: >
+            The auto-tuning process did not answer. It runs on loopback, so this means it
+            has died since startup.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "503":
+          description: >
+            No auto-tuning process is running. `GET /api/auto-tuning` says why.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+  /api/auto-tuning/swagger.yml:
+    get:
+      summary: The auto-tuning program's own API description
+      operationId: getAutoTuningSpec
+      description: >
+        Serves the OpenAPI document the auto-tuning process carries, fetched from it on
+        each request. The schemas under `/api/auto-tuning/run` above are a copy of these,
+        so this is where to look when a version of the program disagrees with them.
+      responses:
+        "200":
+          description: The OpenAPI document, as YAML.
+          content:
+            application/yaml:
+              schema:
+                type: string
+        "502":
+          description: The auto-tuning process did not answer.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "503":
+          description: No auto-tuning process is running.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
   /api/meta/al-status-codes:
     get:
       summary: List all known AL Status Codes
@@ -6057,6 +6199,496 @@ components:
             unparsable value. A file with warnings still parses. Per-device assembly problems
             are reported on the device instead.
           items: { type: string }
+    AutoTuningStatus:
+      type: object
+      description: >
+        What Motion Master knows about the auto-tuning process, as a startup snapshot.
+      required: [enabled, binaryPath, installed, started, version, port, error]
+      properties:
+        enabled:
+          type: boolean
+          description: The `autoTuning.enabled` setting from the configuration file.
+          example: true
+        binaryPath:
+          type: string
+          description: The executable Motion Master looked for, as an absolute path.
+          example: /opt/motion-master/auto-tuning
+        installed:
+          type: boolean
+          description: Whether a file exists at that path.
+          example: true
+        started:
+          type: boolean
+          description: >
+            Whether the process started and answered its health endpoint. Not a liveness
+            check: nothing polls the process after startup.
+          example: true
+        version:
+          type: string
+          description: >
+            The version the process reported, empty unless it started. A build older than
+            that program's version reporting starts and reports nothing, which is why an
+            empty string here does not mean it failed.
+          example: 3.1.1
+        port:
+          type: integer
+          description: The loopback port the process was told to serve on.
+          example: 63528
+        error:
+          type: string
+          description: Why it is not running. Empty when it is.
+          example: ""
+    AutoTuningError:
+      type: object
+      description: >
+        The auto-tuning program's error shape. Returned with 200 when a function rejected
+        its inputs, and with 404 or 500 for an unknown function or an unhandled exception.
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [message]
+          properties:
+            message:
+              type: string
+              example: "A linear model can't be fit in the recorded data."
+    PlantModel:
+      type: object
+      description: Transfer function coefficients, highest order first.
+      required: [numerator, denominator]
+      properties:
+        numerator:
+          type: array
+          items:
+            type: number
+        denominator:
+          type: array
+          items:
+            type: number
+      example:
+        numerator: [1.0]
+        denominator: [0.000150, 0.000206]
+    Pid:
+      type: object
+      description: One controller's gains.
+      properties:
+        kp:
+          type: number
+        ki:
+          type: number
+        kd:
+          type: number
+    Gains:
+      type: object
+      description: >
+        Controller gains. A function that tunes only the velocity loop leaves the position
+        gains at zero.
+      properties:
+        position:
+          $ref: "#/components/schemas/Pid"
+        velocity:
+          $ref: "#/components/schemas/Pid"
+    Bode:
+      type: object
+      description: >
+        Bode diagram data, keyed by column name, every array the same length. This comes
+        back in the response body instead of a written CSV, which is why no auto-tuning
+        call needs a shared filesystem. A non-finite value is null.
+      additionalProperties:
+        type: array
+        items:
+          type: number
+          nullable: true
+      example:
+        Frequency_Hz: [0.5, 1.0]
+        Plant_Mag_dB: [65.77570877159437, 59.79191013147556]
+        Plant_Phase_deg: [-66.38766900151838, -76.55997369096534]
+    DriveConfig:
+      type: object
+      description: Drive configuration, as read from the drive.
+      properties:
+        vel_lp_type:
+          type: integer
+        vel_lp_fc:
+          type: number
+        pos_lp_type:
+          type: integer
+        pos_lp_fc:
+          type: number
+        notch_en:
+          type: integer
+        notch_fw:
+          type: number
+        notch_fc:
+          type: number
+        notch_dp:
+          type: number
+        vel_ff_gain:
+          type: number
+        vel_ff_fc:
+          type: number
+        L:
+          type: number
+          description: Winding inductance.
+        R:
+          type: number
+          description: Winding resistance.
+        vdc:
+          type: number
+          description: DC link voltage.
+        current_ratio:
+          type: number
+        tc_kp:
+          type: number
+        tc_ki:
+          type: number
+        switch_F:
+          type: integer
+        tc_st:
+          type: number
+        tc_damping:
+          type: number
+        software_version:
+          type: string
+        rated_torque:
+          type: number
+        max_vel_noise:
+          type: number
+    AutoTuningRunRequest:
+      description: >
+        The `data` schema depends on the value of `run`. Each variant pairs one `run` value
+        with the inputs that function reads. `run: exit` is deliberately absent: it shuts
+        the process down, and this endpoint refuses it with 400.
+      oneOf:
+        - $ref: "#/components/schemas/AutoTuneVelocityController"
+        - $ref: "#/components/schemas/AutoTunePositionController"
+        - $ref: "#/components/schemas/FullAutoTuneVelocityController"
+        - $ref: "#/components/schemas/FullAutoTunePositionController"
+        - $ref: "#/components/schemas/AutoTuneNotch"
+        - $ref: "#/components/schemas/AutoTuneFeedbackFilters"
+        - $ref: "#/components/schemas/ComputePositionControllerGains"
+        - $ref: "#/components/schemas/IdentifyPlantModel"
+        - $ref: "#/components/schemas/GeneratePlantBode"
+    AutoTuneVelocityController:
+      type: object
+      required: [run, data]
+      properties:
+        run:
+          type: string
+          enum: [auto_tune_velocity_controller]
+        data:
+          type: object
+          required: [plant_model, zeta, demanded_bw]
+          properties:
+            plant_model:
+              $ref: "#/components/schemas/PlantModel"
+            zeta:
+              type: number
+              description: Damping ratio.
+            demanded_bw:
+              type: number
+              description: Demanded bandwidth in Hz.
+    AutoTunePositionController:
+      type: object
+      required: [run, data]
+      properties:
+        run:
+          type: string
+          enum: [auto_tune_position_controller]
+        data:
+          type: object
+          required: [plant_model, controller_type, zeta, demanded_st]
+          properties:
+            plant_model:
+              $ref: "#/components/schemas/PlantModel"
+            controller_type:
+              type: string
+              example: PI-P
+            zeta:
+              type: number
+            demanded_st:
+              type: number
+              description: Demanded settling time in seconds.
+            highFrictionGain:
+              type: number
+              description: Optional. Absent means the standard tuning rule.
+    FullAutoTuneVelocityController:
+      type: object
+      required: [run, data]
+      properties:
+        run:
+          type: string
+          enum: [full_auto_tune_velocity_controller]
+        data:
+          type: object
+          required: [plant_model, drive_config]
+          properties:
+            plant_model:
+              $ref: "#/components/schemas/PlantModel"
+            drive_config:
+              $ref: "#/components/schemas/DriveConfig"
+    FullAutoTunePositionController:
+      type: object
+      required: [run, data]
+      properties:
+        run:
+          type: string
+          enum: [full_auto_tune_position_controller]
+        data:
+          type: object
+          required: [plant_model, controller_type, drive_config, highFriction]
+          properties:
+            plant_model:
+              $ref: "#/components/schemas/PlantModel"
+            controller_type:
+              type: string
+              example: PI-P
+            drive_config:
+              $ref: "#/components/schemas/DriveConfig"
+            highFriction:
+              type: integer
+              enum: [0, 1]
+    AutoTuneNotch:
+      type: object
+      required: [run, data]
+      properties:
+        run:
+          type: string
+          enum: [auto_tune_notch]
+        data:
+          type: object
+          required: [plant_model]
+          properties:
+            plant_model:
+              $ref: "#/components/schemas/PlantModel"
+    AutoTuneFeedbackFilters:
+      type: object
+      required: [run, data]
+      properties:
+        run:
+          type: string
+          enum: [auto_tune_feedback_filters]
+        data:
+          type: object
+          required: [sigma_v, sigma_p, resVel, resPos, gearRatio]
+          properties:
+            sigma_v:
+              type: number
+            sigma_p:
+              type: number
+            resVel:
+              type: number
+            resPos:
+              type: number
+            gearRatio:
+              type: number
+    ComputePositionControllerGains:
+      type: object
+      required: [run, data]
+      properties:
+        run:
+          type: string
+          enum: [compute_position_controller_gains]
+        data:
+          type: object
+          required: [pk, pt, omega, alpha, zeta, controller_type]
+          properties:
+            pk:
+              type: number
+            pt:
+              type: number
+            omega:
+              type: number
+            alpha:
+              type: number
+            zeta:
+              type: number
+            controller_type:
+              type: string
+              example: PI-P
+    IdentifyPlantModel:
+      type: object
+      description: >
+        Identifies a plant model from chirp measurements. The measurements are uploaded in
+        `data.csv`; `data.filepath` names a file on the auto-tuning process's own machine
+        instead, and is a fallback that Motion Master has no use for.
+      required: [run, data]
+      properties:
+        run:
+          type: string
+          enum: [identify_plant_model, identify_plant_model_inline]
+        data:
+          type: object
+          required: [f0, f1]
+          properties:
+            csv:
+              type: string
+              description: >
+                Contents of the measurement CSV. Three columns, no header: time, torque in
+                Nm, velocity in rad/s, sampled at 1000 Hz.
+            filepath:
+              type: string
+              description: Path to that CSV instead of its contents.
+            f0:
+              type: number
+              description: Chirp start frequency in Hz.
+            f1:
+              type: number
+              description: Chirp end frequency in Hz.
+    GeneratePlantBode:
+      type: object
+      description: Computes the bode data of a plant model and returns it inline.
+      required: [run, data]
+      properties:
+        run:
+          type: string
+          enum: [generate_plant_bode_file, generate_plant_bode]
+        data:
+          type: object
+          required: [plant_model]
+          properties:
+            plant_model:
+              $ref: "#/components/schemas/PlantModel"
+    AutoTuningRunResponse:
+      description: >
+        Which variant comes back depends on the request's `run`. Every result carries
+        `duration`, the function's execution time in seconds. A function that rejected its
+        inputs answers with `AutoTuningError` and status 200.
+      oneOf:
+        - $ref: "#/components/schemas/GainsResult"
+        - $ref: "#/components/schemas/FullVelocityResult"
+        - $ref: "#/components/schemas/FullPositionResult"
+        - $ref: "#/components/schemas/NotchResult"
+        - $ref: "#/components/schemas/FeedbackFiltersResult"
+        - $ref: "#/components/schemas/IdentifyPlantModelResult"
+        - $ref: "#/components/schemas/BodeResult"
+        - $ref: "#/components/schemas/AutoTuningError"
+    GainsResult:
+      type: object
+      properties:
+        gains:
+          $ref: "#/components/schemas/Gains"
+        duration:
+          type: number
+    FullVelocityResult:
+      type: object
+      properties:
+        gains:
+          $ref: "#/components/schemas/Gains"
+        demanded_bw:
+          type: number
+        demanded_zeta:
+          type: number
+        state:
+          type: object
+          description: Stability margins and closed-loop metrics.
+          properties:
+            gm:
+              type: number
+            pm:
+              type: number
+            msens:
+              type: number
+            act_bw:
+              type: number
+            vel_cl:
+              type: number
+            noise_resp:
+              type: number
+            max_KS:
+              type: number
+        duration:
+          type: number
+    FullPositionResult:
+      type: object
+      properties:
+        gains:
+          $ref: "#/components/schemas/Gains"
+        demanded_st:
+          type: number
+        demanded_zeta:
+          type: number
+        highFrictionGain:
+          type: number
+        state:
+          type: object
+          description: Stability margins and closed-loop metrics, position and velocity loop.
+          properties:
+            gm_p:
+              type: number
+            pm_p:
+              type: number
+            msens_p:
+              type: number
+            gm_v:
+              type: number
+            pm_v:
+              type: number
+            msens_v:
+              type: number
+            noise_resp:
+              type: number
+            max_KS:
+              type: number
+            bw_p:
+              type: number
+            bw_v:
+              type: number
+            act_st:
+              type: number
+            pos_cl:
+              type: number
+        duration:
+          type: number
+    NotchResult:
+      type: object
+      properties:
+        notch_en:
+          type: boolean
+        notch_fc:
+          type: number
+          nullable: true
+        notch_fw:
+          type: number
+          nullable: true
+        notch_dp:
+          type: number
+          nullable: true
+        duration:
+          type: number
+    FeedbackFiltersResult:
+      type: object
+      properties:
+        fcv:
+          type: number
+          description: Velocity feedback filter cut-off in Hz.
+        fcp:
+          type: number
+          description: Position feedback filter cut-off in Hz.
+        duration:
+          type: number
+    IdentifyPlantModelResult:
+      type: object
+      properties:
+        numerators:
+          type: array
+          items:
+            type: number
+        denominators:
+          type: array
+          items:
+            type: number
+        bode:
+          $ref: "#/components/schemas/Bode"
+        duration:
+          type: number
+    BodeResult:
+      type: object
+      properties:
+        bode:
+          $ref: "#/components/schemas/Bode"
+        duration:
+          type: number
   headers:
     WireTime:
       description: >

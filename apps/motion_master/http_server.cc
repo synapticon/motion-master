@@ -9,6 +9,7 @@
 #include <ctime>
 #include <expected>
 #include <iterator>
+#include <map>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <ranges>
@@ -48,6 +49,23 @@
 #include "swagger_spec.h"
 
 namespace {
+
+// The status line to answer with when a reply from the auto-tuning process is passed through. uWS
+// writes this string verbatim, so it needs the reason phrase too, and a numeric code alone will not
+// do. Only the statuses that program documents are listed; anything else is forwarded with its code
+// and no claim about what it means, which is more honest than mapping it to a status we invented.
+std::string statusLine(int code) {
+  static const std::map<int, std::string_view> kReasons{
+      {200, "OK"},
+      {400, "Bad Request"},
+      {404, "Not Found"},
+      {405, "Method Not Allowed"},
+      {500, "Internal Server Error"},
+  };
+  const auto reason = kReasons.find(code);
+  return reason == kReasons.end() ? std::to_string(code)
+                                  : std::to_string(code) + " " + std::string{reason->second};
+}
 
 // Runs @p fn against the device at @p position with the device set held stable for the whole call,
 // answering 404 when no device holds that position.
@@ -540,6 +558,66 @@ void HttpServer::run() {
     nlohmann::json body = info ? certInfoJson(*info, config_.certFile) : nlohmann::json::object();
     body["restartRequired"] = true;
     return mm::api::json(body);
+  });
+
+  // Auto-tuning runs in a separate process, and these three routes are the whole surface: one
+  // forwards a call, one says whether there is anything to forward to, and one serves that
+  // process's own API description.
+  //
+  // The forwarding route passes the reply through untouched, status and body. That is not laziness:
+  // the auto-tuning program answers a rejected input with 200 and an `error` property, keeping 4xx
+  // and 5xx for a malformed request, an unknown function name and a routine that threw. Rewriting
+  // any of that here would either lose the distinction or invent one.
+  router.get("/api/auto-tuning", [this](const mm::api::Request&) {
+    if (!config_.autoTuningStatus) {
+      return mm::api::json(mm::auto_tuning::Status{});
+    }
+    return mm::api::json(config_.autoTuningStatus());
+  });
+
+  router.post("/api/auto-tuning/run", [this](const mm::api::Request& req) {
+    if (!config_.runAutoTuning) {
+      return mm::api::error("503 Service Unavailable",
+                            "auto-tuning is not running — see GET /api/auto-tuning");
+    }
+    // The one function that is not forwarded. "exit" stops the process, and Motion Master starts it
+    // once at startup and never again — so one client could end auto-tuning for every other one,
+    // and the only cure would be a restart of the server. A body that does not parse is forwarded
+    // as it is: the auto-tuning program rejects it with a message about its own request format,
+    // which is more use than one invented here.
+    const auto request = nlohmann::json::parse(req.body(), nullptr, false);
+    if (request.is_object() && request.value("run", std::string{}) == "exit") {
+      return mm::api::badRequest(
+          "auto-tuning cannot be shut down through this endpoint — every other client depends on "
+          "it, and Motion Master starts it only at startup");
+    }
+    auto reply = config_.runAutoTuning(req.body());
+    if (!reply) {
+      // The process is on loopback, so a request that gets no answer means it has died. That is a
+      // failure of this server's own dependency, which is what 502 says.
+      return mm::api::error("502 Bad Gateway", reply.error());
+    }
+    mm::api::Response response;
+    response.status = statusLine(reply->status);
+    response.contentType = "application/json";
+    response.body = std::move(reply->body);
+    return response;
+  });
+
+  router.get("/api/auto-tuning/swagger.yml", [this](const mm::api::Request&) {
+    if (!config_.autoTuningSpec) {
+      return mm::api::error("503 Service Unavailable",
+                            "auto-tuning is not running — see GET /api/auto-tuning");
+    }
+    auto reply = config_.autoTuningSpec();
+    if (!reply) {
+      return mm::api::error("502 Bad Gateway", reply.error());
+    }
+    mm::api::Response response;
+    response.status = statusLine(reply->status);
+    response.contentType = "application/yaml";
+    response.body = std::move(reply->body);
+    return response;
   });
 
   router.get("/api/log", [this](const mm::api::Request&) {

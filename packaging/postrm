@@ -1,0 +1,9 @@
+#!/bin/bash
+set -e
+
+# postinst downloads the auto-tuning executable, so dpkg never installed that file and does not
+# know it. Without this, a purge would leave 65 MB behind. Remove the file on purge only. An
+# upgrade and a plain remove keep it, so a reinstall does not download it again.
+if [ "$1" = purge ]; then
+    rm -f /opt/motion-master/auto-tuning
+fi

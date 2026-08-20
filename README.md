@@ -34,6 +34,27 @@ The Linux `.deb`/`.rpm` packages install to `/opt/motion-master/` with a `/usr/l
 
 > **aarch64 note:** the arm64 artefacts are built on **Debian 13 (trixie)** and need glibc 2.38 or newer, so they run on Debian 13 and Raspberry Pi OS trixie. Debian 12 (bookworm, glibc 2.36) is too old — [build from source](#building-from-source) there.
 
+### Auto-tuning
+
+The auto-tuning and system-identification functions run in a separate executable. Motion Master starts it as a child process, and calls it over HTTP on loopback. The installed file is `auto-tuning`, and `auto-tuning.exe` on Windows.
+
+The executable is not in the release archives. It is about 65 MB, and the Motion Master binary is about 5 MB. Motion Master ships on every tag, and auto-tuning changes a few times a year. A copy in every release would therefore make each download many times larger, for a file that rarely changes. Each install path downloads the file once instead, from one rolling release: [`releases/tag/auto-tuning`](../../releases/tag/auto-tuning).
+
+| Install path | What downloads the file |
+| --- | --- |
+| Tarball (Linux, macOS) | `./setup.sh`, or `./install-auto-tuning.sh` on its own |
+| `.deb` / `.rpm` | the `postinst` or `%post` scriptlet, during install |
+| Zip (Windows) | `.\setup.ps1` |
+| Docker | the image build, which puts the file in the image |
+
+If the download fails, each of them prints a message and continues. Motion Master then runs without auto-tuning. The HTTP API, the fieldbus and the real-time loop are not affected, and only the auto-tuning endpoints are missing. To add the file later, run the script again on a machine that is online.
+
+A machine that already has the file keeps it. An upgrade of Motion Master therefore never downloads the file a second time.
+
+Each download is named for its platform, as `standalone-autotuning-linux-x86_64` is. Every install path renames the file to `auto-tuning` when it puts the file in place, so one name works on every platform.
+
+There is no build for ARM64 Windows, and none for an Intel Mac. ARM64 Windows runs the x64 executable under the emulation that the operating system provides.
+
 ### Debian / Ubuntu
 
 ```bash
@@ -42,7 +63,7 @@ sudo apt remove motion-master                         # remove (leaves cert.pem 
 sudo apt purge motion-master                          # full removal including certs
 ```
 
-The `postinst` script automatically sets the four required capabilities (`cap_sys_nice`, `cap_net_admin`, `cap_net_raw`, `cap_ipc_lock`) on the binary — see [Linux capabilities](#linux-capabilities) for what each one does. On upgrade the capabilities are re-applied to the new binary automatically.
+The `postinst` script automatically sets the four required capabilities (`cap_sys_nice`, `cap_net_admin`, `cap_net_raw`, `cap_ipc_lock`) on the binary — see [Linux capabilities](#linux-capabilities) for what each one does. On upgrade the capabilities are re-applied to the new binary automatically. The script also downloads [auto-tuning](#auto-tuning), when the machine does not have that file yet. This is why the package depends on `curl`. `apt purge` deletes the file again.
 
 > **Note:** `apt remove` leaves `cert.pem` and `key.pem` behind as conffiles. Use `apt purge` for a complete uninstall.
 
@@ -56,6 +77,8 @@ sudo dnf remove motion-master                             # full removal
 
 On aarch64 use `motion-master-<version>-aarch64.rpm` instead.
 
+The `%post` scriptlet sets the capabilities and downloads [auto-tuning](#auto-tuning). It does what the deb `postinst` does. An uninstall deletes the downloaded file again.
+
 On uninstall, unmodified `cert.pem` and `key.pem` are removed automatically. If you replaced them with your own, they are saved as `cert.pem.rpmsave` / `key.pem.rpmsave`.
 
 ### Tarball
@@ -63,11 +86,13 @@ On uninstall, unmodified `cert.pem` and `key.pem` are removed automatically. If 
 ```bash
 tar -xzf motion-master-<version>-linux-x64.tar.gz  # aarch64: -linux-arm64.tar.gz
 cd motion-master-<version>-linux-x64
-sudo ./setup.sh  # sets capabilities once; re-run after any OS update that resets them
+./setup.sh  # downloads auto-tuning, then sets capabilities; run it again after an OS update
 ./motion-master --help
 ```
 
-Alongside the binary the tarball carries `setup.sh`, a `SETUP.md` with the same first-run notes, the bundled `cert.pem`/`key.pem`, and the annotated `motion-master.example.jsonc`.
+Run `setup.sh` as yourself. Do not use `sudo`. The script calls `sudo` itself for the capability step, so the file it downloads belongs to you.
+
+Alongside the binary the tarball carries `setup.sh` and `install-auto-tuning.sh`, a `SETUP.md` with the same first-run notes, the bundled `cert.pem`/`key.pem`, and the annotated `motion-master.example.jsonc`.
 
 ### Linux capabilities
 
@@ -95,7 +120,7 @@ Inside a container file capabilities are ignored entirely; see [Docker → Capab
 
 ### Windows
 
-Unzip `motion-master-<version>-windows-x64.zip` — it contains `motion-master.exe`, the bundled `cert.pem`/`key.pem`, an auto-loaded `motion-master.jsonc` (preset to a 4 ms real-time cycle, robust on stock Windows timers), the annotated `motion-master.example.jsonc`, and the required vcpkg runtime DLLs. Install the two runtime dependencies listed under [Usage → Prerequisites](#prerequisites) (Visual C++ Redistributable and Npcap), then run `motion-master.exe` from the extracted directory — it picks up the neighbouring `motion-master.jsonc` automatically (edit it to change the cycle period or any other setting).
+Unzip `motion-master-<version>-windows-x64.zip` — it contains `motion-master.exe`, the bundled `cert.pem`/`key.pem`, an auto-loaded `motion-master.jsonc` (preset to a 4 ms real-time cycle, robust on stock Windows timers), the annotated `motion-master.example.jsonc`, and the required vcpkg runtime DLLs. The zip also contains `setup.ps1`, which downloads [auto-tuning](#auto-tuning). Windows has no capability step, so the script does nothing else. Install the two runtime dependencies listed under [Usage → Prerequisites](#prerequisites) (Visual C++ Redistributable and Npcap), then run `motion-master.exe` from the extracted directory — it picks up the neighbouring `motion-master.jsonc` automatically (edit it to change the cycle period or any other setting).
 
 `motion-master.exe` is **Authenticode code-signed** (with an RFC 3161 timestamp), so Windows shows Synapticon as the verified publisher instead of an "unknown publisher" SmartScreen block. Signing happens on a self-hosted runner holding the certificate token, as a final step of the release workflow — it replaces the zip asset in place, so the published archive is always the signed one.
 
@@ -105,6 +130,7 @@ Unzip `motion-master-<version>-windows-x64.zip` — it contains `motion-master.e
 tar -xzf motion-master-<version>-macos-arm64.tar.gz
 cd motion-master-<version>-macos-arm64
 xattr -dr com.apple.quarantine motion-master  # required once — see below
+./setup.sh                                    # downloads auto-tuning
 sudo ./motion-master
 ```
 

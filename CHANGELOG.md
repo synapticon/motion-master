@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **Auto-tuning is installed for you.** The auto-tuning and system-identification functions run in a separate executable, which Motion Master starts as a child process. Every install path now downloads it: `./setup.sh` for a tarball, `.\setup.ps1` for the Windows zip, the `postinst` and `%post` scriptlets for the deb and the rpm, and the image build for Docker. The file installs as `auto-tuning` next to the server binary. It is about 65 MB and it changes a few times a year, so it is downloaded once from a rolling release instead of shipped in every Motion Master release. A machine that already has the file keeps it, so an upgrade does not download it again. If the download fails, each install path says so and continues, and Motion Master runs without auto-tuning. Only the Docker image requires the file: an image build that cannot reach the release fails.
+
 ## [6.0.0-alpha.81] - 2026-08-20
 
 ### Fixed

@@ -69,6 +69,11 @@
 #                -v /path/to/motion-master.jsonc:/config.jsonc:ro -e MM_CONFIG=/config.jsonc \
 #                motion-master
 #
+# Auto-tuning:
+#   The image holds the auto-tuning executable, which adds about 65 MB. The build downloads it
+#   from the rolling `auto-tuning` release, and Motion Master starts it as a child process. The
+#   file is mandatory here: a build that cannot reach that release fails.
+#
 # Running with --privileged also works but grants far more than necessary.
 
 # ── Stage 1: build ─────────────────────────────────────────────────────────
@@ -108,6 +113,16 @@ RUN base=https://github.com/synapticon/motion-master/releases/download/tls-cert;
     rm -f cert.pem.new key.pem.new; \
     [ -f cert.pem ] || : > cert.pem; [ -f key.pem ] || : > key.pem
 
+# Auto-tuning is a separate executable of about 65 MB. Motion Master starts it as a child process,
+# and install-auto-tuning.sh explains why the file lives in its own release. Unlike the cert above,
+# this file is mandatory: an image without it would answer the auto-tuning endpoints with an
+# error, and nobody can add the file to a running container. The script exits with status 0 even
+# when the download fails, because a package install must survive that. The test is what turns a
+# failed download into a failed build. The script picks the asset from uname, and this image is
+# x86_64 only.
+RUN ./install-auto-tuning.sh /src \
+    && test -x /src/auto-tuning
+
 # vcpkg binary cache is reused across image rebuilds when building with BuildKit.
 RUN --mount=type=cache,target=/root/.cache/vcpkg/archives \
     cmake --preset x64-linux-release \
@@ -134,6 +149,7 @@ RUN ldconfig
 
 WORKDIR /opt/motion-master
 COPY --from=build /src/build/x64-linux-release/apps/motion_master/motion-master .
+COPY --from=build /src/auto-tuning ./
 # Bake the cert/key fetched in the build stage (empty if that build ran offline).
 COPY --from=build /src/cert.pem /src/key.pem ./
 

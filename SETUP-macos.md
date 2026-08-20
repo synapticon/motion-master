@@ -12,7 +12,17 @@ xattr -dr com.apple.quarantine motion-master
 (Alternatively, right-click `motion-master` in Finder → **Open** once, and confirm
 the dialog — this whitelists that exact binary.)
 
-## 2. Start the server
+## 2. Download auto-tuning (optional)
+
+```bash
+./setup.sh
+```
+
+The auto-tuning executable is about 65 MB, and Motion Master starts it as a child process. It installs as `auto-tuning`, next to the server binary. The file is downloaded once, instead of a copy in every release. If the download fails, the script prints a message and continues. Motion Master then runs without auto-tuning, and only the auto-tuning endpoints are missing. To add the file later, run `./install-auto-tuning.sh`.
+
+On macOS the script does nothing else. The capability step it runs on Linux has no equivalent here, and step 3 uses `sudo` instead.
+
+## 3. Start the server
 
 ```bash
 sudo ./motion-master

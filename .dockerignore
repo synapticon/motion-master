@@ -10,3 +10,8 @@ build/
 # Docker footgun where `-v "$(pwd)/cert.pem:..."` with no local file auto-creates a directory here.
 cert.pem
 key.pem
+
+# The image downloads the auto-tuning executable in the build stage (see Dockerfile). A copy left
+# in the repository root by install-auto-tuning.sh must not enter the build context. The script
+# keeps a file that is already there, so a local copy for another architecture would be baked in.
+auto-tuning

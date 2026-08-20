@@ -37,10 +37,12 @@ cp "$BUILD_DIR/motion-master" "$deb_root/opt/motion-master/motion-master"
 cp "$BUILD_DIR/cert.pem"      "$deb_root/opt/motion-master/cert.pem"
 cp "$BUILD_DIR/key.pem"       "$deb_root/opt/motion-master/key.pem"
 cp "$REPO_DIR/setup.sh"       "$deb_root/opt/motion-master/setup.sh"
+cp "$REPO_DIR/install-auto-tuning.sh" "$deb_root/opt/motion-master/install-auto-tuning.sh"
 cp "$REPO_DIR/apps/motion_master/motion-master.example.jsonc" \
    "$deb_root/opt/motion-master/motion-master.example.jsonc"
 chmod 755 "$deb_root/opt/motion-master/motion-master" \
-          "$deb_root/opt/motion-master/setup.sh"
+          "$deb_root/opt/motion-master/setup.sh" \
+          "$deb_root/opt/motion-master/install-auto-tuning.sh"
 chmod 644 "$deb_root/opt/motion-master/cert.pem" \
           "$deb_root/opt/motion-master/key.pem" \
           "$deb_root/opt/motion-master/motion-master.example.jsonc"
@@ -51,12 +53,13 @@ Package: motion-master
 Version: ${VERSION}
 Architecture: ${DEB_ARCH}
 Maintainer: Marko Sanković <msankovic@synapticon.com>
-Depends: libcap2-bin
+Depends: libcap2-bin, curl
 Description: Motion control software for SOMANET servo drives
 EOF
 
 cp "$REPO_DIR/packaging/postinst" "$deb_root/DEBIAN/postinst"
-chmod 755 "$deb_root/DEBIAN/postinst"
+cp "$REPO_DIR/packaging/postrm"   "$deb_root/DEBIAN/postrm"
+chmod 755 "$deb_root/DEBIAN/postinst" "$deb_root/DEBIAN/postrm"
 
 # cert and key are marked as conffiles so upgrades prompt rather than silently overwrite
 printf '/opt/motion-master/cert.pem\n/opt/motion-master/key.pem\n' \
@@ -78,6 +81,7 @@ cp "$BUILD_DIR/motion-master" "$rpm_root/SOURCES/"
 cp "$BUILD_DIR/cert.pem"      "$rpm_root/SOURCES/"
 cp "$BUILD_DIR/key.pem"       "$rpm_root/SOURCES/"
 cp "$REPO_DIR/setup.sh"       "$rpm_root/SOURCES/"
+cp "$REPO_DIR/install-auto-tuning.sh" "$rpm_root/SOURCES/"
 cp "$REPO_DIR/apps/motion_master/motion-master.example.jsonc" "$rpm_root/SOURCES/"
 
 cat > "$rpm_root/SPECS/motion-master.spec" <<SPEC
@@ -88,7 +92,7 @@ Summary:        Motion control software for SOMANET servo drives
 License:        GPL-3.0
 URL:            https://motion-master.synapticon.com
 BuildArch:      ${RPM_ARCH}
-Requires:       libcap
+Requires:       libcap curl
 AutoReq:        no
 
 %description
@@ -102,11 +106,22 @@ install -m 755 %{_sourcedir}/motion-master %{buildroot}/opt/motion-master/
 install -m 644 %{_sourcedir}/cert.pem      %{buildroot}/opt/motion-master/
 install -m 644 %{_sourcedir}/key.pem       %{buildroot}/opt/motion-master/
 install -m 755 %{_sourcedir}/setup.sh      %{buildroot}/opt/motion-master/
+install -m 755 %{_sourcedir}/install-auto-tuning.sh %{buildroot}/opt/motion-master/
 install -m 644 %{_sourcedir}/motion-master.example.jsonc %{buildroot}/opt/motion-master/
 ln -sf /opt/motion-master/motion-master %{buildroot}/usr/local/bin/motion-master
 
 %post
 setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip /opt/motion-master/motion-master
+# The twin of packaging/postinst; keep the two in step.
+/opt/motion-master/install-auto-tuning.sh /opt/motion-master
+
+%postun
+# %post downloads the auto-tuning executable, so rpm never installed that file and does not know
+# it. Without this, an uninstall would leave 65 MB behind. \$1 is 0 on a real uninstall only, so
+# an upgrade keeps the file.
+if [ \$1 -eq 0 ]; then
+    rm -f /opt/motion-master/auto-tuning
+fi
 
 %files
 %defattr(-,root,root,-)
@@ -114,6 +129,7 @@ setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip /opt/motion-maste
 %config(noreplace) /opt/motion-master/cert.pem
 %config(noreplace) /opt/motion-master/key.pem
 /opt/motion-master/setup.sh
+/opt/motion-master/install-auto-tuning.sh
 /opt/motion-master/motion-master.example.jsonc
 /usr/local/bin/motion-master
 

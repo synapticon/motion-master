@@ -280,10 +280,15 @@ jobs:
 
   # ── Publish @synapticon/motion-master-client to npm ────────────────────────
   # Independent of the binary build legs: a version bump → v* tag publishes the client library
-  # at the same version as the server. Requires the NPM_TOKEN repo secret (an npm automation token
-  # with publish rights to the @synapticon scope).
+  # at the same version as the server. Authentication is npm trusted publishing: pnpm exchanges
+  # the GitHub Actions OIDC token for a short-lived npm credential, so there is no publish token
+  # to store or rotate. npm accepts the exchange only for the trusted publisher registered on the
+  # package, which names this repository and this workflow file, so renaming the file breaks it.
   publish-client:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v6
 
@@ -304,8 +309,6 @@ jobs:
         run: pnpm run build:client
 
       - name: Publish to npm
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           # Pre-release versions (e.g. 6.0.0-alpha.1) publish under the `next` dist-tag so they
           # never become npm's default `latest`.

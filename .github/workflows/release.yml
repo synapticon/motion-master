@@ -323,13 +323,15 @@ jobs:
       - name: Generate and build the client
         run: pnpm run build:client
 
-      # Every release takes the `latest` dist-tag, pre-release version or not, because a bare
-      # `npm install @synapticon/motion-master-client` must serve the client that matches the
-      # server people are running. Holding the alphas back under `next` left `latest` on
-      # 2.3.0-beta.0, a client three years older than any server this repository builds.
-      # Restore the split when 6.0.0 ships and the first 6.1.0 alpha would otherwise displace it.
       - name: Publish to npm
-        run: pnpm --filter @synapticon/motion-master-client publish --no-git-checks --tag latest
+        run: |
+          # Pre-release versions (e.g. 6.0.0-alpha.1) publish under the `next` dist-tag so they
+          # never become npm's default `latest`.
+          tag="latest"
+          case "$GITHUB_REF_NAME" in
+            *-*) tag="next" ;;
+          esac
+          pnpm --filter @synapticon/motion-master-client publish --no-git-checks --tag "$tag"
 
   # ── Publish the GitHub Release with all platform artifacts ─────────────────
   release:

@@ -642,7 +642,7 @@ git tag v6.1.0
 git push && git push --tags
 ```
 
-The `v*` tag builds the platform binaries **and** publishes `@synapticon/motion-master-client@<version>` to npm (prereleases under the `next` dist-tag). Two drift nets back the sync: `version_test.cc` fails if its hard-coded string falls out of step, and the `api-client-drift` CI job fails if the committed API client is stale against `swagger.yml`.
+The `v*` tag builds the platform binaries **and** publishes `@synapticon/motion-master-client@<version>` to npm, on the `latest` dist-tag. Two drift nets back the sync: `version_test.cc` fails if its hard-coded string falls out of step, and the `api-client-drift` CI job fails if the committed API client is stale against `swagger.yml`.
 
 ### CI
 

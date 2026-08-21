@@ -90,7 +90,7 @@ class HttpServer {
   /// process. Unset when there is nothing to forward to, which the route answers with 503 —
   /// so the server needs to know neither the process nor the client. Wired in main.cc.
   using AutoTuningRunFn =
-      std::function<std::expected<mm::net::Response, std::string>(std::string body)>;
+      std::function<std::expected<mm::net::Response, std::string>(const std::string& body)>;
 
   /// @brief Callback type for `GET /api/auto-tuning`.
   ///
@@ -159,7 +159,7 @@ class HttpServer {
 
   /// @brief Stops the server, closes the listen socket, and joins the thread.
   ///
-  /// Idempotent: a second call after the server has already stopped is a no-op.
+  /// Idempotent: a second call after the server already stopped is a no-op.
   void stop();
 
   /// @brief Registers a route plug-in to be wired in when the server starts.

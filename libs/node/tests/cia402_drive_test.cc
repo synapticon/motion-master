@@ -97,7 +97,7 @@ class Cia402FakeDriver : public FieldbusDriver {
   /// Models quick stop option codes 0-4: the drive rides through Quick Stop Active into Switch On
   /// Disabled rather than staying there. Immediate here, where a real drive takes a ramp.
   bool quickStopPassesThrough = false;
-  /// Models a drive whose control service has stopped: writes are accepted and reads answer, but
+  /// Models a drive whose control service stopped: writes are accepted and reads answer, but
   /// nothing steps the state machine, so the statusword never changes.
   bool acceptWritesWithoutAdvancing = false;
   /// Advances normally for this many controlword writes and then stalls — a drive that got part of
@@ -157,9 +157,13 @@ class Cia402FakeDriver : public FieldbusDriver {
     if (acceptWritesWithoutAdvancing) {
       return;
     }
-    if (freezeAfterWrites >= 0 && freezeAfterWrites-- == 0) {
-      acceptWritesWithoutAdvancing = true;
-      return;
+    if (freezeAfterWrites >= 0) {
+      const bool freezeNow = freezeAfterWrites == 0;
+      --freezeAfterWrites;
+      if (freezeNow) {
+        acceptWritesWithoutAdvancing = true;
+        return;
+      }
     }
     const uint16_t cmd = controlword & mm::node::cia402::kCommandMask;
     if ((controlword & 0x0080) &&
@@ -463,7 +467,7 @@ TEST(Cia402DriveFaultReset, IsOneWriteWhenBitSevenIsAlreadyLow) {
 
 TEST(Cia402DriveTransitionToState, GivesAFaultResetTimeBeforeCallingItUnclearable) {
   // The other half of the same hardware failure: the walk concluded "the cause is still present"
-  // one poll after issuing the reset, before the drive could possibly have acted on it — and
+  // one poll after issuing the reset, before the drive could possibly act on it — and
   // reported a drive that recovered as one that had not.
   Cia402FakeDriver driver;
   driver.machineState = State::kFault;
@@ -636,10 +640,10 @@ TEST(Cia402DriveTransitionToState, NamesAStoppedControlServiceOnTimeout) {
 }
 
 TEST(Cia402DriveTransitionToState, DoesNotBlameTheServiceForAnOrdinaryTimeout) {
-  // A drive whose statusword *does* move is stepping its machine; it simply has not arrived. Saying
-  // "the service may have stopped" there would be a false lead, which is worse than a bare timeout.
-  // So the drive is made to advance one hop and then stall — the statusword changes during the
-  // walk, which is exactly what must suppress the hint.
+  // A drive whose statusword *does* move is stepping its machine; it simply is not there yet.
+  // Saying "the service may have stopped" there would be a false lead, which is worse than a bare
+  // timeout. So the drive is made to advance one hop and then stall — the statusword changes during
+  // the walk, which is exactly what must suppress the hint.
   Cia402FakeDriver driver;
   Device device = makeCia402Device(driver);
   driver.freezeAfterWrites = 1;

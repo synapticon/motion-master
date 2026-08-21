@@ -144,6 +144,7 @@ TEST(Concurrency, ReadSurfacesAgainstARunningCycle) {
   std::thread rt([&] { runCycleLoop(*dm, stop, cycles); });
 
   std::vector<std::thread> readers;
+  readers.reserve(3);
   for (int i = 0; i < 3; ++i) {
     readers.emplace_back([&] {
       const auto deadline = std::chrono::steady_clock::now() + kDuration;

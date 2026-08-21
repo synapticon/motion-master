@@ -283,13 +283,13 @@ void Device::publishParameters(std::unordered_map<uint32_t, DeviceParameter>&& b
                             existing->second->bitLength == definition.bitLength;
       if (reusable) {
         DeviceParameter* cell = existing->second;
-        // The annotation may have changed (a cache hit carries no unit or limits, a live
+        // The annotation can differ (a cache hit carries no unit or limits, a live
         // enumeration does), so adopt it. The value is adopted only when this enumeration read
         // one: a definitions-only pass must not zero a setpoint written before it ran.
         cell->name = std::move(definition.name);
         cell->objectCode = definition.objectCode;
         cell->access = definition.access;
-        cell->unit = std::move(definition.unit);
+        cell->unit = definition.unit;
         cell->defaultValue = std::move(definition.defaultValue);
         cell->minValue = std::move(definition.minValue);
         cell->maxValue = std::move(definition.maxValue);
@@ -376,7 +376,7 @@ bool decodeCompleteAccess(std::span<DeviceParameter* const> subs,
 
 // Tracks Complete Access support across grouped reads: probe once, then per-object fallback. CA
 // is optional in CoE, so the first eligible object is a probe — if the slave rejects it, CA is
-// disabled for every later read sharing the same state. After a CA read has succeeded, a later
+// disabled for every later read sharing the same state. After a CA read succeeds, a later
 // per-object failure falls back for that object only (support can vary per object). The state is
 // external so it can be a per-pass local (initializeParameters' value pass) or the per-device
 // Device::caSupport_ that persists the outcome across point reads.
@@ -390,7 +390,7 @@ class CompleteAccessProbe {
   }
   void recordSuccess() { state_ = CompleteAccessSupport::kSupported; }
   // Records a failed CA read. Returns true when this failure disabled CA state-wide (the probe),
-  // false when it is a per-object failure after CA had already worked — the caller logs
+  // false when it is a per-object failure after CA already worked — the caller logs
   // accordingly.
   bool recordFailure() {
     if (state_ == CompleteAccessSupport::kUnknown) {
@@ -456,7 +456,7 @@ void Device::readParameterValues(std::vector<DeviceParameter>& defs, bool useCom
 
   // Complete Access support is discovered by a probe: the first eligible object is read with CA;
   // if the slave rejects it (SDO abort), CA is disabled for the rest of this pass and everything
-  // falls back to per-subindex reads. Once a CA read has succeeded we keep using it, but a
+  // falls back to per-subindex reads. Once a CA read succeeds we keep using it, but a
   // per-object failure only falls back for that object (support can vary per object). The state
   // is a pass-local, not caSupport_: this runs off parametersMutex_ (on a local defs vector,
   // before the map is published), so it must not touch the lock-guarded member.
@@ -1023,7 +1023,7 @@ std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t 
 
   // Phase 3 — under the lock: re-find and commit. Never reuse phase 1's pointer — a concurrent
   // initializeParameters replaces the whole map, destroying every entry. A miss, or an entry whose
-  // declared type has changed, means the dictionary was re-enumerated while we were on the wire:
+  // declared type changed, means the dictionary was re-enumerated while we were on the wire:
   // the bytes were decoded under a type this object no longer declares, so report it rather than
   // cache a value that may be misdecoded. The caller retries and gets the current object.
   const std::lock_guard<std::mutex> lock(*parametersMutex_);

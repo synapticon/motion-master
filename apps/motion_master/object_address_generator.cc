@@ -53,10 +53,9 @@ std::string sanitiseComment(std::string_view text) {
   std::string out;
   out.reserve(text.size());
   for (char c : text) {
-    if (c == '\n' || c == '\r' || c == '\t') {
+    // A '*' after a '/' would open a nested comment, so it goes the same way as whitespace.
+    if (c == '\n' || c == '\r' || c == '\t' || (c == '*' && !out.empty() && out.back() == '/')) {
       out += ' ';
-    } else if (c == '*' && !out.empty() && out.back() == '/') {
-      out += ' ';  // would open a nested comment
     } else {
       out += c;
     }

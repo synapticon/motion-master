@@ -45,9 +45,9 @@ DeviceParameter param(uint16_t dataType, const DeviceParameterValue& value) {
 }
 
 // As param(), additionally setting the slave-reported min/max bounds.
-DeviceParameter paramWithBounds(uint16_t dataType, DeviceParameterValue value,
+DeviceParameter paramWithBounds(uint16_t dataType, const DeviceParameterValue& value,
                                 DeviceParameterValue lo, DeviceParameterValue hi) {
-  DeviceParameter p = param(dataType, std::move(value));
+  DeviceParameter p = param(dataType, value);
   p.minValue = std::move(lo);
   p.maxValue = std::move(hi);
   return p;

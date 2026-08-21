@@ -22,14 +22,22 @@ import fs from "node:fs";
 
 // Mermaid expects a browser. jsdom is enough: nothing here lays anything out, and parse() only
 // needs a document to exist.
+//
+// defineProperty rather than assignment, because Node 21 and later define `navigator` themselves as
+// a getter with no setter — so `globalThis.navigator = ...` throws there while it works on Node 20.
+// The property is configurable on every version that has it, so redefining it works on all of them.
 let JSDOM;
 let mermaid;
 try {
   ({ JSDOM } = await import("jsdom"));
   const dom = new JSDOM("<!DOCTYPE html><body></body>", { pretendToBeVisual: true });
-  globalThis.window = dom.window;
-  globalThis.document = dom.window.document;
-  globalThis.navigator = dom.window.navigator;
+  for (const [name, value] of [
+    ["window", dom.window],
+    ["document", dom.window.document],
+    ["navigator", dom.window.navigator],
+  ]) {
+    Object.defineProperty(globalThis, name, { value, configurable: true, writable: true });
+  }
   mermaid = (await import("mermaid")).default;
 } catch (e) {
   console.error("check-mermaid: cannot load the parser — install it with:");

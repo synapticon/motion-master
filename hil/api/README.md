@@ -58,11 +58,15 @@ hil/api/
     setup.ts          ← shared MotionMasterClient instance (HTTP + WebSocket)
     log-fetch.ts      ← fetch wrapper that logs requests
   tests/
-    system.test.ts      ← version / config / dump
-    monitoring.test.ts  ← monitoring routes + WebSocket plumbing
+    system.test.ts        ← version / config / dump
+    monitoring.test.ts    ← monitoring routes + WebSocket plumbing
+    process-data.test.ts  ← process-image and recorder routes
+    auto-tuning.test.ts   ← the auto-tuning child process and its endpoints
   vitest.config.ts
   package.json
   biome.json          ← formatter / linter config
 ```
+
+`auto-tuning.test.ts` skips its calls when no auto-tuning process is running, rather than failing them. The Docker image the suite builds carries the executable, so the calls do run there; a machine that never had it installed is a supported state, and the status test still checks what the server reports about it.
 
 The typed HTTP client and the WebSocket connection both come from `@synapticon/motion-master-client` (`workspace:*`); there is no generated client checked in here. The client is generated and built in that package — see its README to regenerate from `apps/motion_master/swagger.yml`.

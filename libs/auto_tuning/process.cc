@@ -87,9 +87,7 @@ std::expected<void, std::string> Process::start() {
     // A child that died explains itself in its own log, and its exit is the real failure — so stop
     // waiting for a port that will never open and say where to look.
     if (!detail::childAlive({pid_, handle_, group_})) {
-      pid_ = 0;
-      handle_ = 0;
-      group_ = 0;
+      forget();
       std::string message = options_.binary.string() + " exited during startup";
       if (!options_.logFile.empty()) {
         message += "; see " + options_.logFile.string();
@@ -112,9 +110,9 @@ std::expected<void, std::string> Process::start() {
                          std::to_string(options_.startTimeout.count()) + " ms");
 }
 
-void Process::stop() {
+Process::StopOutcome Process::stop() {
   if (pid_ == 0) {
-    return;
+    return StopOutcome::NotRunning;
   }
 
   // Ask over its own API first. The auto-tuning program answers a run named "exit" by shutting the
@@ -127,17 +125,19 @@ void Process::stop() {
     const auto deadline = std::chrono::steady_clock::now() + kStopGrace;
     while (std::chrono::steady_clock::now() < deadline) {
       if (!detail::childAlive({pid_, handle_, group_})) {
-        pid_ = 0;
-        handle_ = 0;
-        group_ = 0;
-        version_.clear();
-        return;
+        forget();
+        return StopOutcome::Requested;
       }
       std::this_thread::sleep_for(kHealthPollInterval);
     }
   }
 
-  detail::terminateChild({pid_, handle_, group_}, kStopGrace);
+  const bool killed = detail::terminateChild({pid_, handle_, group_}, kStopGrace);
+  forget();
+  return killed ? StopOutcome::Killed : StopOutcome::Signalled;
+}
+
+void Process::forget() {
   pid_ = 0;
   handle_ = 0;
   group_ = 0;

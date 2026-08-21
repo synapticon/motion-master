@@ -301,6 +301,9 @@ int main(int argc, char** argv) {
   // Bound to the running process, and left empty when there is none: an unset callback below is how
   // the routes answer 503 without naming any of this.
   std::optional<mm::auto_tuning::Client> autoTuningClient;
+  // Whether the last call reached the process. Only for logging: it turns a stream of failures into
+  // one line, and a call that succeeds again arms it for the next outage.
+  std::atomic<bool> autoTuningAnswers{true};
 
   if (!opts.config.autoTuning.enabled) {
     autoTuningStatus.error = "disabled by the configuration";
@@ -316,7 +319,7 @@ int main(int argc, char** argv) {
     autoTuningStatus.started = true;
     autoTuningStatus.version = autoTuning.version();
     autoTuningClient.emplace(autoTuning.baseUrl());
-    spdlog::info("Auto-tuning {} on port {} (pid {})",
+    spdlog::info("Auto-tuning {} started on port {} (pid {})",
                  autoTuning.version().empty() ? "of an unknown version" : autoTuning.version(),
                  autoTuning.options().port, autoTuning.pid());
   }
@@ -403,11 +406,23 @@ int main(int argc, char** argv) {
           },
           // Unset when nothing is running, which is what makes the routes answer 503 rather than
           // ask a client to interpret a status snapshot before every call.
-          .runAutoTuning = autoTuningClient
-                               ? HttpServer::AutoTuningRunFn{[&autoTuningClient](std::string body) {
-                                   return autoTuningClient->run(body);
-                                 }}
-                               : HttpServer::AutoTuningRunFn{},
+          .runAutoTuning = autoTuningClient ? HttpServer::AutoTuningRunFn{[&autoTuningClient,
+                                                                           &autoTuningAnswers](
+                                                                              std::string body) {
+            auto reply = autoTuningClient->run(body);
+            // Nothing polls the process, so a call is where its death first shows. Say so
+            // in the server log rather than leaving it in one client's console — but only
+            // on the first failure, because a page that retries would otherwise fill the
+            // log with the same line. A call that succeeds arms it again for the next
+            // outage.
+            if (!reply && autoTuningAnswers.exchange(false)) {
+              spdlog::warn("Auto-tuning stopped answering: {}", reply.error());
+            } else if (reply) {
+              autoTuningAnswers.store(true);
+            }
+            return reply;
+          }}
+                                            : HttpServer::AutoTuningRunFn{},
           .autoTuningStatus = [&autoTuningStatus] { return autoTuningStatus; },
           .autoTuningSpec = autoTuningClient ? HttpServer::AutoTuningSpecFn{[&autoTuningClient] {
             return autoTuningClient->spec();
@@ -506,6 +521,26 @@ int main(int argc, char** argv) {
   monitoringManager.stop();  // stop sampling/publishing before the server loops go away
   wsServer.stop();
   httpServer.stop();
+
+  // Stopped here rather than by its destructor, so what happened to it is logged while the log is
+  // still being written. A Motion Master that exits leaves nothing of its own running.
+  const auto autoTuningPid = autoTuning.pid();
+  switch (autoTuning.stop()) {
+    case mm::auto_tuning::Process::StopOutcome::NotRunning:
+      break;
+    case mm::auto_tuning::Process::StopOutcome::Requested:
+      spdlog::info("Auto-tuning stopped (pid {})", autoTuningPid);
+      break;
+    case mm::auto_tuning::Process::StopOutcome::Signalled:
+      spdlog::info("Auto-tuning stopped after a termination signal (pid {})", autoTuningPid);
+      break;
+    case mm::auto_tuning::Process::StopOutcome::Killed:
+      // It ignored both the exit request and the signal, so it was wedged inside a routine. Worth a
+      // warning: this is the case where something could be left holding the port against the next
+      // start.
+      spdlog::warn("Auto-tuning did not exit and was killed (pid {})", autoTuningPid);
+      break;
+  }
 
   spdlog::info("Shutting down");
   return 0;

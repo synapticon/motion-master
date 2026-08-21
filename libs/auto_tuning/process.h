@@ -98,6 +98,17 @@ class Process {
   ///         failure, a child that exited during the wait, or a timeout.
   std::expected<void, std::string> start();
 
+  /// @brief How a @c stop ended, so that the caller can log it.
+  ///
+  /// On Windows only @c NotRunning, @c Requested and @c Killed occur: there is no signal that
+  /// program handles there, so the middle step does not exist.
+  enum class StopOutcome {
+    NotRunning,  ///< Nothing was running.
+    Requested,   ///< It exited on the exit request, which is the ordinary case.
+    Signalled,   ///< It ignored the request and exited on the termination signal.
+    Killed,      ///< It ignored both and was killed.
+  };
+
   /// @brief Asks the child to exit, then kills it if it does not.
   ///
   /// Three steps, politest first: a @c {"run":"exit"} request, which the auto-tuning program
@@ -107,7 +118,11 @@ class Process {
   /// log.
   ///
   /// Safe to call when nothing was started, and safe to call twice.
-  void stop();
+  ///
+  /// @return Which step ended it. @c Killed is the one worth a warning: a child wedged inside a
+  ///         numerical routine had to be taken down, and that is the case where something could be
+  ///         left holding the port.
+  StopOutcome stop();
 
   /// @brief The version the child reported at startup, or empty when it never started.
   const std::string& version() const { return version_; }
@@ -122,6 +137,10 @@ class Process {
   std::int64_t pid() const { return pid_; }
 
  private:
+  /// Drops every trace of a child that is gone. A process id may be reissued once it is reaped, so
+  /// nothing must be kept that a later @c stop could signal.
+  void forget();
+
   ProcessOptions options_;
   /// The process id on POSIX. On Windows the id is also kept as a handle, in @c handle_.
   std::int64_t pid_ = 0;

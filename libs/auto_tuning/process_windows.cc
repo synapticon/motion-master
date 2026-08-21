@@ -160,9 +160,9 @@ bool childAlive(const Child& child) {
   return WaitForSingleObject(handle, 0) == WAIT_TIMEOUT;
 }
 
-void terminateChild(const Child& child, std::chrono::milliseconds grace) {
+bool terminateChild(const Child& child, std::chrono::milliseconds grace) {
   if (child.handle == 0) {
-    return;
+    return false;
   }
   auto handle = reinterpret_cast<HANDLE>(child.handle);
   auto job = reinterpret_cast<HANDLE>(child.group);
@@ -182,6 +182,9 @@ void terminateChild(const Child& child, std::chrono::milliseconds grace) {
   if (job != nullptr) {
     CloseHandle(job);
   }
+  // Always a kill here. Windows has no signal for the program to handle, so there is no gentler
+  // step for this function to have tried.
+  return true;
 }
 
 }  // namespace mm::auto_tuning::detail

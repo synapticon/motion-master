@@ -59,6 +59,10 @@ bool childAlive(const Child& child);
 /// Returns once the child is gone. The auto-tuning program handles a termination signal and shuts
 /// its server down; the kill is for a child wedged inside a numerical routine, and it takes the
 /// whole group so that nothing is left holding the port.
-void terminateChild(const Child& child, std::chrono::milliseconds grace);
+///
+/// @return @c false when the signal was enough, @c true when the kill was needed. The caller logs
+///         the difference: a child that ignores a termination signal is worth knowing about, and
+///         it is the case where a leftover process could hold the port against the next start.
+bool terminateChild(const Child& child, std::chrono::milliseconds grace);
 
 }  // namespace mm::auto_tuning::detail

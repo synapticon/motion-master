@@ -111,9 +111,9 @@ bool childAlive(const Child& child) {
   return !reaped(child.pid);
 }
 
-void terminateChild(const Child& child, std::chrono::milliseconds grace) {
+bool terminateChild(const Child& child, std::chrono::milliseconds grace) {
   if (child.pid == 0) {
-    return;
+    return false;
   }
   const auto pid = static_cast<pid_t>(child.pid);
   // The child leads its own process group, so its group id is its process id, and a negative
@@ -124,7 +124,7 @@ void terminateChild(const Child& child, std::chrono::milliseconds grace) {
   const auto deadline = std::chrono::steady_clock::now() + grace;
   while (std::chrono::steady_clock::now() < deadline) {
     if (reaped(child.pid)) {
-      return;
+      return false;
     }
     std::this_thread::sleep_for(kReapPollInterval);
   }
@@ -136,6 +136,7 @@ void terminateChild(const Child& child, std::chrono::milliseconds grace) {
   kill(-pid, SIGKILL);
   int status = 0;
   waitpid(pid, &status, 0);
+  return true;
 }
 
 }  // namespace mm::auto_tuning::detail

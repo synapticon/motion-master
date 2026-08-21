@@ -8,7 +8,7 @@ namespace mm::node {
 /// @brief Game-loop task that exchanges one cycle of process data.
 ///
 /// Delegates to DeviceManager::exchangeProcessData, which is a no-op until a process image has
-/// been published (i.e. devices have been mapped and brought into SAFE-OP/OP). Registering it
+/// been published (i.e. the devices are mapped and in SAFE-OP or OP). Registering it
 /// unconditionally is therefore safe: the RT loop drives PDO automatically as soon as the bus
 /// is configured, and stops again when it is torn down — no wiring changes per state.
 class ProcessDataCyclicTask : public mm::core::CyclicTask {

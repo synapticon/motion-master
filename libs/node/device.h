@@ -137,7 +137,7 @@ class Device {
   ///
   /// True when both the controlword (0x6040) and statusword (0x6041) are present in the
   /// enumerated parameter map — the same offline-safe discriminator @c createCia402Drive uses
-  /// (no bus I/O; requires @c initializeParameters to have run). Surfaced on the device JSON so
+  /// (no bus I/O; requires an earlier @c initializeParameters). Surfaced on the device JSON so
   /// clients can gate CiA402-only UI without duplicating the object indices.
   bool isCia402() const;
 
@@ -349,7 +349,7 @@ class Device {
   std::expected<DeviceParameterValue, std::string> setValueFromBytes(
       uint16_t index, uint8_t subindex, std::span<const uint8_t> bytes);
 
-  /// @brief Whether the object dictionary has been enumerated (thread-safe; no bus access).
+  /// @brief Whether the object dictionary is enumerated (thread-safe; no bus access).
   ///
   /// The map itself is deliberately not exposed: handing out a reference to it would let a caller
   /// traverse it while @c initializeParameters replaces it wholesale under @c parametersMutex_.
@@ -357,7 +357,7 @@ class Device {
   /// entry), both of which copy under the lock.
   bool hasParameters() const;
 
-  /// @brief Whether an @c initializeParameters call on this device has failed since it was scanned
+  /// @brief Whether any @c initializeParameters call on this device failed since it was scanned
   ///        (thread-safe; no bus access).
   ///
   /// Set so the automatic read on reaching a mailbox-active state is attempted once rather than
@@ -409,7 +409,7 @@ class Device {
 
   /// @brief Returns a parameter's declared ETG.1020 data-type code, thread-safely (cache lock).
   ///
-  /// The data type is immutable once @c initializeParameters has populated the entry, but the
+  /// The data type is immutable once @c initializeParameters populates the entry, but the
   /// map itself can be rebuilt off the caller's thread, so reading it under the lock is the safe
   /// way for an off-thread consumer (e.g. capturing a PDO decode spec) to obtain it.
   ///
@@ -620,7 +620,7 @@ class Device {
   ///
   /// @c nullopt means the parameter is unknown to this device, is not a scalar (a string or byte
   /// array), or does not hold a @p T — never "the value happens to be zero", and never "the device
-  /// is offline". A parameter whose device has stopped exchanging keeps reporting its last known
+  /// is offline". A parameter whose device stopped exchanging keeps reporting its last known
   /// value: swapping a real number for nothing is how a control loop ends up acting on a fallback
   /// it never asked for. Use @c exchangesProcessData() and @c parameter()'s @c syncState to decide
   /// otherwise.
@@ -832,7 +832,7 @@ class Device {
   std::expected<void, std::string> readParameterDefinitions(bool readValues,
                                                             bool useCompleteAccess);
 
-  /// Whether an initializeParameters call has failed for this device. Guarded by parametersMutex_,
+  /// Whether any initializeParameters call failed for this device. Guarded by parametersMutex_,
   /// which is also what guards the map the flag describes: the automatic read runs under
   /// DeviceManager's busOperationMutex_ and an explicit one holds no lock at all, so an AL
   /// transition and POST .../parameters/init can reach this at the same time.
@@ -864,7 +864,7 @@ class Device {
   // publishParameters; the cells it points at outlive every replacement.
   std::unordered_map<uint32_t, DeviceParameter*> parameters_;
   // Maps kept alive because the RT cycle did not drain before they were replaced. A cyclic task may
-  // still have been walking one, and freeing it then is a use-after-free. They are only ever added
+  // still be walking one, and freeing it then is a use-after-free. They are only ever added
   // to, which is bounded by how many times a drain fails — an emergency that is logged each time.
   std::vector<std::unordered_map<uint32_t, DeviceParameter*>> retiredMaps_;
   FlatPdoMapping flatPdoMapping_;

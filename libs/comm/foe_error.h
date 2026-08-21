@@ -16,7 +16,7 @@
 //     buffer) — the exact distinction the `retry` tag carries.
 //   • It removes a file before rewriting it, and FileNotFound means the removal already had
 //     nothing to do — a success, not a failure.
-// String-matching a message to decide either is the smell that says a surface has earned a
+// String-matching a message to decide either is the smell that says a surface earned a
 // structured error.
 //
 // Because FoeError keeps a string face (operator<<, .message, .what()), the forwarding callers that

@@ -77,7 +77,7 @@ constexpr auto kFirmwareLatencyTimeout = std::chrono::seconds(30);
 constexpr auto kMinFirmwareLatencyDuration = std::chrono::milliseconds(100);
 constexpr auto kMaxFirmwareLatencyDuration = std::chrono::milliseconds(60'000);
 
-// How long to wait before concluding a service that was told to stop has stopped. Short on purpose:
+// How long to wait before a service told to stop counts as stopped. Short on purpose:
 // for the four types that stop a service, no answer is the intended outcome, so this is the cost of
 // establishing it rather than a ceiling on real work. The types that do answer answer at once.
 constexpr auto kTriggerErrorTimeout = std::chrono::seconds(3);
@@ -197,7 +197,7 @@ std::expected<bool, std::string> readBool(const nlohmann::json& body, const char
 
 // Puts back everything a diagnostics-mode procedure changed, on every path out of the body — an
 // early return, a failure, a cancellation — because a procedure that leaves the brake released and
-// the drive in diagnostics mode has left the machine in a worse state than it found it.
+// the drive in diagnostics mode leaves the machine in a worse state than it found it.
 //
 // Inert until told what to restore, so a body that failed before changing anything restores nothing
 // and does not claim a restore it never performed. Each restore is armed *before* the change it
@@ -549,7 +549,7 @@ std::expected<void, std::string> writeFileWithRetry(DeviceManager& deviceManager
       return std::unexpected(cancelled(std::format("before writing '{}'", filename)));
     }
     // Resolved per attempt, so a rescan mid-install ends the run at the next step rather than
-    // writing to a device that has moved.
+    // writing to a device that moved.
     const auto device = deviceManager.deviceAt(devicePosition);
     if (!device) {
       return std::unexpected(std::format("device {} not found", devicePosition));
@@ -666,7 +666,7 @@ std::expected<void, std::string> leaveBoot(DeviceManager& deviceManager, uint16_
     return {};
   }
   // Climbing further re-maps the whole bus, which DeviceManager handles — including re-reading this
-  // device's PDO mapping, which the firmware just written may well have changed.
+  // device's PDO mapping, which the firmware just written can change.
   if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::SafeOp, kStateTimeout);
       !r) {
     return std::unexpected(std::format("could not reach SAFE-OP: {}", r.error()));
@@ -2399,7 +2399,7 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
   if (package->sii) {
     // Checked before anything is written, because an EEPROM write is the one operation here that
     // can leave a device unidentifiable, and a malformed image is discovered only after a power
-    // cycle — long past the point where it could have been declined.
+    // cycle — long past the point where it could still be declined.
     if (auto valid = mm::comm::validateSiiImage(package->sii->content); !valid) {
       const std::string reason = std::format("the package's '{}' is not a valid SII image: {}",
                                              package->sii->name, valid.error());

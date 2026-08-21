@@ -50,7 +50,7 @@ namespace {
 //
 // Progress is trace, because a firmware image is hundreds of packets and none of them is
 // interesting on its own. BUSY is info: it is rare, it is the thing that distinguishes "the
-// bootloader needs a moment" from "the slave has stopped answering", and telling those apart from
+// bootloader needs a moment" from "the slave stopped answering", and telling those apart from
 // the outside is otherwise impossible — the transfer just stalls either way.
 //
 // SOEM's hook is a bare function pointer with no user data, so this is a free function.
@@ -191,7 +191,7 @@ std::chrono::microseconds recommendedCyclePeriod(uint32_t processBytes, int slav
 // not taken, and SOEM establishes exactly that — ecx_mbxempty polls SM0 for it — then discards it
 // and returns 0. One register read on the failure path recovers it, which is the difference between
 // a caller reading "failed" and reading why. Off the RT path, on a transfer that has already cost
-// tens of milliseconds, and only when a transfer has failed — and, in a retry loop, only while
+// tens of milliseconds, and only when a transfer failed — and, in a retry loop, only while
 // there is still no reason to report (see sdoErrorSuffix's explainRefusal).
 std::string mailboxRefusalSuffix(ecx_contextt* ctx, uint16_t slavePosition) {
   uint8_t status = 0;
@@ -1051,7 +1051,7 @@ FoeError foeError(int wkc, std::string_view op, uint16_t slave, std::string_view
 
 // Discards whatever is sitting in a slave's read mailbox, ignoring the contents.
 //
-// An FoE transaction that timed out — most often a bootloader that had not finished coming up when
+// An FoE transaction that timed out — most often a bootloader still coming up when
 // the first request after entering BOOT arrived — leaves the mailbox out of sync: the late reply
 // is still queued, so every subsequent request reads the *previous* answer and fails. That state
 // survives a Motion Master restart, which historically left a power cycle as the only recovery.
@@ -1466,7 +1466,7 @@ namespace {
 //
 // A SOMANET bootloader hands over to freshly written firmware by restarting the device, and the
 // restart clears the ESC's configured station address (0x0010) along with everything else the
-// master had programmed. Every FPRD/FPWR the master makes is addressed by that value, so from the
+// master programmed. Every FPRD/FPWR the master makes is addressed by that value, so from the
 // master's side the slave silently vanishes: state reads return the last value SOEM happened to
 // cache, and every write lands nowhere.
 //
@@ -1476,9 +1476,9 @@ namespace {
 // touching the rest of the bus.
 //
 // @return true when the slave answers at its configured address (either it never lost it, or it
-//         has just been given it back).
+//         just got it back).
 // Outcome of checking a slave's station address, which decides what the caller must do next: only a
-// slave that had to be re-addressed has also lost the sync managers the master programmed into it.
+// slave that had to be re-addressed also lost the sync managers the master programmed into it.
 enum class AddressState {
   Answering,    ///< Reachable at its configured address; nothing was changed.
   Reassigned,   ///< It had lost the address, and now answers again.
@@ -1620,11 +1620,11 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
   // PDO tick, being lock-free, never contends here).
 
   // A slave sitting in INIT can silently ignore the next state request — staying in INIT with the
-  // error bit clear and AL status code 0x0000 — when its PDI has latched a stale internal state
+  // error bit clear and AL status code 0x0000 — when its PDI latched a stale internal state
   // (e.g. it lost its previous master to a cable unplugged mid-cycle and never cleanly recovered).
   // An explicit INIT+ACK cycle re-engages the PDI before the target state is requested; it is
   // harmless to a healthy slave, which just re-affirms INIT. Only meaningful when leaving INIT, so
-  // skip it when INIT itself is the target. The resend loop below only ACKs slaves that have raised
+  // skip it when INIT itself is the target. The resend loop below only ACKs slaves that raised
   // the error bit, so a cleanly-latched INIT (no error bit) would otherwise never get this kick.
   // Issued under the lock, then released so the slave can settle without the lock held across the
   // sleep.
@@ -1691,7 +1691,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
   auto deadline = std::chrono::steady_clock::now() + timeout;
   auto lastResend = std::chrono::steady_clock::now();
   bool aborted = false;
-  // Slaves whose error bit we have already reported. The AL status code a slave latches the
+  // Slaves whose error bit we already reported. The AL status code a slave latches the
   // instant it raises the error bit is often more specific than the one it settles on by the
   // timeout, so log it once on first sight rather than only at the end.
   std::set<uint16_t> errorReported;
@@ -1820,13 +1820,13 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
           name.empty() ? "unknown — not a known AL status code" : name);
 
       // Say whether the slave is even reachable, because the AL status above cannot: SOEM keeps the
-      // last value it read, so a slave that has stopped answering reports whatever it last said —
+      // last value it read, so a slave that stopped answering reports whatever it last said —
       // indistinguishable from one that is genuinely sitting in that state. The distinction decides
       // what to do next, and nothing else in the log carries it.
       //
       // Two reads. FPRD addresses the slave by the station address the master assigned it; APRD
       // addresses it by position on the wire, which needs no configuration. A slave that answers
-      // the second but not the first has lost its station address — which is what a device reset
+      // the second but not the first lost its station address — which is what a device reset
       // does, and the firmware handover out of BOOT is a reset.
       uint16_t alStatusProbe = 0;
       const int configuredWkc =

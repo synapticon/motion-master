@@ -471,7 +471,7 @@ std::expected<OsCommandResponse, std::string> SomanetDrive::runOsCommand(
   const uint16_t position = device().slavePosition();
   const uint8_t id = command[0];
 
-  // Restores 0x1024 once the master has forced an abort. The drive ignores a write to 0x1023:01
+  // Restores 0x1024 once the master forces an abort. The drive ignores a write to 0x1023:01
   // whenever the mode is non-zero, so a mode left at 3 would make the *next* command look like it
   // ran and return the previous one's response — hence a restore on every path out, not just the
   // successful one.
@@ -490,7 +490,7 @@ std::expected<OsCommandResponse, std::string> SomanetDrive::runOsCommand(
   } modeRestorer;
 
   // Drain any response left unread, because the drive returns to its idle state only when 0x1023:03
-  // has been read. **Both preconditions for accepting a command are made true rather than assumed,
+  // was read. **Both preconditions for accepting a command are made true rather than assumed,
   // and this is the second of them**: a drive still holding an unread response ignores the write to
   // 0x1023:01 exactly as silently as one whose mode is not 0, and then the first poll below reads
   // that *stale* terminal status and reports it as this command's verdict — a failure this command
@@ -1479,7 +1479,7 @@ void to_json(nlohmann::json& j, const KueblerRegisterResult& result) {
                      {"wrote", result.wrote},     {"bytes", result.bytes},
                      {"value", result.value},     {"description", result.describe()}};
   // The register's own metadata, when the vendor's draft documents this address — so a client that
-  // has not fetched /api/meta/kuebler-registers still knows what it just read, and one that has can
+  // never fetched /api/meta/kuebler-registers still knows what it just read, and one that did can
   // see the two agree.
   if (auto known = somanet::findKueblerRegister(result.address)) {
     j["name"] = known->name;

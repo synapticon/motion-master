@@ -33,7 +33,7 @@ TEST(GameLoopCycleGate, RunsNoTaskWhileTheBusIsNotActivated) {
   loop.addTask(&task);
 
   std::thread runner([&loop] { loop.run(); });
-  // Long enough for a 1 ms loop to have executed many cycles had the gate let it.
+  // Long enough for a 1 ms loop to run many cycles, if the gate allowed it.
   std::this_thread::sleep_for(std::chrono::milliseconds(30));
   loop.stop();
   runner.join();

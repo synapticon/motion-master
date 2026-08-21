@@ -279,7 +279,7 @@ std::string_view parameterOriginName(ParameterOrigin origin) {
 DeviceParameterValue DeviceParameter::currentValue() const {
   // Reconstructed rather than stored: dataType is immutable, so the same mapping
   // defaultValueForDataType uses to pick the alternative turns the stored wire bytes back into it.
-  // A decode failure can only mean the stored bytes are too short for the type (nothing has been
+  // A decode failure can only mean the stored bytes are too short for the type (nothing is
   // read yet, or a slave answered short), for which the type's zero is the honest answer.
   if (isScalarDataType(dataType)) {
     // Always the full eight bytes: decodeSdoBytes takes the leading sizeof(T) of them, so one

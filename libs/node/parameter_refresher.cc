@@ -119,7 +119,7 @@ void ParameterRefresher::pollDue() {
 
   // Snapshot the keys due now, then poll each with the lock released — readDeviceParameter does a
   // mailbox upload and must not block acquire/release/trackedCount. Re-find each entry before and
-  // after the poll, since a concurrent release may have erased it in the meantime.
+  // after the poll, since a concurrent release can erase it in the meantime.
   std::vector<uint64_t> dueKeys;
   {
     std::lock_guard<std::mutex> lock(mutex_);

@@ -13,7 +13,7 @@ namespace {
 
 // The two packages committed under tests/data are real Synapticon releases, and between them they
 // cover the shape difference that matters: the Circulo ships an SII and no COM binary, the ACTILINK
-// a COM binary and no SII. A synthetic zip would have been shaped by what this parser expects;
+// a COM binary and no SII. A synthetic zip would take the shape this parser expects;
 // these were shaped by the build that produces them.
 constexpr std::string_view kCirculoPackage =
     "package_SOMANET-Circulo-7_8500-04-2332_motion-drive_v5.6.10.zip";
@@ -310,7 +310,7 @@ TEST(FirmwareCompatibilityTest, TheFieldbusCharacterDecidesTheVerdict) {
 
 TEST(FirmwareCompatibilityTest, ComparesTheWholeDescriptorNotItsParts) {
   // Right hardware, wrong encryption key: the build descriptors agree and the packages do not. A
-  // check on the decoded product id would have accepted this.
+  // check on the decoded product id would accept this.
   auto verdict = checkFirmwareCompatibility(
       kCirculo, "package_SOMANET-Circulo-7_8500-04-9999_motion-drive_v5.6.10.zip");
   ASSERT_TRUE(verdict) << verdict.error();

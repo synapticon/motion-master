@@ -105,13 +105,13 @@ void to_json(nlohmann::json& j, const ProgressStep& step);
 /// miss a result. Only the transient @c kRunning blip on a fast step can be skipped, and it
 /// carries no data.
 ///
-/// A device that has never run the procedure still yields a well-formed snapshot — @c kIdle,
+/// A device that never ran the procedure still yields a well-formed snapshot — @c kIdle,
 /// @c runCount 0, no timestamps, every step @c kIdle from the template — so a client renders one
 /// component with no empty-state special case.
 struct ProcedureSnapshot {
   ProcedureStatus status = ProcedureStatus::kIdle;  ///< The one field a polling loop checks.
 
-  /// @brief How many runs have been *accepted* on this device since the last rescan (a rejected
+  /// @brief How many runs this device *accepted* since the last rescan (a rejected
   ///        start does not count).
   ///
   /// Doubles as a generation counter, which is what makes polling safe without a run id: a run
@@ -134,7 +134,7 @@ struct ProcedureSnapshot {
 };
 void to_json(nlohmann::json& j, const ProcedureSnapshot& snapshot);
 
-/// @brief A well-formed snapshot for a procedure that has never run — idle, no timestamps, and
+/// @brief A well-formed snapshot for a procedure that never ran — idle, no timestamps, and
 ///        every step idle from @p steps.
 ///
 /// @c ProcedureManager cannot produce this — it is only told a step template when a run starts — so

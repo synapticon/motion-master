@@ -556,10 +556,10 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(osCommand),
       // Vendor ID, deliberately, and not createSomanetDrive: that also requires the device's object
-      // dictionary to have been enumerated (its CiA402 check looks for controlword/statusword in
+      // dictionary to be enumerated first (its CiA402 check looks for controlword/statusword in
       // the parameter map), and enumeration is opportunistic — it happens when a device is first
       // seen at PRE-OP. Binding applicability to it would report a genuine drive as having *no*
-      // procedures merely because its OD had not been read yet, which is a wrong answer rather than
+      // procedures merely because nothing read its OD yet, which is a wrong answer rather than
       // a late one. The vendor ID comes from SII at scan time and is always known. Whether the
       // device is also a conformant CiA402 drive stays the body's business, where it fails with a
       // reason.
@@ -1036,7 +1036,7 @@ std::expected<const ProcedureCatalogueEntry*, ProcedureError> applicableEntry(
   return *it;
 }
 
-// The retained snapshot, or the descriptor's all-idle one when the procedure has never run here.
+// The retained snapshot, or the descriptor's all-idle one when the procedure never ran here.
 ProcedureSnapshot snapshotOrIdle(ProcedureManager& procedureManager, uint16_t devicePosition,
                                  const ProcedureDescriptor& descriptor) {
   return procedureManager.snapshot(devicePosition, descriptor.name)

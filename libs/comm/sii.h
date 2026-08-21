@@ -194,7 +194,7 @@ std::expected<SlaveInformationInterface, std::string> parseSii(std::span<const u
 /// This is the guard in front of @c FieldbusDriver::writeSii, and it exists because that write is
 /// the most destructive operation in the stack: a malformed image leaves the slave unidentifiable
 /// until it is re-flashed, and the ESC only reloads the EEPROM on a power cycle, so the damage is
-/// discovered after the point where it could have been undone. Validation is therefore not a
+/// discovered after the point where it could still be undone. Validation is therefore not a
 /// nicety — it is the difference between rejecting a bad file and bricking a drive.
 ///
 /// Deliberately structural rather than semantic: it does not judge whether the vendor ID or the PDO

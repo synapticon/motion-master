@@ -97,7 +97,7 @@ struct StoreParametersConfig {
 
   /// @brief Abandons the confirmation wait; default never stops.
   ///
-  /// It stops the *waiting*, not the store: the "save" signature has already been written and the
+  /// It stops the *waiting*, not the store: the "save" signature is already on the wire and the
   /// device is already writing to flash, so a cancelled call reports that the store was not
   /// confirmed rather than that it did not happen.
   std::stop_token stop{};

@@ -46,7 +46,7 @@ class CyclicTask {
   /// @brief Virtual destructor.
   virtual ~CyclicTask() = default;
 
-  /// @brief Called once per cycle, after process data has been exchanged and
+  /// @brief Called once per cycle, after the exchange of process data and
   ///        device parameters updated.
   ///
   /// Must return before the next cycle deadline.  Blocking here stalls the

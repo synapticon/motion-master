@@ -74,7 +74,7 @@ void ExampleCyclicTask::execute(const mm::core::CycleContext& /*ctx*/) noexcept 
   }
 
   // Rule 3 — read through the cell. This is the live statusword: the RT exchange decoded it into
-  // the cell earlier in this same cycle. nullopt means the object dictionary has not been
+  // the cell earlier in this same cycle. nullopt means the object dictionary is not
   // enumerated, or this is not a CiA402 drive — either way there is nothing to command.
   const auto statusword = drive->value<uint16_t>(cia402::kStatusword, 0);
   if (!statusword) {
@@ -107,7 +107,7 @@ void ExampleCyclicTask::execute(const mm::core::CycleContext& /*ctx*/) noexcept 
   // --- bring the drive up, one step per cycle ------------------------------------------------
 
   // The mode first: enabling in the wrong mode only means the setpoint below is ignored. Ask for
-  // CSV and come back next cycle — the drive reports the change in 0x6061 once it has taken it, so
+  // CSV and come back next cycle — the drive reports the change in 0x6061 once it takes it, so
   // there is nothing to wait on here.
   const auto mode = drive->value<int8_t>(cia402::kModeOfOperationDisplay, 0);
   if (!mode) {

@@ -113,7 +113,7 @@ int main(int argc, char** argv) {
   //
   // Flushing only on warn+ was the first attempt, on the assumption that a crash is preceded by a
   // warning that checkpoints everything buffered before it. That assumption does not hold here:
-  // this codebase's crashes have been memory-corruption segfaults inside SOEM (the re-map FMMU
+  // this codebase's crashes were memory-corruption segfaults inside SOEM (the re-map FMMU
   // overrun, the BOOT -> SAFE-OP mailbox read), which log nothing at all before dying — so the
   // policy dropped exactly the trail into the fault it was meant to preserve.
   //
@@ -406,23 +406,24 @@ int main(int argc, char** argv) {
           },
           // Unset when nothing is running, which is what makes the routes answer 503 rather than
           // ask a client to interpret a status snapshot before every call.
-          .runAutoTuning = autoTuningClient ? HttpServer::AutoTuningRunFn{[&autoTuningClient,
-                                                                           &autoTuningAnswers](
-                                                                              std::string body) {
-            auto reply = autoTuningClient->run(body);
-            // Nothing polls the process, so a call is where its death first shows. Say so
-            // in the server log rather than leaving it in one client's console — but only
-            // on the first failure, because a page that retries would otherwise fill the
-            // log with the same line. A call that succeeds arms it again for the next
-            // outage.
-            if (!reply && autoTuningAnswers.exchange(false)) {
-              spdlog::warn("Auto-tuning stopped answering: {}", reply.error());
-            } else if (reply) {
-              autoTuningAnswers.store(true);
-            }
-            return reply;
-          }}
-                                            : HttpServer::AutoTuningRunFn{},
+          .runAutoTuning =
+              autoTuningClient
+                  ? HttpServer::AutoTuningRunFn{[&autoTuningClient,
+                                                 &autoTuningAnswers](const std::string& body) {
+                      auto reply = autoTuningClient->run(body);
+                      // Nothing polls the process, so a call is where its death first shows. Say so
+                      // in the server log rather than leaving it in one client's console — but only
+                      // on the first failure, because a page that retries would otherwise fill the
+                      // log with the same line. A call that succeeds arms it again for the next
+                      // outage.
+                      if (!reply && autoTuningAnswers.exchange(false)) {
+                        spdlog::warn("Auto-tuning stopped answering: {}", reply.error());
+                      } else if (reply) {
+                        autoTuningAnswers.store(true);
+                      }
+                      return reply;
+                    }}
+                  : HttpServer::AutoTuningRunFn{},
           .autoTuningStatus = [&autoTuningStatus] { return autoTuningStatus; },
           .autoTuningSpec = autoTuningClient ? HttpServer::AutoTuningSpecFn{[&autoTuningClient] {
             return autoTuningClient->spec();

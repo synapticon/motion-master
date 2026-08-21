@@ -509,7 +509,7 @@ TEST(ProcedureManagerBody, SurvivesARescanWhileRunningAndIsCollectedAfterwards) 
   }
   ASSERT_TRUE(finished.load());
 
-  // Now that it has ended, a later sweep collects it: its result belongs to a device set that no
+  // Now that it ended, a later sweep collects it: its result belongs to a device set that no
   // longer exists, which is exactly what the discard rule is for.
   for (int attempt = 0; attempt < 2000; ++attempt) {
     if (!manager.snapshot(1, "flash").has_value()) {

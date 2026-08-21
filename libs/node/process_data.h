@@ -121,7 +121,7 @@ struct ProcessData {
   ///
   /// Outputs come from the parameter's own cell (our current setpoint — always valid); inputs from
   /// the newest recorded cycle (@c ring head()-1), gated on @c healthy(). Returns @c nullopt when
-  /// no image is published, nothing has been recorded yet, the object is not PDO-mapped, its owning
+  /// no image is published, nothing is recorded yet, the object is not PDO-mapped, its owning
   /// parameter is unknown, or (inputs only) the bus is unhealthy — in each case the caller reads it
   /// over SDO instead. Bytes are little-endian and LSB-aligned.
   std::optional<std::vector<uint8_t>> readPdo(uint16_t slavePosition, uint16_t index,

@@ -486,7 +486,7 @@ TEST(RunOsCommand, RestoresTheModeWhenTheAbortIsNeverConfirmed) {
 }
 
 TEST(RunOsCommand, ReadsTheResponseBeforeIssuingSoAStaleOneCannotBeReported) {
-  // The drive returns to idle only once 0x1023:03 has been read, and one still holding an unread
+  // The drive returns to idle only once something reads 0x1023:03, and one still holding an unread
   // response ignores the write to 0x1023:01 as silently as one whose mode is not 0. Without this
   // read the first poll would return the *previous* command's terminal status and it would be
   // reported as this command's verdict — a failure this command never produced.
@@ -498,7 +498,7 @@ TEST(RunOsCommand, ReadsTheResponseBeforeIssuingSoAStaleOneCannotBeReported) {
   driver.responses = {{1, 0, 7, 0, 0, 0, 0, 0}};
   ASSERT_TRUE(drive->runOsCommand(kRequest, {.pollInterval = kNoDelay}).has_value());
 
-  // drainReads only counts reads taken while no command had been written yet, so a non-zero count
+  // drainReads only counts reads taken while no command was written yet, so a non-zero count
   // *is* the ordering assertion: the response was read before the command was issued.
   EXPECT_EQ(driver.drainReads, 1);
   EXPECT_EQ(driver.commandWrites, 1);
@@ -1180,7 +1180,7 @@ TEST(ReadHrdRecording, ReportsThePaddingItDidNotDecode) {
 }
 
 TEST(ReadHrdRecording, SaysWhenTheDeviceHoldsNoRecording) {
-  // A device that has never recorded lists no hr_data file at all, which is a different thing from
+  // A device that never recorded lists no hr_data file at all, which is a different thing from
   // a read that failed — and the message has to say which, because the fix is to record one.
   OsCommandFakeDriver driver;
   Device device = makeOsCommandDevice(driver);

@@ -83,7 +83,7 @@ std::expected<Cia402Status, std::string> transitionToCia402State(
       deviceManager, slavePosition,
       [target, timeout](Cia402Drive& drive) -> std::expected<Cia402Status, std::string> {
         // The override is on: a caller naming Operation Enabled while the drive is in
-        // Quick Stop Active has asked to leave that stop.
+        // Quick Stop Active is asking to leave that stop.
         if (auto r = drive.transitionToState(target, timeout, true); !r) {
           return std::unexpected(r.error());
         }

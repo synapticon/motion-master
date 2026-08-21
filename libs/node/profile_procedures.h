@@ -42,7 +42,7 @@ std::vector<ProgressStep> storeParametersSteps();
 /// within the built-in budget, because a device busy writing to flash may refuse the read outright.
 ///
 /// **Cancellation abandons the wait, not the store.** By the time a run can be cancelled the
-/// signature has been written and the device is already persisting; stopping only means the master
+/// signature is on the wire and the device is already persisting; stopping only means the master
 /// stops waiting for the confirmation, which the step says rather than implying the store was
 /// undone.
 ///

@@ -62,7 +62,7 @@ const std::vector<ProcedureCatalogueEntry>& procedureCatalogue();
 ///        @c GET /api/devices/:pos/procedures.
 ///
 /// The pairing is what lets a per-device page render in a single request instead of one per
-/// procedure, and it is why the snapshot is never absent here: a procedure that has never run
+/// procedure, and it is why the snapshot is never absent here: a procedure that never ran
 /// reports an @c idleSnapshot, so every entry has the same shape.
 struct ProcedureListing {
   ProcedureDescriptor descriptor;
@@ -99,7 +99,7 @@ std::expected<ProcedureSnapshot, ProcedureError> startProcedure(DeviceManager& d
 ///
 /// Cancels the *run*, not the record: the retained snapshot stays behind reporting how far it got.
 ///
-/// @return Void if a run was in flight and has been asked to stop. @c kUnknownProcedure covers both
+/// @return Void if a run was in flight and got the stop request. @c kUnknownProcedure covers both
 ///         an unrecognised name and a recognised one with nothing running — from a client's side
 ///         both mean "there is no run here to cancel".
 std::expected<void, ProcedureError> cancelProcedure(DeviceManager& deviceManager,

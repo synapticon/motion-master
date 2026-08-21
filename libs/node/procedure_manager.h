@@ -146,7 +146,7 @@ class ProcedureManager {
 
   /// @brief The current or last-known state of @p name on @p devicePosition.
   ///
-  /// @return The snapshot, or @c std::nullopt if that procedure has never run on that device since
+  /// @return The snapshot, or @c std::nullopt if that procedure never ran on that device since
   ///         the last rebuild of the device set. (A caller that knows the procedure's step template
   ///         can render an all-idle snapshot itself; the manager does not invent one, because it is
   ///         only told a template when a run starts.)
@@ -158,7 +158,7 @@ class ProcedureManager {
   /// promptly it notices — typically at its next step boundary or poll — after which the run
   /// finishes as @c kCancelled.
   ///
-  /// @return True if a run was in flight and has been asked to stop; false if there was nothing to
+  /// @return True if a run was in flight and got the stop request; false if there was nothing to
   ///         cancel.
   bool cancel(uint16_t devicePosition, std::string_view name);
 
@@ -172,7 +172,7 @@ class ProcedureManager {
     uint32_t runCount = 0;                       ///< Set once at start, under the manager's mutex.
     int64_t startedAt = 0;                       ///< Set once at start, under the manager's mutex.
     /// The device-set generation this run was started against. A retained snapshot is meaningless
-    /// once the set has been rebuilt (positions may remap), so this is what marks it collectable.
+    /// once the set is rebuilt (positions may remap), so this is what marks it collectable.
     uint64_t topologyGeneration = 0;
     std::atomic<ProcedureStatus> status{ProcedureStatus::kRunning};
     std::atomic<int64_t> finishedAt{0};  ///< Epoch ms; 0 while running.

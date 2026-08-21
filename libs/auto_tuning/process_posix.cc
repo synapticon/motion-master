@@ -24,14 +24,14 @@ namespace mm::auto_tuning::detail {
 
 namespace {
 
-/// How often to check whether a signalled child has gone.
+/// How often to check whether a signalled child is gone.
 constexpr std::chrono::milliseconds kReapPollInterval{20};
 
-/// @brief Whether waitpid has already collected the child, so its pid means nothing more.
+/// @brief Whether waitpid already collected the child, so its pid means nothing more.
 bool reaped(std::int64_t pid) {
   int status = 0;
   const pid_t result = waitpid(static_cast<pid_t>(pid), &status, WNOHANG);
-  // 0 means the child exists and has not exited. A pid means it exited and this call reaped it.
+  // 0 means the child exists and did not exit. A pid means it exited and this call reaped it.
   // -1 means there is no such child, which happens when a previous call already reaped it.
   return result != 0;
 }

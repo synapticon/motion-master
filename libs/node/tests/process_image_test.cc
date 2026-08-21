@@ -482,7 +482,7 @@ TEST(CycleGuard, ExchangeDecodesInputsIntoCells) {
 
   const Device* drive = dm.findDevice(1);
   ASSERT_NE(drive, nullptr);
-  // Before the first exchange nothing has been read, so the cells hold the type zero.
+  // Before the first exchange nothing is read, so the cells hold the type zero.
   EXPECT_EQ(drive->value<uint16_t>(0x6041, 0x00), std::optional<uint16_t>{0});
 
   dm.exchangeProcessData();
@@ -776,7 +776,7 @@ TEST(DeviceManagerProcessData, MappingConfiguredAndTornDownReactingToState) {
 
 TEST(DeviceManagerProcessData, SubsetDownKeepsOthersExchangingAndRejoinRemaps) {
   // A subset of the bus can be taken down (firmware download / manual PDO re-map) while the rest
-  // keep exchanging; bringing it back re-maps the whole bus, since its PDO layout may have changed.
+  // keep exchanging; bringing it back re-maps the whole bus, since its PDO layout can differ.
   const auto kTimeout = std::chrono::milliseconds(10);
   auto bus = std::make_unique<FakeBus>();
   programMapping(*bus);  // position-agnostic mapping for both devices
@@ -815,7 +815,7 @@ TEST(DeviceManagerProcessData, SubsetDownKeepsOthersExchangingAndRejoinRemaps) {
 
   // Model device 2 now sitting in PRE-OP, then climb it back to SAFE-OP (PRE-OP -> OP would be an
   // illegal AL jump): rejoining from a non-exchange state re-maps the whole bus (a new image
-  // generation), since its PDO layout may have changed.
+  // generation), since its PDO layout can differ.
   busPtr->slaveStates[2] = static_cast<uint16_t>(EtherCatState::PreOp);
   ASSERT_TRUE(dm.transitionToState({2}, EtherCatState::SafeOp, kTimeout).has_value());
   EXPECT_TRUE(dm.processDataConfigured());
@@ -848,7 +848,7 @@ std::unique_ptr<FakeBus> makeTwoAxisOpBus() {
 
 TEST(DeviceManagerProcessData, DroppingOneDeviceIsNotCountedAsABusFault) {
   // A drop that leaves another device exchanging keeps the image published, so the RT loop runs
-  // for the whole multi-second transition — during which the dropping device has already stopped
+  // for the whole multi-second transition — during which the dropping device already stopped
   // answering. The expectation must come down before the drop is commanded, or every one of those
   // cycles is counted against the bus and reported as a fault the user caused deliberately.
   const auto kTimeout = std::chrono::milliseconds(10);
@@ -898,7 +898,7 @@ TEST(DeviceManagerProcessData, ADropAndAClimbInOneCallDoNotNetOut) {
   dm.exchangeProcessData();
   ASSERT_EQ(dm.processImageInfo().shortWkcCycles, 0u);
 
-  // Device 1 leaves at once; device 2 has not arrived yet, so the bus answers 1 for most of the
+  // Device 1 leaves at once; device 2 is not there yet, so the bus answers 1 for most of the
   // transition and only reaches 2 at the end.
   busPtr->whileTransitioning = [&] {
     busPtr->slaveStates[1] = static_cast<uint16_t>(EtherCatState::SafeOp);
@@ -953,7 +953,7 @@ TEST(DeviceManagerProcessData, FailedObjectDictionaryReadIsAttemptedOncePerScan)
 
 TEST(DeviceManagerProcessData, CountsCyclesTheBusDidNotFullyAnswer) {
   // The other half of the same rule: with no transition in play, a working counter below the
-  // expectation is a real fault and must be recorded — including after it has cleared, which is
+  // expectation is a real fault and must be recorded — including after it clears, which is
   // the whole reason the count exists beside the point-in-time `healthy` flag.
   auto bus = makeTwoAxisOpBus();
   FakeBus* busPtr = bus.get();

@@ -56,7 +56,7 @@ TEST(CyclicTimerTest, SkipsBacklogAfterStall) {
   // to replay the missed cycles. So we only assert a lower bound — that it did
   // skip several grid points. We deliberately do NOT bound it from above: a
   // loaded CI runner can overshoot both the sleep and the alignment wait wildly
-  // (a macOS runner has turned this 10 ms stall into ~90 ms → 47 skips), and the
+  // (a macOS runner turned this 10 ms stall into ~90 ms → 47 skips), and the
   // skip count is measured from the timer's internal deadline, so no wall-clock
   // figure sampled here is a reliable ceiling. That the timer re-syncs afterward
   // instead of staying perpetually behind is covered by ResyncsAfterStall.

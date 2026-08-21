@@ -134,7 +134,7 @@ std::string esiUnitSymbol(uint32_t unit, std::span<const UnitType> local) {
 
   // 0x00B44700 composes literally to "Revolution/min". Every drive vendor writes that value
   // meaning rotational speed, and "rpm" is what a user expects to read, so collapse it. This is
-  // the one composition special-cased; note it is *not* applied when a dictionary has redefined
+  // the one composition special-cased; note it is *not* applied when a dictionary redefines
   // either byte locally, since then the composition means whatever that dictionary says.
   const bool overridden = std::any_of(local.begin(), local.end(), [&parts](const UnitType& u) {
     return u.notationIndex == parts.numerator || u.notationIndex == parts.denominator;

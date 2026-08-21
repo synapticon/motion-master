@@ -566,7 +566,7 @@ class Cia402Drive : public ProfileDevice {
 ///
 /// @param device  Device to view. The reference must outlive the returned view.
 /// @return A @c Cia402Drive bound to @p device, or an error string if it is not a CiA402 drive
-///         (or its parameters have not been initialised).
+///         (or its parameters are not initialised).
 std::expected<Cia402Drive, std::string> createCia402Drive(Device& device);
 
 }  // namespace mm::node

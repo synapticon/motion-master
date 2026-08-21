@@ -287,7 +287,7 @@ struct SlaveDiagnostics {
 ///
 /// The reference clock (the first DC-capable slave) defines bus time; every other DC slave
 /// continuously corrects its local clock toward it. @c systemTimeDifference is the live
-/// deviation: it converges toward zero once the bus has been exchanging process data long
+/// deviation: it converges toward zero once the bus exchanges process data for long
 /// enough for the slaves' drift-compensation loops to settle, and a value that stays large or
 /// grows means a slave is not locked to the reference. The figure is only meaningful while the
 /// bus is exchanging in SAFE-OP/OP, since the master distributes the reference time in the

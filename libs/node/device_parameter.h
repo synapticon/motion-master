@@ -246,7 +246,7 @@ struct DeviceParameter {
   /// @c int32_t for an INTEGER32 object, @c uint8_t for a BOOLEAN — and a mismatch, or a
   /// non-scalar parameter, reads as @c nullopt rather than as a wrong number.
   ///
-  /// A parameter that has never been written reads as zero, not @c nullopt: @c syncState is where
+  /// A parameter never written reads as zero, not @c nullopt: @c syncState is where
   /// "never read" is recorded, and a control loop wants a number it can act on.
   template <typename T>
   std::optional<T> scalar() const {

@@ -83,7 +83,7 @@ std::expected<Monitoring, std::string> MonitoringManager::create(Monitoring conf
   for (const auto& p : config.parameters) {
     auto plan = classify(p);
     if (!plan) {
-      // Not sourceable yet. If this device's object dictionary has not been enumerated, read it
+      // Not sourceable yet. If this device's object dictionary is not enumerated, read it
       // once (the "read parameters" step, done implicitly) and retry — a PDO object then resolves
       // its data type and an SDO object its entry. A device that is already enumerated has a
       // non-empty map and is skipped, so a genuinely-absent object errors immediately instead of
@@ -327,7 +327,7 @@ void MonitoringManager::flushDetached(FlushState& state, const PublishFn& publis
   if (head == state.cursor) {
     return;  // no new cycles recorded since the last flush (bus idle / not exchanging)
   }
-  // Resync a cursor that has fallen outside the live recorded span [oldest, head). Two causes:
+  // Resync a cursor that fell outside the live recorded span [oldest, head). Two causes:
   //   - it fell more than a whole ring behind (cursor < oldest): those cycles were overwritten
   //     before we read them.
   //   - a layout-changing re-map re-allocated the recorder ring, resetting head to a fresh, smaller

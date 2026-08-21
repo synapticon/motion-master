@@ -47,7 +47,7 @@ bool isMacAddress(const std::string& s);
 
 /// @brief Normalises a MAC address string to uppercase with the given separator.
 ///
-/// Extracts the six hex-octet pairs from @p raw (which must have passed
+/// Extracts the six hex-octet pairs from @p raw (which must pass
 /// @c isMacAddress()) and rebuilds the string in uppercase with @p sep as the
 /// field delimiter.
 /// @param raw  Source MAC string (colon- or dash-separated, any case).

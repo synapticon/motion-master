@@ -47,7 +47,7 @@ void to_json(nlohmann::json& j, const DeviceStateInfo& info);
 ///
 /// A flattened, API-facing view of a @c ProcessImageEntry: the raw entry plus the textual
 /// name looked up from the owning device's parameter map (empty when the object dictionary
-/// has not been enumerated for that device).
+/// is not enumerated for that device).
 struct ProcessImageObjectInfo {
   uint16_t slavePosition = 0;  ///< 1-based bus position of the owning device.
   uint16_t index = 0;          ///< CoE object index.
@@ -61,7 +61,7 @@ struct ProcessImageObjectInfo {
 ///
 /// Built on the calling (non-RT) thread by @c DeviceManager::processImageInfo. When an image is
 /// live (@c configured true) the layout describes it. When no image is published (@c configured
-/// false) but generations have been mapped since the last reset(), the byte sizes and object
+/// false) but generations were mapped since the last reset(), the byte sizes and object
 /// lists describe the most recent retained generation — the last-known layout — so a bus that has
 /// dropped out of SAFE-OP/OP remains inspectable; @c lastWkc then holds the final exchange value
 /// while @c expectedWkc reflects the now-idle bus. The lists are empty only before any image has
@@ -74,7 +74,7 @@ struct ProcessImageInfo {
   int lastWkc = 0;           ///< Working counter from the most recent exchange (0 before any).
   bool healthy = false;      ///< Whether the last working counter meets the expected value.
   /// Cycles that answered short since the bus came up. @c healthy is a sample and can miss
-  /// a fault that has already cleared; this cannot.
+  /// a fault that already cleared; this cannot.
   uint64_t shortWkcCycles = 0;
   uint64_t firstShortWkcUs = 0;  ///< Epoch microseconds of the first such cycle (0 if none).
   uint64_t lastShortWkcUs = 0;   ///< Epoch microseconds of the most recent one (0 if none).
@@ -333,8 +333,8 @@ class DeviceManager {
   /// is running concurrently.
   void reset();
 
-  /// @brief Whether a driver is currently held (i.e. @c init() has succeeded and
-  ///        @c reset() has not since been called). Thread-safe.
+  /// @brief Whether a driver is currently held: @c init() succeeded, and no @c reset()
+  ///        followed it. Thread-safe.
   bool initialised() const;
 
   /// @brief Whether a device holds @p slavePosition. Thread-safe; no bus access.
@@ -352,8 +352,9 @@ class DeviceManager {
   /// no lock is held either way.
   ///
   /// A @c scan that lands while you hold one publishes a *new* set. Your device keeps working, and
-  /// its next bus transaction fails against hardware that has moved or gone. That is the intended
-  /// outcome: a rescan never waits for a procedure, and a procedure never reads freed memory.
+  /// its next bus transaction fails against hardware that moved, or that is no longer there. That
+  /// is the intended outcome: a rescan never waits for a procedure, and a procedure never reads
+  /// freed memory.
   ///
   /// @code
   /// const auto device = deviceManager.deviceAt(slavePosition);
@@ -459,7 +460,7 @@ class DeviceManager {
   /// as for @c init / @c reset (see the @c exchangeProcessData warning).
   ///
   /// @return Void on success, or an error string if no driver is initialised, no devices
-  ///         have been discovered, the driver mapping fails, a device's mapping cannot be
+  ///         were discovered, the driver mapping fails, a device's mapping cannot be
   ///         read, or the assembled image is inconsistent with the driver layout.
   std::expected<void, std::string> configureProcessData();
 
@@ -469,7 +470,7 @@ class DeviceManager {
   /// @c FieldbusDriver::exchangeProcessData, appends the cycle (both directions) to the recorder
   /// ring for non-RT readers, and decodes every mapped input back into its own cell — which is what
   /// makes @c Device::value<T>() a single atomic load rather than an image lookup.  No-op until
-  /// @c configureProcessData has published an image, so the GameLoop can call it unconditionally
+  /// @c configureProcessData published an image, so the GameLoop can call it unconditionally
   /// every cycle.  Runs on the RT thread and takes no lock.
   ///
   /// @warning @c exchangeProcessData() runs on the RT GameLoop thread while @c init(),
@@ -480,13 +481,13 @@ class DeviceManager {
   ///          before it mutates, so no caller has to stop the loop first.
   void exchangeProcessData();
 
-  /// @brief Whether @c configureProcessData has published a process image for exchange.
+  /// @brief Whether @c configureProcessData published a process image for exchange.
   bool processDataConfigured() const;
 
   /// @brief Monotonic counter bumped every time a new process image is published (each (re)map).
   ///
   /// A consumer that captured per-object layout (bit offsets/lengths) from the image compares
-  /// this on each use: a change means the bus was re-mapped and offsets may have shifted, so the
+  /// this on each use: a change means the bus was re-mapped and the offsets can differ, so the
   /// captured layout must be refreshed. Lock-free (atomic). Distinct from @c topologyGeneration
   /// (scan/reset), which signals the device set itself changed.
   uint64_t processImageGeneration() const;
@@ -512,7 +513,7 @@ class DeviceManager {
   /// @brief Snapshots the published process image and its runtime health for the API.
   ///
   /// Resolves every mapped object to an absolute bit offset and a name (looked up from each
-  /// device's parameter map, empty if the OD has not been enumerated) and reports the byte
+  /// device's parameter map, empty if the OD is not enumerated) and reports the byte
   /// sizes, expected/last working counter, health, and the number of retained image
   /// generations. Returns @c configured false with empty object lists when no image is
   /// published. Runs on the (non-RT) caller's thread; reads the published image lock-free.
@@ -526,7 +527,7 @@ class DeviceManager {
   /// offline. Works in any state: while exchanging (OP/SAFE-OP) it dumps tail→head at that moment
   /// and ignores cycles the producer records afterwards; after teardown it uses the most recent
   /// retained image generation. The header objects' names/data types come from each device's
-  /// parameter map (empty/0 when the object dictionary has not been enumerated).
+  /// parameter map (empty/0 when the object dictionary is not enumerated).
   ///
   /// The file is written to the configured @c recorderDumpDir (created if absent); an empty
   /// @c recorderDumpDir (the default) resolves to a @c "dumps" subdirectory of the per-user cache
@@ -572,7 +573,7 @@ class DeviceManager {
   /// @param targetState  Desired EtherCAT AL state.
   /// @param timeout      Maximum time to wait for all devices.
   /// @return The final state snapshot of each targeted device (in the order targeted), or an
-  ///         error string if no driver is initialised, no devices have been discovered, or the
+  ///         error string if no driver is initialised, no devices were discovered, or the
   ///         final state read-back fails.
   std::expected<std::vector<DeviceStateInfo>, std::string> transitionToState(
       const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
@@ -777,7 +778,7 @@ class DeviceManager {
                                              uint8_t subindex) const;
 
   /// @brief The recorder ring's next sequence number; @c recorderHead()-1 is the newest recorded
-  ///        cycle and @c recorderHead()==0 means nothing has been recorded yet.
+  ///        cycle and @c recorderHead()==0 means nothing is recorded yet.
   ///
   /// A monitoring holds a read cursor and ships every record in @c [cursor, recorderHead()) per
   /// flush, advancing the cursor — a non-destructive reader that never gates the RT producer.
@@ -791,7 +792,7 @@ class DeviceManager {
   uint64_t recorderHead() const;
 
   /// @brief The oldest sequence number still present in the ring (@c max(0, head - capacity)).
-  ///        A cursor below this has been lapped (overwritten) and must resync to it. Thread-safe
+  ///        A cursor below this was lapped (overwritten) and must resync to it. Thread-safe
   ///        on the same terms as @c recorderHead.
   uint64_t recorderOldestSeq() const;
 
@@ -883,7 +884,7 @@ class DeviceManager {
   ///
   /// Called *before* commanding a drop, and it is what keeps a deliberate transition from being
   /// counted as a bus fault. A device commanded out of OP stops answering the moment it leaves,
-  /// while @c updateExpectedWkc only runs once the transition has settled — so without this the RT
+  /// while @c updateExpectedWkc only runs once the transition settles — so without this the RT
   /// loop spends the whole multi-second transition comparing the bus against an expectation that
   /// still includes a device we told to stop, and @c shortWkcCycles fills up with our own doing.
   ///
@@ -904,7 +905,7 @@ class DeviceManager {
   /// @brief Publishes @p set as the current generation. Call with @c busOperationMutex_ held.
   ///
   /// Hands the RT thread the raw pointer, then swaps the shared pointer readers copy — which is
-  /// what drops the previous set. The caller must have drained the RT cycle first (@c
+  /// what drops the previous set. The caller must drain the RT cycle first (@c
   /// stopExchange), so no cyclic task is inside a @c CycleGuard reading the set being dropped.
   void publishDeviceSet(std::shared_ptr<DeviceSet> set);
 
@@ -939,7 +940,7 @@ class DeviceManager {
   // What a failed drain held back. When @c stopExchange times out, the RT thread is still inside a
   // cycle and may be reading a device set, a process image or a parameter map that the operation
   // was about to release — so the operation keeps it here instead of freeing it, and the next
-  // successful drain clears the list. Empty unless a drain has failed, which is an emergency and is
+  // successful drain clears the list. Empty unless a drain failed, which is an emergency and is
   // logged.
   std::vector<std::shared_ptr<const void>> abandoned_;
 

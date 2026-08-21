@@ -224,7 +224,7 @@ TEST(RunStoreParametersProcedure, FailsTheStepWhenTheDeviceNeverConfirms) {
 
 TEST(RunStoreParametersProcedure, CancellingAbandonsTheWaitButTheCommandWasAlreadyWritten) {
   // The distinction the procedure has to report honestly: by the time a run can be cancelled the
-  // signature has gone out, so the device may store anyway. A cancel stops the master waiting.
+  // signature is already out, so the device may store anyway. A cancel stops the master waiting.
   CommandFakeDriver driver;
   Device device = makeDevice(driver, kStoreParameters, 1);
   driver.neverConfirm = true;

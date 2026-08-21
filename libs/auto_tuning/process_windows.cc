@@ -125,7 +125,7 @@ std::expected<Child, std::string> spawnChild(const std::filesystem::path& binary
                      CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &startup, &info);
   const DWORD error = GetLastError();
   if (log != INVALID_HANDLE_VALUE) {
-    // The child holds its own copy of the handle, so this one has done its job either way.
+    // The child holds its own copy of the handle, so this one did its job either way.
     CloseHandle(log);
   }
   if (created == FALSE) {
@@ -155,7 +155,7 @@ bool childAlive(const Child& child) {
   }
   auto handle = reinterpret_cast<HANDLE>(child.handle);
   // A zero wait is a test, not a wait. WAIT_TIMEOUT means the process is still running; anything
-  // else means it has exited, and the handle is what keeps its exit status readable, so there is no
+  // else means it exited, and the handle is what keeps its exit status readable, so there is no
   // process id to reissue while we hold it.
   return WaitForSingleObject(handle, 0) == WAIT_TIMEOUT;
 }
@@ -183,7 +183,7 @@ bool terminateChild(const Child& child, std::chrono::milliseconds grace) {
     CloseHandle(job);
   }
   // Always a kill here. Windows has no signal for the program to handle, so there is no gentler
-  // step for this function to have tried.
+  // step for this function to try.
   return true;
 }
 

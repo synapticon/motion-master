@@ -357,7 +357,7 @@ TEST(MonitoringManagerTest, FlushPublishesEveryRecordedCycleAsPositionalRows) {
 
 TEST(MonitoringManagerTest, RemapResyncsCursorPastHeadInsteadOfUnderflowing) {
   // A layout-changing re-map re-allocates the recorder ring, restarting the sequence at 0. A
-  // monitoring whose cursor had advanced past that fresh head must resync to the oldest record
+  // monitoring whose cursor advanced past that fresh head must resync to the oldest record
   // rather than evaluating the unsigned head - cursor (which underflows into an ~18-quintillion
   // rows.reserve() that aborts the whole process). Regression for the crash hit while transitioning
   // a device into OP with a live monitoring: the re-map reset head below the monitoring's cursor.

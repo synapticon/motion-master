@@ -33,7 +33,7 @@ constexpr uint32_t kCommandComplete = 1;
 // or a transient mailbox read error while the device is busy, both handled alike — up to @p retries
 // times, @p interval apart. @p label names the operation for the failure message.
 //
-// @p stop abandons the *wait*, which is all it can abandon: the signature has already been written
+// @p stop abandons the *wait*, which is all it can abandon: the signature is already on the wire
 // and the device is already acting on it. It is checked between sleeps, so a cancel lands within
 // one settle or interval rather than at the end of the whole budget.
 std::expected<void, std::string> runSignatureConfirmCommand(

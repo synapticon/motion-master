@@ -155,7 +155,7 @@ TEST_F(UserCacheTest, RemoveOfAMissingPathReportsFalseNotAnError) {
 // The three truncation cases are not hypothetical. Before the control-character and trailing
 // dot/space guards, `resolve("..\0")` returned `<root>/..` — accepted by the ".." check as a
 // three-byte component, then truncated back to ".." by the C string every OS path API takes. Since
-// that path *is* a directory, `remove` would have reached `fs::remove_all` on the cache's parent
+// that path *is* a directory, `remove` would reach `fs::remove_all` on the cache's parent
 // (`~/.cache` on a default install). ".. " and "..." are the same escape via Win32's habit of
 // stripping trailing dots and spaces before resolving a component.
 TEST_F(UserCacheTest, ResolveRejectsEscapingAndMalformedPaths) {

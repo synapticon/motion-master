@@ -86,7 +86,7 @@ class UserCache {
   ///
   /// Directories are not listed in their own right — only the files they contain, each with its
   /// full relative path — so a client renders one flat table and needs no tree walk. A root that
-  /// does not exist yet is an empty listing, not an error (nothing has been uploaded).
+  /// does not exist yet is an empty listing, not an error (nothing is uploaded yet).
   ///
   /// Entries are sorted by path so the listing is stable across calls and platforms (directory
   /// iteration order is not).
@@ -132,7 +132,7 @@ class UserCache {
   /// @param relPath Path relative to the root, as it appears in @c list.
   void retain(std::string relPath);
 
-  /// @brief Whether @p relPath has been @c retain'd, and so will be refused by @c remove.
+  /// @brief Whether @c retain covers @p relPath, and so will be refused by @c remove.
   ///
   /// Exposed so a caller can classify the refusal without matching on the message @c remove
   /// returns. Purely lexical, like @c resolve — it compares names and does not touch the disk.
@@ -140,7 +140,7 @@ class UserCache {
 
  private:
   std::filesystem::path root_;
-  /// Paths @c retain has been told about. Small and fixed after startup, so a flat set is right.
+  /// Paths @c retain named. Small and fixed after startup, so a flat set is right.
   std::set<std::string, std::less<>> retained_;
 };
 

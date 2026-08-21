@@ -200,7 +200,7 @@ std::vector<ProgressStep> icMuCalibrationModeSteps();
 /// Prepares nothing and moves nothing, like @c runEncoderRegisterProcedure — the command needs
 /// only an active mailbox — but it differs from every other procedure here in one way worth
 /// stating plainly: **it has no restore.** Configuration and raw are modes an encoder is left in,
-/// so a run that puts one there has changed how the drive reads position until another run puts it
+/// so a run that puts one there changes how the drive reads position until another run puts it
 /// back to standard.
 ///
 /// @param device   Device to run against, borrowed by the manager for this call.
@@ -383,7 +383,7 @@ std::expected<void, std::string> runVelocitySourceProcedure(Device& device,
 ///        key.
 inline constexpr std::string_view kFirmwareLatencyProcedure = "firmware-latency-measurement";
 
-/// @brief The step that starts a measurement — clearing whatever the latency had recorded.
+/// @brief The step that starts a measurement, and clears whatever the latency recorded.
 inline constexpr std::string_view kFirmwareLatencyStartStep = "start-measurement";
 
 /// @brief The step that lets the drive run while the measurement collects. Occupies the whole
@@ -836,7 +836,7 @@ std::vector<ProgressStep> motorPhaseOrderDetectionSteps();
 /// writes the detected order into 0x2003:05 itself, so there is nothing to save afterwards — and
 /// nothing to undo either: the restore puts back the mode and the brake, not the phase order,
 /// because the new value *is* the result the run was for. It is also a prerequisite: commutation
-/// offset measurement requires that this has been run.
+/// offset measurement requires that this ran first.
 ///
 /// **The command rotates the rotor**, so the shaft must be free and its load safe to move.
 ///
@@ -885,7 +885,7 @@ std::vector<ProgressStep> offsetDetectionSteps();
 ///
 /// **What it does not do is store the measurements.** Commands 7, 8 and 9 report a value without
 /// writing it (unlike 4 and 5, which the firmware stores itself), and the objects it would belong
-/// in — 0x2003:01, :03 and :04 — hold their values in units this code has not confirmed against the
+/// in — 0x2003:01, :03 and :04 — hold their values in units this code never confirmed against the
 /// firmware. Writing an unverified scaling into a motor's configuration is worse than reporting the
 /// number and letting the caller place it.
 ///
@@ -926,8 +926,8 @@ std::vector<ProgressStep> commutationOffsetMeasurementSteps();
 /// detection (4) lives in @c runOffsetDetectionProcedure, which runs the whole commissioning
 /// sequence; running the two on their own is the caller's to sequence.
 ///
-/// **Command 5 is only meaningful once the phase order is established, and the drive does not check
-/// that it has been.** An offset measured against an unknown phase order is simply wrong, and
+/// **Command 5 is only meaningful once the phase order is established, and the drive does not
+/// verify that.** An offset measured against an unknown phase order is simply wrong, and
 /// nothing here can tell the difference — 0x2003:05 holds a valid value either way, so there is no
 /// "never established" to detect. Run motor phase order detection first, or run offset detection.
 ///

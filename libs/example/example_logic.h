@@ -36,7 +36,7 @@ void to_json(nlohmann::json& j, const DeviceSummary& summary);
 /// @brief Builds a summary row for every device currently known to @p deviceManager.
 ///
 /// Pure read-only domain logic — no HTTP, no I/O — so it is unit-testable against a
-/// @c DeviceManager with no live bus (returns an empty vector when nothing has been scanned).
+/// @c DeviceManager with no live bus (returns an empty vector when nothing is scanned yet).
 std::vector<DeviceSummary> summarizeDevices(const mm::node::DeviceManager& deviceManager);
 
 }  // namespace mm::example

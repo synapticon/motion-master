@@ -49,7 +49,7 @@ std::expected<Child, std::string> spawnChild(const std::filesystem::path& binary
 
 /// @brief Whether @p child is still running.
 ///
-/// **This reaps a child that has exited**, which is how the exit is detected at all, and it is why
+/// **This reaps a child that exited**, which is how the exit is detected at all, and it is why
 /// only @c Process::start calls it: a reaped process id may be reissued to an unrelated process, so
 /// the caller must forget the child as soon as this returns false.
 bool childAlive(const Child& child);

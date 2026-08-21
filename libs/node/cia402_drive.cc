@@ -68,7 +68,7 @@ constexpr auto kPollStep = std::chrono::milliseconds(1);
 // How long a fault reset is given to take effect before the fault is called unclearable. Generous
 // against the two process-data cycles it actually needs, because the cost of being wrong is
 // asymmetric: waiting 200 ms too long is nothing, while giving up too early reports a drive that
-// recovered as one that did not — and sends someone looking for a fault cause that has gone.
+// recovered as one that did not — and sends someone looking for a fault cause that is gone.
 constexpr auto kFaultResetGrace = std::chrono::milliseconds(200);
 
 // How long to leave controlword bit 7 low before raising it again, when a previous reset left it
@@ -77,7 +77,7 @@ constexpr auto kFaultResetGrace = std::chrono::milliseconds(200);
 // cycle rather than the 1 ms default, since being early here costs the whole reset.
 constexpr auto kEdgeSettle = std::chrono::milliseconds(10);
 
-// Names the one explanation a bare timeout hides: a drive whose control service has stopped.
+// Names the one explanation a bare timeout hides: a drive whose control service stopped.
 //
 // The signature is narrow on purpose — a command was issued and the statusword did not move *once*
 // across the whole walk. An ordinary timeout has the statusword changing as the drive steps through
@@ -272,7 +272,7 @@ std::expected<void, std::string> Cia402Drive::faultReset() {
   // last-writer-wins and the drive sees no edge either. Waiting a poll between them is what makes
   // the edge reach the wire.
   //
-  // In the ordinary case — a drive that has just faulted out of OperationEnabled, controlword
+  // In the ordinary case — a drive that just faulted out of OperationEnabled, controlword
   // 0x000F — bit 7 is already low and this is one write, as before.
   auto current = controlword();
   if (!current) {
@@ -304,7 +304,7 @@ std::expected<void, std::string> Cia402Drive::transitionToState(cia402::State ta
                     cia402::toString(target)));
   }
 
-  // Whether a fault reset has already been issued this walk. A drive that stays in Fault after one
+  // Whether this walk already issued a fault reset. A drive that stays in Fault after one
   // is a drive whose fault cause is still present — the firmware refuses transition 15 while the
   // error is still reported — so saying so beats spending the whole timeout re-asserting bit 7.
   // When a fault reset was issued, so the drive can be given time to act on it. A reset is not
@@ -315,12 +315,12 @@ std::expected<void, std::string> Cia402Drive::transitionToState(cia402::State ta
 
   // Targeting a quick stop the drive does not hold: 0x605A codes 0-4 end it in SwitchOnDisabled, so
   // that is where such a walk arrives. Read once, before anything is issued — reading it later
-  // would mean reading it after the state it decides has already come and gone. A drive that will
+  // would mean reading it after the state it decides already came and went. A drive that will
   // not answer is treated as not holding, which is the reading that terminates.
   bool quickStopIssued = false;
 
   // The first statusword seen, and whether any later one differed. A drive whose control service
-  // has stopped is the case this exists to name: it keeps accepting controlword writes — the ESC
+  // stopped is the case this exists to name: it keeps accepting controlword writes — the ESC
   // and the object dictionary are fine — while nothing steps the state machine, so the statusword
   // never moves. Nothing at the EtherCAT level shows it either; the AL state stays OP with no
   // error, which is why a timeout alone sends people looking at the bus.
@@ -374,7 +374,7 @@ std::expected<void, std::string> Cia402Drive::transitionToState(cia402::State ta
           if (faultResetAt &&
               std::chrono::steady_clock::now() - *faultResetAt >= kFaultResetGrace) {
             // The firmware refuses transition 15 while the error is still reported, so a drive
-            // that stayed in Fault through a reset has a cause that has not gone away. 0x603F is
+            // that stayed in Fault through a reset has a cause that is still there. 0x603F is
             // the profile's own account of it — the vendor's fuller one lives outside this view.
             auto reason = std::string(
                 "the drive is still in Fault after a fault reset, so its cause is still present");

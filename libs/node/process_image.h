@@ -51,7 +51,7 @@ struct ProcessImageEntry {
   /// Valid for as long as the image generation is: @c initializeParameters replaces the parameter
   /// map, and @c scan / @c reset destroy the @c Device — but both pause the RT cycle across the
   /// change (@c ProcessData::pauseCycle), and a re-map rebuilds every entry here. @c nullptr when
-  /// the object dictionary had not been enumerated at build time, which is legal: the object is
+  /// the object dictionary was not enumerated at build time, which is legal: the object is
   /// still exchanged, it simply has nowhere to decode into.
   ///
   /// Const because the cell is written through @c DeviceParameter::storeBits, which is itself const

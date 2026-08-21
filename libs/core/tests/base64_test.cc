@@ -49,7 +49,7 @@ TEST(Base64Test, RoundTripsEveryByteValueAcrossManyBlocks) {
   EXPECT_EQ(*decoded, data);
 }
 
-// A payload that has been through a PEM-shaped tool arrives wrapped; that must still decode.
+// A payload that went through a PEM-shaped tool arrives wrapped; that must still decode.
 TEST(Base64Test, ToleratesLineBreaks) {
   auto decoded = base64Decode("Zm9v\nYmFy\n");
   ASSERT_TRUE(decoded) << decoded.error();

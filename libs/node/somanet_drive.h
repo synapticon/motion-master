@@ -98,7 +98,7 @@ enum class CommutationOffsetMethod : uint8_t {
   kRotating = 0,
 
   /// Rotates the rotor only a few electrical degrees and holds the load, but **requires the
-  /// Kp/Ki/Kd gains in 0x2009:04-06 to have been tuned**; intended for the prototype phase. How
+  /// Kp/Ki/Kd gains in 0x2009:04-06 to be tuned already**; intended for the prototype phase. How
   /// few depends entirely on the quality of that tuning, and the firmware documentation quotes two
   /// different figures for a well-tuned controller — "less than 5 degrees" in prose, "less than 20
   /// electrical degrees" in its comparison table — so treat either as an order of magnitude rather
@@ -1365,9 +1365,9 @@ void to_json(nlohmann::json& j, const KueblerRegisterResult& result);
 /// (the DCS/MCS alignment offset for @c kSetpoint, the estimated upstream processing time for
 /// @c kFeedback), which is why it travels with the latency it belongs to rather than on its own.
 ///
-/// **Both are zero on a drive that has not measured anything**, which is indistinguishable from a
+/// **Both are zero on a drive that never measured anything**, which is indistinguishable from a
 /// genuine zero: the firmware records a value only while the measurement is enabled, and nothing
-/// reports whether it is. A zero pair means "no measurement has run", in practice.
+/// reports whether it is. A zero pair means "no measurement ran", in practice.
 struct FirmwareLatencyResult {
   somanet::FirmwareLatency latency{somanet::FirmwareLatency::kSetpoint};  ///< Which latency.
 
@@ -1421,7 +1421,7 @@ class SomanetDrive : public Cia402Drive {
   /// are easy to break by "tidying" it:
   /// - **Only reading 0x1023:03 re-arms 0x1023:01.** The status byte is mirrored in 0x1023:02, but
   ///   reading *that* does not make the command object writable again — the drive returns to its
-  ///   idle state only once the response has been read — so a command is never polled through
+  ///   idle state only once something reads the response — so a command is never polled through
   ///   0x1023:02, and 0x1023:03 is read even when its payload is not wanted.
   /// - **0x1024 must be 0 for a command to be accepted**, and a write to 0x1023:01 while it is not
   ///   is *silently ignored* rather than refused. That would make the next poll read the previous
@@ -1470,7 +1470,7 @@ class SomanetDrive : public Cia402Drive {
   /// for restoring a previously captured status, where the point is to write exactly what was read.
   std::expected<void, std::string> setBrakeStatus(somanet::BrakeStatus status);
 
-  /// @brief Releases (disengages) the brake and waits for it to have done so.
+  /// @brief Releases (disengages) the brake, then waits for the release to finish.
   ///
   /// Writes @c kDisengaged to 0x2004:07, then waits the drive's pull time (0x2004:03) plus @p
   /// settle before returning, because the firmware blocks motion — and motion-related OS commands —
@@ -1489,7 +1489,7 @@ class SomanetDrive : public Cia402Drive {
   /// exactly why a diagnostics procedure has to call this at all.
   ///
   /// **On a pin brake (@c kPin) this moves the shaft.** The controller raises current progressively
-  /// until the load has lifted off the pin by the minimum displacement (0x2004:08), reversing
+  /// until the load lifts off the pin by the minimum displacement (0x2004:08), reversing
   /// direction if it reaches the current ceiling (0x2004:09, a percentage of rated current) first.
   /// Releasing a brake is not electrically passive on that strategy.
   ///
@@ -1615,7 +1615,7 @@ class SomanetDrive : public Cia402Drive {
   ///
   /// Needs no preparation — no diagnostics mode, no Operation Enabled, no brake, and nothing moves
   /// — only an active mailbox. What the *data* is worth does depend on preparation elsewhere: see
-  /// @c somanet::HrdData, whose two selections each require another command to have run first.
+  /// @c somanet::HrdData, whose two selections each require another command to run first.
   ///
   /// @param data      Which signal the recording should capture.
   /// @param duration  How long to record for; at most @c somanet::maxHrdStreamDuration(data).
@@ -1769,7 +1769,7 @@ class SomanetDrive : public Cia402Drive {
   /// Determines whether the motor's phases are wired normally or inverted, by turning the rotor and
   /// comparing which way the sensor angle moves. **A successful run reconfigures the drive**: the
   /// firmware writes the detected order into 0x2003:05 itself, which is the point of running it —
-  /// commutation offset measurement (command 5) requires it to have been done.
+  /// commutation offset measurement (command 5) requires it to run first.
   ///
   /// Preconditions, all enforced by the drive refusing with OS error 251: operation mode
   /// @c somanet::OperationMode::kDiagnostics, CiA402 state Operation Enabled, no limit switch
@@ -1808,10 +1808,10 @@ class SomanetDrive : public Cia402Drive {
   /// Preconditions, all enforced by the drive refusing with OS error 251: operation mode
   /// @c somanet::OperationMode::kDiagnostics and CiA402 state Operation Enabled always, plus —
   /// **for the rotating methods only** — no limit switch active and the brake disengaged. Motor
-  /// phase order detection (command 4) must also have been run; that one the drive does not check.
+  /// phase order detection (command 4) must also run first; that one the drive does not check.
   ///
   /// **Whether it turns the rotor depends on the configured method** (0x2009:03), so a caller that
-  /// has not read the method does not know what this will do physically. @c kStationary does not
+  /// never read the method does not know what this will do physically. @c kStationary does not
   /// turn it and needs the brake engaged; the two rotating methods turn it and need the brake
   /// released.
   ///
@@ -1929,7 +1929,7 @@ class SomanetDrive : public Cia402Drive {
   ///
   /// What comes back depends on the type, and the result says which happened rather than guessing:
   ///   - @c kNotImplemented — the firmware's case body is empty. The drive answers that the command
-  ///     failed and nothing has happened. Seven of the twelve.
+  ///     failed and nothing happened. Seven of the twelve.
   ///   - @c kStopsService — the service executes faulty code or hangs and never answers again, so
   ///     **the command timing out is the intended outcome**, reported as such rather than as a
   ///     failure. The drive keeps its other services; the one addressed is gone until a power
@@ -2011,13 +2011,13 @@ class SomanetDrive : public Cia402Drive {
 
   /// @brief Starts measuring one internal firmware latency (OS command 22, action 0).
   ///
-  /// Clears whatever that latency had recorded and enables its measurement. The drive then keeps
+  /// Clears whatever that latency recorded and enables its measurement. The drive then keeps
   /// the maximum of every drive control cycle until @c stopFirmwareLatencyMeasurements ends it or
   /// the drive is power-cycled; the other latency is untouched either way.
   ///
   /// **Nothing reports whether a measurement is running**, so starting one twice is
   /// indistinguishable from starting it once, except that the second start throws away what the
-  /// first had collected.
+  /// first collected.
   ///
   /// **No preconditions and nothing to restore.** The command is accepted in any state and moves
   /// nothing — the measurement is two timer reads and a comparison inside a cycle the drive was
@@ -2052,7 +2052,7 @@ class SomanetDrive : public Cia402Drive {
   /// @brief Stops measuring **both** firmware latencies (OS command 22, action 2).
   ///
   /// The command has no per-latency stop — one action disables both — so stopping one measurement
-  /// necessarily ends the other. What each latency had recorded is left alone and can still be
+  /// necessarily ends the other. What each latency recorded is left alone and can still be
   /// read.
   ///
   /// @param config Timing and cancellation.
@@ -2063,7 +2063,7 @@ class SomanetDrive : public Cia402Drive {
 
   /// @brief Reads a control loop's skipped-cycle counter (OS command 13).
   ///
-  /// How many cycles @p service has failed to start on time since it began running. The firmware
+  /// How many cycles @p service failed to start on time since it began running. The firmware
   /// counts a cycle as skipped when it starts late enough to miss its slot, and adds the whole
   /// backlog when several are missed at once — so the figure is missed *cycles*, not missed
   /// deadlines. **It is cumulative and nothing resets it**, so read it twice and subtract: a

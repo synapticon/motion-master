@@ -276,7 +276,7 @@ class Router {
   /// @param app         The uWS app to register on.
   /// @param loop        The app's loop; responses are written by deferring onto it.
   /// @param pool        Workers the handlers run on. Must be drained before @p loop is closed.
-  /// @param stopping    Set once shutdown has begun; while it is set, requests are answered 503
+  /// @param stopping    Set once shutdown starts; while it is set, requests are answered 503
   ///                    instead of being dispatched. See @c stopping_.
   /// @param corsOrigin  Value for `Access-Control-Allow-Origin`; must outlive the server.
   Router(uWS::SSLApp& app, uWS::Loop* loop, BS::light_thread_pool& pool,
@@ -306,16 +306,17 @@ class Router {
   uWS::SSLApp& app_;
   uWS::Loop* loop_;
   BS::light_thread_pool& pool_;
-  /// Whether the server has begun shutting down, owned by the server and only ever set there.
+  /// Whether the server started to shut down, owned by the server and only ever set there.
   ///
   /// A handler finishing its work defers the write back onto the loop, so a worker must never
   /// outlive the loop thread. The server drains the pool before closing the loop for that reason —
   /// but draining is not enough on its own, because the loop keeps accepting while it drains, and a
   /// request arriving after the drain would dispatch a *fresh* worker that then defers onto a loop
-  /// whose thread has since exited. This flag closes that door: the server sets it on the loop
-  /// thread and only then drains, and dispatch happens on that same thread — so once it is set, no
-  /// further request can reach the pool, and everything already there is what the drain waits for.
-  /// Like @c aborted in @c add, it is serialised by the thread rather than protected by the atomic.
+  /// whose thread exited in the meantime. This flag closes that door: the server sets it on the
+  /// loop thread and only then drains, and dispatch happens on that same thread — so once it is
+  /// set, no further request can reach the pool, and everything already there is what the drain
+  /// waits for. Like @c aborted in @c add, it is serialised by the thread rather than protected by
+  /// the atomic.
   const std::atomic<bool>& stopping_;
   std::string_view corsOrigin_;
 };

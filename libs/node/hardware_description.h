@@ -22,7 +22,7 @@ namespace mm::node {
 /// including its §3.3 clarifying names — @c firmwareId for a product's @c id, @c firmwareVersion
 /// for its @c version, @c buildDescriptor for the two joined, @c fullFirmwareDescriptor for the
 /// whole thing. Source code elsewhere in the ecosystem calls some of these something else (the
-/// descriptor has been an "API identifier" and an "FWID"); those names are not used here.
+/// descriptor was also called an "API identifier" and an "FWID"); those names are not used here.
 
 /// @brief One item making up a device or assembly (specification §3.2.2.3).
 ///

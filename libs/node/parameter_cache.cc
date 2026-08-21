@@ -140,7 +140,7 @@ fs::path ParameterCache::resolveDir() const {
   // A subdirectory of the standard per-user cache directory, so the cache survives restarts (the
   // main win) rather than living in temp. Sharing that root with the user cache is deliberate: the
   // `/api/user-cache` browser then lists these files too, which is the honest picture of what
-  // Motion Master has written to the machine.
+  // Motion Master writes to the machine.
   return mm::core::userCacheDir() / "parameters";
 }
 

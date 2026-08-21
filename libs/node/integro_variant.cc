@@ -132,7 +132,7 @@ constexpr std::array<std::string_view, 1> kMpnCyclicActive = {"01"};
 /// Codes in ascending order. The gaps are real — there is no code 15.
 ///
 /// Add a row here when a firmware release adds an option code; this table is maintained by hand
-/// (see @c integroVariantOptions()). Nothing detects that it has gone stale, and it does not need
+/// (see @c integroVariantOptions()). Nothing detects that it is stale, and it does not need
 /// to: an unrecognised code still decodes and is still reported, without a category or meaning.
 /// Take the new row from the commissioning tooling's table, which carries the category, SoC
 /// variables, alternatives and part-number segments; the firmware's own enum has only the id.

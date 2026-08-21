@@ -27,7 +27,7 @@ std::string base64Encode(std::span<const uint8_t> bytes);
 
 /// @brief Decodes base64 @p text.
 ///
-/// Line breaks are tolerated wherever they appear, because a base64 payload that has been through a
+/// Line breaks are tolerated wherever they appear, because a base64 payload that went through a
 /// text editor or a PEM-shaped tool is routinely wrapped. Everything else is rejected: characters
 /// outside the alphabet, and a length that is not a whole number of four-character quanta.
 /// Strictness is deliberate — a silently mis-decoded firmware image would be written to a drive.

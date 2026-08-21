@@ -53,7 +53,7 @@ struct ProcessOptions {
   ///
   /// Measured on a Linux development machine, a healthy child answers 1.0 s after the spawn: the
   /// executable unpacks itself on every start, and that unpack is the whole cost. The default is
-  /// far above that because a machine that has never unpacked this executable is slower, and
+  /// far above that because a machine that never unpacked this executable is slower, and
   /// because the wait ends the moment the child answers or dies. So a generous limit costs nothing
   /// in either normal case, and only a child that is alive and silent waits it out.
   std::chrono::milliseconds startTimeout{30000};

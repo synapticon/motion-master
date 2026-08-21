@@ -754,7 +754,7 @@ std::expected<EsiEntryTable, std::string> buildDeviceEntries(const EsiFile& file
     }
   }
 
-  // Now that the merge has settled, group the collisions by "who claimed it" plus "who ended up
+  // Now that the merge is settled, group the collisions by "who claimed it" plus "who ended up
   // owning it" and report each group once, naming the real winner.
   std::map<std::pair<std::string, std::string>, CollisionGroup> grouped;
   for (const auto& [key, claim] : claims) {

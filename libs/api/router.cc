@@ -68,7 +68,7 @@ void writeResponse(uWS::HttpResponse<true>* res, std::string_view corsOrigin, Re
 // Running every route on the pool is only safe because the pool cannot be saturated by the client
 // population this serves — a handful of local clients, each capped by the browser's ~6 connections
 // per origin. That is an argument from arithmetic, so it deserves to be checked against reality
-// rather than assumed: if a request ever does queue, the API has started degrading in exactly the
+// rather than assumed: if a request ever does queue, the API started to degrade in exactly the
 // way the Router exists to prevent, and silence would hide it.
 //
 // Edge-triggered, so a saturated pool logs twice rather than once per request.
@@ -197,7 +197,7 @@ void Router::add(std::string_view method, const std::string& pattern, Handler ha
   // this returns. Dispatch then happens either immediately or once the body is complete.
   auto onRequest = [names, shared, loop, pool, stopping, corsOrigin, hasBody](
                        uWS::HttpResponse<true>* res, uWS::HttpRequest* req) {
-    // Refused rather than dispatched once shutdown has begun, because a worker started now could
+    // Refused rather than dispatched once shutdown starts, because a worker started now could
     // outlive the loop it would defer its response onto — see Router::stopping_. Answering here is
     // legal (and better than dropping the request) precisely because this runs on the loop thread,
     // which is the one thread allowed to touch a response.

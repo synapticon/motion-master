@@ -59,7 +59,7 @@ TEST(EsiUnitTest, ADictionaryLocalUnitTypeOverridesTheBuiltInCatalogue) {
 
 TEST(EsiUnitTest, ALocalOverrideSuppressesTheRpmSpecialCase) {
   // The "Revolution/min" collapse is a rendering convenience for the standard composition. Once a
-  // dictionary has redefined one of those bytes, the composition means whatever that dictionary
+  // dictionary redefines one of those bytes, the composition means whatever that dictionary
   // says and the shortcut would be a lie.
   const std::vector<UnitType> local{
       UnitType{.notationIndex = 0xB4, .index = 0x4B4, .name = "Widgets", .symbol = "Wg"},

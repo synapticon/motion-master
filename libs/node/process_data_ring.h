@@ -81,7 +81,7 @@ class ProcessDataRing {
   /// @warning Same exclusion requirement as @c allocate — it frees what readers are reading.
   void clear();
 
-  /// @brief Whether @c allocate has been called with a non-zero capacity.
+  /// @brief Whether @c allocate ran with a non-zero capacity.
   bool allocated() const { return capacity_ != 0; }
 
   /// @brief Records one cycle. RT, wait-free, single-writer. No-op until @c allocate.
@@ -92,14 +92,14 @@ class ProcessDataRing {
              std::span<const uint8_t> outputs);
 
   /// @brief The producer's next sequence number; @c head()-1 is the newest recorded cycle, and
-  ///        @c head()==0 means nothing has been recorded yet.
+  ///        @c head()==0 means nothing is recorded yet.
   uint64_t head() const { return head_.load(std::memory_order_acquire); }
 
   /// @brief Number of cycles the ring can hold.
   size_t capacity() const { return capacity_; }
 
   /// @brief The oldest sequence number still in the ring: @c max(0, head - capacity). A cursor
-  ///        below this has been lapped (its data overwritten) and must resync to this value.
+  ///        below this was lapped (its data overwritten) and must resync to this value.
   uint64_t oldestValidSeq() const;
 
   /// @brief Copies the record for @p seq into @p out. Lock-free; retries are the caller's job.

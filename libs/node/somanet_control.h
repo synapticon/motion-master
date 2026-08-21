@@ -23,7 +23,7 @@ namespace mm::node {
 /// **These are not procedures**, for the reason spelled out in @c cia402_control.h: they are short
 /// interactive control, and they are what procedures are *built from*. A diagnostics procedure
 /// releases the brake as one of its steps by calling @c SomanetDrive::releaseBrake on the device it
-/// has already borrowed — never by starting a brake "procedure", which would deadlock against the
+/// already borrowed — never by starting a brake "procedure", which would deadlock against the
 /// device token it already holds.
 
 /// @brief Reads a drive's brake configuration and current state (0x2004).
@@ -35,7 +35,7 @@ namespace mm::node {
 std::expected<BrakeState, std::string> brakeState(DeviceManager& deviceManager,
                                                   uint16_t slavePosition);
 
-/// @brief Releases (disengages) a drive's brake and waits for it to have done so.
+/// @brief Releases (disengages) a drive's brake, then waits for the release to finish.
 ///
 /// Thin forward to @c SomanetDrive::releaseBrake — read its documentation before calling this,
 /// because two of its properties are surprising. The release only actually happens while the drive

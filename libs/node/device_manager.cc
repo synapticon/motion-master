@@ -97,7 +97,7 @@ bool isValidStateTransition(EtherCatState currentState, EtherCatState targetStat
 std::expected<void, std::string> DeviceManager::init(
     std::unique_ptr<mm::comm::FieldbusDriver> driver, const DeviceManagerConfig& config) {
   // One control-plane operation at a time. There is no second lock to take: publishing a set is a
-  // pointer swap, and no reader can observe a driver whose context has not opened, because the set
+  // pointer swap, and no reader can observe a driver whose context is not yet open, because the set
   // that carries it is published only after init() succeeds.
   const std::lock_guard busOperationLock(busOperationMutex_);
   // init() is a one-shot. A live driver stays until reset(), because the devices of the current set
@@ -155,7 +155,7 @@ std::expected<int, std::string> DeviceManager::scan() {
   if (!stopExchange()) {
     // Refused rather than forced. A scan frees the recording, the retained images and — once this
     // set is replaced — every device and cell in it, and the RT thread is demonstrably still
-    // reading them. Nothing has been touched yet, so the bus is exactly as it was and the caller
+    // reading them. Nothing is touched yet, so the bus is exactly as it was and the caller
     // may retry.
     return std::unexpected(
         "the real-time loop did not leave its cycle within 200 ms, so nothing was changed — check "
@@ -241,7 +241,7 @@ void DeviceManager::reset() {
   if (previous->driver) {
     // Stop the bus now rather than when the last holder of the retired set drops it: a procedure
     // still running against a retired device must fail its next transfer, not keep driving
-    // hardware the user has asked us to release. The driver object itself lives until that holder
+    // hardware the user asked us to release. The driver object itself lives until that holder
     // is done with it, which is what keeps the failure a clean error instead of a crash.
     previous->driver->stop();
     spdlog::info("DeviceManager reset");
@@ -323,7 +323,7 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
   // Unpublish first and drain any in-flight cycle so the RT thread is not touching the IOmap
   // while we re-map it. Refused rather than forced: this re-allocates the ring and has the driver
   // rewrite the IOmap, both of which the RT thread is still reading if the drain failed. Nothing
-  // has changed yet at this point.
+  // changes at this point.
   if (!stopExchange()) {
     return std::unexpected(
         "the real-time loop did not leave its cycle within 200 ms, so the process image was not "
@@ -441,7 +441,7 @@ void DeviceManager::exchangeProcessData() {
                                 std::chrono::system_clock::now().time_since_epoch())
                                 .count());
   // Note a cycle the bus did not fully answer, with when it happened. At most three relaxed stores,
-  // on a path that has just blocked on a frame round trip — and the only place the fault is
+  // on a path that just blocked on a frame round trip — and the only place the fault is
   // visible, since no other thread sees every cycle.
   if (wkc < pd_->expectedWkc.load(std::memory_order_relaxed)) {
     pd_->lastShortWkcNs.store(timestampNs, std::memory_order_relaxed);
@@ -509,7 +509,7 @@ bool DeviceManager::stopExchange() {
   }
   // The drain succeeded, so the RT thread is out of the cycle and anything an earlier failed drain
   // left alive is now unreachable by it. This is the only reclaim point for that backlog, and it is
-  // empty unless a drain has failed before.
+  // empty unless a drain failed before.
   if (!abandoned_.empty()) {
     spdlog::info("Reclaiming {} object(s) held back by an earlier stalled cycle",
                  abandoned_.size());
@@ -523,8 +523,8 @@ ProcessData::PauseResult ProcessData::pauseCycle() {
   // Drain whatever the RT thread has in flight — the exchange itself, and any cyclic task body
   // holding a CycleGuard (which resolves devices and parameters of its own, so it must be out
   // before scan/reset destroy them). Both operations here are sequentially consistent so they pair
-  // with each raiser's seq_cst depth-increment / image-load: once we have stored the null image,
-  // any RT cycle that has already raised the depth is visible to this load, and any that has not
+  // with each raiser's seq_cst depth-increment / image-load: once we store the null image,
+  // any RT cycle that already raised the depth is visible to this load, and any that did not
   // yet raised it will observe the null image and back out. We therefore only wait out the
   // at-most-one cycle already in flight. Bounded so a stalled/absent RT loop can never hang a
   // control-plane call.
@@ -619,7 +619,7 @@ ProcessImageInfo DeviceManager::processImageInfo() const {
   info.healthy = info.configured && info.lastWkc >= info.expectedWkc;
 
   // Describe the live image when exchanging; otherwise fall back to the most recent retained
-  // generation so a bus that has dropped out of SAFE-OP/OP (image torn down, but generations
+  // generation so a bus that dropped out of SAFE-OP/OP (image torn down, but generations
   // kept until reset()) still shows what it last mapped. `configured` tells the caller which it
   // is, so a stale layout is never mistaken for an active one.
   const ProcessImage* describe = image;
@@ -633,7 +633,7 @@ ProcessImageInfo DeviceManager::processImageInfo() const {
   info.inputBytes = describe->inputBytes;
 
   // Resolve each entry's name from the owning device's parameter map (empty when its object
-  // dictionary has not been enumerated — PDO mappings are read independently of OD enumeration).
+  // dictionary is not enumerated — PDO mappings are read independently of OD enumeration).
   auto flatten = [&set](const std::vector<ProcessImageEntry>& entries) {
     std::vector<ProcessImageObjectInfo> out;
     out.reserve(entries.size());
@@ -663,7 +663,7 @@ std::expected<DeviceManager::DumpSpan, std::string> DeviceManager::serializeDump
   std::shared_lock lock(processDataMutex_);
   const std::shared_ptr<DeviceSet> set = deviceSet();
 
-  // Header image: the live published image, or — once the bus has left the exchange states and the
+  // Header image: the live published image, or — once the bus leaves the exchange states and the
   // image was torn down — the most recent retained generation (kept until reset()/scan()). Records
   // currently in the ring were all written under this layout (a layout-changing re-map resets the
   // ring), so it is the correct decode header for the whole span.
@@ -942,7 +942,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   if (exchangeState) {
     // Entering an exchange state. Re-map when there is no image yet, or when any targeted device
     // is (re)joining from a non-exchange state — it must be added to the whole-bus image and its
-    // PDO mapping re-read (a firmware update or manual re-map may have changed it). A device
+    // PDO mapping re-read (a firmware update or a manual re-map can change it). A device
     // already exchanging being re-commanded (SAFE-OP -> OP) needs no re-map; the published image
     // still describes it. Re-mapping briefly pauses exchange for the whole bus (stopExchange
     // inside configureProcessData) — the accepted cost of bringing a device back online.
@@ -1063,7 +1063,7 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
     }
   }
 
-  // Read the object dictionary of any device that has just reached an exchange-capable state
+  // Read the object dictionary of any device that just reached an exchange-capable state
   // (CoE mailbox live from PRE-OP up) and has no parameters yet, so recorder dumps, monitoring, and
   // the Parameters page have object names and data types without a manual read. Definitions only
   // (no value uploads) and cache-first, so a given device model pays the (slow, hundreds of

@@ -128,7 +128,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
   uint16_t statusword = 0x0040;  // SwitchOnDisabled
   std::vector<std::pair<uint16_t, uint8_t>> writeLog;
 
-  // Faults the drive once this many commands have been issued, modelling the drive dropping out of
+  // Faults the drive once this many commands go out, which models the drive dropping out of
   // Operation Enabled part-way through a sequence — what a real fault or a quick stop does. Zero
   // leaves the drive healthy for the whole run.
   int faultAfterCommands = 0;
@@ -1170,8 +1170,8 @@ TEST(RunOffsetDetectionProcedure, AFaultMidSequenceStopsAndQuotesTheDriveErrorRe
   ASSERT_FALSE(result.has_value());
 
   // Named for what actually happened, not the OS error 251 ("command not allowed") the drive would
-  // have answered every later command with — that code names a precondition, so it would have
-  // pointed at the operation mode or the brake instead of at the fault.
+  // answer every later command with — that code names a precondition, so it would point
+  // at the operation mode or the brake instead of at the fault.
   EXPECT_NE(result.error().find("Fault"), std::string::npos) << result.error();
   EXPECT_NE(result.error().find("OVERCURR"), std::string::npos) << result.error();
 
@@ -1182,7 +1182,7 @@ TEST(RunOffsetDetectionProcedure, AFaultMidSequenceStopsAndQuotesTheDriveErrorRe
   EXPECT_EQ(stepById(steps, "phase-inductance-measurement")->status, ProgressStatus::kIdle);
   EXPECT_EQ(stepById(steps, "pole-pair-detection")->status, ProgressStatus::kIdle);
 
-  // The point of checking first: no further command is put on the wire once the drive has left
+  // The point of checking first: no further command is put on the wire once the drive leaves
   // Operation Enabled.
   EXPECT_EQ(driver.commandIds, std::vector<uint8_t>{6});
   EXPECT_EQ(stepById(steps, "restore")->status, ProgressStatus::kSucceeded);

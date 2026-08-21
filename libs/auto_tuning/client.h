@@ -40,9 +40,9 @@ class Client {
   ///                    what its functions accept and answers a bad request itself.
   /// @param timeout     Whole-call limit. The default is far above what any function takes —
   ///                    measured against version 3.1.1, the slowest returns in 0.2 s — so it only
-  ///                    fires when the program has stopped answering.
+  ///                    fires when the program stops answering.
   /// @return The reply, status and body, whatever the status. An error only when the request did
-  ///         not reach the program at all, which for a process on loopback means it has died.
+  ///         not reach the program at all, which for a process on loopback means it died.
   std::expected<mm::net::Response, std::string> run(
       const std::string& requestBody,
       std::chrono::seconds timeout = std::chrono::seconds{30}) const;

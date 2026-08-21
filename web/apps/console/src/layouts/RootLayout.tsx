@@ -495,6 +495,7 @@ export default function RootLayout() {
 
           {online && (
             <SidebarGroup label="Tools" defaultOpen={false}>
+              <NavItem to="/tools/auto-tuning" label="Auto-Tuning" />
               <NavItem to="/tools/esi" label="ESI" />
               <NavItem to="/tools/integro-variant" label="Integro Variant" />
               <NavItem to="/tools/sii" label="SII" />

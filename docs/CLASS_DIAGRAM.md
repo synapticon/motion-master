@@ -291,8 +291,8 @@ classDiagram
     HttpServer ..> ProcedureManager : ref
     HttpServer *-- "1" UserCache : ref (owned by main)
     HttpServer *-- "1" HttpServerConfig : owns (by value)
-    HttpServerConfig ..> GameLoop : health + period, via std::function
-    HttpServerConfig ..> AutoTuningClient : run + spec, via std::function
+    HttpServerConfig ..> GameLoop : health + period, through a callback
+    HttpServerConfig ..> AutoTuningClient : run + spec, through a callback
     HttpServer o-- "0..*" RoutePlugin : addRoutes (RegisterRoutesFn)
     HttpServer ..> RouteContext : builds, passes to each plugin
     BusHealthReporter ..> DeviceManager : ref

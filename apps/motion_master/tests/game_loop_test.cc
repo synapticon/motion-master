@@ -12,9 +12,9 @@
 namespace {
 
 /// Counts how many times the loop called it.
-class CountingTask : public CyclicTask {
+class CountingTask : public mm::core::CyclicTask {
  public:
-  void execute(const CycleContext&) noexcept override {
+  void execute(const mm::core::CycleContext&) noexcept override {
     calls.fetch_add(1, std::memory_order_relaxed);
   }
 

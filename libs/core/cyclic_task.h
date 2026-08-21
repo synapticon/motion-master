@@ -2,6 +2,8 @@
 
 #include <cstdint>
 
+namespace mm::core {
+
 /// @brief Per-cycle timing context passed to every CyclicTask::execute().
 ///
 /// The game loop sleeps to a fixed deadline grid (CyclicTimer), so when a cycle
@@ -63,3 +65,5 @@ class CyclicTask {
   ///             that act only on the freshest state may ignore it.
   virtual void execute(const CycleContext& ctx) noexcept = 0;
 };
+
+}  // namespace mm::core

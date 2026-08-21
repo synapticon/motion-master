@@ -31,7 +31,7 @@ namespace mm::example {
 ///
 /// 1. **Resolve the device every cycle; never cache the pointer.** A rescan publishes a new device
 ///    set, and pointers held across cycles do not follow it. Resolving costs a walk over a handful
-///    of devices. @c GameLoop has already entered the cycle before it calls @c execute, which is
+///    of devices. @c GameLoop enters the cycle before it calls @c execute, which is
 ///    what makes the pointer valid for the body — a task takes no guard and checks nothing.
 /// 2. **A device that is not there is not an error.** It simply is not driven this cycle, and the
 ///    task picks it up again when it returns. That is what lets a machine be powered up in stages.
@@ -52,7 +52,7 @@ namespace mm::example {
 /// nothing refills it cyclically — @c MonitoringManager::keepFresh has to be called once, off the
 /// RT thread, before the loop starts. Without it the read never produces a value, the interlock
 /// treats that as unsafe, and the drive never spins. @c main.cc shows the call.
-class ExampleCyclicTask : public CyclicTask {
+class ExampleCyclicTask : public mm::core::CyclicTask {
  public:
   /// @brief Everything the task needs to know, so nothing is hard-coded in @c execute.
   struct Config {
@@ -92,7 +92,7 @@ class ExampleCyclicTask : public CyclicTask {
   ExampleCyclicTask(mm::node::DeviceManager& deviceManager, Config config);
 
   /// @brief Runs one cycle. Non-blocking, non-allocating, lock-free.
-  void execute(const CycleContext& ctx) noexcept override;
+  void execute(const mm::core::CycleContext& ctx) noexcept override;
 
  private:
   mm::node::DeviceManager& deviceManager_;

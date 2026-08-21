@@ -354,7 +354,7 @@ int main(int argc, char** argv) {
   // via the API, at which point DeviceManager publishes the image and the loop begins driving PDO
   // automatically. Declared before gameLoop so it is destroyed after it — a registered task must
   // outlive every call to GameLoop::run().
-  ProcessDataCyclicTask processDataCyclicTask{deviceManager};
+  mm::node::ProcessDataCyclicTask processDataCyclicTask{deviceManager};
 
   // Tier 3 — your own code inside the RT loop. Uncomment the three marked lines (here, and the
   // addTask + keepFresh below) to run libs/example/example_cyclic_task.cc, then copy that file to

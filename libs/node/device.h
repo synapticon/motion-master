@@ -601,7 +601,7 @@ class Device {
   /// **Lifetime.** The returned pointer is invalidated by @c initializeParameters, which replaces
   /// the whole map, and by @c DeviceManager::scan / @c reset, which destroy the @c Device. Never
   /// carry one across cycles or across a release of @c parametersMutex_: re-resolve where you use
-  /// it. A cyclic task does its lookups inside the cycle @c GameLoop has entered, which is what
+  /// it. A cyclic task does its lookups inside the cycle @c GameLoop entered, which is what
   /// keeps the device (and therefore its map) alive for the body of the cycle.
   ///
   /// **Locking.** A control-plane caller must hold @c parametersMutex_ for the lookup *and* for any
@@ -632,7 +632,7 @@ class Device {
   /// @warning Call it from a cyclic task's @c execute, or from a control-plane caller holding
   ///          @c parametersMutex_. The lookup walks a map that @c initializeParameters replaces,
   ///          and the @c Device belongs to a set that @c scan / @c reset retire; the cycle @c
-  ///          GameLoop has entered is what holds both still for the body of a cycle.
+  ///          GameLoop entered is what holds both still for the body of a cycle.
   ///
   /// @tparam T        The arithmetic type the parameter's data type maps to.
   /// @param index     CoE object index.

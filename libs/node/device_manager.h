@@ -383,7 +383,7 @@ class DeviceManager {
   /// @code
   /// const DeviceManager::CycleGuard cycle(deviceManager_);   // in GameLoop::run
   /// if (cycle) {
-  ///   for (CyclicTask* task : tasks_) { task->execute(ctx); }
+  ///   for (mm::core::CyclicTask* task : tasks_) { task->execute(ctx); }
   /// }
   /// @endcode
   ///

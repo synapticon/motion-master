@@ -86,7 +86,7 @@ class GameLoop {
   /// @param task  Non-owning pointer.  The task must outlive every call to
   ///              run() — its pointer is only dereferenced while the loop is
   ///              executing, never after run() returns.
-  void addTask(CyclicTask* task);
+  void addTask(mm::core::CyclicTask* task);
 
   /// @brief Blocks the calling thread, running one cycle per period until
   ///        stop() is called.
@@ -180,5 +180,5 @@ class GameLoop {
   // The cycle the loop enters before calling any task. Held for the whole task list, so a task's
   // device and parameter lookups stay valid without the task naming the guard at all.
   mm::node::DeviceManager& deviceManager_;
-  std::vector<CyclicTask*> tasks_;
+  std::vector<mm::core::CyclicTask*> tasks_;
 };

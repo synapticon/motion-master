@@ -66,7 +66,7 @@ std::optional<uint16_t> commandTowardsOperationEnabled(cia402::State state, uint
 ExampleCyclicTask::ExampleCyclicTask(DeviceManager& deviceManager, Config config)
     : deviceManager_(deviceManager), config_(config) {}
 
-void ExampleCyclicTask::execute(const CycleContext& /*ctx*/) noexcept {
+void ExampleCyclicTask::execute(const mm::core::CycleContext& /*ctx*/) noexcept {
   // Rule 1 and 2 — resolve every cycle, and treat absence as "not this cycle" rather than an error.
   Device* drive = deviceManager_.findDevice(config_.slavePosition);
   if (drive == nullptr) {

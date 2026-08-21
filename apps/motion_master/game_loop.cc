@@ -30,7 +30,7 @@ GameLoop::GameLoop(mm::node::DeviceManager& deviceManager, std::chrono::microsec
                    int cpuAffinity)
     : period_(period), cpuAffinity_(cpuAffinity), deviceManager_(deviceManager) {}
 
-void GameLoop::addTask(CyclicTask* task) { tasks_.push_back(task); }
+void GameLoop::addTask(mm::core::CyclicTask* task) { tasks_.push_back(task); }
 
 void GameLoop::run() {
   const mm::core::RtSetupResult rt = mm::core::setRealtimePriority(cpuAffinity_);
@@ -93,7 +93,7 @@ void GameLoop::run() {
     const uint64_t executed = executedCycles_.fetch_add(1, std::memory_order_relaxed) + 1;
     const uint64_t totalSkipped =
         skippedCycles_.fetch_add(skipped, std::memory_order_relaxed) + skipped;
-    const CycleContext ctx{.elapsed = executed + totalSkipped, .skipped = skipped};
+    const mm::core::CycleContext ctx{.elapsed = executed + totalSkipped, .skipped = skipped};
 
     // Time the task work (not the sleep) so /api/game-loop can report budget use.
     // steady_clock::now() is a vDSO CLOCK_MONOTONIC read on Linux — cheap enough
@@ -105,7 +105,7 @@ void GameLoop::run() {
       // task to drive and every task is skipped. Two atomic operations, and it never waits.
       const mm::node::DeviceManager::CycleGuard cycle(deviceManager_);
       if (cycle) {
-        for (CyclicTask* task : tasks_) {
+        for (mm::core::CyclicTask* task : tasks_) {
           task->execute(ctx);
         }
       }

@@ -92,6 +92,27 @@ jobs:
             -I libs \
             apps libs
 
+  mermaid:
+    name: Mermaid diagrams parse
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      # Installed here rather than added to the workspace, so that a contributor who never touches a
+      # diagram does not pay for the parser on every `pnpm install`. Both versions are pinned for the
+      # reason the cppcheck job pins its own: a parser that updates on its own turns an unrelated
+      # upstream release into a failure here. Raise them deliberately.
+      - name: Install the Mermaid parser
+        run: npm install --no-save mermaid@11.17.0 jsdom@29.1.1
+
+      - name: Check every diagram
+        run: node tools/check-mermaid.mjs
+
   api-client-drift:
     name: Generated API client is up to date
     runs-on: ubuntu-24.04

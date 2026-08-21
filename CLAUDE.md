@@ -61,6 +61,7 @@ Wrapper scripts live in `tools/`. Each takes an optional preset name as the firs
 | `cppcheck.sh` | cppcheck |
 | `tidy.sh` | clang-tidy, bug-finding checks only |
 | `shellcheck.sh` | shellcheck every tracked shell script |
+| `check-mermaid.mjs` | Parse every Mermaid diagram in the tracked Markdown. Needs `npm install --no-save mermaid jsdom` |
 | `check.sh` | format + cppcheck + lint + cmake-lint + shellcheck |
 | `clean.sh` | Remove `build/<preset>` |
 | `package.sh` | Build .deb and .rpm. Needs cert.pem/key.pem in the build dir |
@@ -125,7 +126,8 @@ Four more workflows:
   and rpm for both Linux architectures, a Windows zip, a macOS tar.gz). Packages install
   to `/opt/motion-master/`. Certs are marked as config files so an upgrade never
   overwrites them.
-- **`lint.yml`** — clang-format, cpplint, and the API client drift check.
+- **`lint.yml`** — clang-format, cpplint, cppcheck, the Mermaid diagrams, the API client drift
+  check, and the Python client example.
 - **`deploy-pages.yml`** — publishes `motion-master.synapticon.com`. Docs and landing
   track `main`; the web apps are pinned to the latest `v*` tag and cached per tag.
 

@@ -202,8 +202,8 @@
     "useCompleteAccess": true
   },
 
-  // The auto-tuning child process. Auto-tuning and system identification run in a separate
-  // executable, which Motion Master starts at startup and calls over HTTP on loopback. The install
+  // The auto-tuning child process. The tuning calculations run in a separate executable, which
+  // Motion Master starts at startup and calls over HTTP on loopback. The install
   // scripts download that executable (setup.sh, setup.ps1, or the package install step), because it
   // is far larger than the server and changes rarely. A machine without it still runs: only the
   // auto-tuning endpoints fail.

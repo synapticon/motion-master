@@ -36,7 +36,9 @@ The Linux `.deb`/`.rpm` packages install to `/opt/motion-master/` with a `/usr/l
 
 ### Auto-tuning
 
-The auto-tuning and system-identification functions run in a separate executable. Motion Master starts it as a child process, and calls it over HTTP on loopback. The installed file is `auto-tuning`, and `auto-tuning.exe` on Windows.
+The tuning calculations run in a separate executable: the controller-gain functions, and the fit that turns recorded measurements into a plant model. Motion Master starts it as a child process, and calls it over HTTP on loopback. The installed file is `auto-tuning`, and `auto-tuning.exe` on Windows.
+
+That executable drives nothing. It computes on the numbers sent to it. The measurement a plant model is fitted to is recorded on the drive, by the system identification procedure.
 
 The executable is not in the release archives. It is about 65 MB, and the Motion Master binary is about 5 MB. Motion Master ships on every tag, and auto-tuning changes a few times a year. A copy in every release would therefore make each download many times larger, for a file that rarely changes. Each install path downloads the file once instead, from one rolling release: [`releases/tag/auto-tuning`](../../releases/tag/auto-tuning).
 

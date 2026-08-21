@@ -244,7 +244,7 @@ const EXAMPLES: Example[] = [
     id: 'identify_plant_model',
     label: 'identify_plant_model',
     description:
-      'Fits a plant model to chirp measurements: three columns of CSV — time, torque in Nm, velocity in rad/s at 1000 Hz — plus the frequency range the chirp swept. Load a file below; its text is sent as data.csv.',
+      'Fits a plant model to measurements the System Identification procedure recorded on the drive: three columns of CSV — time, torque in Nm, velocity in rad/s at 1000 Hz — plus the frequency range the chirp swept. Load a file below; its text is sent as data.csv.',
     body: {
       run: 'identify_plant_model',
       data: { csv: '', f0: 1, f1: 200 },
@@ -369,7 +369,7 @@ export default function ToolsAutoTuningPage() {
       <PageHeader
         eyebrow="Tools"
         title="Auto-Tuning"
-        description="Call the auto-tuning and system-identification functions directly. Every function is reachable through one endpoint, with a prepared example for each."
+        description="Call the tuning functions directly. Every one is reachable through a single endpoint, with a prepared example for each."
       />
       <div className="p-4 sm:px-8 sm:py-7 space-y-6">
         <AutoTuningExplainer />

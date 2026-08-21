@@ -7,12 +7,17 @@ export default function AutoTuningExplainer() {
   return (
     <Explainer title="What is auto-tuning?">
       <p>
-        <strong>Auto-tuning</strong> computes controller gains for a drive from a model of the
-        machine it moves. <strong>System identification</strong> is the step that produces that
-        model: the drive is excited with a <strong>chirp</strong> — a torque signal that sweeps a
-        frequency range — and the recorded response is fitted to a transfer function. The result is
-        the <strong>plant model</strong>, a numerator and a denominator, and every tuning function
-        here starts from one.
+        <strong>Auto-tuning</strong> computes controller gains for a drive from a{' '}
+        <strong>plant model</strong>: a transfer function, a numerator and a denominator, describing
+        how the machine responds to torque. Every tuning function here starts from one.
+      </p>
+      <p>
+        A plant model comes from a measurement, and the measurement is made elsewhere. The{' '}
+        <strong>System Identification</strong> procedure runs on the drive: it excites the machine
+        with a <strong>chirp</strong> — a torque signal that sweeps a frequency range — and records
+        the response. This program has no part in that and reaches no device. What it does is the
+        step after: <code>identify_plant_model</code> fits a plant model to the samples that
+        recording produced.
       </p>
       <p>
         The functions run in a <strong>separate program</strong>, which Motion Master starts as a
@@ -44,8 +49,8 @@ export default function AutoTuningExplainer() {
         <code>auto_tune_feedback_filters</code> tune a single feature rather than a loop.
       </p>
       <p>
-        Nothing on this page moves a motor. These calls are pure computation on the numbers you send:
-        the excitation that produces a measurement is a separate operation on the device itself.
+        Nothing on this page moves a motor. Every call here computes on the numbers in the request.
+        The chirp that produces a measurement is the System Identification procedure, on the device.
       </p>
     </Explainer>
   )

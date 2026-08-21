@@ -534,7 +534,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Reports what Motion Master knows about the auto-tuning process. Auto-tuning and system identification run in a separate executable, which Motion Master starts at startup and reaches over loopback. That executable is downloaded by the install scripts rather than shipped in a release, so a machine may not have it — this endpoint is how a client tells the four cases apart: switched off in the configuration, not installed, installed but would not start, or running. The values are a startup snapshot. `started` says the process answered when Motion Master waited for it, not that it is alive now. Nothing polls it: a call is the honest test, and `POST /api/auto-tuning/run` makes one.
+   * @description Reports what Motion Master knows about the auto-tuning process. The tuning calculations run in a separate executable, which Motion Master starts at startup and reaches over loopback. That executable is downloaded by the install scripts rather than shipped in a release, so a machine may not have it — this endpoint is how a client tells the four cases apart: switched off in the configuration, not installed, installed but would not start, or running. The values are a startup snapshot. `started` says the process answered when Motion Master waited for it, not that it is alive now. Nothing polls it: a call is the honest test, and `POST /api/auto-tuning/run` makes one.
    *
    * @name GetAutoTuning
    * @summary Auto-tuning process status

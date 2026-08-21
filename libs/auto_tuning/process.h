@@ -9,9 +9,14 @@
 /// @file
 /// @brief The auto-tuning executable, started and supervised as a child process.
 ///
-/// Auto-tuning is a separate program. It holds the tuning and system-identification algorithms,
-/// it is compiled from another repository, and it serves an HTTP API on loopback. Motion Master
-/// starts one instance at startup and talks to it for the rest of the run.
+/// Auto-tuning is a separate program. It holds the tuning calculations, and the fit that turns
+/// recorded measurements into a plant model. It is compiled from another repository and serves an
+/// HTTP API on loopback. Motion Master starts one instance at startup and talks to it for the rest
+/// of the run.
+///
+/// It drives nothing. Every function computes on the numbers it is handed. The measurement a plant
+/// model is fitted to is recorded on the drive, by the system identification procedure, and this
+/// program only ever sees the samples that procedure produced.
 ///
 /// It is a child process rather than a library because the algorithms are Python compiled to a
 /// self-contained executable of about 65 MB. Linking that into the server is not an option, and

@@ -135,10 +135,10 @@ struct ParametersConfig {
 
 /// @brief @c "autoTuning" block — the auto-tuning child process.
 ///
-/// The auto-tuning and system-identification functions are a separate executable, which Motion
-/// Master starts at startup and reaches over HTTP on loopback. It is downloaded by the install
-/// scripts rather than shipped in a release, so a machine may not have it. That is not an error:
-/// Motion Master runs, and only the auto-tuning endpoints fail.
+/// The tuning calculations are a separate executable, which Motion Master starts at startup and
+/// reaches over HTTP on loopback. It computes on the numbers it is sent and drives no device. It is
+/// downloaded by the install scripts rather than shipped in a release, so a machine may not have
+/// it. That is not an error: Motion Master runs, and only the auto-tuning endpoints fail.
 struct AutoTuningConfig {
   /// Start the executable at all. Set false to leave it alone on a machine that has the file but
   /// should not run it — a real-time appliance where no tuning is done, for example.

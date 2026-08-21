@@ -270,10 +270,10 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  // Auto-tuning and system identification run in a separate executable, started here as a child
-  // process. Started before the servers, and long before GameLoop::run() raises this thread to
-  // SCHED_FIFO, because a child inherits the scheduling policy of the thread that spawned it and
-  // this one runs a spin-waiting numerical worker per core.
+  // The tuning calculations run in a separate executable, started here as a child process. Started
+  // before the servers, and long before GameLoop::run() raises this thread to SCHED_FIFO, because a
+  // child inherits the scheduling policy of the thread that spawned it and this one runs a
+  // spin-waiting numerical worker per core.
   //
   // Not having it is a supported state, so every failure here is a warning. The install scripts
   // download the executable, and a machine that could not reach the release, or that was installed

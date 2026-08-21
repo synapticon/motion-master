@@ -57,7 +57,7 @@ DeviceSet — immutable once published
 | a re-map | the ring storage, re-allocated for the new layout | `stopExchange()` drains the cycle first |
 | `scan()` | the retired device set and its cells once the last handle releases them, the retained images, the ring storage | the same drain, so no task is inside a cycle holding a pointer |
 | `reset()` | the same, and it stops the driver | the same drain |
-| `~DeviceManager` | everything | the loop has stopped |
+| `~DeviceManager` | everything | the loop no longer runs |
 
 **The locks, one line each.**
 
@@ -73,7 +73,9 @@ DeviceSet — immutable once published
 Lock order is `busOperationMutex_` → `Device::parametersMutex_` →
 `FieldbusDriver::controlPlaneMutex_`. The bottom three rows are leaves: nothing is ever acquired
 while one of them is held. The [inventory](#mutex-inventory) below lists all ten, including the
-per-run procedure locks and the log sink that this summary folds together.
+per-run procedure locks that this summary folds together. It also lists three primitives that the
+count leaves out, because none of them guards state that two threads share: the log sink, the
+reporter's wait mutex, and the single-instance file lock.
 
 To find every primitive in the source, run:
 
@@ -134,6 +136,7 @@ This file uses the vocabulary of the code. Read this table first if the reposito
 | WebSocket event loop | 1 | `ws_server.cc` | |
 | Monitoring sampler | 1 | `monitoring_manager.cc` | |
 | Parameter refresher | 1 | `parameter_refresher.cc` | |
+| Bus health reporter | 1 | `std::jthread` in `bus_health_reporter.h` | takes `processDataMutex_` shared, every 10 s, and nothing else |
 | Procedure runs | 0 to N | `std::jthread` in `procedure_manager.cc` | one thread per procedure in flight |
 
 **There is no such thing as "the HTTP thread".** Route handlers run on the worker pool, so two
@@ -155,6 +158,7 @@ HTTP thread, so the two calls are serialised."
 | 9 | `ProcedureManager::Run::errorMutex_` | `std::mutex` | `libs/node/procedure_manager.h` | one `std::optional<std::string>` | the thread of the run, which writes. Pollers read | no |
 | 10 | `ProgressReporter::mutex_` | `std::mutex` | `libs/node/procedure.h` | the step array | the thread of the run, which writes. Pollers read | no |
 | — | `RingLogSink`, through the spdlog `base_sink::mutex_` | `std::mutex` | `apps/motion_master/ring_log_sink.h` | the log ring buffer | every thread that logs | no |
+| — | the reporter's wait mutex | `std::mutex` plus `std::condition_variable_any`, both local to the thread body | `apps/motion_master/bus_health_reporter.cc` | nothing. One thread owns it, and it exists only so the wait takes a `std::stop_token` and ends at once on shutdown | that one thread | no |
 | — | single-instance lock | `flock`, or a named mutex on Windows | `libs/core/platform.cc` | the *process*, not a data structure | startup only | not applicable |
 
 Entries 9 and 10 exist for one reason. **A procedure thread that finishes must never need
@@ -250,7 +254,7 @@ with the cycle drained. The two routes split by caller:
 | Caller | Route | What holds the device still |
 | --- | --- | --- |
 | control plane: HTTP worker, procedure, sampler | `deviceAt`, `deviceSet`, or a position-based method | a `shared_ptr` to the set. No lock |
-| real-time cyclic task | `findDevice`, inside the cycle `GameLoop` has entered | the published set pointer and the `inCycle` drain. No lock |
+| real-time cyclic task | `findDevice`, inside the cycle that `GameLoop` entered | the published set pointer and the `inCycle` drain. No lock |
 
 Anything else is a defect. A raw `findDevice` off the real-time thread resolves a `Device*` with
 nothing holding its set alive. That code compiles, so the warning lives on the declaration, and this
@@ -556,6 +560,7 @@ ill-formed on libc++ and on MSVC.
 | `GameLoop` counters | `game_loop.h` | one real-time writer, relaxed. Diagnostics only. Never a synchronisation mechanism |
 | `topologyGeneration_` and `processImageGeneration_` | `device_manager.h` | version counters. An off-thread consumer compares one to learn that its captured state is stale. **Position is not identity**: after a rescan, a task pinned to position 4 can find different hardware there, and this counter is the only signal that says so |
 | `lastWkc` and `expectedWkc` | `process_data.h` | the real-time thread writes the first. The control plane writes the second |
+| `shortWkcCycles`, `firstShortWkcNs`, `lastShortWkcNs` | `process_data.h` | one real-time writer, relaxed. The real-time thread cannot log, so it only counts. `BusHealthReporter` reads them through `processImageInfo` and logs a growth. Cumulative on purpose: a longer interval delays a report, and it never loses one |
 | `loop_`, `app_`, and `running_` of the two servers | `http_server.h`, `ws_server.h` | targets of a cross-thread `defer()` |
 | `Router::stopping_` | `http_server.h` | set and read on the loop thread. The thread serialises it, not the atomic. It closes the window where a request that arrives *during* the pool drain dispatches a fresh worker, which then defers onto a dead loop |
 | `Run::status`, `Run::finishedAt`, `Run::running` | `procedure_manager.h` | written last to first, so a poller that sees "finished" also sees the outcome |
@@ -586,7 +591,7 @@ Each item below must stay true. Something in the code relies on each one today.
    storage, `publishedSet_`, and the `parameters_` map of a device.** A cyclic task reads the last
    two, so the pause is not only about the IOmap.
 9. **`generations` retains every published `ProcessImage` until the next `scan()` or `reset()`.**
-   Both clear it after `stopExchange()` has drained the cycle and unpublished the image.
+   Both clear it after `stopExchange()` drains the cycle and unpublishes the image.
 10. **`GameLoop` holds a `CycleGuard` around every call to `CyclicTask::execute`, and calls no task
     when the guard is falsy.** On the real-time thread, no `findDevice` result, no `findParameter`
     result, and no cell access is valid outside one. A task therefore takes none itself.
@@ -601,7 +606,7 @@ Each item below must stay true. Something in the code relies on each one today.
     takes a `shared_ptr` to the current set and reads that, so none of them can observe a set being
     built. The real-time exceptions read `publishedSet_`, guarded by the cycle gate instead.
 14. **`publishedSet_` is replaced only with the real-time cycle drained**, by `publishDeviceSet`,
-    whose callers hold `busOperationMutex_` and have called `stopExchange`.
+    whose callers hold `busOperationMutex_` and called `stopExchange`.
 15. **A published process image implies a published device set with a live driver.** Only
     `remapProcessImage` publishes an image and it needs both, and every teardown unpublishes the image
     before it drops a set. That is what lets `exchangeProcessData` dereference `publishedSet_` without
@@ -616,7 +621,7 @@ Each item below must stay true. Something in the code relies on each one today.
 in for the real-time loop, the others doing what an HTTP worker, a sampler and a procedure do. It
 runs in the ordinary build, and under ThreadSanitizer through `tools/tsan.sh`, which is where a data
 race that happens to be benign today gets caught. It found one the first time it ran — the parameter
-copy described above — which review had missed for months and which `LOCKING.md` claimed was
+copy described above — which review missed for months and which `LOCKING.md` claimed was
 impossible.
 
 `tsan.supp` holds one suppression, for the recorder ring's sequence lock. TSan cannot see that
@@ -660,7 +665,7 @@ Each item below is known and deliberate. None is a defect.
   Tolerate a re-map that ends the span early, exactly as a lapped cursor already does.
 - **A retired `DeviceSet` lives until its last holder drops it.** A long procedure therefore keeps a
   full device set — devices, their parameter maps and cells, and the driver — alive after a rescan
-  has replaced it. The memory is transient rather than retained, and the alternative is a rescan
+  replaced it. The memory is transient rather than retained, and the alternative is a rescan
   that waits minutes for a procedure to finish.
 - **`SoemFieldbusDriver::exchangeProcessData` reads `ctx_` lock-free**, while `closeContext` writes
   it under `controlPlaneMutex_`. This is correct only because `stopExchange()` orders the two

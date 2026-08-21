@@ -40,6 +40,8 @@ The tuning calculations run in a separate executable: the controller-gain functi
 
 That executable drives nothing. It computes on the numbers sent to it. The measurement a plant model is fitted to is recorded on the drive, by the system identification procedure.
 
+It is also **optional**, and that is not only a matter of size. Auto-tuning is a commissioning tool: gains are computed while a drive is being configured, and a machine that only runs an already-configured drive never calls it. An installation that commissions nothing can leave the executable off entirely, or keep it and set `autoTuning.enabled` to `false`.
+
 The executable is not in the release archives. It is about 65 MB, and the Motion Master binary is about 5 MB. Motion Master ships on every tag, and auto-tuning changes a few times a year. A copy in every release would therefore make each download many times larger, for a file that rarely changes. Each install path downloads the file once instead, from one rolling release: [`releases/tag/auto-tuning`](../../releases/tag/auto-tuning).
 
 | Install path | What downloads the file |

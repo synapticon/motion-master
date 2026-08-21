@@ -27,6 +27,12 @@ export default function AutoTuningExplainer() {
         machine may not have it. Nothing else on this server depends on it.
       </p>
       <p>
+        It is <strong>a commissioning tool</strong>. Gains are computed while a drive is being
+        configured; a machine that only runs an already-configured drive never calls it. So an
+        installation can leave it out, and this page then says so instead of offering controls that
+        cannot work.
+      </p>
+      <p>
         Measurement data travels <strong>in the request body</strong>. The chirp measurements are
         uploaded as CSV text and the resulting bode data comes back inline, so nothing writes a file
         and the two processes need no shared view of a filesystem.

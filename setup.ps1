@@ -9,8 +9,10 @@ would therefore make each download many times larger, for a file that rarely cha
 file lives in one rolling release, at a URL that does not change, and every install path
 downloads it from there.
 
-Motion Master runs without auto-tuning. A failed download is therefore not an error. This
-script reports what happened, and the server still starts.
+Auto-tuning is a commissioning tool: it is used while a drive is being configured, and a machine
+that only runs an already-configured drive never calls it. So Motion Master runs without it, a
+failed download is not an error, and this script reports what happened while the server still
+starts.
 
 There is nothing else to set up on Windows. The binary needs no file capabilities, unlike the
 Linux build. What it may do comes from the account that runs it.

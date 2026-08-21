@@ -136,12 +136,15 @@ struct ParametersConfig {
 /// @brief @c "autoTuning" block — the auto-tuning child process.
 ///
 /// The tuning calculations are a separate executable, which Motion Master starts at startup and
-/// reaches over HTTP on loopback. It computes on the numbers it is sent and drives no device. It is
+/// reaches over HTTP on loopback. It computes on the numbers it is sent and drives no device.
+///
+/// It is optional because of what it is for: gains are computed while a drive is commissioned, and
+/// an installation that only runs already-configured drives never calls it. It is
 /// downloaded by the install scripts rather than shipped in a release, so a machine may not have
 /// it. That is not an error: Motion Master runs, and only the auto-tuning endpoints fail.
 struct AutoTuningConfig {
-  /// Start the executable at all. Set false to leave it alone on a machine that has the file but
-  /// should not run it — a real-time appliance where no tuning is done, for example.
+  /// Start the executable at all. Set false on a machine that has the file but should not run it —
+  /// a system in operation, where nothing is being commissioned.
   bool enabled = true;
   /// "" = @c auto-tuning next to the Motion Master binary, which is where every install path puts
   /// it. Set an absolute path to run a copy from somewhere else.

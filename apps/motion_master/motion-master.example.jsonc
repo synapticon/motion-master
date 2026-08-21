@@ -205,10 +205,12 @@
   // The auto-tuning child process. The tuning calculations run in a separate executable, which
   // Motion Master starts at startup and calls over HTTP on loopback. The install
   // scripts download that executable (setup.sh, setup.ps1, or the package install step), because it
-  // is far larger than the server and changes rarely. A machine without it still runs: only the
+  // is far larger than the server and changes rarely. It is also only needed while a drive is being
+  // commissioned — a system in operation never calls it. A machine without it still runs: only the
   // auto-tuning endpoints fail.
   "autoTuning": {
-    // Start the executable at all. Set false on a machine that has the file but should not run it.
+    // Start the executable at all. Set false on a machine that has the file but should not run it,
+    // such as a system in operation where nothing is being commissioned.
     "enabled": true,
     // "" (default) = "auto-tuning" next to the Motion Master binary, where every install path puts
     // it. Set an absolute path to run a copy from elsewhere.

@@ -7,9 +7,10 @@
 # file lives in one rolling release, at a URL that does not change, and every install path
 # downloads it from there.
 #
-# Motion Master runs without auto-tuning. A failed download is therefore not an error. This
-# script reports what happened and always exits with status 0. That is also what lets a package
-# install succeed on a machine with no network.
+# Auto-tuning is a commissioning tool: it is used while a drive is being configured, and a machine
+# that only runs an already-configured drive never calls it. So Motion Master runs without it, a
+# failed download is not an error, and this script reports what happened and always exits with
+# status 0. That is also what lets a package install succeed on a machine with no network.
 #
 # Usage: ./install-auto-tuning.sh [directory]
 #

@@ -58,6 +58,10 @@ syntaxError:*/esi_request_test.cc
 syntaxError:*/esi_somanet_test.cc
 syntaxError:*/esi_test.cc
 syntaxError:*/esi_unit_test.cc
+syntaxError:*/fsoe_crc_test.cc
+syntaxError:*/fsoe_frame_test.cc
+syntaxError:*/fsoe_master_test.cc
+syntaxError:*/fsoe_master_interop_test.cc
 syntaxError:*/user_cache_test.cc
 syntaxError:*/base64_test.cc
 syntaxError:*/firmware_package_test.cc

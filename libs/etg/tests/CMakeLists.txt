@@ -1,7 +1,17 @@
 find_package(GTest CONFIG REQUIRED)
 
-add_executable(mm_etg_tests esi_data_type_test.cc esi_entry_test.cc esi_request_test.cc
-                            esi_somanet_test.cc esi_test.cc esi_unit_test.cc)
+add_executable(
+  mm_etg_tests
+  esi_data_type_test.cc
+  esi_entry_test.cc
+  esi_request_test.cc
+  esi_somanet_test.cc
+  esi_test.cc
+  esi_unit_test.cc
+  fsoe_crc_test.cc
+  fsoe_frame_test.cc
+  fsoe_master_interop_test.cc
+  fsoe_master_test.cc)
 
 target_link_libraries(mm_etg_tests PRIVATE mm::etg GTest::gtest GTest::gtest_main)
 

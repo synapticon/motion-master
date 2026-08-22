@@ -2739,3 +2739,59 @@ Worth keeping for the argument, not just the fix: this is precisely the class of
 Six reports remain and are suppressed in `tsan.supp`: `ProcessDataRing` is a sequence lock, the writer and a reader copy the same payload on purpose, and the reader's second sequence check is what makes the torn result safe to discard. TSan cannot see that protocol. Making it strictly conformant means copying the payload as relaxed atomic words on both sides — cheap in principle, on the hottest RT write path in practice, so it wants measurement before it wants doing.
 
 The `x64-linux-tsan` preset uses clang: Fedora ships clang's TSan runtime, while GCC's needs a `libtsan` package that is not installed. Coverage is four scenarios — rescan and re-map, re-enumeration, every read surface, and reset — against a thread standing in for the loop at ordinary priority, which is harsher than the real thing because it can be preempted anywhere.
+
+---
+
+## Session 2026-08-22 — An FSoE master in `mm::etg`: protocol master, not safety master (as-built)
+
+Motion Master can now open, hold and diagnose an FSoE connection to a safe drive. `libs/etg/fsoe_master.{h,cc}` is the ETG.5100 ch. 8.4 master state machine, `fsoe_frame.{h,cc}` the Safety PDU layout, and `fsoe_crc.{h,cc}` the Annex A hash. Roughly 700 lines of shipped code, 46 tests, no new dependency.
+
+### Why a master here at all
+
+The obvious objection is that a safety master belongs on safety hardware, and it does. A certified FSoE master runs on an assessed platform with two channels and a cross-check — a TwinSAFE Logic terminal, or an equivalent — because the master's own integrity is what the certificate covers. There is no soft safety PLC for the same reason, and this library does not pretend otherwise: **it implements the protocol, not the integrity.** The header says so in a `@warning`, and the phrase to keep is *protocol master, not safety master*.
+
+What makes it useful anyway is that **the slave is the one that stays safe.** It authenticates every frame, and it drops its outputs to the safe state the moment the frames stop or fail a check. That property does not depend on the quality of the master, so a tool-side master can operate a safe drive — release and re-apply STO, read safe position, velocity and torque, watch a connection fault and explain it — without weakening the safety function. Commissioning, diagnostics and a bench that can move a safe axis are worth a great deal, and until now none of it was reachable without borrowing a safety PLC.
+
+Open-sourcing it is deliberate. FSoE is a published standard, an interoperable master helps anyone with a safe drive, and the interesting engineering was never the frame format.
+
+### Where it lives, and why not in `comm` or `node`
+
+`libs/etg`, next to the ESI parser, because it is the same kind of thing: an ETG specification implemented as a pure transform, with no bus underneath it. The class owns no socket, no thread and no clock. One call per bus cycle takes the octets that arrived and returns the octets to send; whether they ride in EtherCAT process data, over the SIM's TCP link, or in a unit test is the caller's business. That keeps `etg` offline, as the library's rule already required, and it means the state machine can be tested exhaustively with no hardware at all.
+
+A `node`-level view that maps ETG.6100 Safety Drive Profile objects onto the SafeData octets, and the HTTP surface above it, are the next layer and are not in this change.
+
+### Decisions worth keeping
+
+**The frame layout is a type, not a formula at each call site.** A Safety PDU is `1 + 2n + 2` octets, because SafeData is cut into blocks of at most two octets and **each block carries its own CRC**. Writing `1 + n + 2` produces a frame the peer drops without a word, which reads as a dead bus. That exact bug cost a day on the drive side of this system, in a place where one length had been shared between two directions. `FsoeFrameLayout` answers every offset question, refuses a length the standard does not allow — returning zero size rather than plausible offsets — and the two directions are separate objects.
+
+**Asymmetric lengths are the normal case.** A Synapticon drive with the safe-sensor option takes 8 SafeData octets and returns 12: a 19-octet frame out, a 27-octet frame back. `rxPduSize()` and `txPdu().size()` are independent, and the tests pin both.
+
+**A repeated frame is not an event.** ETG.5100 defines the frame-received event as a Safety PDU in which at least one bit changed. A fieldbus re-presents the same input image until the peer writes new octets, so the master compares each received PDU against the last and ignores a repeat. Answering the same frame twice would send a sequence number the slave is not expecting, and the connection would fault on the second answer. The comparison is safe because every legal successor differs: the sequence number advances, which changes every CRC.
+
+**A protocol fault is a result; a wrong-sized buffer is an error.** `cycle()` returns `std::expected<FsoeCycleResult, std::string>`. The `std::unexpected` case means the transport handed over the wrong span, which is a defect in the caller. A CRC failure, a watchdog expiry or a bad connection ID is not — it is what the protocol is for, so it arrives as a `fault` field with the state that followed. Collapsing the two would send an integrator to look at the safety configuration when the bug is in an offset calculation.
+
+**The watchdog is advanced before the frame is examined.** A frame that arrives after the deadline is a late frame, and the deadline is the event. This is the conservative reading and it costs nothing.
+
+**The session ID is a counter, and that is a certification gap.** ETG.5100 wants a random session ID, because that is what makes a replay of a whole recorded connection fail. A counter is deterministic and therefore testable — the recorded interop trace below only exists because both session IDs are fixed. For a master that is not safety-rated this is the right trade, and it is stated in the header where someone building on it will read it: a certified master must draw the session ID from a real random source.
+
+**A new connection sends `FailSafeData`.** The Data command is initialised to fail-safe, exactly as Table 32 requires, and it returns there after every fault. So a caller must call `setDataCommand(ProcessData)` to leave the safe state, and must call it **again after a fault**. This is the first thing a tool author will trip over — SafeOutputs that appear to be ignored — and it is the correct default.
+
+**The fail-safe container guarantee is copied from the slave.** `safeInputs()` reads all zero whenever `inputsValid()` is false, because the buffer is cleared on every transition that invalidates it. A caller that forgets the flag gets fail-safe data rather than a stale value. The drive firmware makes the same promise in the same words, and safety consumers there already depend on it.
+
+**The state table is transcribed, not refactored.** The five handlers repeat themselves, and the repetition is the point: each branch names its transition (`CONN_FAIL3`, `PARA_STAY1`, `DATA_OK2`) so the code can be read against the specification row by row. Two rows are worth knowing about. `SESSION_STAY2` tolerates one bad CRC in the Session state and **sends nothing at all** — in a cyclic transport that means the previous output image stays on the wire, which is why `txUpdated` exists and why the transport must keep sending `txPdu()` on every cycle regardless. And `RESET_WD` offers a Session after the watchdog expires in Reset, which is what makes the master retry on its own rather than wait for a peer that may never speak.
+
+### How it is verified, and why the obvious test is not enough
+
+Unit tests cover the CRC against the firmware's known answers, the frame layout including every illegal length, and the state machine against a `FakeFsoeSlave` — a port of the ch. 8.5 slave tables that authenticates every frame, because an echo that accepted anything would let a stalled sequence number pass.
+
+That is still self-consistency. A peer written by the same author from the same reading of the standard repeats any misreading, and the two halves cancel out. So the master was also linked directly against **the drive firmware's own FSoE slave** — the C implementation that runs on the hardware and that has passed the EtherCAT Conformance Test Tool's FSoE suite. Both are pure state machines over buffers, so they run back to back in one process with no bus at all. The harness lives in the firmware repository (`tools/fsoe_master_interop`) and it does the full round trip: handshake in six cycles, 500 cycles of process data, a deliberately corrupted frame, the slave's Reset carrying `INVALID_CRC`, and the reconnection after it.
+
+The result of that run is committed here as `fsoe_master_interop_test.cc`: eight cycles of recorded octets, replayed with no firmware present, asserting the master reproduces every octet it produced against the real device. Regenerate it whenever either state machine changes and read the diff — a changed octet means one of the two implementations moved. Note what this evidence is not: **there is no conformance test for the master role in our lab.** The CTT's FSoE suite tests a slave device. That is exactly why the interop trace carries the weight it does.
+
+### Known untested
+
+Both SafeData lengths may be 1 or any even number, which is the whole envelope ETG.5100 allows, and a length below 4 octets spreads the session ID and the connection data over several frames. Those two rows — `SESSION_STAY1` and `CONN_STAY1` — are transcribed and unexercised, because the slave the master was measured against does not implement them either, so a test would only compare one reading of the table against the same reading. Their arithmetic is shared with the multi-cycle SafePara transfer, which *is* tested against the firmware. A drive carries 4 octets or more; a narrow safety terminal may not, and that is the case to be careful with.
+
+### Not in this change
+
+ETG.5120 SafeData sectioning and the SRA parameter checksum; an ESI-driven configuration helper, though `esi.h` already parses the FSoE slots and modules that would feed it; the ETG.6100 profile view that gives the SafeData octets their meaning; more than one connection at a time; and any HTTP surface. None of them are blocked by anything here.

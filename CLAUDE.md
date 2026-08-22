@@ -162,7 +162,7 @@ motion-master/
     playground/        ← scratch binary
   libs/
     core/              ← version, CyclicTimer, CyclicTask/CycleContext, RT setup, utils
-    etg/               ← mm::etg: ESI XML parser + object-dictionary flattener. Offline
+    etg/               ← mm::etg: ESI parser, object-dictionary flattener, FSoE master. Offline
     comm/              ← fieldbus interfaces; soem.cc, spoe.cc, igh.cc
     node/              ← Device, DeviceManager, CiA402, profiles, RT tasks. No HTTP
     api/               ← mm::api: HTTP glue. The only lib that knows uWebSockets
@@ -735,6 +735,54 @@ Rules that are easy to get wrong and are pinned by tests:
 `libs/etg/tests/data/somanet-v5.6.6.xml` is a real 1.9 MB Synapticon ESI, reached through the
 `MM_ETG_TEST_DATA_DIR` compile definition. It pins the parser against a document nobody shaped
 for it.
+
+### FSoE Master (`libs/etg`)
+
+`fsoe_master.{h,cc}` is the ETG.5100 ch. 8.4 master state machine, over `fsoe_frame.{h,cc}` (Safety
+PDU layout) and `fsoe_crc.{h,cc}` (the Annex A hash). It opens and holds an FSoE connection to a
+safe drive, so a tool can release STO, read safe process values, and explain a connection fault.
+
+> [!WARNING]
+> **This is a protocol master, not a safety master.** It implements the protocol, not the integrity
+> of the device that runs it. A certified master needs certified hardware and a certified stack. The
+> reason a tool-side master is still useful is that **the slave is the one that stays safe** — it
+> authenticates every frame and drops its outputs when the frames stop, whatever the master does.
+
+Pure, like the rest of `etg`: no socket, no thread, no clock, no allocation after construction. One
+`cycle()` call per bus cycle takes the octets that arrived and returns the octets to send.
+
+Rules that are easy to get wrong and are pinned by tests:
+
+- **A Safety PDU is `1 + 2n + 2` octets, not `1 + n + 2`.** Each block of at most two SafeData
+  octets carries its own CRC. Getting this wrong produces a frame the peer drops silently, which
+  reads as a dead bus. Ask `FsoeFrameLayout`, never a formula at the call site.
+- **The two directions have independent lengths.** A drive with the safe-sensor option takes 8
+  octets and returns 12 — a 19-octet frame against a 27-octet one. Sharing one length between the
+  directions is the bug above, in the form it actually shipped once.
+- **The transport copies `txPdu()` into the output image every cycle**, including the cycles where
+  `FsoeCycleResult::txUpdated` is false. One state-table row sends nothing at all, and a fieldbus
+  keeps presenting the last image.
+- **A repeated input frame is not an event.** ETG.5100 defines the frame-received event as a PDU in
+  which a bit changed, and `cycle()` enforces it. Answering the same frame twice sends a sequence
+  number the slave is not expecting.
+- **A wrong-sized `rx` span is a transport defect and returns `std::unexpected`.** A CRC failure,
+  a watchdog expiry or a bad connection ID is not an error — it is a `fault` in the result.
+- **A connection starts in `FailSafeData` and returns to it after every fault.** Call
+  `setDataCommand(ProcessData)` to leave the safe state, and call it again after a fault. SafeOutputs
+  that seem to be ignored are almost always this.
+- **`safeInputs()` reads all zero whenever `inputsValid()` is false**, by clearing the buffer on
+  every transition that invalidates it. A caller that ignores the flag still gets fail-safe data.
+- **The session ID is a counter, not a random value.** That is what makes the interop trace
+  reproducible, and it is a gap a certified master must close.
+
+`fsoe_master_interop_test.cc` replays a recorded exchange with the real drive firmware's slave,
+octet for octet. It was produced by linking this master against the firmware's own FSoE slave (the
+`tools/fsoe_master_interop` harness in the firmware repository) and running a full connection with
+no bus. **There is no conformance test for the master role in the lab** — the CTT's FSoE suite tests
+a slave — so that trace is the interoperability evidence. Regenerate it whenever either state
+machine changes and read the diff.
+
+Rationale: `NEXTGEN.md`, Session 2026-08-22.
 
 ### Generated Object Addresses
 

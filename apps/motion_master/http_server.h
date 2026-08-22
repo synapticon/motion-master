@@ -27,6 +27,7 @@ class UserCache;
 
 namespace mm::node {
 class DeviceManager;
+class FsoeManager;
 class MonitoringManager;
 class ProcedureManager;
 }  // namespace mm::node
@@ -138,11 +139,14 @@ class HttpServer {
   ///                           must exceed that of this object.
   /// @param procedureManager   Procedure runner backing the `/api/devices/:pos/procedures` routes;
   ///                           lifetime must exceed that of this object.
+  /// @param fsoeManager        Safety connections backing the `/api/fsoe` routes; lifetime must
+  ///                           exceed that of this object.
   /// @param userCache          File store backing the `/api/user-cache` routes; lifetime must
   ///                           exceed that of this object.
   HttpServer(Config config, mm::node::DeviceManager& deviceManager,
              mm::node::MonitoringManager& monitoringManager,
-             mm::node::ProcedureManager& procedureManager, mm::core::UserCache& userCache);
+             mm::node::ProcedureManager& procedureManager, mm::node::FsoeManager& fsoeManager,
+             mm::core::UserCache& userCache);
 
   /// @brief Destructor.  Calls stop() if the server is still running.
   ~HttpServer();
@@ -180,6 +184,7 @@ class HttpServer {
   mm::node::DeviceManager& deviceManager_;
   mm::node::MonitoringManager& monitoringManager_;
   mm::node::ProcedureManager& procedureManager_;
+  mm::node::FsoeManager& fsoeManager_;
   mm::core::UserCache& userCache_;
   std::vector<mm::api::RegisterRoutesFn> routeModules_;
   std::atomic<bool> running_{false};

@@ -28,6 +28,7 @@
 #include "http_server.h"
 #include "net/http_client.h"
 #include "node/device_manager.h"
+#include "node/fsoe_manager.h"
 #include "node/monitoring_manager.h"
 #include "node/procedure_manager.h"
 #include "node/process_data_cyclic_task.h"
@@ -332,6 +333,12 @@ int main(int argc, char** argv) {
   // Runs off-RT procedures and retains their results for polling.
   mm::node::ProcedureManager procedureManager{deviceManager};
 
+  // Owns the Safety-over-EtherCAT connections behind /api/fsoe. It holds the protocol master for
+  // each safe drive; the cycle drives them through fsoeCyclicTask below. **A protocol master, not
+  // a safety master** — see libs/etg/fsoe_master.h. Declared before gameLoop so it outlives the
+  // task registered with it.
+  mm::node::FsoeManager fsoeManager{deviceManager};
+
   // The user-writable file store behind /api/user-cache, rooted at the shared cache directory
   // resolved above. Like the parameter cache, its location is a process-level setting fixed at
   // startup, not something init() can change. Everything Motion Master writes lands under this
@@ -356,6 +363,11 @@ int main(int argc, char** argv) {
   // outlive every call to GameLoop::run().
   mm::node::ProcessDataCyclicTask processDataCyclicTask{deviceManager};
 
+  // Runs every open FSoE connection, after the exchange above: it reads the frame that just
+  // arrived and stages the answer for the next exchange. It does nothing at all until a connection
+  // is opened over the API.
+  mm::node::FsoeCyclicTask fsoeCyclicTask{fsoeManager};
+
   // Tier 3 — your own code inside the RT loop. Uncomment the three marked lines (here, and the
   // addTask + keepFresh below) to run libs/example/example_cyclic_task.cc, then copy that file to
   // start your own. It is a naive thermal interlock: it puts a drive into CSV, enables it, runs it
@@ -373,6 +385,9 @@ int main(int argc, char** argv) {
   GameLoop gameLoop{deviceManager, std::chrono::microseconds{opts.config.gameLoop.periodUs},
                     opts.config.gameLoop.cpuAffinity};
   gameLoop.addTask(&processDataCyclicTask);
+  // After the exchange, and that order is load-bearing: the FSoE task reads the input image that
+  // task captured, and the frame it stages goes out on the next exchange.
+  gameLoop.addTask(&fsoeCyclicTask);
   // Tier 3, line 2 of 3 — register the example task. Membership is fixed: every task is added
   // before run(), and the loop never gains or loses one afterwards.
   // gameLoop.addTask(&exampleCyclicTask);
@@ -431,7 +446,11 @@ int main(int argc, char** argv) {
                                              : HttpServer::AutoTuningSpecFn{},
           .corsOrigin = opts.config.server.corsOrigin,
       },
-      deviceManager, monitoringManager, procedureManager, userCache};
+      deviceManager,
+      monitoringManager,
+      procedureManager,
+      fsoeManager,
+      userCache};
   // Wire the example C++ route plug-in (/api/example/...) before start(): the composition root is
   // the only place that knows the concrete plug-in. Copy libs/example to add your own.
   httpServer.addRoutes(mm::example::registerRoutes);

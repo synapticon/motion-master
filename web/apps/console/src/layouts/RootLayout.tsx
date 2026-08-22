@@ -245,10 +245,13 @@ function DeviceSection({
 
   // Motion is CiA402-only AND requires OP: you can only drive the state machine and setpoints while
   // the device is in the operational EtherCAT state (process data actually exchanging) — in any
-  // other AL state a motion command has no effect. All device links are sorted by name.
+  // other AL state a motion command has no effect. Safety is shown on the same condition and for
+  // the same reason: an FSoE frame rides in the cyclic process data, so nothing can be exchanged
+  // outside OP. All device links are sorted by name.
   const isOp = state?.alState === 8
   const links = [
     ...(isCia402 && isOp ? [{ to: 'motion', label: 'Motion' }] : []),
+    ...(isOp ? [{ to: 'safety', label: 'Safety' }] : []),
     ...deviceLinks,
   ].sort((a, b) => a.label.localeCompare(b.label))
 

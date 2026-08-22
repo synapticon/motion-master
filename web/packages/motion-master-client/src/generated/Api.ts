@@ -27,6 +27,7 @@ import {
   FirmwareCompatibility,
   FirmwarePackageName,
   FoeErrorCode,
+  FsoeConnection,
   GameLoopHealth,
   HardwareDescription,
   HrdRecording,
@@ -531,6 +532,243 @@ export class Api<
     this.request<string, any>({
       path: `/api/log`,
       method: "GET",
+      ...params,
+    });
+  /**
+   * @description Every open FSoE connection, with its protocol state and the safe process values the drive is publishing. **This is a protocol master, not a safety master**, which is what `safetyMaster: false` says in every answer. It implements ETG.5100; it does not implement the integrity of the machine it runs on, and it cannot — that needs certified hardware. What makes it useful anyway is that the drive stays safe on its own: it authenticates every frame and drops its outputs to the safe state when the frames stop, whatever this master does. Use it to commission, to diagnose and to move a safe axis on a bench. Do not use it as the safety function of a machine.
+   *
+   * @name GetFsoe
+   * @summary List the Safety-over-EtherCAT connections
+   * @request GET:/api/fsoe
+   */
+  getFsoe = (params: RequestParams = {}) =>
+    this.request<
+      {
+        /**
+         * Always false. See the description above.
+         * @example false
+         */
+        safetyMaster: boolean;
+        connections: FsoeConnection[];
+      },
+      any
+    >({
+      path: `/api/fsoe`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Opens a connection to one drive and starts the handshake. The frame is located in the published process image, so **process data has to be configured first** and the device has to be reachable — the drive's PDO mapping is read over SDO here. Opening a connection to a drive that already has one **replaces** it. That is how a caller re-binds after the bus was re-mapped: a re-map moves the frame, and a connection whose offsets belong to the old image reports `bound: false` and stops driving. `slaveAddress` must match the address the drive itself is configured with, or the drive refuses the connection with `InvalidAddress`. On a Synapticon drive that address is a stored parameter which takes effect after a power cycle. A new connection sends `FailSafeData`, so the drive holds its outputs in the safe state until `PUT /api/fsoe/{slavePosition}/data-command` says otherwise. That is the standard's default, not a choice made here.
+   *
+   * @name OpenFsoeConnection
+   * @summary Open a Safety-over-EtherCAT connection
+   * @request POST:/api/fsoe
+   */
+  openFsoeConnection = (
+    data: {
+      /**
+       * 1-based bus position of the drive.
+       * @example 1
+       */
+      slavePosition: number;
+      /**
+       * FSoE Slave Address the drive is configured with.
+       * @default 0
+       * @example 3
+       */
+      slaveAddress?: number;
+      /**
+       * Non-zero, and unique among the connections on the bus.
+       * @default 1
+       * @example 7
+       */
+      connectionId?: number;
+      /**
+       * FSoE watchdog in milliseconds. It bounds the whole round trip, so it has to exceed the bus cycle time with margin, and the drive checks it against its own accepted range.
+       * @default 100
+       * @example 100
+       */
+      watchdogMs?: number;
+      /**
+       * PDO carrying the master frame. ETG.5001.4 leaves the index to the device, so it cannot be inferred; the default is what a Synapticon safe drive uses. The frame *length* is never configured — it comes from the device's own mapping.
+       * @default 5636
+       * @example 5636
+       */
+      rxPdoIndex?: number;
+      /**
+       * PDO carrying the slave frame.
+       * @default 6660
+       * @example 6660
+       */
+      txPdoIndex?: number;
+      /**
+       * First session ID. ETG.5100 asks for a random one; this master counts, which is deterministic and therefore testable. A certified master must not.
+       * @default 1
+       */
+      initialSessionId?: number;
+      /** Application half of the SafePara, as bytes. Empty for a device that takes no application parameters. */
+      applicationParameters?: number[];
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      FsoeConnection,
+      {
+        /** What went wrong, in words. */
+        error: string;
+      }
+    >({
+      path: `/api/fsoe`,
+      method: "POST",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Stops driving the frame. The drive's own watchdog then expires and takes its outputs to the safe state, which is the correct way to end a safety connection — there is no "goodbye" frame in FSoE.
+   *
+   * @name CloseFsoeConnection
+   * @summary Close a Safety-over-EtherCAT connection
+   * @request DELETE:/api/fsoe/{slavePosition}
+   */
+  closeFsoeConnection = (slavePosition: number, params: RequestParams = {}) =>
+    this.request<
+      {
+        slavePosition?: number;
+        /** @example false */
+        open?: boolean;
+      },
+      {
+        /** What went wrong, in words. */
+        error: string;
+      }
+    >({
+      path: `/api/fsoe/${slavePosition}`,
+      method: "DELETE",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Sets the STO bit of the safety controlword. `released: false` asks the drive to remove torque; `true` permits it. The bit is inverted on the wire — zero requests STO — so an all-zero frame, which is what a fail-safe frame and a lost frame both carry, is a request for Safe Torque Off. Nothing in this API can invert that. Torque is only permitted once **both** halves agree: this bit released, and the connection sending `ProcessData` rather than `FailSafeData`.
+   *
+   * @name SetFsoeSto
+   * @summary Release or apply Safe Torque Off
+   * @request PUT:/api/fsoe/{slavePosition}/sto
+   */
+  setFsoeSto = (
+    slavePosition: number,
+    data: {
+      /**
+       * True permits torque; false requests Safe Torque Off.
+       * @example true
+       */
+      released: boolean;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      {
+        released?: boolean;
+      },
+      {
+        /** What went wrong, in words. */
+        error: string;
+      }
+    >({
+      path: `/api/fsoe/${slavePosition}/sto`,
+      method: "PUT",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description The command sent in the Data state. `FailSafeData` tells the drive to hold its outputs in the safe state while the connection stays up, which is how a master applies a safety function without dropping the link. A connection starts in `FailSafeData` and **returns to it after every fault**, so this has to be set to `ProcessData` before SafeOutputs mean anything, and set again after a fault.
+   *
+   * @name SetFsoeDataCommand
+   * @summary Choose ProcessData or FailSafeData
+   * @request PUT:/api/fsoe/{slavePosition}/data-command
+   */
+  setFsoeDataCommand = (
+    slavePosition: number,
+    data: {
+      /** @example "ProcessData" */
+      command: "ProcessData" | "FailSafeData";
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      {
+        command?: string;
+      },
+      {
+        /** What went wrong, in words. */
+        error: string;
+      }
+    >({
+      path: `/api/fsoe/${slavePosition}/data-command`,
+      method: "PUT",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description The SafeData octets sent to the drive, for a safety function this API does not name yet. **Octet 0 is the safety controlword**, so a caller that writes it here writes STO too.
+   *
+   * @name SetFsoeSafeOutputs
+   * @summary Set the raw SafeOutputs
+   * @request PUT:/api/fsoe/{slavePosition}/safe-outputs
+   */
+  setFsoeSafeOutputs = (
+    slavePosition: number,
+    data: {
+      /**
+       * SafeOutputs octets, at most as many as the connection carries.
+       * @example [1,0,0,0,0,0,0,0]
+       */
+      data: number[];
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      {
+        safeOutputs?: number[];
+      },
+      {
+        /** What went wrong, in words. */
+        error: string;
+      }
+    >({
+      path: `/api/fsoe/${slavePosition}/safe-outputs`,
+      method: "PUT",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Drops the connection and starts the handshake again. The safe inputs go fail-safe at once. This is the local Reset Connection event of ETG.5100, and it is also how a caller clears a fault that has left the connection in Reset.
+   *
+   * @name ResetFsoeConnection
+   * @summary Reset a Safety-over-EtherCAT connection
+   * @request POST:/api/fsoe/{slavePosition}/reset
+   */
+  resetFsoeConnection = (slavePosition: number, params: RequestParams = {}) =>
+    this.request<
+      {
+        reset?: boolean;
+      },
+      {
+        /** What went wrong, in words. */
+        error: string;
+      }
+    >({
+      path: `/api/fsoe/${slavePosition}/reset`,
+      method: "POST",
+      format: "json",
       ...params,
     });
   /**

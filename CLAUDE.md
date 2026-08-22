@@ -164,7 +164,7 @@ motion-master/
     core/              ← version, CyclicTimer, CyclicTask/CycleContext, RT setup, utils
     etg/               ← mm::etg: ESI parser, object-dictionary flattener, FSoE master. Offline
     comm/              ← fieldbus interfaces; soem.cc, spoe.cc, igh.cc
-    node/              ← Device, DeviceManager, CiA402, profiles, RT tasks. No HTTP
+    node/              ← Device, DeviceManager, CiA402, profiles, FSoE connections, RT tasks. No HTTP
     api/               ← mm::api: HTTP glue. The only lib that knows uWebSockets
     example/           ← copy-me starter: a route plug-in and a cyclic task
   hil/
@@ -781,6 +781,40 @@ octet for octet. It was produced by linking this master against the firmware's o
 no bus. **There is no conformance test for the master role in the lab** — the CTT's FSoE suite tests
 a slave — so that trace is the interoperability evidence. Regenerate it whenever either state
 machine changes and read the diff.
+
+### FSoE on the bus (`libs/node`, `/api/fsoe`)
+
+The master above is pure; this is what puts its octets on the wire. `fsoe_connection.{h,cc}` binds
+one connection to one drive, `fsoe_manager.{h,cc}` owns them and carries `FsoeCyclicTask`, and
+`/api/fsoe` is the HTTP surface. The Console's device **Safety** page drives it.
+
+- **The frame goes out through parameter cells, and comes back raw.** `exchangeProcessData` zeroes
+  the output image and recomposes it from each object's cell every cycle, so a raw write into that
+  image is overwritten. Every octet of the master frame *is* a mapped object, so `step` writes the
+  built frame back through those cells with `setValue`. The input direction cannot work that way: a
+  SafeData value wider than two octets is split by the interleaved CRCs, and the ESI maps the second
+  half as an alignment gap with no object behind it. It is read from `DeviceManager::cycleInputs()`,
+  the image the cycle just captured.
+- **Never read a "safe position" object out of the process image.** You would get half of a 32-bit
+  value, and you would get it without any CRC, sequence or watchdog check. Read the frame, let the
+  master validate it, then decode — that is what `FsoeConnectionState::processValues()` does.
+- **Register `FsoeCyclicTask` after `ProcessDataCyclicTask`.** It reads the input image that task
+  captured, and the frame it stages goes out on the next exchange. That one cycle of delay is what
+  a master sees on any fieldbus.
+- **The transport must not present the same frame twice.** The master ignores an unchanged input,
+  and the drive's own glue does the same, because a peer that answers one frame twice breaks the CRC
+  chain. `fsoe_manager_test.cc` models that, and the test would pass a broken master without it.
+- **Offsets belong to one process image.** A connection captures `processImageGeneration()` and
+  `topologyGeneration()`; if either changes it reports `bound: false` and stops driving rather than
+  write a Safety PDU into whatever now occupies those octets. Re-open to re-bind.
+- **`open` is the only expensive call.** It reads the drive's PDO mapping over SDO, derives the
+  SafeData lengths from the mapping (a frame is `1 + 2n + 2`, so `n = (octets - 3) / 2`), checks
+  every field is byte-aligned and typed, and allocates. `step` allocates nothing.
+- **Connections are appended, never removed.** The cycle thread walks a fixed pointer array whose
+  length only grows, published with a release store, so it needs no lock. Closing marks a connection
+  inactive; re-opening appends a new one and retires the old.
+- **The state crosses to HTTP through a sequence lock**, so a display cannot show a safe position
+  from one cycle beside a validity flag from another. Same shape as the recorder ring's.
 
 Rationale: `NEXTGEN.md`, Session 2026-08-22.
 

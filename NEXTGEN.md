@@ -2795,3 +2795,45 @@ Both SafeData lengths may be 1 or any even number, which is the whole envelope E
 ### Not in this change
 
 ETG.5120 SafeData sectioning and the SRA parameter checksum; an ESI-driven configuration helper, though `esi.h` already parses the FSoE slots and modules that would feed it; the ETG.6100 profile view that gives the SafeData octets their meaning; more than one connection at a time; and any HTTP surface. None of them are blocked by anything here.
+
+---
+
+## Session 2026-08-22 — The FSoE master reaches the wire: through parameter cells out, raw bytes back (as-built)
+
+The master state machine from earlier today now drives a real drive. `libs/node/fsoe_connection.{h,cc}` binds one connection to one device, `fsoe_manager.{h,cc}` owns them and carries the cyclic task, `/api/fsoe` is the HTTP surface, and the Console has a device **Safety** page that opens a connection, releases STO and shows the safe process values. `libs/etg/safety_drive_profile.{h,cc}` decodes the ETG.6100 payload.
+
+### The question that decided the design
+
+There was no need for a fake EtherCAT device, and that was the first thing to establish. FSoE is a black channel: the Safety PDU is opaque payload in ordinary process data, and the master is an application that produces 19 octets and consumes 27. A TwinSAFE system puts that application inside an EL6910 terminal because *safety integrity* needs certified hardware, not because the protocol wants a device on the bus. Motion Master already owns the process image, so the master lives in the process and writes into it.
+
+Which raised the real question: **how does a Safety PDU get into the output image?** `exchangeProcessData` zeroes the live region and recomposes it from each output object's parameter cell every cycle, so a raw write into that buffer is erased before it is sent. The answer the architecture had already decided is that there is no other path — and it works, because every octet of the master frame *is* a mapped object in the ESI: the command octet, the SafeData octets, each CRC, the connection ID. So `step` writes the frame it built back through those cells, and the composer puts it on the wire. No new RT mechanism, no exception to the single-composer rule.
+
+The input direction cannot be done that way, and the reason is worth keeping. A 32-bit safe value spans two CRC sections, so the ESI maps its low half to `0x6611` and its **high half as an alignment gap with no object at all**. There is nothing to read it from. Even if there were, reading a "safe position" object would hand out a number that no CRC, sequence number or watchdog had vouched for. So the frame is read whole from `DeviceManager::cycleInputs()` — a new accessor, documented for exactly this: a payload whose meaning comes from a protocol rather than from the object dictionary.
+
+### What the harness taught us, which is a real integration requirement
+
+The first end-to-end test stalled in Session with `UnexpectedCommand`. The master was right and the harness was wrong, in a way that matters on hardware: **the transport must not present the same frame twice.** ETG.5100 defines the frame-received event as a Safety PDU in which a bit changed, and both ends depend on it. A cyclic bus re-presents an unchanged image; the master already ignores a repeat, but a *slave* handed the same frame twice answers twice, and the second answer inherits the wrong CRC. The drive's own glue does this check before it calls its FSoE core, and the test double now does too. Without it the test would pass a master that was subtly wrong, which is the interesting part: the check is load-bearing, not hygiene.
+
+### Decisions
+
+**Binding is a control-plane act; the cycle only uses it.** `open` reads the drive's PDO mapping over SDO, derives both SafeData lengths from the mapping rather than from configuration (a frame is `1 + 2n + 2`, so `n = (octets - 3) / 2`, and the two directions cannot silently disagree), checks that every field of the master frame is byte-aligned and typed as an 8- or 16-bit integer, and allocates. `step` allocates nothing and takes no lock.
+
+**A stale binding stops driving rather than write somewhere else.** Offsets belong to one process image. A connection captures `processImageGeneration()` and `topologyGeneration()`, and a change in either makes it report `bound: false` and go quiet — the drive's watchdog then takes its outputs to the safe state, which is the correct outcome for a master that no longer knows where its frame is. Re-opening re-binds. The alternative — keep writing — would put a Safety PDU into whatever now occupies those octets.
+
+**Connections are appended and never removed.** The cycle walks a fixed array of pointers whose length only grows, published with a release store, so it needs no lock and cannot see a half-built connection. Closing marks one inactive; re-opening appends a new one and retires the old. The cost of never reclaiming a slot is a few hundred bytes and a bounded count; the benefit is that the RT side has no lifetime problem at all.
+
+**The state crosses to HTTP as one sequence-locked snapshot**, not as a set of independently readable fields. A page that showed a safe position from one cycle beside a validity flag from another would be a page that can say "valid" about a value that was not. Same shape as the recorder ring, whose payload copies race by design in exactly the same way. **No `tsan.supp` entry was added**, deliberately: nothing runs ThreadSanitizer over this code yet — `concurrency_test.cc` does not drive a connection — so an entry now would be a suppression written without a report to justify it. Widen that test to cover FSoE and the entry will be earned, with the ring's own wording to copy.
+
+**Requests cross as atomics, latest wins.** Data command, safe outputs and reset are one relaxed atomic each; the SafeOutputs setpoint is capped at eight octets so it fits in one 64-bit atomic and cannot tear. That covers every safe drive connection, and `open` refuses a wider one rather than truncating it.
+
+**`cycle()`'s error path is unreachable from here, on purpose.** The master returns `std::unexpected` for a wrong-sized span, which would allocate a string on the RT thread. `step` passes either an empty span or exactly `rxPduSize()` octets, so the branch cannot be taken — the type still carries the contract for other callers.
+
+### The API, and the one sentence it repeats
+
+`GET /api/fsoe` answers with `safetyMaster: false`, and every page and header says the same thing in longer form: **this implements the protocol, not the integrity of the machine that runs it.** The endpoints are `POST /api/fsoe` (open, which also re-binds), `DELETE /api/fsoe/{pos}`, `PUT .../sto`, `PUT .../data-command`, `PUT .../safe-outputs` and `POST .../reset`. STO is its own endpoint rather than a raw octet write because it is what a caller actually wants, and because the inversion — zero requests STO, so a lost frame is a request for it — should be stated once, here, and not repeated by every client.
+
+Two things a caller has to know, and both are in the swagger text: a connection starts in `FailSafeData` and returns to it after every fault, so `data-command` has to be set before SafeOutputs mean anything; and torque needs both halves to agree, the STO bit released *and* `ProcessData` being sent.
+
+### Verified
+
+995 tests pass. `fsoe_manager_test.cc` runs a whole drive on a fake bus whose mapping is the shipping ESI entry for entry — alignment gaps included — against the ETG.5100 slave double: the handshake, the safe values arriving decoded, STO reaching the drive, fail-safe data dropping its outputs without dropping the link, a local reset, a re-map unbinding, and a re-open replacing a connection. The endpoints were exercised against the running server over TLS. What is *not* verified is hardware: nothing here has driven a real drive yet, and the next step is the C021 axis on the bench.

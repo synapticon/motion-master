@@ -297,6 +297,10 @@ const Device* DeviceManager::findDevice(uint16_t slavePosition) const {
   return set != nullptr ? set->find(slavePosition) : nullptr;
 }
 
+std::span<const uint8_t> DeviceManager::cycleInputs() const {
+  return {pd_->inScratch.bytes.data(), pd_->inScratch.size};
+}
+
 Device* DeviceManager::findDevice(uint16_t slavePosition) {
   DeviceSet* set = publishedSet_.load(std::memory_order_acquire);
   return set != nullptr ? set->find(slavePosition) : nullptr;

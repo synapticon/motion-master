@@ -38,6 +38,7 @@
 #include "node/device_manager.h"
 #include "node/device_parameter.h"
 #include "node/firmware_package.h"
+#include "node/fsoe_manager.h"
 #include "node/ic_haus_registers.h"
 #include "node/kuebler_registers.h"
 #include "node/monitoring_manager.h"
@@ -87,6 +88,23 @@ mm::api::Response withDeviceOr404(mm::node::DeviceManager& deviceManager, uint16
     return mm::api::notFound("no device at that bus position");
   }
   return fn(*device);
+}
+
+// Resolves the :slavePosition parameter to an open FSoE connection, or answers 404. The connection
+// is owned by the manager and outlives the request: closing one only marks it inactive, so a
+// handler can never be left holding a destroyed connection.
+template <typename Fn>
+mm::api::Response withFsoeConnection(mm::node::FsoeManager& fsoeManager,
+                                     const mm::api::Request& req, Fn&& fn) {
+  const auto position = req.parameterAs<uint16_t>("slavePosition");
+  if (!position) {
+    return mm::api::badRequest("slavePosition must be a number");
+  }
+  mm::node::FsoeConnection* connection = fsoeManager.find(*position);
+  if (connection == nullptr) {
+    return mm::api::notFound("no FSoE connection is open to that bus position");
+  }
+  return fn(*connection);
 }
 
 // Parses the optional comma-separated "positions" query into 1-based slave positions. An absent
@@ -370,11 +388,13 @@ std::string userCacheRelPath(std::string_view url) {
 
 HttpServer::HttpServer(Config config, mm::node::DeviceManager& deviceManager,
                        mm::node::MonitoringManager& monitoringManager,
-                       mm::node::ProcedureManager& procedureManager, mm::core::UserCache& userCache)
+                       mm::node::ProcedureManager& procedureManager,
+                       mm::node::FsoeManager& fsoeManager, mm::core::UserCache& userCache)
     : config_(std::move(config)),
       deviceManager_(deviceManager),
       monitoringManager_(monitoringManager),
       procedureManager_(procedureManager),
+      fsoeManager_(fsoeManager),
       userCache_(userCache) {}
 
 HttpServer::~HttpServer() {
@@ -717,6 +737,139 @@ void HttpServer::run() {
                return withDeviceOr404(deviceManager_, *position, [](mm::node::Device& device) {
                  return mm::api::json(nlohmann::json(device));
                });
+             });
+
+  // ── Safety over EtherCAT ────────────────────────────────────────────────────────────────────
+  // A connection to a safe drive: open it, watch it, release STO, read the safe process values.
+  //
+  // **This is not a safety master.** The protocol is implemented; the integrity of the machine
+  // running it is not, and cannot be — that needs certified hardware. What makes these endpoints
+  // useful anyway is that the drive stays safe on its own: it authenticates every frame and drops
+  // its outputs to the safe state when the frames stop, whatever this master does. So this is the
+  // surface for commissioning, diagnosis and a bench that can move a safe axis. It is not the
+  // safety function of a machine, and `GET /api/fsoe` says so in its own answer.
+  router.get("/api/fsoe", [this](const mm::api::Request&) {
+    nlohmann::json body;
+    body["safetyMaster"] = false;
+    body["connections"] = nlohmann::json(fsoeManager_.report());
+    return mm::api::json(body);
+  });
+
+  // Opening reads the drive's PDO mapping and locates the Safety PDU in the published process
+  // image, so process data has to be configured first. Opening again replaces the connection:
+  // that is how a caller re-binds after the bus was re-mapped.
+  router.post("/api/fsoe", [this](const mm::api::Request& req) -> mm::api::Response {
+    const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+    if (!body.is_object() || !body.contains("slavePosition")) {
+      return mm::api::badRequest(
+          "body must be {\"slavePosition\": n, \"slaveAddress\": n, \"connectionId\": n, "
+          "\"watchdogMs\": n} (slaveAddress, connectionId and watchdogMs are optional)");
+    }
+    mm::node::FsoeConnectionConfig config;
+    config.slavePosition = body.value("slavePosition", uint16_t{0});
+    config.slaveAddress = body.value("slaveAddress", uint16_t{0});
+    config.connectionId = body.value("connectionId", uint16_t{1});
+    config.watchdogMs = body.value("watchdogMs", uint16_t{100});
+    config.rxPdoIndex = body.value("rxPdoIndex", uint16_t{0x1604});
+    config.txPdoIndex = body.value("txPdoIndex", uint16_t{0x1A04});
+    config.initialSessionId = body.value("initialSessionId", uint16_t{1});
+    if (body.contains("applicationParameters")) {
+      if (!body["applicationParameters"].is_array()) {
+        return mm::api::badRequest("applicationParameters must be an array of bytes");
+      }
+      config.applicationParameters = body["applicationParameters"].get<std::vector<uint8_t>>();
+    }
+    auto opened = fsoeManager_.open(config);
+    if (!opened) {
+      return mm::api::badRequest(opened.error());
+    }
+    return mm::api::json(nlohmann::json(*opened));
+  });
+
+  router.del("/api/fsoe/:slavePosition", [this](const mm::api::Request& req) -> mm::api::Response {
+    const auto position = req.parameterAs<uint16_t>("slavePosition");
+    if (!position) {
+      return mm::api::badRequest("slavePosition must be a number");
+    }
+    auto closed = fsoeManager_.close(*position);
+    if (!closed) {
+      return mm::api::notFound(closed.error());
+    }
+    return mm::api::json(nlohmann::json{{"slavePosition", *position}, {"open", false}});
+  });
+
+  // A local reset: the connection drops and the handshake starts again. The drive's SafeOutputs go
+  // to the safe state on the way, because a reset is what a master does when it has lost trust.
+  router.post(
+      "/api/fsoe/:slavePosition/reset", [this](const mm::api::Request& req) -> mm::api::Response {
+        return withFsoeConnection(fsoeManager_, req,
+                                  [](mm::node::FsoeConnection& connection) -> mm::api::Response {
+                                    connection.requestReset();
+                                    return mm::api::json(nlohmann::json{{"reset", true}});
+                                  });
+      });
+
+  // Safe Torque Off, the endpoint this whole layer exists for. `released: false` asks the drive to
+  // remove torque; `true` permits it. The wire inverts the bit — zero means STO — so a lost or
+  // fail-safe frame reads as a request for STO, and nothing here can invert that.
+  router.put(
+      "/api/fsoe/:slavePosition/sto", [this](const mm::api::Request& req) -> mm::api::Response {
+        const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+        if (!body.is_object() || !body.contains("released") || !body["released"].is_boolean()) {
+          return mm::api::badRequest("body must be {\"released\": true|false}");
+        }
+        const bool released = body["released"].get<bool>();
+        return withFsoeConnection(
+            fsoeManager_, req,
+            [released](mm::node::FsoeConnection& connection) -> mm::api::Response {
+              connection.setControl(
+                  mm::etg::SdpControl{.stoRequested = !released, .errorAcknowledge = false});
+              return mm::api::json(nlohmann::json{{"released", released}});
+            });
+      });
+
+  // ProcessData or FailSafeData. A connection starts in FailSafeData and returns to it after every
+  // fault, so this has to be set before SafeOutputs mean anything — and set again after a fault.
+  router.put(
+      "/api/fsoe/:slavePosition/data-command",
+      [this](const mm::api::Request& req) -> mm::api::Response {
+        const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+        const std::string command =
+            body.is_object() ? body.value("command", std::string{}) : std::string{};
+        mm::etg::FsoeCommand chosen{};
+        if (command == "ProcessData") {
+          chosen = mm::etg::FsoeCommand::ProcessData;
+        } else if (command == "FailSafeData") {
+          chosen = mm::etg::FsoeCommand::FailSafeData;
+        } else {
+          return mm::api::badRequest(
+              "body must be {\"command\": \"ProcessData\"|\"FailSafeData\"}");
+        }
+        return withFsoeConnection(
+            fsoeManager_, req, [chosen](mm::node::FsoeConnection& connection) -> mm::api::Response {
+              connection.setDataCommand(chosen);
+              return mm::api::json(nlohmann::json{{"command", mm::etg::fsoeCommandName(chosen)}});
+            });
+      });
+
+  // The raw SafeOutputs, for a safety function this API does not name yet. Octet 0 is the safety
+  // controlword, so a caller that sets it here sets STO too.
+  router.put("/api/fsoe/:slavePosition/safe-outputs",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto bytes = parseByteArrayBody(req.body());
+               if (!bytes) {
+                 return mm::api::badRequest(bytes.error());
+               }
+               return withFsoeConnection(
+                   fsoeManager_, req,
+                   [&bytes](mm::node::FsoeConnection& connection) -> mm::api::Response {
+                     if (!connection.setSafeOutputs(*bytes)) {
+                       return mm::api::badRequest(
+                           std::format("this connection carries {} SafeOutputs octets",
+                                       connection.state().safeOutputsLength));
+                     }
+                     return mm::api::json(nlohmann::json{{"safeOutputs", *bytes}});
+                   });
              });
 
   // ── Offline tools: no device, no bus ────────────────────────────────────────────────────────

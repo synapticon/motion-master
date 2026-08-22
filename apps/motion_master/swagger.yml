@@ -704,6 +704,414 @@ paths:
             text/plain:
               schema:
                 type: string
+  /api/fsoe:
+    get:
+      summary: List the Safety-over-EtherCAT connections
+      operationId: getFsoe
+      description: >
+        Every open FSoE connection, with its protocol state and the safe process values the drive
+        is publishing.
+
+
+        **This is a protocol master, not a safety master**, which is what `safetyMaster: false`
+        says in every answer. It implements ETG.5100; it does not implement the integrity of the
+        machine it runs on, and it cannot — that needs certified hardware. What makes it useful
+        anyway is that the drive stays safe on its own: it authenticates every frame and drops its
+        outputs to the safe state when the frames stop, whatever this master does. Use it to
+        commission, to diagnose and to move a safe axis on a bench. Do not use it as the safety
+        function of a machine.
+      responses:
+        "200":
+          description: The connections. An empty list when none is open.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [safetyMaster, connections]
+                properties:
+                  safetyMaster:
+                    type: boolean
+                    description: Always false. See the description above.
+                    example: false
+                  connections:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/FsoeConnection"
+    post:
+      summary: Open a Safety-over-EtherCAT connection
+      operationId: openFsoeConnection
+      description: >
+        Opens a connection to one drive and starts the handshake. The frame is located in the
+        published process image, so **process data has to be configured first** and the device has
+        to be reachable — the drive's PDO mapping is read over SDO here.
+
+
+        Opening a connection to a drive that already has one **replaces** it. That is how a caller
+        re-binds after the bus was re-mapped: a re-map moves the frame, and a connection whose
+        offsets belong to the old image reports `bound: false` and stops driving.
+
+
+        `slaveAddress` must match the address the drive itself is configured with, or the drive
+        refuses the connection with `InvalidAddress`. On a Synapticon drive that address is a
+        stored parameter which takes effect after a power cycle.
+
+
+        A new connection sends `FailSafeData`, so the drive holds its outputs in the safe state
+        until `PUT /api/fsoe/{slavePosition}/data-command` says otherwise. That is the standard's
+        default, not a choice made here.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [slavePosition]
+              properties:
+                slavePosition:
+                  type: integer
+                  description: 1-based bus position of the drive.
+                  example: 1
+                slaveAddress:
+                  type: integer
+                  description: FSoE Slave Address the drive is configured with.
+                  default: 0
+                  example: 3
+                connectionId:
+                  type: integer
+                  description: Non-zero, and unique among the connections on the bus.
+                  default: 1
+                  example: 7
+                watchdogMs:
+                  type: integer
+                  description: >
+                    FSoE watchdog in milliseconds. It bounds the whole round trip, so it has to
+                    exceed the bus cycle time with margin, and the drive checks it against its own
+                    accepted range.
+                  default: 100
+                  example: 100
+                rxPdoIndex:
+                  type: integer
+                  description: >
+                    PDO carrying the master frame. ETG.5001.4 leaves the index to the device, so it
+                    cannot be inferred; the default is what a Synapticon safe drive uses. The frame
+                    *length* is never configured — it comes from the device's own mapping.
+                  default: 5636
+                  example: 5636
+                txPdoIndex:
+                  type: integer
+                  description: PDO carrying the slave frame.
+                  default: 6660
+                  example: 6660
+                initialSessionId:
+                  type: integer
+                  description: >
+                    First session ID. ETG.5100 asks for a random one; this master counts, which is
+                    deterministic and therefore testable. A certified master must not.
+                  default: 1
+                applicationParameters:
+                  type: array
+                  description: >
+                    Application half of the SafePara, as bytes. Empty for a device that takes no
+                    application parameters.
+                  items:
+                    type: integer
+      responses:
+        "200":
+          description: The connection, as just opened.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FsoeConnection"
+        "400":
+          description: >
+            The body was malformed, the device is unknown, process data is not configured, or the
+            device does not carry a Safety PDU of a legal shape. The message names which.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: What went wrong, in words.
+  /api/fsoe/{slavePosition}:
+    delete:
+      summary: Close a Safety-over-EtherCAT connection
+      operationId: closeFsoeConnection
+      description: >
+        Stops driving the frame. The drive's own watchdog then expires and takes its outputs to the
+        safe state, which is the correct way to end a safety connection — there is no "goodbye"
+        frame in FSoE.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The connection was closed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  slavePosition:
+                    type: integer
+                  open:
+                    type: boolean
+                    example: false
+        "404":
+          description: No connection is open to that position.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: What went wrong, in words.
+  /api/fsoe/{slavePosition}/sto:
+    put:
+      summary: Release or apply Safe Torque Off
+      operationId: setFsoeSto
+      description: >
+        Sets the STO bit of the safety controlword. `released: false` asks the drive to remove
+        torque; `true` permits it.
+
+
+        The bit is inverted on the wire — zero requests STO — so an all-zero frame, which is what
+        a fail-safe frame and a lost frame both carry, is a request for Safe Torque Off. Nothing in
+        this API can invert that.
+
+
+        Torque is only permitted once **both** halves agree: this bit released, and the connection
+        sending `ProcessData` rather than `FailSafeData`.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [released]
+              properties:
+                released:
+                  type: boolean
+                  description: True permits torque; false requests Safe Torque Off.
+                  example: true
+      responses:
+        "200":
+          description: The request was staged; it goes out on the next cycle.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  released:
+                    type: boolean
+        "400":
+          description: 'The body was not `{"released": true|false}`.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: What went wrong, in words.
+        "404":
+          description: No connection is open to that position.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: What went wrong, in words.
+  /api/fsoe/{slavePosition}/data-command:
+    put:
+      summary: Choose ProcessData or FailSafeData
+      operationId: setFsoeDataCommand
+      description: >
+        The command sent in the Data state. `FailSafeData` tells the drive to hold its outputs in
+        the safe state while the connection stays up, which is how a master applies a safety
+        function without dropping the link.
+
+
+        A connection starts in `FailSafeData` and **returns to it after every fault**, so this has
+        to be set to `ProcessData` before SafeOutputs mean anything, and set again after a fault.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [command]
+              properties:
+                command:
+                  type: string
+                  enum: [ProcessData, FailSafeData]
+                  example: ProcessData
+      responses:
+        "200":
+          description: The command was staged.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  command:
+                    type: string
+        "400":
+          description: The body named no known command.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: What went wrong, in words.
+        "404":
+          description: No connection is open to that position.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: What went wrong, in words.
+  /api/fsoe/{slavePosition}/safe-outputs:
+    put:
+      summary: Set the raw SafeOutputs
+      operationId: setFsoeSafeOutputs
+      description: >
+        The SafeData octets sent to the drive, for a safety function this API does not name yet.
+        **Octet 0 is the safety controlword**, so a caller that writes it here writes STO too.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [data]
+              properties:
+                data:
+                  type: array
+                  description: SafeOutputs octets, at most as many as the connection carries.
+                  items:
+                    type: integer
+                  example: [1, 0, 0, 0, 0, 0, 0, 0]
+      responses:
+        "200":
+          description: The octets were staged.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  safeOutputs:
+                    type: array
+                    items:
+                      type: integer
+        "400":
+          description: The body was malformed, or longer than the connection's SafeOutputs.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: What went wrong, in words.
+        "404":
+          description: No connection is open to that position.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: What went wrong, in words.
+  /api/fsoe/{slavePosition}/reset:
+    post:
+      summary: Reset a Safety-over-EtherCAT connection
+      operationId: resetFsoeConnection
+      description: >
+        Drops the connection and starts the handshake again. The safe inputs go fail-safe at once.
+        This is the local Reset Connection event of ETG.5100, and it is also how a caller clears a
+        fault that has left the connection in Reset.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The reset was requested; it takes effect on the next cycle.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reset:
+                    type: boolean
+        "404":
+          description: No connection is open to that position.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: What went wrong, in words.
   /api/auto-tuning:
     get:
       summary: Auto-tuning process status
@@ -4044,6 +4452,168 @@ paths:
             be deleted now.
 components:
   schemas:
+    FsoeConnection:
+      type: object
+      description: >
+        One FSoE connection: how it is configured, what the protocol is doing, and what the drive
+        is reporting. The raw SafeData octets are given beside the decoded values on purpose — the
+        octets are what the CRC covered, the decode is this server's reading of them, and anyone
+        chasing a mapping problem needs both.
+      required:
+        [slavePosition, slaveAddress, connectionId, watchdogMs, rxPdoIndex, txPdoIndex, state,
+         bound, inputsValid, dataCommand, fault, peerFaultCode, sessionId, cycles, framesAccepted,
+         faults, safeInputs, safeOutputs, safetyStatus, processValues]
+      properties:
+        slavePosition:
+          type: integer
+          example: 1
+        slaveAddress:
+          type: integer
+          description: FSoE Slave Address this connection was opened with.
+          example: 3
+        connectionId:
+          type: integer
+          example: 7
+        watchdogMs:
+          type: integer
+          example: 100
+        rxPdoIndex:
+          type: integer
+          description: PDO carrying the master frame (0x1604 = 5636).
+          example: 5636
+        txPdoIndex:
+          type: integer
+          description: PDO carrying the slave frame (0x1A04 = 6660).
+          example: 6660
+        state:
+          type: string
+          enum: [Reset, Session, Connection, Parameter, Data]
+          description: >
+            The connection state (ETG.5100 Table 29). Safe data flows only in `Data`, and only
+            while `inputsValid` is true.
+          example: Data
+        bound:
+          type: boolean
+          description: >
+            Whether the frame is still located in the current process image. False after a re-map
+            or a rescan: the offsets may name something else, so the master stops driving rather
+            than write a Safety PDU into whatever now occupies those octets. Open the connection
+            again to re-bind.
+          example: true
+        inputsValid:
+          type: boolean
+          description: >
+            Whether `safeInputs` hold process data. False until the first ProcessData frame is
+            accepted, and false again the moment the connection leaves `Data` or the drive switches
+            to fail-safe data. When false the octets read all zero, so a client that ignores this
+            flag still reads fail-safe values rather than stale ones.
+          example: true
+        dataCommand:
+          type: string
+          enum: [ProcessData, FailSafeData]
+          description: What this master is sending in the Data state.
+          example: ProcessData
+        fault:
+          type: string
+          enum:
+            [None, UnexpectedCommand, UnknownCommand, InvalidConnId, InvalidCrc, WatchdogExpired,
+             InvalidAddress, InvalidData, InvalidCommParaLen, InvalidCommPara, InvalidAppParaLen,
+             InvalidAppPara]
+          description: The reason this master last sent a Reset PDU (ETG.5100 Table 28).
+          example: None
+        peerFaultCode:
+          type: integer
+          description: >
+            The code from the last Reset PDU the **drive** sent — the first thing to read when a
+            handshake will not complete, because the drive saw the fault first. 0 to 11 are the
+            standard codes; 0x80 to 0xFF are device-specific SafePara faults.
+          example: 0
+        sessionId:
+          type: integer
+          example: 8721
+        cycles:
+          type: integer
+          format: int64
+          description: Bus cycles this connection has run.
+        framesAccepted:
+          type: integer
+          format: int64
+          description: Frames from the drive that passed every check.
+        faults:
+          type: integer
+          format: int64
+          description: Faults since the connection was opened.
+        safeInputs:
+          type: array
+          description: The SafeData octets received, after validation.
+          items:
+            type: integer
+          example: [1, 31, 0, 0, 192, 0, 88, 2, 0, 0, 250, 0]
+        safeOutputs:
+          type: array
+          description: The SafeData octets being sent. Octet 0 is the safety controlword.
+          items:
+            type: integer
+          example: [1, 0, 0, 0, 0, 0, 0, 0]
+        safetyStatus:
+          type: object
+          description: The safety statusword, SafeInputs octet 0 (ETG.6100.2 Table 5).
+          properties:
+            stoActive:
+              type: boolean
+              description: Safe Torque Off is active — the drive cannot produce torque.
+              example: false
+            error:
+              type: boolean
+              description: At least one safety error is present in the drive.
+              example: false
+        processValues:
+          $ref: "#/components/schemas/FsoeProcessValues"
+    FsoeProcessValues:
+      type: object
+      description: >
+        The safe process values decoded from the SafeData (ETG.6100.2 ch. 5.4), each with its own
+        validity flag. Units come from the drive's read-only unit objects, because the profile
+        mandates no resolution; a Synapticon drive declares 8.24 fixed-point revolutions of the
+        output shaft, milli-RPM, and milli-newton-metres.
+
+
+        **A validity flag is per value, not per frame.** ETG.6100 defines no "value unusable" flag,
+        so vendors place them in the statusword octets past the first; a drive encodes an invalid
+        value as zero rather than holding the last good reading.
+      properties:
+        position:
+          type: integer
+          description: Safe position (0x6611), 8.24 fixed-point output-shaft revolutions.
+          example: 25165824
+        positionRevolutions:
+          type: number
+          description: The same position in revolutions, for display. No more precise.
+          example: 1.5
+        positionValid:
+          type: boolean
+          description: The position measurement can be trusted.
+        positionReferenced:
+          type: boolean
+          description: >
+            The position has an established **absolute** origin. Stronger than `positionValid`: a
+            client applying an absolute limit — Safe Limited Position above all — must gate on this
+            one. Direction and distance travelled need only `positionValid`.
+        velocityMilliRpm:
+          type: integer
+          description: Safe velocity (0x6613), milli-RPM.
+          example: 600
+        velocityValid:
+          type: boolean
+        torqueMillinewtonMetres:
+          type: integer
+          description: Safe torque (0x6616), milli-newton-metres.
+          example: 250
+        torqueValid:
+          type: boolean
+        crossCheckOk:
+          type: boolean
+          description: Two sensor channels are configured and agree.
     Cia402Status:
       type: object
       description: A CiA402 drive's control snapshot — its state machine, control words, and mode.

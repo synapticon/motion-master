@@ -12,6 +12,155 @@
 
 type UtilRequiredKeys<T, K extends keyof T> = Omit<T, K> & Required<Pick<T, K>>;
 
+/** One FSoE connection: how it is configured, what the protocol is doing, and what the drive is reporting. The raw SafeData octets are given beside the decoded values on purpose — the octets are what the CRC covered, the decode is this server's reading of them, and anyone chasing a mapping problem needs both. */
+export interface FsoeConnection {
+  /** @example 1 */
+  slavePosition: number;
+  /**
+   * FSoE Slave Address this connection was opened with.
+   * @example 3
+   */
+  slaveAddress: number;
+  /** @example 7 */
+  connectionId: number;
+  /** @example 100 */
+  watchdogMs: number;
+  /**
+   * PDO carrying the master frame (0x1604 = 5636).
+   * @example 5636
+   */
+  rxPdoIndex: number;
+  /**
+   * PDO carrying the slave frame (0x1A04 = 6660).
+   * @example 6660
+   */
+  txPdoIndex: number;
+  /**
+   * The connection state (ETG.5100 Table 29). Safe data flows only in `Data`, and only while `inputsValid` is true.
+   * @example "Data"
+   */
+  state: "Reset" | "Session" | "Connection" | "Parameter" | "Data";
+  /**
+   * Whether the frame is still located in the current process image. False after a re-map or a rescan: the offsets may name something else, so the master stops driving rather than write a Safety PDU into whatever now occupies those octets. Open the connection again to re-bind.
+   * @example true
+   */
+  bound: boolean;
+  /**
+   * Whether `safeInputs` hold process data. False until the first ProcessData frame is accepted, and false again the moment the connection leaves `Data` or the drive switches to fail-safe data. When false the octets read all zero, so a client that ignores this flag still reads fail-safe values rather than stale ones.
+   * @example true
+   */
+  inputsValid: boolean;
+  /**
+   * What this master is sending in the Data state.
+   * @example "ProcessData"
+   */
+  dataCommand: "ProcessData" | "FailSafeData";
+  /**
+   * The reason this master last sent a Reset PDU (ETG.5100 Table 28).
+   * @example "None"
+   */
+  fault:
+    | "None"
+    | "UnexpectedCommand"
+    | "UnknownCommand"
+    | "InvalidConnId"
+    | "InvalidCrc"
+    | "WatchdogExpired"
+    | "InvalidAddress"
+    | "InvalidData"
+    | "InvalidCommParaLen"
+    | "InvalidCommPara"
+    | "InvalidAppParaLen"
+    | "InvalidAppPara";
+  /**
+   * The code from the last Reset PDU the **drive** sent — the first thing to read when a handshake will not complete, because the drive saw the fault first. 0 to 11 are the standard codes; 0x80 to 0xFF are device-specific SafePara faults.
+   * @example 0
+   */
+  peerFaultCode: number;
+  /** @example 8721 */
+  sessionId: number;
+  /**
+   * Bus cycles this connection has run.
+   * @format int64
+   */
+  cycles: number;
+  /**
+   * Frames from the drive that passed every check.
+   * @format int64
+   */
+  framesAccepted: number;
+  /**
+   * Faults since the connection was opened.
+   * @format int64
+   */
+  faults: number;
+  /**
+   * The SafeData octets received, after validation.
+   * @example [1,31,0,0,192,0,88,2,0,0,250,0]
+   */
+  safeInputs: number[];
+  /**
+   * The SafeData octets being sent. Octet 0 is the safety controlword.
+   * @example [1,0,0,0,0,0,0,0]
+   */
+  safeOutputs: number[];
+  /** The safety statusword, SafeInputs octet 0 (ETG.6100.2 Table 5). */
+  safetyStatus: {
+    /**
+     * Safe Torque Off is active — the drive cannot produce torque.
+     * @example false
+     */
+    stoActive?: boolean;
+    /**
+     * At least one safety error is present in the drive.
+     * @example false
+     */
+    error?: boolean;
+  };
+  /**
+   * The safe process values decoded from the SafeData (ETG.6100.2 ch. 5.4), each with its own validity flag. Units come from the drive's read-only unit objects, because the profile mandates no resolution; a Synapticon drive declares 8.24 fixed-point revolutions of the output shaft, milli-RPM, and milli-newton-metres.
+   *
+   * **A validity flag is per value, not per frame.** ETG.6100 defines no "value unusable" flag, so vendors place them in the statusword octets past the first; a drive encodes an invalid value as zero rather than holding the last good reading.
+   */
+  processValues: FsoeProcessValues;
+}
+
+/**
+ * The safe process values decoded from the SafeData (ETG.6100.2 ch. 5.4), each with its own validity flag. Units come from the drive's read-only unit objects, because the profile mandates no resolution; a Synapticon drive declares 8.24 fixed-point revolutions of the output shaft, milli-RPM, and milli-newton-metres.
+ *
+ * **A validity flag is per value, not per frame.** ETG.6100 defines no "value unusable" flag, so vendors place them in the statusword octets past the first; a drive encodes an invalid value as zero rather than holding the last good reading.
+ */
+export interface FsoeProcessValues {
+  /**
+   * Safe position (0x6611), 8.24 fixed-point output-shaft revolutions.
+   * @example 25165824
+   */
+  position?: number;
+  /**
+   * The same position in revolutions, for display. No more precise.
+   * @example 1.5
+   */
+  positionRevolutions?: number;
+  /** The position measurement can be trusted. */
+  positionValid?: boolean;
+  /** The position has an established **absolute** origin. Stronger than `positionValid`: a client applying an absolute limit — Safe Limited Position above all — must gate on this one. Direction and distance travelled need only `positionValid`. */
+  positionReferenced?: boolean;
+  /**
+   * Safe velocity (0x6613), milli-RPM.
+   * @example 600
+   */
+  velocityMilliRpm?: number;
+  velocityValid?: boolean;
+  /**
+   * Safe torque (0x6616), milli-newton-metres.
+   * @example 250
+   */
+  torqueMillinewtonMetres?: number;
+  torqueValid?: boolean;
+  /** Two sensor channels are configured and agree. */
+  crossCheckOk?: boolean;
+}
+
 /** A CiA402 drive's control snapshot — its state machine, control words, and mode. */
 export interface Cia402Status {
   /**

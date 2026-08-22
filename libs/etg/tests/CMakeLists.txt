@@ -11,7 +11,8 @@ add_executable(
   fsoe_crc_test.cc
   fsoe_frame_test.cc
   fsoe_master_interop_test.cc
-  fsoe_master_test.cc)
+  fsoe_master_test.cc
+  safety_drive_profile_test.cc)
 
 target_link_libraries(mm_etg_tests PRIVATE mm::etg GTest::gtest GTest::gtest_main)
 

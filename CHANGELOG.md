@@ -19,6 +19,11 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **Motion Master can operate a safe drive over Safety over EtherCAT.** A new device page, **Safety**, opens an FSoE connection to a drive, releases or applies Safe Torque Off, and shows the safe process values the drive publishes — safe position, velocity and torque, each with the drive's own validity flag, beside the raw SafeData octets they were decoded from. The page appears for any device in OP, because an FSoE frame travels in the cyclic process data and nothing can be exchanged outside OP. **This is a protocol master, not a safety master:** it implements ETG.5100, not the integrity of the machine running it, and that needs certified hardware. What makes it useful anyway is that the drive stays safe on its own — it authenticates every frame and drops its outputs to the safe state when the frames stop, whatever this master does. Use it to commission, to diagnose, and to move a safe axis on a bench. Do not use it as the safety function of a machine; the page and the API both say so in their own answers.
+- **Safety over EtherCAT is on the API.** `GET /api/fsoe` lists the open connections with their protocol state, fault reasons — including the code the *drive* reported, which is the first thing to read when a handshake will not complete — and the decoded safe values. `POST /api/fsoe` opens a connection, and opening one again is how a caller re-binds after the bus was re-mapped. `PUT /api/fsoe/{slavePosition}/sto` releases or applies Safe Torque Off, `PUT .../data-command` chooses ProcessData or FailSafeData, `PUT .../safe-outputs` writes the raw SafeData octets, `DELETE /api/fsoe/{slavePosition}` stops driving the connection, and `POST .../reset` restarts the handshake. Two things to know: a connection starts in FailSafeData and returns to it after every fault, so the data command has to be set before SafeOutputs mean anything; and torque needs both halves to agree — STO released and ProcessData being sent. `swagger.yml` carries the whole surface, so `@synapticon/motion-master-client` is typed for it.
+
 ## [6.0.0-alpha.82] - 2026-08-21
 
 ### Added

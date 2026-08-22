@@ -438,6 +438,21 @@ class DeviceManager {
   /// @brief Const overload of @c findDevice. Same contract.
   const Device* findDevice(uint16_t slavePosition) const;
 
+  /// @brief The raw input image captured by the most recent exchange.
+  ///
+  /// **For the RT thread, inside a cycle**, and specifically for a task registered after
+  /// @c ProcessDataCyclicTask: the span then holds the octets that arrived this cycle. It is the
+  /// scratch buffer the exchange received into, so it is valid until the next exchange overwrites
+  /// it — never store the span, only read from it.
+  ///
+  /// Everything mapped to an object is better reached through @c Device::value, which decodes it
+  /// and needs no offsets. This exists for the case that has no object behind it: a container that
+  /// several objects share, or a payload whose meaning is decided by a protocol rather than by the
+  /// object dictionary — an FSoE Safety PDU is both.
+  ///
+  /// Empty when nothing has been exchanged yet.
+  std::span<const uint8_t> cycleInputs() const;
+
   /// @brief Monotonic counter bumped every time the device set is rebuilt (@c scan / @c reset).
   ///
   /// An off-thread consumer that pinned work to a device position records this value and

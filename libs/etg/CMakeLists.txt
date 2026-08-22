@@ -7,7 +7,8 @@ add_library(
   esi_unit.cc
   fsoe_crc.cc
   fsoe_frame.cc
-  fsoe_master.cc)
+  fsoe_master.cc
+  safety_drive_profile.cc)
 add_library(mm::etg ALIAS etg)
 
 target_include_directories(etg PUBLIC ${CMAKE_SOURCE_DIR}/libs)

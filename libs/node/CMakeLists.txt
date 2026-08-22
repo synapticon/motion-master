@@ -6,6 +6,8 @@ add_library(
   device_manager.cc
   device_parameter.cc
   firmware_package.cc
+  fsoe_connection.cc
+  fsoe_manager.cc
   hardware_description.cc
   integro_variant.cc
   ic_haus_registers.cc
@@ -37,9 +39,13 @@ find_package(libzip CONFIG REQUIRED)
 
 # libzip is an implementation detail of firmware_package.cc — no libzip type appears in a node
 # header — but a static library still propagates the link requirement to whoever links node.
+#
+# mm::etg is PUBLIC because fsoe_connection.h carries an mm::etg::FsoeMaster by value: a consumer
+# that opens an FSoE connection needs the master's own header. The dependency runs one way only —
+# node may depend on etg, never the reverse.
 target_link_libraries(
   node
-  PUBLIC mm::comm nlohmann_json::nlohmann_json spdlog::spdlog
+  PUBLIC mm::comm mm::etg nlohmann_json::nlohmann_json spdlog::spdlog
   PRIVATE libzip::zip)
 
 add_subdirectory(tests)

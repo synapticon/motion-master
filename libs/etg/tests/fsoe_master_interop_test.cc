@@ -24,7 +24,8 @@ struct Exchange {
 /// The peer was the FSoE slave state machine in the Jasper firmware
 /// (@c libs/etg5100_fsoe), the code that runs on the drive and that passes the FSoE conformance
 /// test. The two state machines were linked into one process and wired back to back by
-/// @c tools/fsoe_master_interop in that repository, which is also how this table is regenerated.
+/// @c libs/etg5100_fsoe/tools/master_interop.sh in that repository, which is also how this table
+/// is regenerated.
 ///
 /// The recording is deterministic because every input is fixed: 8 SafeData octets out and 12 back,
 /// slave address 3, connection ID 7, a 100 ms watchdog, no application parameters, master session

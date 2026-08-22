@@ -777,7 +777,7 @@ Rules that are easy to get wrong and are pinned by tests:
 
 `fsoe_master_interop_test.cc` replays a recorded exchange with the real drive firmware's slave,
 octet for octet. It was produced by linking this master against the firmware's own FSoE slave (the
-`tools/fsoe_master_interop` harness in the firmware repository) and running a full connection with
+`libs/etg5100_fsoe/tools/master_interop.sh` harness in the firmware repository) and running a full connection with
 no bus. **There is no conformance test for the master role in the lab** — the CTT's FSoE suite tests
 a slave — so that trace is the interoperability evidence. Regenerate it whenever either state
 machine changes and read the diff.

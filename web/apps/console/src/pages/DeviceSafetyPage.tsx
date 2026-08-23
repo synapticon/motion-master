@@ -4,6 +4,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import type { FsoeConnection } from '@synapticon/motion-master-client'
 import DevicePageHeader from '../components/DevicePageHeader'
 import Callout from '../components/Callout'
+import SafeSensorPanel from '../components/SafeSensorPanel'
 import { useConnection } from '../contexts/ConnectionContext'
 
 // One shared control height for every input and button, as on the Motion page: this theme's
@@ -472,6 +473,12 @@ export default function DeviceSafetyPage() {
             </section>
           </>
         )}
+
+        {/* Outside the connection block on purpose. These objects read over SDO,
+            and the moment they are most wanted is when the connection will NOT
+            open - a wrong safety address, a tolerance nobody set - which is
+            exactly when there is no connection to hang them off. */}
+        <SafeSensorPanel slavePosition={slavePosition} />
       </div>
     </>
   )

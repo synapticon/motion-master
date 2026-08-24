@@ -77,9 +77,21 @@ classDiagram
         +autoTuningStatus «fn»
         +autoTuningSpec «fn»
     }
-    class BusHealthReporter {
-        <<app layer — thread 6>>
+    class NotificationBus {
+        <<mm::node — thread 6>>
+        +setPublish(PublishFn)
+        +addSource(Source)
+        +start() / stop()
+        -vector~Source~ sources_
+        -vector~uint64~ lastSeen_
+        -vector~time_point~ nextDue_
         -jthread thread_
+    }
+    class NotificationSource {
+        <<NotificationBus::Source>>
+        +revision «fn»
+        +render «fn»
+        +interval
     }
     class AutoTuningProcess {
         <<mm::auto_tuning::Process — child process>>
@@ -295,7 +307,9 @@ classDiagram
     HttpServerConfig ..> AutoTuningClient : run + spec, through a callback
     HttpServer o-- "0..*" RoutePlugin : addRoutes (RegisterRoutesFn)
     HttpServer ..> RouteContext : builds, passes to each plugin
-    BusHealthReporter ..> DeviceManager : ref
+    NotificationBus o-- "0..*" NotificationSource : addSource, fixed before start()
+    NotificationBus ..> WebSocketServer : publish to "notifications", through a callback
+    NotificationSource ..> DeviceManager : busHealthSource borrows it
     AutoTuningClient ..> HttpGlobal : needs it initialised
     AutoTuningProcess ..> HttpGlobal : needs it initialised
     RouteContext ..> DeviceManager : ref
@@ -340,9 +354,12 @@ classDiagram
 | `HttpServer` | `pool_` | `BS::light_thread_pool` (32) | **Yes** — every route handler runs here | `apps/motion_master/http_server.h` |
 | `HttpServer` | `routeModules_` | `vector<mm::api::RegisterRoutesFn>` | **Yes** — queued plug-ins, run once at `start()` | `apps/motion_master/http_server.h` |
 | `HttpServer` | `config_` | `HttpServer::Config` | **Yes** — listen settings as data, plus one `std::function` for each delegated operation, so the server names no concrete collaborator | `apps/motion_master/http_server.h` |
-| `WebSocketServer` | — (publish target for `MonitoringManager::setPublish`) | — | No | `apps/motion_master/ws_server.h` |
-| `BusHealthReporter` | `thread_` | `std::jthread` | **Yes** — declared last, so the members it reads are built first | `apps/motion_master/bus_health_reporter.h` |
-| `BusHealthReporter` | `deviceManager` | `DeviceManager&` | No — borrowed, and it must outlive the reporter | `apps/motion_master/bus_health_reporter.h` |
+| `WebSocketServer` | — (publish target for both `MonitoringManager::setPublish` and `NotificationBus::setPublish`) | — | No | `apps/motion_master/ws_server.h` |
+| `NotificationBus` | `sources_` | `vector<Source>` | **Yes** — one per feature, fixed before `start()` so the poll thread reads it with no lock | `libs/node/notification_bus.h` |
+| `NotificationBus` | `lastSeen_`, `nextDue_` | `vector<uint64_t>`, `vector<time_point>` | **Yes** — the poll thread's private marks, seeded at `start()` and never read by a producer | `libs/node/notification_bus.h` |
+| `NotificationBus` | `publish_` | `PublishFn` | **Yes** — a `std::function`, so the bus names no server type | `libs/node/notification_bus.h` |
+| `NotificationBus` | `thread_` | `std::jthread` | **Yes** — declared last, so the members it reads are built first | `libs/node/notification_bus.h` |
+| `busHealthSource` | `deviceManager` | `DeviceManager&` | No — captured by reference, and it must outlive the bus | `apps/motion_master/bus_health_source.h` |
 | `main()` | `httpGlobal` | `mm::net::HttpGlobal` | **Yes — exactly one, before any thread starts** | `apps/motion_master/main.cc` |
 | `main()` | `autoTuning` | `mm::auto_tuning::Process` | **Yes** — the child process, started before the main thread turns real-time | `apps/motion_master/main.cc` |
 | `main()` | `autoTuningClient` | `optional<mm::auto_tuning::Client>` | **Yes** — empty when the child never started | `apps/motion_master/main.cc` |

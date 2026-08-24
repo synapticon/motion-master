@@ -60,10 +60,36 @@ info:
     this HTTP API (`61447`) and on its own event loop, so a slow HTTP request can
     never stall the stream: `wss://local.motion-master.synapticon.com:62281` (the
     whole port is the WebSocket, so the URL needs no path).
+
+    ### Topics
+
+    Every message is published to a topic, and a client receives nothing until it
+    subscribes: send `{"subscribe":"<topic>"}` over the socket, and
+    `{"unsubscribe":"<topic>"}` to stop. Subscribing to a topic nothing publishes to
+    is accepted and simply delivers nothing.
+
+    There are two kinds of topic, and the difference is how wide they are.
+
+    - **A monitoring's topic is narrow.** You create it with `POST /api/monitorings`
+      and name it yourself (1 to 64 characters of `[A-Za-z0-9._-]`). One monitoring
+      has one topic, and subscribing to it delivers that monitoring's batches and
+      nothing else. There is one such topic for each monitoring you have created,
+      and no limit on how many you create.
+    - **`notifications` is wide.** It always exists and is never created. Every
+      server notification goes to it, whatever raised it. So one subscription covers
+      every event, including kinds added in a later version — which is why there is
+      one shared topic rather than one per event. To act on only some events, filter
+      on `data.event`; there is no way to subscribe to a subset. `notifications` is
+      reserved: `POST /api/monitorings` refuses it with 400.
+
+    So the topics you can subscribe to at any moment are your monitorings, plus
+    `notifications`.
+
+    ### Monitoring
+
     A client creates a monitoring
     with `POST /api/monitorings` (a topic, flush interval, and a list of
-    parameters), then subscribes to its topic over the socket by sending
-    `{"subscribe":"<topic>"}` (and `{"unsubscribe":"<topic>"}` to stop). The stream
+    parameters), then subscribes to its topic. The stream
     is **lossless**: every process-data cycle recorded since the last flush is
     delivered — `interval` is the flush cadence, not a sample rate, so a longer
     interval means a bigger batch, never dropped cycles. Each batch is published to
@@ -74,8 +100,12 @@ info:
 
     ```json
     {"type": "monitoring", "topic": "left-leg", "data": [[1735821000123456, 39000, 41], ...]}
-    {"type": "notification", "data": {"event": "slaves_changed"}}
+    {"type": "notification", "data": {"event": "short-working-counter", "shortWkcCycles": 3}}
     ```
+
+    Notifications are state changes the server raises on its own — today, cycles the
+    bus did not fully answer. Tell them apart by `data.event`, which is kebab-case;
+    every other key in `data` is camelCase, and times are epoch microseconds.
 
     `data` is an array of cycle rows; each row is `[timestampUs, v0, v1, ...]` where
     `timestampUs` is epoch microseconds and the values are positionally ordered by

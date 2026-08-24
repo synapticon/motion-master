@@ -71,6 +71,7 @@ syntaxError:*/concurrency_test.cc
 syntaxError:*/soem_fieldbus_driver_test.cc
 syntaxError:*/http_client_test.cc
 syntaxError:*/process_test.cc
+syntaxError:*/notification_bus_test.cc
 
 // The ESI parser builds vectors by appending inside a range-for over an XML child range or a
 // parsed collection. cppcheck suggests std::transform/std::copy_if for each; rewriting them would
@@ -151,3 +152,9 @@ constParameterReference:*/somanet_procedures.cc
 // would silence it and reintroduce the very bug the type exists to prevent: a plain store racing the
 // RT thread's atomic one. The helper stays.
 operatorEqVarError:*/device_parameter.h
+
+// NotificationBus::run holds a std::unique_lock over a mutex declared beside it. cppcheck reads a
+// mutex locked in its own scope as pointless, and for mutual exclusion it would be — but this one
+// guards nothing. std::condition_variable_any::wait_for requires a lock, and only its stop_token
+// overload lets a stop request cut the wait short instead of waiting out a whole poll interval.
+localMutex:*/notification_bus.cc

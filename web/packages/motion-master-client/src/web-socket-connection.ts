@@ -3,9 +3,12 @@
 // progress, and client->server topic subscribe/unsubscribe. It owns reconnection, multiplexes
 // per-topic subscriptions over the one socket (ref-counted: subscribe on the first listener,
 // unsubscribe on the last, re-subscribe everything on reconnect), and routes inbound frames by
-// type. It is isomorphic: the browser global `WebSocket` is used by default, and any compatible
-// implementation (e.g. the Node `ws` package) can be injected — there is no hard dependency on
-// either, so the package stays usable in both environments.
+// type. Nothing arrives until something is subscribed: `subscribe(topic, cb)` for one monitoring's
+// batches, `onNotification(cb)` for every server notification — the latter is one shared topic, so
+// a single subscription covers events added in a later server version. It is isomorphic: the
+// browser global `WebSocket` is used by default, and any compatible implementation (e.g. the Node
+// `ws` package) can be injected — there is no hard dependency on either, so the package stays
+// usable in both environments.
 
 /// Connection state, mirroring the three states the UI cares about.
 export type ReadyState = 'connecting' | 'open' | 'closed'
@@ -45,6 +48,12 @@ type StateListener = (state: ReadyState) => void
 /// The numeric `readyState` value a WebSocket reports when it is open. Hard-coded (rather than read
 /// off a global) so the client never depends on a particular `WebSocket` implementation's statics.
 const WS_OPEN = 1
+
+/// The one topic every server notification is published to. One topic rather than one per event, so
+/// a client subscribes once and keeps receiving events added in a later server version — uWebSockets
+/// matches topic names exactly, with no wildcard, so there is no way to ask for "all of them".
+/// Events are told apart by `data.event`, which is kebab-case.
+export const NOTIFICATION_TOPIC = 'notifications'
 
 /// Minimal structural shape of a WebSocket instance — satisfied by both the browser global and the
 /// Node `ws` package (which implements the same `on*` property setters) — so neither is a hard
@@ -148,6 +157,9 @@ export class WebSocketConnection {
       for (const topic of this.topicListeners.keys()) {
         this.send({ subscribe: topic })
       }
+      if (this.notificationListeners.size > 0) {
+        this.send({ subscribe: NOTIFICATION_TOPIC })
+      }
     }
     socket.onmessage = (event) => this.route(event.data)
     socket.onclose = () => this.handleDisconnect()
@@ -200,13 +212,21 @@ export class WebSocketConnection {
     }
   }
 
-  /// Registers a listener for server notifications (e.g. `{ event: 'slaves_changed' }`). Connects
-  /// lazily. Returns a removal function.
+  /// Registers a listener for server notifications (e.g. `{ event: 'short-working-counter' }`). Every
+  /// notification arrives on one topic, so the first listener subscribes and the last to leave
+  /// unsubscribes — the same ref-counting `subscribe` uses. Connects lazily. Returns a removal
+  /// function.
   onNotification(listener: NotificationListener): () => void {
+    if (this.notificationListeners.size === 0) {
+      this.send({ subscribe: NOTIFICATION_TOPIC })
+    }
     this.notificationListeners.add(listener)
     this.connect()
     return () => {
       this.notificationListeners.delete(listener)
+      if (this.notificationListeners.size === 0) {
+        this.send({ unsubscribe: NOTIFICATION_TOPIC })
+      }
     }
   }
 

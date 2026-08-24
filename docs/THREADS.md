@@ -68,8 +68,8 @@ flowchart TB
     subgraph REF["Thread 5 — Parameter refresher"]
         PR[ParameterRefresher.run]
     end
-    subgraph BHR["Thread 6 — Bus health reporter"]
-        BH[BusHealthReporter]
+    subgraph NB["Thread 6 — Notification bus"]
+        BH[NotificationBus.run]
     end
 
     HTTP -.->|write a setpoint<br/>lock-free| CELLS[("DeviceParameter cells<br/>(atomic bits, one per object)")]
@@ -101,7 +101,7 @@ flowchart TB
 | 3 | **WebSocket server** | `std::thread`, `ws_server.cc` | A separate uWebSockets WSS event loop on **port 62281**. Monitoring batches and notifications go out, subscriptions come in | Normal |
 | 4 | **Monitoring sampler** | `std::thread`, `monitoring_manager.cc` | Ships every recorded cycle since each monitoring's read cursor to the `setPublish` callback | Normal. `cv_.wait_until(nearest deadline)` |
 | 5 | **Parameter refresher** | `std::thread`, `parameter_refresher.cc` | Polls objects that are **not** in the PDO image over SDO, into their parameter cells | Normal. A 10 ms period floor. A failing object backs off exponentially, to a 2000 ms ceiling |
-| 6 | **Bus health reporter** | `std::jthread`, `bus_health_reporter.h` | Calls `processImageInfo()` every 10 s and logs the short-working-counter count when it grows | Normal. A `stop_token` wait, so the destructor does not wait the interval out |
+| 6 | **Notification bus** | `std::jthread`, `notification_bus.cc` | Reads each source's version counter on that source's own interval, then renders and publishes the ones that moved. Today one source: bus health, every second | Normal. `wait_until(earliest due source)` with a `stop_token`, so `stop()` does not wait the interval out |
 
 **Thread 1 — the cycle.** `ProcessDataCyclicTask` calls `DeviceManager::exchangeProcessData()`,
 which does four things in order. It composes the output image from every output object's cell. It
@@ -132,27 +132,49 @@ also the Tier-3 door: `MonitoringManager::keepFresh` is what lets a cyclic task 
 object with `value<T>()`. The thread takes `FieldbusDriver::controlPlaneMutex_` for each SDO, and
 it releases its own lock for the duration of the poll.
 
-**Thread 6 — bus health.** A cycle whose working counter comes back below the expected value is a
-cycle some device did not answer. The real-time loop is the only thread that sees every cycle, and
-it cannot log, so it only counts into relaxed atomics. Something off the real-time thread has to
-read them, and nothing already running can: every other background thread sleeps until it has
-work. So this reporter has a timer of its own. It is silent unless the count grew since the last
-check, so a healthy bus never speaks and one fault is reported once.
+**Thread 6 — the notification bus.** The real-time thread cannot call a WebSocket server: a publish
+allocates, uWebSockets is only safely callable from its own loop, and both can block. But the
+real-time thread is the only code that sees a fault when it happens. So it writes plain scalars and
+bumps a version counter, and this thread notices and formats. One thread serves every such source.
 
-The read is `DeviceManager::processImageInfo()`, which takes `processDataMutex_` **shared**. The
-counters themselves are relaxed atomics and need no lock. The lock is there because the same call
-also walks the retained image generations. The report states two ages rather than two absolute
-times, so the line carries its own reference point:
+Each source gives the bus a `revision` — a cheap counter read — and a `render`, called only when
+that counter has moved. A counter rather than a flag is what makes it race-free:
+there is no clear step to lose an update against, and several bumps between two polls coalesce into
+one message carrying current state. A producer bumps with `release` after writing its scalars, and
+a `render` reads the counter with `acquire` before them, so a message can never pair a fresh
+counter with stale fields.
+
+Today's one source is bus health. A cycle whose working counter comes back below the expected value
+is a cycle some device did not answer. `shortWkcCycles` is both the count and the version counter,
+because it only ever rises. `DeviceManager::shortWkcCycles()` is one atomic load, which is what
+makes it cheap enough to poll; the render then calls `processImageInfo()` for the timestamps, which
+takes `processDataMutex_` **shared** because the same call walks the retained image generations.
+
+The render both warns and returns a payload. The warning is what reaches a support log from a
+machine nobody was watching; the payload is what reaches a client that is. Whether a source does
+one or both is a per-source decision, not a rule. The log line states two ages rather than two
+absolute times, so it carries its own reference point:
 
 ```text
 Process data: 3 cycle(s) answered with a short working counter since the bus came up;
 the first was 41.2 s and the last 0.4 s before this line
 ```
 
-The reporter lives in the app, not in `DeviceManager`, because a log warning is a **policy**.
-`DeviceManager` is meant to be embeddable without one. An embedder who does not want this thread
-simply does not construct it. `NEXTGEN.md` records that the planned `NotificationBus` has this
-exact shape, and that bus health is its first source.
+A source sets its own `interval`, and that one number is both its latency floor and its ceiling on
+messages: a counter read once a second cannot be reported more often than that. Bus health uses a
+second — soon enough that someone watching a fault sees it while they are still looking at what
+caused it, and slow enough that a bus faulting at 1 kHz does not report at the rate of the fault.
+Nothing is lost to the gap — the count is cumulative and carries the time of the first and last
+cycle in it, and the last-seen mark advances only when a message goes out. The bus sleeps until the
+earliest source is due, the way the monitoring sampler does, so no source pays for another's
+cadence.
+
+The message goes to the single `"notifications"` topic. One topic rather than one per source,
+because uWebSockets matches topic names exactly and has no wildcard, so a client could not ask for
+all of them and a source added later would reach nobody. Clients tell events apart by `data.event`.
+
+The source lives in the app, not in `DeviceManager`, because a log warning is a **policy**.
+`DeviceManager` is meant to be embeddable without one, and it owns no background thread itself.
 
 ## Control plane against the PDO path
 
@@ -202,17 +224,20 @@ Startup and shutdown order (`apps/motion_master/main.cc`):
 4. `wsServer.start()` — spawns thread 3 and listens on `127.0.0.1:62281`.
 5. `monitoringManager.setPublish(...)` wires sampler batches to `wsServer.publish`. Then
    `monitoringManager.start()` spawns threads 4 and 5.
-6. Construct `BusHealthReporter` — spawns thread 6.
+6. `notificationBus.setPublish(...)` wires messages to `wsServer.publish`, `addSource(...)`
+   registers each feature, then `notificationBus.start()` spawns thread 6. Membership is fixed
+   from here on.
 7. Install the `SIGINT` and `SIGTERM` handlers. Each one flips the loop's stop flag, and both
    steps are async-signal-safe.
 8. `gameLoop.run()` — the main thread becomes thread 1 and blocks until stop.
 9. On a signal: `gameLoop.stop()` makes `run()` return after the current cycle.
 10. `monitoringManager.stop()` — joins threads 4 and 5 *before* the server loops go away.
-11. `wsServer.stop()`, then `httpServer.stop()` — close the listen sockets and join threads 3
+11. `notificationBus.stop()` — joins thread 6, for the same reason and before the same point.
+12. `wsServer.stop()`, then `httpServer.stop()` — close the listen sockets and join threads 3
     and 2.
-12. `autoTuning.stop()` — stops the child. It is stopped here rather than by its destructor, so
+13. `autoTuning.stop()` — stops the child. It is stopped here rather than by its destructor, so
     the outcome is logged while the log is still written.
-13. The destructors run. `~BusHealthReporter` requests the stop and joins thread 6.
+14. The destructors run.
 
 Every `CyclicTask` is registered with `gameLoop.addTask()` **before** step 8. Membership is fixed
 for the lifetime of the loop.

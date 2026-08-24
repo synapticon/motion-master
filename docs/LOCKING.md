@@ -136,7 +136,7 @@ This file uses the vocabulary of the code. Read this table first if the reposito
 | WebSocket event loop | 1 | `ws_server.cc` | |
 | Monitoring sampler | 1 | `monitoring_manager.cc` | |
 | Parameter refresher | 1 | `parameter_refresher.cc` | |
-| Bus health reporter | 1 | `std::jthread` in `bus_health_reporter.h` | takes `processDataMutex_` shared, every 10 s, and nothing else |
+| Notification bus | 1 | `std::jthread` in `notification_bus.cc` | reads a source's version counter with no lock; only a render that fires takes anything, and today's one source takes `processDataMutex_` shared |
 | Procedure runs | 0 to N | `std::jthread` in `procedure_manager.cc` | one thread per procedure in flight |
 
 **There is no such thing as "the HTTP thread".** Route handlers run on the worker pool, so two
@@ -158,7 +158,7 @@ HTTP thread, so the two calls are serialised."
 | 9 | `ProcedureManager::Run::errorMutex_` | `std::mutex` | `libs/node/procedure_manager.h` | one `std::optional<std::string>` | the thread of the run, which writes. Pollers read | no |
 | 10 | `ProgressReporter::mutex_` | `std::mutex` | `libs/node/procedure.h` | the step array | the thread of the run, which writes. Pollers read | no |
 | — | `RingLogSink`, through the spdlog `base_sink::mutex_` | `std::mutex` | `apps/motion_master/ring_log_sink.h` | the log ring buffer | every thread that logs | no |
-| — | the reporter's wait mutex | `std::mutex` plus `std::condition_variable_any`, both local to the thread body | `apps/motion_master/bus_health_reporter.cc` | nothing. One thread owns it, and it exists only so the wait takes a `std::stop_token` and ends at once on shutdown | that one thread | no |
+| — | the bus's wait mutex | `std::mutex` plus `std::condition_variable_any`, both local to the thread body | `libs/node/notification_bus.cc` | nothing. One thread owns it, and it exists only so the wait takes a `std::stop_token` and ends at once on shutdown | that one thread | no |
 | — | single-instance lock | `flock`, or a named mutex on Windows | `libs/core/platform.cc` | the *process*, not a data structure | startup only | not applicable |
 
 Entries 9 and 10 exist for one reason. **A procedure thread that finishes must never need
@@ -560,7 +560,7 @@ ill-formed on libc++ and on MSVC.
 | `GameLoop` counters | `game_loop.h` | one real-time writer, relaxed. Diagnostics only. Never a synchronisation mechanism |
 | `topologyGeneration_` and `processImageGeneration_` | `device_manager.h` | version counters. An off-thread consumer compares one to learn that its captured state is stale. **Position is not identity**: after a rescan, a task pinned to position 4 can find different hardware there, and this counter is the only signal that says so |
 | `lastWkc` and `expectedWkc` | `process_data.h` | the real-time thread writes the first. The control plane writes the second |
-| `shortWkcCycles`, `firstShortWkcNs`, `lastShortWkcNs` | `process_data.h` | one real-time writer, relaxed. The real-time thread cannot log, so it only counts. `BusHealthReporter` reads them through `processImageInfo` and logs a growth. Cumulative on purpose: a longer interval delays a report, and it never loses one |
+| `shortWkcCycles`, `firstShortWkcNs`, `lastShortWkcNs` | `process_data.h` | one real-time writer. The real-time thread cannot log or publish, so it only counts. The two timestamps are relaxed and the counter is stored **release** after them, which makes it the publish fence: a reader that loads the counter with acquire sees the timestamps that belong to it. `shortWkcCycles` doubles as the `NotificationBus` version counter, because it only ever rises. Cumulative on purpose: a longer interval delays a report, and it never loses one |
 | `loop_`, `app_`, and `running_` of the two servers | `http_server.h`, `ws_server.h` | targets of a cross-thread `defer()` |
 | `Router::stopping_` | `http_server.h` | set and read on the loop thread. The thread serialises it, not the atomic. It closes the window where a request that arrives *during* the pool drain dispatches a fresh worker, which then defers onto a dead loop |
 | `Run::status`, `Run::finishedAt`, `Run::running` | `procedure_manager.h` | written last to first, so a poller that sees "finished" also sees the outcome |

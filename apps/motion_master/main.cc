@@ -11,7 +11,7 @@
 
 #include "auto_tuning/process.h"
 #include "auto_tuning_setup.h"
-#include "bus_health_reporter.h"
+#include "bus_health_source.h"
 #include "cert_updater.h"
 #include "comm/base.h"
 #include "comm/soem_fieldbus_driver.h"
@@ -26,6 +26,7 @@
 #include "net/http_client.h"
 #include "node/device_manager.h"
 #include "node/monitoring_manager.h"
+#include "node/notification_bus.h"
 #include "node/procedure_manager.h"
 #include "node/process_data_cyclic_task.h"
 #include "options.h"
@@ -380,10 +381,15 @@ int main(int argc, char** argv) {
   // ExampleCyclicTask::Config.
   // monitoringManager.keepFresh(1, 0x2031, 0x01, std::chrono::milliseconds{200});
 
-  // Says what the RT loop saw and cannot say itself — cycles the bus did not fully answer.
-  // Declared after deviceManager so it is destroyed first; see bus_health_reporter.h for why this
-  // is an app-layer policy rather than something DeviceManager does for itself.
-  BusHealthReporter busHealthReporter{deviceManager};
+  // Says what the RT loop saw and cannot say itself. One thread serves every such source; a
+  // feature contributes a version counter to watch and a message to build. Declared after
+  // deviceManager so it is destroyed first, and started after wsServer so the seam is live.
+  mm::node::NotificationBus notificationBus;
+  notificationBus.setPublish([&wsServer](std::string topic, std::string json) {
+    wsServer.publish(std::move(topic), std::move(json));
+  });
+  notificationBus.addSource(mm::busHealthSource(deviceManager));
+  notificationBus.start();
 
   if (opts.openBrowser) {
     mm::core::openInBrowser("https://motion-master.synapticon.com/apps/console/");
@@ -416,6 +422,7 @@ int main(int argc, char** argv) {
 
   gGameLoop.store(nullptr, std::memory_order_relaxed);
   monitoringManager.stop();  // stop sampling/publishing before the server loops go away
+  notificationBus.stop();
   wsServer.stop();
   httpServer.stop();
 

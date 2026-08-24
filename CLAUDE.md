@@ -246,20 +246,42 @@ main.cc  (composition root)
  ├── HttpServer      (port 61447, own loop and thread)
  ├── WebSocketServer (port 62281, own loop and thread)
  ├── MonitoringManager  (off-RT; owns ParameterRefresher and a sampler thread)
- └── ProcedureManager   (off-RT jthreads, busy token, retained snapshot; poll-only)
+ ├── ProcedureManager   (off-RT jthreads, busy token, retained snapshot; poll-only)
+ └── NotificationBus    (off-RT poll thread; Source[] → the "notifications" topic)
 ```
 
-Planned, not in code: `TrajectoryCyclicTask` and `NotificationBus`.
+Planned, not in code: `TrajectoryCyclicTask`.
 
 **Both directions already have a settled shape, so build to it rather than re-deriving one.**
 Inbound is a `RtMailboxPool<T>`: a depth-1 latest-wins mailbox per axis, where a newer intent
 supersedes an older one and nothing queues. The pool is **owned by the composition root** and
 injected by reference into the RT task (which reads) and the launch path (which writes), so
 producer and task never name each other and only `main.cc` names the concrete task. Outbound is
-the `NotificationBus` with a `Source{revision, render}` polled by version counter, reaching the
-WebSocket through a `std::function` publish callback wired in `main.cc`. **The RT thread never
-touches the WebSocket, and `node` never names `WebSocketServer`.** See `NEXTGEN.md`, Sessions
-2026-07-09, 2026-07-13, and 2026-07-14.
+the `NotificationBus`, which ships. **The RT thread never touches the WebSocket, and `node` never
+names `WebSocketServer`.** See `NEXTGEN.md`, Sessions 2026-07-09, 2026-07-13, 2026-07-14 and
+2026-08-24.
+
+**A notification source is a version counter plus a renderer.** The RT thread writes plain scalars
+into storage that already exists, then bumps a counter with `release`. `NotificationBus` polls
+every counter, and when one has moved it calls that source's `render` off the RT thread to build
+the message. A counter, not a flag: several bumps between two polls coalesce into one message
+carrying current state, and there is no clear step to lose an update against. `render` returns
+`std::optional`, so a source that has gone idle says nothing rather than inventing an event, and it
+may log as well as return a payload — `busHealthSource` does both, because a warning is what
+reaches a support log from a machine nobody was watching. Membership is fixed before `start()`, the
+same rule `CyclicTask` follows.
+
+**Each source sets its own `interval`, and that one number is both its latency floor and its
+message ceiling.** A source read once a second cannot speak more often than that, so no separate
+rate limit exists. The bus sleeps until the earliest source is due, the way `MonitoringManager`'s
+sampler does, so no source pays for another's cadence. Bus health reads every second.
+
+**Every notification goes to the single `"notifications"` topic.** A client subscribes once and
+keeps receiving events added in a later version. A topic per source would break that: uWebSockets
+20.77 matches topic names exactly, with no wildcard, so "give me all notifications" is not
+expressible and a new source would silently reach no existing client. Clients tell events apart by
+`data.event`. Per-topic fan-out is for the monitoring streams, where a client chooses what it pays
+for.
 
 **Profile views are borrowed, not owned.** `ProfileDevice ← Cia402Drive ← SomanetDrive`
 each hold only a `Device&`, which is the only data member permitted in the chain. Build
@@ -595,8 +617,27 @@ Two message types:
 
 ```json
 {"type": "monitoring", "topic": "left-leg", "data": [[1735821000123456, 39, 0, 12345]]}
-{"type": "notification", "data": {"event": "slaves_changed"}}
+{"type": "notification", "data": {"event": "short-working-counter", "shortWkcCycles": 3}}
 ```
+
+**A client receives nothing until it subscribes**, and the two kinds of topic differ in how wide
+they are. A monitoring's topic is **narrow**: one monitoring, one topic, and subscribing delivers
+that monitoring's batches and nothing else. `"notifications"` is **wide**: it always exists, every
+source publishes to it, so one subscription covers every event including kinds added later. That is
+why it is one shared topic and not one per source — uWebSockets matches topic names exactly, so a
+client could not ask for all of them. To act on only some events, filter on `data.event`. The
+TypeScript client's `onNotification` subscribes to it on the first listener.
+
+A monitoring's topic is whatever the client chose, validated by `mm::core::isUrlSafeId`
+(1–64 of `[A-Za-z0-9._-]`). **`notifications` is reserved**: `MonitoringManager::create` refuses it,
+because it satisfies the same character rule and a monitoring taking it would push sample batches
+at every client subscribed for faults.
+
+**`data.event` is kebab-case, and every name is a `constexpr std::string_view` beside the source
+that sends it** — `kShortWorkingCounterEvent` in `bus_health_source.h`, matching how procedure names
+and step ids are declared. It is protocol: a client switches on it, so it must survive a rewrite of
+the message around it. Nothing enforces the case, so a new source is where it drifts. The rest of
+the payload is camelCase like every other JSON body this API serves.
 
 `data` is an array of cycle rows, one per recorded cycle since the last flush. A row is
 `[timestampUs, v0, v1, ...]`: epoch **microseconds**, then one value per parameter in a fixed

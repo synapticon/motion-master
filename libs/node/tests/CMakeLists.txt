@@ -14,6 +14,7 @@ add_executable(
   ic_haus_registers_test.cc
   kuebler_registers_test.cc
   monitoring_test.cc
+  notification_bus_test.cc
   monitoring_manager_test.cc
   operation_modes_test.cc
   parameter_cache_test.cc

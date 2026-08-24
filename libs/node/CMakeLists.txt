@@ -11,6 +11,7 @@ add_library(
   ic_haus_registers.cc
   kuebler_registers.cc
   monitoring.cc
+  notification_bus.cc
   monitoring_manager.cc
   operation_modes.cc
   parameter_cache.cc

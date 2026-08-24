@@ -23,8 +23,8 @@
 ///   - client → server: topic subscribe/unsubscribe, and process-data output values (target-map
 ///     writes for the RT loop).
 ///
-/// Today the inbound path handles only subscribe/unsubscribe and the outbound path only monitoring
-/// publishes; notifications and output values plug in here as those features land.  Procedure
+/// Today the inbound path handles only subscribe/unsubscribe, and the outbound path monitoring
+/// batches and notifications; output values plug in here as that feature lands.  Procedure
 /// progress deliberately does **not**: @c ProcedureManager holds no publish callback and names no
 /// WebSocket, so that surface is HTTP-poll-only.  All public methods are thread-safe — publish()
 /// and broadcast() may be called from any thread; the send is marshalled onto this server's event
@@ -59,11 +59,17 @@ class WebSocketServer {
   void stop();
 
   /// @brief Sends a JSON message to all currently-connected WebSocket clients.
+  ///
+  /// Nothing calls this today: every outbound message, notifications included, goes to a topic a
+  /// client asked for.  It stays because reaching every client regardless of what they subscribed
+  /// to is a different thing from publishing, and the day something has to say it — the server is
+  /// going down, this build is incompatible — a topic is the wrong mechanism.
   /// @param json  Serialised JSON string.  Moved into the deferred closure.
   void broadcast(std::string json);
 
   /// @brief Publishes a JSON message to the clients subscribed to @p topic (native uWS pub/sub).
-  /// @param topic  Topic to publish under (a monitoring id).  Moved into the deferred closure.
+  /// @param topic  Topic to publish under: a monitoring id, or @c mm::node::kNotificationTopic.
+  ///               Moved into the deferred closure.
   /// @param json   Serialised JSON string.  Moved into the deferred closure.
   void publish(std::string topic, std::string json);
 

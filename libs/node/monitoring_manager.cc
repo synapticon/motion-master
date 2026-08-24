@@ -18,6 +18,7 @@
 
 #include "core/util.h"
 #include "node/device_parameter.h"
+#include "node/notification_bus.h"
 #include "node/process_image.h"
 
 namespace mm::node {
@@ -48,6 +49,13 @@ void MonitoringManager::setPublish(PublishFn publish) {
 std::expected<Monitoring, std::string> MonitoringManager::create(Monitoring config) {
   if (!mm::core::isUrlSafeId(config.topic)) {
     return std::unexpected("invalid topic: must match [A-Za-z0-9._-]{1,64}");
+  }
+  // The notification topic satisfies the same character rule, so nothing else would stop a
+  // monitoring taking it — and a client subscribed for faults would then be handed sample batches
+  // it never asked for, on the one topic it cannot choose to leave.
+  if (config.topic == kNotificationTopic) {
+    return std::unexpected("topic '" + std::string(kNotificationTopic) +
+                           "' is reserved for server notifications");
   }
   // interval is the flush cadence, not a sample rate. Bounded so each batch stays a sane size: a
   // longer interval ships more recorded cycles per message (~one row per cycle), so 2000 ms caps

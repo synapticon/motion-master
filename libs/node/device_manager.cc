@@ -440,14 +440,22 @@ void DeviceManager::exchangeProcessData() {
       static_cast<uint64_t>(std::chrono::duration_cast<std::chrono::nanoseconds>(
                                 std::chrono::system_clock::now().time_since_epoch())
                                 .count());
-  // Note a cycle the bus did not fully answer, with when it happened. At most three relaxed stores,
-  // on a path that just blocked on a frame round trip — and the only place the fault is
-  // visible, since no other thread sees every cycle.
+  // Note a cycle the bus did not fully answer, with when it happened. At most three stores, on a
+  // path that just blocked on a frame round trip — and the only place the fault is visible, since
+  // no other thread sees every cycle.
+  //
+  // The counter is written last, with release, so that it is the publish fence for the two
+  // timestamps: a reader that acquires the new count is guaranteed to see the timestamps that
+  // belong to it, rather than a fresh count beside a stale or still-zero time. Reading the counter
+  // first rather than using fetch_add is what allows that ordering, and is exact because this
+  // thread is its only writer while the bus exchanges (reset() clears it with the cycle drained).
   if (wkc < pd_->expectedWkc.load(std::memory_order_relaxed)) {
-    pd_->lastShortWkcNs.store(timestampNs, std::memory_order_relaxed);
-    if (pd_->shortWkcCycles.fetch_add(1, std::memory_order_relaxed) == 0) {
+    const uint64_t shortCycles = pd_->shortWkcCycles.load(std::memory_order_relaxed);
+    if (shortCycles == 0) {
       pd_->firstShortWkcNs.store(timestampNs, std::memory_order_relaxed);
     }
+    pd_->lastShortWkcNs.store(timestampNs, std::memory_order_relaxed);
+    pd_->shortWkcCycles.store(shortCycles + 1, std::memory_order_release);
   }
   pd_->ring.write(timestampNs, wkc,
                   std::span<const uint8_t>(pd_->inScratch.bytes.data(), image->inputBytes),
@@ -600,6 +608,10 @@ int DeviceManager::expectedWorkingCounter() const {
 
 bool DeviceManager::processDataHealthy() const { return pd_->healthy(); }
 
+uint64_t DeviceManager::shortWkcCycles() const {
+  return pd_->shortWkcCycles.load(std::memory_order_acquire);
+}
+
 ProcessImageInfo DeviceManager::processImageInfo() const {
   // Shared: generations is a vector the control plane appends to (a re-map) and clears
   // (scan/reset), so walking it and dereferencing its back() needs the lock those writers take.
@@ -609,7 +621,9 @@ ProcessImageInfo DeviceManager::processImageInfo() const {
   info.lastWkc = pd_->lastWkc.load(std::memory_order_relaxed);
   info.expectedWkc = pd_->expectedWkc.load(std::memory_order_relaxed);
   info.generations = pd_->generations.size();
-  info.shortWkcCycles = pd_->shortWkcCycles.load(std::memory_order_relaxed);
+  // Acquire, then the timestamps relaxed behind it: the RT writer releases this counter after
+  // writing both, so this order is what makes the three consistent with each other.
+  info.shortWkcCycles = pd_->shortWkcCycles.load(std::memory_order_acquire);
   // Reduced to microseconds at the JSON boundary, matching every other timestamp this API serves.
   info.firstShortWkcUs = pd_->firstShortWkcNs.load(std::memory_order_relaxed) / 1000;
   info.lastShortWkcUs = pd_->lastShortWkcNs.load(std::memory_order_relaxed) / 1000;

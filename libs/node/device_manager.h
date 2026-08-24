@@ -519,6 +519,16 @@ class DeviceManager {
   /// published. Runs on the (non-RT) caller's thread; reads the published image lock-free.
   ProcessImageInfo processImageInfo() const;
 
+  /// @brief Cycles that answered with a short working counter since the bus came up.
+  ///
+  /// One atomic load, so it is cheap enough to poll as a change signal — which @c processImageInfo
+  /// is not, since that takes a lock and walks the mapped-object lists. The count only ever rises
+  /// while the bus exchanges, and @c reset() is the one place it returns to zero.
+  ///
+  /// The same value @c ProcessImageInfo::shortWkcCycles carries. Read it there when the timestamps
+  /// are wanted too.
+  uint64_t shortWkcCycles() const;
+
   /// @brief Serialises the recorder's current span to a `.mmpd` dump file and returns its path.
   ///
   /// Freezes the recorder span at the instant of the call — @c [recorderOldestSeq(),

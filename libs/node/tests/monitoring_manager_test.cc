@@ -20,6 +20,7 @@
 #include "comm/fieldbus_driver.h"
 #include "node/device_manager.h"
 #include "node/monitoring.h"
+#include "node/notification_bus.h"
 
 namespace {
 
@@ -30,6 +31,7 @@ using mm::comm::PdoLayout;
 using mm::comm::SlaveInfo;
 using mm::comm::SlaveIo;
 using mm::node::DeviceManager;
+using mm::node::kNotificationTopic;
 using mm::node::MonitoredParameter;
 using mm::node::Monitoring;
 using mm::node::MonitoringManager;
@@ -314,6 +316,21 @@ TEST(MonitoringManagerTest, CreateRejectsInvalidConfigs) {
 
   ASSERT_TRUE(manager.create(axisConfig()).has_value());
   EXPECT_FALSE(manager.create(axisConfig()).has_value());  // duplicate topic
+}
+
+TEST(MonitoringManagerTest, RefusesTheReservedNotificationTopic) {
+  DeviceManager dm;
+  setUp(dm);
+  MonitoringManager manager{dm};
+
+  // It passes isUrlSafeId, so only the reserved-name check stops it — and it must, or a client
+  // subscribed for notifications would receive sample batches on the one topic it cannot leave.
+  auto m = axisConfig();
+  m.topic = std::string(kNotificationTopic);
+  const auto result = manager.create(m);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("reserved"), std::string::npos);
+  EXPECT_EQ(manager.monitoringCount(), 0u);
 }
 
 TEST(MonitoringManagerTest, FlushPublishesEveryRecordedCycleAsPositionalRows) {

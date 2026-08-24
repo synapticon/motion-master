@@ -6,6 +6,7 @@ import DevicePageHeader from '../components/DevicePageHeader'
 import Callout from '../components/Callout'
 import SafeSensorPanel from '../components/SafeSensorPanel'
 import Ss1Panel from '../components/Ss1Panel'
+import Ss1StopTracePanel from '../components/Ss1StopTracePanel'
 import { useConnection } from '../contexts/ConnectionContext'
 
 // One shared control height for every input and button, as on the Motion page: this theme's
@@ -472,6 +473,11 @@ export default function DeviceSafetyPage() {
                 />
               </div>
             </section>
+
+            {/* INSIDE the connection block, unlike the two panels below: the stop recorder is
+                per-connection state written by the FSoE cycle thread, so without a connection there
+                is nothing recording and the endpoint has nothing to answer with. */}
+            <Ss1StopTracePanel slavePosition={slavePosition} />
           </>
         )}
 

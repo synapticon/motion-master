@@ -7,6 +7,7 @@ add_library(
   device_parameter.cc
   firmware_package.cc
   fsoe_connection.cc
+  ss1_trace.cc
   fsoe_manager.cc
   hardware_description.cc
   integro_variant.cc

@@ -198,9 +198,13 @@ std::expected<std::unique_ptr<FsoeConnection>, std::string> FsoeConnection::open
 
   // Not std::make_unique: the constructor is private, and it stays private so a connection can only
   // come from a successful open.
-  return std::unique_ptr<FsoeConnection>(new FsoeConnection(
+  auto connection = std::unique_ptr<FsoeConnection>(new FsoeConnection(
       config, std::move(*master_), std::move(fields), inputSpec->bitOffset / 8,
       deviceManager.processImageGeneration(), deviceManager.topologyGeneration()));
+  /* Size the stop recorder here, because open is the only call in this class allowed to be
+     expensive - observe() runs on the cycle thread and may not allocate. */
+  connection->ss1Recorder_.allocate(safeInputsLen);
+  return connection;
 }
 
 void FsoeConnection::step(DeviceManager& deviceManager, uint32_t dtUs) {
@@ -220,6 +224,16 @@ void FsoeConnection::step(DeviceManager& deviceManager, uint32_t dtUs) {
     unbound.bound = false;
     unbound.inputsValid = false;
     unbound.safeInputs = {};
+    /* Record it too. A stop in flight when the frame stops being driven must end in the trace as
+       "Unbound" rather than simply stop producing samples, which would read back as an axis that
+       held its speed. */
+    ss1Recorder_.observe({.safeInputs = {},
+                          .controlword = 0,
+                          .fsoeState = static_cast<uint8_t>(unbound.state),
+                          .inputsValid = false,
+                          .bound = false,
+                          .processData = false},
+                         dtUs);
     publish(unbound);
     return;
   }
@@ -269,6 +283,19 @@ void FsoeConnection::step(DeviceManager& deviceManager, uint32_t dtUs) {
   fresh.safeOutputsLength = master_.config().safeOutputsLen;
   std::ranges::copy(master_.safeInputs(), fresh.safeInputs.begin());
   std::ranges::copy(std::span(outputs).first(fresh.safeOutputsLength), fresh.safeOutputs.begin());
+
+  /* Both directions of this one cycle are in hand here, and the input has already been
+     authenticated by the FSoE master - CRC, sequence number, watchdog. Recording anywhere else
+     would either miss one direction or store octets nobody vouched for. */
+  ss1Recorder_.observe(
+      {.safeInputs = std::span(fresh.safeInputs).first(fresh.safeInputsLength),
+       .controlword = fresh.safeOutputsLength > 0 ? fresh.safeOutputs[0] : uint8_t{0},
+       .fsoeState = static_cast<uint8_t>(fresh.state),
+       .inputsValid = fresh.inputsValid,
+       .bound = true,
+       .processData = fresh.dataCommand == mm::etg::FsoeCommand::ProcessData},
+      dtUs);
+
   publish(fresh);
 }
 

@@ -56,6 +56,93 @@ export const SAMPLE_INDEX: XAxis = {
   ticks: (splits) => splits.map((v) => v.toLocaleString()),
 }
 
+/**
+ * Draws the reference geometry, in a uPlot `draw` hook reading the latest annotations from a ref.
+ *
+ * Everything is clipped to the plot area and drawn under the same save/restore, so a band that
+ * extends past the current zoom paints to the edge rather than over the axes. Labels are skipped
+ * when they would land on top of the previous one - a dozen overlapping strings is worse than none,
+ * and a stop trace legitimately has several markers within a few milliseconds of each other.
+ */
+function drawAnnotations(ref: { current: ChartAnnotations | undefined }) {
+  return (u: uPlot) => {
+    const a = ref.current
+    if (!a) return
+    const { ctx } = u
+    const { left, top, width, height } = u.bbox
+    ctx.save()
+    ctx.beginPath()
+    ctx.rect(left, top, width, height)
+    ctx.clip()
+
+    const xPos = (v: number) => u.valToPos(v, 'x', true)
+    const yPos = (v: number) => u.valToPos(v, 'y', true)
+    let lastLabelX = -Infinity
+    const label = (text: string, x: number, y: number, color: string) => {
+      if (x - lastLabelX < 44) return
+      lastLabelX = x
+      ctx.fillStyle = color
+      ctx.font = '10px ui-sans-serif, system-ui, sans-serif'
+      ctx.fillText(text, x + 3, y)
+    }
+
+    for (const b of a.hBands ?? []) {
+      const y0 = yPos(b.to)
+      const y1 = yPos(b.from)
+      ctx.fillStyle = b.color ?? 'rgba(16,185,129,0.12)'
+      ctx.fillRect(left, Math.min(y0, y1), width, Math.abs(y1 - y0))
+    }
+    for (const b of a.vBands ?? []) {
+      const x0 = xPos(b.from)
+      const x1 = xPos(b.to)
+      ctx.fillStyle = b.color ?? 'rgba(245,158,11,0.12)'
+      ctx.fillRect(Math.min(x0, x1), top, Math.abs(x1 - x0), height)
+    }
+    for (const l of a.vLines ?? []) {
+      const x = xPos(l.x)
+      ctx.strokeStyle = l.color ?? '#6b7280'
+      ctx.lineWidth = 1
+      ctx.setLineDash(l.dash ?? [])
+      ctx.beginPath()
+      ctx.moveTo(x, top)
+      ctx.lineTo(x, top + height)
+      ctx.stroke()
+      ctx.setLineDash([])
+      if (l.label) label(l.label, x, top + 11, l.color ?? '#6b7280')
+    }
+    for (const p of a.points ?? []) {
+      const x = xPos(p.x)
+      const y = yPos(p.y)
+      ctx.strokeStyle = p.color ?? '#111827'
+      ctx.lineWidth = 2
+      ctx.beginPath()
+      ctx.arc(x, y, 4, 0, Math.PI * 2)
+      ctx.stroke()
+      if (p.label) label(p.label, x + 4, y - 6, p.color ?? '#111827')
+    }
+    ctx.restore()
+  }
+}
+
+/** x is microseconds from an event, so negative values are context from before it. */
+export const SINCE_TRIGGER: XAxis = {
+  label: 'From trigger',
+  format: formatMicros,
+  ticks: formatTicks,
+}
+
+/** Reference geometry drawn over the series: what the data should be measured against. */
+export interface ChartAnnotations {
+  /** A vertical line at an x value - an instant. */
+  vLines?: { x: number; label?: string; color?: string; dash?: number[] }[]
+  /** A shaded x range - an interval. */
+  vBands?: { from: number; to: number; color?: string; label?: string }[]
+  /** A shaded y range - a limit band such as a standstill window. */
+  hBands?: { from: number; to: number; color?: string; label?: string }[]
+  /** A marked (x, y) - an event at a value. */
+  points?: { x: number; y: number; label?: string; color?: string }[]
+}
+
 /// Thin uPlot wrapper for a live time-series. Re-creates the plot when the series set changes and
 /// pushes new data via setData otherwise — so streaming updates never tear down the canvas.
 ///
@@ -69,6 +156,8 @@ export default function MonitoringChart({
   titles = [],
   hidden = [],
   colors = [],
+  dashes = [],
+  annotations,
   xAxis = ELAPSED_MICROSECONDS,
 }: {
   data: uPlot.AlignedData
@@ -81,6 +170,17 @@ export default function MonitoringChart({
   /** Optional per-series stroke colour, aligned with `labels`; a blank/undefined entry falls back
    *  to the built-in palette. Changing a colour rebuilds the plot (keyed on content). */
   colors?: (string | undefined)[]
+  /** Optional per-series dash pattern, aligned with `labels`. Joins the rebuild key, so it is a
+   *  plain array of numbers rather than anything that would only compare by reference. */
+  dashes?: (number[] | undefined)[]
+  /** Reference geometry drawn over the series.
+   *
+   *  Passed as DATA rather than as a uPlot plugin on purpose. The rebuild below is keyed on the
+   *  *content* of the props, and a plugin is a function - it cannot be serialised into that key, so
+   *  handing one in would either rebuild the canvas on every render (which collapses it to zero
+   *  height and yanks the page scroll) or never pick up a change. A built-in draw hook reading a ref
+   *  avoids both. */
+  annotations?: ChartAnnotations
   /** What the x values mean. Defaults to elapsed microseconds; pass SAMPLE_INDEX for data whose
    *  x is a position rather than a time, so the ticks do not read as µs. */
   xAxis?: XAxis
@@ -100,11 +200,17 @@ export default function MonitoringChart({
   colorsRef.current = colors
   const xAxisRef = useRef(xAxis)
   xAxisRef.current = xAxis
+  const dashesRef = useRef(dashes)
+  dashesRef.current = dashes
+  const annotationsRef = useRef(annotations)
+  annotationsRef.current = annotations
   // Content keys — a stable string identity for a given set of labels/titles/colors. These, not the
   // array references, drive the effects, so a caller passing a fresh array each render is harmless.
   const labelsKey = JSON.stringify(labels)
   const titlesKey = JSON.stringify(titles)
   const colorsKey = JSON.stringify(colors)
+  const dashesKey = JSON.stringify(dashes)
+  const annotationsKey = JSON.stringify(annotations)
 
   // Create (and re-create when the series set actually changes). Reads the latest data/labels via
   // refs, so it fires only when labelsKey changes — never on a per-batch data update.
@@ -120,6 +226,7 @@ export default function MonitoringChart({
         label,
         stroke: colorsRef.current[i] || COLORS[i % COLORS.length],
         width: 1,
+        dash: dashesRef.current[i],
         spanGaps: false, // null samples (device not exchanging) leave gaps
         show: !hiddenRef.current.includes(label), // initial visibility; legend can toggle it back on
       })),
@@ -135,6 +242,7 @@ export default function MonitoringChart({
       axes: [{ values: (_u, splits) => xAxisRef.current.ticks(splits) }, {}],
       legend: { live: true },
       cursor: { drag: { x: true, y: false } },
+      plugins: [{ hooks: { draw: [drawAnnotations(annotationsRef)] } }],
     }
     const plot = new uPlot(opts, dataRef.current, el)
     plotRef.current = plot
@@ -151,7 +259,13 @@ export default function MonitoringChart({
     }
     // xAxis.label joins the rebuild key so a page that switches what x means (and only then) gets a
     // plot whose legend and ticks agree with its data.
-  }, [labelsKey, colorsKey, xAxis.label])
+  }, [labelsKey, colorsKey, dashesKey, xAxis.label])
+
+  // Annotations live in a ref, so a change to them alone needs an explicit repaint. Keyed on their
+  // content for the same reason as everything else here: the caller builds them fresh each render.
+  useEffect(() => {
+    plotRef.current?.redraw()
+  }, [annotationsKey])
 
   // Stream new data into the existing plot.
   useEffect(() => {

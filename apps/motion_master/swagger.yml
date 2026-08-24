@@ -945,6 +945,205 @@ paths:
                   error:
                     type: string
                     description: What went wrong, in words.
+  /api/fsoe/{slavePosition}/ss1:
+    put:
+      summary: Request or release Safe Stop 1
+      operationId: setFsoeSs1
+      description: >
+        Sets the SS1 bit of the safety controlword (ETG.6100.2 Table 3, bit 1). `requested: true`
+        asks the drive to bring the axis down and then remove torque.
+
+
+        Like STO, the bit is inverted on the wire — zero is a request — so an all-zero frame asks
+        for SS1 as well. Permitting motion therefore means releasing **both** stop functions; a
+        caller that releases only STO leaves SS1 requested, and a drive that implements SS1 will
+        stop.
+
+
+        Releasing the request does **not** abort a stop. ETG.6100.2 ch. 8.2.1.1 requires the
+        function to be finalized once activated, so this endpoint can start a stop and cannot
+        cancel one. What the stop actually did is available from
+        `GET /api/fsoe/{slavePosition}/ss1-trace`.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requested]
+              properties:
+                requested:
+                  type: boolean
+                  description: True requests Safe Stop 1; false releases the request.
+                  example: true
+      responses:
+        "200":
+          description: The request was staged; it goes out on the next cycle.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requested:
+                    type: boolean
+        "400":
+          description: 'The body was not `{"requested": true|false}`.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: What went wrong, in words.
+        "404":
+          description: No connection is open to that position.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: What went wrong, in words.
+  /api/fsoe/{slavePosition}/ss1-trace:
+    get:
+      summary: The most recent completed Safe Stop 1 stop
+      operationId: readSs1Trace
+      description: >
+        Returns the samples recorded on the FSoE cycle thread for the last stop that completed, with
+        a few hundred cycles of context from before the request.
+
+
+        Recorded in the cycle rather than polled, because a stop completes in a couple of hundred
+        milliseconds and the finalizing STO is visible for a single cycle — anything sampling from
+        outside would miss the evidence that the stop finished at all.
+
+
+        Only completed stops are published. A capture in progress reports `capturing: true` and the
+        previous trace, because half a stop plotted against a deadline invites a conclusion the data
+        cannot support.
+
+
+        The SS1 parameters are deliberately **not** included: read them from the objects
+        (0x6651/0x6653/0x6654/0x6656/0x6657 and 0x2606) so this endpoint costs no bus traffic and
+        cannot stall on an SDO timeout while a plot is being polled. They are commissioning values,
+        so reading them after the stop is normally safe — but check 0x2606:02, because a refused set
+        means the *previous* one was in force.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: 'The trace, or `haveTrace: false` when no stop has completed yet.'
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [capturing, haveTrace, traceId, columns, samples]
+                properties:
+                  capturing:
+                    type: boolean
+                    description: A stop is being recorded right now.
+                  haveTrace:
+                    type: boolean
+                    description: False when no stop has completed since the connection opened.
+                  traceId:
+                    type: integer
+                    description: Monotonic per connection; 0 means nothing has been captured.
+                  complete:
+                    type: boolean
+                    description: >
+                      True only when torque removal was observed and the post-roll ran to the end.
+                      False means the capture was cut short — see `endReason`.
+                  truncated:
+                    type: boolean
+                    description: The stop outlasted the buffer.
+                  endReason:
+                    type: string
+                    enum: [None, StoObserved, BufferFull, Retriggered, Unbound]
+                    description: >
+                      `StoObserved` is the normal ending. `Retriggered` means a new stop began
+                      before this one finished. `Unbound` means the connection stopped driving the
+                      frame mid-stop.
+                  safeInputsLength:
+                    type: integer
+                    description: >
+                      SafeInputs octets this connection carries. Fewer than 12 means the safe
+                      process values are not mapped, so there is no velocity in the trace and a
+                      client must refuse to plot rather than draw a stop from zero.
+                  triggeredAtUnixNs:
+                    type: integer
+                    description: >
+                      Wall clock at the trigger, for a title only. It is a system clock and can step
+                      under NTP; ordering is by `traceId` and time within the trace is accumulated dt.
+                  measuredCyclePeriodUs:
+                    type: integer
+                    description: Mean dt across the capture, so a bus running off nominal is visible.
+                  anchorMilliRpm:
+                    type: integer
+                    description: >
+                      The speed magnitude the deceleration limit is anchored on, taken from the cycle
+                      AFTER the trigger — the trigger cycle's input is the drive's answer to the
+                      previous frame and cannot reflect the request yet.
+                  anchorValid:
+                    type: boolean
+                    description: False when the safe velocity was not believable at the anchor, in which case no limit line can be drawn.
+                  markers:
+                    type: object
+                    description: Microseconds from the trigger, or null for "never happened".
+                    properties:
+                      stoActiveTUs:
+                        type: integer
+                        nullable: true
+                      errorTUs:
+                        type: integer
+                        nullable: true
+                      requestReleasedTUs:
+                        type: integer
+                        nullable: true
+                  columns:
+                    type: array
+                    description: Names for the positional fields of every row in `samples`.
+                    items:
+                      type: string
+                  samples:
+                    type: array
+                    description: >
+                      One row per recorded cycle, positional per `columns`, booleans as 0/1. Negative
+                      `tUs` is the pre-roll from before the request.
+                    items:
+                      type: array
+                      items:
+                        type: number
+        "404":
+          description: No connection is open to that position.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: What went wrong, in words.
   /api/fsoe/{slavePosition}/data-command:
     put:
       summary: Choose ProcessData or FailSafeData

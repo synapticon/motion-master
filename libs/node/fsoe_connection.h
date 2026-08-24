@@ -10,6 +10,7 @@
 #include <vector>
 
 #include "etg/fsoe_master.h"
+#include "node/ss1_trace.h"
 #include "etg/safety_drive_profile.h"
 
 namespace mm::node {
@@ -169,6 +170,13 @@ class FsoeConnection {
   [[nodiscard]] bool active() const { return active_.load(std::memory_order_acquire); }
   [[nodiscard]] const FsoeConnectionConfig& config() const { return config_; }
 
+  /// @brief The most recent completed Safe Stop 1 stop, recorded on the cycle thread.
+  ///
+  /// Lives here rather than in a caller because only this class sees every cycle: a stop completes
+  /// in a couple of hundred milliseconds and the finalizing STO is visible for a single cycle, so
+  /// anything sampling from outside would miss it.
+  [[nodiscard]] const Ss1Recorder& ss1Recorder() const { return ss1Recorder_; }
+
   /// @brief Where the master frame's octets live: one entry per mapped object of the frame PDO.
   struct FrameField {
     uint16_t index = 0;
@@ -199,6 +207,8 @@ class FsoeConnection {
   std::atomic<bool> resetRequested_{false};
   std::atomic<uint8_t> dataCommand_{static_cast<uint8_t>(mm::etg::FsoeCommand::FailSafeData)};
   std::atomic<uint64_t> safeOutputs_{0};  ///< Up to eight octets, little-endian.
+
+  Ss1Recorder ss1Recorder_;  ///< written by the cycle thread; read by HTTP handlers
 
   // Counters owned by the cycle thread.
   uint64_t cycles_ = 0;

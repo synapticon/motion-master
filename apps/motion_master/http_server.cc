@@ -856,6 +856,69 @@ void HttpServer::run() {
             });
       });
 
+  // The most recent completed Safe Stop 1 stop, as recorded on the cycle thread.
+  //
+  // Read-only and cheap: it copies a buffer the FSoE cycle already filled. Deliberately returns ONLY
+  // what was recorded - the SS1 parameters are not read here. The console reads those over SDO
+  // itself (Ss1Panel already does, with an sdoUpload fallback for the case where the object
+  // dictionary has not been enumerated), so this handler touches no extra bus traffic and cannot
+  // stall on an SDO timeout while somebody is polling a plot.
+  //
+  // Rows are positional, with `columns` given once. A trace is up to 4096 samples and naming the
+  // fields per row would triple the bytes for nothing - the front end feeds a column straight into
+  // uPlot.
+  router.get(
+      "/api/fsoe/:slavePosition/ss1-trace", [this](const mm::api::Request& req) -> mm::api::Response {
+        return withFsoeConnection(
+            fsoeManager_, req, [](mm::node::FsoeConnection& connection) -> mm::api::Response {
+              mm::node::Ss1Trace trace;
+              const bool have = connection.ss1Recorder().snapshot(trace);
+              nlohmann::json body;
+              body["capturing"] = connection.ss1Recorder().capturing();
+              body["haveTrace"] = have;
+              if (!have) {
+                // No stop has completed since this connection opened. Not an error: it is the
+                // resting state of a machine nobody has asked to stop.
+                body["traceId"] = 0;
+                body["samples"] = nlohmann::json::array();
+                body["columns"] = nlohmann::json::array();
+                return mm::api::json(body);
+              }
+              body["traceId"] = trace.traceId;
+              body["complete"] = trace.complete;
+              body["truncated"] = trace.truncated;
+              body["endReason"] = mm::node::ss1TraceEndName(trace.endReason);
+              body["safeInputsLength"] = trace.safeInputsLength;
+              body["triggeredAtUnixNs"] = trace.triggeredAtUnixNs;
+              body["measuredCyclePeriodUs"] = trace.measuredCyclePeriodUs;
+              body["anchorMilliRpm"] = trace.anchorMilliRpm;
+              body["anchorValid"] = trace.anchorValid;
+
+              // null rather than a sentinel: "this never happened" is not a time, and a client that
+              // treated INT32_MIN as one would plot a marker at minus half an hour.
+              const auto marker = [](int32_t v) -> nlohmann::json {
+                return v == mm::node::kSs1TraceNever ? nlohmann::json(nullptr) : nlohmann::json(v);
+              };
+              body["markers"] = {{"stoActiveTUs", marker(trace.stoActiveTUs)},
+                                 {"errorTUs", marker(trace.errorTUs)},
+                                 {"requestReleasedTUs", marker(trace.requestReleasedTUs)}};
+
+              auto columns = nlohmann::json::array();
+              for (const char* name : mm::node::ss1TraceColumns()) {
+                columns.push_back(name);
+              }
+              body["columns"] = std::move(columns);
+
+              auto samples = nlohmann::json::array();
+              for (const mm::node::Ss1TraceSample& sample : trace.samples) {
+                const auto row = mm::node::ss1TraceRow(sample, trace.safeInputsLength);
+                samples.push_back(nlohmann::json(row));
+              }
+              body["samples"] = std::move(samples);
+              return mm::api::json(body);
+            });
+      });
+
   // ProcessData or FailSafeData. A connection starts in FailSafeData and returns to it after every
   // fault, so this has to be set before SafeOutputs mean anything — and set again after a fault.
   router.put(

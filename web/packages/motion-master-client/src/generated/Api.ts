@@ -685,6 +685,98 @@ export class Api<
       ...params,
     });
   /**
+   * @description Sets the SS1 bit of the safety controlword (ETG.6100.2 Table 3, bit 1). `requested: true` asks the drive to bring the axis down and then remove torque. Like STO, the bit is inverted on the wire — zero is a request — so an all-zero frame asks for SS1 as well. Permitting motion therefore means releasing **both** stop functions; a caller that releases only STO leaves SS1 requested, and a drive that implements SS1 will stop. Releasing the request does **not** abort a stop. ETG.6100.2 ch. 8.2.1.1 requires the function to be finalized once activated, so this endpoint can start a stop and cannot cancel one. What the stop actually did is available from `GET /api/fsoe/{slavePosition}/ss1-trace`.
+   *
+   * @name SetFsoeSs1
+   * @summary Request or release Safe Stop 1
+   * @request PUT:/api/fsoe/{slavePosition}/ss1
+   */
+  setFsoeSs1 = (
+    slavePosition: number,
+    data: {
+      /**
+       * True requests Safe Stop 1; false releases the request.
+       * @example true
+       */
+      requested: boolean;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      {
+        requested?: boolean;
+      },
+      {
+        /** What went wrong, in words. */
+        error: string;
+      }
+    >({
+      path: `/api/fsoe/${slavePosition}/ss1`,
+      method: "PUT",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Returns the samples recorded on the FSoE cycle thread for the last stop that completed, with a few hundred cycles of context from before the request. Recorded in the cycle rather than polled, because a stop completes in a couple of hundred milliseconds and the finalizing STO is visible for a single cycle — anything sampling from outside would miss the evidence that the stop finished at all. Only completed stops are published. A capture in progress reports `capturing: true` and the previous trace, because half a stop plotted against a deadline invites a conclusion the data cannot support. The SS1 parameters are deliberately **not** included: read them from the objects (0x6651/0x6653/0x6654/0x6656/0x6657 and 0x2606) so this endpoint costs no bus traffic and cannot stall on an SDO timeout while a plot is being polled. They are commissioning values, so reading them after the stop is normally safe — but check 0x2606:02, because a refused set means the *previous* one was in force.
+   *
+   * @name ReadSs1Trace
+   * @summary The most recent completed Safe Stop 1 stop
+   * @request GET:/api/fsoe/{slavePosition}/ss1-trace
+   */
+  readSs1Trace = (slavePosition: number, params: RequestParams = {}) =>
+    this.request<
+      {
+        /** A stop is being recorded right now. */
+        capturing: boolean;
+        /** False when no stop has completed since the connection opened. */
+        haveTrace: boolean;
+        /** Monotonic per connection; 0 means nothing has been captured. */
+        traceId: number;
+        /** True only when torque removal was observed and the post-roll ran to the end. False means the capture was cut short — see `endReason`. */
+        complete?: boolean;
+        /** The stop outlasted the buffer. */
+        truncated?: boolean;
+        /** `StoObserved` is the normal ending. `Retriggered` means a new stop began before this one finished. `Unbound` means the connection stopped driving the frame mid-stop. */
+        endReason?:
+          | "None"
+          | "StoObserved"
+          | "BufferFull"
+          | "Retriggered"
+          | "Unbound";
+        /** SafeInputs octets this connection carries. Fewer than 12 means the safe process values are not mapped, so there is no velocity in the trace and a client must refuse to plot rather than draw a stop from zero. */
+        safeInputsLength?: number;
+        /** Wall clock at the trigger, for a title only. It is a system clock and can step under NTP; ordering is by `traceId` and time within the trace is accumulated dt. */
+        triggeredAtUnixNs?: number;
+        /** Mean dt across the capture, so a bus running off nominal is visible. */
+        measuredCyclePeriodUs?: number;
+        /** The speed magnitude the deceleration limit is anchored on, taken from the cycle AFTER the trigger — the trigger cycle's input is the drive's answer to the previous frame and cannot reflect the request yet. */
+        anchorMilliRpm?: number;
+        /** False when the safe velocity was not believable at the anchor, in which case no limit line can be drawn. */
+        anchorValid?: boolean;
+        /** Microseconds from the trigger, or null for "never happened". */
+        markers?: {
+          stoActiveTUs?: number | null;
+          errorTUs?: number | null;
+          requestReleasedTUs?: number | null;
+        };
+        /** Names for the positional fields of every row in `samples`. */
+        columns: string[];
+        /** One row per recorded cycle, positional per `columns`, booleans as 0/1. Negative `tUs` is the pre-roll from before the request. */
+        samples: number[][];
+      },
+      {
+        /** What went wrong, in words. */
+        error: string;
+      }
+    >({
+      path: `/api/fsoe/${slavePosition}/ss1-trace`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
    * @description The command sent in the Data state. `FailSafeData` tells the drive to hold its outputs in the safe state while the connection stays up, which is how a master applies a safety function without dropping the link. A connection starts in `FailSafeData` and **returns to it after every fault**, so this has to be set to `ProcessData` before SafeOutputs mean anything, and set again after a fault.
    *
    * @name SetFsoeDataCommand

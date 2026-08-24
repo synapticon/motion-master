@@ -1,20 +1,16 @@
-#include <spdlog/sinks/rotating_file_sink.h>
-#include <spdlog/sinks/stdout_color_sinks.h>
 #include <spdlog/spdlog.h>
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <csignal>
 #include <filesystem>
 #include <memory>
 #include <nlohmann/json.hpp>
-#include <optional>
 #include <string>
 #include <utility>
 
-#include "auto_tuning/client.h"
 #include "auto_tuning/process.h"
+#include "auto_tuning_setup.h"
 #include "bus_health_reporter.h"
 #include "cert_updater.h"
 #include "comm/base.h"
@@ -26,13 +22,13 @@
 #include "example/example_routes.h"
 #include "game_loop.h"
 #include "http_server.h"
+#include "logging.h"
 #include "net/http_client.h"
 #include "node/device_manager.h"
 #include "node/monitoring_manager.h"
 #include "node/procedure_manager.h"
 #include "node/process_data_cyclic_task.h"
 #include "options.h"
-#include "ring_log_sink.h"
 #include "ws_server.h"
 
 /// @brief Signal-handler target for SIGINT/SIGTERM; set before run(), cleared after.
@@ -54,12 +50,7 @@ static std::atomic<GameLoop*> gGameLoop{nullptr};
 // print and exit non-zero anyway.
 // NOLINTNEXTLINE(bugprone-exception-escape)
 int main(int argc, char** argv) {
-  // Replacing the default logger drops its built-in console sink, so re-add it
-  // explicitly alongside the ring sink that backs GET /api/log.
-  auto ringSink = std::make_shared<mm::RingLogSinkMt>();
-  auto consoleSink = std::make_shared<spdlog::sinks::stdout_color_sink_mt>();
-  spdlog::set_default_logger(
-      std::make_shared<spdlog::logger>("", spdlog::sinks_init_list{consoleSink, ringSink}));
+  const auto logSinks = mm::installLogSinks();
 
   auto opts = parseOptions(argc, argv);
 
@@ -72,60 +63,8 @@ int main(int argc, char** argv) {
           ? mm::core::userCacheDir()
           : std::filesystem::path{opts.config.userCache.directory};
 
-  // The console and the ring share the configured level; the file keeps its own, so the terminal
-  // can stay readable while the file holds the detail a support request needs. The logger gates
-  // before any sink does, so it has to run at whichever of the two is more verbose — otherwise the
-  // console setting would silently starve the file.
-  const auto consoleLevel = spdlog::level::from_str(opts.config.logging.level);
-  consoleSink->set_level(consoleLevel);
-  ringSink->set_level(consoleLevel);
-  auto loggerLevel = consoleLevel;
-  std::filesystem::path logFile;
-  if (opts.config.logging.file.enabled) {
-    const auto& fileConfig = opts.config.logging.file;
-    const std::filesystem::path logDir = fileConfig.directory.empty()
-                                             ? userCacheRoot / "logs"
-                                             : std::filesystem::path{fileConfig.directory};
-    logFile = logDir / "motion-master.log";
-    // spdlog signals a sink it cannot open by throwing, which is the one place this codebase has to
-    // catch rather than return — and it must not be fatal: a read-only or unwritable directory is a
-    // reason to run without a log file, not a reason not to run. The console and GET /api/log are
-    // unaffected either way.
-    try {
-      auto fileSink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-          logFile.string(), static_cast<std::size_t>(fileConfig.maxSizeMb) * 1024 * 1024,
-          fileConfig.maxFiles);
-      const auto fileLevel = spdlog::level::from_str(fileConfig.level);
-      fileSink->set_level(fileLevel);
-      spdlog::default_logger()->sinks().push_back(std::move(fileSink));
-      loggerLevel = std::min(loggerLevel, fileLevel);
-    } catch (const spdlog::spdlog_ex& e) {
-      logFile.clear();
-      spdlog::warn("Log file disabled — could not open {}: {}", (logDir).string(), e.what());
-    }
-  }
-  spdlog::set_level(loggerLevel);
-  // Every line, not just the alarming ones. spdlog hands each line to fwrite immediately but never
-  // calls fflush of its own accord, so without this they sit in the C stdio buffer (~4 KB, roughly
-  // 44 lines) until it fills. A clean shutdown flushes that; a segfault or a SIGKILL does not — and
-  // the log file exists precisely to outlive the crash it is describing, so a tail lost to the
-  // buffer is the one part that must not be missing.
-  //
-  // Flushing only on warn+ was the first attempt, on the assumption that a crash is preceded by a
-  // warning that checkpoints everything buffered before it. That assumption does not hold here:
-  // this codebase's crashes were memory-corruption segfaults inside SOEM (the re-map FMMU
-  // overrun, the BOOT -> SAFE-OP mailbox read), which log nothing at all before dying — so the
-  // policy dropped exactly the trail into the fault it was meant to preserve.
-  //
-  // Measured, in this three-sink layout: ~610 ns per line against ~240. The ratio is large and the
-  // number is not — the heaviest thing logged is a full parameter read at a few thousand lines, so
-  // roughly a millisecond across an operation that spends seconds in SDO round-trips. Nothing logs
-  // on the RT path (checked: exchangeProcessData and the cyclic tasks make no logging calls), so no
-  // deadline is exposed to it either.
-  //
-  // "Flushed" means handed to the OS, not on the platter — this survives a process crash, not a
-  // power cut. Guarding against that needs an fsync per line, which is milliseconds each.
-  spdlog::default_logger()->flush_on(spdlog::level::trace);
+  const std::filesystem::path logFile =
+      mm::applyLoggingConfig(logSinks, opts.config.logging, userCacheRoot);
 
   spdlog::info("Motion Master v{}", mm::core::kVersion);
   // Named once the file sink is up, so a support log says which config was in effect and where the
@@ -274,55 +213,12 @@ int main(int argc, char** argv) {
   // before the servers, and long before GameLoop::run() raises this thread to SCHED_FIFO, because a
   // child inherits the scheduling policy of the thread that spawned it and this one runs a
   // spin-waiting numerical worker per core.
-  //
-  // Not having it is a supported state, so every failure here is a warning. The install scripts
-  // download the executable, and a machine that could not reach the release, or that was installed
-  // from a tarball nobody ran setup.sh on, simply has no auto-tuning.
-  mm::auto_tuning::ProcessOptions autoTuningOptions;
-  autoTuningOptions.binary = opts.config.autoTuning.binaryPath.empty()
-                                 ? mm::core::exeDir() / mm::auto_tuning::defaultBinaryName()
-                                 : std::filesystem::path{opts.config.autoTuning.binaryPath};
-  autoTuningOptions.port = opts.config.autoTuning.port;
-  // Beside Motion Master's own log file, so the child's output is listed and downloadable through
-  // /api/user-cache like everything else this process writes. Without a log file of our own there
-  // is nowhere better than our streams, which is what an empty path selects.
-  if (!logFile.empty()) {
-    autoTuningOptions.logFile = logFile.parent_path() / "auto-tuning.log";
-  }
-  mm::auto_tuning::Process autoTuning{autoTuningOptions};
-  // The snapshot GET /api/auto-tuning serves. A page needs to tell the four states apart — switched
-  // off, not installed, would not start, running — because each asks something different of the
-  // person reading it.
-  mm::auto_tuning::Status autoTuningStatus;
-  autoTuningStatus.enabled = opts.config.autoTuning.enabled;
-  autoTuningStatus.binaryPath = autoTuningOptions.binary.string();
-  autoTuningStatus.installed = std::filesystem::exists(autoTuningOptions.binary);
-  autoTuningStatus.port = autoTuningOptions.port;
-  // Bound to the running process, and left empty when there is none: an unset callback below is how
-  // the routes answer 503 without naming any of this.
-  std::optional<mm::auto_tuning::Client> autoTuningClient;
-  // Whether the last call reached the process. Only for logging: it turns a stream of failures into
-  // one line, and a call that succeeds again arms it for the next outage.
+  mm::auto_tuning::Process autoTuning{mm::buildAutoTuningOptions(opts.config.autoTuning, logFile)};
+  auto [autoTuningStatus, autoTuningClient] =
+      mm::startAutoTuning(autoTuning, opts.config.autoTuning.enabled);
+  // Whether the last call reached the process. Only for logging: it turns a stream of failures
+  // into one line, and a call that succeeds again arms it for the next outage.
   std::atomic<bool> autoTuningAnswers{true};
-
-  if (!opts.config.autoTuning.enabled) {
-    autoTuningStatus.error = "disabled by the configuration";
-    spdlog::info("Auto-tuning is disabled by the configuration");
-  } else if (!autoTuningStatus.installed) {
-    autoTuningStatus.error = "not installed at " + autoTuningStatus.binaryPath;
-    spdlog::warn("Auto-tuning is not installed at {} — the auto-tuning endpoints will fail",
-                 autoTuningStatus.binaryPath);
-  } else if (auto started = autoTuning.start(); !started) {
-    autoTuningStatus.error = started.error();
-    spdlog::warn("Auto-tuning did not start: {}", started.error());
-  } else {
-    autoTuningStatus.started = true;
-    autoTuningStatus.version = autoTuning.version();
-    autoTuningClient.emplace(autoTuning.baseUrl());
-    spdlog::info("Auto-tuning {} started on port {} (pid {})",
-                 autoTuning.version().empty() ? "of an unknown version" : autoTuning.version(),
-                 autoTuning.options().port, autoTuning.pid());
-  }
 
   // Owns the monitoring registry plus its background SDO-refresher and sampler threads. The HTTP
   // server reaches it for the /api/monitorings routes; sampled batches publish over the WebSocket
@@ -386,7 +282,7 @@ int main(int argc, char** argv) {
           .version = std::string{mm::core::kVersion},
           .startedConfig = nlohmann::json(opts.config).dump(),
           .initDeviceManager = initDeviceManager,
-          .getLog = [ringSink]() { return ringSink->entries(); },
+          .getLog = [ringSink = logSinks.ring]() { return ringSink->entries(); },
           .refreshCert = [certFile = opts.config.tls.certPath, keyFile = opts.config.tls.keyPath,
                           certUrl = opts.certUrl,
                           keyUrl = opts.keyUrl]() -> std::expected<void, std::string> {
@@ -523,25 +419,7 @@ int main(int argc, char** argv) {
   wsServer.stop();
   httpServer.stop();
 
-  // Stopped here rather than by its destructor, so what happened to it is logged while the log is
-  // still being written. A Motion Master that exits leaves nothing of its own running.
-  const auto autoTuningPid = autoTuning.pid();
-  switch (autoTuning.stop()) {
-    case mm::auto_tuning::Process::StopOutcome::NotRunning:
-      break;
-    case mm::auto_tuning::Process::StopOutcome::Requested:
-      spdlog::info("Auto-tuning stopped (pid {})", autoTuningPid);
-      break;
-    case mm::auto_tuning::Process::StopOutcome::Signalled:
-      spdlog::info("Auto-tuning stopped after a termination signal (pid {})", autoTuningPid);
-      break;
-    case mm::auto_tuning::Process::StopOutcome::Killed:
-      // It ignored both the exit request and the signal, so it was wedged inside a routine. Worth a
-      // warning: this is the case where something could be left holding the port against the next
-      // start.
-      spdlog::warn("Auto-tuning did not exit and was killed (pid {})", autoTuningPid);
-      break;
-  }
+  mm::stopAutoTuning(autoTuning);
 
   spdlog::info("Shutting down");
   return 0;

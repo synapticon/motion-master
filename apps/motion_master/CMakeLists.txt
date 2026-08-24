@@ -15,6 +15,8 @@ add_executable(
   main.cc
   options.cc
   config.cc
+  logging.cc
+  auto_tuning_setup.cc
   http_server.cc
   ws_server.cc
   game_loop.cc

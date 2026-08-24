@@ -5,6 +5,7 @@ import type { FsoeConnection } from '@synapticon/motion-master-client'
 import DevicePageHeader from '../components/DevicePageHeader'
 import Callout from '../components/Callout'
 import SafeSensorPanel from '../components/SafeSensorPanel'
+import Ss1Panel from '../components/Ss1Panel'
 import { useConnection } from '../contexts/ConnectionContext'
 
 // One shared control height for every input and button, as on the Motion page: this theme's
@@ -479,6 +480,7 @@ export default function DeviceSafetyPage() {
             open - a wrong safety address, a tolerance nobody set - which is
             exactly when there is no connection to hang them off. */}
         <SafeSensorPanel slavePosition={slavePosition} />
+        <Ss1Panel slavePosition={slavePosition} />
       </div>
     </>
   )

@@ -2771,3 +2771,113 @@ The ordering rule survives the collapse: **the last-seen mark advances only when
 Nine unit tests cover the pump: publish to the one topic on change, silence while a counter holds still, coalescing a thousand bumps into one message carrying current state, `nullopt` suppression leaving the change outstanding, a slow source staying quiet while a fast one beside it speaks, rendering with no publish seam wired, prompt stop, a stop with nothing started, and a run with no sources at all. TSan is clean.
 
 Untested on hardware. Nothing has yet seen a real short working counter reach a browser.
+
+## Session 2026-08-24 — The trajectory task is a setpoint task: renamed, given a generator library, and told to offset at arm time (design)
+
+Picked the motion layer back up. Sessions 2026-07-09, 2026-07-13 and 2026-07-14 settled the
+machinery and nothing in them is retracted here. What this session adds is a name that matches
+what the task does, the userspace half that produces the buffers, and one launch flag. It also
+records what moved under those notes while they sat unbuilt, because two of the mechanisms they
+lean on no longer exist in the form they describe.
+
+### `TrajectoryCyclicTask` becomes `SetpointCyclicTask`
+
+The suffix was never in question. The naming rule says a polymorphic implementation embeds the
+full interface name, so `ProcessDataCyclicTask` sets the pattern and `...CyclicTask` stays.
+
+`Trajectory` is the wrong half. The task runs in CSP, CSV and CST, and the mode picks the target
+object: 0x607A for CSP, 0x60FF for CSV, 0x6071 for CST. A trajectory is a position path. A torque
+step response is not a trajectory and neither is a torque sine sweep, so the name would have
+described one of the three modes and misdescribed the other two. It also promises a motion
+planner, which this task is not: it holds a cursor into a buffer somebody else computed.
+
+So the task is `SetpointCyclicTask` in `libs/node/setpoint_cyclic_task.h`, its payload is
+`SetpointProgram`, and the launch free function is `startSetpointProgram`. `MotionCyclicTask` was
+considered and rejected as vaguer than the thing it names. `PlaybackCyclicTask` is accurate and
+reads like the process-data recorder, which is a different feature.
+
+### Four mechanisms the earlier notes name no longer exist in that form
+
+The three design sessions predate the RT value cells, the `DeviceSet` refcount and the shipped
+`NotificationBus`. Read them for the reasoning and take the mechanics from here.
+
+1. **The RT write is `device.setValue<T>(...)`, not `ProcessData::writePdo(pos, 0x607A, 0, bytes)`.**
+   The cell is the storage now (Session 2026-08-10). The task writes the cell and the loop composes
+   the wire image.
+2. **`GameLoop` takes one `CycleGuard` around the whole task list.** The per-cycle rescan drain the
+   old notes ask each task to arrange is already arranged. A task resolves its devices inside
+   `execute()` and they are valid for that body by construction.
+3. **Device lifetime is a refcount (Session 2026-08-19).** "A program must be stopped before a
+   rescan" is no longer a correctness rule. A rescan retires the set, the run keeps its own devices,
+   and its writes reach no wire. `topologyGeneration()` is how the launcher notices.
+4. **The bespoke `TrajectoryWatcher` is a `NotificationBus` source.** A revision counter plus a
+   render, at whatever `interval` the feature asks for.
+
+One design is superseded rather than moved: the RT-callable profile view by bus-state dispatch
+(Session 2026-07-09). `Cia402Drive::enable()` still sleep-polls, so the launcher does the op-mode
+and enable handshake off-RT before it arms the mailbox, and the RT task writes setpoints only. It
+runs no state machine and has no error branch.
+
+### The generators are pure functions, and the API exposes them twice
+
+Session 2026-07-13 already decided that waveform maths happens in userspace and the RT task stays a
+buffer reader. This fixes where that code lives and how a client reaches it.
+
+`libs/node/setpoint_generators.{h,cc}` holds one pure function per shape — step, ramp, trapezoid,
+sine, chirp, dwell. Each takes the mode, the cycle period and its own parameters, and returns
+`std::expected<std::vector<int32_t>, std::string>`. No `Device`, no HTTP, no clock. They are
+unit-tested against golden vectors, which is the point: the hard part of a move is the numbers, and
+the numbers are testable without a bus.
+
+The HTTP surface exposes them in two places, over one implementation:
+
+- `POST /api/setpoint-programs/preview` takes `{mode, cyclePeriodUs, generator, params}` and returns
+  the points. A client plots the move before anything turns.
+- The launch request accepts **either** an explicit `points` array **or** the same
+  `{generator, params}` pair, resolved server-side by the identical function.
+
+A client that wants a plain trapezoid never has to write one. A client with its own path still
+sends points. Repeatability falls out of both: the same parameters produce the same buffer, and
+`repeat` replays that buffer with no seam.
+
+### `relative` — the launcher reads the current value and offsets the buffer at arm time
+
+A step response and a sine both want to start from where the axis is now. Requiring absolute
+setpoints would make every client fetch the current position first, then add it to every element,
+and a client that forgets produces a jump on the first cycle of the move.
+
+So `SetpointProgram` carries a `relative` flag. When it is set, the launch path reads the current
+value for the mode's target object once, off-RT, during the same handshake that sets the operation
+mode and enables the drive, and adds it to every point before the program is published. The buffer
+the RT task reads is absolute either way. The RT side learns nothing about this and does no
+arithmetic beyond the cursor.
+
+Two consequences worth stating. The offset is taken at arm time, not at the first executed cycle,
+so it is one off-RT read of a value that is already seeded from the actual position by the same
+handshake. And a repeating program offsets once, not once per loop, so a sine does not walk.
+
+### Skips: the answer is the launch parameter that already exists
+
+Asked again, answered as Session 2026-07-13 answered it. `Sequential` is the default and advances
+the cursor by one per `execute()`, so every setpoint is commanded and the shape is preserved while
+the timing slips. `RealTime` computes `cursor = ctx.elapsed - startCycle`, so the schedule is
+honoured and the setpoint jumps at resume. Neither is universally right, so the user picks per
+program. Skips are routine on the Windows and macOS hosts most of this software runs on, so the
+default absorbs them rather than reporting a fault.
+
+### Commit order
+
+Six commits, each independently verifiable.
+
+1. `RtMailboxPool<T>` with its own tests. No feature attached.
+2. `SetpointProgram` and `setpoint_generators` with golden-vector tests. Offline, no RT.
+3. `SetpointCyclicTask`, `startSetpointProgram`, and the `main.cc` wiring.
+4. The HTTP surface, `swagger.yml`, and the regenerated client.
+5. The `NotificationBus` source for progress, completion and fault.
+6. The console page.
+
+### Open
+
+Nothing is built. Multi-axis coordination is designed but not deliverable until DC SYNC0 lands with
+the DC-locked cycle timer, because without SYNC0 two drives act on frame arrival rather than on the
+same instant. The single-axis path does not depend on that and can ship first.

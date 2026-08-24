@@ -250,10 +250,22 @@ main.cc  (composition root)
  └── NotificationBus    (off-RT poll thread; Source[] → the "notifications" topic)
 ```
 
-Planned, not in code: `TrajectoryCyclicTask`.
+Planned, not in code: `SetpointCyclicTask`.
+
+**The motion layer has a settled design and a name. Build to it.** `SetpointCyclicTask` plays a
+precomputed buffer, one setpoint per axis per cycle, in CSP, CSV or CST. The mode picks the target
+object: 0x607A, 0x60FF or 0x6071. The RT side holds a cursor and nothing else. It runs no state
+machine, computes no waveform, and has no error branch, because the launch path does the op-mode
+and enable handshake off-RT before it arms the mailbox. Waveform maths lives in pure functions in
+`libs/node/setpoint_generators.{h,cc}`, which the API exposes twice: a preview endpoint, and a
+`{generator, params}` pair the launch request accepts in place of an explicit `points` array. A
+`relative` program is offset by the current value once, at arm time, on the launch thread. Skip
+handling is a launch parameter: `Sequential` advances the cursor by one and preserves the shape,
+`RealTime` computes `cursor = ctx.elapsed - startCycle` and preserves the timing. See `NEXTGEN.md`,
+Sessions 2026-07-09, 2026-07-13, 2026-07-14 and 2026-08-24.
 
 **Both directions already have a settled shape, so build to it rather than re-deriving one.**
-Inbound is a `RtMailboxPool<T>`: a depth-1 latest-wins mailbox per axis, where a newer intent
+Inbound is a `RtMailboxPool<T>`: a depth-1 latest-wins mailbox per slot, where a newer intent
 supersedes an older one and nothing queues. The pool is **owned by the composition root** and
 injected by reference into the RT task (which reads) and the launch path (which writes), so
 producer and task never name each other and only `main.cc` names the concrete task. Outbound is

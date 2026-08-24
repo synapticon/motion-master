@@ -812,6 +812,10 @@ void HttpServer::run() {
   // Safe Torque Off, the endpoint this whole layer exists for. `released: false` asks the drive to
   // remove torque; `true` permits it. The wire inverts the bit — zero means STO — so a lost or
   // fail-safe frame reads as a request for STO, and nothing here can invert that.
+  //
+  // Read-modify-write on the staged controlword, so this endpoint owns bit 0 and nothing else. It
+  // used to write the whole octet from SdpControl's defaults, which was harmless while STO was the
+  // only function; the moment a second activation bit exists that would silently re-request it.
   router.put(
       "/api/fsoe/:slavePosition/sto", [this](const mm::api::Request& req) -> mm::api::Response {
         const auto body = nlohmann::json::parse(req.body(), nullptr, false);
@@ -822,9 +826,33 @@ void HttpServer::run() {
         return withFsoeConnection(
             fsoeManager_, req,
             [released](mm::node::FsoeConnection& connection) -> mm::api::Response {
-              connection.setControl(
-                  mm::etg::SdpControl{.stoRequested = !released, .errorAcknowledge = false});
+              mm::etg::SdpControl control = connection.state().safetyControl();
+              control.stoRequested = !released;
+              control.errorAcknowledge = false;
+              connection.setControl(control);
               return mm::api::json(nlohmann::json{{"released", released}});
+            });
+      });
+
+  // Safe Stop 1 (ETG.6100.2 ch. 8.2). `requested: true` asks the drive to bring the axis down and
+  // then remove torque; `false` releases the request. Note that releasing it mid-stop does NOT
+  // abort the stop - the standard requires the function be finalized once activated - so this
+  // endpoint starts a stop and cannot cancel one.
+  router.put(
+      "/api/fsoe/:slavePosition/ss1", [this](const mm::api::Request& req) -> mm::api::Response {
+        const auto body = nlohmann::json::parse(req.body(), nullptr, false);
+        if (!body.is_object() || !body.contains("requested") || !body["requested"].is_boolean()) {
+          return mm::api::badRequest("body must be {\"requested\": true|false}");
+        }
+        const bool requested = body["requested"].get<bool>();
+        return withFsoeConnection(
+            fsoeManager_, req,
+            [requested](mm::node::FsoeConnection& connection) -> mm::api::Response {
+              mm::etg::SdpControl control = connection.state().safetyControl();
+              control.ss1Requested = requested;
+              control.errorAcknowledge = false;
+              connection.setControl(control);
+              return mm::api::json(nlohmann::json{{"requested", requested}});
             });
       });
 

@@ -87,6 +87,16 @@ struct FsoeConnectionState {
   [[nodiscard]] mm::etg::SdpStatus safetyStatus() const {
     return mm::etg::sdpDecodeStatus(std::span(safeInputs).first(safeInputsLength));
   }
+
+  /// @brief The safety controlword currently staged, decoded (ETG.6100.2 Table 3).
+  ///
+  /// Exists so a caller that owns ONE activation bit can change it without disturbing the others:
+  /// decode, set its own field, encode. Two endpoints each writing the whole octet from their own
+  /// defaults would otherwise fight, and the loser would be silently re-requesting a stop
+  /// function - which, given the inverted activation, is the direction that stops the axis.
+  [[nodiscard]] mm::etg::SdpControl safetyControl() const {
+    return mm::etg::sdpDecodeControl(std::span(safeOutputs).first(safeOutputsLength));
+  }
 };
 
 /// @brief One FSoE connection to one drive, driven from the cycle.

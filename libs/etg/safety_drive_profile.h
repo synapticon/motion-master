@@ -7,6 +7,7 @@ namespace mm::etg {
 
 /// @brief Safety controlword bit positions, SafeData octet 0 master to slave (ETG.6100.2 Table 3).
 inline constexpr uint8_t kSdpControlStoBit = 0;
+inline constexpr uint8_t kSdpControlSs1Bit = 1;
 inline constexpr uint8_t kSdpControlErrorAckBit = 7;
 
 /// @brief Safety statusword bit positions, SafeData octet 0 slave to master (ETG.6100.2 Table 5).
@@ -43,7 +44,15 @@ inline constexpr uint8_t kSdpValidPositionReferencedBit = 4;
 /// Fail-safe follows from it — an all-zero frame, which is what a lost or fail-safe frame carries,
 /// requests STO.
 struct SdpControl {
-  bool stoRequested = true;       ///< Request Safe Torque Off. The safe default.
+  bool stoRequested = true;  ///< Request Safe Torque Off. The safe default.
+  /// @brief Request Safe Stop 1 (ETG.6100.2 Table 3 bit 1). The safe default.
+  ///
+  /// Defaults to requested for the same reason @c stoRequested does, and the consequence is worth
+  /// knowing: a caller that sets only @c stoRequested = false leaves SS1 REQUESTED, and a drive
+  /// that implements SS1 will stop. Permitting motion means clearing both. That is not a quirk of
+  /// this struct - it is what the standard's inverted activation means, and a master must drive
+  /// every function bit the drive declares.
+  bool ss1Requested = true;
   bool errorAcknowledge = false;  ///< Raw level of bit 7; the drive acts on the rising edge.
 };
 

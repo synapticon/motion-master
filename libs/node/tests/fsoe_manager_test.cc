@@ -284,12 +284,14 @@ TEST(FsoeManagerTest, ReleasingStoReachesTheDrive) {
   // Still safe: nobody has asked for torque.
   EXPECT_TRUE(mm::etg::sdpDecodeControl(drive.slave().safeOutputs()).stoRequested);
 
-  ASSERT_TRUE(connection->setControl(mm::etg::SdpControl{.stoRequested = false}));
+  ASSERT_TRUE(connection->setControl(mm::etg::SdpControl{.stoRequested = false, .ss1Requested = false}));
   drive.cycles(3);
 
   EXPECT_TRUE(drive.slave().outputsValid());
   EXPECT_FALSE(mm::etg::sdpDecodeControl(drive.slave().safeOutputs()).stoRequested);
-  EXPECT_EQ(connection->state().safeOutputs[0], 0x01);
+  // 0x03, not 0x01: releasing torque means clearing BOTH activation bits, because bit 1 is SS1
+  // and the drive implements it. Leaving bit 1 at 0 would request a Safe Stop 1 on every cycle.
+  EXPECT_EQ(connection->state().safeOutputs[0], 0x03);
 }
 
 TEST(FsoeManagerTest, FailSafeDataDropsTheDriveOutputsWithoutLosingTheConnection) {
@@ -297,7 +299,7 @@ TEST(FsoeManagerTest, FailSafeDataDropsTheDriveOutputsWithoutLosingTheConnection
   ASSERT_TRUE(drive.manager().open(drive.config()).has_value());
   FsoeConnection* connection = drive.manager().find(1);
   connection->setDataCommand(mm::etg::FsoeCommand::ProcessData);
-  connection->setControl(mm::etg::SdpControl{.stoRequested = false});
+  connection->setControl(mm::etg::SdpControl{.stoRequested = false, .ss1Requested = false});
   drive.cycles(24);
   ASSERT_TRUE(drive.slave().outputsValid());
 

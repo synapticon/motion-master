@@ -24,10 +24,10 @@ TEST(SafetyDriveProfileTest, TheStoBitIsInvertedOnTheWireSoZeroIsSafe) {
   // ETG.6100.2 Table 3: the bit is set to *permit* torque. An all-zero frame — which is what a
   // fail-safe frame and a lost frame both carry — therefore requests Safe Torque Off.
   std::array<uint8_t, 8> outputs{};
-  sdpEncodeControl(SdpControl{.stoRequested = true}, outputs);
+  sdpEncodeControl(SdpControl{.stoRequested = true, .ss1Requested = true}, outputs);
   EXPECT_EQ(outputs[0], 0x00);
 
-  sdpEncodeControl(SdpControl{.stoRequested = false}, outputs);
+  sdpEncodeControl(SdpControl{.stoRequested = false, .ss1Requested = true}, outputs);
   EXPECT_EQ(outputs[0], 0x01);
 
   EXPECT_TRUE(sdpDecodeControl(std::array<uint8_t, 1>{0x00}).stoRequested);
@@ -35,9 +35,30 @@ TEST(SafetyDriveProfileTest, TheStoBitIsInvertedOnTheWireSoZeroIsSafe) {
   EXPECT_TRUE(sdpDecodeControl(std::span<const uint8_t>{}).stoRequested);
 }
 
+TEST(SafetyDriveProfileTest, TheSs1BitIsBitOneAndInvertedTheSameWay) {
+  // ETG.6100.2 Table 3 bit 1 is SS1_1, with the same inversion as STO. The pairing below is the
+  // one that matters in practice: releasing STO alone leaves 0x01, which still requests SS1, so a
+  // drive that implements SS1 stops. Permitting motion needs 0x03.
+  std::array<uint8_t, 8> outputs{};
+  sdpEncodeControl(SdpControl{.stoRequested = true, .ss1Requested = true}, outputs);
+  EXPECT_EQ(outputs[0], 0x00) << "all-zero requests every stop function - the fail-safe reading";
+
+  sdpEncodeControl(SdpControl{.stoRequested = false, .ss1Requested = false}, outputs);
+  EXPECT_EQ(outputs[0], 0x03) << "permitting motion clears BOTH activation bits";
+
+  sdpEncodeControl(SdpControl{.stoRequested = true, .ss1Requested = false}, outputs);
+  EXPECT_EQ(outputs[0], 0x02);
+
+  EXPECT_TRUE(sdpDecodeControl(std::array<uint8_t, 1>{0x01}).ss1Requested);
+  EXPECT_FALSE(sdpDecodeControl(std::array<uint8_t, 1>{0x03}).ss1Requested);
+  EXPECT_TRUE(sdpDecodeControl(std::span<const uint8_t>{}).ss1Requested)
+      << "an absent frame requests SS1 as well as STO";
+}
+
 TEST(SafetyDriveProfileTest, EncodingTheControlwordLeavesTheOtherSafeDataAlone) {
   std::array<uint8_t, 8> outputs{0xFF, 0xAA, 0xBB, 0, 0, 0, 0, 0};
-  sdpEncodeControl(SdpControl{.stoRequested = false, .errorAcknowledge = true}, outputs);
+  sdpEncodeControl(SdpControl{.stoRequested = false, .ss1Requested = true, .errorAcknowledge = true},
+                   outputs);
   EXPECT_EQ(outputs[0], 0x81);
   EXPECT_EQ(outputs[1], 0xAA);
   EXPECT_EQ(outputs[2], 0xBB);

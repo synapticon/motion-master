@@ -30,6 +30,9 @@ void sdpEncodeControl(SdpControl control, std::span<uint8_t> safeOutputs) {
   if (!control.stoRequested) {
     octet |= static_cast<uint8_t>(1u << kSdpControlStoBit);
   }
+  if (!control.ss1Requested) {
+    octet |= static_cast<uint8_t>(1u << kSdpControlSs1Bit);
+  }
   if (control.errorAcknowledge) {
     octet |= static_cast<uint8_t>(1u << kSdpControlErrorAckBit);
   }
@@ -42,6 +45,7 @@ SdpControl sdpDecodeControl(std::span<const uint8_t> safeOutputs) {
   }
   return SdpControl{
       .stoRequested = !bitSet(safeOutputs[0], kSdpControlStoBit),
+      .ss1Requested = !bitSet(safeOutputs[0], kSdpControlSs1Bit),
       .errorAcknowledge = bitSet(safeOutputs[0], kSdpControlErrorAckBit),
   };
 }

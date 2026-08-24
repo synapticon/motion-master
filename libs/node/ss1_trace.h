@@ -33,6 +33,19 @@ inline constexpr size_t kSs1TracePreRoll = 256;
 /// @brief Cycles kept AFTER torque is removed, so the coast is visible.
 inline constexpr size_t kSs1TracePostRoll = 128;
 
+/// @brief Speed magnitude, in milli-rpm, below which a stop has nothing to show.
+///
+/// A stop requested while the axis is already still is a real event and a legitimate capture, but
+/// there is no deceleration in it: every sample sits inside the standstill window and the plot is
+/// noise around zero. One such trigger - and during commissioning they are common, because
+/// verifying that SS1 fires at all is the obvious first thing to try - would otherwise overwrite
+/// the informative trace somebody was reading.
+///
+/// A fixed floor rather than the configured n_Zero_SS1, because the recorder runs on the cycle
+/// thread and has no access to the object dictionary. One rpm is far below any plausible standstill
+/// window and far above measurement noise, so the classification does not depend on tuning.
+inline constexpr uint32_t kSs1TraceMotionFloorMrpm = 1000;
+
 /// @brief One recorded cycle. POD, 20 bytes, no decoding on the cycle thread.
 ///
 /// The SafeInputs are stored as RAW OCTETS rather than as decoded values on purpose: decoding is
@@ -143,6 +156,19 @@ class Ss1Recorder {
     /// @brief Whether a stop is being recorded right now.
     [[nodiscard]] bool capturing() const { return capturing_.load(std::memory_order_acquire); }
 
+    /// @brief Stops that began at standstill and were therefore NOT published.
+    ///
+    /// Reported rather than dropped silently: the event happened, and a user who triggered SS1 and
+    /// saw the plot not change is owed an explanation better than nothing.
+    [[nodiscard]] uint32_t standstillStops() const {
+        return standstillStops_.load(std::memory_order_relaxed);
+    }
+
+    /// @brief Wall clock of the most recent such stop, or 0.
+    [[nodiscard]] uint64_t lastStandstillStopUnixNs() const {
+        return lastStandstillNs_.load(std::memory_order_relaxed);
+    }
+
   private:
     struct Slot {
         Ss1Trace meta;
@@ -160,6 +186,8 @@ class Ss1Recorder {
 
     std::atomic<uint64_t> generation_{0};  ///< even/odd selects the published slot; 0 = none yet
     std::atomic<bool> capturing_{false};
+    std::atomic<uint32_t> standstillStops_{0};
+    std::atomic<uint64_t> lastStandstillNs_{0};
 
     bool allocated_ = false;
     uint16_t safeInputsLength_ = 0;

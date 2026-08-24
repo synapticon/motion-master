@@ -876,6 +876,11 @@ void HttpServer::run() {
               nlohmann::json body;
               body["capturing"] = connection.ss1Recorder().capturing();
               body["haveTrace"] = have;
+              /* Counted rather than published: a stop requested with the axis already still has no
+                 deceleration in it, so it must not replace a trace that has. Reporting the count
+                 is what stops "I triggered SS1 and the plot did not change" being a mystery. */
+              body["standstillStops"] = connection.ss1Recorder().standstillStops();
+              body["lastStandstillStopUnixNs"] = connection.ss1Recorder().lastStandstillStopUnixNs();
               if (!have) {
                 // No stop has completed since this connection opened. Not an error: it is the
                 // resting state of a machine nobody has asked to stop.

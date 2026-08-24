@@ -35,6 +35,8 @@ void Ss1Recorder::allocate(uint16_t safeInputsLength) {
     prevSs1Requested_ = true;  // see the field's comment: the boot state must not read as an edge
     capturing_.store(false, std::memory_order_release);
     generation_.store(0, std::memory_order_release);
+    standstillStops_.store(0, std::memory_order_relaxed);
+    lastStandstillNs_.store(0, std::memory_order_relaxed);
     allocated_ = true;
 }
 
@@ -204,6 +206,22 @@ void Ss1Recorder::finish(Ss1TraceEnd reason, bool complete) {
     slot.meta.samples.resize(kSs1TraceCapacity);  // capacity is fixed; count says what is live
 
     capturing_.store(false, std::memory_order_release);
+
+    /* A stop that began at standstill is not published, so it cannot displace one that has a
+       deceleration in it. The exception is the very first capture: with nothing published yet,
+       something honest beats nothing at all, and the panel can say what it is looking at.
+
+       The event is still counted and timestamped, because "I triggered SS1 and the plot did not
+       change" deserves a better answer than silence. */
+    const bool hasMotion = slot.meta.anchorValid && slot.meta.anchorMilliRpm >= static_cast<int32_t>(kSs1TraceMotionFloorMrpm);
+    if (!hasMotion) {
+        standstillStops_.fetch_add(1, std::memory_order_relaxed);
+        lastStandstillNs_.store(slot.meta.triggeredAtUnixNs, std::memory_order_relaxed);
+        if (generation_.load(std::memory_order_relaxed) != 0) {
+            return;
+        }
+    }
+
     /* Publishing is the generation bump, and it must be the LAST store: until it lands, a reader
        sees the previous trace, which is whole. Release so everything written above is visible to a
        reader that acquires the new generation. */

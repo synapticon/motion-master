@@ -732,6 +732,10 @@ export class Api<
         capturing: boolean;
         /** False when no stop has completed since the connection opened. */
         haveTrace: boolean;
+        /** Stops requested with the axis already still, which are counted rather than published. Such a stop has no deceleration in it - every sample sits inside the standstill window - so it must not replace a trace that has one. Verifying that SS1 fires at all is the obvious first thing to try during commissioning and is usually done from standstill, which is exactly how an informative trace would otherwise be lost. */
+        standstillStops?: number;
+        /** Wall clock of the most recent such stop, or 0. */
+        lastStandstillStopUnixNs?: number;
         /** Monotonic per connection; 0 means nothing has been captured. */
         traceId: number;
         /** True only when torque removal was observed and the post-roll ran to the end. False means the capture was cut short — see `endReason`. */

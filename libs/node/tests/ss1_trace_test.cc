@@ -10,6 +10,7 @@
 namespace {
 
 using mm::node::kSs1TraceCapacity;
+using mm::node::kSs1TraceMotionFloorMrpm;
 using mm::node::kSs1TraceNever;
 using mm::node::kSs1TracePostRoll;
 using mm::node::kSs1TracePreRoll;
@@ -239,6 +240,7 @@ TEST(Ss1TraceTest, ASecondStopSupersedesTheFirstRatherThanBeingDropped) {
     run(r, 10, spinning, kCwSs1Active);
     run(r, 5, spinning, kCwRunBothOff);              // released without finishing
     r.observe(cycle(spinning, kCwSs1Active), kDtUs);  // stop 2 begins
+    r.observe(cycle(spinning, kCwSs1Active), kDtUs);  // its anchor: still moving
 
     Ss1Trace t;
     ASSERT_TRUE(r.snapshot(t)) << "the superseded run is published, not discarded - it is evidence";
@@ -264,6 +266,7 @@ TEST(Ss1TraceTest, ARetriggeredRunStillGetsItsPreRoll) {
     run(r, 40, spinning, kCwSs1Active);
     run(r, 5, spinning, kCwRunBothOff);
     r.observe(cycle(spinning, kCwSs1Active), kDtUs);  // retrigger
+    r.observe(cycle(spinning, kCwSs1Active), kDtUs);  // its anchor: still moving
     const auto stopped = safeInputs(0, true, false);
     run(r, kSs1TracePostRoll + 2, stopped, kCwSs1Active);
 
@@ -434,6 +437,62 @@ TEST(Ss1TraceTest, CyclesWithoutAFreshFrameOnlyAdvanceTime) {
     // And the measured period reports the EXCHANGE period, so anything derived from it scales right.
     EXPECT_GE(t.measuredCyclePeriodUs, 2u * kDtUs)
         << "the measured period must reflect the exchange rate, not the bus rate";
+}
+
+
+TEST(Ss1TraceTest, AStopFromStandstillDoesNotDisplaceAnInformativeOne) {
+    /* Verifying that SS1 fires at all is the obvious first thing to try during commissioning, and it
+       is usually done with the axis already still. One such trigger must not overwrite the trace
+       somebody was reading: there is no deceleration in it, every sample sits inside the standstill
+       window, and the plot is noise around zero. */
+    Ss1Recorder r;
+    r.allocate(12);
+    const auto spinning = safeInputs(600000, false, false);
+    const auto still = safeInputs(0, false, false);
+    const auto stopped = safeInputs(0, true, false);
+
+    // A real stop, from motion.
+    run(r, 20, spinning, kCwRunBothOff);
+    r.observe(cycle(spinning, kCwSs1Active), kDtUs);
+    r.observe(cycle(spinning, kCwSs1Active), kDtUs);
+    run(r, kSs1TracePostRoll + 4, stopped, kCwSs1Active);
+    Ss1Trace good;
+    ASSERT_TRUE(r.snapshot(good));
+    ASSERT_EQ(good.traceId, 1u);
+    ASSERT_GE(good.anchorMilliRpm, 600000);
+    EXPECT_EQ(r.standstillStops(), 0u);
+
+    // Now trigger from standstill, twice.
+    for (int i = 0; i < 2; ++i) {
+        run(r, 10, still, kCwRunBothOff);
+        r.observe(cycle(still, kCwSs1Active), kDtUs);
+        run(r, kSs1TracePostRoll + 4, stopped, kCwSs1Active);
+    }
+
+    Ss1Trace after;
+    ASSERT_TRUE(r.snapshot(after));
+    EXPECT_EQ(after.traceId, good.traceId) << "the informative trace must survive";
+    EXPECT_GE(after.anchorMilliRpm, 600000);
+    EXPECT_EQ(r.standstillStops(), 2u) << "but the events are counted, not silently dropped";
+    EXPECT_NE(r.lastStandstillStopUnixNs(), 0u);
+}
+
+TEST(Ss1TraceTest, TheFirstStopIsPublishedEvenFromStandstill) {
+    /* With nothing published yet, something honest beats nothing at all - the panel can say what it
+       is looking at. Only a LATER trivial stop is declined. */
+    Ss1Recorder r;
+    r.allocate(12);
+    const auto still = safeInputs(0, false, false);
+    const auto stopped = safeInputs(0, true, false);
+    run(r, 10, still, kCwRunBothOff);
+    r.observe(cycle(still, kCwSs1Active), kDtUs);
+    run(r, kSs1TracePostRoll + 4, stopped, kCwSs1Active);
+
+    Ss1Trace t;
+    ASSERT_TRUE(r.snapshot(t));
+    EXPECT_EQ(t.traceId, 1u);
+    EXPECT_LT(t.anchorMilliRpm, static_cast<int32_t>(kSs1TraceMotionFloorMrpm));
+    EXPECT_EQ(r.standstillStops(), 1u) << "counted as well, so the panel can label it";
 }
 
 }  // namespace

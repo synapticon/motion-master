@@ -78,6 +78,7 @@ export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: nu
 
   const t = trace.data
   const p = params.data ?? {}
+  const standstillStops = (t as { standstillStops?: number } | undefined)?.standstillStops ?? 0
 
   const model = useMemo(() => {
     if (!t?.haveTrace || !t.samples?.length || !t.columns?.length) return null
@@ -257,6 +258,12 @@ export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: nu
                 {t.endReason}
               </span>
             )}
+            {standstillStops > 0 && (
+              <span title="SS1 was requested this many times with the axis already still. Those stops have no deceleration in them - every sample would sit inside the standstill window - so they are counted rather than allowed to replace the trace below."
+                    className="inline-flex items-center h-[18px] px-1.5 text-[10px] border border-grey-300 text-grey-600 cursor-help">
+                +{standstillStops} from standstill
+              </span>
+            )}
             {p.paramsOk === 0 && (
               <span title="0x2606:02 reports the written parameter set was refused, so the overlays may not be the set that was actually enforced during this stop."
                     className="inline-flex items-center h-[18px] px-1.5 text-[10px] bg-status-bad/10 text-status-bad border border-status-bad/40 cursor-help">
@@ -336,6 +343,16 @@ export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: nu
               ]}
             />
           </div>
+
+          {(t.anchorMilliRpm ?? 0) < 1000 && (
+            <div className="mx-4 mt-3 border border-grey-300 bg-grey-50 px-3 py-2 text-[11px] text-grey-600">
+              This stop began with the axis already still, so there is no deceleration in it - every
+              sample sits inside the standstill window and the trace is measurement noise around
+              zero. It is shown because it is the only stop recorded so far. Request SS1 while the
+              axis is moving and that one will be kept instead; a later stop from standstill will not
+              replace it.
+            </div>
+          )}
 
           <div className="px-4 py-2 text-[10px] text-grey-500">
             Shaded green is the standstill window (n_Zero_SS1); amber spans are cycles where the safe

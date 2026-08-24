@@ -474,10 +474,6 @@ export default function DeviceSafetyPage() {
               </div>
             </section>
 
-            {/* INSIDE the connection block, unlike the two panels below: the stop recorder is
-                per-connection state written by the FSoE cycle thread, so without a connection there
-                is nothing recording and the endpoint has nothing to answer with. */}
-            <Ss1StopTracePanel slavePosition={slavePosition} />
           </>
         )}
 
@@ -487,6 +483,10 @@ export default function DeviceSafetyPage() {
             exactly when there is no connection to hang them off. */}
         <SafeSensorPanel slavePosition={slavePosition} />
         <Ss1Panel slavePosition={slavePosition} />
+        {/* Directly under the SS1 parameters it is a picture of, rather than up with the connection
+            detail. It needs a connection to have anything to show and says so when there is none,
+            which is a better outcome than being rendered somewhere it makes no sense. */}
+        <Ss1StopTracePanel slavePosition={slavePosition} />
       </div>
     </>
   )

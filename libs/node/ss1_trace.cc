@@ -79,9 +79,18 @@ void Ss1Recorder::observe(const Cycle& cycle, uint32_t dtUs) {
     if (capturing_.load(std::memory_order_relaxed)) {
         Slot& slot = writeSlot();
         elapsedUs_ = addSaturating(elapsedUs_, dtUs);
-        dtSumUs_ += dtUs;
-        ++dtCount_;
         sample.tUs = elapsedUs_;
+
+        /* Time always advances; only a cycle carrying a NEW frame becomes a sample. Without this the
+           trace holds three copies of every value and its own measured period reads as the bus
+           period rather than the exchange period - which then mis-scales anything derived from it. */
+        pendingUs_ += dtUs;
+        const bool record = cycle.freshFrame || !cycle.bound;
+        if (record) {
+            dtSumUs_ += pendingUs_;
+            ++dtCount_;
+            pendingUs_ = 0;
+        }
 
         /* The anchor comes from the cycle AFTER the trigger - see Ss1Trace::anchorMilliRpm. The
            skip is what makes it "after": beginCapture runs inside this same observe() call. */
@@ -109,7 +118,7 @@ void Ss1Recorder::observe(const Cycle& cycle, uint32_t dtUs) {
             slot.meta.requestReleasedTUs = sample.tUs;
         }
 
-        if (slot.count < kSs1TraceCapacity) {
+        if (record && slot.count < kSs1TraceCapacity) {
             slot.meta.samples[slot.count] = sample;
             ++slot.count;
         }
@@ -131,11 +140,13 @@ void Ss1Recorder::observe(const Cycle& cycle, uint32_t dtUs) {
 
     /* The pre-roll ring is written on EVERY cycle, capturing or not. That is what lets a retrigger
        still get a correct pre-roll, and it costs one 20-byte store. */
-    sample.tUs = 0;  // pre-roll timestamps are assigned relative to the trigger, in beginCapture
-    preRoll_[preRollHead_] = sample;
-    preRollHead_ = (preRollHead_ + 1) % kSs1TracePreRoll;
-    if (preRollCount_ < kSs1TracePreRoll) {
-        ++preRollCount_;
+    if (cycle.freshFrame) {
+        sample.tUs = 0;  // pre-roll timestamps are assigned relative to the trigger, in beginCapture
+        preRoll_[preRollHead_] = sample;
+        preRollHead_ = (preRollHead_ + 1) % kSs1TracePreRoll;
+        if (preRollCount_ < kSs1TracePreRoll) {
+            ++preRollCount_;
+        }
     }
 }
 
@@ -174,6 +185,7 @@ void Ss1Recorder::beginCapture(const Cycle& cycle) {
     }
 
     elapsedUs_ = 0;
+    pendingUs_ = 0;
     dtSumUs_ = 0;
     dtCount_ = 0;
     awaitingAnchor_ = true;

@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <vector>
@@ -44,7 +45,8 @@ Ss1Recorder::Cycle cycle(const std::array<uint8_t, 12>& in, uint8_t controlword)
             .fsoeState = 5,  // Data
             .inputsValid = true,
             .bound = true,
-            .processData = true};
+            .processData = true,
+            .freshFrame = true};
 }
 
 void run(Ss1Recorder& r, size_t cycles, const std::array<uint8_t, 12>& in, uint8_t cw) {
@@ -95,7 +97,8 @@ TEST(Ss1TraceTest, ARequestOutsideProcessDataIsNotAStop) {
                    .fsoeState = 5,
                    .inputsValid = true,
                    .bound = true,
-                   .processData = false},
+                   .processData = false,
+                   .freshFrame = true},
                   kDtUs);
     }
     for (int i = 0; i < 20; ++i) {
@@ -104,7 +107,8 @@ TEST(Ss1TraceTest, ARequestOutsideProcessDataIsNotAStop) {
                    .fsoeState = 5,
                    .inputsValid = true,
                    .bound = true,
-                   .processData = false},
+                   .processData = false,
+                   .freshFrame = true},
                   kDtUs);
     }
     Ss1Trace t;
@@ -321,7 +325,8 @@ TEST(Ss1TraceTest, AShortSafeInputsSpanIsHonouredRatherThanOverread) {
                    .fsoeState = 5,
                    .inputsValid = true,
                    .bound = true,
-                   .processData = true},
+                   .processData = true,
+                   .freshFrame = true},
                   kDtUs);
     }
     r.observe({.safeInputs = std::span(in),
@@ -329,7 +334,8 @@ TEST(Ss1TraceTest, AShortSafeInputsSpanIsHonouredRatherThanOverread) {
                .fsoeState = 5,
                .inputsValid = true,
                .bound = true,
-               .processData = true},
+               .processData = true,
+               .freshFrame = true},
               kDtUs);
     std::array<uint8_t, 2> stopped{0x01, 0x00};
     for (size_t i = 0; i < kSs1TracePostRoll + 2; ++i) {
@@ -338,7 +344,8 @@ TEST(Ss1TraceTest, AShortSafeInputsSpanIsHonouredRatherThanOverread) {
                    .fsoeState = 5,
                    .inputsValid = true,
                    .bound = true,
-                   .processData = true},
+                   .processData = true,
+                   .freshFrame = true},
                   kDtUs);
     }
     Ss1Trace t;
@@ -383,6 +390,50 @@ TEST(Ss1TraceTest, EveryEndReasonHasAName) {
                    Ss1TraceEnd::Retriggered, Ss1TraceEnd::Unbound}) {
         EXPECT_STRNE(mm::node::ss1TraceEndName(r), "Unknown");
     }
+}
+
+
+TEST(Ss1TraceTest, CyclesWithoutAFreshFrameOnlyAdvanceTime) {
+    /* FSoE is a ping-pong: each direction costs a bus cycle, so a new frame lands roughly every
+       third one. Recording every cycle stored each value three times and made the trace claim a
+       resolution the transport does not have - it looked like a staircase because it WAS one. */
+    Ss1Recorder r;
+    r.allocate(12);
+    const auto spinning = safeInputs(600000, false, false);
+
+    auto stale = [&](const std::array<uint8_t, 12>& in, uint8_t cw) {
+        return Ss1Recorder::Cycle{.safeInputs = std::span(in),
+                                  .controlword = cw,
+                                  .fsoeState = 5,
+                                  .inputsValid = true,
+                                  .bound = true,
+                                  .processData = true,
+                                  .freshFrame = false};
+    };
+
+    // Three bus cycles per exchange, which is what the bench measured.
+    auto exchange = [&](const std::array<uint8_t, 12>& in, uint8_t cw) {
+        r.observe(stale(in, cw), kDtUs);
+        r.observe(stale(in, cw), kDtUs);
+        r.observe(cycle(in, cw), kDtUs);
+    };
+
+    for (int i = 0; i < 10; ++i) exchange(spinning, kCwRunBothOff);
+    r.observe(cycle(spinning, kCwSs1Active), kDtUs);
+    for (int i = 0; i < 10; ++i) exchange(spinning, kCwSs1Active);
+    const auto stopped = safeInputs(0, true, false);
+    for (size_t i = 0; i < kSs1TracePostRoll + 4; ++i) exchange(stopped, kCwSs1Active);
+
+    Ss1Trace t;
+    ASSERT_TRUE(r.snapshot(t));
+    // One sample per exchange, not per cycle.
+    const size_t post = static_cast<size_t>(
+        std::count_if(t.samples.begin(), t.samples.end(), [](const auto& s) { return s.tUs >= 0; }));
+    EXPECT_LE(post, 12u + kSs1TracePostRoll)
+        << "a stale cycle must not become a sample; got " << post;
+    // And the measured period reports the EXCHANGE period, so anything derived from it scales right.
+    EXPECT_GE(t.measuredCyclePeriodUs, 2u * kDtUs)
+        << "the measured period must reflect the exchange rate, not the bus rate";
 }
 
 }  // namespace

@@ -27,6 +27,8 @@ const PARAM = {
   tD: [0x6657, 1],
   paramsOk: [0x2606, 2],
   stopDecel: [0x2606, 5],
+  fwAnchor: [0x2606, 6],
+  fwAnchorValid: [0x2606, 7],
   safetyCycleUs: [0x2605, 4],
 } as const
 
@@ -96,8 +98,12 @@ export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: nu
     const tSS1Us = (p.tSS1 ?? 0) * 1000
     const tDUs = (p.tD ?? 0) * 1000
     const nZero = p.nZero ?? 0
-    const anchor = t.anchorMilliRpm ?? 0
-    const anchorValid = !!t.anchorValid
+    /* Prefer the anchor the FIRMWARE latched (0x2606:06) over the one the recorder inferred. They
+       normally agree, and when they do not the firmware's is the one the limit was actually enforced
+       against - drawing a line from a different anchor is indistinguishable from the monitor being
+       broken, which is a mistake worth not making twice. */
+    const anchor = p.fwAnchor && p.fwAnchor > 0 ? p.fwAnchor : (t.anchorMilliRpm ?? 0)
+    const anchorValid = p.fwAnchorValid !== undefined ? p.fwAnchorValid === 1 : !!t.anchorValid
 
     /* The limit line, ported from sdp_ss1_update rather than approximated. It is a STAIRCASE on the
        safety cycle, not a straight line, and that is what decides a trip: at a_SS1 = 6e6 the step is

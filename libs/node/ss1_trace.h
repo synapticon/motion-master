@@ -124,6 +124,13 @@ class Ss1Recorder {
         bool inputsValid = false;
         bool bound = false;
         bool processData = false;
+        /// @brief A new SafeInputs frame arrived on this cycle.
+        ///
+        /// FSoE is a ping-pong and each direction costs a bus cycle, so a new frame lands roughly
+        /// every third one. Recording every cycle stored each value three times over and made the
+        /// trace claim a resolution the transport does not have - it looked like a staircase because
+        /// it WAS one. Cycles without a fresh frame now only accumulate time.
+        bool freshFrame = false;
     };
 
     /// @brief Advance by one cycle. CYCLE THREAD ONLY. No allocation, no lock, no I/O.
@@ -166,6 +173,7 @@ class Ss1Recorder {
     uint64_t dtSumUs_ = 0;
     size_t dtCount_ = 0;
     bool awaitingAnchor_ = false;
+    uint32_t pendingUs_ = 0;  ///< time accumulated on cycles that carried no new frame
     /// Cycles still to skip before latching the anchor. One, because beginCapture runs inside the
     /// observe() call for the trigger cycle itself, and that cycle's input is the drive's answer to
     /// the PREVIOUS frame - it cannot yet reflect the request.

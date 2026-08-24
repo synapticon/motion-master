@@ -255,6 +255,7 @@ void FsoeConnection::step(DeviceManager& deviceManager, uint32_t dtUs) {
       haveFrame ? image.subspan(inputByteOffset_, inputByteLength_) : std::span<const uint8_t>{};
 
   const auto result = master_.cycle(rx, dtUs);
+  const bool freshFrame = result && result->rxAccepted;
   ++cycles_;
   if (result) {
     if (result->rxAccepted) {
@@ -293,7 +294,8 @@ void FsoeConnection::step(DeviceManager& deviceManager, uint32_t dtUs) {
        .fsoeState = static_cast<uint8_t>(fresh.state),
        .inputsValid = fresh.inputsValid,
        .bound = true,
-       .processData = fresh.dataCommand == mm::etg::FsoeCommand::ProcessData},
+       .processData = fresh.dataCommand == mm::etg::FsoeCommand::ProcessData,
+       .freshFrame = freshFrame},
       dtUs);
 
   publish(fresh);

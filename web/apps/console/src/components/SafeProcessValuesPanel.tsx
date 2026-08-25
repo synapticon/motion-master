@@ -1,9 +1,13 @@
 import type { FsoeConnection } from '@synapticon/motion-master-client'
-import Section from './Section'
 
 /**
- * The safe measurements the drive publishes, and the raw octets they were
- * decoded from.
+ * The live safe values the drive publishes, and the raw octets they were decoded
+ * from.
+ *
+ * A body rather than a section of its own: these numbers and the sensor
+ * configuration below them are one subject - the safe measuring channel - and
+ * splitting them made the reader carry a value in their head to compare it with
+ * the tolerance that judges it. @c SafeMeasurementsPanel is the container.
  *
  * The octets stay with the values rather than with the connection detail: they
  * are what these numbers ARE, and reading them side by side is how somebody
@@ -18,7 +22,7 @@ function octets(bytes: number[] | undefined): string {
   return (bytes ?? []).map(b => b.toString(16).toUpperCase().padStart(2, '0')).join(' ')
 }
 
-function Badge({ ok, label, title }: { ok: boolean; label: string; title?: string }) {
+export function Badge({ ok, label, title }: { ok: boolean; label: string; title?: string }) {
   return (
     <span
       title={title}
@@ -64,32 +68,11 @@ function SafeValue({
   )
 }
 
-export default function SafeProcessValuesPanel({ connection }: { connection: FsoeConnection }) {
+export default function SafeProcessValuesBody({ connection }: { connection: FsoeConnection }) {
   const values = connection.processValues
 
   return (
-    <Section
-      title="Safe process values"
-      chips={
-        <>
-          <Badge
-            ok={values?.crossCheckOk ?? false}
-            label="cross-check"
-            title="Two sensor channels are configured and agree."
-          />
-          <Badge
-            ok={values?.positionReferenced ?? false}
-            label="referenced"
-            title="The safe position has an established absolute origin. Anything applying an absolute limit — Safe Limited Position above all — must gate on this, not on the position's validity flag."
-          />
-          {!connection.inputsValid && (
-            <span className="text-xs text-status-warn">
-              fail-safe: these are not live measurements
-            </span>
-          )}
-        </>
-      }
-    >
+    <>
       <div className="p-4 grid gap-4 sm:grid-cols-3">
         <SafeValue
           label="Safe position"
@@ -135,6 +118,6 @@ export default function SafeProcessValuesPanel({ connection }: { connection: Fso
           </dd>
         </div>
       </div>
-    </Section>
+    </>
   )
 }

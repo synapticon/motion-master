@@ -33,6 +33,15 @@ inline constexpr size_t kSs1TracePreRoll = 256;
 /// @brief Cycles kept AFTER torque is removed, so the coast is visible.
 inline constexpr size_t kSs1TracePostRoll = 128;
 
+/// @brief How much history the pre-roll lays down, in microseconds.
+///
+/// A time budget rather than a sample count, because the ring holds CYCLES and what the plot needs
+/// is a fixed amount of SECONDS before the trigger - enough to show the axis was moving and how
+/// fast, and no more. At one exchange every ~12 ms the full 256-cycle ring is over three seconds,
+/// which would leave a one-second stop squeezed into a quarter of the x axis. The ring stays large
+/// so a fast bus still gets plenty of samples; this bounds what is drawn from it.
+inline constexpr uint32_t kSs1TracePreRollUs = 750000;
+
 /// @brief Speed magnitude, in milli-rpm, below which a stop has nothing to show.
 ///
 /// A stop requested while the axis is already still is a real event and a legitimate capture, but
@@ -202,6 +211,15 @@ class Ss1Recorder {
     size_t dtCount_ = 0;
     bool awaitingAnchor_ = false;
     uint32_t pendingUs_ = 0;  ///< time accumulated on cycles that carried no new frame
+
+    /* The exchange interval, measured on every cycle rather than only inside a capture.
+       beginCapture needs it to space the pre-roll, and it needs it for the FIRST stop - before
+       which a capture-scoped measurement has nothing in it. Getting that wrong does not lose data:
+       the pre-roll samples are real, they are simply laid down at the wrong pitch, which reads as
+       a burst of high-resolution history that then drops to the true rate at the trigger. */
+    uint32_t sinceFreshUs_ = 0;  ///< time since the last frame that carried new inputs
+    uint64_t freshSumUs_   = 0;  ///< sum of completed fresh-frame intervals
+    size_t freshCount_     = 0;  ///< how many such intervals are in the sum
     /// Cycles still to skip before latching the anchor. One, because beginCapture runs inside the
     /// observe() call for the trigger cycle itself, and that cycle's input is the drive's answer to
     /// the PREVIOUS frame - it cannot yet reflect the request.

@@ -37,6 +37,9 @@ void Ss1Recorder::allocate(uint16_t safeInputsLength) {
     generation_.store(0, std::memory_order_release);
     standstillStops_.store(0, std::memory_order_relaxed);
     lastStandstillNs_.store(0, std::memory_order_relaxed);
+    sinceFreshUs_ = 0;
+    freshSumUs_   = 0;
+    freshCount_   = 0;
     allocated_ = true;
 }
 
@@ -54,6 +57,21 @@ void Ss1Recorder::observe(const Cycle& cycle, uint32_t dtUs) {
     const size_t copy = std::min(cycle.safeInputs.size(), kSs1TraceSafeInputs);
     if (copy > 0) {
         std::memcpy(sample.safeInputs.data(), cycle.safeInputs.data(), copy);
+    }
+
+    /* Measured here, outside the capturing branch, so the interval is already known when the FIRST
+       stop lays down its pre-roll. Only while bound: unbound cycles carry no frames, and folding
+       that gap in would inflate the average with time the bus was not exchanging at all. */
+    if (cycle.bound) {
+        sinceFreshUs_ = static_cast<uint32_t>(
+            std::min<uint64_t>(static_cast<uint64_t>(sinceFreshUs_) + dtUs, UINT32_MAX));
+        if (cycle.freshFrame) {
+            freshSumUs_ += sinceFreshUs_;
+            ++freshCount_;
+            sinceFreshUs_ = 0;
+        }
+    } else {
+        sinceFreshUs_ = 0;
     }
 
     const bool requested = ss1RequestedFrom(cycle.controlword);
@@ -172,12 +190,22 @@ void Ss1Recorder::beginCapture(const Cycle& cycle) {
             std::chrono::system_clock::now().time_since_epoch())
             .count());
 
-    /* Lay the pre-roll down oldest-first with negative timestamps. The interval between pre-roll
-       samples is not known individually - only the cycles that were captured carry their own dt -
-       so they are spaced by the nominal period seen so far, or 1 ms before anything is known. This
-       is context, not measurement, and the plot labels it as such. */
-    const int32_t spacing = (dtCount_ > 0) ? static_cast<int32_t>(dtSumUs_ / dtCount_) : 1000;
-    const size_t n = preRollCount_;
+    /* Lay the pre-roll down oldest-first with negative timestamps. The individual intervals are not
+       kept - the ring stores samples, not their dt - so they are spaced by the measured exchange
+       interval, which is maintained on every cycle precisely so that this is right on the first
+       stop as well as on later ones. This is reconstruction rather than measurement, and the plot
+       labels it as such.
+
+       Only as many samples as fit the time budget are drawn, newest first: the ring is sized for a
+       fast bus, and on a slow one its full depth would be seconds of history crowding out the
+       stop. */
+    const int32_t spacing = (freshCount_ > 0) ? static_cast<int32_t>(freshSumUs_ / freshCount_)
+                            : (dtCount_ > 0)  ? static_cast<int32_t>(dtSumUs_ / dtCount_)
+                                              : 1000;
+    const size_t affordable =
+        (spacing > 0) ? std::max<size_t>(1u, kSs1TracePreRollUs / static_cast<uint32_t>(spacing))
+                      : preRollCount_;
+    const size_t n = std::min(preRollCount_, affordable);
     for (size_t i = 0; i < n; ++i) {
         const size_t src = (preRollHead_ + kSs1TracePreRoll - n + i) % kSs1TracePreRoll;
         Ss1TraceSample s = preRoll_[src];

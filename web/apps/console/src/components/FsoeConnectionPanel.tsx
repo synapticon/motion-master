@@ -193,6 +193,17 @@ export default function FsoeConnectionPanel({
           )}
         </>
       }
+      description={
+        <>
+          <strong>ProcessData</strong> and <strong>FailSafeData</strong> are the same frame — same
+          CRC, sequence number and watchdog. Only the Command octet differs, and it says whether the
+          SafeData travelling with it counts: ProcessData means use these SafeOutputs, FailSafeData
+          means ignore them and hold the safe state. Both exist so a master can impose the safe
+          state <em>without</em> dropping the link, which would otherwise cost a full handshake to
+          recover. A connection starts in FailSafeData and returns to it after every fault, so it
+          has to be set to ProcessData before any SafeOutputs mean anything.
+        </>
+      }
       actions={
         <>
           <button

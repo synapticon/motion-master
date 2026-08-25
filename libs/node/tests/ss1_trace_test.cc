@@ -56,6 +56,22 @@ void run(Ss1Recorder& r, size_t cycles, const std::array<uint8_t, 12>& in, uint8
     }
 }
 
+/// @brief One FSoE exchange every @p perExchange cycles, which is what a real bus does.
+///
+/// The other helpers mark every cycle fresh, so a recorder driven by them sees one exchange per
+/// cycle and cannot distinguish the bus period from the exchange period. Anything that depends on
+/// telling them apart has to be driven by this instead.
+void runPingPong(Ss1Recorder& r, size_t exchanges, size_t perExchange,
+                 const std::array<uint8_t, 12>& in, uint8_t cw) {
+    for (size_t e = 0; e < exchanges; ++e) {
+        for (size_t c = 0; c < perExchange; ++c) {
+            Ss1Recorder::Cycle cy = cycle(in, cw);
+            cy.freshFrame        = (c + 1 == perExchange);
+            r.observe(cy, kDtUs);
+        }
+    }
+}
+
 /* ===================== nothing captured until something happens ================== */
 
 TEST(Ss1TraceTest, NothingIsPublishedBeforeAnyStop) {
@@ -170,6 +186,48 @@ TEST(Ss1TraceTest, ThePreRollCarriesTheSpeedBeforeTheRequest) {
     for (size_t i = 1; i < t.samples.size(); ++i) {
         EXPECT_GE(t.samples[i].tUs, t.samples[i - 1].tUs) << "at sample " << i;
     }
+}
+
+TEST(Ss1TraceTest, ThePreRollIsSpacedByTheExchangeIntervalNotTheBusCycle) {
+    /* FSoE is a ping-pong: each direction costs a bus cycle, so new inputs land every few cycles
+       and the pre-roll ring is written only on those. Spacing it by anything else lays real samples
+       down at the wrong pitch - the plot shows a burst of impossibly fine-grained history that
+       abruptly coarsens at the trigger, which reads as the recorder losing resolution exactly when
+       the stop begins.
+
+       The measurement therefore has to be alive BEFORE the first capture. A capture-scoped average
+       is empty at that point and falls back to a nominal period, so the very first stop - the one
+       somebody looks at after commissioning an axis - was the one that got it wrong. */
+    constexpr size_t kPerExchange  = 3;
+    constexpr int32_t kExchangeUs  = static_cast<int32_t>(kPerExchange * kDtUs);
+    Ss1Recorder r;
+    r.allocate(12);
+    const auto spinning = safeInputs(600000, false, false);
+    runPingPong(r, kSs1TracePreRoll + 20, kPerExchange, spinning, kCwRunBothOff);
+
+    /* Trigger on a cycle carrying no new frame, so no interval completes on it and the measured
+       average stays exactly one exchange. The activation edge is read from the controlword and does
+       not depend on a frame arriving. */
+    Ss1Recorder::Cycle trigger = cycle(spinning, kCwSs1Active);
+    trigger.freshFrame         = false;
+    r.observe(trigger, kDtUs);
+    const auto stopped = safeInputs(0, true, false);
+    runPingPong(r, kSs1TracePostRoll + 2, kPerExchange, stopped, kCwSs1Active);
+
+    Ss1Trace t;
+    ASSERT_TRUE(r.snapshot(t));
+    ASSERT_GE(t.samples.size(), 2u);
+
+    // Within the budget, the pitch is the exchange interval - not the 1 ms bus cycle.
+    EXPECT_EQ(t.samples[1].tUs - t.samples[0].tUs, kExchangeUs);
+
+    // The budget bounds how much history is drawn, and the ring bounds how much exists.
+    const size_t expected = std::min<size_t>(
+        kSs1TracePreRoll, mm::node::kSs1TracePreRollUs / static_cast<uint32_t>(kExchangeUs));
+    EXPECT_EQ(t.samples.front().tUs,
+              -static_cast<int32_t>(expected * static_cast<size_t>(kExchangeUs)));
+    EXPECT_GE(t.samples.front().tUs, -static_cast<int32_t>(mm::node::kSs1TracePreRollUs))
+        << "the pre-roll must stay inside its time budget";
 }
 
 TEST(Ss1TraceTest, TheAnchorComesFromTheCycleAfterTheTrigger) {

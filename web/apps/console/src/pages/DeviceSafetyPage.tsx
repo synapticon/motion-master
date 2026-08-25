@@ -6,8 +6,7 @@ import DevicePageHeader from '../components/DevicePageHeader'
 import Callout from '../components/Callout'
 import FsoeConnectionPanel from '../components/FsoeConnectionPanel'
 import SafetyControlPanel from '../components/SafetyControlPanel'
-import SafeProcessValuesPanel from '../components/SafeProcessValuesPanel'
-import SafeSensorPanel from '../components/SafeSensorPanel'
+import SafeMeasurementsPanel from '../components/SafeMeasurementsPanel'
 import Ss1Panel from '../components/Ss1Panel'
 import Ss1StopTracePanel from '../components/Ss1StopTracePanel'
 import { useConnection } from '../contexts/ConnectionContext'
@@ -124,13 +123,11 @@ export default function DeviceSafetyPage() {
           </>
         )}
 
+        {/* Outside the connection block on purpose: the sensor half reads over SDO, and the moment
+            it is most wanted is when the connection will NOT open - a wrong safety address, a
+            tolerance nobody set - which is exactly when there is no connection to hang it off. */}
         <Group label="Measurements" />
-        {connection && <SafeProcessValuesPanel connection={connection} />}
-        {/* Outside the connection block on purpose. These objects read over SDO,
-            and the moment they are most wanted is when the connection will NOT
-            open - a wrong safety address, a tolerance nobody set - which is
-            exactly when there is no connection to hang them off. */}
-        <SafeSensorPanel slavePosition={slavePosition} />
+        <SafeMeasurementsPanel slavePosition={slavePosition} connection={connection} />
 
         <Group label="Safety functions" />
         <Ss1Panel slavePosition={slavePosition} />

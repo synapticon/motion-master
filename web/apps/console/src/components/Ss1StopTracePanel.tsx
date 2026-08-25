@@ -193,6 +193,39 @@ export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: nu
 
     const hBands = nZero > 0 ? [{ from: 0, to: nZero, color: 'rgba(16,185,129,0.14)' }] : []
 
+    /* uPlot legends only list series, and every shaded area here is an annotation - so without this
+       the reader is left to match three washes of colour against a paragraph of prose. Only the
+       regions actually drawn are listed.
+
+       `swatch` is the band colour at a higher alpha, with a solid border of the same hue: at the
+       0.10-0.14 alpha that works over a plot, a 12px square is nearly invisible against white. The
+       shape carries the meaning - filled square for an area, dash for a line - and the hue carries
+       the identity. */
+    const regions: { swatch: string; border: string; label: string; hint: string }[] = [
+      {
+        swatch: 'rgba(43,108,176,0.28)',
+        border: 'rgba(43,108,176,0.65)',
+        label: 'activation uncertainty',
+        hint: 'One bus cycle plus one safety cycle after the request. The controlword is not on the wire until the next exchange and the drive picks it up within its own period, so the exact moment the stop began is not knowable to finer than this.',
+      },
+    ]
+    if (vBands.length > 1) {
+      regions.push({
+        swatch: 'rgba(245,158,11,0.30)',
+        border: 'rgba(245,158,11,0.70)',
+        label: 'safe velocity not believable',
+        hint: 'Cycles where the velocity validity bit was clear. No violation could be declared across these even though the limit kept descending, so enforcement was suspended - unshaded, the plot would imply it was not.',
+      })
+    }
+    if (nZero > 0) {
+      regions.push({
+        swatch: 'rgba(16,185,129,0.30)',
+        border: 'rgba(16,185,129,0.70)',
+        label: 'standstill window (n_Zero_SS1)',
+        hint: 'Plus and minus n_Zero_SS1. Holding the speed inside this band for t_L_SS1 removes torque early; it can never delay the deadline.',
+      })
+    }
+
     const points: NonNullable<ChartAnnotations['points']> = []
     if (stoUs != null && iSto >= 0) {
       const at = rows.find((r) => r[iT] >= stoUs)
@@ -216,7 +249,7 @@ export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: nu
     }
 
     const chart: uPlot.AlignedData = [xs, speed, limit, expected] as unknown as uPlot.AlignedData
-    return { chart, annotations: { vLines, vBands, hBands, points }, headroom, distanceRev, deadTimeUs, outcome, modeB, stoUs, T }
+    return { chart, annotations: { vLines, vBands, hBands, points }, regions, headroom, distanceRev, deadTimeUs, outcome, modeB, stoUs, T }
   }, [t, p])
 
   if (trace.isError) {
@@ -357,13 +390,29 @@ export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: nu
             </div>
           )}
 
-          <div className="px-4 py-2 text-[10px] text-grey-500">
-            Shaded green is the standstill window (n_Zero_SS1); amber spans are cycles where the safe
-            velocity was not believable, so no violation could be declared even though the limit kept
-            descending. The blue band at the request is one bus cycle plus one safety cycle of
-            activation uncertainty — the request is not on the wire until the next exchange.
-            {!model.modeB && ' No deceleration limit is drawn: a_SS1 is 0, so only the deadline and the standstill window applied.'}
+          {/* The shaded areas, which uPlot's own legend cannot list: it knows about series, and
+              these are annotations. Filled square for a region, against the dashes uPlot draws for
+              the lines - the shape says which kind of thing it is before the colour says which. */}
+          <div className="px-4 pt-1 pb-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-[10px] text-grey-600">
+            <span className="uppercase tracking-wider text-grey-400">Regions</span>
+            {model.regions.map(r => (
+              <span key={r.label} title={r.hint} className="inline-flex items-center gap-1.5 cursor-help">
+                <span
+                  className="inline-block w-3 h-3 border"
+                  style={{ backgroundColor: r.swatch, borderColor: r.border }}
+                  aria-hidden
+                />
+                {r.label}
+              </span>
+            ))}
           </div>
+
+          {!model.modeB && (
+            <div className="px-4 pb-2 text-[10px] text-grey-500">
+              No deceleration limit is drawn: a_SS1 is 0, so only the deadline and the standstill
+              window applied.
+            </div>
+          )}
         </>
       )}
     </Section>

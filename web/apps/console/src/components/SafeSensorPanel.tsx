@@ -1,7 +1,6 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConnection } from '../contexts/ConnectionContext'
-import Section from './Section'
 
 /* AL states that have a working CoE mailbox: PRE-OP, SAFE-OP, OP. INIT has no mailbox at all and
    BOOT's speaks FoE, not CoE, so the SDO fallback below must not run there. */
@@ -176,7 +175,7 @@ function HeadroomBar({ now, maxPos, maxNeg, tolerance, format }: {
   )
 }
 
-export default function SafeSensorPanel({ slavePosition }: { slavePosition: number }) {
+export default function SafeSensorBody({ slavePosition }: { slavePosition: number }) {
   const { api } = useConnection()
   const queryClient = useQueryClient()
   const [edits, setEdits] = useState<Partial<Record<ObjKey, string>>>({})
@@ -286,15 +285,17 @@ export default function SafeSensorPanel({ slavePosition }: { slavePosition: numb
   )
 
   return (
-    <Section
-      title="Safe sensor"
-      chips={
-        <span className="text-[10px] text-grey-400">
-          0x2601 / 0x2602 / 0x2603 / 0x2605 &middot; read over SDO, so this works with no FSoE connection
-        </span>
-      }
-    >
-      <div className="p-4">
+    <>
+      <div className="px-4 pt-3 pb-4 border-t border-grey-200">
+        <div className="flex items-baseline justify-between gap-3 flex-wrap">
+          <span className="text-[10px] uppercase tracking-wider text-grey-500">
+            Sensor configuration and diagnosis
+          </span>
+          <span className="text-[10px] text-grey-400">
+            0x2601 / 0x2602 / 0x2603 / 0x2605 &middot; read over SDO, so this works with no FSoE
+            connection
+          </span>
+        </div>
       {error && (
         <div className="mt-2 border border-status-bad px-3 py-2 text-xs text-status-bad">{error}</div>
       )}
@@ -456,6 +457,6 @@ export default function SafeSensorPanel({ slavePosition }: { slavePosition: numb
         gets a clean diagnostic epoch.
       </p>
       </div>
-    </Section>
+    </>
   )
 }

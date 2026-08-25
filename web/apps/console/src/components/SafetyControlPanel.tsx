@@ -71,13 +71,15 @@ function FunctionRow({
   reference,
   status,
   note,
-  children,
+  release,
+  activate,
 }: {
   name: string
   reference: string
   status: React.ReactNode
   note?: React.ReactNode
-  children: React.ReactNode
+  release: React.ReactNode
+  activate: React.ReactNode
 }) {
   return (
     <div className="px-4 py-3 border-b border-grey-200 last:border-b-0">
@@ -87,7 +89,13 @@ function FunctionRow({
           <div className="text-[10px] text-grey-500">{reference}</div>
         </div>
         {status}
-        <div className="ml-auto flex items-center gap-2">{children}</div>
+        {/* Two fixed slots rather than a free row of buttons: the same column means the same kind
+            of action on every row, so "the left one lets the axis move, the right one stops it" is
+            learnable once instead of read per row. An empty slot keeps the alignment. */}
+        <div className="ml-auto flex items-center gap-2">
+          <div className="w-[8.5rem] flex justify-end">{release}</div>
+          <div className="w-[8.5rem] flex justify-end">{activate}</div>
+        </div>
       </div>
       {note && <p className="mt-2 text-xs text-grey-600 max-w-3xl">{note}</p>}
     </div>
@@ -124,7 +132,12 @@ export default function SafetyControlPanel({
 
   const inData = connection.state === 'Data'
   const sendingProcessData = connection.dataCommand === 'ProcessData'
-  const controllable = inData && sendingProcessData
+
+  /* One rule, both functions: RELEASING needs a live process-data link, because a release that the
+     link is not carrying would report a permission the drive never got. ACTIVATING never needs it -
+     it is the safe direction, and refusing to make an axis safer because of the transport would be
+     the wrong way round. */
+  const releasable = inData && sendingProcessData
 
   const setSto = useMutation({
     mutationFn: (released: boolean) => api.setFsoeSto(slavePosition, { released }),
@@ -206,9 +219,10 @@ export default function SafetyControlPanel({
       }
       description={
         <>
-          Each stop function is its own bit and its own pair of buttons. Releasing STO does not
-          release SS1 — the wire inverts both, so an all-zero controlword requests every stop at
-          once, and permitting motion means releasing each function you are not testing.
+          Each stop function is its own bit and its own pair of buttons: <strong>release</strong> on
+          the left permits motion, <strong>activate</strong> on the right removes it. Releasing STO
+          does not release SS1 — the wire inverts both, so an all-zero controlword requests every
+          stop at once, and permitting motion means releasing each function you are not testing.
         </>
       }
     >
@@ -223,24 +237,29 @@ export default function SafetyControlPanel({
             {stoActive ? 'STO active — no torque' : 'STO released — torque permitted'}
           </Chip>
         }
-      >
-        <button
-          type="button"
-          className={btnCls}
-          disabled={busy || !controllable || stoReleased}
-          onClick={() => setSto.mutate(true)}
-        >
-          Release STO
-        </button>
-        <button
-          type="button"
-          className={btnGhostCls}
-          disabled={busy || !stoReleased}
-          onClick={() => setSto.mutate(false)}
-        >
-          Apply STO
-        </button>
-      </FunctionRow>
+        release={
+          <button
+            type="button"
+            className={btnGhostCls + ' w-full'}
+            title="Deactivate STO: permit torque. Bit 0 goes high."
+            disabled={busy || !releasable || stoReleased}
+            onClick={() => setSto.mutate(true)}
+          >
+            Release
+          </button>
+        }
+        activate={
+          <button
+            type="button"
+            className={btnCls + ' w-full'}
+            title="Activate STO: remove torque. Bit 0 goes low."
+            disabled={busy || !stoReleased}
+            onClick={() => setSto.mutate(false)}
+          >
+            Activate
+          </button>
+        }
+      />
 
       <FunctionRow
         name="Safe Stop 1"
@@ -258,24 +277,29 @@ export default function SafetyControlPanel({
             ? 'Releasing the request does not abort the stop: ETG.6100.2 ch. 8.2.1.1 requires an activated SS1 to be finalized. Release it to let the axis run again once the stop has ended.'
             : undefined
         }
-      >
-        <button
-          type="button"
-          className={btnCls}
-          disabled={busy || !controllable || !ss1Released}
-          onClick={() => setSs1.mutate(true)}
-        >
-          Request SS1
-        </button>
-        <button
-          type="button"
-          className={btnGhostCls}
-          disabled={busy || ss1Released}
-          onClick={() => setSs1.mutate(false)}
-        >
-          Release request
-        </button>
-      </FunctionRow>
+        release={
+          <button
+            type="button"
+            className={btnGhostCls + ' w-full'}
+            title="Deactivate SS1: stop requesting a stop. Bit 1 goes high. It does not abort a stop already running."
+            disabled={busy || !releasable || ss1Released}
+            onClick={() => setSs1.mutate(false)}
+          >
+            Release
+          </button>
+        }
+        activate={
+          <button
+            type="button"
+            className={btnCls + ' w-full'}
+            title="Activate SS1: bring the axis down, then remove torque. Bit 1 goes low."
+            disabled={busy || !ss1Released}
+            onClick={() => setSs1.mutate(true)}
+          >
+            Activate
+          </button>
+        }
+      />
 
       <FunctionRow
         name="Error acknowledge"
@@ -285,16 +309,19 @@ export default function SafetyControlPanel({
             {driveError ? 'error latched' : 'no error'}
           </Chip>
         }
-      >
-        <button
-          type="button"
-          className={btnGhostCls}
-          disabled={busy || !controllable}
-          onClick={() => acknowledge.mutate()}
-        >
-          {acknowledge.isPending ? 'Acknowledging…' : 'Acknowledge'}
-        </button>
-      </FunctionRow>
+        release={
+          <button
+            type="button"
+            className={btnGhostCls + ' w-full'}
+            title="Pulse bit 7. The drive acts on the rising edge, so this raises it, holds it for several exchanges and lowers it again."
+            disabled={busy || !releasable}
+            onClick={() => acknowledge.mutate()}
+          >
+            {acknowledge.isPending ? 'Acknowledging' : 'Acknowledge'}
+          </button>
+        }
+        activate={null}
+      />
 
       <div className="px-4 py-3 bg-grey-50 border-t border-grey-200 text-xs">
         {blockers.length > 0 ? (

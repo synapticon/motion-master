@@ -2,3 +2,20 @@
    the shared package so every app under web/apps stays visually consistent. Console-only
    style overrides, if ever needed, go below this import. */
 @import "@synapticon/ui/theme.css";
+
+/* uPlot draws its legend swatch as a 1em square, which reads as a filled region rather than as the
+   stroke of a line. Collapsing it to a top border only makes it a dash, and keeps the colour and
+   the solid/dashed style uPlot sets inline (`border: <width>px <dash> <stroke>`) - so a dashed
+   series gets a dashed swatch for free. `!important` is what beats that inline shorthand.
+
+   Filled regions on a chart get their own legend in the component that draws them: they are
+   annotations rather than series, so uPlot has nothing to list for them. */
+.u-legend .u-marker {
+    width: 18px !important;
+    height: 0 !important;
+    border-top-width: 3px !important;
+    border-right-width: 0 !important;
+    border-bottom-width: 0 !important;
+    border-left-width: 0 !important;
+    background: none !important;
+}

@@ -240,7 +240,13 @@ export default function MonitoringChart({
       // overlap; the hover readout (series value above) keeps full resolution.
       scales: { x: { time: false } },
       axes: [{ values: (_u, splits) => xAxisRef.current.ticks(splits) }, {}],
-      legend: { live: true },
+      /* The swatch takes the series' own dash pattern. uPlot's default is "solid" for every
+         marker, which loses the only thing distinguishing two lines of similar colour - and the
+         swatch is styled down to a dash (see index.css), so the pattern is the whole signal. */
+      legend: {
+        live: true,
+        markers: { dash: (u: uPlot, i: number) => (u.series[i].dash ? 'dashed' : 'solid') },
+      },
       cursor: { drag: { x: true, y: false } },
       plugins: [{ hooks: { draw: [drawAnnotations(annotationsRef)] } }],
     }

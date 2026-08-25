@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConnection } from '../contexts/ConnectionContext'
+import Section from './Section'
 
 /**
  * Safe Stop 1: its parameters, and enough diagnosis to tell a healthy stop from
@@ -9,10 +10,12 @@ import { useConnection } from '../contexts/ConnectionContext'
  * Reads over plain SDO like the safe-sensor panel, so it works with no safety
  * connection - which is when a parameter set is usually being chosen.
  *
- * The panel does NOT offer a button to command SS1. Starting a stop is a safety
- * master's job, and ch. 8.2.1.1 makes it irreversible once begun: releasing the
- * request does not abort the stop. A one-click "stop the axis" in a diagnostics
- * page would be a decision nobody could take back.
+ * Parameters and diagnosis only: SS1 is COMMANDED from the Safety control
+ * panel, which owns the safety controlword. Keeping the two apart matters
+ * because ch. 8.2.1.1 makes a stop irreversible once begun - releasing the
+ * request does not abort it - so the button that starts one belongs with the
+ * other irreversible controls, next to STO, and not among the fields somebody
+ * is editing while they tune the stop.
  */
 
 /* AL states that have a working CoE mailbox: PRE-OP, SAFE-OP, OP. INIT has no mailbox at all and
@@ -217,9 +220,10 @@ export default function Ss1Panel({ slavePosition }: { slavePosition: number }) {
   )
 
   return (
-    <div className="border border-grey-200">
-      <div className="px-4 py-2 border-b border-grey-200 flex items-center gap-2 flex-wrap">
-        <span className="text-xs uppercase tracking-wider text-grey-700">Safe Stop 1</span>
+    <Section
+      title="Safe Stop 1"
+      chips={
+        <>
         <Chip tone={STATE[d.state ?? 0]?.tone ?? 'info'} hint={STATE[d.state ?? 0]?.hint}>
           {STATE[d.state ?? 0]?.label ?? `State ${d.state}`}
         </Chip>
@@ -239,8 +243,9 @@ export default function Ss1Panel({ slavePosition }: { slavePosition: number }) {
             set refused
           </Chip>
         )}
-      </div>
-
+        </>
+      }
+    >
       <div className="p-4 grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* ---------------- configuration ---------------- */}
         <div>
@@ -351,6 +356,6 @@ export default function Ss1Panel({ slavePosition }: { slavePosition: number }) {
         later than it was asked for, which is why these objects exist. Once activated a stop must
         finalize: releasing the request does not abort it.
       </div>
-    </div>
+    </Section>
   )
 }

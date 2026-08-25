@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConnection } from '../contexts/ConnectionContext'
+import Section from './Section'
 
 /* AL states that have a working CoE mailbox: PRE-OP, SAFE-OP, OP. INIT has no mailbox at all and
    BOOT's speaks FoE, not CoE, so the SDO fallback below must not run there. */
@@ -285,14 +286,15 @@ export default function SafeSensorPanel({ slavePosition }: { slavePosition: numb
   )
 
   return (
-    <section className="mt-8">
-      <div className="flex items-baseline justify-between">
-        <h2 className="text-sm uppercase tracking-wider text-grey-500">Safe sensor</h2>
+    <Section
+      title="Safe sensor"
+      chips={
         <span className="text-[10px] text-grey-400">
           0x2601 / 0x2602 / 0x2603 / 0x2605 &middot; read over SDO, so this works with no FSoE connection
         </span>
-      </div>
-
+      }
+    >
+      <div className="p-4">
       {error && (
         <div className="mt-2 border border-status-bad px-3 py-2 text-xs text-status-bad">{error}</div>
       )}
@@ -453,6 +455,7 @@ export default function SafeSensorPanel({ slavePosition }: { slavePosition: numb
         guarding against. The high-water marks and the counters reset with it, so each connection
         gets a clean diagnostic epoch.
       </p>
-    </section>
+      </div>
+    </Section>
   )
 }

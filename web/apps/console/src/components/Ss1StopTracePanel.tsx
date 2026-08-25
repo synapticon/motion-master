@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query'
 import type uPlot from 'uplot'
 import { useConnection } from '../contexts/ConnectionContext'
 import MonitoringChart, { SINCE_TRIGGER, type ChartAnnotations } from './MonitoringChart'
+import Section from './Section'
 
 /**
  * The last Safe Stop 1 stop, plotted against the limits it was judged by.
@@ -232,9 +233,10 @@ export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: nu
   const shortInputs = (t?.safeInputsLength ?? 12) < 12
 
   return (
-    <div className="border border-grey-200">
-      <div className="px-4 py-2 border-b border-grey-200 flex items-center gap-2 flex-wrap">
-        <span className="text-xs uppercase tracking-wider text-grey-700">Last SS1 stop</span>
+    <Section
+      title="Last SS1 stop"
+      chips={
+        <>
         {t?.capturing && (
           <span className="inline-flex items-center h-[18px] px-1.5 text-[10px] bg-status-warn/10 text-status-warn border border-status-warn/40">
             recording
@@ -272,8 +274,9 @@ export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: nu
             )}
           </>
         )}
-      </div>
-
+        </>
+      }
+    >
       {shortInputs ? (
         <div className="p-4 text-sm text-grey-500">
           This connection carries {t?.safeInputsLength ?? 0} SafeInputs octets, so it does not publish
@@ -363,6 +366,6 @@ export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: nu
           </div>
         </>
       )}
-    </div>
+    </Section>
   )
 }

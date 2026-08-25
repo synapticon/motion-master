@@ -4,6 +4,7 @@ import type uPlot from 'uplot'
 import { useConnection } from '../contexts/ConnectionContext'
 import MonitoringChart, { SINCE_TRIGGER, type ChartAnnotations } from './MonitoringChart'
 import Section from './Section'
+import { ReasonChip, CauseChips } from './safeSensorReasons'
 
 /**
  * The last Safe Stop 1 stop, plotted against the limits it was judged by.
@@ -20,6 +21,8 @@ import Section from './Section'
  * so an SDO poll essentially never lands inside it.
  */
 
+const MAILBOX_ACTIVE_STATES = new Set([2, 4, 8])
+
 const PARAM = {
   tSS1: [0x6651, 1],
   nZero: [0x6653, 1],
@@ -27,6 +30,11 @@ const PARAM = {
   aSS1: [0x6656, 1],
   tD: [0x6657, 1],
   paramsOk: [0x2606, 2],
+  /* The velocity channel's diagnosis. The safety PDU carries the validity FLAG and not its cause -
+     ETG.6100.2 ch. 5.4 has a bit, not a reason - so a span where the flag was false can only be
+     explained from the non-safe objects, which is where ETG.6100 puts the cause. */
+  velReason: [0x2602, 7],
+  velCauses: [0x2602, 8],
   stopDecel: [0x2606, 5],
   fwAnchor: [0x2606, 6],
   fwAnchorValid: [0x2606, 7],
@@ -47,6 +55,16 @@ const fmtRpm = (mrpm: number) => `${(mrpm / 1000).toFixed(mrpm < 10000 ? 2 : 0)}
 
 export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: number }) {
   const { api } = useConnection()
+
+  /* AL states with a working CoE mailbox: PRE-OP, SAFE-OP, OP. INIT has none and BOOT's speaks
+     FoE, so the SDO fallback below must not run there - a poll landing in the window where a
+     drive's mailbox is being reprogrammed for BOOT is fatal to the daemon. */
+  const statesQuery = useQuery({
+    queryKey: ['deviceStates'],
+    queryFn: () => api.getDeviceStates(),
+  })
+  const alState = statesQuery.data?.data.find(d => d.slavePosition === slavePosition)?.alState
+  const mailboxActive = alState !== undefined && MAILBOX_ACTIVE_STATES.has(alState)
 
   const trace = useQuery({
     queryKey: ['ss1-trace', slavePosition],
@@ -74,6 +92,7 @@ export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: nu
       }
       return out
     },
+    enabled: mailboxActive,
     refetchInterval: 5000,
   })
 
@@ -209,12 +228,13 @@ export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: nu
         hint: 'One bus cycle plus one safety cycle after the request. The controlword is not on the wire until the next exchange and the drive picks it up within its own period, so the exact moment the stop began is not knowable to finer than this.',
       },
     ]
+    const invalidCycles = iVelValid >= 0 ? rows.filter(r => r[iVelValid] === 0).length : 0
     if (vBands.length > 1) {
       regions.push({
         swatch: 'rgba(245,158,11,0.30)',
         border: 'rgba(245,158,11,0.70)',
-        label: 'safe velocity not believable',
-        hint: 'Cycles where the velocity validity bit was clear. No violation could be declared across these even though the limit kept descending, so enforcement was suspended - unshaded, the plot would imply it was not.',
+        label: 'velocity validity flag false',
+        hint: 'Cycles where the drive published its safe velocity with the validity bit clear. The monitor reads such a velocity as zero, so neither a limit violation nor a standstill could be concluded: both optional monitors were suspended and only the t_SS1 deadline still ran. Unshaded, the descending limit would imply enforcement that was not happening. The cause is below - the safety PDU carries the flag, not the reason.',
       })
     }
     if (nZero > 0) {
@@ -249,7 +269,7 @@ export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: nu
     }
 
     const chart: uPlot.AlignedData = [xs, speed, limit, expected] as unknown as uPlot.AlignedData
-    return { chart, annotations: { vLines, vBands, hBands, points }, regions, headroom, distanceRev, deadTimeUs, outcome, modeB, stoUs, T }
+    return { chart, annotations: { vLines, vBands, hBands, points }, regions, invalidCycles, headroom, distanceRev, deadTimeUs, outcome, modeB, stoUs, T }
   }, [t, p])
 
   if (trace.isError) {
@@ -406,6 +426,39 @@ export default function Ss1StopTracePanel({ slavePosition }: { slavePosition: nu
               </span>
             ))}
           </div>
+
+          {model.invalidCycles > 0 && (
+            <div className="mx-4 mb-2 border border-status-warn/40 bg-status-warn/5 px-3 py-2 text-[11px] text-grey-700">
+              <div>
+                The velocity validity flag was false for{' '}
+                <span className="font-mono">{model.invalidCycles}</span>{' '}
+                {model.invalidCycles === 1 ? 'cycle' : 'cycles'}
+                {t.measuredCyclePeriodUs ? (
+                  <>
+                    {' '}(<span className="font-mono">
+                      {fmtMs(model.invalidCycles * t.measuredCyclePeriodUs)}
+                    </span>)
+                  </>
+                ) : null}{' '}
+                of this trace.
+              </div>
+              <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                <span className="text-[10px] uppercase tracking-wider text-grey-500">
+                  velocity channel now
+                </span>
+                <ReasonChip code={p.velReason} />
+              </div>
+              <CauseChips mask={p.velCauses} />
+              {/* Said plainly, because the alternative is a reader assuming the chips describe the
+                  span they are sitting under. They describe the connection. */}
+              <p className="mt-2 text-[10px] text-grey-500">
+                Attributed to the connection, not to this stop: the Safety PDU carries the validity
+                bit and not its cause (ETG.6100.2 ch. 5.4), so the recorder cannot know per cycle
+                WHY the flag was clear. These are 0x2602:07 and 0x2602:08 — the velocity channel's
+                reason now, and every reason latched since the connection came up.
+              </p>
+            </div>
+          )}
 
           {!model.modeB && (
             <div className="px-4 pb-2 text-[10px] text-grey-500">

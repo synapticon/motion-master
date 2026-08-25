@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **Deleting a file from a device is an endpoint now.** `DELETE /api/devices/{slavePosition}/files/{filename}` removes one file from a drive's flash. FoE has no delete operation, so SOMANET firmware acts on a pseudo-file instead: reading the name `fs-remove=<filename>` is what removes the file. Every client had to know that. Now none does, and a device that is not a SOMANET drive is refused rather than probed. A file that was not there answers 200, because the caller asked for the file to be gone and it is. The Console's FoE page uses the endpoint, and the firmware installation procedure removes the files a package replaces through the same one call. Deleting `config.csv` discards the stored parameter values, so the drive falls back to its defaults on the next power cycle.
+
 ### Fixed
 
 - **The Integro internal encoder's register map now says what the encoder does.** `GET /api/meta/kuebler-registers` was a transcription of the vendor's draft table, and the draft is wrong in three ways. It calls four registers not implemented — `0x04` firmware version, `0x61` error control, `0x66` and `0x6A` error codes — that the encoder answers on. It leaves out four more: `0x56`, `0x58`, `0x5A` and `0x5C`, the CW and CCW start and end speeds. And it calls `0x04` a 64-bit register, which put it out of reach of one command and greyed it out in the Console, when four bytes there return a firmware version. All eight registers are now offered, and every register in the map fits one command. A register the draft does not document says so in its `definition`.

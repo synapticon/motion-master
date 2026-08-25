@@ -5,6 +5,8 @@
 #include <type_traits>
 #include <utility>
 
+#include "node/synapticon.h"
+
 namespace mm::node {
 
 namespace {
@@ -52,6 +54,20 @@ std::expected<std::vector<DeviceFile>, std::string> readFileList(DeviceManager& 
                                                                  uint16_t slavePosition) {
   return withSomanetDrive(deviceManager, slavePosition,
                           [](SomanetDrive& drive) { return drive.readFileList(); });
+}
+
+std::expected<void, std::string> removeFile(DeviceManager& deviceManager, uint16_t slavePosition,
+                                            const std::string& filename) {
+  const auto device = deviceManager.deviceAt(slavePosition);
+  if (!device) {
+    return deviceNotFound(slavePosition);
+  }
+  // The vendor id, and not a SomanetDrive: see removeDeviceFile on why a profile view would break
+  // removal in BOOT. The vendor id comes from SII and is there as soon as the device is.
+  if (device->vendorId() != kSynapticonVendorId) {
+    return std::unexpected(std::format("device {} is not a SOMANET drive", slavePosition));
+  }
+  return removeDeviceFile(*device, filename);
 }
 
 std::expected<HardwareDescription, std::string> readHardwareDescription(

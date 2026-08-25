@@ -1106,6 +1106,26 @@ void to_json(nlohmann::json& j, const DeviceFile& file);
 /// @return One entry per non-blank line, in the order they appeared.
 std::vector<DeviceFile> parseDeviceFileList(std::string_view text);
 
+/// @brief Deletes a file from a SOMANET drive's flash (FoE read of "fs-remove=<filename>").
+///
+/// A vendor pseudo-file like @c fs-getlist, and a *read* rather than a write, because FoE has no
+/// delete: the firmware acts on the name the read carries. This is the one place that knows the
+/// prefix, so no caller has to.
+///
+/// **Takes a @c Device rather than being a @c SomanetDrive method, on purpose.** Building a
+/// @c SomanetDrive validates the CiA402 dictionary, which a drive in BOOT has not enumerated — and
+/// BOOT is exactly where firmware installation deletes the files a package replaces. A profile view
+/// would make removal fail where it is needed most. Everything this needs is FoE, which the
+/// bootloader serves.
+///
+/// **A file that was not there is success.** The caller asked for the file to be gone, and it is.
+/// Every other FoE failure is reported.
+///
+/// @param device    The drive to delete from.
+/// @param filename  Name as the drive lists it, with no prefix.
+/// @return Void once the file is gone, or why the removal failed.
+std::expected<void, std::string> removeDeviceFile(Device& device, const std::string& filename);
+
 /// @brief One sample of @c somanet::HrdData::kEncoderRawData.
 ///
 /// @c raw is the word the encoder reported and the two counts are the fields packed inside it —

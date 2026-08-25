@@ -17,6 +17,7 @@
 #include <variant>
 #include <vector>
 
+#include "comm/foe_error.h"
 #include "core/util.h"
 #include "node/kuebler_registers.h"
 #include "node/synapticon.h"
@@ -281,6 +282,9 @@ constexpr unsigned kHrdVelocityFractionalBits = 15;
 // The pseudo-file Synapticon firmware serves its directory as. Not a file on the device — reading
 // this name runs a listing.
 constexpr std::string_view kFileListName = "fs-getlist";
+
+/// Reading this pseudo-file, with the target name appended, deletes that file from flash.
+constexpr std::string_view kRemoveFileName = "fs-remove=";
 
 // The two files that say what a device is. Both begin with a period, which is what makes the
 // bootloader protect them from being modified or deleted without a password (specification §3.1).
@@ -959,6 +963,15 @@ std::expected<std::vector<DeviceFile>, std::string> SomanetDrive::readFileList()
                                        kFileListName, listing.error().message));
   }
   return parseDeviceFileList(std::string(listing->begin(), listing->end()));
+}
+
+std::expected<void, std::string> removeDeviceFile(Device& device, const std::string& filename) {
+  const auto removed = device.readFile(std::string(kRemoveFileName) + filename);
+  if (removed || removed.error().kind == mm::comm::FoeErrorKind::FileNotFound) {
+    return {};
+  }
+  return std::unexpected(std::format("removing '{}' from device {} failed: {}", filename,
+                                     device.slavePosition(), removed.error().message));
 }
 
 std::expected<HardwareDescription, std::string> SomanetDrive::readHardwareDescription() const {

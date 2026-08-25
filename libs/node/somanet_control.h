@@ -75,6 +75,19 @@ std::expected<BrakeState, std::string> engageBrake(DeviceManager& deviceManager,
 std::expected<std::vector<DeviceFile>, std::string> readFileList(DeviceManager& deviceManager,
                                                                  uint16_t slavePosition);
 
+/// @brief Deletes one file from a device's flash.
+///
+/// Thin forward to @c SomanetDrive::removeFile. Vendor-specific for the same reason as
+/// @c readFileList: the drive has no delete operation, only a pseudo-file that acts on the name it
+/// carries. A file that was not there counts as removed.
+///
+/// @param deviceManager  Owner of the device set; lends locked access for the call.
+/// @param slavePosition  1-based bus position of the target device.
+/// @param filename       Name as the drive lists it, with no prefix.
+/// @return Void once the file is gone, or why the removal failed.
+std::expected<void, std::string> removeFile(DeviceManager& deviceManager, uint16_t slavePosition,
+                                            const std::string& filename);
+
 /// @brief Reads and parses a device's @c .hardware_description file.
 ///
 /// Thin forward to @c SomanetDrive::readHardwareDescription — what the device says it is, and the

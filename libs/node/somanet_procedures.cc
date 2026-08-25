@@ -28,6 +28,7 @@
 #include "core/base64.h"
 #include "core/platform.h"
 #include "core/user_cache.h"
+#include "node/somanet_control.h"
 
 namespace mm::node {
 
@@ -494,9 +495,6 @@ constexpr std::string_view kFinalStateStep = "final-state";
 constexpr std::string_view kAppFirmwareFoeName = "app_firmware.bin";
 constexpr std::string_view kComFirmwareFoeName = "com_firmware.bin";
 
-/// FoE read of this pseudo-file, with the target appended, deletes a file from the drive's flash.
-constexpr std::string_view kRemoveFilePrefix = "fs-remove=";
-
 /// Ceiling on an ordinary AL transition, which is a mailbox round trip and a slave acknowledgement.
 constexpr auto kStateTimeout = std::chrono::seconds(10);
 
@@ -570,25 +568,6 @@ std::expected<void, std::string> writeFileWithRetry(DeviceManager& deviceManager
     }
   }
   return std::unexpected(std::format("{} (gave up after {} attempts)", lastError, kFoeAttempts));
-}
-
-/// Deletes a file from the drive's flash, treating "there was no such file" as success.
-///
-/// Removal is issued as an FoE *read* of a pseudo-file, which is why this branches on the error
-/// kind rather than the message: a @c FileNotFound means the removal had nothing to do, which is
-/// precisely the outcome the caller wanted.
-std::expected<void, std::string> removeFile(DeviceManager& deviceManager, uint16_t devicePosition,
-                                            const std::string& filename) {
-  const auto device = deviceManager.deviceAt(devicePosition);
-  if (!device) {
-    return std::unexpected(std::format("device {} not found", devicePosition));
-  }
-  const std::expected<std::vector<uint8_t>, FoeError> removed =
-      device->readFile(std::string(kRemoveFilePrefix) + filename);
-  if (removed || removed.error().kind == mm::comm::FoeErrorKind::FileNotFound) {
-    return {};
-  }
-  return std::unexpected(removed.error().message);
 }
 
 std::expected<void, std::string> transitionTo(DeviceManager& deviceManager, uint16_t devicePosition,

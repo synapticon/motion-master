@@ -2821,6 +2821,61 @@ paths:
           description: No device at the given bus position
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
+    delete:
+      summary: Delete a file from a device
+      operationId: deleteDeviceFile
+      description: >
+        Deletes `filename` from the flash of the device at `slavePosition`.
+
+
+        **Vendor-specific despite reading like a filesystem operation.** FoE has no delete, so
+        SOMANET firmware acts on a pseudo-file instead: reading the name `fs-remove=<filename>`
+        removes that file. This endpoint exists so no client has to know that, and a device that is
+        not a SOMANET drive is refused rather than probed.
+
+
+        **A file that was not there answers 200.** The caller asked for the file to be gone, and it
+        is. Every other FoE failure is a 500 naming the reason.
+
+
+        The file is gone from flash immediately. Deleting `config.csv` discards the stored parameter
+        values, so the drive falls back to its defaults on the next power cycle.
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: filename
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Name as the device lists it, with no prefix
+          example: "config.csv"
+      responses:
+        "200":
+          description: The file is gone
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        "400":
+          description: slavePosition is not a valid integer
+        "404":
+          description: No device at the given bus position
+        "500":
+          $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/sii:
     get:
       summary: Read a device's SII (Slave Information Interface / EEPROM)

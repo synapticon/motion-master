@@ -1649,6 +1649,36 @@ export class Api<
       ...params,
     });
   /**
+   * @description Deletes `filename` from the flash of the device at `slavePosition`. **Vendor-specific despite reading like a filesystem operation.** FoE has no delete, so SOMANET firmware acts on a pseudo-file instead: reading the name `fs-remove=<filename>` removes that file. This endpoint exists so no client has to know that, and a device that is not a SOMANET drive is refused rather than probed. **A file that was not there answers 200.** The caller asked for the file to be gone, and it is. Every other FoE failure is a 500 naming the reason. The file is gone from flash immediately. Deleting `config.csv` discards the stored parameter values, so the drive falls back to its defaults on the next power cycle.
+   *
+   * @name DeleteDeviceFile
+   * @summary Delete a file from a device
+   * @request DELETE:/api/devices/{slavePosition}/files/{filename}
+   */
+  deleteDeviceFile = (
+    slavePosition: number,
+    filename: string,
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      {
+        /** @example true */
+        ok?: boolean;
+      },
+      void | {
+        /**
+         * Human-readable error message from the driver
+         * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
+         */
+        error: string;
+      }
+    >({
+      path: `/api/devices/${slavePosition}/files/${filename}`,
+      method: "DELETE",
+      format: "json",
+      ...params,
+    });
+  /**
    * @description Reads the raw SII EEPROM image of the device at `slavePosition` through the ESC's EEPROM-control registers and returns either the parsed structure or the raw bytes, selected by the `Accept` request header. With `Accept: application/json` (or `*\/*`, or no `Accept` header) the parsed `SlaveInformationInterface` is returned — the 128-byte fixed header plus the decoded category section (strings, general info, FMMU/Sync-Manager and PDO defaults, distributed-clock settings).  With `Accept: application/octet-stream` the raw EEPROM image is returned unparsed, suitable for a hex dump or archival. EEPROM access is a control-plane operation and is most reliable while the device is in INIT or PRE-OP.  String-index fields in the parsed structure (e.g. `general.nameIdx`) are 1-based references into `category.strings`.
    *
    * @name ReadSii

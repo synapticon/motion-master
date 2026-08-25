@@ -1442,6 +1442,28 @@ void HttpServer::run() {
                });
              });
 
+  // Removal is a vendor operation dressed as a filesystem one: the drive has no delete, only a
+  // pseudo-file that acts on the name it carries. The endpoint exists so no client has to know
+  // that. A file that was not there answers 200, because the caller asked for it to be gone.
+  router.del("/api/devices/:slavePosition/files/:filename",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               if (!deviceManager_.hasDevice(*position)) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               const std::string filename(req.parameter("filename"));
+               return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
+                 if (auto removed = mm::node::removeFile(deviceManager_, *position, filename);
+                     !removed) {
+                   return std::unexpected(removed.error());
+                 }
+                 return nlohmann::json{{"ok", true}};
+               });
+             });
+
   // ── What a device is, and which firmware fits it ─────────────────────────────────────────────
   // Two FoE reads behind the control-plane lock, so both are off the loop like every other device
   // endpoint. The hardware description is readable in BOOT as well as PRE-OP and above, which is

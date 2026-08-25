@@ -34,6 +34,7 @@ using mm::node::Device;
 using mm::node::kOsCommand;
 using mm::node::kOsCommandMode;
 using mm::node::kSynapticonVendorId;
+using mm::node::removeDeviceFile;
 using mm::node::cia402::Object;
 
 constexpr uint16_t kPreOp = static_cast<uint16_t>(EtherCatState::PreOp);
@@ -273,8 +274,19 @@ class OsCommandFakeDriver : public FieldbusDriver {
   // firmware serves like any other file and which a test therefore programs like any other.
   std::map<std::string, std::vector<uint8_t>> files;
 
+  /// Every FoE name the drive asked for, in order. A removal is a read of a pseudo-file, so this is
+  /// the only way to assert that the prefix reached the wire.
+  std::vector<std::string> reads;
+
+  /// Fails every read with this kind, for the branches a missing file cannot produce.
+  std::optional<mm::comm::FoeErrorKind> readFailure;
+
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
       uint16_t, const std::string& name) override {
+    reads.push_back(name);
+    if (readFailure) {
+      return std::unexpected(mm::comm::makeFoeError(*readFailure, "FOEread", 1, name));
+    }
     auto it = files.find(name);
     if (it == files.end()) {
       return std::unexpected(
@@ -1065,6 +1077,45 @@ TEST(ReadFileList, ReportsAFailedListing) {
   auto files = drive->readFileList();
   ASSERT_FALSE(files.has_value());
   EXPECT_NE(files.error().find("fs-getlist"), std::string::npos) << files.error();
+}
+
+TEST(RemoveFile, DeletesThroughThePseudoFile) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.files["config.csv"] = std::vector<uint8_t>{1, 2, 3};
+
+  auto removed = removeDeviceFile(device, "config.csv");
+  ASSERT_TRUE(removed.has_value()) << removed.error();
+  // The prefix is the whole operation: the drive deletes what the name carries.
+  ASSERT_FALSE(driver.reads.empty());
+  EXPECT_EQ(driver.reads.back(), "fs-remove=config.csv");
+}
+
+TEST(RemoveFile, TreatsAMissingFileAsRemoved) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  // Nothing programmed, so the fake answers FileNotFound. The caller wanted the file gone.
+  auto removed = removeDeviceFile(device, "config.csv");
+  EXPECT_TRUE(removed.has_value()) << removed.error();
+}
+
+TEST(RemoveFile, ReportsAnyOtherFailure) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.readFailure = mm::comm::FoeErrorKind::NoResponse;
+
+  auto removed = removeDeviceFile(device, "config.csv");
+  ASSERT_FALSE(removed.has_value());
+  EXPECT_NE(removed.error().find("config.csv"), std::string::npos) << removed.error();
 }
 
 // --- HRD recording readback ---------------------------------------------------------------------

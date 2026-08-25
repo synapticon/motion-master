@@ -38,7 +38,8 @@ const SYNAPTICON_VENDOR_ID = 0x000022d2
 
 // Well-known files present on SOMANET drives, with whether each may be written
 // back via FoE. `fs-getlist` is not a real file but a pseudo-command the firmware
-// interprets on read (as is `fs-remove=<file>`); it is read-only.
+// interprets on read; it is read-only. Removal has its own pseudo-command, which the
+// server hides behind DELETE, so it is not listed here.
 const SOMANET_FILES: { name: string; write: boolean }[] = [
   { name: '.hardware_description', write: true },
   // Integro only, and read-only here on purpose: the drive verifies its signature, so a file this
@@ -62,7 +63,7 @@ const SOMANET_READ_FILES = SOMANET_FILES.map(f => f.name)
 const SOMANET_WRITE_FILES = SOMANET_FILES.filter(f => f.write).map(f => f.name)
 
 // uWebSockets does not URL-decode path parameters, so encode the filename but
-// keep `=` literal — `fs-remove=config.csv` must reach the backend verbatim.
+// keep `=` literal — `fs-stackunlock=DD1317` must reach the backend verbatim.
 function encodeFilename(name: string): string {
   return encodeURIComponent(name).replace(/%3D/g, '=')
 }
@@ -346,7 +347,7 @@ export default function DeviceFoePage() {
     setRemoving(name)
     setListError(null)
     try {
-      await readRaw(`fs-remove=${name}`)
+      await api.deleteDeviceFile(slavePosition, encodeFilename(name))
       await handleList()
     } catch (err) {
       setListError(err instanceof Error ? err.message : 'Unknown error')

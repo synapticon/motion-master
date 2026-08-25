@@ -15,6 +15,12 @@ import { useConnection } from '../contexts/ConnectionContext'
  * page would be a decision nobody could take back.
  */
 
+/* AL states that have a working CoE mailbox: PRE-OP, SAFE-OP, OP. INIT has no mailbox at all and
+   BOOT's speaks FoE, not CoE. Polling parameters across a firmware update - which is exactly when
+   this panel is most likely to be left open - would otherwise keep issuing SDOs into the window
+   where the drive's mailbox is being reprogrammed for BOOT. */
+const MAILBOX_ACTIVE_STATES = new Set([2, 4, 8])
+
 const OBJ = {
   tSS1: [0x6651, 1],       // t_SS1        [ms]  the unconditional deadline
   nZero: [0x6653, 1],      // n_Zero_SS1   [mRPM] standstill window, 0 = not monitored
@@ -109,6 +115,13 @@ export default function Ss1Panel({ slavePosition }: { slavePosition: number }) {
   const [edits, setEdits] = useState<Partial<Record<ObjKey, string>>>({})
   const [error, setError] = useState<string | null>(null)
 
+  const statesQuery = useQuery({
+    queryKey: ['deviceStates'],
+    queryFn: () => api.getDeviceStates(),
+  })
+  const alState = statesQuery.data?.data.find((s) => s.slavePosition === slavePosition)?.alState
+  const mailboxActive = alState !== undefined && MAILBOX_ACTIVE_STATES.has(alState)
+
   const q = useQuery({
     queryKey: ['ss1', slavePosition],
     queryFn: async () => {
@@ -132,6 +145,7 @@ export default function Ss1Panel({ slavePosition }: { slavePosition: number }) {
       }
       return out
     },
+    enabled: mailboxActive,
     refetchInterval: 1000,
   })
 

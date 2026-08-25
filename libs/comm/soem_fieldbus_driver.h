@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <set>
 #include <span>
 #include <string>
@@ -259,6 +260,11 @@ class SoemFieldbusDriver : public FieldbusDriver {
   std::unique_ptr<std::atomic<uint16_t>[]> slaveStates_;
   // Immutable after construction, so it needs no synchronisation of its own.
   std::size_t slaveStatesSize_ = 0;
+  /// @brief Why a CoE transfer to @p slavePosition must not be issued, or @c nullopt if it may.
+  ///
+  /// Caller must hold @c controlPlaneMutex_ — it reads @c bootMailboxSlaves_.
+  [[nodiscard]] std::optional<std::string> coeMailboxUnavailable(uint16_t slavePosition) const;
+
   // 1-based positions whose context currently holds BOOT-sized mailbox sync
   // managers (set when we drive a slave into BOOT). ecx_config_init programs the
   // correct PRE-OP mailbox SMs for every slave during scan(), so a fresh-scan

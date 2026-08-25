@@ -2,6 +2,10 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useConnection } from '../contexts/ConnectionContext'
 
+/* AL states that have a working CoE mailbox: PRE-OP, SAFE-OP, OP. INIT has no mailbox at all and
+   BOOT's speaks FoE, not CoE, so the SDO fallback below must not run there. */
+const MAILBOX_ACTIVE_STATES = new Set([2, 4, 8])
+
 /**
  * The safe sensor's configuration and diagnosis, objects 0x2601/0x2602/0x2603/0x2605.
  *
@@ -177,6 +181,13 @@ export default function SafeSensorPanel({ slavePosition }: { slavePosition: numb
   const [edits, setEdits] = useState<Partial<Record<ObjKey, string>>>({})
   const [error, setError] = useState<string | null>(null)
 
+  const statesQuery = useQuery({
+    queryKey: ['deviceStates'],
+    queryFn: () => api.getDeviceStates(),
+  })
+  const alState = statesQuery.data?.data.find((s) => s.slavePosition === slavePosition)?.alState
+  const mailboxActive = alState !== undefined && MAILBOX_ACTIVE_STATES.has(alState)
+
   const q = useQuery({
     queryKey: ['safeSensor', slavePosition],
     queryFn: async () => {
@@ -206,6 +217,7 @@ export default function SafeSensorPanel({ slavePosition }: { slavePosition: numb
       }
       return out
     },
+    enabled: mailboxActive,
     refetchInterval: 1000,
   })
 

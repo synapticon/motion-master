@@ -790,6 +790,28 @@ std::expected<std::vector<DcSyncDiagnostics>, std::string> SoemFieldbusDriver::r
   return result;
 }
 
+std::optional<std::string> SoemFieldbusDriver::coeMailboxUnavailable(
+    uint16_t slavePosition) const {
+  // A slave driven into BOOT has its mailbox sync managers reprogrammed to the BOOT geometry, and
+  // its bootloader speaks FoE there, not CoE. An SDO issued into that window is not merely
+  // answered with an abort: it is handed to SOEM against a mailbox whose size and protocol no
+  // longer match what the CoE layer assumes, and the process does not survive it. Refuse before
+  // reaching SOEM, so a client that keeps polling parameters across a firmware update — which is
+  // exactly when a UI most wants to show them — gets an error rather than killing the daemon.
+  //
+  // bootMailboxSlaves_ is the right predicate rather than the cached AL state because it is
+  // maintained under this same lock, and it is set at the instant the sync managers are
+  // reprogrammed rather than when the slave finishes reaching BOOT. The dangerous window opens
+  // with the reprogramming, not with the state change.
+  if (!bootMailboxSlaves_.contains(slavePosition)) {
+    return std::nullopt;
+  }
+  return std::format(
+      "slave {} holds BOOT mailbox sync managers — CoE is unavailable there, so the SDO was not "
+      "issued; leave BOOT for PRE-OP first",
+      slavePosition);
+}
+
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uint16_t slavePosition,
                                                                              uint16_t index,
                                                                              uint8_t subindex) {
@@ -799,6 +821,9 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
   }
   // The background ParameterRefresher polls SDOs continuously; demote its per-read traces to trace
   // so they don't flood the log, while a direct (user-initiated) read keeps its debug trace.
+  if (auto refusal = coeMailboxUnavailable(slavePosition)) {
+    return std::unexpected(std::move(*refusal));
+  }
   const auto sdoLevel = sdoLogQuiet ? spdlog::level::trace : spdlog::level::debug;
   spdlog::log(sdoLevel, "SDOread slave {} 0x{:04X}:{:02X}", slavePosition, index, subindex);
   // 4096-byte upload buffer: ample for every scalar/string parameter a SOMANET drive exposes at a
@@ -845,6 +870,9 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComp
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
+  if (auto refusal = coeMailboxUnavailable(slavePosition)) {
+    return std::unexpected(std::move(*refusal));
+  }
   const auto sdoLevel = sdoLogQuiet ? spdlog::level::trace : spdlog::level::debug;
   spdlog::log(sdoLevel, "SDOread(CA) slave {} 0x{:04X}", slavePosition, index);
   // 64 KiB upload buffer. Complete Access returns *every* subindex of an object in one (internally
@@ -886,6 +914,9 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSdo(uint16_t slavePosi
   std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
+  }
+  if (auto refusal = coeMailboxUnavailable(slavePosition)) {
+    return std::unexpected(std::move(*refusal));
   }
   spdlog::debug("SDOwrite slave {} 0x{:04X}:{:02X} ({} bytes)", slavePosition, index, subindex,
                 data.size());

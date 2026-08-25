@@ -64,8 +64,7 @@ if(CPPCHECK_EXECUTABLE)
                "${CPPCHECK_VERSION_OUTPUT}")
   if(NOT CPPCHECK_LOCAL_VERSION VERSION_EQUAL CPPCHECK_PINNED_VERSION)
     string(
-      CONCAT CPPCHECK_VERSION_NOTE
-             "NOTE: local cppcheck is ${CPPCHECK_LOCAL_VERSION}, CI runs "
+      CONCAT CPPCHECK_VERSION_NOTE "NOTE: local cppcheck is ${CPPCHECK_LOCAL_VERSION}, CI runs "
              "${CPPCHECK_PINNED_VERSION} (.cppcheck-version) -- findings differ between "
              "versions, so a clean run here does not guarantee a clean CI run.")
   endif()

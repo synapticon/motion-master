@@ -722,6 +722,10 @@ std::expected<ObjectDictionaryValues, std::string> decodeObjectDictionaryValues(
 
   size_t offset = 0;
   for (const auto& parameter : definitions) {
+    if (std::ranges::contains(kObjectsOutsideOdValues,
+                              makeParameterKey(parameter.index, parameter.subindex))) {
+      continue;
+    }
     auto width = objectDictionaryEntryWidth(parameter);
     if (!width) {
       return std::unexpected(std::format(
@@ -754,7 +758,7 @@ std::expected<ObjectDictionaryValues, std::string> decodeObjectDictionaryValues(
     return std::unexpected(std::format(
         "the drive sent {} bytes but the master's {} dictionary entries account for {}. The two "
         "disagree about how wide an entry is, or about which entries the dictionary holds",
-        data.size(), definitions.size(), offset));
+        data.size(), result.values.size(), offset));
   }
   return result;
 }

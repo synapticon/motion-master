@@ -745,6 +745,43 @@ TEST(DecodeObjectDictionaryValues, NamesTheEntryTheTransferRanOutAt) {
   EXPECT_NE(values.error().find("0x1008:00"), std::string::npos) << values.error();
 }
 
+TEST(DecodeObjectDictionaryValues, LeavesOutAnEntryTheTransferDoesNotCarry) {
+  // 0x10F8 is in the device's dictionary because the drive answers for it over CoE, and absent from
+  // the transfer because the EtherCAT stack serves it rather than the application. Its eight bytes
+  // are not there, so counting them would shift 0x6041 and fail the total. It has to be skipped in
+  // the middle of the walk, not trimmed off an end, which is why it sits between two real entries.
+  auto definitions = objectDictionaryDefinitions();
+  mm::node::DeviceParameter timestamp;
+  timestamp.index = 0x10F8;
+  timestamp.subindex = 0;
+  timestamp.dataType = static_cast<uint16_t>(ObjectDataType::UNSIGNED64);
+  timestamp.bitLength = 64;
+  definitions.insert(definitions.begin() + 3, timestamp);
+
+  const std::vector<uint8_t> data{
+      0x92, 0x01, 0x02, 0x00,  // 0x1000:00
+      0x05,                    // 0x1001:00
+      'A',  'B',  'C',  0x00,  // 0x1008:00
+      0x37, 0x02,              // 0x6041:00 — reached only because 0x10F8 took no bytes
+  };
+  auto values = decodeObjectDictionaryValues(data, definitions);
+  ASSERT_TRUE(values.has_value()) << values.error();
+  // Four values for five definitions, and the last one is right — which it can only be if 0x10F8
+  // consumed no bytes.
+  ASSERT_EQ(values->values.size(), 4U);
+  EXPECT_EQ(values->values[3].index, 0x6041);
+  EXPECT_EQ(std::get<uint16_t>(values->values[3].value), 0x0237U);
+}
+
+TEST(DecodeObjectDictionaryValues, SkipsNothingOnADeviceWithoutSuchAnEntry) {
+  // The list is consulted against the device's own dictionary, so a device that holds none of its
+  // entries loses nothing. This is what keeps the workaround off every other device.
+  const std::vector<uint8_t> data{0x92, 0x01, 0x02, 0x00, 0x05, 'A', 'B', 'C', 0x00, 0x37, 0x02};
+  auto values = decodeObjectDictionaryValues(data, objectDictionaryDefinitions());
+  ASSERT_TRUE(values.has_value()) << values.error();
+  EXPECT_EQ(values->values.size(), 4U);
+}
+
 TEST(DecodeObjectDictionaryValues, SaysSoWhenTheDictionaryWasNeverRead) {
   auto values = decodeObjectDictionaryValues(std::vector<uint8_t>{1, 2, 3}, {});
   ASSERT_FALSE(values.has_value());

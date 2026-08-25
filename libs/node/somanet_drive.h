@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -1101,6 +1102,29 @@ struct OsCommandConfig {
   std::stop_token stop{};  ///< Requesting a stop aborts the command; default never stops.
 };
 
+/// @brief The entries a SOMANET drive answers for over CoE that OS command 21 does not carry.
+///
+/// **The command sends one array, and the CoE dictionary is bigger than that array.** OS command 21
+/// streams the firmware's `od_values`, which holds the application object dictionary. An Integro
+/// also answers for 0x10F8, the standard Timestamp Object, because the EtherCAT stack in its
+/// communication processor serves that one rather than the application does. It has no slot in
+/// `od_values`, so its eight bytes are never sent, and a decode that expected them shifts every
+/// value after it.
+///
+/// **This is a list because the wire offers no rule.** Nothing in the SDO Info answer tells the two
+/// apart: 0x10F8 comes back as an ordinary VAR with ordinary access flags. What keeps the list
+/// honest is the check that was already there — the widths must add up to exactly the bytes the
+/// drive sent — so a list that is wrong fails the transfer instead of quietly shifting it.
+///
+/// A device that does not hold one of these loses nothing: an entry is skipped only when the
+/// device's own dictionary has it. A SOMANET Node has no 0x10F8.
+///
+/// Packed keys rather than a struct, so this needs no type of its own — @c makeParameterKey is what
+/// the rest of the code already compares an index and a subindex with.
+inline constexpr std::array<uint32_t, 1> kObjectsOutsideOdValues{
+    makeParameterKey(0x10F8, 0x00),  // Timestamp Object, served by the EtherCAT stack.
+};
+
 /// @brief One object dictionary entry, as OS command 21 delivered it.
 struct ObjectDictionaryValue {
   uint16_t index{};    ///< CoE object index.
@@ -1121,6 +1145,9 @@ void to_json(nlohmann::json& j, const ObjectDictionaryValue& entry);
 /// entry read as four bytes where the drive sent two shifts the rest of the transfer. What catches
 /// that is the total: the widths must add up to exactly the number of bytes the drive sent, and
 /// @c SomanetDrive::readObjectDictionaryValues refuses the whole transfer when they do not.
+///
+/// @c values holds one entry per object the transfer carries, so it is shorter than the device's
+/// dictionary by whatever @c kObjectsOutsideOdValues left out.
 struct ObjectDictionaryValues {
   size_t byteCount{};  ///< Bytes the drive sent. Equals the widths of @c values added up.
   std::vector<ObjectDictionaryValue> values;
@@ -1136,11 +1163,14 @@ void to_json(nlohmann::json& j, const ObjectDictionaryValues& values);
 /// Free rather than a member so it can be tested against a recorded transfer without a device, and
 /// so the widths it uses are visible in one place.
 ///
+/// Entries named by @c kObjectsOutsideOdValues are left out of the walk, because the transfer does
+/// not carry them.
+///
 /// @param data        The bytes the drive sent.
 /// @param definitions The device's object dictionary entries, sorted ascending by index and then
 ///                    subindex — what @c Device::parametersOrdered returns.
-/// @return One value per definition, or a message naming the mismatch: the widths not adding up to
-///         @c data.size(), or an entry whose bytes could not be decoded.
+/// @return One value per definition the transfer carries, or a message naming the mismatch: the
+///         widths not adding up to @c data.size(), or an entry whose bytes could not be decoded.
 std::expected<ObjectDictionaryValues, std::string> decodeObjectDictionaryValues(
     std::span<const uint8_t> data, const std::vector<DeviceParameter>& definitions);
 

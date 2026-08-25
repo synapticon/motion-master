@@ -758,6 +758,7 @@ enum class OsCommandId : uint8_t {
   kTriggerError = 16,                 ///< Provokes a firmware error or exception. Test tool only.
   kVelocitySource = 18,               ///< Chooses where the velocity loop's feedback comes from.
   kKueblerRegisterCommunication = 19,  ///< Reads or writes an Integro internal encoder register.
+  kReadObjectDictionary = 21,          ///< Sends every object dictionary value at once. No motion.
   kMeasureFirmwareLatency = 22,        ///< Measures a duration inside the drive control cycle.
 };
 
@@ -1009,6 +1010,9 @@ struct OsCommandResponse {
   OsCommandStatus status{OsCommandStatus::kCompleted};  ///< Terminal status (response byte 0).
   std::vector<uint8_t> data;                            ///< Service response payload, if any.
   std::optional<uint8_t> errorCode;                     ///< OS error code, if the drive sent one.
+  /// What the fs-buffer transfer carried up, empty unless @c OsCommandFsBuffer::kRead was asked
+  /// for.
+  std::vector<uint8_t> fsBuffer;
 
   /// @brief Whether the drive reported the command as failed (status 2 or 3). A failed command is
   ///        still a response — the drive rendered a verdict — so it arrives as a value, not an
@@ -1016,6 +1020,63 @@ struct OsCommandResponse {
   bool failed() const {
     return status == OsCommandStatus::kFailed || status == OsCommandStatus::kFailedWithData;
   }
+};
+
+/// @brief The FoE filename that moves bulk data for an OS command.
+///
+/// The firmware compares the requested filename against this exact string. On a match it does not
+/// open a file at all: it connects the transfer to a block of memory that an OS command writes to
+/// or reads from. Any other name, including one that only starts with these characters, is read as
+/// an ordinary file.
+inline constexpr std::string_view kFsBufferFilename = "fs-buffer";
+
+/// @brief Which way an OS command's fs-buffer transfer moves bytes.
+enum class FsBufferTransfer : uint8_t {
+  kNone,   ///< The command uses no fs-buffer. The default.
+  kRead,   ///< Read what the command writes (an FoE read of @c kFsBufferFilename).
+  kWrite,  ///< Send the command what it needs (an FoE write of @c kFsBufferFilename).
+};
+
+/// @brief Name of an fs-buffer direction, as a request and a response spell it.
+constexpr std::string_view toString(FsBufferTransfer transfer) {
+  switch (transfer) {
+    case FsBufferTransfer::kRead:
+      return "read";
+    case FsBufferTransfer::kWrite:
+      return "write";
+    case FsBufferTransfer::kNone:
+      break;
+  }
+  return "none";
+}
+
+/// @brief Reads an fs-buffer direction back from its name. @c std::nullopt if @p token names none.
+std::optional<FsBufferTransfer> parseFsBufferTransfer(std::string_view token);
+
+/// @brief An OS command's fs-buffer transfer — the data that does not fit in the 8 command bytes.
+///
+/// **`fs-buffer` is not a file, and the difference is not cosmetic.** The firmware routes the
+/// transfer to 2024 bytes of memory shared with the command that is running. The command writes
+/// into that memory as the master reads it out, or reads out of it as the master writes in. Three
+/// rules follow, and none of them is the caller's choice:
+///
+/// - **The transfer runs while the command runs.** It is issued after the write to 0x1023:01 and
+///   before the response is read, because the command does not report a terminal status until all
+///   the data has moved. More data than 2024 bytes cannot be held: the drive stops and waits for
+///   the master to move the next part. A transfer that waited for the command to finish would
+///   therefore never finish either, on exactly the commands that need one.
+/// - **You cannot ask for part of the memory, and it does not last.** The transfer carries no
+///   offset and no length: what it moves is whatever the running command put there. The firmware
+///   clears the memory 2.5 seconds after the command stops using it. So a transfer belongs to one
+///   run of one command, and is not a step a caller can take afterwards.
+/// - **It needs firmware 5.2 or newer.** Older firmware cannot move data while a command runs. It
+///   requires the data to be written *before* the command instead, and that older way is
+///   deliberately not implemented here.
+///
+/// A failed transfer does not, on its own, end the command: see @c SomanetDrive::runOsCommand.
+struct OsCommandFsBuffer {
+  FsBufferTransfer transfer{FsBufferTransfer::kNone};  ///< What to move; @c kNone moves nothing.
+  std::vector<uint8_t> payload;  ///< What to send. Read by @c kWrite, ignored otherwise.
 };
 
 /// @brief Timing and cancellation for @c SomanetDrive::runOsCommand.
@@ -1039,6 +1100,49 @@ struct OsCommandConfig {
   std::chrono::milliseconds abortTimeout{10000};  ///< Time allowed to confirm a forced abort.
   std::stop_token stop{};  ///< Requesting a stop aborts the command; default never stops.
 };
+
+/// @brief One object dictionary entry, as OS command 21 delivered it.
+struct ObjectDictionaryValue {
+  uint16_t index{};    ///< CoE object index.
+  uint8_t subindex{};  ///< CoE object subindex.
+  DeviceParameterValue value;
+};
+void to_json(nlohmann::json& j, const ObjectDictionaryValue& entry);
+
+/// @brief Every object dictionary value the drive holds, read in one transfer by OS command 21.
+///
+/// The drive sends the raw bytes of every entry, back to back, ordered by index and then by
+/// subindex, with nothing in between. There is no index, no subindex and no length on the wire: the
+/// only way to tell one value from the next is to know how wide each one is, in the same order.
+/// This master takes that order and those widths from its own record of the device's object
+/// dictionary, which it read over CoE when the device was enumerated.
+///
+/// **So the two sides have to agree, and a single disagreement spoils every value after it.** One
+/// entry read as four bytes where the drive sent two shifts the rest of the transfer. What catches
+/// that is the total: the widths must add up to exactly the number of bytes the drive sent, and
+/// @c SomanetDrive::readObjectDictionaryValues refuses the whole transfer when they do not.
+struct ObjectDictionaryValues {
+  size_t byteCount{};  ///< Bytes the drive sent. Equals the widths of @c values added up.
+  std::vector<ObjectDictionaryValue> values;
+};
+void to_json(nlohmann::json& j, const ObjectDictionaryValues& values);
+
+/// @brief Splits what OS command 21 sent into one value per entry of @p definitions.
+///
+/// Walks @p definitions in order and takes each entry's declared width off the front of @p data.
+/// A scalar's width comes from its data type; a string's or a byte array's comes from its bit
+/// length, which is the only record of how much room the drive reserved for it.
+///
+/// Free rather than a member so it can be tested against a recorded transfer without a device, and
+/// so the widths it uses are visible in one place.
+///
+/// @param data        The bytes the drive sent.
+/// @param definitions The device's object dictionary entries, sorted ascending by index and then
+///                    subindex — what @c Device::parametersOrdered returns.
+/// @return One value per definition, or a message naming the mismatch: the widths not adding up to
+///         @c data.size(), or an entry whose bytes could not be decoded.
+std::expected<ObjectDictionaryValues, std::string> decodeObjectDictionaryValues(
+    std::span<const uint8_t> data, const std::vector<DeviceParameter>& definitions);
 
 /// @brief The brake's configuration and its current state — one read of the parts of 0x2004 that
 ///        decide what a release or engage will actually do.
@@ -1459,14 +1563,48 @@ class SomanetDrive : public Cia402Drive {
   /// the driver's lock for one transaction, so it never blocks the RT loop. Requires the mailbox
   /// to be active (PRE-OP/SAFE-OP/OP).
   ///
+  /// A command that carries bulk data moves it through @p fsBuffer, after the write to 0x1023:01
+  /// and before the first poll. @c OsCommandFsBuffer explains why that position is not a choice.
+  ///
+  /// **A failed transfer is written down, and the poll runs anyway.** The reason is that the drive
+  /// usually gives the better answer. A command the firmware does not support writes nothing, so
+  /// the FoE read gets no reply and fails with a bare timeout, while the drive is about to report
+  /// "unsupported command". So the transfer's own error is returned in one case only: the drive
+  /// reports that the command succeeded, and the payload the caller asked for is still missing.
+  ///
   /// @param command  The 8-byte request: byte 0 is the OS command ID, bytes 1-7 its parameters.
   /// @param config   Timing and cancellation (see @c OsCommandConfig).
+  /// @param fsBuffer The bulk-data transfer, if the command has one (see @c OsCommandFsBuffer).
   /// @return The decoded response — including one the drive marked failed, which is a verdict and
   ///         not a transport error (check @c OsCommandResponse::failed). An error string if the
   ///         command was not run or produced no verdict: a malformed request, an SDO failure
-  ///         (forwarded as-is), an unknown status byte, a timeout, or a cancellation.
-  std::expected<OsCommandResponse, std::string> runOsCommand(const std::vector<uint8_t>& command,
-                                                             const OsCommandConfig& config = {});
+  ///         (forwarded as-is), an unknown status byte, a timeout, a cancellation, or an fs-buffer
+  ///         transfer that failed under a command the drive says succeeded.
+  std::expected<OsCommandResponse, std::string> runOsCommand(
+      const std::vector<uint8_t>& command, const OsCommandConfig& config = {},
+      const OsCommandFsBuffer& fsBuffer = {});
+
+  /// @brief Reads every object dictionary value the drive holds, in one transfer (OS command 21).
+  ///
+  /// The drive writes the raw bytes of its whole object dictionary to the fs-buffer while the
+  /// command runs, and this decodes them against the entries the device reported when it was
+  /// enumerated. @c ObjectDictionaryValues explains why that decode can go wrong and what stops it
+  /// from going wrong quietly.
+  ///
+  /// **A test and a diagnostic, not the fast path for reading parameters.** CoE Complete Access
+  /// already reads a whole object in one transfer, which is what the parameter cache uses. What
+  /// this adds is a second, independent reading of the same values, and the cheapest way to prove
+  /// an fs-buffer transfer works on real hardware. It does reach two values SDO cannot: 0x1024,
+  /// which is write-only, and 0x1023:01.
+  ///
+  /// The transfer is about 2 KB and the drive sends 100 bytes per control cycle, so give it a
+  /// timeout of a few hundred milliseconds rather than the default.
+  ///
+  /// @param config Timing and cancellation (see @c OsCommandConfig).
+  /// @return Every value the drive sent, or why not: the command failing, the transfer failing, or
+  ///         the decode disagreeing with what the drive sent.
+  std::expected<ObjectDictionaryValues, std::string> readObjectDictionaryValues(
+      const OsCommandConfig& config = {});
 
   /// @brief Reads the drive's description of its most recent fault (0x203F:01).
   ///

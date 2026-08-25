@@ -13,6 +13,7 @@
 #include <expected>
 #include <format>
 #include <functional>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -911,6 +912,19 @@ namespace {
 constexpr int kSdoInfoMaxRetries = 10;
 constexpr auto kSdoInfoRetryDelay = std::chrono::milliseconds(50);
 
+// How long a declared-size probe's refusal may take before probing is abandoned for that device.
+//
+// The two ways a slave refuses one are three orders of magnitude apart: an SDO abort comes back in
+// a few milliseconds, while a slave that simply does not answer costs a full mailbox timeout
+// (EC_TIMEOUTRXM, 700 ms). So this threshold does not need to be accurate — it only has to sit
+// between the two.
+constexpr auto kProbeRefusalBudget = std::chrono::milliseconds(100);
+
+// Object Code (ETG.1000.6 §5.6.3.2). A VAR holds one entry and the firmware reports its subindex
+// count correctly, so only these two are worth probing past.
+constexpr uint8_t kObjectCodeArray = 0x08;
+constexpr uint8_t kObjectCodeRecord = 0x09;
+
 // What one SDO Info transfer (first attempt plus retries) did, beyond whether it worked.
 //
 // Every field is here to separate causes that otherwise print identically, because the distinction
@@ -935,11 +949,15 @@ struct SdoInfoResult {
 // let a concurrent control-plane transfer claim this transfer's reason as its own. The lock is
 // dropped across the back-off sleeps, so a multi-second enumeration still never blocks another
 // control-plane caller for longer than a single transfer.
+//
+// @p maxRetries is 0 for a transfer whose *expected* answer is a refusal — see the declared-size
+// probe in readObjectDictionary. Retrying one of those buys nothing and costs a back-off per turn.
 template <typename F>
-SdoInfoResult retrySdoInfo(ecx_contextt* ctx, uint16_t slavePosition, std::mutex& mutex, F&& call) {
+SdoInfoResult retrySdoInfo(ecx_contextt* ctx, uint16_t slavePosition, std::mutex& mutex, F&& call,
+                           int maxRetries = kSdoInfoMaxRetries) {
   const auto started = std::chrono::steady_clock::now();
   SdoInfoResult result;
-  for (int attempt = 0; attempt <= kSdoInfoMaxRetries; ++attempt) {
+  for (int attempt = 0; attempt <= maxRetries; ++attempt) {
     if (attempt > 0) {
       std::this_thread::sleep_for(kSdoInfoRetryDelay);
     }
@@ -985,6 +1003,15 @@ struct SdoInfoCounters {
   // Gave up with a working counter of 0, which is genuinely ambiguous: either the slave answered
   // with an abort or the mailbox send failed. The per-object line's reason tells them apart.
   int zeroWkc = 0;
+  int probes = 0;  // declared-size probes issued; the refusal that ends one is not a failure
+
+  // Counts a declared-size probe. Its refusal is the expected outcome and the signal the loop is
+  // looking for, so it must not reach `failed` — otherwise every healthy device logs its summary
+  // at warning level and the count that identifies a degraded link stops meaning anything.
+  void addProbe(const SdoInfoResult& result) {
+    ++probes;
+    retries += result.attempts - 1;
+  }
 
   void add(const SdoInfoResult& result) {
     retries += result.attempts - 1;
@@ -1083,7 +1110,7 @@ void drainMailbox(ecx_contextt* ctx, uint16_t slavePosition) {
 
 }  // namespace
 
-std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectDictionary(
+std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
     uint16_t slavePosition) {
   // Fine-grained locking: controlPlaneMutex_ is taken per individual SDO Info
   // transaction (and released during retrySdoInfo's back-off sleeps), so this
@@ -1126,9 +1153,11 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
                                .count();
     spdlog::log(counters.failed > 0 ? spdlog::level::warn : spdlog::level::debug,
                 "Device {}: object dictionary read {} entries from {} object(s) in {} ms; "
-                "{} failed, {} retries consumed ({} no reply, {} zero wkc, {} no frame)",
+                "{} failed, {} retries consumed ({} no reply, {} zero wkc, {} no frame), "
+                "{} declared-size probes",
                 slavePosition, entriesRead, odList.Entries, elapsedMs, counters.failed,
-                counters.retries, counters.noReply, counters.zeroWkc, counters.noFrame);
+                counters.retries, counters.noReply, counters.zeroWkc, counters.noFrame,
+                counters.probes);
   };
 
   if (auto list = retrySdoInfo(ctx_.get(), slavePosition, controlPlaneMutex_,
@@ -1141,6 +1170,11 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
 
   std::vector<OdEntry> entries;
   entries.reserve(odList.Entries);
+
+  // Turned off by the first probe whose refusal took longer than kProbeRefusalBudget: a slave that
+  // refuses by staying silent makes probing cost a mailbox timeout per object, and a dictionary
+  // short of its unused slots is a far better outcome than a minutes-long enumeration.
+  bool probeDeclaredSize = true;
 
   for (uint16_t i = 0; i < odList.Entries; ++i) {
     auto description = retrySdoInfo(ctx_.get(), slavePosition, controlPlaneMutex_,
@@ -1158,13 +1192,49 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
     // asks for Unit/Default/Min/Max, sidestepping the SOMANET firmware quirk
     // where those bits are echoed without payload and corrupt the name. Those
     // fields stay empty here; they are not available from this service.
+    // **A record's or array's declared size is not on the wire, so it is probed for.**
+    //
+    // SOMANET firmware answers Get Object Description with the *runtime value of subindex 0*
+    // rather than the object's declared size (`sdoinfo_get_object_description`, and the
+    // `max_subindex` field beside it carries the same figure). For a PDO mapping object that value
+    // is how many entries are currently mapped, so an unmapped 0x1603 reports itself as having no
+    // entries at all while its storage holds ten. Walking only 0..MaxSub therefore reads a
+    // dictionary short by every unused slot — 62 entries on a SOMANET Integro, whose 0x1603,
+    // 0x1A02 and 0x16xx tails all went missing.
+    //
+    // Those slots are real and readable: the firmware resolves an entry description from its
+    // static entry table without consulting the count, which is why asking past MaxSub answers.
+    // So the loop keeps asking until the slave refuses. **Each probe is a single attempt**, because
+    // a refusal is the answer it is looking for and running it through the retry budget would
+    // spend ten back-offs per object to learn the same thing.
     ec_OElistt oeList{};
-    for (uint8_t sub = 0; sub <= odList.MaxSub[i]; ++sub) {
-      auto entry = retrySdoInfo(ctx_.get(), slavePosition, controlPlaneMutex_, [&] {
-        return ecx_readOEsingle(ctx_.get(), i, sub, &odList, &oeList);
-      });
-      counters.add(entry);
+    const bool hasSubindices =
+        odList.ObjectCode[i] == kObjectCodeArray || odList.ObjectCode[i] == kObjectCodeRecord;
+    for (uint8_t sub = 0;; ++sub) {
+      const bool probing = sub > odList.MaxSub[i];
+      if (probing && !(hasSubindices && probeDeclaredSize)) {
+        break;
+      }
+      auto entry = retrySdoInfo(
+          ctx_.get(), slavePosition, controlPlaneMutex_,
+          [&] { return ecx_readOEsingle(ctx_.get(), i, sub, &odList, &oeList); },
+          probing ? 0 : kSdoInfoMaxRetries);
+      if (probing) {
+        counters.addProbe(entry);
+      } else {
+        counters.add(entry);
+      }
       if (!entry.ok()) {
+        if (probing) {
+          if (entry.elapsed > kProbeRefusalBudget) {
+            spdlog::debug(
+                "Device {}: 0x{:04X}:{:02X} took {} ms to refuse, so the remaining objects are "
+                "read at the size the slave reports; unused subindices will be missing",
+                slavePosition, odList.Index[i], sub, entry.elapsed.count() / 1000);
+            probeDeclaredSize = false;
+          }
+          break;
+        }
         spdlog::warn("Device {}: readOEsingle 0x{:04X}:{:02X} failed{}", slavePosition,
                      odList.Index[i], sub, sdoInfoFailureDetail(entry));
         continue;
@@ -1182,11 +1252,21 @@ std::expected<std::vector<OdEntry>, std::string> SoemFieldbusDriver::readObjectD
           .minValue = std::nullopt,
           .maxValue = std::nullopt,
       });
+      // `sub` is a uint8_t and oeList's arrays hold EC_MAXOELIST (256) rows, so 255 is both the
+      // last subindex CoE can address and the last this loop can index. Stopping here rather than
+      // wrapping to 0 and enumerating the object a second time for ever.
+      if (sub == std::numeric_limits<uint8_t>::max()) {
+        break;
+      }
     }
   }
 
   logSummary(entries.size());
-  return entries;
+  // counters.failed is the entry count reported to the caller, not merely a log figure: every
+  // transfer counted there is one (index, subindex) the slave was asked about and never answered,
+  // so it is exactly what the dictionary is short by. Probes are excluded by addProbe, and an
+  // object-description failure returns above rather than reaching here.
+  return OdRead{.entries = std::move(entries), .missingEntries = counters.failed};
 }
 
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSii(

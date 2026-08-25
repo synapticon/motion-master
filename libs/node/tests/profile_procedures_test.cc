@@ -25,6 +25,7 @@ using mm::comm::EtherCatState;
 using mm::comm::FieldbusDriver;
 using mm::comm::ObjectDataType;
 using mm::comm::OdEntry;
+using mm::comm::OdRead;
 using mm::comm::SlaveInfo;
 using mm::node::Device;
 using mm::node::parseRestoreDefaultParametersRequest;
@@ -123,8 +124,8 @@ class CommandFakeDriver : public FieldbusDriver {
     return {};
   }
 
-  std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
-    return ods;
+  std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override {
+    return OdRead{.entries = ods};
   }
 
   // --- unused stubs ---------------------------------------------------------

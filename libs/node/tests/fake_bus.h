@@ -28,6 +28,7 @@ namespace mm::node::testing {
 using mm::comm::EtherCatState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
+using mm::comm::OdRead;
 using mm::comm::PdoLayout;
 using mm::comm::SlaveInfo;
 using mm::comm::SlaveIo;
@@ -129,14 +130,15 @@ class FakeBus : public FieldbusDriver {
                                             std::span<const uint8_t>) override {
     return {};
   }
-  int odReadCalls = 0;  // how many times the enumeration was attempted
-  std::string odError;  // non-empty makes every enumeration fail
-  std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
+  int odReadCalls = 0;       // how many times the enumeration was attempted
+  std::string odError;       // non-empty makes every enumeration fail
+  int odMissingEntries = 0;  // above zero reports a lossy enumeration, which must not be cached
+  std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override {
     ++odReadCalls;
     if (!odError.empty()) {
       return std::unexpected(odError);
     }
-    return ods;
+    return OdRead{.entries = ods, .missingEntries = odMissingEntries};
   }
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
                                                                    const std::string&) override {

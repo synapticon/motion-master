@@ -26,6 +26,7 @@ namespace {
 using mm::comm::EtherCatState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
+using mm::comm::OdRead;
 using mm::comm::SlaveInfo;
 using mm::node::cancelProcedure;
 using mm::node::DeviceManager;
@@ -60,9 +61,7 @@ class VendorFakeDriver : public FieldbusDriver {
 
   // --- unused stubs ---------------------------------------------------------
   std::expected<void, std::string> init() override { return {}; }
-  std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
-    return std::vector<OdEntry>{};
-  }
+  std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override { return OdRead{}; }
   std::expected<void, std::string> configureProcessData() override { return {}; }
   mm::comm::PdoLayout processDataLayout() override { return {}; }
   int exchangeProcessData(std::span<const uint8_t>, std::span<uint8_t>) override { return 0; }

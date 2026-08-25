@@ -536,7 +536,8 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "command ID and bytes 1-7 are its parameters, so any command the firmware implements can be "
       "run here. Where a command also has a procedure of its own, that one names and validates its "
       "parameters and decodes its result for you; this one asks you for the bytes and hands back "
-      "what the drive replied.";
+      "what the drive replied. A command that moves more data than the 8 request bytes hold moves "
+      "it through the drive's fs-buffer, which this can do in either direction.";
   osCommand.caveats = {
       "The request bytes are not checked against any command's expected parameters — an unintended "
       "command ID or parameter is issued to the drive as written.",
@@ -544,6 +545,9 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "Some commands are refused unless the drive is already enabled in a suitable mode of "
       "operation; the drive reports those as OS error 251, \"command not allowed\".",
       "Size the timeout for the command being run. Reaching it aborts the command on the drive.",
+      "Bulk data moves through the drive's fs-buffer while the command runs, and only firmware 5.2 "
+      "and newer can do that. Setting a direction for a command that moves no bulk data leaves the "
+      "master waiting for a transfer the drive will never start.",
   };
   // Unknowable here — the caller chooses the command, and some of them spin the motor — so this
   // reports the possibility rather than a false negative. requiresEnabled stays false because the
@@ -573,6 +577,43 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
                               std::stop_token stop) {
           Device& device = ctx.device;
           return runOsCommandProcedure(device, reporter, std::move(stop), spec);
+        };
+      },
+  });
+
+  ProcedureDescriptor readObjectDictionary;
+  readObjectDictionary.name = std::string(kReadObjectDictionaryProcedure);
+  readObjectDictionary.title = "Read object dictionary";
+  readObjectDictionary.description =
+      "Asks the drive to send the value of every object in its dictionary in one transfer, and "
+      "reports them all. The drive writes the raw values to its fs-buffer while the command runs, "
+      "and this reads them back and splits them up using the object dictionary it read from the "
+      "device earlier. Runs OS command 21. This is a test of that bulk transfer and a way to "
+      "cross-check the values read over SDO — not the normal way to read parameters, which is what "
+      "the parameters page does.";
+  readObjectDictionary.caveats = {
+      "Needs firmware 5.2 or newer. Older firmware cannot send data while a command is running.",
+      "The drive sends raw values with nothing to say where one ends and the next begins, so this "
+      "splits them up by the widths it read from the device's object dictionary. When the two "
+      "disagree the run fails and says so, rather than reporting values that have been shifted.",
+      "The device's object dictionary must have been read first. That happens when the device is "
+      "first seen at PRE-OP, so a drive that has not reached PRE-OP yet has nothing to decode "
+      "against.",
+      "Reports two values SDO cannot read: 0x1024, which is write-only, and 0x1023:01.",
+      "Reports the values the drive holds right now. A value the drive is still computing reads as "
+      "whatever it held at the moment of the transfer.",
+  };
+  readObjectDictionary.movesMotor = false;
+  readObjectDictionary.requiresEnabled = false;
+  readObjectDictionary.steps = readObjectDictionarySteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(readObjectDictionary),
+      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
+        return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
+          Device& device = ctx.device;
+          return runReadObjectDictionaryProcedure(device, reporter, std::move(stop));
         };
       },
   });

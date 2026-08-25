@@ -49,6 +49,9 @@ struct OsCommandRequest {
   std::vector<uint8_t> command;                ///< The 8 request bytes (byte 0 = command ID).
   std::chrono::milliseconds timeout{1000};     ///< Ceiling on the whole command.
   std::chrono::milliseconds pollInterval{10};  ///< Delay between response polls.
+  /// The bulk data the command moves, if it moves any (see @c OsCommandFsBuffer). Defaults to
+  /// moving nothing, which is what most commands do.
+  OsCommandFsBuffer fsBuffer;
 };
 
 /// @brief Parses and validates a client's OS command request body.
@@ -57,8 +60,14 @@ struct OsCommandRequest {
 /// bytes a command is, what a byte may hold, what timing is sane — and the handler's job is only to
 /// forward. A C++ caller building a request directly gets the same checks.
 ///
-/// Accepts `{"command": [8, 0, ...], "timeoutMs": 30000, "pollIntervalMs": 10}`. Both timing fields
-/// are optional and default as @c OsCommandRequest declares.
+/// Accepts `{"command": [8, 0, ...], "timeoutMs": 30000, "pollIntervalMs": 10, "fsBuffer": "read",
+/// "fsBufferData": "<base64>"}`. Everything but `command` is optional and defaults as
+/// @c OsCommandRequest declares.
+///
+/// `fsBuffer` is `"none"`, `"read"` or `"write"`. `fsBufferData` carries the bytes to send,
+/// base64-encoded because JSON has no binary type; it is required for `"write"` and rejected for
+/// the other two, so a caller who sets one and forgets the other is told rather than silently
+/// running a command that moves nothing.
 ///
 /// @param body  Parsed request JSON.
 /// @return The validated request, or a message naming what is wrong with it.
@@ -79,6 +88,9 @@ struct OsCommandResult {
   uint8_t status = 0;                ///< Terminal status byte (0x1023:03 byte 0).
   std::vector<uint8_t> data;         ///< Service response payload, if the drive sent one.
   std::optional<uint8_t> errorCode;  ///< OS error code, present only when the drive reported one.
+  /// What the fs-buffer transfer read, when one was asked for. Serialised the same way as @c data,
+  /// as an array of byte values, so one result reads consistently.
+  std::vector<uint8_t> fsBuffer;
 };
 void to_json(nlohmann::json& j, const OsCommandResult& result);
 
@@ -722,6 +734,39 @@ std::expected<void, std::string> runSkippedCyclesProcedure(Device& device,
                                                            ProgressReporter& reporter,
                                                            std::stop_token stop,
                                                            const SkippedCyclesRequest& request);
+
+/// @brief Procedure name for reading the whole object dictionary, as it appears in its URL and its
+///        snapshot key.
+inline constexpr std::string_view kReadObjectDictionaryProcedure = "read-object-dictionary";
+
+/// @brief The single step reading the whole object dictionary reports against.
+inline constexpr std::string_view kReadObjectDictionaryStep = "read-dictionary";
+
+/// @brief The read-object-dictionary procedure's step template — one step, idle.
+std::vector<ProgressStep> readObjectDictionarySteps();
+
+/// @brief Reads every object dictionary value in one transfer, as a procedure body.
+///
+/// **This exists to exercise the fs-buffer transfer, not because it is the way to read
+/// parameters.** CoE Complete Access already reads a whole object at a time, and that is what the
+/// parameter cache uses. What this run proves is that the drive can hand over bulk data while a
+/// command is running, which is the mechanism every safety-module command depends on. It also
+/// reaches two values SDO cannot: 0x1024, which is write-only, and 0x1023:01.
+///
+/// Harmless: a pure read, no operation mode, no CiA402 state, no brake, and nothing restored. It
+/// runs from PRE-OP up, needing only an active mailbox.
+///
+/// A run that fails on the decode rather than on the wire is still useful information, and the
+/// step's message says which: it means this master's record of the device's object dictionary
+/// disagrees with the drive's own. See @c SomanetDrive::readObjectDictionaryValues.
+///
+/// @param device   Device to run against, borrowed by the manager for this call.
+/// @param reporter Where step progress is recorded.
+/// @param stop     Cancellation token; passed into the command so an in-flight read is aborted.
+/// @return Void once every value was read and decoded, otherwise why not.
+std::expected<void, std::string> runReadObjectDictionaryProcedure(Device& device,
+                                                                  ProgressReporter& reporter,
+                                                                  std::stop_token stop);
 
 /// @brief The step ids shared by every procedure that prepares a drive, measures, and puts it back.
 ///

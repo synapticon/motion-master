@@ -4632,8 +4632,10 @@ components:
         value:
           description: >
             What the step produced, if anything — shape is per procedure. Absent when the step
-            produced nothing. For `os-command` it is an object with `status`, `data`, and
-            `errorCode` when the drive sent one.
+            produced nothing. For `os-command` it is an object with `status`, `data`, `errorCode`
+            when the drive sent one, and `fsBuffer` when the request asked to read bulk data. For
+            `read-object-dictionary` it is an object with `byteCount` and `values`, one entry per
+            object with its `index`, `subindex` and `value`.
           example: { status: 1, data: [1, 2, 3, 4, 5, 6] }
         error:
           type: string
@@ -5284,6 +5286,25 @@ components:
           default: 10
           description: >
             `os-command` only: how often the server reads the drive's response object while waiting.
+        fsBuffer:
+          type: string
+          enum: [none, read, write]
+          default: none
+          description: >
+            `os-command` only: whether the command moves bulk data through the drive's fs-buffer,
+            and which way. Most commands move none. The transfer runs while the command runs,
+            because the drive holds the command in progress until all the data has moved, and it
+            needs firmware 5.2 or newer. Setting a direction for a command that moves no bulk data
+            leaves the server waiting for a transfer the drive will never start.
+          example: read
+        fsBufferData:
+          type: string
+          description: >
+            `os-command` only, and required when `fsBuffer` is `write`: the bytes to send,
+            base64-encoded into this JSON string. Rejected for the other two directions rather than
+            ignored, so a request that names one and forgets the other is told rather than running a
+            command that moves nothing.
+            (Deliberately not `format: byte`, for the reason spelled out on `packageContent`.)
         encoder:
           type: integer
           enum: [1, 2]

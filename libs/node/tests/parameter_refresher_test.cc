@@ -25,6 +25,7 @@ namespace {
 using mm::comm::EtherCatState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
+using mm::comm::OdRead;
 using mm::comm::SlaveInfo;
 using mm::node::DeviceManager;
 using mm::node::ParameterRefresher;
@@ -77,8 +78,8 @@ class FakeDriver : public FieldbusDriver {
     }
     return it->second;
   }
-  std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
-    return ods;
+  std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override {
+    return OdRead{.entries = ods};
   }
   uint16_t slaveState(uint16_t) const override { return state; }
   // CoE-capable stand-in: parameters are enumerated over the object dictionary, not SII.

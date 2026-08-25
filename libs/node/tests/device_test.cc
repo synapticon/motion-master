@@ -6,17 +6,20 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <map>
 #include <optional>
 #include <set>
 #include <span>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
+#include "node/parameter_cache.h"
 #include "node/synapticon.h"
 
 namespace {
@@ -24,6 +27,7 @@ namespace {
 using mm::comm::EtherCatState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
+using mm::comm::OdRead;
 using mm::comm::SlaveInfo;
 using mm::node::Device;
 using mm::node::DeviceParameter;
@@ -64,6 +68,8 @@ class SdoFakeDriver : public FieldbusDriver {
   std::set<uint32_t> failWrites;
   /// Object dictionary entries returned by readObjectDictionary().
   std::vector<OdEntry> ods;
+  /// Entries the enumeration asked for and never got. Above zero, @c ods is short by that many.
+  int odMissingEntries = 0;
   /// Programmed Complete Access blobs, keyed by object index. An unprogrammed index reports
   /// complete access unsupported (an SDO abort in reality).
   std::map<uint16_t, std::expected<std::vector<uint8_t>, std::string>> completeReads;
@@ -163,8 +169,8 @@ class SdoFakeDriver : public FieldbusDriver {
     return std::vector<SlaveStateRaw>(positions.size(), SlaveStateRaw{});
   }
 
-  std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
-    return ods;
+  std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override {
+    return OdRead{.entries = ods, .missingEntries = odMissingEntries};
   }
 
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
@@ -517,6 +523,33 @@ TEST(DeviceInitParametersCompleteAccess, DecodesMultiSubObjectInOneUpload) {
             DeviceParameterValue{uint32_t{0x11111111}});
   EXPECT_EQ(device.parameter(0x1600, 0x02)->currentValue(),
             DeviceParameterValue{uint32_t{0x22222222}});
+  EXPECT_EQ(device.parameter(0x1600, 0x02)->syncState, SyncState::Synced);
+}
+
+TEST(DeviceInitParametersCompleteAccess, FallsBackWhenTheSlaveSendsOnlyTheEntriesItCounts) {
+  // A PDO mapping object whose dictionary declares three entries while only one is mapped. SOMANET
+  // firmware builds a Complete Access upload from the runtime value of subindex 0, so it sends the
+  // one mapped entry and stops. That is ordinary, not a fault: the read falls back per subindex and
+  // every declared entry still gets its value, including the unmapped ones.
+  SdoFakeDriver driver;
+  driver.programOd(0x1600, 0x00, kU8, 0x3F, 8, kArray);
+  driver.programOd(0x1600, 0x01, kU32, 0x3F, 32, kArray);
+  driver.programOd(0x1600, 0x02, kU32, 0x3F, 32, kArray);
+  driver.state = kPreOp;
+  driver.completeReads[0x1600] = completeBlob(1, {u32le(0x44444444)});  // one entry, not two
+  driver.programRead(0x1600, 0x00, {1});
+  driver.programRead(0x1600, 0x01, u32le(0x44444444));
+  driver.programRead(0x1600, 0x02, u32le(0x00000000));
+  Device device(1, driver);
+
+  ASSERT_TRUE(
+      device.initializeParameters(/*readValues=*/true, /*useCompleteAccess=*/true).has_value());
+
+  EXPECT_EQ(driver.completeReadIndices, (std::vector<uint16_t>{0x1600}));
+  EXPECT_GT(driver.perSubReads, 0);
+  EXPECT_EQ(device.parameter(0x1600, 0x01)->currentValue(),
+            DeviceParameterValue{uint32_t{0x44444444}});
+  EXPECT_EQ(device.parameter(0x1600, 0x02)->currentValue(), DeviceParameterValue{uint32_t{0}});
   EXPECT_EQ(device.parameter(0x1600, 0x02)->syncState, SyncState::Synced);
 }
 
@@ -1421,6 +1454,69 @@ TEST(DeviceParameterLocking, CachedReadSeesTheNewValueWhileAnSdoDownloadIsInFlig
   ASSERT_TRUE(seen.has_value());
   EXPECT_EQ(*seen, DeviceParameterValue{uint32_t{77}});
   EXPECT_EQ(device.parameter(0x6065, 0x00)->syncState, SyncState::Synced);
+}
+
+// ── The object dictionary cache and a lossy enumeration ─────────────────────────────────────────
+//
+// A cache file is keyed on the device's identity alone and is never checked against the device
+// again, so whatever it holds is what this host believes for as long as it exists. An enumeration
+// that lost an entry must therefore not be written: it would leave one host short of an entry no
+// other host is missing.
+
+// A fresh, empty temp directory unique to one test, removed first so a previous run never leaks in.
+std::filesystem::path makeCacheDir(const std::string& tag) {
+  std::filesystem::path dir =
+      std::filesystem::temp_directory_path() / ("mm-device-od-cache-test-" + tag);
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+  return dir;
+}
+
+// Gives the fake an identity the cache accepts: caching is on for the Synapticon vendor by default.
+// The driver is configured in place because SdoFakeDriver holds an atomic and so cannot be returned
+// by value.
+void makeCacheable(SdoFakeDriver& driver) {
+  driver.info.vendorId = mm::node::kSynapticonVendorId;
+  driver.info.productCode = 0x00000301;
+  driver.info.revisionNumber = 0x00000001;
+  driver.programOd(0x6040, 0, 0x0006, 0x3F, 16);
+}
+
+TEST(DeviceParameterCache, CompleteEnumerationIsCached) {
+  const auto dir = makeCacheDir("complete");
+  mm::node::ParameterCache cache({.directory = dir.string(), .enabled = true});
+  SdoFakeDriver driver;
+  makeCacheable(driver);
+  Device device(1, driver, nullptr, &cache);
+
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+
+  const auto cached =
+      cache.load(driver.info.vendorId, driver.info.productCode, driver.info.revisionNumber);
+  ASSERT_TRUE(cached.has_value()) << "a complete enumeration must be cached";
+  EXPECT_EQ(cached->size(), 1U);
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
+TEST(DeviceParameterCache, LossyEnumerationIsNotCached) {
+  const auto dir = makeCacheDir("lossy");
+  mm::node::ParameterCache cache({.directory = dir.string(), .enabled = true});
+  SdoFakeDriver driver;
+  makeCacheable(driver);
+  driver.odMissingEntries = 1;  // one entry the slave was asked about and never answered
+  Device device(1, driver, nullptr, &cache);
+
+  // The device still comes up, and on the entries that were read: a lost entry degrades the
+  // dictionary, it does not fail the enumeration.
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  EXPECT_NE(device.findParameter(0x6040, 0), nullptr);
+
+  EXPECT_FALSE(
+      cache.load(driver.info.vendorId, driver.info.productCode, driver.info.revisionNumber))
+      << "a short dictionary must not be written, or every later scan reads it back";
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
 }
 
 }  // namespace

@@ -56,6 +56,16 @@ constexpr auto kEncoderRegisterPollInterval = std::chrono::milliseconds(20);
 // Anything shorter aborts first and reports that this master gave up, which is true and useless.
 constexpr auto kSkippedCyclesTimeout = std::chrono::seconds(30);
 
+// Reading the whole object dictionary moves about 2 KB, and the drive writes 100 bytes per control
+// cycle, so the transfer itself is over in around 25 ms. This ceiling clears the drive's own ~20 s
+// reception timeout for the same reason kSkippedCyclesTimeout does: firmware older than 5.2 cannot
+// hand over data while a command runs, and letting the drive answer for itself gives a real reason
+// instead of "this master gave up".
+constexpr auto kReadObjectDictionaryTimeout = std::chrono::seconds(30);
+// Barely used: the transfer only finishes once the drive has sent everything, so the first poll
+// after it normally reads a terminal status already.
+constexpr auto kReadObjectDictionaryPollInterval = std::chrono::milliseconds(20);
+
 // Same reasoning for the BiSS service commands whose precondition is "this encoder exists and is
 // BiSS": only the service instance owning the addressed encoder answers, so an encoder that is
 // neither is answered by nothing and the drive's own ~20 s timeout is the report. Clear it, and a
@@ -755,6 +765,49 @@ std::expected<OsCommandRequest, std::string> parseOsCommandRequest(const nlohman
     return std::unexpected(pollInterval.error());
   }
   request.pollInterval = *pollInterval;
+
+  auto transfer = body.find("fsBuffer");
+  if (transfer != body.end() && !transfer->is_null()) {
+    if (!transfer->is_string()) {
+      return std::unexpected("'fsBuffer' must be a string");
+    }
+    auto parsed = parseFsBufferTransfer(transfer->get<std::string>());
+    if (!parsed) {
+      return std::unexpected(
+          std::format("'fsBuffer' must be {}, {} or {}", toString(FsBufferTransfer::kNone),
+                      toString(FsBufferTransfer::kRead), toString(FsBufferTransfer::kWrite)));
+    }
+    request.fsBuffer.transfer = *parsed;
+  }
+
+  auto payload = body.find("fsBufferData");
+  // An empty string counts as absent, not as an empty payload. A client that renders a file picker
+  // for every parameter sends the field either way, and "" means the user picked nothing.
+  const bool hasPayload = payload != body.end() && !payload->is_null() &&
+                          !(payload->is_string() && payload->get<std::string>().empty());
+  if (request.fsBuffer.transfer == FsBufferTransfer::kWrite) {
+    if (!hasPayload) {
+      return std::unexpected(std::format("'fsBufferData' is required when 'fsBuffer' is {}",
+                                         toString(FsBufferTransfer::kWrite)));
+    }
+    if (!payload->is_string()) {
+      return std::unexpected("'fsBufferData' must be a base64 string");
+    }
+    auto decoded = core::base64Decode(payload->get<std::string>());
+    if (!decoded) {
+      return std::unexpected(
+          std::format("'fsBufferData' is not valid base64: {}", decoded.error()));
+    }
+    if (decoded->empty()) {
+      return std::unexpected("'fsBufferData' decoded to no bytes at all");
+    }
+    request.fsBuffer.payload = std::move(*decoded);
+  } else if (hasPayload) {
+    // Refused rather than ignored: a caller who supplied bytes and left the direction at its
+    // default asked for a transfer, and running the command without one looks like it worked.
+    return std::unexpected(std::format("'fsBufferData' only applies when 'fsBuffer' is {}",
+                                       toString(FsBufferTransfer::kWrite)));
+  }
   return request;
 }
 
@@ -776,6 +829,24 @@ std::vector<ProcedureParameter> osCommandParameters() {
           "How long to wait between reads of the drive's response object while the command runs.",
           defaults.pollInterval.count(), kMinPollInterval.count(),
           std::chrono::duration_cast<std::chrono::milliseconds>(kMaxPollInterval).count()),
+      enumParameter(
+          "fsBuffer", "Bulk data",
+          "Whether this command moves bulk data through the drive's fs-buffer, and which way. Most "
+          "commands move none. A command that does is documented as doing so, and moving data it "
+          "does not expect makes it wait for a transfer that never comes.",
+          std::string(toString(defaults.fsBuffer.transfer)),
+          {
+              ParameterOption{.value = std::string(toString(FsBufferTransfer::kNone)),
+                              .title = "None"},
+              ParameterOption{.value = std::string(toString(FsBufferTransfer::kRead)),
+                              .title = "Read from the drive"},
+              ParameterOption{.value = std::string(toString(FsBufferTransfer::kWrite)),
+                              .title = "Write to the drive"},
+          }),
+      fileParameter("fsBufferData", "Bulk data to write",
+                    "The bytes to send, for a command that reads bulk data from the master. Leave "
+                    "it empty for anything else.",
+                    nlohmann::json("")),
   };
 }
 
@@ -783,6 +854,9 @@ void to_json(nlohmann::json& j, const OsCommandResult& result) {
   j = nlohmann::json{{"status", result.status}, {"data", result.data}};
   if (result.errorCode) {
     j["errorCode"] = *result.errorCode;
+  }
+  if (!result.fsBuffer.empty()) {
+    j["fsBuffer"] = result.fsBuffer;
   }
 }
 
@@ -801,7 +875,8 @@ std::expected<void, std::string> runOsCommandProcedure(Device& device, ProgressR
   reporter.start(kOsCommandStep);
   auto response = drive->runOsCommand(
       request.command,
-      {.timeout = request.timeout, .pollInterval = request.pollInterval, .stop = std::move(stop)});
+      {.timeout = request.timeout, .pollInterval = request.pollInterval, .stop = std::move(stop)},
+      request.fsBuffer);
   if (!response) {
     reporter.fail(kOsCommandStep, response.error());
     return std::unexpected(response.error());
@@ -825,7 +900,8 @@ std::expected<void, std::string> runOsCommandProcedure(Device& device, ProgressR
 
   reporter.succeed(kOsCommandStep, OsCommandResult{.status = static_cast<uint8_t>(response->status),
                                                    .data = response->data,
-                                                   .errorCode = response->errorCode});
+                                                   .errorCode = response->errorCode,
+                                                   .fsBuffer = response->fsBuffer});
   return {};
 }
 
@@ -2181,6 +2257,31 @@ std::expected<void, std::string> runSkippedCyclesProcedure(Device& device,
     return std::unexpected(result.error());
   }
   reporter.succeed(kSkippedCyclesStep, *result);
+  return {};
+}
+
+std::vector<ProgressStep> readObjectDictionarySteps() {
+  return stepsFrom({kReadObjectDictionaryStep});
+}
+
+std::expected<void, std::string> runReadObjectDictionaryProcedure(Device& device,
+                                                                  ProgressReporter& reporter,
+                                                                  std::stop_token stop) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+
+  reporter.start(kReadObjectDictionaryStep);
+  auto values =
+      drive->readObjectDictionaryValues({.timeout = kReadObjectDictionaryTimeout,
+                                         .pollInterval = kReadObjectDictionaryPollInterval,
+                                         .stop = std::move(stop)});
+  if (!values) {
+    reporter.fail(kReadObjectDictionaryStep, values.error());
+    return std::unexpected(values.error());
+  }
+  reporter.succeed(kReadObjectDictionaryStep, *values);
   return {};
 }
 

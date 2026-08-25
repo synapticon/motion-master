@@ -449,6 +449,16 @@ std::optional<IcMuCalibrationMode> parseIcMuCalibrationMode(std::string_view tok
 
 }  // namespace somanet
 
+std::optional<FsBufferTransfer> parseFsBufferTransfer(std::string_view token) {
+  for (const auto transfer :
+       {FsBufferTransfer::kNone, FsBufferTransfer::kRead, FsBufferTransfer::kWrite}) {
+    if (token == toString(transfer)) {
+      return transfer;
+    }
+  }
+  return std::nullopt;
+}
+
 std::optional<std::string_view> osCommandErrorName(uint8_t code) {
   switch (static_cast<OsCommandError>(code)) {
     case OsCommandError::kNotAllowed:
@@ -467,7 +477,8 @@ std::optional<std::string_view> osCommandErrorName(uint8_t code) {
 }
 
 std::expected<OsCommandResponse, std::string> SomanetDrive::runOsCommand(
-    const std::vector<uint8_t>& command, const OsCommandConfig& config) {
+    const std::vector<uint8_t>& command, const OsCommandConfig& config,
+    const OsCommandFsBuffer& fsBuffer) {
   if (command.size() != kOsCommandSize) {
     return std::unexpected(
         std::format("an OS command is {} bytes, got {}", kOsCommandSize, command.size()));
@@ -542,8 +553,49 @@ std::expected<OsCommandResponse, std::string> SomanetDrive::runOsCommand(
     return std::unexpected(reason);
   }
 
-  std::string abortReason;
+  // Started before the transfer, not after it, so config.timeout keeps meaning what it says: a
+  // ceiling on the whole command. Overrunning it costs nothing when the command has in fact
+  // finished, because the loop below reads the response before it looks at the clock.
   auto deadline = std::chrono::steady_clock::now() + config.timeout;
+
+  // The transfer goes here, after the command write and before the first poll, because the drive
+  // keeps the command in progress until all the data has moved. OsCommandFsBuffer has the detail.
+  //
+  // A failure is recorded rather than returned. A command the drive never accepted writes nothing,
+  // so the read gets no reply and fails with a bare timeout. The poll below is what learns why.
+  std::string fsBufferError;
+  std::vector<uint8_t> fsBufferData;
+  switch (fsBuffer.transfer) {
+    case FsBufferTransfer::kNone:
+      break;
+    case FsBufferTransfer::kRead: {
+      auto read = device_.readFile(std::string(kFsBufferFilename));
+      if (read) {
+        fsBufferData = std::move(*read);
+        spdlog::debug("Device {}: OS command 0x{:02X} read {} fs-buffer bytes", position, id,
+                      fsBufferData.size());
+      } else {
+        fsBufferError = read.error().message;
+        spdlog::debug("Device {}: OS command 0x{:02X} fs-buffer read failed: {}", position, id,
+                      fsBufferError);
+      }
+      break;
+    }
+    case FsBufferTransfer::kWrite: {
+      if (auto written = device_.writeFile(std::string(kFsBufferFilename), fsBuffer.payload);
+          !written) {
+        fsBufferError = written.error().message;
+        spdlog::debug("Device {}: OS command 0x{:02X} fs-buffer write failed: {}", position, id,
+                      fsBufferError);
+      } else {
+        spdlog::debug("Device {}: OS command 0x{:02X} wrote {} fs-buffer bytes", position, id,
+                      fsBuffer.payload.size());
+      }
+      break;
+    }
+  }
+
+  std::string abortReason;
   std::optional<uint8_t> lastPercent;
 
   for (;;) {
@@ -569,7 +621,17 @@ std::expected<OsCommandResponse, std::string> SomanetDrive::runOsCommand(
       if (!abortReason.empty()) {
         return std::unexpected(abortReason);
       }
-      return decodeResponse(*response);
+      OsCommandResponse decoded = decodeResponse(*response);
+      // The drive says the command ran, so it cannot account for the missing payload. This is
+      // the one case where the transfer's own error is the answer.
+      if (!fsBufferError.empty() && !decoded.failed()) {
+        return std::unexpected(
+            std::format("the fs-buffer transfer failed although the drive "
+                        "completed OS command 0x{:02X}: {}",
+                        id, fsBufferError));
+      }
+      decoded.fsBuffer = std::move(fsBufferData);
+      return decoded;
     }
     if (status >= kProgressMin && status <= kProgressMax) {
       const uint8_t percent = static_cast<uint8_t>(status - kProgressMin);
@@ -609,6 +671,114 @@ std::expected<OsCommandResponse, std::string> SomanetDrive::runOsCommand(
 
     std::this_thread::sleep_for(config.pollInterval);
   }
+}
+
+namespace {
+
+/// How many bytes of an OS command 21 transfer one dictionary entry takes up. The drive lays its
+/// values out by their declared widths, so a scalar takes the width of its data type, and a string
+/// or byte array takes the room its bit length says the drive reserved for it.
+///
+/// @return The width, or @c std::nullopt for an entry that declares neither.
+std::optional<size_t> objectDictionaryEntryWidth(const DeviceParameter& parameter) {
+  if (const size_t scalar = scalarByteWidth(parameter.dataType); scalar > 0) {
+    return scalar;
+  }
+  if (parameter.bitLength == 0) {
+    return std::nullopt;
+  }
+  return (static_cast<size_t>(parameter.bitLength) + 7U) / 8U;
+}
+
+/// Encodes a typed parameter value as a native JSON scalar: numbers stay numbers, strings stay
+/// strings, and a byte array becomes an array of numbers.
+nlohmann::json parameterValueToJson(const DeviceParameterValue& value) {
+  return std::visit([](const auto& v) -> nlohmann::json { return v; }, value);
+}
+
+}  // namespace
+
+void to_json(nlohmann::json& j, const ObjectDictionaryValue& entry) {
+  j = nlohmann::json{{"index", entry.index},
+                     {"subindex", entry.subindex},
+                     {"value", parameterValueToJson(entry.value)}};
+}
+
+void to_json(nlohmann::json& j, const ObjectDictionaryValues& values) {
+  j = nlohmann::json{{"byteCount", values.byteCount}, {"values", values.values}};
+}
+
+std::expected<ObjectDictionaryValues, std::string> decodeObjectDictionaryValues(
+    std::span<const uint8_t> data, const std::vector<DeviceParameter>& definitions) {
+  if (definitions.empty()) {
+    return std::unexpected(
+        "the device's object dictionary has not been enumerated, so there is nothing to decode "
+        "the transfer against");
+  }
+
+  ObjectDictionaryValues result;
+  result.byteCount = data.size();
+  result.values.reserve(definitions.size());
+
+  size_t offset = 0;
+  for (const auto& parameter : definitions) {
+    auto width = objectDictionaryEntryWidth(parameter);
+    if (!width) {
+      return std::unexpected(std::format(
+          "0x{:04X}:{:02X} declares data type 0x{:04X} and a bit length of 0, so how many bytes it "
+          "takes in the transfer is unknown",
+          parameter.index, parameter.subindex, parameter.dataType));
+    }
+    if (offset + *width > data.size()) {
+      return std::unexpected(std::format(
+          "the drive sent {} bytes, which runs out at 0x{:04X}:{:02X}: that entry needs {} bytes "
+          "from offset {}. The master and the drive disagree about how wide an earlier entry is, "
+          "or about which entries the dictionary holds",
+          data.size(), parameter.index, parameter.subindex, *width, offset));
+    }
+
+    auto value = decodeSdoBytes(parameter.dataType, data.subspan(offset, *width));
+    if (!value) {
+      return std::unexpected(
+          std::format("0x{:04X}:{:02X}: {}", parameter.index, parameter.subindex, value.error()));
+    }
+    result.values.push_back(
+        {.index = parameter.index, .subindex = parameter.subindex, .value = std::move(*value)});
+    offset += *width;
+  }
+
+  // The one check that catches a width the two sides disagree about. Anything short of the whole
+  // transfer means the walk above went off course, and every value it produced after that point is
+  // some other entry's bytes read as this one's.
+  if (offset != data.size()) {
+    return std::unexpected(std::format(
+        "the drive sent {} bytes but the master's {} dictionary entries account for {}. The two "
+        "disagree about how wide an entry is, or about which entries the dictionary holds",
+        data.size(), definitions.size(), offset));
+  }
+  return result;
+}
+
+std::expected<ObjectDictionaryValues, std::string> SomanetDrive::readObjectDictionaryValues(
+    const OsCommandConfig& config) {
+  std::vector<uint8_t> command(kOsCommandSize, 0);
+  command[0] = static_cast<uint8_t>(somanet::OsCommandId::kReadObjectDictionary);
+
+  auto response =
+      runOsCommand(command, config, {.transfer = FsBufferTransfer::kRead, .payload = {}});
+  if (!response) {
+    return std::unexpected(response.error());
+  }
+  if (response->failed()) {
+    // Command 21 declares no error codes of its own, so anything here is a general one.
+    auto name = response->errorCode ? osCommandErrorName(*response->errorCode) : std::nullopt;
+    return std::unexpected(
+        std::format("the drive refused to read its object dictionary: {}",
+                    name ? std::string(*name)
+                         : (response->errorCode ? std::format("OS error {}", *response->errorCode)
+                                                : std::string("no reason given"))));
+  }
+  return decodeObjectDictionaryValues(response->fsBuffer, device_.parametersOrdered());
 }
 
 void to_json(nlohmann::json& j, const BrakeState& state) {

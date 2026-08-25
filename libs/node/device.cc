@@ -182,13 +182,13 @@ std::expected<void, std::string> Device::readParameterDefinitions(bool readValue
     definitions = parameterCache_->load(vendorId_, productCode_, revisionNumber_);
   }
   if (!definitions) {
-    auto entries = driver_.readObjectDictionary(slavePosition_);
-    if (!entries) {
-      return std::unexpected(entries.error());
+    auto read = driver_.readObjectDictionary(slavePosition_);
+    if (!read) {
+      return std::unexpected(read.error());
     }
     std::vector<DeviceParameter> built;
-    built.reserve(entries->size());
-    for (const auto& e : *entries) {
+    built.reserve(read->entries.size());
+    for (const auto& e : read->entries) {
       DeviceParameter p{
           .index = e.index,
           .subindex = e.subindex,
@@ -224,8 +224,22 @@ std::expected<void, std::string> Device::readParameterDefinitions(bool readValue
     }
     // Persist the freshly enumerated definitions before reading values, so the (possibly slow)
     // value pass below is never on the cache-population critical path.
+    //
+    // An enumeration that lost an entry is not persisted. The cache file is keyed on the device's
+    // identity alone and is never checked against the device again, so a dictionary short of one
+    // entry would be what this host believes for as long as the file exists — and only this host,
+    // which is a fault nobody else can reproduce and nothing corrects. Reading the dictionary from
+    // the device again on the next scan costs seconds; the alternative costs a support case. The
+    // definitions in hand are still used for this session: every entry that was read is correct.
     if (parameterCache_) {
-      parameterCache_->store(vendorId_, productCode_, revisionNumber_, built);
+      if (read->missingEntries == 0) {
+        parameterCache_->store(vendorId_, productCode_, revisionNumber_, built);
+      } else {
+        spdlog::warn(
+            "Device {}: the object dictionary read is short {} entry(ies), so it is not cached; "
+            "the next scan reads it from the device again",
+            slavePosition_, read->missingEntries);
+      }
     }
     definitions = std::move(built);
   }
@@ -346,32 +360,43 @@ bool completeAccessEligible(std::span<DeviceParameter* const> subs) {
   return true;
 }
 
+// What one attempt at decoding a Complete Access blob did.
+enum class CompleteAccessDecode {
+  kFilled,       // every entry got a value
+  kShortBlob,    // the slave sent fewer bytes than the entries need — see below
+  kUndecodable,  // an entry's slice does not fit its declared type
+};
+
 // Decodes a Complete Access blob into @p subs (subindex order), assigning each entry's value and
 // marking it synced. The blob layout (ETG): subindex 0 as a 16-bit value (1 data byte + 1 alignment
 // pad), then subindices 1..N concatenated at their native bit lengths. Callers guarantee the run is
-// eligible (see @c completeAccessEligible). Returns false (leaving any partially-applied values to
-// be overwritten by the per-subindex fallback) if the blob is shorter than the layout implies or
-// any entry fails to decode.
-bool decodeCompleteAccess(std::span<DeviceParameter* const> subs,
-                          const std::vector<uint8_t>& blob) {
+// eligible (see @c completeAccessEligible). Anything but @c kFilled leaves partially-applied values
+// for the per-subindex fallback to overwrite.
+//
+// @c kShortBlob is ordinary rather than a fault, which is why it is told apart from
+// @c kUndecodable. SOMANET firmware builds a Complete Access upload from the *runtime value of
+// subindex 0* — an unmapped 0x1603 sends two bytes while its dictionary declares eleven entries —
+// so a mapping object with unused slots lands here every time the values are read.
+CompleteAccessDecode decodeCompleteAccess(std::span<DeviceParameter* const> subs,
+                                          const std::vector<uint8_t>& blob) {
   const uint32_t totalBits = static_cast<uint32_t>(blob.size()) * 8u;
   uint32_t cursor = 0;
   for (size_t k = 0; k < subs.size(); ++k) {
     DeviceParameter* p = subs[k];
     if (cursor + p->bitLength > totalBits) {
-      return false;
+      return CompleteAccessDecode::kShortBlob;
     }
     const std::vector<uint8_t> slice =
         extractBits(std::span<const uint8_t>(blob.data(), blob.size()), cursor, p->bitLength);
     if (!decodeSdoBytes(p->dataType, slice)) {
-      return false;  // slice too short for the declared type — the layout assumption was wrong
+      return CompleteAccessDecode::kUndecodable;  // the layout assumption was wrong
     }
     p->setRawValue(slice);
     p->syncState = SyncState::Synced;
     // Subindex 0 occupies a padded 16-bit slot; every later entry follows at its native width.
     cursor += (k == 0) ? 16u : p->bitLength;
   }
-  return true;
+  return CompleteAccessDecode::kFilled;
 }
 
 // Tracks Complete Access support across grouped reads: probe once, then per-object fallback. CA
@@ -424,8 +449,17 @@ bool readCompleteInto(mm::comm::FieldbusDriver& driver, uint16_t slavePosition,
     return false;
   }
   ca.recordSuccess();
-  if (decodeCompleteAccess(subs, *blob)) {
-    return true;
+  switch (decodeCompleteAccess(subs, *blob)) {
+    case CompleteAccessDecode::kFilled:
+      return true;
+    case CompleteAccessDecode::kShortBlob:
+      spdlog::debug(
+          "Device {}: complete access of 0x{:04X} returned {} bytes for {} entries, so the slave "
+          "sent only the entries it counts as in use; per-subindex reads",
+          slavePosition, index, blob->size(), subs.size());
+      return false;
+    case CompleteAccessDecode::kUndecodable:
+      break;
   }
   spdlog::warn("Device {}: complete-access layout for 0x{:04X} inconsistent; per-subindex reads",
                slavePosition, index);
@@ -1152,12 +1186,21 @@ bool Device::readObjectComplete(uint16_t index, std::span<const uint8_t> subindi
   if (!completeAccessEligible(subs)) {
     return false;
   }
-  if (!decodeCompleteAccess(subs, *blob)) {
-    spdlog::warn("Device {}: complete-access layout for 0x{:04X} inconsistent; per-subindex reads",
-                 slavePosition_, index);
-    return false;
+  switch (decodeCompleteAccess(subs, *blob)) {
+    case CompleteAccessDecode::kFilled:
+      return true;
+    case CompleteAccessDecode::kShortBlob:
+      spdlog::debug(
+          "Device {}: complete access of 0x{:04X} returned {} bytes for {} entries, so the slave "
+          "sent only the entries it counts as in use; per-subindex reads",
+          slavePosition_, index, blob->size(), subs.size());
+      return false;
+    case CompleteAccessDecode::kUndecodable:
+      break;
   }
-  return true;
+  spdlog::warn("Device {}: complete-access layout for 0x{:04X} inconsistent; per-subindex reads",
+               slavePosition_, index);
+  return false;
 }
 
 std::expected<ObjectValues, std::string> Device::readObject(uint16_t index,

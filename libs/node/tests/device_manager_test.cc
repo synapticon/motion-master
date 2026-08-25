@@ -23,6 +23,7 @@ namespace {
 using mm::comm::EtherCatState;
 using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
+using mm::comm::OdRead;
 using mm::comm::SlaveDiagnostics;
 using mm::comm::SlaveInfo;
 using mm::node::DeviceManager;
@@ -128,9 +129,7 @@ class FakeDriver : public FieldbusDriver {
     return {};
   }
 
-  std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
-    return std::vector<OdEntry>{};
-  }
+  std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override { return OdRead{}; }
 
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
                                                                    const std::string&) override {

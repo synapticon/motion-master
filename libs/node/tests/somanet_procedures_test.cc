@@ -37,6 +37,7 @@ using mm::comm::EtherCatState;
 using mm::comm::FieldbusDriver;
 using mm::comm::ObjectDataType;
 using mm::comm::OdEntry;
+using mm::comm::OdRead;
 using mm::comm::SlaveInfo;
 using mm::node::commutationOffsetMeasurementSteps;
 using mm::node::Device;
@@ -47,6 +48,7 @@ using mm::node::FirmwareLatencyAction;
 using mm::node::firmwareLatencyParameters;
 using mm::node::FirmwareLatencyRequest;
 using mm::node::firmwareLatencySteps;
+using mm::node::FsBufferTransfer;
 using mm::node::hrdStreamingParameters;
 using mm::node::HrdStreamingRequest;
 using mm::node::hrdStreamingSteps;
@@ -56,9 +58,11 @@ using mm::node::icMuCalibrationModeSteps;
 using mm::node::IgnoreBissStatusBitsRequest;
 using mm::node::ignoreBissStatusBitsSteps;
 using mm::node::kEncoderRegisterStep;
+using mm::node::kFsBufferFilename;
 using mm::node::kOsCommand;
 using mm::node::kOsCommandMode;
 using mm::node::kOsCommandStep;
+using mm::node::kReadObjectDictionaryStep;
 using mm::node::kSynapticonVendorId;
 using mm::node::motorPhaseOrderDetectionSteps;
 using mm::node::offsetDetectionSteps;
@@ -71,6 +75,7 @@ using mm::node::parseFirmwareLatencyRequest;
 using mm::node::parseHrdStreamingRequest;
 using mm::node::parseIcMuCalibrationModeRequest;
 using mm::node::parseIgnoreBissStatusBitsRequest;
+using mm::node::parseOsCommandRequest;
 using mm::node::parseSkippedCyclesRequest;
 using mm::node::parseSystemIdentificationRequest;
 using mm::node::parseVelocitySourceRequest;
@@ -79,6 +84,7 @@ using mm::node::phaseResistanceMeasurementSteps;
 using mm::node::polePairDetectionSteps;
 using mm::node::ProgressReporter;
 using mm::node::ProgressStatus;
+using mm::node::readObjectDictionarySteps;
 using mm::node::runCommutationOffsetMeasurementProcedure;
 using mm::node::runEncoderRegisterProcedure;
 using mm::node::runFirmwareLatencyProcedure;
@@ -92,6 +98,7 @@ using mm::node::runOsCommandProcedure;
 using mm::node::runPhaseInductanceMeasurementProcedure;
 using mm::node::runPhaseResistanceMeasurementProcedure;
 using mm::node::runPolePairDetectionProcedure;
+using mm::node::runReadObjectDictionaryProcedure;
 using mm::node::runSkippedCyclesProcedure;
 using mm::node::runSystemIdentificationProcedure;
 using mm::node::runTorqueConstantMeasurementProcedure;
@@ -276,8 +283,8 @@ class OsCommandFakeDriver : public FieldbusDriver {
     return found;
   }
 
-  std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
-    return ods;
+  std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override {
+    return OdRead{.entries = ods};
   }
   SlaveInfo slaveInfo(uint16_t) const override {
     SlaveInfo info{};
@@ -303,12 +310,25 @@ class OsCommandFakeDriver : public FieldbusDriver {
       const std::vector<uint16_t>& positions) override {
     return std::vector<SlaveStateRaw>(positions.size(), SlaveStateRaw{});
   }
-  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
-                                                                   const std::string&) override {
-    return std::vector<uint8_t>{};
+  /// What a read of each filename returns. A name that is absent reads as not found.
+  std::map<std::string, std::vector<uint8_t>> files;
+  /// Every file read and every file written, in order — the fs-buffer transfers a test asserts on.
+  std::vector<std::string> fileReads;
+  std::vector<std::pair<std::string, std::vector<uint8_t>>> fileWrites;
+
+  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
+      uint16_t, const std::string& name) override {
+    fileReads.push_back(name);
+    auto it = files.find(name);
+    if (it == files.end()) {
+      return std::unexpected(
+          mm::comm::makeFoeError(mm::comm::FoeErrorKind::FileNotFound, "FOEread", 1, name));
+    }
+    return it->second;
   }
-  std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string&,
-                                                    std::span<const uint8_t>) override {
+  std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string& name,
+                                                    std::span<const uint8_t> data) override {
+    fileWrites.emplace_back(name, std::vector<uint8_t>(data.begin(), data.end()));
     return {};
   }
   std::expected<void, std::string> readRegister(uint16_t, uint16_t, std::span<uint8_t>) override {
@@ -333,7 +353,153 @@ Device makeDevice(OsCommandFakeDriver& driver) {
 OsCommandRequest makeRequest() {
   return OsCommandRequest{.command = {8, 0, 0, 0, 0, 0, 0, 0},
                           .timeout = std::chrono::milliseconds(1000),
-                          .pollInterval = kNoDelay};
+                          .pollInterval = kNoDelay,
+                          .fsBuffer = {}};
+}
+
+// Bodies are parsed from text rather than built from initialiser lists: a JSON integer literal
+// arrives unsigned off the wire, and an initialiser list makes it signed, which the byte check
+// rejects for reasons that have nothing to do with what is under test.
+nlohmann::json osCommandBody(std::string_view json) { return nlohmann::json::parse(json); }
+
+TEST(ParseOsCommandRequest, DefaultsToMovingNoBulkData) {
+  auto request = parseOsCommandRequest(osCommandBody(R"({"command": [8, 0, 0, 0, 0, 0, 0, 0]})"));
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->fsBuffer.transfer, FsBufferTransfer::kNone);
+  EXPECT_TRUE(request->fsBuffer.payload.empty());
+}
+
+TEST(ParseOsCommandRequest, AcceptsAReadTransfer) {
+  auto request = parseOsCommandRequest(
+      osCommandBody(R"({"command": [21, 0, 0, 0, 0, 0, 0, 0], "fsBuffer": "read"})"));
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->fsBuffer.transfer, FsBufferTransfer::kRead);
+}
+
+TEST(ParseOsCommandRequest, DecodesTheWritePayloadFromBase64) {
+  // "AQID" is 0x01 0x02 0x03.
+  auto request = parseOsCommandRequest(osCommandBody(
+      R"({"command": [11, 0, 0, 0, 0, 0, 0, 0], "fsBuffer": "write", "fsBufferData": "AQID"})"));
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->fsBuffer.transfer, FsBufferTransfer::kWrite);
+  EXPECT_EQ(request->fsBuffer.payload, std::vector<uint8_t>({1, 2, 3}));
+}
+
+TEST(ParseOsCommandRequest, RejectsAnUnknownDirection) {
+  auto request = parseOsCommandRequest(
+      osCommandBody(R"({"command": [8, 0, 0, 0, 0, 0, 0, 0], "fsBuffer": "sideways"})"));
+  ASSERT_FALSE(request.has_value());
+  EXPECT_NE(request.error().find("'fsBuffer'"), std::string::npos) << request.error();
+}
+
+TEST(ParseOsCommandRequest, RequiresThePayloadForAWrite) {
+  auto request = parseOsCommandRequest(
+      osCommandBody(R"({"command": [11, 0, 0, 0, 0, 0, 0, 0], "fsBuffer": "write"})"));
+  ASSERT_FALSE(request.has_value());
+  EXPECT_NE(request.error().find("'fsBufferData' is required"), std::string::npos)
+      << request.error();
+}
+
+TEST(ParseOsCommandRequest, RefusesAPayloadWithNoDirectionToSendItIn) {
+  // Ignoring it would run the command with no transfer at all and look like it worked.
+  auto request = parseOsCommandRequest(
+      osCommandBody(R"({"command": [8, 0, 0, 0, 0, 0, 0, 0], "fsBufferData": "AQID"})"));
+  ASSERT_FALSE(request.has_value());
+  EXPECT_NE(request.error().find("only applies"), std::string::npos) << request.error();
+}
+
+TEST(ParseOsCommandRequest, TreatsAnEmptyPayloadAsNoPayload) {
+  // A client that renders a control for every parameter sends the field whether or not the user
+  // filled it in, so an empty one must read as "no bulk data" rather than as a contradiction.
+  auto request = parseOsCommandRequest(
+      osCommandBody(R"({"command": [8, 0, 0, 0, 0, 0, 0, 0], "fsBufferData": ""})"));
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->fsBuffer.transfer, FsBufferTransfer::kNone);
+}
+
+TEST(ParseOsCommandRequest, RejectsAPayloadThatIsNotBase64) {
+  auto request = parseOsCommandRequest(osCommandBody(
+      R"({"command": [11, 0, 0, 0, 0, 0, 0, 0], "fsBuffer": "write", "fsBufferData": "no!"})"));
+  ASSERT_FALSE(request.has_value());
+  EXPECT_NE(request.error().find("base64"), std::string::npos) << request.error();
+}
+
+TEST(RunOsCommandProcedure, RecordsWhatTheFsBufferTransferRead) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(osCommandSteps());
+
+  driver.files[std::string(kFsBufferFilename)] = {7, 7, 7};
+  OsCommandRequest request = makeRequest();
+  request.fsBuffer.transfer = FsBufferTransfer::kRead;
+
+  auto result = runOsCommandProcedure(device, reporter, std::stop_token{}, request);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  const auto steps = reporter.steps();
+  ASSERT_EQ(steps.size(), 1U);
+  ASSERT_FALSE(steps[0].value.is_null());
+  EXPECT_EQ(steps[0].value["fsBuffer"], nlohmann::json({7, 7, 7}));
+  ASSERT_EQ(driver.fileReads.size(), 1U);
+  EXPECT_EQ(driver.fileReads[0], kFsBufferFilename);
+}
+
+TEST(RunOsCommandProcedure, SendsTheFsBufferPayload) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(osCommandSteps());
+
+  OsCommandRequest request = makeRequest();
+  request.fsBuffer.transfer = FsBufferTransfer::kWrite;
+  request.fsBuffer.payload = {4, 5, 6};
+
+  auto result = runOsCommandProcedure(device, reporter, std::stop_token{}, request);
+  ASSERT_TRUE(result.has_value()) << result.error();
+  ASSERT_EQ(driver.fileWrites.size(), 1U);
+  EXPECT_EQ(driver.fileWrites[0].first, kFsBufferFilename);
+  EXPECT_EQ(driver.fileWrites[0].second, std::vector<uint8_t>({4, 5, 6}));
+  // Nothing was read, so the result carries no fs-buffer at all rather than an empty array.
+  const auto steps = reporter.steps();
+  ASSERT_FALSE(steps[0].value.is_null());
+  EXPECT_FALSE(steps[0].value.contains("fsBuffer"));
+}
+
+TEST(RunReadObjectDictionaryProcedure, ReadsAndDecodesEveryValue) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(readObjectDictionarySteps());
+
+  // The blob has to match the device's own dictionary exactly, so it is built from it.
+  std::vector<uint8_t> blob;
+  for (const auto& parameter : device.parametersOrdered()) {
+    blob.insert(blob.end(), parameter.bitLength / 8U, uint8_t{0});
+  }
+  driver.files[std::string(kFsBufferFilename)] = blob;
+
+  auto result = runReadObjectDictionaryProcedure(device, reporter, std::stop_token{});
+  ASSERT_TRUE(result.has_value()) << result.error();
+  const auto steps = reporter.steps();
+  ASSERT_EQ(steps.size(), 1U);
+  EXPECT_EQ(steps[0].status, ProgressStatus::kSucceeded);
+  ASSERT_FALSE(steps[0].value.is_null());
+  EXPECT_EQ(steps[0].value["byteCount"], blob.size());
+  EXPECT_EQ(steps[0].value["values"].size(), device.parametersOrdered().size());
+  ASSERT_EQ(driver.commandIds.size(), 1U);
+  EXPECT_EQ(driver.commandIds[0], 21);
+}
+
+TEST(RunReadObjectDictionaryProcedure, FailsTheStepWhenTheTransferDoesNotMatchTheDictionary) {
+  OsCommandFakeDriver driver;
+  Device device = makeDevice(driver);
+  ProgressReporter reporter(readObjectDictionarySteps());
+
+  driver.files[std::string(kFsBufferFilename)] = {1, 2, 3};  // far too short
+  auto result = runReadObjectDictionaryProcedure(device, reporter, std::stop_token{});
+  ASSERT_FALSE(result.has_value());
+  const auto steps = reporter.steps();
+  ASSERT_EQ(steps.size(), 1U);
+  EXPECT_EQ(steps[0].status, ProgressStatus::kFailed);
+  ASSERT_TRUE(steps[0].error.has_value());
+  EXPECT_NE(steps[0].error->find("sent 3 bytes"), std::string::npos) << *steps[0].error;
 }
 
 TEST(RunOsCommandProcedure, RecordsTheResponseAsTheStepValue) {
@@ -2205,9 +2371,7 @@ class FirmwareFakeDriver : public FieldbusDriver {
   }
 
   // --- unused stubs ---------------------------------------------------------
-  std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
-    return std::vector<OdEntry>{};
-  }
+  std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override { return OdRead{}; }
   std::expected<void, std::string> configureProcessData() override { return {}; }
   mm::comm::PdoLayout processDataLayout() override { return {}; }
   int exchangeProcessData(std::span<const uint8_t>, std::span<uint8_t>) override { return 0; }

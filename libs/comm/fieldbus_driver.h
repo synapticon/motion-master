@@ -130,6 +130,22 @@ struct OdEntry {
   std::optional<std::vector<uint8_t>> maxValue;      ///< Raw maximum-value bytes, if available.
 };
 
+/// @brief One device's object dictionary as read from the bus, and what the read did not get.
+///
+/// @c missingEntries counts the @c (index, subindex) pairs the device was asked about and did not
+/// answer, after the driver exhausted its retries on each of them. It is separate from the error
+/// channel because an enumeration that loses a few entries still returns a usable dictionary: the
+/// device comes up, and every entry that was read is correct.
+///
+/// A caller that persists the dictionary must refuse to persist one with @c missingEntries above
+/// zero. A cache file is keyed on the device's identity and read back on every later scan, so a
+/// short dictionary written once is what the master believes for as long as the file exists — on
+/// that host alone, which is a fault nobody else can reproduce and nothing corrects.
+struct OdRead {
+  std::vector<OdEntry> entries;  ///< One per @c (index, subindex) pair the device answered for.
+  int missingEntries = 0;  ///< Entries asked for and never answered. Above zero, do not cache.
+};
+
 /// @brief One slave's input and output windows within the process-data images.
 ///
 /// @c outputOffset is relative to the start of the output image; @c inputOffset is relative
@@ -615,11 +631,14 @@ class FieldbusDriver {
   ///
   /// Slaves that do not implement the SDO Info service return an error.
   ///
+  /// A single entry the slave never answers for is left out rather than failing the whole
+  /// enumeration, and counted in @c OdRead::missingEntries. A failure of the object list or of an
+  /// object description does fail the call, because neither leaves a usable dictionary behind.
+  ///
   /// @param slavePosition  1-based slave position on the bus.
-  /// @return All OD entries on success, or an error string if any phase of the enumeration
-  ///         fails after the driver's internal retries.
-  virtual std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(
-      uint16_t slavePosition) = 0;
+  /// @return The entries read and the count of those missing, or an error string if the object
+  ///         list or an object description fails after the driver's internal retries.
+  virtual std::expected<OdRead, std::string> readObjectDictionary(uint16_t slavePosition) = 0;
 
   /// @brief Reads the raw Slave Information Interface (SII / EEPROM) image of a slave.
   ///

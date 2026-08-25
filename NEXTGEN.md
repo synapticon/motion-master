@@ -2881,3 +2881,214 @@ Six commits, each independently verifiable.
 Nothing is built. Multi-axis coordination is designed but not deliverable until DC SYNC0 lands with
 the DC-locked cycle timer, because without SYNC0 two drives act on frame arrival rather than on the
 same instant. The single-axis path does not depend on that and can ship first.
+
+## Session 2026-08-25 — `fs-buffer` is a stream, not a file; command 21 proved the transfer and found a short object dictionary (as-built)
+
+Built the bulk-data half of the OS command channel. `SomanetDrive::runOsCommand` takes a third
+argument, `OsCommandFsBuffer`, and OS command 21 (read object dictionary) is the first caller —
+chosen because it needs nothing set up, moves nothing, and either returns 566 correct values or
+tells you exactly where the master and the drive stopped agreeing.
+
+Everything below was read out of `somanet_software`, not out of the OS command specification. The
+specification is a draft and is right about this one; the firmware is what settled the ordering.
+
+**`fs-buffer` is not a filename that resolves to a file.** `foe_glb_buffer_request_file`
+(`sc_base/module_storage/src/foe_buffer.c`) compares the requested name against
+`FOE_DATA_BUFFER_NAME` exactly and, on a match, sets the use case to `FOE_DB_STREAM_UP` for a read
+or `FOE_DB_STREAM_DOWN` for a write instead of opening anything. What the transfer then moves is a
+2 × 1012-byte double buffer that the running command writes into (`write_stream_foe_buffer`) or
+reads out of. A name that merely starts with those characters is an ordinary file.
+
+**The transfer has to overlap the command, and the arithmetic says so.** `handle_os_command_21`
+(`sc_drive/module_drive_control/src/drive_control_service.xc`) pushes `OSCMD21_CHUNK_BYTESIZE` = 100
+bytes per drive-control cycle and only reports a terminal status once `od_values_index` reaches
+`OD_VALUES_LENGTH`. The buffer holds 2024 bytes. `OD_VALUES_LENGTH` is 1781 on Circulo and Node,
+1911 on Integro, and **2517 on Circulo with a safety module** — larger than the buffer. So on that
+device the producer writes 2024 bytes, `foe_glb_buffer_write_data` returns 0 for every further
+attempt, and the command never finishes unless the master is draining. A transfer issued after the
+command completed would work on three devices and hang forever on the fourth. That is the whole
+reason the transfer sits between the write to 0x1023:01 and the first poll, and why the header says
+the position is not the caller's choice. The 2.5-second `FOE_STREAM_TIMEOUT` that erases an
+untouched buffer is a second, weaker reason.
+
+**A silent slave is how this fails, and it is indistinguishable from a refused command.** When the
+buffer is empty `ecs_foe_handler` returns 0 and the slave puts nothing in its mailbox at all — no
+`FOE_BUSY`, no error. SOEM's `ecx_FOEread` waits `EC_TIMEOUTRXM` (700 ms) for each packet and gives
+up on silence with no retry. A command the firmware does not implement produces nothing, so a read
+of its output looks exactly like a wire fault. **So a failed transfer is recorded, not returned**,
+and the poll runs anyway: the drive is about to answer "unsupported command", which is worth more
+than a mailbox timeout. The transfer's own error is returned in exactly one case — the drive reports
+the command succeeded and the payload the caller asked for is still missing.
+
+`config.timeout` is anchored *before* the transfer, so it keeps meaning "a ceiling on the whole
+command". Overrunning it costs nothing when the command has in fact finished, because the poll loop
+reads 0x1023:03 before it looks at the clock.
+
+**Only the 5.2-and-newer behaviour is implemented.** Older firmware cannot move data while a command
+runs and wants the payload written first. Nothing reads 0x100A to tell the two apart, on purpose:
+the old path is not built, so a version check would only decide which error message to print.
+
+**Command 21 sends 566 values with nothing marking where one ends.** `od_values` in the generated
+`co_dictionary.c` is a bare concatenation, ordered by index then subindex, densely packed and
+byte-aligned — the last entry on Circulo starts at 1780 and is one byte long, which is
+`OD_VALUES_LENGTH`. The only way to split it is to know every width in the same order, and
+`decodeObjectDictionaryValues` takes both from `Device::parametersOrdered()`: a scalar's width from
+its data type, a string's or blob's from its bit length, which is the drive's reserved room (0x1008
+is `STRING(50)` with `BitSize` 400 in the ESI and 50 bytes in `od_values`). **One width the two
+sides disagree about shifts every value after it**, so the widths must add up to exactly the number
+of bytes that arrived, and the whole transfer is refused when they do not. The message names the
+entry the walk ran out at, because that is where the disagreement is.
+
+**Not a faster way to read parameters, and the changelog says so.** Complete Access already reads a
+whole object per transfer and the parameter cache uses it. What command 21 buys is a second,
+independent reading of the same values, plus two the SDO path cannot reach at all: 0x1024, which is
+write-only, and 0x1023:01.
+
+Surfaced as a procedure (`read-object-dictionary`) rather than a `GET`, because it is a test
+instrument. The generic `os-command` procedure also takes `fsBuffer` and `fsBufferData` now, so any
+command can be driven with a transfer in either direction without a row in the catalogue — which is
+what the safety-module work will need first. `fsBufferData` is `type: string` in `swagger.yml` and
+deliberately not `format: byte`, for the reason already written beside `packageContent`.
+
+Twenty-three unit tests: the transfer's direction, its position relative to the command write, both
+failure precedences, the parse rules including an empty payload reading as no payload, the decode's
+happy path and its three refusals, and the procedure end to end.
+
+### First hardware run, and the defect it found
+
+Ran against a SOMANET Integro at v5.6.10, position 2 on a two-drive bench.
+
+**The transfer worked on the first attempt.** 1900 bytes came back over `fs-buffer` while command 21
+was in progress, in two FoE packets (1012 + 888), and the command then reported a terminal status.
+Everything above about the ordering and the stream is confirmed on hardware.
+
+**The decode failed, and it was right to.** It reported that the drive sent 1900 bytes while the
+master's 520 dictionary entries account for 1686. The refusal was the point of building it that way:
+the alternative would have been 520 plausible values, most of them another entry's bytes.
+
+The cause is not in this feature. **`sdoinfo_get_object_description` reports the runtime value of
+subindex 0 as the object's size** (`sc_drive/module_canopen_interface/object_dictionary/sdo.c`), and
+the `max_subindex` field in `COD_Object` beside it carries the same figure rather than the declared
+one — the generator writes the default configured count into both. For a PDO mapping object that is
+how many entries are mapped *now*. The drive reported 0x1600 as having 7 subindices, 0x1601 2,
+0x1603 **0**, 0x1A02 1, 0x1C12 3, 0x1C13 4 — exactly the configured counts — while `od_values`
+reserves storage for all ten (six for the assignment objects).
+
+The arithmetic closes. The unused slots are 53 × 4 bytes plus 5 × 2 = 222; 1686 + 222 = 1908 against
+1900 sent, and the 8 is drift between the drive and the source read here, which added touch probe 2
+(0x60BC, 0x60BD, 0x60D3, 0x60D4) afterwards.
+
+**So the master cannot learn `od_values`'s layout from the object descriptions, but it can ask for
+the entries.** `find_entry` resolves an entry description from the static subitem table without
+consulting the count, which is why 0x1603:01, :05 and :0A all answered over SDO while :0B aborted.
+`readObjectDictionary` now probes past `MaxSub` until the slave refuses, for records and arrays
+only. Two things make that affordable rather than reckless:
+
+- **A probe is a single attempt.** A refusal is the answer it wants, so putting it through
+  `kSdoInfoMaxRetries` would spend ten transfers plus ten back-offs per object to learn the same
+  thing.
+- **The first slow refusal turns probing off for that device.** The two ways a slave refuses are
+  three orders of magnitude apart: an abort in a few milliseconds, silence at a full 700 ms mailbox
+  timeout. A device that goes silent would otherwise add minutes to its enumeration, and a
+  dictionary short of its unused slots is a much better outcome than that.
+
+The same firmware behaviour shortens a Complete Access upload of such an object —
+`sdo.c` builds the blob by looping `1..max_subindex` — so `decodeCompleteAccess` now tells a short
+blob apart from a layout it cannot decode. The short case is ordinary and logs at debug before
+falling back per subindex; only a genuinely wrong layout still warns.
+
+This is a real fix independent of command 21: those slots were invisible on the parameters page, and
+0x1603 presented as an object with no entries at all.
+
+### Open
+
+**The decode is still unproven.** The enumeration fix is untested on hardware, so whether the
+widened dictionary now matches `od_values` entry for entry is the next run. A device with a safety
+module remains the interesting case for the transfer itself, being the only one whose dictionary
+(2517 bytes) does not fit the 2024-byte buffer.
+
+**The bench drive was left wedged.** After roughly 250 SDO reads probing subindices by hand, slave 2
+began aborting *every* SDO with 0x08000000 while reporting PRE-OP with no AL error; slave 1 stayed
+healthy. The probing is the likeliest trigger and the command 21 run cannot be ruled out. Not
+diagnosed, and a power cycle is what would separate the two.
+
+One duplication left standing: `valueToJson`'s `std::visit` one-liner now exists in three files
+(`parameter_cache.cc`, `monitoring_manager.cc`, `somanet_drive.cc`). It belongs on
+`device_parameter.h` beside the type it serialises; moving it touches two files this change had no
+other reason to open.
+
+## Session 2026-08-25 — A short object dictionary must not be cached, and the mailbox drain corrupts the pool it draws from (as-built)
+
+Reviewed what the previous-generation master shipped for reading SDO Information and carried over
+the one part v6 was missing. Two of its three changes were already here in a broader form. Reading
+SOEM 2.0's mailbox handling for the third found a defect that is in neither master.
+
+**Already here, and broader.** `ports/soem/portfile.cmake` already checks that an SDO Info response
+describes the object and the entry that were asked for, and it checks `ecx_SDOread`'s index and
+subindex as well, which the other master's fork does not. `readObjectDictionary` already asks for
+one subindex at a time, retries each one on its own budget, and reports the loss rate per device.
+The cache file that made the original fault permanent is already listable, downloadable and
+deletable over HTTP, so recovering a poisoned host no longer means finding the file by hand.
+
+**The gap was the cache, and the cache is what makes a lost entry permanent.** `readObjectDictionary`
+counted its failures for the log and then dropped the number, so `Device::enumerateParameters` had
+nothing to consult and called `ParameterCache::store` on every enumeration that returned. A cache
+file is keyed on vendor, product and revision alone and is never checked against the device again.
+One transfer the drive never answered therefore wrote a dictionary short of that entry, and that
+file was what the host believed until somebody deleted it — one host, with no other host missing the
+entry, which is a fault nobody can reproduce and nothing corrects. `readObjectDictionary` now
+returns `OdRead`: the entries, and `missingEntries`. The caller writes the file only when that count
+is zero, and logs how short the read was when it is not.
+
+**A count, and not the error channel.** A lost entry does not fail the enumeration, and should not:
+the device still comes up, and every entry that was read is correct. The dictionary in hand is used
+for the session; only the file is refused. A count rather than a flag because the log line is worth
+a number, and the driver already has it — `SdoInfoCounters::failed` counts exactly the transfers that
+exhausted their retries, with the declared-size probes excluded and an object-description failure
+returning through the error channel before it can reach the count.
+
+**The decision sits with the caller, not the driver.** The driver reports what it got and what it
+did not. Whether a short dictionary is worth keeping depends on what the caller does with it, and
+the caller is the one that knows a file will outlive the scan.
+
+**SOEM 2.0 returns one mailbox buffer to the pool twice.** `ecx_readODlist`,
+`ecx_readODdescription` and `ecx_readOEsingle` each open by draining whatever the slave left in its
+read mailbox, and each drops that buffer without clearing the pointer to it. Every one of them then
+drops the same pointer again further down. `ecx_dropmbx` pushes the slot index onto the free list
+and increments `listcount` with no check that the slot is free already, and the pool holds
+`EC_MBXPOOLSIZE` slots. So one double drop duplicates an index and overcounts the free list, and
+`ecx_getmbx` can hand the same buffer to two callers at once. This is read out of `ec_coe.c` and
+`ec_main.c`; it has not been observed on a bus.
+
+**The trigger is the fault the drain exists for.** A message is in the mailbox at the start of a
+transfer when an earlier request's reply arrived late, which is the same late reply the
+response-identity check above it rejects. So the two arrive together: a device that answers late
+corrupts the pool through the drain that is there to clean up after it, and an enumeration over a
+lossy link is where both are reachable. `ecx_SDOread` and `ecx_SDOwrite` in the same file are
+correct — they drain into `MbxIn` and drop it once. SOEM 1.x cannot have this defect, because
+`MbxIn` was a stack buffer there and there was no pool.
+
+Fixed in the port by clearing the pointer at the drain. `ecx_TxPDO` has the same defect and is left
+alone: nothing here issues a TxPDO read remote request, and a patch against a function nothing calls
+only gives the next version bump one more string to match.
+
+**One change deliberately not made.** The previous-generation master also made a type-mismatched
+parameter write name the device, the entry and the entry's declared type. v6's `setValue` already
+names the entry, and it does not refuse an integer written to a `REAL32` entry at all — it coerces
+it, so 1650 is stored as 1650.0f and nothing is reported. That silence is what made the original
+fault hard to see, but tightening the coercion changes what every caller of `setValue` is allowed to
+write, which is a decision about the write surface rather than about reading a dictionary.
+
+### Open
+
+**Neither fix is verified on hardware.** The cache rule has unit tests: a complete enumeration is
+written, a lossy one is not, and the lossy test fails if the condition is removed. The pool fix has
+none, because the double drop needs a slave that answers late.
+
+**The pool corruption is inferred from the source, not measured.** What a duplicated free-list index
+does to a live bus — a corrupted transfer, buffers lost until `ecx_getmbx` returns NULL, or nothing
+visible at all — has not been reproduced.
+
+**Not reported upstream.** The defect is on SOEM master as of `b410bf6`, and the fix is four
+characters wide. No issue or pull request has been filed.
+

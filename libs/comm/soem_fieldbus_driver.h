@@ -135,8 +135,7 @@ class SoemFieldbusDriver : public FieldbusDriver {
                                             std::span<const uint8_t> data) override;
 
   /// @copydoc FieldbusDriver::readObjectDictionary
-  std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(
-      uint16_t slavePosition) override;
+  std::expected<OdRead, std::string> readObjectDictionary(uint16_t slavePosition) override;
 
   /// @copydoc FieldbusDriver::readSii
   std::expected<std::vector<uint8_t>, std::string> readSii(uint16_t slavePosition) override;

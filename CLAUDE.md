@@ -581,6 +581,34 @@ lock — so a body may call `transitionToState`, which firmware installation is 
 Two consequences: a rescan can interleave any run, so `discardIfRescanned` must skip running
 entries; and nothing blocks a concurrent `scan()`. See `NEXTGEN.md`, Session 2026-08-02.
 
+### Bulk Data for an OS Command (`fs-buffer`)
+
+A command that carries more than the eight bytes of 0x1023:01 moves it through `fs-buffer`, the
+third argument of `SomanetDrive::runOsCommand`. **`fs-buffer` is not a file.** The firmware matches
+the name exactly and connects the FoE transfer to 2024 bytes of memory shared with the command that
+is running.
+
+Three rules, and none is a preference:
+
+- **The transfer sits between the write to 0x1023:01 and the first poll.** The drive holds the
+  command in progress until every byte has moved, and a command whose output is larger than 2024
+  bytes stalls on a full buffer until the master drains it. Circulo with a safety module sends 2517
+  bytes, so a transfer deferred until the command finished would hang on that device and work on
+  every other one.
+- **A failed transfer is recorded, not returned.** A command the firmware does not support produces
+  nothing, and the slave answers a read of an empty buffer with *silence* — no `FOE_BUSY`, no error
+  — so `ecx_FOEread` fails on a 700 ms mailbox timeout while the drive is about to say "unsupported
+  command". The poll runs anyway and the drive's verdict wins. The transfer's own error surfaces
+  only when the drive reports success and the payload is still missing.
+- **Firmware 5.2 or newer only.** Older firmware wants the payload written before the command. That
+  path is deliberately not built, and nothing reads 0x100A to detect it.
+
+`decodeObjectDictionaryValues` splits OS command 21's output, which is a bare concatenation of
+values ordered by `(index, subindex)` with no lengths on the wire. It takes the widths from
+`Device::parametersOrdered()`, so **one width the master and the drive disagree about shifts every
+value after it** — the widths must sum to exactly the bytes received or the whole transfer is
+refused. Rationale, with the firmware citations: `NEXTGEN.md`, Session 2026-08-25.
+
 ### Networking and TLS
 
 Binds to `127.0.0.1:61447` (HTTP) and `127.0.0.1:62281` (WebSocket), separate loops and
@@ -690,6 +718,28 @@ falling back to per-subindex reads. `parameters.useCompleteAccess` (default on) 
 **The advertised mailbox capability bytes are a hint, not a gate** — SOMANET advertises
 `completeAccess=false` while CA works, so the runtime probe is authoritative. They are exposed
 raw on `GET /api/bus-config` and decoded client-side.
+
+**A record's declared size is not on the wire, so the enumeration probes for it.** SOMANET
+firmware answers Get Object Description with the *runtime value of subindex 0* rather than the
+object's declared size. For a PDO mapping object that is the number of entries currently mapped,
+so an unmapped 0x1603 reports itself as having none while its storage holds ten, and walking only
+`0..MaxSub` reads a dictionary short by every unused slot — 62 entries on an Integro.
+`readObjectDictionary` therefore keeps asking past `MaxSub` until the slave refuses, for records
+and arrays only. **Each probe is a single attempt with no retries**, because a refusal is the
+answer it wants, and the first refusal that takes longer than 100 ms turns probing off for the
+rest of that device: an abort comes back in milliseconds while silence costs a 700 ms mailbox
+timeout per object. The same firmware behaviour makes a Complete Access upload of such an object
+short, which is expected and falls back per subindex rather than warning. See `NEXTGEN.md`,
+Session 2026-08-25.
+
+**A lossy enumeration is never cached.** `readObjectDictionary` returns an `OdRead` — the entries
+plus `missingEntries`, the count of subindices the slave was asked about and never answered. A
+lost entry does not fail the enumeration, because the device still comes up and every entry that
+was read is correct. It does bar the write: a `ParameterCache` file is keyed on vendor, product and
+revision alone and is never checked against the device again, so a short dictionary written once is
+what that host believes until somebody deletes the file. `Device::enumerateParameters` calls
+`store` only when the count is zero. Delete an existing file with
+`DELETE /api/parameter-cache/{id}`. See `NEXTGEN.md`, Session 2026-08-25.
 
 Configuration (master-programmed, cached, all slaves) and SII (raw EEPROM of one device, read
 live) stay separate. They overlap in category, not in source.

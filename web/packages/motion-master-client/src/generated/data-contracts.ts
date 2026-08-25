@@ -455,7 +455,7 @@ export interface ProgressStep {
   /** @example "succeeded" */
   status: "idle" | "running" | "succeeded" | "failed";
   /**
-   * What the step produced, if anything — shape is per procedure. Absent when the step produced nothing. For `os-command` it is an object with `status`, `data`, and `errorCode` when the drive sent one.
+   * What the step produced, if anything — shape is per procedure. Absent when the step produced nothing. For `os-command` it is an object with `status`, `data`, `errorCode` when the drive sent one, and `fsBuffer` when the request asked to read bulk data. For `read-object-dictionary` it is an object with `byteCount` and `values`, one entry per object with its `index`, `subindex` and `value`.
    * @example {"status":1,"data":[1,2,3,4,5,6]}
    */
   value?: any;
@@ -962,6 +962,14 @@ export interface ProcedureRequest {
    * @default 10
    */
   pollIntervalMs?: number;
+  /**
+   * `os-command` only: whether the command moves bulk data through the drive's fs-buffer, and which way. Most commands move none. The transfer runs while the command runs, because the drive holds the command in progress until all the data has moved, and it needs firmware 5.2 or newer. Setting a direction for a command that moves no bulk data leaves the server waiting for a transfer the drive will never start.
+   * @default "none"
+   * @example "read"
+   */
+  fsBuffer?: "none" | "read" | "write";
+  /** `os-command` only, and required when `fsBuffer` is `write`: the bytes to send, base64-encoded into this JSON string. Rejected for the other two directions rather than ignored, so a request that names one and forgets the other is told rather than running a command that moves nothing. (Deliberately not `format: byte`, for the reason spelled out on `packageContent`.) */
+  fsBufferData?: string;
   /**
    * `encoder-register-communication` and `ic-mu-calibration-mode`: which of the drive's encoders to address. Encoder 1 is the encoder configured in 0x2110 and encoder 2 the one configured in 0x2112, so the ordinal picks a configuration object rather than a kind of encoder.
    * @default 1

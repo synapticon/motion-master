@@ -221,6 +221,49 @@ vcpkg_replace_string(
              (aSDOp->wdata[0] == htoes(Index)) &&
              (aSDOp->bdata[2] == SubI))")
 
+# A mailbox buffer is returned to the pool twice.
+#
+# ecx_readODlist, ecx_readODdescription and ecx_readOEsingle each open by draining whatever sits in
+# the slave's read mailbox, and they drop that buffer without clearing the pointer to it:
+#
+#     wkc = ecx_mbxreceive(context, Slave, &MbxIn, 0);
+#     if (MbxIn) ecx_dropmbx(context, MbxIn);    /* MbxIn stays non-NULL */
+#
+# Every one of them drops MbxIn again further down — where it replaces the drained buffer with the
+# response, or on the way out — so the same pool slot is freed twice. ecx_dropmbx pushes the slot's
+# index onto the free list and increments listcount without checking whether that slot is free
+# already, and the pool holds EC_MBXPOOLSIZE (32) slots. One double drop therefore duplicates an
+# index and overcounts the free list, so ecx_getmbx hands the same buffer to two callers: a request
+# being built and a response being read occupy the same bytes. Once listcount passes 32 the ring
+# overwrites its own entries and slots are lost from the pool for good, until ecx_getmbx returns
+# NULL and every mailbox transfer on the bus fails.
+#
+# What triggers it is a message already in the mailbox when a transfer starts, which is a late reply
+# to an earlier request — the same fault the response-identity check above exists for. The two
+# arrive together: a device that answers late corrupts the pool through the drain that is there to
+# clean up after it. That makes an enumeration over a lossy link the way to hit this, which is
+# exactly where the identity check sends a rejected response back for a retry.
+#
+# ecx_SDOread and ecx_SDOwrite in the same file are correct. They drain into MbxIn and drop it once.
+# The three SDO Info functions drop at the drain as well, and that is the extra one. SOEM 1.x is
+# unaffected, because MbxIn was a stack buffer there and there was no pool to corrupt.
+#
+# Fixed by clearing the pointer at the drain, which is what the correct sites do. One match, three
+# call sites: the comment line is present only in these three functions.
+#
+# ecx_TxPDO carries the identical defect and is deliberately left alone. Motion Master issues no
+# TxPDO read remote request, and patching a function nothing calls buys nothing while giving the
+# next version bump one more string to match.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"   /* Empty slave out mailbox if something is in. Timeout set to 0 */
+   wkc = ecx_mbxreceive(context, Slave, &MbxIn, 0);
+   if (MbxIn) ecx_dropmbx(context, MbxIn);"
+"   /* Empty slave out mailbox if something is in. Timeout set to 0 */
+   wkc = ecx_mbxreceive(context, Slave, &MbxIn, 0);
+   if (MbxIn) ecx_dropmbx(context, MbxIn);
+   MbxIn = NULL;")
+
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS

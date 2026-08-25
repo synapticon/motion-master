@@ -27,8 +27,12 @@ using mm::comm::EtherCatState;
 using mm::comm::FieldbusDriver;
 using mm::comm::ObjectDataType;
 using mm::comm::OdEntry;
+using mm::comm::OdRead;
 using mm::comm::SlaveInfo;
 using mm::node::createSomanetDrive;
+using mm::node::decodeObjectDictionaryValues;
+using mm::node::FsBufferTransfer;
+using mm::node::kFsBufferFilename;
 namespace somanet = mm::node::somanet;
 using mm::node::Device;
 using mm::node::kOsCommand;
@@ -64,8 +68,8 @@ class IdentityFakeDriver : public FieldbusDriver {
     info.vendorId = vendorId;
     return info;
   }
-  std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
-    return ods;
+  std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override {
+    return OdRead{.entries = ods};
   }
   uint16_t slaveState(uint16_t) const override { return kPreOp; }
   // CoE-capable stand-in: parameters are enumerated over the object dictionary, not SII.
@@ -242,8 +246,8 @@ class OsCommandFakeDriver : public FieldbusDriver {
     return {};
   }
 
-  std::expected<std::vector<OdEntry>, std::string> readObjectDictionary(uint16_t) override {
-    return ods;
+  std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override {
+    return OdRead{.entries = ods};
   }
   SlaveInfo slaveInfo(uint16_t) const override {
     SlaveInfo info{};
@@ -281,9 +285,26 @@ class OsCommandFakeDriver : public FieldbusDriver {
   /// Fails every read with this kind, for the branches a missing file cannot produce.
   std::optional<mm::comm::FoeErrorKind> readFailure;
 
+  /// Every file written, in order, with its contents.
+  std::vector<std::pair<std::string, std::vector<uint8_t>>> writes;
+
+  /// Fails every write with this kind.
+  std::optional<mm::comm::FoeErrorKind> writeFailure;
+
+  /// How many commands had been written when the first file transfer happened, or -1 if none has.
+  /// An fs-buffer transfer has to follow the command write, so the order is asserted, not assumed.
+  int commandWritesAtFirstTransfer = -1;
+
+  void recordTransferOrder() {
+    if (commandWritesAtFirstTransfer < 0) {
+      commandWritesAtFirstTransfer = commandWrites;
+    }
+  }
+
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
       uint16_t, const std::string& name) override {
     reads.push_back(name);
+    recordTransferOrder();
     if (readFailure) {
       return std::unexpected(mm::comm::makeFoeError(*readFailure, "FOEread", 1, name));
     }
@@ -294,8 +315,13 @@ class OsCommandFakeDriver : public FieldbusDriver {
     }
     return it->second;
   }
-  std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string&,
-                                                    std::span<const uint8_t>) override {
+  std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string& name,
+                                                    std::span<const uint8_t> data) override {
+    writes.emplace_back(name, std::vector<uint8_t>(data.begin(), data.end()));
+    recordTransferOrder();
+    if (writeFailure) {
+      return std::unexpected(mm::comm::makeFoeError(*writeFailure, "FOEwrite", 1, name));
+    }
     return {};
   }
   std::expected<void, std::string> readRegister(uint16_t, uint16_t, std::span<uint8_t>) override {
@@ -554,6 +580,214 @@ TEST(RunOsCommand, FailsOnAnUnknownStatus) {
   ASSERT_FALSE(response.has_value());
   EXPECT_NE(response.error().find("unknown OS command status 42"), std::string::npos)
       << response.error();
+}
+
+// --- fs-buffer transfers ------------------------------------------------------------------------
+
+TEST(RunOsCommand, ReadsTheFsBufferAfterIssuingTheCommand) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.files[std::string(kFsBufferFilename)] = {1, 2, 3, 4};
+  auto response = drive->runOsCommand(kRequest, {.pollInterval = kNoDelay},
+                                      {.transfer = FsBufferTransfer::kRead, .payload = {}});
+  ASSERT_TRUE(response.has_value()) << response.error();
+  EXPECT_EQ(response->fsBuffer, std::vector<uint8_t>({1, 2, 3, 4}));
+  ASSERT_EQ(driver.reads.size(), 1U);
+  EXPECT_EQ(driver.reads[0], kFsBufferFilename);
+  // The drive holds the command in progress until the data has moved, so a transfer issued before
+  // the command write would wait on a drive that has not been told to produce anything.
+  EXPECT_EQ(driver.commandWritesAtFirstTransfer, 1);
+}
+
+TEST(RunOsCommand, WritesTheFsBufferAfterIssuingTheCommand) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  const std::vector<uint8_t> payload{9, 8, 7};
+  auto response = drive->runOsCommand(kRequest, {.pollInterval = kNoDelay},
+                                      {.transfer = FsBufferTransfer::kWrite, .payload = payload});
+  ASSERT_TRUE(response.has_value()) << response.error();
+  ASSERT_EQ(driver.writes.size(), 1U);
+  EXPECT_EQ(driver.writes[0].first, kFsBufferFilename);
+  EXPECT_EQ(driver.writes[0].second, payload);
+  EXPECT_EQ(driver.commandWritesAtFirstTransfer, 1);
+  EXPECT_TRUE(response->fsBuffer.empty());
+}
+
+TEST(RunOsCommand, MovesNothingWhenNoTransferWasAskedFor) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  auto response = drive->runOsCommand(kRequest, {.pollInterval = kNoDelay});
+  ASSERT_TRUE(response.has_value()) << response.error();
+  EXPECT_TRUE(driver.reads.empty());
+  EXPECT_TRUE(driver.writes.empty());
+}
+
+TEST(RunOsCommand, AFailedTransferUnderARefusedCommandReportsTheDrivesReason) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  // What an unsupported command looks like on the wire: the drive produces nothing, so the read
+  // gets no reply, and the drive is about to say why. Its answer is the one worth reporting.
+  driver.readFailure = mm::comm::FoeErrorKind::NoResponse;
+  driver.responses = {{3, 0, 254, 0, 0, 0, 0, 0}};  // failed, "unsupported command"
+  auto response = drive->runOsCommand(kRequest, {.pollInterval = kNoDelay},
+                                      {.transfer = FsBufferTransfer::kRead, .payload = {}});
+  ASSERT_TRUE(response.has_value()) << response.error();
+  EXPECT_TRUE(response->failed());
+  ASSERT_TRUE(response->errorCode.has_value());
+  EXPECT_EQ(*response->errorCode, 254);
+  EXPECT_TRUE(response->fsBuffer.empty());
+}
+
+TEST(RunOsCommand, AFailedTransferUnderASucceededCommandIsTheError) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.readFailure = mm::comm::FoeErrorKind::NoResponse;
+  auto response = drive->runOsCommand(kRequest, {.pollInterval = kNoDelay},
+                                      {.transfer = FsBufferTransfer::kRead, .payload = {}});
+  ASSERT_FALSE(response.has_value());
+  EXPECT_NE(response.error().find("fs-buffer transfer failed"), std::string::npos)
+      << response.error();
+}
+
+TEST(RunOsCommand, AFailedWriteUnderASucceededCommandIsTheError) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.writeFailure = mm::comm::FoeErrorKind::NoResponse;
+  auto response = drive->runOsCommand(kRequest, {.pollInterval = kNoDelay},
+                                      {.transfer = FsBufferTransfer::kWrite, .payload = {1, 2}});
+  ASSERT_FALSE(response.has_value());
+  EXPECT_NE(response.error().find("fs-buffer transfer failed"), std::string::npos)
+      << response.error();
+}
+
+TEST(FsBufferTransferName, RoundTripsEveryDirection) {
+  for (const auto transfer :
+       {FsBufferTransfer::kNone, FsBufferTransfer::kRead, FsBufferTransfer::kWrite}) {
+    EXPECT_EQ(mm::node::parseFsBufferTransfer(mm::node::toString(transfer)), transfer);
+  }
+  EXPECT_FALSE(mm::node::parseFsBufferTransfer("sideways").has_value());
+}
+
+// --- Read object dictionary (command 21) --------------------------------------------------------
+
+// The dictionary command 21 is tested against: three scalars of different widths and one string,
+// so a wrong width in the walk shows up as a wrong value rather than only as a wrong total.
+std::vector<mm::node::DeviceParameter> objectDictionaryDefinitions() {
+  auto entry = [](uint16_t index, uint8_t subindex, ObjectDataType type, uint16_t bitLength) {
+    mm::node::DeviceParameter p;
+    p.index = index;
+    p.subindex = subindex;
+    p.dataType = static_cast<uint16_t>(type);
+    p.bitLength = bitLength;
+    return p;
+  };
+  return {
+      entry(0x1000, 0, ObjectDataType::UNSIGNED32, 32),
+      entry(0x1001, 0, ObjectDataType::UNSIGNED8, 8),
+      entry(0x1008, 0, ObjectDataType::VISIBLE_STRING, 32),
+      entry(0x6041, 0, ObjectDataType::UNSIGNED16, 16),
+  };
+}
+
+TEST(DecodeObjectDictionaryValues, SplitsTheTransferByTheDeclaredWidths) {
+  const std::vector<uint8_t> data{
+      0x92, 0x01, 0x02, 0x00,  // 0x1000:00 = 0x00020192
+      0x05,                    // 0x1001:00 = 5
+      'A',  'B',  'C',  0x00,  // 0x1008:00 = "ABC", padded
+      0x37, 0x02,              // 0x6041:00 = 0x0237
+  };
+  auto values = decodeObjectDictionaryValues(data, objectDictionaryDefinitions());
+  ASSERT_TRUE(values.has_value()) << values.error();
+  EXPECT_EQ(values->byteCount, data.size());
+  ASSERT_EQ(values->values.size(), 4U);
+
+  EXPECT_EQ(values->values[0].index, 0x1000);
+  EXPECT_EQ(std::get<uint32_t>(values->values[0].value), 0x00020192U);
+  EXPECT_EQ(std::get<uint8_t>(values->values[1].value), 5U);
+  EXPECT_EQ(std::get<std::string>(values->values[2].value), "ABC");
+  EXPECT_EQ(values->values[3].subindex, 0U);
+  EXPECT_EQ(std::get<uint16_t>(values->values[3].value), 0x0237U);
+}
+
+TEST(DecodeObjectDictionaryValues, RefusesATransferTheWidthsDoNotAccountFor) {
+  auto definitions = objectDictionaryDefinitions();
+  // One byte more than the widths add up to: the drive holds an object this master does not know
+  // about, so every value from that point on would be some other object's bytes.
+  const std::vector<uint8_t> data(12, 0);
+  auto values = decodeObjectDictionaryValues(data, definitions);
+  ASSERT_FALSE(values.has_value());
+  EXPECT_NE(values.error().find("sent 12 bytes"), std::string::npos) << values.error();
+  EXPECT_NE(values.error().find("account for 11"), std::string::npos) << values.error();
+}
+
+TEST(DecodeObjectDictionaryValues, NamesTheEntryTheTransferRanOutAt) {
+  const std::vector<uint8_t> data(6, 0);  // stops inside 0x1008
+  auto values = decodeObjectDictionaryValues(data, objectDictionaryDefinitions());
+  ASSERT_FALSE(values.has_value());
+  EXPECT_NE(values.error().find("0x1008:00"), std::string::npos) << values.error();
+}
+
+TEST(DecodeObjectDictionaryValues, SaysSoWhenTheDictionaryWasNeverRead) {
+  auto values = decodeObjectDictionaryValues(std::vector<uint8_t>{1, 2, 3}, {});
+  ASSERT_FALSE(values.has_value());
+  EXPECT_NE(values.error().find("has not been enumerated"), std::string::npos) << values.error();
+}
+
+TEST(ReadObjectDictionaryValues, IssuesCommand21AndDecodesTheTransfer) {
+  OsCommandFakeDriver driver;
+  driver.programOsCommandObjects();
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters().has_value());
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  // The device's own dictionary is what the transfer is split by, so the blob is built from it:
+  // the objects makeOsCommandDevice programs, in ascending order, each holding its own bytes.
+  std::vector<uint8_t> blob;
+  for (const auto& parameter : device.parametersOrdered()) {
+    const size_t width = parameter.bitLength / 8U;
+    blob.insert(blob.end(), width, static_cast<uint8_t>(parameter.index & 0xFFU));
+  }
+  driver.files[std::string(kFsBufferFilename)] = blob;
+
+  auto values = drive->readObjectDictionaryValues({.pollInterval = kNoDelay});
+  ASSERT_TRUE(values.has_value()) << values.error();
+  EXPECT_EQ(values->byteCount, blob.size());
+  EXPECT_EQ(values->values.size(), device.parametersOrdered().size());
+  EXPECT_EQ(driver.lastCommand[0], 21);
+  ASSERT_EQ(driver.reads.size(), 1U);
+  EXPECT_EQ(driver.reads[0], kFsBufferFilename);
+}
+
+TEST(ReadObjectDictionaryValues, ReportsARefusalAsTheDriveNamedIt) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  driver.readFailure = mm::comm::FoeErrorKind::NoResponse;
+  driver.responses = {{3, 0, 254, 0, 0, 0, 0, 0}};  // failed, "unsupported command"
+  auto values = drive->readObjectDictionaryValues({.pollInterval = kNoDelay});
+  ASSERT_FALSE(values.has_value());
+  EXPECT_NE(values.error().find("unsupported command"), std::string::npos) << values.error();
 }
 
 TEST(OsCommandErrorName, NamesGeneralCodesOnly) {

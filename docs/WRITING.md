@@ -1,7 +1,7 @@
 # Writing Guide
 
 This guide sets the English style for everything written down in this repository. It
-applies to documentation, to code comments, and to commit messages.
+applies to documentation, to code comments, to commit messages, and to issues.
 
 The base is **ASD-STE100 Simplified Technical English**. STE is a controlled language.
 The aerospace industry built it so that a reader who cannot ask a follow-up question
@@ -91,6 +91,25 @@ Apply every base rule. Then apply these:
 - **The body says why.** The diff says what.
 - **Never reference an older version of this software** by name or by number in a commit
   message.
+
+## Issues
+
+One issue tracks one feature or one defect. Apply every base rule. Then apply these:
+
+- **Write the title as the plain feature name.** Do not add a type prefix or a scope.
+- **Open with a user story.** Write three lines: "As a ...", then "I want ...", then "so
+  that ...". End the first two lines with two spaces, so GitHub keeps the break.
+- **Use these sections, in this order.** User story, Context, Acceptance criteria,
+  Implementation, Out of scope, Notes, References. Leave out a section you have nothing
+  to say in.
+- **Write each acceptance criterion as a checkbox.** One criterion states one outcome a
+  reviewer can test.
+- **Say where the behaviour exists today** in Context, and why this repository does it
+  differently.
+- **Never wrap a line.** One paragraph is one line. One list item is one line. GitHub
+  wraps the text for the reader, and a wrapped source is harder to edit. The user story
+  is the one exception.
+- **Point at the file, not at the idea.** Give the path a reader must open.
 
 ## What these rules never touch
 

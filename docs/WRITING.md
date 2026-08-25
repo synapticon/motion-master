@@ -94,22 +94,66 @@ Apply every base rule. Then apply these:
 
 ## Issues
 
-One issue tracks one feature or one defect. Apply every base rule. Then apply these:
+Apply every base rule. Then apply these to every issue, whatever its type:
 
-- **Write the title as the plain feature name.** Do not add a type prefix or a scope.
+- **Write the title in sentence case.** Capital on the first word only. A proper noun, an
+  initialism, and a code identifier keep their own case, the first word included: "SMM
+  factory reset", "fs.cpSync fails on a bind mount".
+- **Do not prefix the title.** No type, no scope, no subsystem. The issue type and the
+  labels carry that. A repository that routes thousands of issues needs a prefix. This one
+  does not.
+- **Never wrap a line.** One paragraph is one line. One list item is one line. GitHub wraps
+  the text for the reader, and a wrapped source is harder to edit. The three-line user
+  story below is the one exception.
+- **Point at the file, not at the idea.** Give the path a reader must open.
+- **Say what is out of scope** when a reader could reasonably read it as in scope.
+
+Then follow the shape for the type. The types in use are Feature, Bug, and Task.
+
+### Feature
+
+Sections, in this order. Leave out a section you have nothing to say in.
+
+User story, Context, Acceptance criteria, Implementation, Out of scope, Notes, References.
+
 - **Open with a user story.** Write three lines: "As a ...", then "I want ...", then "so
-  that ...". End the first two lines with two spaces, so GitHub keeps the break.
-- **Use these sections, in this order.** User story, Context, Acceptance criteria,
-  Implementation, Out of scope, Notes, References. Leave out a section you have nothing
-  to say in.
-- **Write each acceptance criterion as a checkbox.** One criterion states one outcome a
-  reviewer can test.
+  that ...". End the first two lines with two spaces, so GitHub keeps the break. One clause
+  is one line, however long it runs.
 - **Say where the behaviour exists today** in Context, and why this repository does it
   differently.
-- **Never wrap a line.** One paragraph is one line. One list item is one line. GitHub
-  wraps the text for the reader, and a wrapped source is harder to edit. The user story
-  is the one exception.
-- **Point at the file, not at the idea.** Give the path a reader must open.
+- **Write each acceptance criterion as a checkbox.** One criterion states one outcome a
+  reviewer can test.
+
+### Bug
+
+Sections, in this order: What happens, What should happen, How to reproduce, Environment,
+Evidence, Notes.
+
+- **Do not write a user story.** A defect is not a request.
+- **Give the reproduction as commands and their output.** A described reproduction is one
+  the next reader has to reconstruct.
+- **Quote the evidence.** The log line, the error string, the counter reading. Never rewrite
+  quoted material.
+- **Record the environment, and read it rather than remember it.** Four things, each from a
+  named source:
+    - The Motion Master version, from `GET /api/version`. One version covers the server, the
+      web apps, and the client library, so one line is enough.
+    - The host, from `GET /api/system-info`: the OS name, the kernel, and the architecture.
+    - The firmware of every drive involved, from object `0x100A`, and the product it runs on,
+      from `GET /api/devices/{slavePosition}/hardware-description`.
+    - Which fieldbus driver was in use, SOEM or SPoE.
+- **Add the loop period and the skipped-cycle count** when the defect involves timing, the
+  RT loop, or process data.
+- **Say which of these you could not get**, rather than leaving the reader to guess whether
+  it was missing or irrelevant.
+
+### Task
+
+Sections, in this order: What to do, Why, Done when, Notes.
+
+- **Do not write a user story, and do not write acceptance criteria.** "Done when" is one
+  short checkbox list.
+- **Write the why.** A task whose reason nobody recorded is a task nobody can close.
 
 ## What these rules never touch
 

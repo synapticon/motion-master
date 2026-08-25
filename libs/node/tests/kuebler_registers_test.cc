@@ -16,10 +16,17 @@ using mm::node::somanet::kMaxKueblerRegisterBytes;
 using mm::node::somanet::KueblerAccess;
 using mm::node::somanet::KueblerFormat;
 
-TEST(KueblerRegisters, TranscribesTheWholeDraft) {
-  // The vendor's draft table has 27 rows. Pinned because this was transcribed by hand from a CSV,
-  // and a dropped row is invisible otherwise.
-  EXPECT_EQ(kKueblerRegisters.size(), 27u);
+TEST(KueblerRegisters, HoldsTheWholeDraftAndTheRegistersItLeavesOut) {
+  // The vendor's draft table has 27 rows, and four more come from the encoder calibration sequence.
+  // Pinned because the draft was transcribed by hand from a CSV, and a dropped row is invisible
+  // otherwise.
+  EXPECT_EQ(kKueblerRegisters.size(), 31u);
+  for (const uint8_t address : std::initializer_list<uint8_t>{0x56, 0x58, 0x5A, 0x5C}) {
+    auto entry = findKueblerRegister(address);
+    ASSERT_TRUE(entry.has_value()) << static_cast<int>(address);
+    EXPECT_TRUE(entry->implemented) << entry->name;
+    EXPECT_EQ(entry->bits, 16) << entry->name;
+  }
 }
 
 TEST(KueblerRegisters, AreAscendingAndUnique) {
@@ -39,18 +46,16 @@ TEST(KueblerRegisters, EveryWidthIsAWidthTheEncoderUses) {
   }
 }
 
-TEST(KueblerRegisters, TheFirmwareVersionIsOutOfReachOfOneCommand) {
-  // 0x04 is 64-bit and the command's length byte caps at 4, so it cannot be transferred at all.
-  // The one register for which that is true, and the reason the table carries a width rather than
-  // assuming everything fits.
+TEST(KueblerRegisters, EveryRegisterFitsOneCommand) {
+  // The command's length byte caps at 4 bytes, and no register is wider. 0x04 is why the table
+  // carries a width at all: the draft calls it 64-bit, which would not fit, while the encoder
+  // calibration sequence reads four bytes there and parses a version out of them. The table
+  // follows the sequence.
   auto firmwareVersion = findKueblerRegister(0x04);
   ASSERT_TRUE(firmwareVersion.has_value());
-  EXPECT_EQ(firmwareVersion->bits, 64);
-  EXPECT_GT(firmwareVersion->bits / 8, kMaxKueblerRegisterBytes);
+  EXPECT_EQ(firmwareVersion->bits, 32);
   for (const auto& entry : kKueblerRegisters) {
-    if (entry.address != 0x04) {
-      EXPECT_LE(entry.bits / 8, kMaxKueblerRegisterBytes) << entry.name;
-    }
+    EXPECT_LE(entry.bits / 8, kMaxKueblerRegisterBytes) << entry.name;
   }
 }
 
@@ -80,20 +85,29 @@ TEST(KueblerRegisters, CarriesTheFormatsThatCsvProseCannotBeParsedFor) {
 }
 
 TEST(KueblerRegisters, MarksTheOnesTheEncoderDoesNotImplement) {
-  // Seven are documented but not implemented, and a client must be able to say so rather than offer
+  // Only the three nothing has exercised, and a client must be able to say so rather than offer
   // them as working.
   const auto notImplemented = std::ranges::count_if(
       kKueblerRegisters, [](const auto& entry) { return !entry.implemented; });
-  EXPECT_EQ(notImplemented, 7);
+  EXPECT_EQ(notImplemented, 3);
   // Typed list, not a braced one of ints: the literals would deduce to int and narrow on the way
   // into the loop variable, which MSVC treats as an error (C4244) while GCC and clang say nothing.
-  for (const uint8_t address :
-       std::initializer_list<uint8_t>{0x00, 0x04, 0x60, 0x61, 0x62, 0x66, 0x6A}) {
+  for (const uint8_t address : std::initializer_list<uint8_t>{0x00, 0x60, 0x62}) {
     auto entry = findKueblerRegister(address);
     // Cast to int, or the stream prints the address as an unprintable character rather than a
     // number.
     ASSERT_TRUE(entry.has_value()) << static_cast<int>(address);
     EXPECT_FALSE(entry->implemented) << entry->name;
+  }
+}
+
+TEST(KueblerRegisters, FollowsTheEncoderWhereTheDraftIsWrong) {
+  // The draft calls all four not implemented. The encoder calibration sequence reads or writes
+  // every one of them, so the table says implemented and this pins that against a re-transcription.
+  for (const uint8_t address : std::initializer_list<uint8_t>{0x04, 0x61, 0x66, 0x6A}) {
+    auto entry = findKueblerRegister(address);
+    ASSERT_TRUE(entry.has_value()) << static_cast<int>(address);
+    EXPECT_TRUE(entry->implemented) << entry->name;
   }
 }
 
@@ -132,11 +146,10 @@ TEST(KueblerRegistersToJson, CarriesWhatAPickerNeeds) {
   EXPECT_EQ(position->at("format").get<std::string>(), "unsigned");
   EXPECT_TRUE(position->at("readableInOneCommand").get<bool>());
 
-  // The one a picker must grey out for reading.
-  const auto firmwareVersion = std::ranges::find_if(
-      j, [](const nlohmann::json& row) { return row.at("address").get<int>() == 0x04; });
-  ASSERT_NE(firmwareVersion, j.end());
-  EXPECT_FALSE(firmwareVersion->at("readableInOneCommand").get<bool>());
+  // Nothing is greyed out for reading today, because every register fits one command.
+  for (const nlohmann::json& row : j) {
+    EXPECT_TRUE(row.at("readableInOneCommand").get<bool>()) << row.at("name").get<std::string>();
+  }
 }
 
 }  // namespace

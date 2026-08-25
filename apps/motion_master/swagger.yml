@@ -1082,21 +1082,25 @@ paths:
         device, so it needs no bus and no scan.
 
 
-        Transcribed from the vendor's own draft table. Each entry carries the width, the access type,
-        whether the encoder actually implements it — seven are documented but not implemented — and
-        the vendor's bit definitions verbatim, which for a bit-field register is the only place its
-        meaning is recorded.
+        Transcribed from the vendor's own draft table, then corrected against what the encoder
+        really does: the draft calls four registers not implemented that the encoder calibration
+        sequence reads or writes, and leaves out four more. Each entry carries the width, the
+        access type, whether the encoder implements it, and the vendor's bit definitions verbatim,
+        which for a bit-field register is the only place its meaning is recorded. A register the
+        draft does not document says so in `definition`, because a reader has nowhere else to
+        look.
 
 
         `format` says how to read the assembled value, because signedness is not uniform and one
         register is not a single number at all: `unsigned`, `signed`, `bitField` (the number means
         nothing on its own), or `signedHalves` — two signed 16-bit values packed into 32 bits, which
-        register 0x3C is the only case of. `readableInOneCommand` is false for the one 64-bit
-        register, since the command's length byte caps at 4 bytes.
+        register 0x3C is the only case of. `readableInOneCommand` says whether one command can
+        carry the register, since the command's length byte caps at 4 bytes. Every register fits
+        today, so it is true for all of them.
       operationId: getKueblerRegisters
       responses:
         "200":
-          description: Every register the vendor's draft documents, ascending by address
+          description: Every register known, ascending by address
           content:
             application/json:
               schema:

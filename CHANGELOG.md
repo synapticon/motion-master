@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Integro internal encoder's register map now says what the encoder does.** `GET /api/meta/kuebler-registers` was a transcription of the vendor's draft table, and the draft is wrong in three ways. It calls four registers not implemented — `0x04` firmware version, `0x61` error control, `0x66` and `0x6A` error codes — that the encoder answers on. It leaves out four more: `0x56`, `0x58`, `0x5A` and `0x5C`, the CW and CCW start and end speeds. And it calls `0x04` a 64-bit register, which put it out of reach of one command and greyed it out in the Console, when four bytes there return a firmware version. All eight registers are now offered, and every register in the map fits one command. A register the draft does not document says so in its `definition`.
+
 ## [6.0.0-alpha.82] - 2026-08-21
 
 ### Added

@@ -23,6 +23,17 @@ namespace mm::node::somanet {
 /// integer", which is one clause spanning the whole register — a scalar, not a bit field. And 0x3C
 /// is two *separate* signed 16-bit values in one 32-bit register, which no single signedness flag
 /// describes. Hence @c KueblerFormat rather than a bool.
+///
+/// **The draft is not the last word, and this table says what the encoder does.** The encoder
+/// calibration sequence in OBLAC runs against real Integros in production. It reads four registers
+/// the draft leaves out (0x56 to 0x5C, the start and end speeds), and it reads or writes four the
+/// draft calls not implemented (0x04, 0x61, 0x66 and 0x6A). Those rows follow the sequence, and so
+/// does the width of 0x04. The three still marked not implemented are the ones nothing has
+/// exercised: 0x00, 0x60 and 0x62.
+///
+/// **The draft is the only document there is, and it is not a specification.** Ask Synapticon
+/// control engineering for the vendor's own register specification before trusting a row nothing
+/// has read off hardware.
 
 /// @brief How a register's value should be read once assembled.
 enum class KueblerFormat : uint8_t {
@@ -40,18 +51,21 @@ enum class KueblerAccess : uint8_t { kReadOnly, kWriteOnly, kReadWrite };
 /// @brief One register of the Kübler encoder.
 struct KueblerRegister {
   uint8_t address = 0;    ///< Register address, as OS command 19 carries it in byte 2.
-  uint8_t bits = 0;       ///< Width in bits: 8, 16, 32 — or 64, which the command cannot reach.
+  uint8_t bits = 0;       ///< Width in bits: 8, 16 or 32. See @c kMaxKueblerRegisterBytes.
   std::string_view name;  ///< The vendor's own name for it.
   KueblerAccess access{KueblerAccess::kReadOnly};
 
-  /// Whether the encoder implements it. **Seven of these are documented but not implemented**, and
-  /// the draft says so per row; a client should mark them rather than offer them as working.
+  /// Whether the encoder implements it, so that a client marks a register rather than offering it
+  /// as working. The draft states this per row and is the starting point, but **it is wrong on
+  /// several rows**: the encoder calibration sequence reads and writes registers the draft calls
+  /// not implemented. Where the two disagree, this flag follows the encoder.
   bool implemented = false;
 
   KueblerFormat format{KueblerFormat::kUnsigned};
 
   /// The vendor's bit definitions, clauses joined with "; ". The only place a bit field's meaning
-  /// is recorded, so it is carried verbatim rather than summarised.
+  /// is recorded, so it is carried verbatim rather than summarised. A register the draft does not
+  /// document carries where it comes from instead, because a reader has nowhere else to look.
   std::string_view definition;
 };
 
@@ -59,11 +73,16 @@ struct KueblerRegister {
 ///        @c nlohmann::json(kKueblerRegisters) works.
 void to_json(nlohmann::json& j, const KueblerRegister& r);
 
-/// @brief Every register the vendor's draft documents, ascending by address.
+/// @brief Every register known, ascending by address: the vendor's draft, plus the four the
+///        encoder calibration sequence reads and the draft leaves out.
 inline constexpr auto kKueblerRegisters = std::to_array<KueblerRegister>({
     {0x00, 32, "Identification pattern", KueblerAccess::kReadOnly, false, KueblerFormat::kUnsigned,
      "TBD"},
-    {0x04, 64, "Firmware-version", KueblerAccess::kReadOnly, false, KueblerFormat::kUnsigned,
+    // 32 bit, not the draft's 64: the encoder calibration sequence reads four bytes here and parses
+    // a version out of them. The draft's own format line describes 18 decimal digits, which those
+    // four bytes cannot hold, so the line below and the width disagree. The vendor specification is
+    // what settles it, and nobody has it yet.
+    {0x04, 32, "Firmware-version", KueblerAccess::kReadOnly, true, KueblerFormat::kUnsigned,
      "Major(3 digit).Minor(3 digit).Timestamp(12 digits); 001.002.2023.09.18.14.25 --> Version "
      "1.2.202309181425"},
     {0x10, 16, "POA start offset A", KueblerAccess::kReadOnly, true, KueblerFormat::kSigned,
@@ -116,17 +135,31 @@ inline constexpr auto kKueblerRegisters = std::to_array<KueblerRegister>({
      "active; Bit 2: Reserved; Bit 1: linear learn active; Bit 0: automatic calibration active"},
     {0x54, 8, "Configuration control", KueblerAccess::kWriteOnly, true, KueblerFormat::kBitField,
      "Bit 7 - 2: Reserved; Bit 1: Load default configuration; Bit 0: Save current configuration"},
+    // Not in the vendor's draft. The encoder calibration sequence reads all four, two bytes each,
+    // around the correction table learning it does in each direction.
+    {0x56, 16, "CW start speed", KueblerAccess::kReadOnly, true, KueblerFormat::kUnsigned,
+     "Not documented in the vendor's draft. The encoder calibration sequence reads it as an "
+     "unsigned 16-bit value. Write access is unknown."},
+    {0x58, 16, "CW end speed", KueblerAccess::kReadOnly, true, KueblerFormat::kUnsigned,
+     "Not documented in the vendor's draft. The encoder calibration sequence reads it as an "
+     "unsigned 16-bit value. Write access is unknown."},
+    {0x5A, 16, "CCW start speed", KueblerAccess::kReadOnly, true, KueblerFormat::kUnsigned,
+     "Not documented in the vendor's draft. The encoder calibration sequence reads it as an "
+     "unsigned 16-bit value. Write access is unknown."},
+    {0x5C, 16, "CCW end speed", KueblerAccess::kReadOnly, true, KueblerFormat::kUnsigned,
+     "Not documented in the vendor's draft. The encoder calibration sequence reads it as an "
+     "unsigned 16-bit value. Write access is unknown."},
     {0x60, 8, "Error status", KueblerAccess::kReadOnly, false, KueblerFormat::kBitField,
      "Bit 7 - 3: Reserved; Bit 2: Command execution error; Bit 1: signal error; Bit 0: "
      "Initialization error"},
-    {0x61, 8, "Error control", KueblerAccess::kWriteOnly, false, KueblerFormat::kBitField,
+    {0x61, 8, "Error control", KueblerAccess::kWriteOnly, true, KueblerFormat::kBitField,
      "Bit 7 - 2: Reserved; Bit 1: Clear all errors; Bit 0: Clear single error"},
     {0x62, 32, "Error code 1", KueblerAccess::kReadOnly, false, KueblerFormat::kUnsigned, "TBD"},
-    {0x66, 32, "Error code 2", KueblerAccess::kReadOnly, false, KueblerFormat::kUnsigned, "TBD"},
-    {0x6A, 32, "Error code 3", KueblerAccess::kReadOnly, false, KueblerFormat::kUnsigned, "TBD"},
+    {0x66, 32, "Error code 2", KueblerAccess::kReadOnly, true, KueblerFormat::kUnsigned, "TBD"},
+    {0x6A, 32, "Error code 3", KueblerAccess::kReadOnly, true, KueblerFormat::kUnsigned, "TBD"},
 });
 
-/// @brief The register at @p address, or @c std::nullopt when the draft documents none.
+/// @brief The register at @p address, or @c std::nullopt when the table has none.
 ///
 /// A missing entry is not an error: the draft is preliminary and the command addresses any byte, so
 /// an unknown address is read as an unnamed register rather than refused.
@@ -138,8 +171,10 @@ constexpr std::optional<KueblerRegister> findKueblerRegister(uint8_t address) {
   return *entry;
 }
 
-/// @brief The largest register width OS command 19 can transfer, in bytes (its length byte is
-///        capped at 4). Register 0x04 is 64-bit and therefore out of reach in one command.
+/// @brief The largest register width OS command 19 can transfer, in bytes: its length byte is
+///        capped at 4. Every register in the table fits, so @c readableInOneCommand is true for
+///        all of them today. It stays on the wire because the cap is real and a wider register
+///        would be reported rather than silently truncated.
 inline constexpr uint8_t kMaxKueblerRegisterBytes = 4;
 
 }  // namespace mm::node::somanet

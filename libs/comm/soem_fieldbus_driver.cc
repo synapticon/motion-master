@@ -920,6 +920,23 @@ constexpr auto kSdoInfoRetryDelay = std::chrono::milliseconds(50);
 // between the two.
 constexpr auto kProbeRefusalBudget = std::chrono::milliseconds(100);
 
+// Whether the answer to a probe carries no entry, which ends the probe exactly as a refusal does.
+//
+// **A refusal is not the only way a slave says "no such subindex".** The ARM stack in a SOMANET
+// Integro answers Get Entry Description for a subindex it does not have with *success* and an
+// all-zero descriptor (`Handle_Get_SubObject_Info_Ind` discards the lookup's error and replies from
+// an uninitialised struct). The XMOS stack in a SOMANET Node aborts, which is what ETG.1000.6
+// asks for. Reading only the abort therefore probes an ARM device to subindex 255 on every record
+// and array, and records thousands of rows that name nothing.
+//
+// **The bit length is the test, and the data type cannot be part of it.** The reply is built from
+// whatever the stack left behind, so its data type is sometimes zero and sometimes a leftover from
+// an earlier request — an Integro answered seven of them with 0x1024, 0x1025 and neighbours, which
+// are indices, not data types. A bit length of zero is the field that stays trustworthy, and it is
+// enough on its own: every entry in a SOMANET dictionary declares a width, and an entry without one
+// could not be decoded even if the slave meant it.
+bool describesNoEntry(const ec_OElistt& oeList, uint8_t sub) { return oeList.BitLength[sub] == 0; }
+
 // Object Code (ETG.1000.6 §5.6.3.2). A VAR holds one entry and the firmware reports its subindex
 // count correctly, so only these two are worth probing past.
 constexpr uint8_t kObjectCodeArray = 0x08;
@@ -1204,9 +1221,10 @@ std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
     //
     // Those slots are real and readable: the firmware resolves an entry description from its
     // static entry table without consulting the count, which is why asking past MaxSub answers.
-    // So the loop keeps asking until the slave refuses. **Each probe is a single attempt**, because
-    // a refusal is the answer it is looking for and running it through the retry budget would
-    // spend ten back-offs per object to learn the same thing.
+    // So the loop keeps asking until the slave says there is nothing there — either by refusing,
+    // or by answering with an empty descriptor, which @c describesNoEntry explains. **Each probe is
+    // a single attempt**, because that answer is the one it is looking for and running it through
+    // the retry budget would spend ten back-offs per object to learn the same thing.
     ec_OElistt oeList{};
     const bool hasSubindices =
         odList.ObjectCode[i] == kObjectCodeArray || odList.ObjectCode[i] == kObjectCodeRecord;
@@ -1238,6 +1256,9 @@ std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
         spdlog::warn("Device {}: readOEsingle 0x{:04X}:{:02X} failed{}", slavePosition,
                      odList.Index[i], sub, sdoInfoFailureDetail(entry));
         continue;
+      }
+      if (probing && describesNoEntry(oeList, sub)) {
+        break;
       }
       entries.push_back(OdEntry{
           .index = odList.Index[i],

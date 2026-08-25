@@ -52,10 +52,20 @@ struct ParameterCacheConfig {
 /// which is rebuilt on every scan) and handed to each @c Device by pointer.
 class ParameterCache {
  public:
-  /// @brief Bumped when the on-disk field set / meaning changes in a way that invalidates older
-  ///        files. Adding a new optional field does not require a bump (missing keys default and
-  ///        unknown keys are ignored); changing a field's meaning does.
-  static constexpr int kFormatVersion = 1;
+  /// @brief Bumped when an older file's *contents* can no longer be trusted, whatever its shape.
+  ///
+  /// Two things invalidate a file, and the second is easy to miss. One is the on-disk field set or
+  /// a field's meaning: adding a new optional field needs no bump (missing keys default and unknown
+  /// keys are ignored), changing what a field means does. The other is **a change to how the
+  /// dictionary is enumerated**, because a file records what the enumeration of the day produced
+  /// and is never checked against the device again.
+  ///
+  /// Nothing detects the second case, so it has to be remembered here. A file is keyed on vendor,
+  /// product and revision alone, so an enumeration fix that is not accompanied by a bump reaches
+  /// every host except the ones that already had the bug — where a stale file keeps being served
+  /// and the fix looks like it never shipped. That is a fault only one machine can reproduce and
+  /// nothing corrects.
+  static constexpr int kFormatVersion = 2;
 
   ParameterCache() = default;
   explicit ParameterCache(ParameterCacheConfig config);

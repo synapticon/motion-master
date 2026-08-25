@@ -40,6 +40,31 @@ class ParameterCache;
 ///        outcome is remembered — the runtime probe, not the hint, is authoritative.
 enum class CompleteAccessSupport : uint8_t { kUnknown, kSupported, kUnsupported };
 
+/// @brief Whether a device serves the subindices an array or a record declares but does not hold.
+///
+/// **The two answers are both legitimate, and they cost the master very different amounts.** An
+/// array or a record states in its subindex 0 how many entries are in use, and the enumeration
+/// deliberately lists the rest so a free PDO mapping slot appears like any other entry. Reading one
+/// of their *values* is a different request. CiA 301 says it is refused. Some devices answer
+/// anyway, and reading a SOMANET Node's free slots costs under a millisecond each.
+///
+/// A device that refuses is the expensive case, because SOMANET firmware refuses by silence rather
+/// than by abort, at a full 700 ms mailbox timeout each. So this is discovered once and remembered:
+/// the first such read that fails marks the device, and later objects stop at their count instead
+/// of paying the timeout again. A device that answers is never marked and keeps every value.
+///
+/// Learned rather than assumed, because assuming the refusal throws away values a well-behaved
+/// device would have given. @c kUnknown is the state in which every declared subindex is attempted.
+///
+/// **One timeout per device, not per entry.** On a SOMANET Integro the first sweep spends 700 ms on
+/// 0x1600:08 and every later object stops at its count without a transfer, so 53 timeouts become
+/// one: 36 s becomes 2.8 s, and 2.2 s once the state is set.
+///
+/// Nothing here names a product or a firmware version. The state keys on a read that failed, so a
+/// device that answers is never affected, and a device that aborts properly gets the same skipping
+/// at a fraction of the cost. If the silence is ever fixed this can be deleted for about 0.3 s.
+enum class DeclaredSubindexReads : uint8_t { kUnknown, kServed, kRefused };
+
 /// @brief Decoded values of one object's readable sub-entries, as returned by @c
 ///        Device::readObject.
 struct ObjectValues {
@@ -731,6 +756,22 @@ class Device {
   /// @c parametersMutex_. Per-entry failures are logged and leave the type default.
   void readParameterValues(std::vector<DeviceParameter>& defs, bool useCompleteAccess);
 
+  /// @brief Reports what a read of a subindex above its object's stated count did, and returns
+  ///        whether the rest of that object is still worth asking for.
+  ///
+  /// The learning step behind @c DeclaredSubindexReads. @p ok is whether the read produced a value.
+  /// A success marks the device as serving these and keeps every later one; a failure marks it as
+  /// refusing, and every later object stops at its count rather than paying the timeout again.
+  ///
+  /// @param ok Whether the read succeeded.
+  /// @return @c true while above-count reads are still worth issuing on this device.
+  bool recordDeclaredSubindexRead(bool ok);
+
+  /// @brief Whether a subindex above its object's stated count is worth reading on this device.
+  ///
+  /// @c true unless this device has already refused one. See @c DeclaredSubindexReads.
+  bool declaredSubindexReadsWorthTrying() const;
+
   /// @brief Reads one multi-subindex object into the parameter map with a single Complete Access
   ///        upload, taking @c parametersMutex_ itself and releasing it across the transfer.
   ///
@@ -871,6 +912,10 @@ class Device {
   // Discovered Complete Access support (the probe outcome), shared by every grouped read for the
   // device's lifetime. Read and written only under parametersMutex_.
   CompleteAccessSupport caSupport_ = CompleteAccessSupport::kUnknown;
+  // Whether this device serves a subindex above its object's stated count -- see
+  // DeclaredSubindexReads. Learned by the read sweeps and kept for the device's lifetime. Read and
+  // written only under parametersMutex_.
+  DeclaredSubindexReads declaredSubindexReads_ = DeclaredSubindexReads::kUnknown;
 };
 
 /// @brief Serialises a Device to JSON.

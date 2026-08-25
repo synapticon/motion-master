@@ -529,8 +529,11 @@ TEST(DeviceInitParametersCompleteAccess, DecodesMultiSubObjectInOneUpload) {
 TEST(DeviceInitParametersCompleteAccess, FallsBackWhenTheSlaveSendsOnlyTheEntriesItCounts) {
   // A PDO mapping object whose dictionary declares three entries while only one is mapped. SOMANET
   // firmware builds a Complete Access upload from the runtime value of subindex 0, so it sends the
-  // one mapped entry and stops. That is ordinary, not a fault: the read falls back per subindex and
-  // every declared entry still gets its value, including the unmapped ones.
+  // one mapped entry and stops. That is ordinary, not a fault: the read falls back per subindex.
+  //
+  // The fallback reads subindex 0, the entry it counts, and then subindex 2 -- which the object
+  // declares and does not currently hold. Whether that answers is the device's to say, so it is
+  // asked once. This device refuses it, and the entry keeps its declaration with no value.
   SdoFakeDriver driver;
   driver.programOd(0x1600, 0x00, kU8, 0x3F, 8, kArray);
   driver.programOd(0x1600, 0x01, kU32, 0x3F, 32, kArray);
@@ -539,18 +542,96 @@ TEST(DeviceInitParametersCompleteAccess, FallsBackWhenTheSlaveSendsOnlyTheEntrie
   driver.completeReads[0x1600] = completeBlob(1, {u32le(0x44444444)});  // one entry, not two
   driver.programRead(0x1600, 0x00, {1});
   driver.programRead(0x1600, 0x01, u32le(0x44444444));
-  driver.programRead(0x1600, 0x02, u32le(0x00000000));
+  // No answer programmed for subindex 2, so reading it fails.
   Device device(1, driver);
 
   ASSERT_TRUE(
       device.initializeParameters(/*readValues=*/true, /*useCompleteAccess=*/true).has_value());
 
   EXPECT_EQ(driver.completeReadIndices, (std::vector<uint16_t>{0x1600}));
-  EXPECT_GT(driver.perSubReads, 0);
+  EXPECT_EQ(driver.perSubReads, 3);
   EXPECT_EQ(device.parameter(0x1600, 0x01)->currentValue(),
             DeviceParameterValue{uint32_t{0x44444444}});
-  EXPECT_EQ(device.parameter(0x1600, 0x02)->currentValue(), DeviceParameterValue{uint32_t{0}});
-  EXPECT_EQ(device.parameter(0x1600, 0x02)->syncState, SyncState::Synced);
+  EXPECT_TRUE(device.parameter(0x1600, 0x02).has_value());
+  EXPECT_EQ(device.parameter(0x1600, 0x02)->syncState, SyncState::Unknown);
+}
+
+TEST(DeviceInitParameters, AsksOnceThenStopsAskingForEntriesTheDeviceDoesNotHold) {
+  // The expensive part is not the refusal, it is that SOMANET firmware refuses by silence, so each
+  // one costs a full mailbox timeout. The device is asked once and its answer is remembered: the
+  // first object pays for the discovery, and every later object stops at its stated count.
+  //
+  // Two arrays, each declaring one entry more than it holds. Reads: 0x1600 sub 0, 1 and the refused
+  // 2; then 0x1601 sub 0 and 1, with sub 2 never attempted. Five, not six.
+  SdoFakeDriver driver;
+  for (uint16_t index : {0x1600, 0x1601}) {
+    driver.programOd(index, 0x00, kU8, 0x3F, 8, kArray);
+    driver.programOd(index, 0x01, kU32, 0x3F, 32, kArray);
+    driver.programOd(index, 0x02, kU32, 0x3F, 32, kArray);
+    driver.programRead(index, 0x00, {1});
+    driver.programRead(index, 0x01, u32le(0x44444444));
+  }
+  driver.state = kPreOp;
+  Device device(1, driver);
+
+  ASSERT_TRUE(
+      device.initializeParameters(/*readValues=*/true, /*useCompleteAccess=*/false).has_value());
+  driver.perSubReads = 0;
+  ASSERT_TRUE(device.readAllParameters(/*useCompleteAccess=*/false).has_value());
+
+  EXPECT_EQ(driver.perSubReads, 5);
+  EXPECT_EQ(device.parameter(0x1600, 0x02)->syncState, SyncState::Unknown);
+  EXPECT_EQ(device.parameter(0x1601, 0x02)->syncState, SyncState::Unknown);
+}
+
+TEST(DeviceInitParameters, KeepsReadingDeclaredEntriesOnADeviceThatServesThem) {
+  // The mirror case, and the reason the refusal is learned rather than assumed. This device answers
+  // for the entry above its stated count, so nothing is skipped and the value is reported. Assuming
+  // CiA 301 here would throw away 58 readable values on a SOMANET Node.
+  SdoFakeDriver driver;
+  for (uint16_t index : {0x1600, 0x1601}) {
+    driver.programOd(index, 0x00, kU8, 0x3F, 8, kArray);
+    driver.programOd(index, 0x01, kU32, 0x3F, 32, kArray);
+    driver.programOd(index, 0x02, kU32, 0x3F, 32, kArray);
+    driver.programRead(index, 0x00, {1});
+    driver.programRead(index, 0x01, u32le(0x44444444));
+    driver.programRead(index, 0x02, u32le(0x55555555));
+  }
+  driver.state = kPreOp;
+  Device device(1, driver);
+
+  ASSERT_TRUE(
+      device.initializeParameters(/*readValues=*/true, /*useCompleteAccess=*/false).has_value());
+  driver.perSubReads = 0;
+  ASSERT_TRUE(device.readAllParameters(/*useCompleteAccess=*/false).has_value());
+
+  EXPECT_EQ(driver.perSubReads, 6);
+  EXPECT_EQ(device.parameter(0x1600, 0x02)->currentValue(),
+            DeviceParameterValue{uint32_t{0x55555555}});
+  EXPECT_EQ(device.parameter(0x1601, 0x02)->currentValue(),
+            DeviceParameterValue{uint32_t{0x55555555}});
+}
+
+TEST(DeviceInitParameters, ReadsEverySubindexWhenTheCountItselfCannotBeRead) {
+  // The limit comes from subindex 0. Without it there is no limit to apply, so every declared
+  // subindex is still attempted -- the behaviour with nothing learned, rather than a guess.
+  SdoFakeDriver driver;
+  driver.programOd(0x1600, 0x00, kU8, 0x3F, 8, kArray);
+  driver.programOd(0x1600, 0x01, kU32, 0x3F, 32, kArray);
+  driver.programOd(0x1600, 0x02, kU32, 0x3F, 32, kArray);
+  driver.state = kPreOp;
+  // No programRead for subindex 0, so its upload fails and the count stays unknown.
+  driver.programRead(0x1600, 0x01, u32le(0x44444444));
+  driver.programRead(0x1600, 0x02, u32le(0x55555555));
+  Device device(1, driver);
+
+  ASSERT_TRUE(
+      device.initializeParameters(/*readValues=*/true, /*useCompleteAccess=*/false).has_value());
+
+  EXPECT_EQ(device.parameter(0x1600, 0x01)->currentValue(),
+            DeviceParameterValue{uint32_t{0x44444444}});
+  EXPECT_EQ(device.parameter(0x1600, 0x02)->currentValue(),
+            DeviceParameterValue{uint32_t{0x55555555}});
 }
 
 TEST(DeviceInitParametersCompleteAccess, FallsBackToPerSubindexWhenUnsupported) {

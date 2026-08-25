@@ -466,7 +466,50 @@ bool readCompleteInto(mm::comm::FieldbusDriver& driver, uint16_t slavePosition,
   return false;
 }
 
+// The highest subindex of an object worth reading, from the value just read for its subindex 0.
+//
+// **An array or a record declares more storage than it currently holds, and the part above the
+// count cannot be uploaded.** Subindex 0 carries how many entries are in use, and CiA 301 makes
+// anything above that inaccessible. The enumeration lists those entries anyway, on purpose: it asks
+// past the reported count so a free PDO mapping slot appears with its name, type and access flags
+// like any other entry. Their *values* are a different matter, and asking for one is a request the
+// device is right to refuse.
+//
+// **Refusing is not what makes this expensive. Refusing by silence is.** SOMANET firmware answers a
+// read above the count with nothing at all, so each one costs a full 700 ms mailbox timeout rather
+// than an abort in a few milliseconds. On a SOMANET Integro that is 53 entries across ten mapping
+// objects, which turns a sub-second sweep into a thirty-six-second one.
+//
+// **The limit only applies once the device has refused one of these reads.** A SOMANET Node serves
+// all 58 of them, in under a millisecond each, through this same per-subindex path -- so applying
+// the limit unconditionally throws away values a well-behaved device was giving. That is what
+// @c DeclaredSubindexReads is for, and it is why the refusal is learned rather than assumed.
+//
+// @c nullopt means no limit is known, and every declared subindex is attempted. That is the answer
+// for a VAR, for a count that is not a @c uint8_t, and for a subindex 0 that could not be read --
+// the behaviour with nothing learned, rather than a guess.
+std::optional<uint8_t> subindicesInUse(uint16_t objectCode, const DeviceParameterValue& value) {
+  if (objectCode != kOtypeArray && objectCode != kOtypeRecord) {
+    return std::nullopt;
+  }
+  if (const auto* count = std::get_if<uint8_t>(&value)) {
+    return *count;
+  }
+  return std::nullopt;
+}
+
 }  // namespace
+
+bool Device::declaredSubindexReadsWorthTrying() const {
+  const std::lock_guard<std::mutex> lock(*parametersMutex_);
+  return declaredSubindexReads_ != DeclaredSubindexReads::kRefused;
+}
+
+bool Device::recordDeclaredSubindexRead(bool ok) {
+  const std::lock_guard<std::mutex> lock(*parametersMutex_);
+  declaredSubindexReads_ = ok ? DeclaredSubindexReads::kServed : DeclaredSubindexReads::kRefused;
+  return ok;
+}
 
 void Device::readParameterValues(std::vector<DeviceParameter>& defs, bool useCompleteAccess) {
   // Reads one subindex the classic way: an individual SDO upload, decoded in place. Used for VARs,
@@ -497,6 +540,10 @@ void Device::readParameterValues(std::vector<DeviceParameter>& defs, bool useCom
   CompleteAccessSupport passState = CompleteAccessSupport::kUnknown;
   CompleteAccessProbe ca(useCompleteAccess, passState);
 
+  // Pass-local for the same reason `passState` is: this runs off parametersMutex_ on a local defs
+  // vector, before the map is published, so it must not touch declaredSubindexReads_.
+  DeclaredSubindexReads declaredReads = DeclaredSubindexReads::kUnknown;
+
   for (size_t start = 0; start < defs.size();) {
     // Group the contiguous run of entries sharing this object index.
     size_t end = start + 1;
@@ -511,8 +558,23 @@ void Device::readParameterValues(std::vector<DeviceParameter>& defs, bool useCom
 
     if (!(ca.enabled() && completeAccessEligible(subs) &&
           readCompleteInto(driver_, slavePosition_, subs, ca))) {
+      // Stops at the object's stated count once this device has refused one such read -- see
+      // subindicesInUse and DeclaredSubindexReads. The subindices are in order, so leaving the loop
+      // leaves the object.
+      std::optional<uint8_t> lastInUse;
       for (DeviceParameter* p : subs) {
+        const bool aboveCount = lastInUse && p->subindex > *lastInUse;
+        if (aboveCount && declaredReads == DeclaredSubindexReads::kRefused) {
+          break;
+        }
         readOne(*p);
+        const bool ok = p->syncState == SyncState::Synced;
+        if (aboveCount) {
+          declaredReads = ok ? DeclaredSubindexReads::kServed : DeclaredSubindexReads::kRefused;
+        }
+        if (p->subindex == 0 && ok) {
+          lastInUse = subindicesInUse(p->objectCode, p->currentValue());
+        }
       }
     }
     start = end;
@@ -1077,7 +1139,13 @@ std::expected<void, std::string> Device::readAllParameters(bool useCompleteAcces
   // released — and the per-object reads below release it across their transfers too, so this sweep
   // never holds parametersMutex_ across any bus I/O at all. Write-only objects are skipped: an SDO
   // upload of one would abort and only add a spurious failure log.
-  std::map<uint16_t, std::vector<uint8_t>> objects;
+  // The object code travels with the subindices because @c subindicesInUse needs it, and reading it
+  // later would mean taking the lock again per object.
+  struct ReadableObject {
+    uint16_t objectCode = 0;
+    std::vector<uint8_t> subindices;
+  };
+  std::map<uint16_t, ReadableObject> objects;
   {
     std::lock_guard<std::mutex> lock(*parametersMutex_);
     if (parameters_.empty()) {
@@ -1086,27 +1154,46 @@ std::expected<void, std::string> Device::readAllParameters(bool useCompleteAcces
     }
     for (const auto& [key, p] : parameters_) {
       if (p->isReadable()) {
-        objects[p->index].push_back(p->subindex);
+        auto& object = objects[p->index];
+        object.objectCode = p->objectCode;
+        object.subindices.push_back(p->subindex);
       }
     }
   }
-  for (auto& [index, subindices] : objects) {
+  for (auto& [index, object] : objects) {
     std::ranges::sort(
-        subindices);  // completeAccessEligible needs subindex order, contiguous from 0
+        object.subindices);  // completeAccessEligible needs subindex order, contiguous from 0
   }
 
   // Best-effort, like initializeParameters(readValues=true): a per-entry failure keeps that entry's
   // cached value and is logged, and the sweep still succeeds so one bad object never blocks the
   // rest. Multi-subindex objects try Complete Access first; single-subindex objects and any CA
   // fallthrough go through the PDO-aware per-subindex readParameter.
-  for (const auto& [index, subindices] : objects) {
-    if (subindices.size() >= 2 && readObjectComplete(index, subindices, useCompleteAccess)) {
+  for (const auto& [index, object] : objects) {
+    if (object.subindices.size() >= 2 &&
+        readObjectComplete(index, object.subindices, useCompleteAccess)) {
       continue;
     }
-    for (uint8_t si : subindices) {
-      if (auto r = readParameter(index, si); !r) {
+    // Stops at the object's stated count once this device has refused one such read -- see
+    // subindicesInUse and DeclaredSubindexReads. The subindices are sorted, so leaving the loop
+    // leaves the object.
+    std::optional<uint8_t> lastInUse;
+    for (uint8_t si : object.subindices) {
+      const bool aboveCount = lastInUse && si > *lastInUse;
+      if (aboveCount && !declaredSubindexReadsWorthTrying()) {
+        break;
+      }
+      auto r = readParameter(index, si);
+      if (aboveCount) {
+        recordDeclaredSubindexRead(r.has_value());
+      }
+      if (!r) {
         spdlog::warn("Device {}: read 0x{:04X}:{:02X} failed: {}", slavePosition_, index, si,
                      r.error());
+        continue;
+      }
+      if (si == 0) {
+        lastInUse = subindicesInUse(object.objectCode, *r);
       }
     }
   }

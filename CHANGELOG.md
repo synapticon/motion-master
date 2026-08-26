@@ -19,6 +19,12 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.84] - 2026-08-26
+
+### Fixed
+
+- **6.0.0-alpha.83 has no downloadable binaries; install this release instead.** Its Windows build failed, and that stopped the release from publishing a package for any platform — no archive, no deb, no rpm, no Windows zip. The TypeScript client was published before the failure, so `@synapticon/motion-master-client@6.0.0-alpha.83` does exist on npm. This release carries the same changes with the build repaired.
+
 ## [6.0.0-alpha.83] - 2026-08-26
 
 ### Added
@@ -781,7 +787,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.83...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.84...HEAD
+[6.0.0-alpha.84]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.83...v6.0.0-alpha.84
 [6.0.0-alpha.83]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.82...v6.0.0-alpha.83
 [6.0.0-alpha.82]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.81...v6.0.0-alpha.82
 [6.0.0-alpha.81]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.80...v6.0.0-alpha.81

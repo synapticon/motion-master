@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.83] - 2026-08-26
+
 ### Added
 
 - **An OS command can move bulk data now.** Some commands carry more than the eight request bytes hold, and they move it through the drive's `fs-buffer`. That is not a file: the firmware matches the name exactly and connects the transfer to a block of memory shared with the command that is running. `POST /api/devices/{slavePosition}/procedures/os-command` takes `fsBuffer` — `none`, `read` or `write` — and `fsBufferData` for the bytes to send, base64-encoded. A read comes back on the step's `fsBuffer`. The transfer runs while the command runs, because the drive holds the command in progress until all the data has moved, so a command that produces more than 2024 bytes could not be read any other way. It needs firmware 5.2 or newer. When a transfer fails the drive is still asked for its verdict first: a command the firmware does not support produces nothing, so the transfer times out on silence while the drive is about to say "unsupported command", which is the more useful answer. This is what every safety-module command will be built on.
@@ -779,7 +781,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.82...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.83...HEAD
+[6.0.0-alpha.83]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.82...v6.0.0-alpha.83
 [6.0.0-alpha.82]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.81...v6.0.0-alpha.82
 [6.0.0-alpha.81]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.80...v6.0.0-alpha.81
 [6.0.0-alpha.80]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.79...v6.0.0-alpha.80

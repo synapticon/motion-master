@@ -556,6 +556,11 @@ TEST(DeviceInitParametersCompleteAccess, FallsBackWhenTheSlaveSendsOnlyTheEntrie
   EXPECT_EQ(device.parameter(0x1600, 0x02)->syncState, SyncState::Unknown);
 }
 
+// Two RxPDO mapping objects, for the tests that need a second object to prove what was learned on
+// the first. A typed array rather than a braced list in the loop: `{0x1600, 0x1601}` deduces to
+// `std::initializer_list<int>`, and MSVC rejects the narrowing to uint16_t as C4244.
+constexpr uint16_t kTwoMappingObjects[] = {0x1600, 0x1601};
+
 TEST(DeviceInitParameters, AsksOnceThenStopsAskingForEntriesTheDeviceDoesNotHold) {
   // The expensive part is not the refusal, it is that SOMANET firmware refuses by silence, so each
   // one costs a full mailbox timeout. The device is asked once and its answer is remembered: the
@@ -564,7 +569,7 @@ TEST(DeviceInitParameters, AsksOnceThenStopsAskingForEntriesTheDeviceDoesNotHold
   // Two arrays, each declaring one entry more than it holds. Reads: 0x1600 sub 0, 1 and the refused
   // 2; then 0x1601 sub 0 and 1, with sub 2 never attempted. Five, not six.
   SdoFakeDriver driver;
-  for (uint16_t index : {0x1600, 0x1601}) {
+  for (uint16_t index : kTwoMappingObjects) {
     driver.programOd(index, 0x00, kU8, 0x3F, 8, kArray);
     driver.programOd(index, 0x01, kU32, 0x3F, 32, kArray);
     driver.programOd(index, 0x02, kU32, 0x3F, 32, kArray);
@@ -589,7 +594,7 @@ TEST(DeviceInitParameters, KeepsReadingDeclaredEntriesOnADeviceThatServesThem) {
   // for the entry above its stated count, so nothing is skipped and the value is reported. Assuming
   // CiA 301 here would throw away 58 readable values on a SOMANET Node.
   SdoFakeDriver driver;
-  for (uint16_t index : {0x1600, 0x1601}) {
+  for (uint16_t index : kTwoMappingObjects) {
     driver.programOd(index, 0x00, kU8, 0x3F, 8, kArray);
     driver.programOd(index, 0x01, kU32, 0x3F, 32, kArray);
     driver.programOd(index, 0x02, kU32, 0x3F, 32, kArray);

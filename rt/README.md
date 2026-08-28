@@ -702,9 +702,10 @@ a version in the filename would move it on every release. Which build a download
 
 **The SSH key goes up with the image.** Every card authorises the same key, and its private half is
 published beside the archive rather than kept. That is the same posture as the root password: with
-an API that has no authentication, neither credential is what keeps anybody out, and both are what
-keep a board reachable when the network does not come up. The script refuses to publish without it,
-because an image whose key was forgotten is one nobody can reach over SSH.
+an API that has no authentication, neither credential is what keeps anybody out. The two serve
+different failures — the password is the console way in, for a board with no network, and the key is
+for SSH once there is one. The script refuses to publish without the key, because an image whose key
+was forgotten is one nobody can reach over SSH.
 
 **Readers are served by CloudFront, not by the bucket.** `dezliul92qqoq.cloudfront.net` serves
 `s3://synapticon/motion-master/` at the root of its own host, so the object key is the whole path.

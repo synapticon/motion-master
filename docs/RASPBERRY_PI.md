@@ -190,8 +190,11 @@ read.
 
 **That key is public, and so is the password.** They are not what keeps anyone out of the board.
 The API has no authentication and answers on every interface, so somebody who can reach the board
-can already drive the motors without logging in. What the credentials buy is a board that stays
-reachable when the network does not come up.
+can already drive the motors without logging in.
+
+What each one is for is different. The password is for the console, with a monitor and a keyboard —
+that is the way in when the board has no network, which is the failure you most need a way in for.
+The key is for SSH, so nobody has to type a password over the network.
 
 ## 6. Keeping it up to date
 

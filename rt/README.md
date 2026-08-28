@@ -574,9 +574,11 @@ ssh -i ~/.ssh/motion-master-rpi root@<address>   # over the network
 Two keypairs are in play and they are not interchangeable. The one in `.cache` is a throwaway,
 authorised only while the image is being provisioned and removed before the image is finished. The
 one above — `~/.ssh/motion-master-rpi`, generated on the first run of the build and **not** kept in
-the repository — is durable, and its public half is baked into every image. It is the key handed to
-whoever owns a board, so **treat it as published, and back it up**: a card only accepts the key it
-was built with, so losing it locks you out of every board already in the field.
+the repository — is durable, and its public half is baked into every image. It **is** published:
+the private half sits beside the image, at
+`https://dezliul92qqoq.cloudfront.net/motion-master-rpi`, because it is the key handed to whoever
+owns a board. Back it up: a card only accepts the key it was built with, so losing it locks you out
+of every board already in the field, and publishing a new one helps nobody holding an old card.
 
 The root password is the account name, and root may log in over SSH. That is deliberate. The
 board's HTTP API has no authentication and binds every interface, so login credentials are not what
@@ -697,6 +699,12 @@ of CPU and publishing the same build twice is a normal thing to do.
 **One key, overwritten every time.** The documentation points at a URL that has to keep working, and
 a version in the filename would move it on every release. Which build a download is comes from the
 `.sha256` published beside it, and from the version inside the image.
+
+**The SSH key goes up with the image.** Every card authorises the same key, and its private half is
+published beside the archive rather than kept. That is the same posture as the root password: with
+an API that has no authentication, neither credential is what keeps anybody out, and both are what
+keep a board reachable when the network does not come up. The script refuses to publish without it,
+because an image whose key was forgotten is one nobody can reach over SSH.
 
 **Readers are served by CloudFront, not by the bucket.** `dezliul92qqoq.cloudfront.net` serves
 `s3://synapticon/motion-master/` at the root of its own host, so the object key is the whole path.

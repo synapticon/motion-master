@@ -176,6 +176,23 @@ ssh root@192.168.0.81
 
 The password is `root`.
 
+Every image carries the same key, and the private half is published beside it:
+
+```bash
+curl -o ~/.ssh/motion-master-rpi \
+  https://dezliul92qqoq.cloudfront.net/motion-master-rpi
+chmod 600 ~/.ssh/motion-master-rpi
+ssh -i ~/.ssh/motion-master-rpi root@192.168.0.81
+```
+
+`chmod 600` is not optional. `ssh` refuses a private key that other accounts on your computer can
+read.
+
+**That key is public, and so is the password.** They are not what keeps anyone out of the board.
+The API has no authentication and answers on every interface, so somebody who can reach the board
+can already drive the motors without logging in. What the credentials buy is a board that stays
+reachable when the network does not come up.
+
 ## 6. Keeping it up to date
 
 On the board:

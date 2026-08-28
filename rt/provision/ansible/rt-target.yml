@@ -57,6 +57,18 @@
       when: motion_master_install | default(false)
       tags: motion-master
 
+    # Off by default like the daemon above. A host reached over its only network
+    # interface is one where reconfiguring the radio is a way to lose the
+    # session; a board whose Ethernet port belongs to EtherCAT is the opposite
+    # case, so rpi-image.yml turns it on.
+    - name: Configure Wi-Fi from the boot partition
+      ansible.builtin.include_role:
+        name: wifi
+        apply:
+          tags: wifi
+      when: wifi_install | default(false)
+      tags: wifi
+
     # Off by default, for the same reason as the daemon above: a host someone
     # points this playbook at may have been partitioned deliberately, and
     # growing its root partition over the free space is not a decision to make

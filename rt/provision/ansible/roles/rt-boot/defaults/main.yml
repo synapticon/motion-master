@@ -47,6 +47,15 @@ rt_grub_dropin_path: /etc/default/grub.d/99-realtime.cfg
 # or firmware upgrade and must not be edited. See tasks/firmware-cmdline.yml.
 rt_firmware_extra_cmdline_path: /etc/default/raspi-extra-cmdline
 rt_firmware_defaults_path: /etc/default/raspi-firmware
+rt_firmware_custom_config_path: /etc/default/raspi-firmware-custom
+
+# Device tree the firmware must load, as a filename on the firmware partition.
+# Empty leaves the choice to the firmware, which is right on every board whose
+# die the firmware recognises. A Raspberry Pi 5 Rev 1.1 is not one of those and
+# panics on the tree the firmware picks, so the appliance names its own — see
+# tasks/firmware-cmdline.yml. The name is board-specific: pinning the D-step
+# tree on a Rev 1.0 board would fail the same way, in the other direction.
+rt_firmware_device_tree: ""
 
 # Detection only: its presence is what identifies a Pi-style boot.
 rt_firmware_cmdline_path: /boot/firmware/cmdline.txt

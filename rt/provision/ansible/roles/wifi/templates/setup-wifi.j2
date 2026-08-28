@@ -1,0 +1,283 @@
+#!/bin/sh
+# Managed by Ansible (wifi role) — do not edit.
+#
+# Sets the Wi-Fi network this board uses for management.
+#
+# The card is the normal way in: {{ wifi_settings_file }} on the FAT firmware
+# partition is written from the laptop that flashed it, and the boot unit
+# replays it. This command is for when that did not work, which is the case
+# where the board has no network and somebody is at a monitor and keyboard.
+# Both write the settings file and the netplan file together, so the two can
+# never disagree and the next boot does not replay the card over a correction
+# made at the console.
+set -eu
+
+SETTINGS="{{ wifi_settings_file }}"
+NETPLAN="{{ wifi_netplan_file }}"
+README="{{ wifi_readme_file }}"
+
+usage() {
+    cat <<EOF
+Usage:
+  $(basename "$0") <ssid> <password> [country]   set the network
+  $(basename "$0") <ssid> "" [country]           set an open network
+  $(basename "$0") --from-settings               apply $SETTINGS
+  $(basename "$0") --init-settings               write $SETTINGS if it is absent
+  $(basename "$0") --write-readme                write $README beside it
+  $(basename "$0") --validate                    check the generated netplan
+
+The country is an ISO 3166 code such as DE, US or GB. Without one the radio
+stays in the world domain, where some channels are unavailable.
+EOF
+}
+
+# Reads one key out of the settings file. Everything after the first "=" is the
+# value, so a password may contain one. A commented line cannot match, because
+# the key has to be first on the line. The carriage return is what the file
+# carries when it was edited on Windows, which is the common case for a card
+# read on a laptop.
+setting() {
+    if [ ! -f "$SETTINGS" ]; then
+        return 0
+    fi
+    sed -n "s/^[[:space:]]*$1[[:space:]]*=//p" "$SETTINGS" |
+        head -1 |
+        tr -d '\r' |
+        sed 's/^[[:space:]]*//; s/[[:space:]]*$//'
+}
+
+# An SSID and a password are arbitrary text, and both land in YAML.
+yamlQuote() {
+    printf '"%s"' "$(printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g')"
+}
+
+# The interface is named, not matched. The base image's own 90-default.yaml
+# matches en* and eth*, and the same shape here is rejected: "networkd backend
+# does not support wifi with match:, only by interface name". So the name has to
+# be right. net.ifnames=0 is what makes it wlan0 rather than a name derived from
+# the bus address, and that comes from raspi-firmware's own generator, which
+# writes it into every cmdline.txt it produces.
+renderNetplan() {
+    ssid=$1
+    psk=$2
+    country=$3
+
+    printf 'network:\n'
+    printf '  version: 2\n'
+    printf '  wifis:\n'
+    printf '    {{ wifi_interface }}:\n'
+    printf '      dhcp4: true\n'
+    printf '      dhcp6: true\n'
+    if [ -n "$country" ]; then
+        printf '      regulatory-domain: %s\n' "$(yamlQuote "$country")"
+    fi
+    printf '      access-points:\n'
+    if [ -n "$psk" ]; then
+        printf '        %s:\n' "$(yamlQuote "$ssid")"
+        printf '          password: %s\n' "$(yamlQuote "$psk")"
+    else
+        printf '        %s: {}\n' "$(yamlQuote "$ssid")"
+    fi
+}
+
+# The header is written every time, so the instructions survive a change made at
+# the console. An empty value is emitted as a commented placeholder, which is
+# what --init-settings produces.
+renderSettings() {
+    ssid=$1
+    psk=$2
+    country=$3
+
+    cat <<EOF
+# Wi-Fi for this Motion Master appliance.
+#
+# The board's Ethernet port carries EtherCAT, so this is how you reach it.
+# Fill in the two lines below, save the file, and put the card in the board.
+# Editing this file again and rebooting moves the board to another network.
+#
+# Spaces around the "=" and at the ends of a value are removed.
+
+EOF
+    printSetting ssid "$ssid" YourNetwork
+    printSetting psk "$psk" YourPassword
+    cat <<EOF
+
+# ISO 3166 country code of where the board is used. Without one the radio stays
+# in the world domain, where some channels are unavailable.
+EOF
+    printSetting country "$country" DE
+}
+
+printSetting() {
+    if [ -n "$2" ]; then
+        printf '%s=%s\n' "$1" "$2"
+    else
+        printf '#%s=%s\n' "$1" "$3"
+    fi
+}
+
+# Writing only on a difference is what keeps this cheap enough to run on every
+# boot: an unchanged card does no work at all. That matters because netplan
+# apply reconfigures every interface it manages, and one of them is the port the
+# drives are on.
+applyNetplan() {
+    ssid=$1
+    psk=$2
+    country=$3
+
+    scratch=$(mktemp)
+    renderNetplan "$ssid" "$psk" "$country" >"$scratch"
+
+    if [ -f "$NETPLAN" ] && cmp -s "$scratch" "$NETPLAN"; then
+        rm -f "$scratch"
+        echo "Wi-Fi settings are already applied for SSID $ssid."
+        return 0
+    fi
+
+    install -m 600 -o root -g root "$scratch" "$NETPLAN"
+    rm -f "$scratch"
+    netplan apply
+    echo "Wi-Fi configured for SSID $ssid."
+}
+
+# Written in place rather than through install(1). The settings file lives on
+# the FAT firmware partition, which carries no ownership or permission bits, so
+# setting them fails there.
+#
+# Rendered to a scratch file first. The write to the card truncates before it
+# writes, and this file is the one somebody would be reading to work out what
+# the board was told, so it must not be left half-finished by a failure.
+#
+# Reports failure rather than acting on it: the two callers want opposite
+# things. Whatever went wrong prints its own reason on the way past.
+saveSettings() {
+    if [ ! -d "$(dirname "$SETTINGS")" ]; then
+        echo "$(dirname "$SETTINGS") is not there." >&2
+        return 1
+    fi
+    scratch=$(mktemp)
+    renderSettings "$1" "$2" "$3" >"$scratch"
+    if ! cat "$scratch" >"$SETTINGS"; then
+        rm -f "$scratch"
+        return 1
+    fi
+    rm -f "$scratch"
+}
+
+# Read on a laptop, by somebody who has just flashed a card and does not know
+# what is on it. It names the drive it is on, because a Linux desktop offers the
+# root partition alongside this one and labels neither.
+renderReadme() {
+    cat <<EOF
+Motion Master appliance
+
+This partition is where the board is configured before it first boots. It is
+the one your computer shows as {{ wifi_firmware_label }}.
+
+  wifi.txt    the wireless network the board joins
+
+The board's Ethernet port carries EtherCAT, so Wi-Fi is how you reach the
+board. Open wifi.txt, fill in the network name and the password, save it, and
+put the card in the board.
+
+Everything else on this partition belongs to the boot process.
+
+The board is driven from a browser: https://motion-master.synapticon.com
+EOF
+}
+
+# Compared before it is written, so provisioning an already-provisioned board
+# reports a change only when the text has actually moved on.
+writeReadme() {
+    scratch=$(mktemp)
+    renderReadme >"$scratch"
+    if [ -f "$README" ] && cmp -s "$scratch" "$README"; then
+        rm -f "$scratch"
+        echo "$README is up to date."
+        return 0
+    fi
+    if ! cat "$scratch" >"$README"; then
+        rm -f "$scratch"
+        return 1
+    fi
+    rm -f "$scratch"
+    echo "Wrote $README."
+}
+
+# Renders the template against a copy of the real configuration and asks netplan
+# to generate from it, under a root of its own so nothing on this host is
+# touched. Run at provisioning time: a mistake in the template above would
+# otherwise surface as a board that never joins a network, on somebody's desk,
+# with no message anywhere.
+validate() {
+    root=$(mktemp -d)
+    mkdir -p "$root/etc/netplan"
+    for f in /etc/netplan/*.yaml; do
+        if [ -f "$f" ]; then
+            install -m 600 "$f" "$root/etc/netplan/"
+        fi
+    done
+    renderNetplan "validation-ssid" "validation-password" "DE" \
+        >"$root/etc/netplan/$(basename "$NETPLAN")"
+    chmod 600 "$root/etc/netplan/$(basename "$NETPLAN")"
+    netplan generate --root-dir "$root"
+    rm -rf "$root"
+    echo "The generated Wi-Fi configuration is valid."
+}
+
+case "${1:---help}" in
+--help | -h)
+    usage
+    ;;
+--validate)
+    validate
+    ;;
+--write-readme)
+    if ! writeReadme; then
+        echo "Could not write $README." >&2
+        exit 1
+    fi
+    ;;
+--init-settings)
+    if [ -f "$SETTINGS" ]; then
+        echo "$SETTINGS is already there; leaving it alone."
+    elif saveSettings "" "" ""; then
+        echo "Wrote $SETTINGS."
+    else
+        # Fatal here, unlike at the console: this runs while the image is being
+        # built, and a card that ships without the file is a card nobody can
+        # configure.
+        echo "Could not write $SETTINGS." >&2
+        exit 1
+    fi
+    ;;
+--from-settings)
+    ssid=$(setting ssid)
+    if [ -z "$ssid" ]; then
+        echo "No ssid in $SETTINGS; leaving Wi-Fi unconfigured."
+        exit 0
+    fi
+    applyNetplan "$ssid" "$(setting psk)" "$(setting country)"
+    ;;
+-*)
+    usage >&2
+    exit 2
+    ;;
+*)
+    if [ "$#" -lt 2 ]; then
+        usage >&2
+        exit 2
+    fi
+    # Applied before it is recorded. Bringing the radio up is what the person
+    # at the console came for; recording it on the card only decides whether
+    # the next boot keeps it. So a card that cannot be written warns and does
+    # not cost them the network they just got working — an unmounted or
+    # read-only firmware partition being one of the things that may be wrong
+    # on a board they came to the console to fix.
+    applyNetplan "$1" "$2" "${3:-}"
+    if ! saveSettings "$1" "$2" "${3:-}"; then
+        echo "Warning: the settings were not recorded on $SETTINGS." >&2
+        echo "         The network is up now, and the next boot will undo it." >&2
+    fi
+    ;;
+esac

@@ -8,3 +8,8 @@ rt_ethercat_interface: ""
 rt_cpu_governor: performance
 
 rt_ethercat_link_path: /etc/systemd/network/90-ethercat.link
+
+# Netplan's view of the same port: managed, up, and carrying no addressing. Read
+# templates/91-ethercat.yaml.j2 for why the base image's glob is not left to
+# claim it.
+rt_ethercat_netplan_path: /etc/netplan/91-ethercat.yaml

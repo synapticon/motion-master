@@ -14,7 +14,16 @@
 # only symptom. Never take this below alpha.62.
 motion_master_version: 6.0.0-alpha.84
 motion_master_release_url: >-
-  https://github.com/synapticon/motion-master/releases/download/v{{ motion_master_version }}
+  {{ motion_master_release_url_base }}/v{{ motion_master_version }}
+
+# The same location without a tag, for update-motion-master, which is handed a
+# version at run time rather than reading one from here.
+motion_master_release_url_base: https://github.com/synapticon/motion-master/releases/download
+motion_master_releases_page: https://github.com/synapticon/motion-master/releases
+
+# Moves a running board to another release without Ansible. Named after what it
+# does, like setup-wifi, because it is typed by somebody over SSH.
+motion_master_update_script: /usr/local/sbin/update-motion-master
 
 # Where the .deb puts everything (see tools/package.sh). The binary auto-discovers
 # motion-master.jsonc next to itself, which is why no --config flag is needed.

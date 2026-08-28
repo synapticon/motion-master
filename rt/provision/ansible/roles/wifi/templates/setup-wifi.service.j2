@@ -1,0 +1,20 @@
+# Managed by Ansible (wifi role) — do not edit.
+[Unit]
+Description=Apply the Wi-Fi settings from the boot partition
+Documentation=file://{{ wifi_script }}
+
+# After /boot/firmware is mounted, which local-fs.target covers. It runs on
+# every boot rather than only the first, so that editing the file on the card
+# and putting it back moves the board to another network. Re-running is free:
+# the script compares what it would write against what is there and applies
+# nothing when they match.
+After=local-fs.target
+ConditionPathIsReadWrite=/
+
+[Service]
+Type=oneshot
+ExecStart={{ wifi_script }} --from-settings
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

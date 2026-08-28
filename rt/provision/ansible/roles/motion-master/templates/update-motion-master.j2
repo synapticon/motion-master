@@ -1,0 +1,76 @@
+#!/bin/sh
+# Managed by Ansible (motion-master role) — do not edit.
+#
+# Moves this board to another Motion Master release.
+#
+#   update-motion-master 6.0.0-alpha.85
+#
+# The version is named rather than resolved. An appliance driving hardware should
+# move when somebody decides it moves, not because a release happened, and a
+# named version is also what makes the step repeatable across a fleet.
+#
+# Provisioning does the same work from Ansible, so this is not the only route —
+# it is the one that needs nothing but the board and its network.
+set -eu
+
+RELEASES="{{ motion_master_release_url_base }}"
+SERVICE="{{ motion_master_service }}"
+
+installedVersion() {
+    dpkg-query -W -f='${Version}' motion-master 2>/dev/null || echo "none"
+}
+
+usage() {
+    cat <<EOF
+Usage: $(basename "$0") <version>
+
+  e.g. $(basename "$0") 6.0.0-alpha.85
+
+Installed: $(installedVersion)
+Releases:  {{ motion_master_releases_page }}
+EOF
+}
+
+if [ "$#" -ne 1 ] || [ "$1" = "--help" ] || [ "$1" = "-h" ]; then
+    usage
+    [ "$#" -eq 1 ] && exit 0
+    exit 2
+fi
+
+# A tag is v-prefixed and the version inside the package is not, so accept either
+# spelling of the same release rather than making the caller remember which.
+version=${1#v}
+architecture=$(dpkg --print-architecture)
+package="motion-master-${version}-${architecture}.deb"
+url="${RELEASES}/v${version}/${package}"
+
+current=$(installedVersion)
+if [ "$current" = "$version" ]; then
+    echo "Motion Master $version is already installed."
+    exit 0
+fi
+
+scratch=$(mktemp -d)
+trap 'rm -rf "$scratch"' EXIT
+
+echo "Downloading $package"
+if ! curl -fSL --retry 3 -o "$scratch/$package" "$url"; then
+    echo "Could not download $url" >&2
+    echo "Check the version exists at {{ motion_master_releases_page }}." >&2
+    exit 1
+fi
+
+# apt rather than dpkg, so dependencies resolve. The package's postinst runs
+# setcap for the raw socket and the real-time capabilities.
+echo "Installing"
+apt-get install -y --allow-downgrades "$scratch/$package"
+
+# Restarted rather than left to the next boot: somebody running this over SSH
+# means to be running the new version when the command returns. The config file
+# is untouched, so the board keeps its adapter, its cycle and its core.
+if systemctl is-enabled "$SERVICE" >/dev/null 2>&1; then
+    echo "Restarting $SERVICE"
+    systemctl restart "$SERVICE"
+fi
+
+echo "Motion Master $current -> $(installedVersion)"

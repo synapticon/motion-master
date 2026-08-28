@@ -35,6 +35,30 @@ rt_targets:
     motion_master_install: true
     motion_master_fieldbus_driver: soem
 
+    # Without this the config carries a driver and no adapter, the binary
+    # refuses to start, and systemd restarts it every five seconds forever. The
+    # board has one wired port and net.ifnames=0 fixes its name, so eth0 is not
+    # a guess — it is the same fact the wifi role relies on for wlan0.
+    motion_master_fieldbus_adapter: eth0
+
+    # Same port, named again for rt-tuning, which installs the .link file that
+    # turns segmentation and receive offload off. SOEM writes raw frames and
+    # expects them on the wire unchanged, so the offloads reshape exactly what
+    # it depends on.
+    rt_ethercat_interface: eth0
+
+    # The appliance board is a Raspberry Pi 5 Rev 1.1, whose BCM2712 is the
+    # D step. Without this the firmware loads the C-step tree and the board
+    # panics on an asynchronous SError before it reaches a login prompt. This
+    # guest cannot detect the board it is building for, so the name is written
+    # down here rather than derived.
+    rt_firmware_device_tree: bcm2712-d-rpi-5-b.dtb
+
+    # The board's one Ethernet port carries EtherCAT, so management traffic
+    # goes over Wi-Fi — and the card is the only place to put an SSID before
+    # the board has a network to be reached on.
+    wifi_install: true
+
     # The image is deliberately small so that writing a card is quick; the card
     # itself is whatever the user had, commonly 32 or 64 GB. Without this the
     # root partition would stay at the image's size and the rest of the card

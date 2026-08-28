@@ -13,6 +13,7 @@ Design documents (the Mermaid diagrams render natively on GitHub):
 - [Threading model](https://github.com/synapticon/motion-master/blob/main/docs/THREADS.md) — the built-in threads, the RT cycle, and why the RT loop never takes a lock.
 - [Locking and synchronisation](https://github.com/synapticon/motion-master/blob/main/docs/LOCKING.md) — every mutex, the lock ordering, and the lock-free protocols that carry the RT path.
 - [LAN deployment](https://github.com/synapticon/motion-master/blob/main/docs/LAN_DEPLOYMENT.md) — running the server on a separate machine (Raspberry Pi, industrial PC) and reaching it from the Console over the network.
+- [Raspberry Pi 5](https://github.com/synapticon/motion-master/blob/main/docs/RASPBERRY_PI.md) — the card image: download it, write it, set its Wi-Fi, reach it, and keep it up to date.
 - [Writing guide](https://github.com/synapticon/motion-master/blob/main/docs/WRITING.md) — the English style for documentation, code comments, and commit messages.
 
 ## Installation

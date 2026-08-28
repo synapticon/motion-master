@@ -50,6 +50,13 @@ and nothing to install.
 Install as usual. See [SETUP-linux.md](../SETUP-linux.md). On a Raspberry Pi use the `-arm64.deb`,
 which needs Raspberry Pi OS **trixie**, because the binaries require glibc 2.38.
 
+**On a Raspberry Pi 5 there is a second route**, and it skips this whole part. `rt/image/build-rpi-image.sh`
+builds a flashable card that arrives with a real-time kernel, isolated cores, Motion Master already
+installed as a service, and the bind below already set. Its Wi-Fi is configured by editing one file
+on the card before first boot, which matters because the wired port is the EtherCAT segment.
+[RASPBERRY_PI.md](RASPBERRY_PI.md) is the guide for using a published image;
+[`rt/README.md`](../rt/README.md) is how one is built.
+
 Then put a `motion-master.jsonc` next to the binary. The server discovers it, so no flag is needed:
 
 ```jsonc

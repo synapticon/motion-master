@@ -21,9 +21,19 @@ rt_targets:
     # rt_isolated_cpu_count: 2
     # rt_isolated_cpus: "2,3"
 
+    # Device tree the Raspberry Pi firmware loads. Needed on a Pi 5 Rev 1.1,
+    # which the firmware does not recognise; it picks the C-step tree and the
+    # board panics on an asynchronous SError. Leave unset on x86.
+    # rt_firmware_device_tree: bcm2712-d-rpi-5-b.dtb
+
     # EtherCAT NIC. Set to disable segmentation/receive offload on it; leave
     # unset to touch no interface at all.
     rt_ethercat_interface: enp2s0
+
+    # Read the Wi-Fi settings from /boot/firmware/wifi.txt on every boot, and
+    # install the setup-wifi command. Raspberry Pi only, and only worth
+    # it when the wired port belongs to EtherCAT.
+    # wifi_install: true
 
     # Install Motion Master as a systemd daemon. Set false for a bare real-time
     # host with no daemon on it.

@@ -1,0 +1,33 @@
+# EtherCAT interface. Managed by Ansible (rt-tuning role) — do not edit.
+#
+# The base image's 90-default.yaml matches en* and eth* and runs DHCP on both.
+# On this board eth* is the EtherCAT segment, where the only other devices are
+# servo drives: nothing answers, the client retries for as long as the board is
+# powered, and its frames go onto a wire whose whole purpose is deterministic
+# timing. Worse, systemd-networkd-wait-online is enabled and motion-master is
+# ordered After=network-online.target, so a link that can never be configured is
+# a link the daemon's start waits on.
+#
+# So the port is named here with addressing off. optional: true is the key that
+# matters — it sets RequiredForOnline=no, which is what takes the link out of
+# wait-online's reckoning. The link still comes up, which SOEM's raw socket
+# needs.
+#
+# all-eth is redefined alongside it, narrowed to eth1 and up. Two definitions
+# claiming one interface would leave which of them wins to netplan's merge and
+# file-ordering rules; narrowing the glob means each interface has exactly one
+# definition and no rule has to be relied on. A second wired port — a USB
+# adapter used for management — keeps its DHCP.
+network:
+  version: 2
+  ethernets:
+    {{ rt_ethercat_interface }}:
+      dhcp4: false
+      dhcp6: false
+      accept-ra: false
+      optional: true
+    all-eth:
+      match:
+        name: "eth[1-9]*"
+      dhcp4: true
+      dhcp6: true

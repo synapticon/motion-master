@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **Motion Master runs on a Raspberry Pi 5 from a card image now.** Download it, write it to a microSD card, put your Wi-Fi network in one file on the card, and the board comes up as an EtherCAT master with a real-time kernel and Motion Master already running as a service. The wired port carries EtherCAT, which is why the board is reached over Wi-Fi. It holds a 1 ms cycle with no skipped cycles against a SOMANET Circulo in OP, with the real-time thread pinned to an isolated core. The Console reaches it over trusted HTTPS through the same hostname scheme as any other machine on the network, and `update-motion-master <version>` moves the board to another release without reflashing the card. The image and the guide are at [docs/RASPBERRY_PI.md](https://github.com/synapticon/motion-master/blob/main/docs/RASPBERRY_PI.md).
+
 ## [6.0.0-alpha.84] - 2026-08-26
 
 ### Fixed

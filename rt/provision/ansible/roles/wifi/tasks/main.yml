@@ -1,0 +1,56 @@
+---
+- name: Install the Wi-Fi packages
+  ansible.builtin.apt:
+    name: "{{ wifi_packages }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install the Wi-Fi command
+  ansible.builtin.template:
+    src: setup-wifi.j2
+    dest: "{{ wifi_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
+# Catches a mistake in the command's netplan template here, where it is one
+# failed task, rather than on a board that quietly never joins a network.
+- name: Check the Wi-Fi configuration it generates
+  ansible.builtin.command:
+    cmd: "{{ wifi_script }} --validate"
+  changed_when: false
+
+# The command owns the file's format, including the instructions in it, so the
+# command is what writes it. creates: is what keeps a filled-in card from being
+# reset to placeholders by a second run.
+- name: Write the settings file on the boot partition
+  ansible.builtin.command:
+    cmd: "{{ wifi_script }} --init-settings"
+    creates: "{{ wifi_settings_file }}"
+
+# Written through the command for the same reason the settings file is: the
+# firmware partition is FAT, which carries no ownership or permission bits, so a
+# module that sets them fails there.
+- name: Write the note beside it
+  ansible.builtin.command:
+    cmd: "{{ wifi_script }} --write-readme"
+  register: wifi_readme
+  changed_when: wifi_readme.stdout is search('^Wrote ')
+
+- name: Install the systemd unit
+  ansible.builtin.template:
+    src: setup-wifi.service.j2
+    dest: "/etc/systemd/system/{{ wifi_service }}"
+    owner: root
+    group: root
+    mode: "0644"
+
+# Enabled, never started here. Starting it would apply whatever the settings
+# file says to the host running the play, which during an image build is an
+# emulated guest with no radio and a network Ansible is talking over.
+- name: Apply the Wi-Fi settings on boot
+  ansible.builtin.systemd_service:
+    name: "{{ wifi_service }}"
+    enabled: true
+    daemon_reload: true

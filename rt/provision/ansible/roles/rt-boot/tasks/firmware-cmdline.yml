@@ -10,8 +10,9 @@
 #
 # raspi-firmware provides the seams instead, and this role writes those:
 #
-#   /etc/default/raspi-extra-cmdline   extra kernel parameters, one line
-#   /etc/default/raspi-firmware        KERNEL= pins which kernel boots
+#   /etc/default/raspi-extra-cmdline     extra kernel parameters, one line
+#   /etc/default/raspi-firmware          KERNEL= pins which kernel boots
+#   /etc/default/raspi-firmware-custom   extra config.txt lines, copied verbatim
 #
 # then regenerates the derived files. Same shape as the GRUB path: edit the
 # source, run the generator, never touch the output.
@@ -27,6 +28,41 @@
     mode: "0644"
   register: rt_boot_config
   notify: Regenerate Raspberry Pi boot files
+
+# The firmware chooses a device tree by name from the board it identifies, and
+# it has no entry for the D-step BCM2712 that a Raspberry Pi 5 Rev 1.1 carries.
+# It loads the C-step bcm2712-rpi-5-b.dtb instead. That tree gives pinctrl
+# register ranges the D-step does not have, so the first pull-config write ends
+# in an external abort: the board panics on an asynchronous SError inside
+# brcmstb_pull_config_set, a second and a half into the boot.
+#
+# device_tree= names the file to load and bypasses the automatic choice. A
+# Raspberry Pi maintainer confirms it stays explicit: "os_prefix and
+# upstream_kernel only affect automatic file selection - they have no effect on
+# explicit cmdline=, kernel=, device_tree= and ramfsfile= settings"
+# (raspberrypi/linux#3237).
+#
+# The name is the upstream one, because the tree comes from Debian's kernel
+# package rather than from the firmware package. z50-raspi-firmware copies every
+# bcm*.dtb the kernel carries onto the firmware partition, so the file is
+# already beside config.txt and needs no path.
+- name: Pin the device tree the firmware loads
+  ansible.builtin.copy:
+    content: "device_tree={{ rt_firmware_device_tree }}\n"
+    dest: "{{ rt_firmware_custom_config_path }}"
+    owner: root
+    group: root
+    mode: "0644"
+  when: rt_firmware_device_tree | length > 0
+  register: rt_boot_device_tree
+  notify: Regenerate Raspberry Pi boot files
+
+# main.yml asks the same of rt_boot_config, which covers the kernel parameters
+# only. A changed device tree also needs the board to come back on it.
+- name: Request a reboot when the device tree pin changed
+  ansible.builtin.set_fact:
+    rt_reboot_required: true
+  when: rt_boot_device_tree.changed
 
 # There is deliberately no KERNEL= pin here, unlike GRUB_TOP_LEVEL on x86.
 #

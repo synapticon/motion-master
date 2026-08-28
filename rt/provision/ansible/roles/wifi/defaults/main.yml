@@ -1,0 +1,41 @@
+---
+# The board has one Ethernet port and it belongs to EtherCAT, so management
+# traffic goes over Wi-Fi. That leaves nothing to reach the board on until the
+# radio is configured, and no way to configure it over the network. The FAT
+# firmware partition breaks the loop: it mounts on any laptop that reads the
+# card, so the settings can be written before the board ever boots.
+wifi_settings_file: /boot/firmware/wifi.txt
+
+# Generated from the settings file, and holds the pre-shared key, so it is
+# written 0600. The number orders it after the base image's 90-default.yaml
+# only by convention — that file matches en* and eth*, this one names wlan0, so
+# the two never describe the same interface.
+wifi_netplan_file: /etc/netplan/95-wifi.yaml
+
+# netplan's networkd backend refuses a match: block on a Wi-Fi device and wants
+# the interface named, so this has to be the name the kernel gives the radio.
+# net.ifnames=0 is what makes that wlan0, and raspi-firmware writes that into
+# every cmdline.txt it generates — so on this board the name is not in doubt.
+wifi_interface: wlan0
+
+# Sits beside the settings file and says what to do with it. The label is what
+# the card announces when it is plugged into a laptop, so the note can name the
+# drive the reader is looking at.
+wifi_readme_file: /boot/firmware/README.txt
+wifi_firmware_label: MM-BOOT
+
+wifi_script: /usr/local/sbin/setup-wifi
+wifi_service: setup-wifi.service
+
+# wpasupplicant is the netplan networkd backend's Wi-Fi half and nothing works
+# without it. wireless-regdb carries the regulatory database the kernel reads to
+# honour a country code; it is only a Recommends, so it is named here rather
+# than left to apt's recommends handling, which an image build may have
+# disabled. iw and rfkill earn their place on a board with no screen: when the
+# radio does not come up, they are what the person at the console has to look
+# at.
+wifi_packages:
+  - wpasupplicant
+  - wireless-regdb
+  - iw
+  - rfkill

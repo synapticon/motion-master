@@ -77,9 +77,37 @@
         mode: "0644"
       register: rt_ethercat_link
 
+    # Only where netplan is what generates the network configuration. The x86
+    # boards are not provisioned from a cloud image and need not have it.
+    - name: Look for netplan
+      ansible.builtin.stat:
+        path: /etc/netplan
+      register: rt_netplan_dir
+
+    - name: Take the EtherCAT interface out of DHCP
+      ansible.builtin.template:
+        src: 91-ethercat.yaml.j2
+        dest: "{{ rt_ethercat_netplan_path }}"
+        owner: root
+        group: root
+        mode: "0600"
+      when: rt_netplan_dir.stat.isdir | default(false)
+
+    # A disk image is provisioned for hardware it is not running on, so the
+    # interface named here may not exist on this host. That costs nothing: a
+    # .link file is applied by udev when the device appears, and on the board
+    # that is at boot. Triggering below is only how a host that already has the
+    # interface picks the file up without a reboot.
+    - name: Look for the EtherCAT interface on this host
+      ansible.builtin.stat:
+        path: "/sys/class/net/{{ rt_ethercat_interface }}"
+      register: rt_ethercat_device
+
     - name: Apply the link configuration
       ansible.builtin.command: >-
         udevadm trigger --settle --subsystem-match=net
         --action=add /sys/class/net/{{ rt_ethercat_interface }}
-      when: rt_ethercat_link.changed
+      when:
+        - rt_ethercat_link.changed
+        - rt_ethercat_device.stat.exists
       changed_when: true

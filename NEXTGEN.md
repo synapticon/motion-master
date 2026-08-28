@@ -3092,3 +3092,104 @@ visible at all — has not been reproduced.
 **Not reported upstream.** The defect is on SOEM master as of `b410bf6`, and the fix is four
 characters wide. No issue or pull request has been filed.
 
+## Session 2026-08-28 — The Pi 5 appliance boots: a device tree the firmware will not choose, and Wi-Fi configured from the card (as-built)
+
+The image built since 2026-08-01 had never been in a board. Putting it in one answered the question
+three sessions had deferred, and then produced four more.
+
+**The panic was a device tree, not the real-time kernel.** A Pi 5 Rev 1.1 panicked on an
+asynchronous SError inside `brcmstb_pull_config_set`, about a second and a half in, with `pinctrl_brcmstb`
+on the stack. Rev 1.1 carries the **D step** of BCM2712, whose pinctrl register ranges differ from
+the C step. The firmware chooses a device tree by name from the board it identifies and has no entry
+for the D step, so it loaded the C-step tree and the first pull-config write went to an address that
+die does not have. The correct tree was *already on the card* — Debian's kernel package ships
+`bcm2712-d-rpi-5-b.dtb` and `raspi-firmware` copies every `bcm*.dtb` onto the firmware partition —
+and nothing told the firmware to use it. `device_tree=` names a file explicitly and bypasses the
+automatic choice; a Raspberry Pi maintainer states the rule plainly in `raspberrypi/linux#3237`:
+"`os_prefix` and `upstream_kernel` only affect automatic file selection - they have no effect on
+explicit `cmdline=`, `kernel=`, `device_tree=` and `ramfsfile=` settings". The seam for writing it is
+`/etc/default/raspi-firmware-custom`, which `z50-raspi-firmware` copies verbatim into the generated
+`config.txt`. `rt_firmware_device_tree` is the role variable; it defaults to empty, because pinning
+the D-step tree on a Rev 1.0 board would fail the same way in the other direction.
+
+**Wi-Fi is configured from the card, because there is no other way in.** The board has one Ethernet
+port and EtherCAT takes it, so management runs over Wi-Fi — and nothing can reach the board to
+configure the radio until the radio is configured. **The FAT firmware partition breaks the loop**: it
+mounts on the laptop that flashed the card, so `wifi.txt` is written before the board ever boots.
+Two properties follow from taking that seriously. The unit runs on **every** boot rather than the
+first, so editing the card moves the board to another network with no state to reset — which is only
+safe because the command compares what it would write against what is there and applies nothing when
+they match, since `netplan apply` reconfigures every managed interface and one of those is the port
+the drives are on. And the console command writes **both** files, so the next boot cannot replay the
+card over a correction just typed at a keyboard.
+
+**The command is the recovery path, not the normal one, and its ordering follows from that.** The
+first design had it as an SSH convenience. That is wrong: reaching for it means the card file did not
+work, and a board with no network is a board somebody is standing in front of. So it applies the
+network *before* recording it, and a card that cannot be written warns rather than aborting — an
+unmounted or read-only firmware partition is one of the things that may be wrong, and it must not
+cost the person the network they just brought up. `--init-settings` takes the opposite trade and
+fails hard, because a card that ships without the file is a card nobody can configure.
+
+**Three findings that only a person holding the card could produce.** The FAT partition was
+unlabelled, so a laptop showed it as a hex volume ID; it is now `MM-BOOT`, which is what the
+partition *is* — `MM-INIT` was rejected because `init` already means `POST /api/init` in this
+product, and `MM-SETUP` names what the user should do rather than what the thing holds. A Linux
+desktop mounts the root partition alongside it and labels neither, and `/boot/firmware` inside the
+root filesystem is an empty mountpoint that accepts a file and then hides it at boot — so a note
+sits there saying "wrong partition", invisible on a running board and visible only to the person
+about to make the mistake. Windows and macOS cannot read ext4 and never see the ambiguity at all.
+
+**The appliance shipped a configuration the binary refuses to start on.** `rpi-image.yml` set
+`motion_master_fieldbus_driver: soem` and never `motion_master_fieldbus_adapter`, the template omits
+the key when empty, and `FieldbusDriver init failed: no network adapter specified` followed. The
+restart counter reached **653** — `Restart=on-failure` with `RestartSec=5` retries forever, and
+systemd's default limit of five starts in ten seconds can never be reached at that spacing. So the
+unit now carries `StartLimitIntervalSec=60`, and a daemon that cannot start says so once instead of
+writing the same three lines for as long as the board has power. The trade is that a genuinely
+repeating fault also stops being retried and needs a person; on a board whose whole job is one
+process, that is the right way round.
+
+**The EtherCAT port was a DHCP client.** The base image's `90-default.yaml` matches `en*` **and
+`eth*`**, so networkd ran DHCP on the drive segment, and `systemd-networkd-wait-online` — enabled,
+with `motion-master.service` ordered `After=network-online.target` — had a link it could never call
+configured. `91-ethercat.yaml` names the port with addressing off and `optional: true`, which is the
+key that sets `RequiredForOnline=no`. It also **redefines `all-eth` narrowed to `eth1` and up**:
+whether an explicit `eth0` beats an `eth*` glob is left to netplan's merge and file-ordering rules,
+and rather than depend on a rule that could not be established from the documentation, each
+interface is given exactly one definition. The build then asks `netplan get` what it resolved to,
+because reading our own file back would not have answered the question.
+
+**Validation at provisioning time earned its place immediately.** The Wi-Fi role renders its netplan
+with placeholder credentials under a throwaway root and runs `netplan generate`. The first run failed
+with "networkd backend does not support wifi with `match:`, only by interface name" — a shape copied
+from the base image's own Ethernet file, which would otherwise have shipped as a board that quietly
+never joins a network. Hence `wlan0` by name, which `net.ifnames=0` makes safe, and that comes from
+`z50-raspi-firmware` hardcoding it into every `cmdline.txt` rather than from anything in `rt/`.
+
+**Status: the appliance works.** The board boots `7.1.8-rt`, joins Wi-Fi from a file written on the
+card, and drives an EtherCAT bus — a SOMANET Circulo enumerated at slave position 1 with its object
+dictionary read, sitting in OP with `alStatusCode: 0`, reached from this workstation over trusted
+HTTPS through the `ip.motion-master.synapticon.com` hostname. The game loop reports 999.9994 Hz
+against a 1000 Hz target with **zero skipped cycles** over 597304 of them, `avgExecNs` 36893 and
+`maxExecNs` 155798, with `schedFifo`, `memLocked` and `cpuPinned` on core 3 all true. Thirty-seven
+microseconds of average task time against a 1 ms grid is well inside the 100–300 µs band `CLAUDE.md`
+calls normal for a consumer NIC.
+
+**What that does and does not establish.** Those figures are the loop's own accounting, not an
+independent measurement: `hil/jitter_bench` has not been run on this board, nothing has been under
+load or on more than one axis, and the run was about ten minutes. The claim earned here is that the
+whole path works — RP1, the raw socket, promiscuous mode, the CoE mailbox, process-data exchange, the
+real-time facilities, and the certificate scheme. The claim not yet earned is a number anyone should
+quote in a specification.
+
+**The image is published under one key, and the URL is a CDN's.** A version in the filename would
+move the address on every release, and the documentation has to hand out one that keeps working — so
+the object is overwritten in place, and which build a download is comes from the `.sha256` beside it
+and from the version inside the image. Readers are served by CloudFront rather than by the bucket,
+which is a variable in `publish-rpi-image.sh` because the host becomes
+`cdn.motion-master.synapticon.com` once that record exists. Overwriting one key leaves the edges
+holding the previous build, so the script creates an invalidation and waits for it to complete: an
+upload that has not reached the address a reader is given is not published. Both addresses are then
+fetched anonymously, because a private object returns 403 and looks identical from a shell whose
+credentials work.

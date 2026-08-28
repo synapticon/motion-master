@@ -91,6 +91,12 @@ MOUNT_DIR="$CACHE_DIR/mnt"
 # installs something bulky. Writing the extra gigabytes costs a little longer
 # once per card; being wrong costs the whole run.
 IMAGE_SIZE="${RT_IMAGE_SIZE:-8G}"
+# Volume label for the firmware partition. It is the name a laptop shows when
+# the card goes in, and the Debian cloud image ships it blank — so without this
+# the partition a user has to open appears as a hex volume ID. FAT allows 11
+# characters.
+FIRMWARE_LABEL="${RT_IMAGE_FIRMWARE_LABEL:-MM-BOOT}"
+
 VM_CPUS="${RT_IMAGE_CPUS:-4}"
 VM_MEMORY_MB="${RT_IMAGE_MEMORY_MB:-4096}"
 SSH_HOST="127.0.0.1"
@@ -419,6 +425,34 @@ sudo systemctl --root="$MOUNT_DIR/root" mask systemd-firstboot.service >/dev/nul
 # collides the moment two of them share a network. Empty means "generate one on
 # first boot", the standard arrangement for a golden image; the masked unit above
 # is what stops that first boot turning into an interactive prompt.
+# Labelled here, with the partition not mounted. Nothing depends on the label —
+# /etc/fstab mounts both partitions by PARTUUID — so this is purely what the
+# person holding the card reads.
+log "labelling the firmware partition $FIRMWARE_LABEL"
+sudo fatlabel "${LOOP_DEV}p${ESP_NUM}" "$FIRMWARE_LABEL"
+sudo fatlabel "${LOOP_DEV}p${ESP_NUM}" | grep -qx "$FIRMWARE_LABEL" ||
+    die "the firmware partition is not labelled $FIRMWARE_LABEL"
+
+# A note in the root filesystem's mountpoint for the firmware partition. The
+# board mounts $FIRMWARE_LABEL over this directory at boot, so the note is
+# visible only to somebody reading the card on a laptop — which is exactly the
+# person who can put wifi.txt on the wrong partition. Windows and macOS cannot
+# read ext4 and so never see either this file or the trap it warns about; Linux
+# offers both partitions and names neither, which is where the mistake happens.
+sudo tee "$MOUNT_DIR/root/boot/firmware/README.txt" >/dev/null <<EOF
+This is the wrong partition.
+
+You are reading the Motion Master appliance's root filesystem. The card also
+carries a small FAT partition labelled $FIRMWARE_LABEL, and that is the one to
+open: wifi.txt is on it.
+
+A file put in this directory is hidden as soon as the board starts, because the
+board mounts $FIRMWARE_LABEL over this directory.
+EOF
+
+[ -s "$MOUNT_DIR/root/boot/firmware/README.txt" ] ||
+    die "the wrong-partition note was not written to the root filesystem"
+
 sudo truncate -s 0 "$MOUNT_DIR/root/etc/machine-id"
 
 log "authorising the build key for root"
@@ -525,6 +559,20 @@ check "RT kernel is the newest"      "test \"\$(linux-version list | linux-versi
 # one.
 check "config.txt boots an RT kernel" "grep -qE '^kernel=vmlinuz-.*-rt-' /boot/firmware/config.txt"
 check "config.txt names an initrd"   "grep -qE '^initramfs +initrd\.img-.*-rt-' /boot/firmware/config.txt"
+# The Pi 5 Rev 1.1 needs its device tree named, or the firmware loads the C-step
+# one and the board panics on an asynchronous SError. Checked in two parts,
+# because a line naming a file that is not there fails exactly as silently as no
+# line at all.
+check "config.txt pins a device tree" "grep -qE '^device_tree=bcm[0-9a-z-]+\.dtb\$' /boot/firmware/config.txt"
+check "the pinned device tree is there" "test -f /boot/firmware/\$(sed -n 's/^device_tree=//p' /boot/firmware/config.txt)"
+# The board's Ethernet port carries EtherCAT, so Wi-Fi is how anyone reaches it,
+# and the card is the only place an SSID can be written before it has a network.
+# A card without the settings file is a card nobody can configure.
+check "wifi.txt on the boot partition" "test -f /boot/firmware/wifi.txt"
+check "README.txt beside it"          "test -s /boot/firmware/README.txt"
+check "the wifi command is installed" "test -x /usr/local/sbin/setup-wifi"
+check "wifi settings applied on boot" "systemctl is-enabled setup-wifi.service"
+check "wpa_supplicant installed"      "test -x /usr/sbin/wpa_supplicant"
 check "isolcpus on the command line" "grep -q isolcpus /boot/firmware/cmdline.txt"
 check "nohz_full on the command line" "grep -q nohz_full /boot/firmware/cmdline.txt"
 check "rtprio limits installed"      "test -f /etc/security/limits.d/99-realtime.conf"
@@ -537,6 +585,15 @@ check "motion-master enabled"        "systemctl is-enabled motion-master"
 check "growroot enabled"             "systemctl is-enabled growroot"
 check "growroot tooling present"     "command -v growpart && command -v sgdisk"
 check "cpuAffinity configured"       "grep -q '\"cpuAffinity\"' /opt/motion-master/motion-master.jsonc"
+# A driver without an adapter is a config the binary refuses to start on, and
+# systemd then retries it every five seconds for as long as the board is powered.
+# The image shipped that way once; this is what stops it shipping that way again.
+check "fieldbus adapter configured"  "grep -q '\"adapter\"' /opt/motion-master/motion-master.jsonc"
+check "EtherCAT offloads turned off" "test -f /etc/systemd/network/90-ethercat.link"
+# Asks netplan what it will do rather than reading the file back, because the
+# question is whether the base image's eth* glob still claims the port.
+check "EtherCAT port has no DHCP"    "test \"\$(netplan get ethernets.eth0.dhcp4)\" = false"
+check "EtherCAT port not waited on"  "test \"\$(netplan get ethernets.eth0.optional)\" = true"
 check "interactive firstboot masked" "test \"\$(systemctl is-enabled systemd-firstboot.service 2>/dev/null)\" = masked"
 check "hostname set"                 "test -s /etc/hostname && ! grep -qx localhost /etc/hostname"
 check "locale set"                   "grep -q C.UTF-8 /etc/locale.conf && grep -q C.UTF-8 /etc/default/locale"

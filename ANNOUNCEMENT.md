@@ -302,8 +302,11 @@ Still ahead before beta:
 - **Notification bus** — a general server→client event channel.
 - **SPoE driver.**
 - **Remote/LAN deployment** — running the server on a separate machine (a flashable Raspberry
-  Pi appliance) that the browser reaches over the network. The certificate design for this is
-  worked out; the image and discovery are not built yet.
+  Pi appliance) that the browser reaches over the network. A Pi 5 now boots the image, joins
+  Wi-Fi from a file written on the card, holds a 1 kHz cycle with a Circulo in OP, and is reached
+  from the Console over trusted HTTPS. What is left is a longer and heavier run than one drive
+  for ten minutes. Discovery is a won't-do: a `.local` name cannot be connected to, because no
+  certificate authority issues certificates for a reserved top-level domain.
 - **DC SYNC0 activation** — hardware-synchronised actuation on a PREEMPT_RT host, for hard
   coordinated multi-axis motion.
 - **Topology / cabling map** and a **master-side frame/WKC health timeline.**

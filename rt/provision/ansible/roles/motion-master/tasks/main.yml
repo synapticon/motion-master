@@ -49,6 +49,16 @@
       than --tags motion-master, or set motion_master_cpu_affinity explicitly.
   when: motion_master_cpu_affinity | int < 0
 
+# Installed whether or not this run changed the version: it is how the board is
+# moved later, by somebody who has only SSH and no copy of this repository.
+- name: Install the update command
+  ansible.builtin.template:
+    src: update-motion-master.j2
+    dest: "{{ motion_master_update_script }}"
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Configure Motion Master
   ansible.builtin.template:
     src: motion-master.jsonc.j2

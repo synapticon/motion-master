@@ -102,9 +102,11 @@ if [ "$FAMILY" = debian ]; then
         # qemu-system-arm carries the aarch64 emulator on Debian, despite the
         # name. qemu-user-static + binfmt let an arm64 binary run directly on an
         # x86 host, which is how a Pi image is prepared without a Pi.
+        # dosfstools carries fatlabel, which names the Pi image's firmware
+        # partition so a card announces itself when it is plugged in.
         packages+=(qemu-system-x86 qemu-system-arm qemu-utils
                    qemu-user-static binfmt-support qemu-efi-aarch64
-                   genisoimage xorriso)
+                   genisoimage xorriso dosfstools)
     fi
 
     if [ "$WITH_DOCKER" = true ] && ! have docker; then
@@ -130,9 +132,11 @@ else
     packages+=(libstdc++-static)
 
     if [ "$WITH_QEMU" = true ]; then
+        # dosfstools carries fatlabel, which names the Pi image's firmware
+        # partition so a card announces itself when it is plugged in.
         packages+=(qemu-system-x86 qemu-system-aarch64 qemu-img
                    qemu-user-static edk2-aarch64
-                   genisoimage xorriso)
+                   genisoimage xorriso dosfstools)
     fi
 
     # Fedora defaults to podman; Docker proper is moby-engine. hil/api drives

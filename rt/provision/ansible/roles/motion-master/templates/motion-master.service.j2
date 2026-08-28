@@ -5,6 +5,18 @@ Documentation=https://motion-master.synapticon.com/docs
 After=network-online.target
 Wants=network-online.target
 
+# Give up after five failed starts in a minute. Restart=on-failure below retries
+# every five seconds, and systemd's default limit of five in ten seconds can
+# never be reached at that spacing — so a daemon that cannot start at all, a
+# missing fieldbus adapter being the way that happens, retries for as long as
+# the board is powered and writes the same three lines every five seconds. The
+# unit lands in "failed" instead, which says so once and keeps the reason
+# readable. The cost is that a genuine repeating fault also stops being retried,
+# and needs a person; that is the right trade on a board whose whole job is one
+# process.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
 [Service]
 Type=simple
 ExecStart={{ motion_master_dir }}/motion-master

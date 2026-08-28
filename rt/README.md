@@ -138,8 +138,10 @@ rt/
         rt-verify/           assertions, summary, cyclictest
         motion-master/       release .deb, config, systemd unit
         growroot/            grow the root partition to the card on first boot
+        wifi/                Wi-Fi from a file on the boot partition
   image/
     build-rpi-image.sh       flashable Raspberry Pi 5 image (arm64, slow)
+    publish-rpi-image.sh     compress it and upload it for people to download
 ```
 
 Inventory groups are what keep the two concerns apart: a play whose group has no hosts in the
@@ -424,6 +426,40 @@ definition no free space past the partition and `growpart` correctly reports not
 build checks only that the unit is enabled and the tools are present; the first real exercise is the
 card's first boot, where `df -h /` should report the card's size rather than the image's.
 
+### wifi — the settings the board cannot be told over the network
+
+On a board whose one Ethernet port belongs to EtherCAT, Wi-Fi is the management network, and there
+is no way to configure it over a network that does not exist yet. The role's answer is that the
+**settings arrive on the card, not over the wire**: `/boot/firmware/wifi.txt` is on the FAT
+partition, so the laptop that flashed the card can write it. See *Wi-Fi* under *Raspberry Pi 5* for
+what a user does with it.
+
+What the role installs is one command, `setup-wifi`, and a oneshot unit that calls it on
+every boot. The command is the recovery path rather than the normal one: reaching it means the card
+file did not work, and a board with no network is a board somebody is standing in front of. Three
+decisions in it are worth knowing:
+
+- **Both entry points write both files.** Running the command rewrites `wifi.txt` as well as the
+  netplan file, so a later boot replaying the card cannot revert a correction made at the console.
+  A single source of truth, written through either door.
+- **It runs on every boot, not the first.** So editing the card moves the board to another network,
+  with no state to reset. That is only safe because the command compares what it would write against
+  what is there and does nothing when they match — `netplan apply` reconfigures every interface it
+  manages, and one of those is the port the drives are on.
+- **The generated configuration is checked at provisioning time**, by rendering it with placeholder
+  credentials under a throwaway root and running `netplan generate` against it. A mistake in the
+  template would otherwise surface as a board that quietly never joins a network, on somebody's
+  desk, with nothing in any log.
+
+It is **off unless an inventory asks for it** (`wifi_install`), like the daemon and `growroot`: a
+host reached over its only interface is one where reconfiguring the radio is a way to lose the
+session.
+
+`wpasupplicant` is what makes netplan's networkd backend speak Wi-Fi at all, and it is not in the
+base image. `wireless-regdb` carries the database the kernel reads to honour a country code. `iw`
+and `rfkill` are there because a board with no screen and no network gives the person at the console
+nothing else to look at.
+
 ## What the VM Can and Cannot Tell You
 
 **It can prove the automation is correct.** That the playbook converges from a genuinely clean
@@ -513,8 +549,9 @@ image and a private key root-owned in your working tree — if that has already 
 reclaims them on the next ordinary run.
 
 **Prerequisites:** `qemu-system-aarch64`, `qemu-user-static` (its `binfmt_misc` handler is what lets
-`apt` run inside the arm64 root filesystem on an x86 host), and sudo rights — nothing else in `rt/`
-needs any of them. `./tools/install-deps.sh` installs all of it.
+`apt` run inside the arm64 root filesystem on an x86 host), `dosfstools` for `fatlabel`, which names
+the firmware partition, and sudo rights — nothing else in `rt/` needs any of them.
+`./tools/install-deps.sh` installs all of it.
 
 The image ships neither cloud-init nor `openssh-server`, so the build installs sshd in that chroot
 before first boot; without it there would be no way for Ansible to get in.
@@ -549,16 +586,88 @@ is a board that stays recoverable when Ethernet does not come up, which is exact
 hardware has not been proven against. `RT_IMAGE_ROOT_PASSWORD=` (empty) leaves root locked and the
 key the only way in, for whoever wants the opposite trade.
 
-### Unverified on hardware
+### Wi-Fi
 
-The build itself now runs end to end — first on 2026-08-01, and again on 2026-08-04, whose image was
-checked offline (RT kernel and matching `initramfs` in `config.txt`, `isolcpus`/`nohz_full` on the
-command line, `motion-master` installed and enabled, machine ID blank, build key gone). What
-**cannot** be established in QEMU is whether the 7.1.3-rt kernel drives BCM2712 and RP1 on a real
-Pi 5 — QEMU is not a Pi. That is a card-in-the-slot test. On first boot, confirm over serial
-(`enable_uart=1` and `console=ttyAMA0,115200` are already set) or HDMI that the board comes up and
-that Ethernet appears. Debian's position is that Forky supports the board, but "supported" and
-"boots with an RT kernel and a 1 ms EtherCAT cycle" are different claims.
+The board has one Ethernet port and EtherCAT takes it, so management traffic goes over Wi-Fi. That
+is a loop: there is nothing to reach the board on until the radio is configured, and no way to
+configure it over the network. **The FAT firmware partition breaks the loop.** It mounts on any
+laptop that reads the card, so the settings are written before the board first boots.
+
+Flash the card and put it back in the reader. **The drive that appears is labelled `MM-BOOT`** —
+that is the FAT firmware partition, and a `README.txt` on it says the same thing this section does.
+Open `wifi.txt` there and fill in two lines:
+
+```ini
+ssid=PlantFloor
+psk=the-password
+country=DE
+```
+
+Put the card in the board. `setup-wifi.service` reads the file on every boot and applies it.
+Editing the file again and rebooting moves the board to another network — nothing is one-shot.
+
+**When that does not work there is a second way, and it needs a monitor and a keyboard.** By
+definition the board has no network at that point, so this is the console:
+
+```bash
+setup-wifi PlantFloor the-password DE      # a password of "" is an open network
+```
+
+It writes both files — `wifi.txt` and `/etc/netplan/95-wifi.yaml` — so the next boot does not replay
+the card over the correction just made. Neither way does any work when the settings already match,
+which is what makes running it on every boot safe: `netplan apply` reconfigures every interface it
+manages, and one of those is the port the drives are on.
+
+The country code is an ISO 3166 code. Without one the radio stays in the world domain, where some
+channels are unavailable.
+
+**On Linux, two drives appear and only one is right.** Windows and macOS cannot read ext4, so they
+mount `MM-BOOT` alone and the question never arises. A Linux desktop mounts the root filesystem as
+well, and `/boot/firmware` inside it is an empty mountpoint that will accept a file and then hide it
+the moment the board boots and mounts `MM-BOOT` over it. A `README.txt` sits in that directory
+saying so. It is invisible on a running board, which is the point: the only reader it can ever have
+is somebody about to make that mistake.
+
+The pre-shared key is in plain text on a partition anybody holding the card can read. That is the
+same trade the rest of the appliance makes — a shared private key, `root`/`root`, and an
+unauthenticated API — and the network's own trust boundary is what the board relies on.
+
+### What the hardware has and has not answered
+
+Established on a Raspberry Pi 5 Rev 1.1, on 2026-08-27 and 2026-08-28:
+
+- **The board boots** the Debian `7.1.8-rt` kernel and reaches a login prompt.
+- **Wi-Fi works end to end** — credentials written into `wifi.txt` on the card from a laptop, and
+  the board joins that network on boot with nothing typed at the console.
+- **It drives an EtherCAT bus.** A SOMANET Circulo enumerates at slave position 1 with its object
+  dictionary read (`isCia402: true`), and sits in **OP** with `alStatusCode: 0`. That exercises the
+  whole path at once: RP1, the raw socket, promiscuous mode, the CoE mailbox, and process-data
+  exchange.
+- **The real-time facilities all took.** `GET /api/game-loop` on the board reports `schedFifo: true`,
+  `memLocked: true`, and `cpuPinned: true` on core 3 — so `isolcpus`, `LimitRTPRIO` and
+  `LimitMEMLOCK` are each doing their job.
+- **The loop holds its grid.** 999.9994 Hz against a 1000 Hz target, **zero skipped cycles** over
+  597304 of them, `avgExecNs` 36893 and `maxExecNs` 155798. `CLAUDE.md` puts 100–300 µs of task time
+  in the normal band for a consumer NIC; this board averages 37 µs.
+- **The LAN certificate scheme works against it.** The Console's hostname form resolves through one
+  hosts-file line and `curl` validates the chain with no `-k` and no exception.
+
+**It did not boot at first**, and the reason is worth keeping. It panicked on an asynchronous SError
+in `brcmstb_pull_config_set`, about a second and a half in. The firmware has no entry for the D-step
+BCM2712 that a Rev 1.1 carries, so it loaded the C-step device tree, whose pinctrl register ranges
+that die does not have. `rt_firmware_device_tree` names the tree explicitly and fixes it — see the
+`rt-boot` role. The card that first booted changed two things at once, the tree pin and a kernel that
+moved from `7.1.3-rt` when the archive did, so the pin is the likely cause rather than the proven
+one.
+
+**Still open:**
+
+- **Jitter has not been measured, only accounted for.** The figures above are the game loop's own
+  counters. They are strong evidence and they are not an independent measurement — `hil/jitter_bench`
+  is, and it has not been run on this board. Nor has any of this been under load, with several axes,
+  or for longer than about ten minutes.
+- **Priority 80 against this kernel's threaded IRQs.** See the note in `CLAUDE.md`.
+- **DC SYNC0.** Still deliberately not activated, here as everywhere.
 
 Networking on the card comes from `netplan.io`, which generates the `systemd-networkd` configuration
 into `/run` at boot — which is why `/etc/systemd/network` is empty and DHCP nevertheless works. Its
@@ -566,5 +675,39 @@ globs are `en*` and `eth*`, and `net.ifnames=0` on the kernel command line means
 appears as plain `eth0`, so it is matched either way.
 
 Design context for the appliance — the LAN certificate scheme and what ships in the image — is in
-`NEXTGEN.md` (sessions 2026-06-12, 2026-07-24 and 2026-07-31) and
+`NEXTGEN.md` (sessions 2026-06-12, 2026-07-24, 2026-07-31 and 2026-08-28) and
 [`docs/LAN_DEPLOYMENT.md`](../docs/LAN_DEPLOYMENT.md).
+
+### Publishing an image
+
+`publish-rpi-image.sh` compresses the built image and uploads it, so that
+[`docs/RASPBERRY_PI.md`](../docs/RASPBERRY_PI.md) has an address to hand out.
+
+```bash
+./rt/image/publish-rpi-image.sh --dry-run    # compress and print what would be sent
+./rt/image/publish-rpi-image.sh              # ask, then upload
+```
+
+`xz` is what makes this practical: Raspberry Pi Imager and balenaEtcher both read `.xz` directly, so
+nobody unpacks 8 GB by hand before writing a card. An 8 GB image compresses to about 1.3 GB, most of
+the saving being the empty space in a root filesystem grown to make room for provisioning. The
+compressed file is kept beside the image and reused when it is newer, because compressing is minutes
+of CPU and publishing the same build twice is a normal thing to do.
+
+**One key, overwritten every time.** The documentation points at a URL that has to keep working, and
+a version in the filename would move it on every release. Which build a download is comes from the
+`.sha256` published beside it, and from the version inside the image.
+
+**Readers are served by CloudFront, not by the bucket.** `dezliul92qqoq.cloudfront.net` serves
+`s3://synapticon/motion-master/` at the root of its own host, so the object key is the whole path.
+The host is a variable in the script, because it becomes `cdn.motion-master.synapticon.com` once
+that record exists. Overwriting one key in place leaves the edges holding the previous build, so the
+script creates an invalidation and **waits for it**: it says published when the address a reader is
+given serves what was just uploaded.
+
+Both addresses are then fetched anonymously — the bucket, which is what proves the object is public,
+and the CDN, which is what proves the distribution serves it. A private object returns 403 and looks
+identical from a shell whose credentials work, which is the whole reason the check is there.
+
+Publishing needs the AWS CLI, credentials for the bucket, and `cloudfront:CreateInvalidation`
+on that distribution.

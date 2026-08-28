@@ -41,19 +41,57 @@ the reasons.
 | Micro-HDMI to HDMI cable | €5 |
 | **Total** | **about €220** |
 
-Buy the 8 GB board. The 4 GB board costs €144 and runs the image, and it is the board we test on.
-The 8 GB board is €40 more, and it is the one most sellers keep in stock.
+**Buy the 8 GB board.** The 4 GB board costs €144, and it is the board we test on. The €40 between
+them buys one thing, and the next section is that thing.
 
 These are German retail prices on 28 August 2026. Each one includes 19% VAT. Postage is on top,
 and it is usually €5 to €10 for the whole order. **Treat the total as an order of magnitude, not
-a quote.** Prices moved hard through 2026. The 8 GB board listed at $80 when it launched and rose
-three times, because the price of LPDDR4 memory rose. Raspberry Pi explains that in
+a quote.** Prices moved hard through 2026. The board rose three times in that year and more than
+doubled, because the price of LPDDR4 memory rose. Raspberry Pi explains that in
 [More memory-driven price rises](https://www.raspberrypi.com/news/more-memory-driven-price-rises/).
 The same shortage raised the price of flash memory, so cards and SSDs both cost more than they did
 a year ago.
 
 The monitor and the HDMI cable are for one step, where you read the board's address off the
 screen. Skip both if your router lists its leases.
+
+### Why 8 GB
+
+One thing on the board grows with your bus, and that is the process-data recorder. It keeps every
+cycle the bus ran, and it is locked into RAM so the real-time loop never waits for a page of it.
+Nothing else on the board scales the same way, so the recorder is what the memory size decides.
+
+The size is exact:
+
+```text
+bytes = recorder.capacity x (28 + IOmap bytes of the whole bus)
+```
+
+One SOMANET drive with the default mapping puts 82 bytes on the bus per cycle. `recorder.capacity`
+counts cycles, not seconds, so the window it buys depends on the loop period. At the default
+300000 cycles that is 5 minutes at a 1 ms period, and 75 seconds at 250 µs.
+
+| Bus | Recorder at 300000 cycles | Recorder for 5 minutes at 250 µs |
+| --- | --- | --- |
+| 1 drive | 33 MB | 132 MB |
+| 8 drives | 205 MB | 821 MB |
+| 32 drives | 796 MB | 3182 MB |
+
+A 4 GB board covers every row except the last one. 32 drives, a 250 µs period and a five-minute
+window need 3.2 GB of locked memory, which 4 GB does not have to spare.
+
+Three reasons to spend the €40 anyway:
+
+1. **The whole extra 4 GB reaches the recorder.** Both boards run the same image, the same
+   services and the same server, so the second 4 GB has nothing else to pay for. At 32 drives and
+   250 µs it is another 6.7 minutes of recording. At 8 drives and 1 ms it is another 105 minutes.
+2. **You cannot add memory later.** The memory is soldered to the board. Every other part in the
+   table is replaceable, so this is the only choice you make once.
+3. **You do not have to do the arithmetic before you record.** On 4 GB a long window on a large
+   bus is a number to check first. On 8 GB it is not.
+
+Raise `recorder.capacity` in `motion-master.jsonc` to record for longer. Size it with the formula
+above, because a ring that does not fit is memory the board cannot give back.
 
 ### Why a microSD card and not an SSD
 

@@ -7,6 +7,66 @@ to drive the drives wired to its Ethernet port.
 **Motion Master has no authentication.** Anything that can reach it over the network can enable a
 drive and command motion. Put the board on a network you trust.
 
+## Why a Raspberry Pi 5
+
+Motion Master runs on any 64-bit Linux machine. The image targets one board on purpose. These are
+the reasons.
+
+- **A real-time kernel runs on it.** Debian ships a `PREEMPT_RT` kernel for arm64. The image uses
+  it, isolates one CPU core, and pins the real-time thread to that core. A Pi 5 with one SOMANET
+  Circulo holds a 250 µs cycle and skips no cycles.
+- **Ethernet and Wi-Fi are both on the board.** EtherCAT needs the wired port to itself, so the
+  wired port cannot also be how you reach the server. The Pi 5 has Gigabit Ethernet and dual-band
+  802.11ac Wi-Fi as standard. No adapter, no second network card.
+- **Every board is the same board.** We tune one machine and ship the result. The kernel, the
+  isolated core, the pinned thread, the service and the configuration are all set the way we
+  measured them. A laptop is a different machine every time, so nobody can hand you those settings.
+- **Setup is short.** Write the image to a microSD card. Put the card in the board. Power it on.
+- **You can buy one anywhere.** Amazon, Farnell, RS, Digi-Key and the Raspberry Pi resellers all
+  stock it.
+- **It stays buyable.** Raspberry Pi Ltd states that the Pi 5 "will remain in production until at
+  least January 2036" in the
+  [product brief](https://pip.raspberrypi.com/categories/892-raspberry-pi-5). That is a decade in
+  which the hardware under this image does not change.
+- **It costs a fraction of a laptop.** The table below is the whole bill.
+
+### What it costs
+
+| Part | Price |
+| --- | --- |
+| Raspberry Pi 5, 4 GB | €144 |
+| 27 W USB-C power supply | €11 |
+| Case with fan | €8 |
+| microSD card, 32 GB | €10 |
+| Micro-HDMI to HDMI cable | €5 |
+| **Total** | **about €180** |
+
+These are German retail prices on 28 August 2026. Each one includes 19% VAT. Postage is on top,
+and it is usually €5 to €10 for the whole order. **Treat the total as an order of magnitude, not
+a quote.** Prices moved hard through 2026. The 4 GB board listed at $60 when it launched and rose
+three times, because the price of LPDDR4 memory rose. Raspberry Pi explains that in
+[More memory-driven price rises](https://www.raspberrypi.com/news/more-memory-driven-price-rises/).
+The same shortage raised the price of flash memory, so cards and SSDs both cost more than they did
+a year ago.
+
+The monitor and the HDMI cable are for one step, where you read the board's address off the
+screen. Skip both if your router lists its leases.
+
+### Why a microSD card and not an SSD
+
+- **The board boots from a card as it comes.** There is no storage on the board. An NVMe
+  (Non-Volatile Memory Express, the interface a modern SSD uses) drive needs the M.2 HAT+ at €13,
+  the drive itself, and a case with room for the extra board.
+- **Any computer writes a card.** Card readers cost a few euros, and many laptops have one. To
+  write an NVMe drive you need the board, or a USB enclosure for the drive.
+- **The speed does not reach the loop.** The Pi 5 reads a card at about 90 MB/s and an NVMe drive at
+  up to 500 MB/s. The board boots in about 21 seconds from a card and about 15 seconds from a
+  drive. Motion Master runs from memory after that, and the real-time loop reads and writes no
+  file, so neither number touches the cycle.
+- **A worn-out card is a card.** Write endurance is the one real argument for a drive. The board
+  writes the system log and little else. If a card does fail, write another one. The image is the
+  whole system, and your own settings are one file on the card.
+
 ## What you need
 
 - A Raspberry Pi 5. The image is built for it and will not boot a Pi 4.

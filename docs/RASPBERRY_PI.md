@@ -34,16 +34,19 @@ the reasons.
 
 | Part | Price |
 | --- | --- |
-| Raspberry Pi 5, 4 GB | €144 |
+| Raspberry Pi 5, 8 GB | €185 |
 | 27 W USB-C power supply | €11 |
 | Case with fan | €8 |
 | microSD card, 32 GB | €10 |
 | Micro-HDMI to HDMI cable | €5 |
-| **Total** | **about €180** |
+| **Total** | **about €220** |
+
+Buy the 8 GB board. The 4 GB board costs €144 and runs the image, and it is the board we test on.
+The 8 GB board is €40 more, and it is the one most sellers keep in stock.
 
 These are German retail prices on 28 August 2026. Each one includes 19% VAT. Postage is on top,
 and it is usually €5 to €10 for the whole order. **Treat the total as an order of magnitude, not
-a quote.** Prices moved hard through 2026. The 4 GB board listed at $60 when it launched and rose
+a quote.** Prices moved hard through 2026. The 8 GB board listed at $80 when it launched and rose
 three times, because the price of LPDDR4 memory rose. Raspberry Pi explains that in
 [More memory-driven price rises](https://www.raspberrypi.com/news/more-memory-driven-price-rises/).
 The same shortage raised the price of flash memory, so cards and SSDs both cost more than they did

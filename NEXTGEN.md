@@ -3113,8 +3113,8 @@ explicit `cmdline=`, `kernel=`, `device_tree=` and `ramfsfile=` settings". The s
 the D-step tree on a Rev 1.0 board would fail the same way in the other direction.
 
 **Wi-Fi is configured from the card, because there is no other way in.** The board has one Ethernet
-port and EtherCAT takes it, so management runs over Wi-Fi — and nothing can reach the board to
-configure the radio until the radio is configured. **The FAT firmware partition breaks the loop**: it
+port and EtherCAT takes it, so management runs over Wi-Fi — and nothing can reach the board until
+Wi-Fi is configured. **The FAT firmware partition breaks the loop**: it
 mounts on the laptop that flashed the card, so `wifi.txt` is written before the board ever boots.
 Two properties follow from taking that seriously. The unit runs on **every** boot rather than the
 first, so editing the card moves the board to another network with no state to reset — which is only

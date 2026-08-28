@@ -1,7 +1,7 @@
 ---
 # The board has one Ethernet port and it belongs to EtherCAT, so management
-# traffic goes over Wi-Fi. That leaves nothing to reach the board on until the
-# radio is configured, and no way to configure it over the network. The FAT
+# traffic goes over Wi-Fi. That leaves nothing to reach the board on until
+# Wi-Fi is configured, and no way to configure it over the network. The FAT
 # firmware partition breaks the loop: it mounts on any laptop that reads the
 # card, so the settings can be written before the board ever boots.
 wifi_settings_file: /boot/firmware/wifi.txt
@@ -13,7 +13,7 @@ wifi_settings_file: /boot/firmware/wifi.txt
 wifi_netplan_file: /etc/netplan/95-wifi.yaml
 
 # netplan's networkd backend refuses a match: block on a Wi-Fi device and wants
-# the interface named, so this has to be the name the kernel gives the radio.
+# the interface named, so this has to be the name the kernel gives the adapter.
 # net.ifnames=0 is what makes that wlan0, and raspi-firmware writes that into
 # every cmdline.txt it generates — so on this board the name is not in doubt.
 wifi_interface: wlan0
@@ -31,8 +31,8 @@ wifi_service: setup-wifi.service
 # without it. wireless-regdb carries the regulatory database the kernel reads to
 # honour a country code; it is only a Recommends, so it is named here rather
 # than left to apt's recommends handling, which an image build may have
-# disabled. iw and rfkill earn their place on a board with no screen: when the
-# radio does not come up, they are what the person at the console has to look
+# disabled. iw and rfkill earn their place on a board with no screen: when
+# Wi-Fi does not come up, they are what the person at the console has to look
 # at.
 wifi_packages:
   - wpasupplicant

@@ -48,7 +48,7 @@
 
 # Enabled, never started here. Starting it would apply whatever the settings
 # file says to the host running the play, which during an image build is an
-# emulated guest with no radio and a network Ansible is talking over.
+# emulated guest with no Wi-Fi adapter and a network Ansible is talking over.
 - name: Apply the Wi-Fi settings on boot
   ansible.builtin.systemd_service:
     name: "{{ wifi_service }}"

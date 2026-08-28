@@ -452,7 +452,7 @@ decisions in it are worth knowing:
   desk, with nothing in any log.
 
 It is **off unless an inventory asks for it** (`wifi_install`), like the daemon and `growroot`: a
-host reached over its only interface is one where reconfiguring the radio is a way to lose the
+host reached over its only interface is one where reconfiguring Wi-Fi is a way to lose the
 session.
 
 `wpasupplicant` is what makes netplan's networkd backend speak Wi-Fi at all, and it is not in the
@@ -589,7 +589,7 @@ key the only way in, for whoever wants the opposite trade.
 ### Wi-Fi
 
 The board has one Ethernet port and EtherCAT takes it, so management traffic goes over Wi-Fi. That
-is a loop: there is nothing to reach the board on until the radio is configured, and no way to
+is a loop: there is nothing to reach the board on until Wi-Fi is configured, and no way to
 configure it over the network. **The FAT firmware partition breaks the loop.** It mounts on any
 laptop that reads the card, so the settings are written before the board first boots.
 
@@ -618,7 +618,7 @@ the card over the correction just made. Neither way does any work when the setti
 which is what makes running it on every boot safe: `netplan apply` reconfigures every interface it
 manages, and one of those is the port the drives are on.
 
-The country code is an ISO 3166 code. Without one the radio stays in the world domain, where some
+The country code is an ISO 3166 code. Without one the board uses a worldwide default, where some
 channels are unavailable.
 
 **On Linux, two drives appear and only one is right.** Windows and macOS cannot read ext4, so they

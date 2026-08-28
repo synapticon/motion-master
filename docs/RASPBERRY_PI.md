@@ -80,7 +80,7 @@ psk=YourPassword
 ```
 
 There is a third line for a country code, `country=DE` or `country=US`. It is optional. Without
-it the radio stays in the world domain, where some channels are unavailable.
+it the board uses a worldwide default, where some channels are unavailable.
 
 Save the file, eject the card, and put it in the board.
 

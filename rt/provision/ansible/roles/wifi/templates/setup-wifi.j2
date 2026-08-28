@@ -26,8 +26,8 @@ Usage:
   $(basename "$0") --write-readme                write $README beside it
   $(basename "$0") --validate                    check the generated netplan
 
-The country is an ISO 3166 code such as DE, US or GB. Without one the radio
-stays in the world domain, where some channels are unavailable.
+The country is an ISO 3166 code such as DE, US or GB. Without one the board
+uses a worldwide default, where some channels are unavailable.
 EOF
 }
 
@@ -102,8 +102,8 @@ EOF
     printSetting psk "$psk" YourPassword
     cat <<EOF
 
-# ISO 3166 country code of where the board is used. Without one the radio stays
-# in the world domain, where some channels are unavailable.
+# ISO 3166 country code of where the board is used. Without one the board uses
+# a worldwide default, where some channels are unavailable.
 EOF
     printSetting country "$country" DE
 }
@@ -268,7 +268,7 @@ case "${1:---help}" in
         usage >&2
         exit 2
     fi
-    # Applied before it is recorded. Bringing the radio up is what the person
+    # Applied before it is recorded. Getting on the network is what the person
     # at the console came for; recording it on the card only decides whether
     # the next boot keeps it. So a card that cannot be written warns and does
     # not cost them the network they just got working — an unmounted or

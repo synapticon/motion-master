@@ -19,9 +19,7 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
   them (INIT / PRE-OP / SAFE-OP / OP / BOOT) via `GET`/`POST /api/devices/state`.
   Illegal AL transitions are rejected up front; entering exchange states reactively
   (re)maps the process image.
-- **Partial-bus operations** — one or more devices can be taken to BOOT (firmware) or
-  PRE-OP (re-map) while the rest keep exchanging process data; bringing them back
-  re-maps the whole bus.
+- **Partial-bus operations** — one or more devices can go to BOOT, where firmware is installed over FoE, or to PRE-OP, where PDO mapping can be rewritten, while the rest keep exchanging process data. Bringing one back re-maps the whole bus, which pauses every device for the duration.
 - **Static bus configuration inspection** — per-slave identity (vendor/product/revision/
   serial), Sync Manager, FMMU, Distributed Clock, mailbox windows, and advertised mailbox
   capability bytes (CoE/FoE/EoE/SoE details, decoded into flags in the UI)

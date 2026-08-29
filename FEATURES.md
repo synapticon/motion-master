@@ -5,8 +5,7 @@ It runs as a local daemon exposing an HTTP API (`127.0.0.1:61447`) and a WebSock
 (`127.0.0.1:62281`), driven by a companion Progressive Web App console. This document
 catalogs the features it provides today. The stable, built-in HTTP API is specified in
 `apps/motion_master/swagger.yml` — and served by the running binary itself at
-`GET /api/swagger.yml`. Installation, configuration, and client usage are covered in
-[`README.md`](./README.md); architecture and design rationale live in `NEXTGEN.md`.
+`GET /api/swagger.yml`. Installation is covered in [`docs/INSTALLATION.md`](docs/INSTALLATION.md), and configuration and client usage in [`README.md`](./README.md); architecture and design rationale live in `NEXTGEN.md`.
 
 ## Fieldbus / EtherCAT Bus Control
 

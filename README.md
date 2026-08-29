@@ -35,6 +35,8 @@ The Linux `.deb`/`.rpm` packages install to `/opt/motion-master/` with a `/usr/l
 
 > **aarch64 note:** the arm64 artefacts are built on **Debian 13 (trixie)** and need glibc 2.38 or newer, so they run on Debian 13 and Raspberry Pi OS trixie. Debian 12 (bookworm, glibc 2.36) is too old — [build from source](#building-from-source) there.
 
+[Download statistics](https://github.com/synapticon/motion-master/releases/tag/stats) shows how many times each file in each release has been downloaded. A workflow regenerates it once a day. The same text is also an asset on that release, at [`STATS.md`](https://github.com/synapticon/motion-master/releases/download/stats/STATS.md), for a script that wants to read it.
+
 ### Auto-tuning
 
 The tuning calculations run in a separate executable: the controller-gain functions, and the fit that turns recorded measurements into a plant model. Motion Master starts it as a child process, and calls it over HTTP on loopback. The installed file is `auto-tuning`, and `auto-tuning.exe` on Windows.
@@ -560,6 +562,7 @@ All scripts default to the `x64-linux-debug` preset. Pass a preset name as the f
 | `./tools/clean.sh` | Remove the build directory |
 | `./tools/docs.sh` | Build the Doxygen documentation (`docs` target) |
 | `./tools/code-stats.sh` | Report per-file / per-directory C++ line counts (code, comment, blank) |
+| `./tools/release-stats.sh` | Write `STATS.md`: the download count of every release asset, read from the GitHub API (needs `gh` and `jq`) |
 | `./tools/bump-version.sh <version>` | Bump the project semver everywhere (see [Versioning](#versioning)) |
 | `./tools/package.sh [preset]` | Build `.deb` and `.rpm` packages (requires `cert.pem`/`key.pem` in the build dir) |
 | `./tools/docker-build.sh [image]` | Build + tag the Docker image from the current `VERSION` (version tag + `latest`/`next`) |
@@ -689,5 +692,6 @@ The `v*` tag builds the platform binaries **and** publishes `@synapticon/motion-
 | `deploy-pages.yml` | push to `main`, `v*` tag | Publish `motion-master.synapticon.com` — landing page, `/docs` Doxygen, the `swagger.yml` spec, and each PWA under `/apps/<name>/`. Docs and landing track `main`; the **apps are pinned to the latest `v*` tag** so the hosted console always matches a released binary |
 | `jitter.yml` | manual dispatch | Run `jitter_bench` on a `PREEMPT_RT` CI machine (duration / period / workload as inputs) |
 | `release.yml` | `v*` tag push | Build all platforms, bundle cert + key from the rolling `tls-cert` release, publish GitHub Release with `.tar.gz`, `.deb`, `.rpm` (Linux x64 and aarch64), `.zip` (Windows), and `.tar.gz` (macOS arm64); then code-sign the Windows exe on a self-hosted runner and replace the zip asset |
+| `release-stats.yml` | every day at 04:00 UTC | Count the downloads of every release asset and publish `STATS.md` to the rolling `stats` release |
 
 The vcpkg cache key is OS + `vcpkg.json` hash, extended with the architecture where two legs share an OS (`build-linux-arm64.yml`) and with the build container where the toolchain differs too (the release workflow's Debian 13 aarch64 leg). The first run after a dependency change rebuilds from source; subsequent runs restore from cache.

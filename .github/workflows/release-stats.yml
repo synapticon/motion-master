@@ -1,0 +1,45 @@
+name: Release Download Statistics
+
+on:
+  schedule:
+    - cron: '0 4 * * *'  # every day at 04:00 UTC
+  workflow_dispatch:
+
+jobs:
+  stats:
+    runs-on: ubuntu-24.04
+
+    # contents: write lets the default GITHUB_TOKEN create/update the rolling `stats` release.
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Generate STATS.md
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./tools/release-stats.sh
+
+      # Publish to a rolling release with a fixed tag, the same way cert-renewal.yml publishes
+      # the certificate. The file is generated, so committing it would push to main every day —
+      # which fires the four build workflows, lint, and a Pages deploy for a file no build reads.
+      # The rolling release gives a stable URL instead:
+      #   https://github.com/synapticon/motion-master/releases/download/stats/STATS.md
+      # The same text is the release body, so the tables are readable on the Releases page
+      # without downloading anything.
+      - name: Publish to rolling release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view stats --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit stats --repo "$GITHUB_REPOSITORY" --notes-file STATS.md
+            gh release upload stats STATS.md --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            # --prerelease keeps this off the repository's "Latest" badge.
+            gh release create stats STATS.md \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "Download statistics (rolling)" \
+              --notes-file STATS.md \
+              --prerelease
+          fi

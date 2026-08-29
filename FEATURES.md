@@ -41,10 +41,12 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
   loop degrades predictably instead of drifting.
 - **Game-loop health & runtime retiming** — inspect a live snapshot of the RT loop
   (configured/achieved rate, executed/skipped-cycle counters, per-cycle task timing,
-  whether RT scheduling was acquired) via `GET /api/game-loop`, and retime the running
+  whether RT scheduling was acquired, whether memory was locked, and whether the core pin
+  took) via `GET /api/game-loop`, and retime the running
   loop to a new cycle period with `PUT /api/game-loop`. The retime takes effect within
   one cycle, is transient (not written back to config), and starts a fresh health epoch;
   the recorder ring is period-independent, so nothing else is resized.
+- **Core pinning** — `gameLoop.cpuAffinity` pins the RT thread to one core, and only that thread; the HTTP, WebSocket, monitoring and parameter-refresher threads stay on the rest. Point it at a core the kernel booted with `isolcpus`, which is otherwise wasted: such a core runs nothing until a thread asks for it by name. Linux only, and `-1` (the default) leaves the thread unpinned.
 - **Process image inspection** — inspect the published PDO layout and working-counter
   (WKC) health (`GET /api/process-image`).
 - **Output staging** — stage a batch of output values into the process image lock-free
@@ -78,8 +80,8 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
   (`PUT .../parameters/{index}/{subindex}`).
 - **Raw SDO access** — upload/download an object dictionary entry directly over CoE SDO
   (`GET`/`PUT /api/devices/{slavePosition}/sdo/{index}/{subindex}`).
-- **On-disk parameter cache** — object-dictionary definitions are cached on disk keyed by
-  device identity. List, download, and delete cache files (`/api/parameter-caches`).
+- **On-disk parameter cache** — object-dictionary definitions are cached on disk keyed by device identity. List, download, and delete cache files (`GET /api/parameter-cache`, `GET`/`DELETE /api/parameter-cache/{id}`).
+- **User cache** — the per-user directory the server writes to, including the rotating log file. List every file in it, flattened, and read one back (`GET /api/user-cache`, `GET /api/user-cache/{path}`). Independent of the bus.
 
 ## Device Services
 
@@ -103,6 +105,8 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
 - **SII / EEPROM** — read a device's SII image, write a raw SII image
   (`GET`/`PUT /api/devices/{slavePosition}/sii`), and parse a raw SII image offline
   (`POST /api/sii/parse`).
+- **Hardware identity** — read the device's `.hardware_description` and, on an Integro, its `.variant` (`GET /api/devices/{slavePosition}/hardware-description`, `GET /api/devices/{slavePosition}/variant`).
+- **Firmware compatibility** — ask whether a firmware package belongs on a device (`GET /api/devices/{slavePosition}/firmware-compatibility?filename=…`). The server assembles the descriptors the device accepts from those two files and compares them against the descriptor in the package name. A mismatch answers 200 with `compatible: false` and names both descriptors, so a client can say which hardware the package was for; a 4xx means the question could not be asked.
 - **Device listing** — list all devices or fetch one by bus position
   (`GET /api/devices`, `GET /api/devices/{slavePosition}`).
 
@@ -116,25 +120,20 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
 - **State machine commands** — `POST /api/devices/{slavePosition}/cia402/command` runs
   `enable` (walking every intermediate transition to Operation Enabled, clearing a latched
   fault first if needed), `disable` (to Switch On Disabled), `quickStop`, or `faultReset`.
+- **Named target state** — `POST /api/devices/{slavePosition}/cia402/state` walks the state machine to the state you name, issuing whatever intermediate transitions that takes.
 - **Operation mode** — set the mode of operation (`0x6060`) with
   `POST /api/devices/{slavePosition}/cia402/mode`; the drive reflects the accepted mode in
-  `0x6061` once it takes effect.
+  `0x6061` once it takes effect. `GET /api/devices/{slavePosition}/operation-modes` lists every mode the device has, standard and manufacturer-specific, so a client renders the choices instead of holding a hard-coded list.
 - **Cyclic setpoints** — `POST /api/devices/{slavePosition}/cia402/target` writes the one
   setpoint matching the active mode: target position (`0x607A`) in PP/CSP, target velocity
   (`0x60FF`) in PV/CSV, or target torque (`0x6071`, per-mille of rated) in PT/CST. All are
   signed, so negative values command reverse motion or regenerative torque.
+- **Brake control** — read what a release or an engage will do (`GET /api/devices/{slavePosition}/brake`, reporting the `0x2004` objects and the current state), then release or engage it (`POST /api/devices/{slavePosition}/brake/release`, `POST .../brake/engage`). Each writes the brake state object (`0x2004:07`) and waits before answering with the state read back — the drive's pull time on a release, the `settle` you pass on an engage. A release only happens while the drive is in OP ENABLED, and on a pin brake it moves the shaft, which `releaseMovesShaft` on the `GET` reports.
 - **Profile views** — internally, a borrowed-view chain `ProfileDevice ← Cia402Drive ←
   SomanetDrive` binds a `Device` for one operation via validated factories, providing the
   CiA402 state machine and SOMANET-specific object-dictionary access behind the endpoints
   above.
-- **Trajectory playback** *(planned)* — an RT cyclic task plays back a precomputed setpoint
-  buffer one point per cycle (sine/chirp/ramp/step are userspace-generated buffers plus a
-  `repeat` flag, not separate tasks). Launched off the RT thread by a node-layer function
-  that validates the request, does the op-mode and enable handshake through a `Cia402Drive`
-  view, and arms an immutable run into a depth-1 latest-wins mailbox slot the task reads —
-  one slot per axis, so a single-axis move and a coordinated multi-axis program share one
-  mechanism. Skips are absorbed by a per-trajectory policy (preserve shape, or preserve
-  wall-clock timing).
+- **Setpoint playback** *(planned)* — `SetpointCyclicTask` plays a precomputed buffer, one setpoint per axis per cycle, in CSP, CSV or CST. The mode picks the target object: `0x607A`, `0x60FF` or `0x6071`. The RT side holds a cursor and nothing else, because the launch path does the op-mode and enable handshake off the RT thread before it arms the run into a depth-1 latest-wins mailbox slot — one slot per axis, so a single-axis move and a coordinated multi-axis program share one mechanism. Waveform maths lives in pure functions the API exposes twice: a preview endpoint, and a `{generator, params}` pair the launch request accepts in place of an explicit `points` array. A `relative` program is offset by the current value once, at arm time. Skip handling is a launch parameter: `Sequential` advances the cursor by one and preserves the shape, `RealTime` computes the cursor from elapsed cycles and preserves the timing.
 
 ## Procedures
 
@@ -171,6 +170,14 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
   calibration mode is the one procedure that **leaves** the drive changed, since the mode it
   sets is a mode the encoder stays in.
 
+## Auto-tuning
+
+- **A separate executable, started as a child** — the tuning calculations are the controller-gain functions and the fit that turns a recorded measurement into a plant model. They run in an `auto-tuning` executable that Motion Master starts at startup and reaches over loopback. It computes on the numbers sent to it and drives nothing: the measurement it fits is recorded on the drive, by the *system identification* procedure.
+- **Optional, and downloaded rather than shipped** — the file is not in the release archives. Every install path fetches it once from a rolling release, and continues without it if the download fails. A machine that commissions nothing can leave it off, or keep it and set `autoTuning.enabled` to `false`.
+- **Status** — `GET /api/auto-tuning` tells the four cases apart: switched off in the configuration, not installed, installed but would not start, or running. The values are a startup snapshot, and nothing polls the process, so a call is the honest test.
+- **Run a function** — `POST /api/auto-tuning/run` names a function and its inputs, forwards the request to the process, and returns the reply unchanged. `503` means no process is running.
+- **Its own contract** — `GET /api/auto-tuning/swagger.yml` serves the OpenAPI document the process carries, fetched from it on each request, so a client reads the schemas from the copy actually installed.
+
 ## Monitoring (Live Telemetry)
 
 - **Monitorings** — create, list, get, and delete monitorings
@@ -190,6 +197,7 @@ catalogs the features it provides today. The stable, built-in HTTP API is specif
   codes, SDO abort codes, CoE object data types, and the internal encoders' register maps
   (iC-Haus iC-MU and iC-PVL for a Circulo, Kübler for an Integro) (`GET /api/meta/*`), each
   with a matching console page.
+- **Offline parsers** — decode a file with no device present: an ESI (`POST /api/esi/parse`, which is the only way to see object descriptions, enum option labels, engineering units and min/max bounds, because the CoE SDO-Information service reports none of them), a `.hardware_description` (`POST /api/hardware-description/parse`), an Integro `.variant` (`POST /api/integro-variant/parse`, with the whole option catalogue at `GET /api/integro-variant/options`), and a SOMANET firmware package filename (`GET /api/firmware-package-name`).
 - **System & version info** — Motion Master version (`GET /api/version`), startup
   configuration (`GET /api/config`), and host OS/hardware info (`GET /api/system-info`).
 - **Self-describing API** — the server serves its own OpenAPI spec at
@@ -212,9 +220,9 @@ A React PWA at `https://motion-master.synapticon.com` provides UI for the above:
 - **Process Data / Recorder** — live process-data view and recorder page.
 - **Game Loop** — RT loop health and runtime cycle-period control.
 - **Monitorings** — configure and plot live telemetry.
-- **Tools & reference** — SII parser, AL Status Codes, ESC Registers, FoE Error Codes,
-  iC-Haus Registers, Kübler Registers, Mailbox Error Codes, SDO Abort Codes, Data Types,
-  HTTP request inspector, Log, Parameter Caches, and bundled API Docs.
+- **Storage** — Parameter Cache and User Cache, the two views on the per-user cache root.
+- **Tools** — Auto-Tuning, ESI, Integro Variant, SII, and Utilities.
+- **Server & reference** — Log, Requests (a client-side log of every HTTP request, failures included, so it stays useful precisely while the connection is failing), the bundled API Docs, and the Meta tables: AL Status Codes, ESC Registers, FoE Error Codes, iC-Haus Registers, Kübler Registers, Mailbox Error Codes, Object Data Types, and SDO Abort Codes.
 
 ## Security & Deployment
 
@@ -247,8 +255,8 @@ A React PWA at `https://motion-master.synapticon.com` provides UI for the above:
   4 ms cycle out of the box.
 - **What is configurable** — HTTP and WebSocket ports plus the CORS origin (`server`), the
   fieldbus driver and adapter to bring up at startup (`fieldbus`), log verbosity and the
-  rotating log file (`logging`), the RT cycle period (`gameLoop`), recorder ring depth and dump directory
+  rotating log file (`logging`), the RT cycle period and core pin (`gameLoop`), recorder ring depth and dump directory
   (`recorder`), the on-disk parameter-definition cache (`parameterCache`), object-dictionary
-  read behaviour (`parameters`), and TLS paths plus cert auto-update (`tls`). See
+  read behaviour (`parameters`), the auto-tuning child process (`autoTuning`), and TLS paths plus cert auto-update (`tls`). See
   [`README.md`](./README.md#configuration) for the annotated block reference, and
   `apps/motion_master/motion-master.example.jsonc` for every key with its default.

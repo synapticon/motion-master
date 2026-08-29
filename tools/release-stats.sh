@@ -96,19 +96,15 @@ def downloads: [.assets[].download_count] | add // 0;
 | [
     "# Release Download Statistics",
     "",
-    "Generated \($generated) from the GitHub Releases API for",
-    "[\($repo)](https://github.com/\($repo)/releases).",
+    "Generated \($generated) from the GitHub Releases API for [\($repo)](https://github.com/\($repo)/releases).",
     "",
-    "A count is the total number of downloads of one file since that file was published. The",
-    "API reports no per-day breakdown, so this file holds the totals at the time it was",
-    "generated. It is not a history. A workflow regenerates it once a day.",
+    "A count is the total number of downloads of one file since that file was published. The API reports no per-day breakdown, so this file holds the totals at the time it was generated. It is not a history. A workflow regenerates it once a day.",
     "",
     "**\($grandTotal) downloads** of \($assetCount) files across \(length) releases.",
     "",
     "## Downloads per artifact",
     "",
-    "Every version release builds the same set of artifacts. This table adds each artifact up",
-    "over all \($versioned | length) version releases.",
+    "Every version release builds the same set of artifacts. This table adds each artifact up over all \($versioned | length) version releases.",
     ""
   ]
   + table(["Artifact", "Downloads"]; 1;
@@ -137,8 +133,7 @@ def downloads: [.assets[].download_count] | add // 0;
         "",
         "## Rolling releases",
         "",
-        "These releases hold one asset set that is replaced in place, so they carry no version",
-        "and no artifact columns.",
+        "These releases hold one asset set that is replaced in place, so they carry no version and no artifact columns.",
         ""
       ]
       + table(["Release", "Asset", "Downloads"]; 2;

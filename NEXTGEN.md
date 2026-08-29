@@ -3193,3 +3193,95 @@ holding the previous build, so the script creates an invalidation and waits for 
 upload that has not reached the address a reader is given is not published. Both addresses are then
 fetched anonymously, because a private object returns 403 and looks identical from a shell whose
 credentials work.
+
+## Session 2026-08-29 — DC SYNC0 is a phase servo on the local timer, not a new clock source (plan)
+
+Asked what the master must do to support SYNC0. The question carried an assumption worth
+correcting first: that the game loop swaps its interval for a tick from the Distributed Clocks
+system. There is no such tick.
+
+### Nothing reaches the master
+
+SYNC0 is a pulse. Each slave's EtherCAT Slave Controller generates it from that slave's own DC
+clock. Nothing returns to the master. There is no interrupt, no callback, and no clock line.
+
+So `CyclicTimer` keeps its absolute-deadline grid on the local monotonic clock. The new work is a
+servo on that grid. Each cycle the loop measures where its frame sits against the DC grid. It then
+moves the next deadline by a small amount. The cadence is already correct today. Phase is what
+SYNC0 adds a requirement for.
+
+Phase matters because the local clock and the DC reference clock are separate crystals. They run at
+slightly different rates. A free-running local grid slides against the pulse grid. It slides slowly,
+and then it delivers a frame on the wrong side of a pulse. The drive latches the previous cycle's
+setpoint. The symptom is a sync error, AL 0x001A or 0x001B, or an SM watchdog trip. This is why
+`ecx_dcsync0` alone is a regression rather than an improvement.
+
+### The pieces
+
+1. **Arm SYNC0.** Call `ecx_dcsync0(ctx, slave, TRUE, cycleTime, shift)` for each DC-capable slave,
+   in SAFE-OP, before the transition to OP. `cycleTime` must equal the loop period.
+2. **A common pulse grid falls out of SOEM's own arithmetic.** `ecx_dcsync0` reads that slave's
+   local system time from 0x0910. It rounds the value up to a whole multiple of `CyclTime`, then
+   adds one more `CyclTime` plus the shift. `ecx_configdc` already disciplined every slave's system
+   time to the reference clock. So per-slave calls land every slave on one grid, and the master
+   computes no start time itself. `SyncDelay` in `ec_dc.c` is 100 ms, so the first pulse is at least
+   100 ms out. That is the margin the master has to reach lock.
+3. **The reference time is already on the wire.** `ecx_configdc` sets `grouplist[0].hasdc`.
+   `ecx_send_processdata` then appends an FRMW datagram addressed at the reference slave, and
+   `ecx_receive_processdata` copies the answer into `ctx->DCtime`. `exchangeProcessData` in
+   `soem_fieldbus_driver.cc` already calls both. The loop therefore reads the reference clock every
+   cycle at no extra frame cost, and the driver needs only to expose the value.
+4. **The servo itself.** Compute `phase = DCtime % periodNs`. Take the error against a target
+   offset. Feed a PI term, and apply the output to the next wake. This needs new API on
+   `CyclicTimer`: an offset applied to one deadline that leaves the grid anchor alone. `setPeriod`
+   re-anchors the grid, which is correct for a retime and wrong here.
+5. **Re-arm after every re-map.** `configureProcessData` and a partial-bus AL transition both leave
+   a slave that needs SYNC0 set again.
+6. **Report the lock.** Add the phase error and a lock state to `GameLoopHealth`. The DC Sync page
+   already surfaces the per-slave system-time difference from 0x092C.
+
+### The config token refuses rather than degrades
+
+The shape is one token in the `gameLoop` block: `sync`, either `"free-run"` (the default) or
+`"dc"`, with the shift beside it. When `sync` is `"dc"` and no slave on the bus is DC-capable, the
+server refuses to activate. It does not fall back to free-run with a warning.
+
+The reason is that `"dc"` is never reached by accident. Somebody wrote the line because the machine
+needs hardware synchronisation. A fallback gives that person a bus that runs, reports healthy, and
+carries exactly the actuation jitter the line was written to remove. The failure is silent and it
+lasts. A log warning on an unattended machine reaches nobody. A refusal costs one edit of the config
+file, and it is visible at once.
+
+The check belongs in `configureProcessData`, where `ecx_configdc` already reports whether any
+DC-capable slave exists. The error then surfaces on `POST /api/devices/state`. The process stays up,
+so the operator corrects the file and retries without a restart.
+
+A mixed bus is not the failure case. Arm SYNC0 only on slaves whose `slavelist[i].hasdc` is set. A
+plain I/O coupler with no DC support stays SM-synchronous and is unaffected.
+
+### Loss of lock at run time is a separate question
+
+The refusal above answers one condition only: no DC on the bus at activation. The other condition is
+a bus with DC where the servo never locks, or where it locks and then drifts out. A refusal is not
+available mid-run.
+
+That case wants a lock state on `GameLoopHealth` and a `NotificationBus` source beside
+`busHealthSource`. It does not want a hard stop. The decision of what a control task should do about
+a lost lock is deferred, because nothing consumes the signal yet.
+
+### Open questions and preconditions
+
+- **A PREEMPT_RT host is required.** SYNC0 without the servo and without RT scheduling turns benign
+  arrival jitter into missed windows and drive faults.
+- **The target offset is unmeasured.** The frame must arrive before the pulse. How much margin a
+  SOMANET drive needs is not established here, and it must be measured rather than guessed.
+- **The sync-manager parameters are unconfirmed.** ETG defines 0x1C32 and 0x1C33 to select the sync
+  type, and a drive may need an explicit write to run on SYNC0. Whether SOMANET firmware requires
+  that write is a question for the firmware source, not an assumption for this plan.
+- **A non-integer microsecond period cannot work.** `CyclTime` is a whole number of nanoseconds in
+  the ESC register. Windows hosts that run a fractional period are outside this feature.
+- **SYNC1 is out of scope.** `ecx_dcsync01` exists, and nothing in the SOMANET path asks for a
+  second pulse.
+
+Nothing is built. The order of work is the servo first, then arming, then the config token, because
+the servo is the only piece with an unknown in it.

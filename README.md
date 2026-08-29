@@ -9,7 +9,7 @@ See [FEATURES.md](FEATURES.md) for a full catalog of capabilities.
 Design documents (the Mermaid diagrams render natively on GitHub):
 
 - [Class diagram](https://github.com/synapticon/motion-master/blob/main/docs/CLASS_DIAGRAM.md) — class structure, ownership, and inheritance.
-- [RT scheduling primer](https://github.com/synapticon/motion-master/blob/main/docs/RT_SCHEDULING.md) — `SCHED_FIFO`, `mlockall`, and absolute-deadline sleeping: the three primitives the cycle depends on.
+- [RT scheduling primer](https://github.com/synapticon/motion-master/blob/main/docs/RT_SCHEDULING.md) — `SCHED_FIFO`, `mlockall`, and absolute-deadline sleeping: the three primitives the cycle depends on, plus the optional core pinning that an `isolcpus` core needs.
 - [Threading model](https://github.com/synapticon/motion-master/blob/main/docs/THREADS.md) — the built-in threads, the RT cycle, and why the RT loop never takes a lock.
 - [Locking and synchronisation](https://github.com/synapticon/motion-master/blob/main/docs/LOCKING.md) — every mutex, the lock ordering, and the lock-free protocols that carry the RT path.
 - [LAN deployment](https://github.com/synapticon/motion-master/blob/main/docs/LAN_DEPLOYMENT.md) — running the server on a separate machine (Raspberry Pi, industrial PC) and reaching it from the Console over the network.
@@ -30,6 +30,7 @@ Start the server (on Linux from a package install, `motion-master` is already on
 
 ```bash
 motion-master           # macOS: sudo ./motion-master   Windows: motion-master.exe
+motion-master --open    # the same, and opens the console in the default browser
 ```
 
 It serves two ports, both bound to `127.0.0.1` and each on its own event loop and thread, so a slow HTTP request can never stall the live data stream:
@@ -39,13 +40,7 @@ It serves two ports, both bound to `127.0.0.1` and each on its own event loop an
 | `61447` | HTTPS API — everything request/response (init, scan, SDO, FoE, state, parameters) | `server.httpPort` |
 | `62281` | Secure WebSocket (`wss://`) — monitoring batches and notifications out, topic subscriptions in | `server.wsPort` |
 
-Then open the console and point it at your machine:
-
-```bash
-motion-master --open    # opens https://motion-master.synapticon.com/apps/console/
-```
-
-The console is a PWA hosted by Synapticon; it talks to the server running on your machine over `https://local.motion-master.synapticon.com:61447` (a DNS name that resolves to `127.0.0.1`, which is why the bundled certificate is valid for it). Nothing is uploaded — the page is the only thing that comes from the network.
+`--open` points the browser at `https://motion-master.synapticon.com/apps/console/`. The console is a PWA hosted by Synapticon. It talks to the server on your machine over `https://local.motion-master.synapticon.com:61447`, a name that resolves to `127.0.0.1`, which is why the bundled certificate is valid for it. Your data stays there. The page is the only thing that comes from Synapticon, and no parameter, recording, or drive identity is sent back.
 
 The fieldbus does **not** come up on its own unless you configure it to. Either bring it up from the console, or do it over the API:
 

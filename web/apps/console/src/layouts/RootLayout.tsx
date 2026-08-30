@@ -507,6 +507,16 @@ export default function RootLayout() {
             <NavItem to="/reference/api-docs" label="API Docs" />
           </SidebarGroup>
 
+          {/* Learn is not gated on `online`: these pages explain concepts and call no endpoint, so
+              they stay readable when nothing is connected — which is exactly when somebody is most
+              likely to be reading up rather than commissioning. */}
+          <SidebarGroup label="Learn">
+            {/* Reading order, not alphabetical: the basics page is the one the others build on. */}
+            <NavItem to="/learn/servo-motors" label="Servo Motors" />
+            <NavItem to="/learn/encoders" label="Encoders" />
+            <NavItem to="/learn/commutation-offset" label="Commutation Offset" />
+          </SidebarGroup>
+
           {online && (
             <SidebarGroup label="Meta" defaultOpen={false}>
               <NavItem to="/meta/al-status-codes" label="AL Status Codes" />

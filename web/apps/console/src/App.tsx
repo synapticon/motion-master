@@ -14,6 +14,9 @@ import ServerGameLoopPage from './pages/ServerGameLoopPage'
 import ServerLogPage from './pages/ServerLogPage'
 import ServerRequestsPage from './pages/ServerRequestsPage'
 import ReferenceApiDocsPage from './pages/ReferenceApiDocsPage'
+import LearnServoMotorsPage from './pages/LearnServoMotorsPage'
+import LearnEncodersPage from './pages/LearnEncodersPage'
+import LearnCommutationOffsetPage from './pages/LearnCommutationOffsetPage'
 import MetaAlStatusCodesPage from './pages/MetaAlStatusCodesPage'
 import MetaEscRegistersPage from './pages/MetaEscRegistersPage'
 import MetaFoeErrorCodesPage from './pages/MetaFoeErrorCodesPage'
@@ -67,6 +70,11 @@ export default function App() {
         </Route>
         <Route path="reference">
           <Route path="api-docs" element={<ReferenceApiDocsPage />} />
+        </Route>
+        <Route path="learn">
+          <Route path="servo-motors" element={<LearnServoMotorsPage />} />
+          <Route path="encoders" element={<LearnEncodersPage />} />
+          <Route path="commutation-offset" element={<LearnCommutationOffsetPage />} />
         </Route>
         <Route path="meta">
           <Route path="al-status-codes" element={<MetaAlStatusCodesPage />} />

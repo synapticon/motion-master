@@ -956,8 +956,9 @@ inline constexpr std::string_view kCommutationOffsetMeasurementStep =
 ///
 /// Its own id rather than @c kReleaseBrakeStep, because the commissioning sequence may **engage**
 /// the brake there instead of releasing it: it released the brake for motor phase order detection,
-/// and the stationary offset method that follows cannot hold the load, so the release has to be
-/// undone. A step called "release-brake" that sometimes engages would be a lie in the step array.
+/// and the stationary offset method that follows asks nothing of the brake, so a release made for
+/// the previous step has no reason to stand and whatever it was holding should be held again. A
+/// step called "release-brake" that sometimes engages would be a lie in the step array.
 inline constexpr std::string_view kSetBrakeStep = "set-brake";
 
 /// @brief Commutation offset measurement's step template — prepare, release the brake, measure,
@@ -983,9 +984,10 @@ std::vector<ProgressStep> commutationOffsetMeasurementSteps();
 /// guesswork — and is reported with the result.
 ///
 /// **The brake is released only for the rotating methods** (0x2009:03 = 0 or 1), which the firmware
-/// refuses to run with it engaged. The stationary method (2) needs nothing of the brake, so the
-/// brake is never written and the load stays held; its **release-brake** step stays idle, and there
-/// is nothing about the brake to restore either.
+/// refuses to run while it is engaged, unless the drive's brake release strategy is manual. The
+/// stationary method (2) needs nothing of the brake, so the brake is never written and the load
+/// stays held; its **release-brake** step stays idle, and there is nothing about the brake to
+/// restore either.
 ///
 /// **A successful run changes the drive's configuration** — 0x2001 written and 0x2009:01 set to
 /// OFFSET_VALID, in the object dictionary rather than in flash — and the restore deliberately

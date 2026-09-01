@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <array>
-#include <bit>
 #include <cstddef>
 #include <format>
 #include <pugixml.hpp>
@@ -565,9 +564,9 @@ std::expected<std::string, std::string> writeEni(const EniNetwork& network) {
   addHex(masterInfo, "Destination", network.master.destination);
   addHex(masterInfo, "Source", network.master.source);
   if (network.master.etherType.has_value()) {
-    // EtherType is hexBinary rather than an integer, and it travels big-endian on the wire.
-    addHex(masterInfo, "EtherType",
-           mm::core::toBytes<std::uint16_t>(*network.master.etherType, std::endian::big));
+    // EtherType is hexBinary rather than an integer, and it is written little-endian like every
+    // other payload in the format: the ENI files ETG ships write 0x88A4 as "a488".
+    addHex(masterInfo, "EtherType", mm::core::toBytes<std::uint16_t>(*network.master.etherType));
   }
   addEcatCmds(master, network.master.initCmds);
 

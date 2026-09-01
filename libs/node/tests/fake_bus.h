@@ -93,6 +93,21 @@ class FakeBus : public FieldbusDriver {
   std::expected<void, std::string> configureProcessData() override { return {}; }
   PdoLayout processDataLayout() override { return layout; }
 
+  // Static configuration and EEPROM, for callers that describe the bus rather than drive it.
+  // Both default to empty, which is what the base class returns, so a test that does not set them
+  // sees no change.
+  std::vector<mm::comm::SlaveConfig> slaveConfigs;
+  std::vector<uint8_t> siiImage;
+  std::string siiError;    // non-empty makes every SII read fail
+  std::string deviceName;  // returned by slaveInfo(), which callers use as the device's name
+  std::vector<mm::comm::SlaveConfig> busConfig() const override { return slaveConfigs; }
+  std::expected<std::vector<uint8_t>, std::string> readSii(uint16_t) override {
+    if (!siiError.empty()) {
+      return std::unexpected(siiError);
+    }
+    return siiImage;
+  }
+
   int exchangeProcessData(std::span<const uint8_t> outputs, std::span<uint8_t> inputs) override {
     ++exchangeCalls;
     lastOutputs.assign(outputs.begin(), outputs.end());
@@ -113,7 +128,7 @@ class FakeBus : public FieldbusDriver {
 
   // --- unused stubs ---------------------------------------------------------
   std::expected<void, std::string> init() override { return {}; }
-  SlaveInfo slaveInfo(uint16_t) const override { return {}; }
+  SlaveInfo slaveInfo(uint16_t) const override { return SlaveInfo{.name = deviceName}; }
   void stop() override {}
   std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& p) override {

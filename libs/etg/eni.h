@@ -317,6 +317,7 @@ struct EniMaster {
   std::vector<std::uint8_t> destination;   ///< Destination MAC, six bytes.
   std::vector<std::uint8_t> source;        ///< Source MAC, six bytes.
   std::optional<std::uint16_t> etherType;  ///< EtherType; unset means the EtherCAT default.
+                                           ///< Written little-endian, so 0x88A4 reads @c "A488".
   std::vector<EniEcatCmd> initCmds;        ///< Bus-wide datagrams, under @c Master/InitCmds.
 };
 

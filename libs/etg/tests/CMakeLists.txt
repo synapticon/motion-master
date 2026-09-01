@@ -31,33 +31,43 @@ gtest_discover_tests(mm_etg_tests DISCOVERY_TIMEOUT 60)
 # An XML Schema is the only machine check that a document conforms: pugixml does not validate, and a
 # unit test can only assert the parts a reader would check by hand. Two documents are checked -- the
 # ENI this library writes, and the vendor ESI it parses, which is the authority every parser test is
-# written against. Both the schemas and xmllint are resolved at configure time, so a host without
-# either gets no test rather than a test that silently passes.
+# written against.
+#
+# The schemas themselves are not in the repository. ETG's download terms forbid copying,
+# distributing or mirroring their files without written permission, and this repository is public.
+# So the paths below are defaults, not contents: put EtherCATConfig.xsd in data/eni/ and
+# EtherCATInfo.xsd with EtherCATBase.xsd beside it in data/esi/ -- both directories are gitignored
+# -- or point MM_ENI_SCHEMA and MM_ESI_SCHEMA somewhere else. A host with neither the schemas nor
+# xmllint gets no test, rather than a test that silently passes.
 find_program(XMLLINT_EXECUTABLE xmllint)
 set(VALIDATE_XML "${CMAKE_CURRENT_SOURCE_DIR}/validate_xml.cmake")
-set(ENI_SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/data/eni/EtherCATConfig.xsd")
-set(ESI_SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/data/esi/EtherCATInfo.xsd")
+set(MM_ENI_SCHEMA
+    "${CMAKE_CURRENT_SOURCE_DIR}/data/eni/EtherCATConfig.xsd"
+    CACHE FILEPATH "ENI XML Schema (EtherCATConfig.xsd) for the EniSchemaValidation test")
+set(MM_ESI_SCHEMA
+    "${CMAKE_CURRENT_SOURCE_DIR}/data/esi/EtherCATInfo.xsd"
+    CACHE FILEPATH "ESI XML Schema (EtherCATInfo.xsd) for the EsiSchemaValidation test")
 
 if(NOT XMLLINT_EXECUTABLE)
   message(STATUS "Schema validation tests disabled: xmllint was not found")
 endif()
 
-if(XMLLINT_EXECUTABLE AND EXISTS "${ENI_SCHEMA}")
+if(XMLLINT_EXECUTABLE AND EXISTS "${MM_ENI_SCHEMA}")
   add_test(
     NAME EniSchemaValidation
     COMMAND
-      ${CMAKE_COMMAND} -DXMLLINT=${XMLLINT_EXECUTABLE} -DSCHEMA=${ENI_SCHEMA}
+      ${CMAKE_COMMAND} -DXMLLINT=${XMLLINT_EXECUTABLE} -DSCHEMA=${MM_ENI_SCHEMA}
       -DDOCUMENT=${CMAKE_CURRENT_BINARY_DIR}/eni_reference.xml -DTESTS=$<TARGET_FILE:mm_etg_tests>
       -DFILTER=EniWriterTest.WritesTheReferenceDocumentForSchemaValidation -P ${VALIDATE_XML})
 elseif(XMLLINT_EXECUTABLE)
-  message(STATUS "EniSchemaValidation disabled: ${ENI_SCHEMA} is not present")
+  message(STATUS "EniSchemaValidation disabled: set MM_ENI_SCHEMA; ${MM_ENI_SCHEMA} is not present")
 endif()
 
-if(XMLLINT_EXECUTABLE AND EXISTS "${ESI_SCHEMA}")
+if(XMLLINT_EXECUTABLE AND EXISTS "${MM_ESI_SCHEMA}")
   add_test(
     NAME EsiSchemaValidation
-    COMMAND ${CMAKE_COMMAND} -DXMLLINT=${XMLLINT_EXECUTABLE} -DSCHEMA=${ESI_SCHEMA}
+    COMMAND ${CMAKE_COMMAND} -DXMLLINT=${XMLLINT_EXECUTABLE} -DSCHEMA=${MM_ESI_SCHEMA}
             -DDOCUMENT=${CMAKE_CURRENT_SOURCE_DIR}/data/somanet-v5.6.6.xml -P ${VALIDATE_XML})
 elseif(XMLLINT_EXECUTABLE)
-  message(STATUS "EsiSchemaValidation disabled: ${ESI_SCHEMA} is not present")
+  message(STATUS "EsiSchemaValidation disabled: set MM_ESI_SCHEMA; ${MM_ESI_SCHEMA} is not present")
 endif()

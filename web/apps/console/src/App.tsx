@@ -23,6 +23,7 @@ import MetaMailboxErrorCodesPage from './pages/MetaMailboxErrorCodesPage'
 import MetaObjectDataTypesPage from './pages/MetaObjectDataTypesPage'
 import MetaSdoAbortCodesPage from './pages/MetaSdoAbortCodesPage'
 import ToolsAutoTuningPage from './pages/ToolsAutoTuningPage'
+import ToolsEniPage from './pages/ToolsEniPage'
 import ToolsEsiPage from './pages/ToolsEsiPage'
 import ToolsIntegroVariantPage from './pages/ToolsIntegroVariantPage'
 import ToolsSiiPage from './pages/ToolsSiiPage'
@@ -80,6 +81,7 @@ export default function App() {
         </Route>
         <Route path="tools">
           <Route path="auto-tuning" element={<ToolsAutoTuningPage />} />
+          <Route path="eni" element={<ToolsEniPage />} />
           <Route path="esi" element={<ToolsEsiPage />} />
           <Route path="integro-variant" element={<ToolsIntegroVariantPage />} />
           <Route path="sii" element={<ToolsSiiPage />} />

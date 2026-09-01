@@ -52,6 +52,7 @@ syntaxError:*/somanet_drive_test.cc
 syntaxError:*/somanet_procedures_test.cc
 syntaxError:*/sii_test.cc
 syntaxError:*/base_test.cc
+syntaxError:*/eni_test.cc
 syntaxError:*/esi_data_type_test.cc
 syntaxError:*/esi_entry_test.cc
 syntaxError:*/esi_request_test.cc

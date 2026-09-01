@@ -1743,7 +1743,7 @@ void HttpServer::run() {
     auto response = mm::api::bytes("application/xml", std::move(*eni));
     response.headers.emplace_back("X-Eni-Warnings", std::to_string(collected->warnings.size()));
     response.headers.emplace_back("Content-Disposition",
-                                  R"(attachment; filename="motion-master.xml")");
+                                  R"(attachment; filename="motion-master-eni.xml")");
     return response;
   });
 

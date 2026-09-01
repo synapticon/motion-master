@@ -2315,6 +2315,32 @@ export class Api<
       ...params,
     });
   /**
+   * @description Returns the bus as an ENI document, the vendor-neutral configuration a third-party master (acontis EC-Master, TwinCAT, CODESYS) replays to bring the same bus up. Where an ESI file describes one device family, an ENI describes one assembled network, and it is imperative rather than declarative: every configuration step is an EtherCAT datagram or a CoE download tagged with the AL-state transition it belongs to. The document carries each device's identity and addresses, its Sync Manager and FMMU register writes, its mailbox windows, its PDO assignment as CoE downloads, the AL-state walk with a read that holds the master until the device arrives, the cyclic frame, and the named process image. Conforms to ENI Schema 1.7 (ETG.2100). The bus must be configured. FMMUs and logical addresses come into being at the SAFE-OP transition, so a bus in PRE-OP has no mapping to describe and the call returns 409. **This drives the bus.** Each device's SII is read for its port layout and bootstrap mailbox, and its PDO assignment is read over CoE, so the call costs one EEPROM read and a short burst of SDO uploads per device. It is an export action, not an accessor. Distributed clocks are left out, so the generated configuration runs in free-run — which is how Motion Master runs the bus itself. The `DC` element needs an `AssignActivate` word, and a SOMANET drive does not carry the SII category that holds one. `X-Eni-Warnings` counts the parts that were asked for and not answered; each is also logged. A warning costs one optional element, never the document: a device whose SII will not read keeps every init command.
+   *
+   * @name ExportEni
+   * @summary Export the bus as an EtherCAT Network Information (ENI) file
+   * @request GET:/api/eni
+   */
+  exportEni = (params: RequestParams = {}) =>
+    this.request<
+      File,
+      | {
+          /** Human-readable reason the export could not be produced */
+          error: string;
+        }
+      | {
+          /** The field that could not be written */
+          error: string;
+        }
+      | {
+          error: string;
+        }
+    >({
+      path: `/api/eni`,
+      method: "GET",
+      ...params,
+    });
+  /**
    * @description Returns every registered monitoring as a resource — its configuration plus, per parameter, how its value is sourced, and the current buffer fill.
    *
    * @name ListMonitorings

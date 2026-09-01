@@ -2,6 +2,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <string>
 
 namespace mm::comm {
@@ -19,6 +20,26 @@ TEST(IsMacAddressTest, AcceptsColonSeparated) {
 TEST(IsMacAddressTest, AcceptsDashSeparated) {
   EXPECT_TRUE(isMacAddress("AA-BB-CC-DD-EE-FF"));
   EXPECT_TRUE(isMacAddress("00-1a-2b-3c-4d-5e"));
+}
+
+// parseMac
+
+TEST(ParseMacTest, DecodesBothSeparatorsAndEitherCase) {
+  const std::array<uint8_t, 6> expected = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+  EXPECT_EQ(parseMac("AA:BB:CC:DD:EE:FF"), expected);
+  EXPECT_EQ(parseMac("aa-bb-cc-dd-ee-ff"), expected);
+}
+
+TEST(ParseMacTest, KeepsTheBytesInTheOrderTheyAreWritten) {
+  const std::array<uint8_t, 6> expected = {0x00, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E};
+  EXPECT_EQ(parseMac("00:1A:2B:3C:4D:5E"), expected);
+}
+
+TEST(ParseMacTest, RejectsWhatIsNotAMacAddress) {
+  EXPECT_FALSE(parseMac("").has_value());
+  EXPECT_FALSE(parseMac("AA:BB:CC:DD:EE").has_value());
+  EXPECT_FALSE(parseMac("AA:BB:CC:DD:EE:GG").has_value());
+  EXPECT_FALSE(parseMac("AA:BB-CC:DD:EE:FF").has_value());  // Mixed separators.
 }
 
 TEST(IsMacAddressTest, AcceptsLowercaseHex) { EXPECT_TRUE(isMacAddress("aa:bb:cc:dd:ee:ff")); }

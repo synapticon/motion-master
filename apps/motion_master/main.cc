@@ -115,11 +115,17 @@ int main(int argc, char** argv) {
                                                               : opts.config.recorder.dumpDir,
       .recorderCapacity = opts.config.recorder.capacity};
 
+  // The MAC of the interface the bus runs on, which an ENI export writes as the source address of
+  // the cyclic frames. Recorded here rather than read back later because only adapter resolution
+  // knows it, and POST /api/init can move the bus to another interface. Shared so the HTTP thread
+  // reads whatever the last successful init wrote.
+  auto busAdapterMac = std::make_shared<std::atomic<std::array<uint8_t, 6>>>();
+
   // Resolve the adapter, construct the concrete driver, and hand it to DeviceManager::init. Used
   // both for the optional eager init below and as the POST /api/init callback, so the two paths
   // share one set of driver-creation and adapter-resolution rules. main.cc is the only place that
   // names concrete driver types (the composition root).
-  auto initDeviceManager = [&deviceManager, deviceManagerConfig,
+  auto initDeviceManager = [&deviceManager, deviceManagerConfig, busAdapterMac,
                             mailboxStatusFmmu = opts.config.fieldbus.mailboxStatusFmmu](
                                const std::string& type,
                                const std::string& adapter) -> std::expected<void, std::string> {
@@ -134,6 +140,9 @@ int main(int argc, char** argv) {
         return std::unexpected(resolved.error());
       }
       ifname = resolved->name;
+      if (const auto mac = mm::comm::parseMac(resolved->macLinux); mac) {
+        busAdapterMac->store(*mac, std::memory_order_relaxed);
+      }
       // Recorded on every init, because a support log that never names the adapter cannot answer
       // the first question any fieldbus fault raises — and on Windows the interface name is an NPF
       // GUID path, so the description and the MAC (whose OUI names the vendor) are what identify
@@ -326,6 +335,15 @@ int main(int argc, char** argv) {
             return autoTuningClient->spec();
           }}
                                              : HttpServer::AutoTuningSpecFn{},
+          .eniOptions =
+              [&gameLoop, busAdapterMac, name = std::string{"Motion Master"}] {
+                const auto mac = busAdapterMac->load(std::memory_order_relaxed);
+                mm::node::EniCollectorOptions options;
+                options.masterName = name;
+                options.sourceMac.assign(mac.begin(), mac.end());
+                options.cycleTimeUs = static_cast<uint32_t>(gameLoop.health().periodUs);
+                return options;
+              },
           .corsOrigin = opts.config.server.corsOrigin,
       },
       deviceManager, monitoringManager, procedureManager, userCache};

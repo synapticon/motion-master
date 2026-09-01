@@ -1,7 +1,10 @@
 #pragma once
 
+#include <array>
+#include <cstdint>
 #include <expected>
 #include <nlohmann/json_fwd.hpp>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -55,6 +58,17 @@ bool isMacAddress(const std::string& s);
 /// @return Normalised MAC string of the form @c "XX<sep>XX<sep>…<sep>XX".
 /// @pre @c isMacAddress(raw) == true
 std::string normalizeMac(const std::string& raw, char sep);
+
+/// @brief Decodes a MAC address string into its six bytes, in wire order.
+///
+/// The string form is what an adapter carries and what a human types; a protocol that puts a MAC on
+/// the wire — an ENI @c Source, an EoE frame — needs the bytes. @c isMacAddress decides what is
+/// acceptable, so both separators and either case are.
+///
+/// @param s  Source MAC string.
+/// @return The six bytes, most significant first, or @c std::nullopt when @p s is not a MAC
+/// address.
+std::optional<std::array<uint8_t, 6>> parseMac(const std::string& s);
 
 /// @brief Enumerates all network adapters visible to the OS.
 ///

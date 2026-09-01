@@ -3815,6 +3815,92 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/SlaveConfig"
+  /api/eni:
+    get:
+      summary: Export the bus as an EtherCAT Network Information (ENI) file
+      description: >-
+        Returns the bus as an ENI document, the vendor-neutral configuration a
+        third-party master (acontis EC-Master, TwinCAT, CODESYS) replays to bring the
+        same bus up. Where an ESI file describes one device family, an ENI describes
+        one assembled network, and it is imperative rather than declarative: every
+        configuration step is an EtherCAT datagram or a CoE download tagged with the
+        AL-state transition it belongs to. The document carries each device's
+        identity and addresses, its Sync Manager and FMMU register writes, its
+        mailbox windows, its PDO assignment as CoE downloads, the AL-state walk with
+        a read that holds the master until the device arrives, the cyclic frame, and
+        the named process image. Conforms to ENI Schema 1.7 (ETG.2100).
+
+
+        The bus must be configured. FMMUs and logical addresses come into being at
+        the SAFE-OP transition, so a bus in PRE-OP has no mapping to describe and the
+        call returns 409.
+
+
+        **This drives the bus.** Each device's SII is read for its port layout and
+        bootstrap mailbox, and its PDO assignment is read over CoE, so the call costs
+        one EEPROM read and a short burst of SDO uploads per device. It is an export
+        action, not an accessor.
+
+
+        Distributed clocks are left out, so the generated configuration runs in
+        free-run — which is how Motion Master runs the bus itself. The `DC` element
+        needs an `AssignActivate` word, and a SOMANET drive does not carry the SII
+        category that holds one.
+
+
+        `X-Eni-Warnings` counts the parts that were asked for and not answered; each
+        is also logged. A warning costs one optional element, never the document: a
+        device whose SII will not read keeps every init command.
+      operationId: exportEni
+      responses:
+        "200":
+          description: The ENI document
+          headers:
+            X-Eni-Warnings:
+              description: Number of parts that could not be read; each is logged
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/xml:
+              schema:
+                type: string
+                format: binary
+        "409":
+          description: >-
+            The bus has no published process image (bring it to SAFE-OP or OP first),
+            or it has no devices.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: Human-readable reason the export could not be produced
+        "500":
+          description: The collected network could not be written as a valid ENI
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: The field that could not be written
+        "501":
+          description: This build serves no ENI options
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+
   /api/monitorings:
     get:
       summary: List all monitorings

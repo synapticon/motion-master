@@ -20,6 +20,7 @@
 #include "auto_tuning/status.h"  // Status (returned by the GET /api/auto-tuning callback)
 #include "game_loop.h"           // GameLoopHealth (returned by the GET /api/game-loop callback)
 #include "net/http_client.h"     // net::Response (an auto-tuning reply, passed through verbatim)
+#include "node/eni_collector.h"  // EniCollectorOptions (returned by the GET /api/eni callback)
 
 namespace mm::core {
 class UserCache;
@@ -105,6 +106,15 @@ class HttpServer {
   /// @c AutoTuningRunFn: the reply passes through, an error means the process is unreachable.
   using AutoTuningSpecFn = std::function<std::expected<mm::net::Response, std::string>()>;
 
+  /// @brief Supplies the three things an ENI needs that no device can answer for: the master's
+  ///        name, the MAC of the interface the bus runs on, and the RT loop period.
+  ///
+  /// A callback rather than three config fields, because two of the three change after start-up —
+  /// `POST /api/init` can move the bus to another adapter, and `PUT /api/game-loop` retimes the
+  /// loop — so a value copied at construction would go stale. Same pattern as
+  /// @c GetGameLoopHealthFn.
+  using EniOptionsFn = std::function<mm::node::EniCollectorOptions()>;
+
   /// @brief Server configuration.
   struct Config {
     /// Local address to bind. Loopback serves only this machine; "0.0.0.0" serves the network.
@@ -127,6 +137,7 @@ class HttpServer {
     AutoTuningStatusFn
         autoTuningStatus;             ///< Handler for `GET /api/auto-tuning`; the startup snapshot.
     AutoTuningSpecFn autoTuningSpec;  ///< Handler for `GET /api/auto-tuning/swagger.yml`.
+    EniOptionsFn eniOptions;  ///< Supplies the non-bus half of `GET /api/eni`; required for it.
     /// Value sent in `Access-Control-Allow-Origin`. Defaults to the production PWA origin.
     std::string corsOrigin{"https://motion-master.synapticon.com"};
   };

@@ -13,9 +13,10 @@ export * from './web-socket-connection'
 export * from './client'
 
 // Pure, framework-agnostic helpers (no DOM/React): hex formatting, CoE SDO value
-// encode/decode, SOMANET file-list parsing, and the LAN hostname mapping that lets a browser
-// reach a server on another machine under a name the bundled certificate covers.
+// encode/decode, SOMANET file-list parsing, the ENI export, and the LAN hostname mapping that lets
+// a browser reach a server on another machine under a name the bundled certificate covers.
 export * from './lan';
+export * from './eni'
 export * from './hex'
 export * from './sdo'
 export * from './mmpd'

@@ -119,13 +119,27 @@ int main(int argc, char** argv) {
   // the cyclic frames. Recorded here rather than read back later because only adapter resolution
   // knows it, and POST /api/init can move the bus to another interface. Shared so the HTTP thread
   // reads whatever the last successful init wrote.
-  auto busAdapterMac = std::make_shared<std::atomic<std::array<uint8_t, 6>>>();
+  //
+  // Packed into the low six bytes of a uint64_t, first byte first. A std::atomic over the six-byte
+  // array is not lock-free on any platform, so the compiler emits libatomic calls for it and the
+  // link fails wherever that library is not already being pulled in. Sixty-four bits are lock-free
+  // everywhere, and a MAC has room to spare in them.
+  static_assert(std::atomic<uint64_t>::is_always_lock_free,
+                "a non-lock-free atomic needs libatomic, which is not linked on every target");
+  auto busAdapterMac = std::make_shared<std::atomic<uint64_t>>(0);
+  const auto packMac = [](const std::array<uint8_t, 6>& mac) {
+    uint64_t packed = 0;
+    for (size_t i = 0; i < mac.size(); ++i) {
+      packed |= static_cast<uint64_t>(mac[i]) << (8 * i);
+    }
+    return packed;
+  };
 
   // Resolve the adapter, construct the concrete driver, and hand it to DeviceManager::init. Used
   // both for the optional eager init below and as the POST /api/init callback, so the two paths
   // share one set of driver-creation and adapter-resolution rules. main.cc is the only place that
   // names concrete driver types (the composition root).
-  auto initDeviceManager = [&deviceManager, deviceManagerConfig, busAdapterMac,
+  auto initDeviceManager = [&deviceManager, deviceManagerConfig, busAdapterMac, packMac,
                             mailboxStatusFmmu = opts.config.fieldbus.mailboxStatusFmmu](
                                const std::string& type,
                                const std::string& adapter) -> std::expected<void, std::string> {
@@ -141,7 +155,7 @@ int main(int argc, char** argv) {
       }
       ifname = resolved->name;
       if (const auto mac = mm::comm::parseMac(resolved->macLinux); mac) {
-        busAdapterMac->store(*mac, std::memory_order_relaxed);
+        busAdapterMac->store(packMac(*mac), std::memory_order_relaxed);
       }
       // Recorded on every init, because a support log that never names the adapter cannot answer
       // the first question any fieldbus fault raises — and on Windows the interface name is an NPF
@@ -337,10 +351,13 @@ int main(int argc, char** argv) {
                                              : HttpServer::AutoTuningSpecFn{},
           .eniOptions =
               [&gameLoop, busAdapterMac, name = std::string{"Motion Master"}] {
-                const auto mac = busAdapterMac->load(std::memory_order_relaxed);
+                const uint64_t packed = busAdapterMac->load(std::memory_order_relaxed);
                 mm::node::EniCollectorOptions options;
                 options.masterName = name;
-                options.sourceMac.assign(mac.begin(), mac.end());
+                options.sourceMac.resize(6);
+                for (size_t i = 0; i < options.sourceMac.size(); ++i) {
+                  options.sourceMac[i] = static_cast<uint8_t>((packed >> (8 * i)) & 0xFFu);
+                }
                 options.cycleTimeUs = static_cast<uint32_t>(gameLoop.health().periodUs);
                 return options;
               },

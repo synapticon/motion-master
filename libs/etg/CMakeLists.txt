@@ -1,4 +1,12 @@
-add_library(etg STATIC eni.cc esi.cc esi_data_type.cc esi_entry.cc esi_request.cc esi_unit.cc)
+add_library(
+  etg STATIC
+  eni.cc
+  eni_reader.cc
+  esi.cc
+  esi_data_type.cc
+  esi_entry.cc
+  esi_request.cc
+  esi_unit.cc)
 add_library(mm::etg ALIAS etg)
 
 target_include_directories(etg PUBLIC ${CMAKE_SOURCE_DIR}/libs)

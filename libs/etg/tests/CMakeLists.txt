@@ -2,6 +2,7 @@ find_package(GTest CONFIG REQUIRED)
 
 add_executable(
   mm_etg_tests
+  eni_reader_test.cc
   eni_test.cc
   esi_data_type_test.cc
   esi_entry_test.cc

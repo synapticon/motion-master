@@ -122,15 +122,42 @@ TEST(EniReaderTest, AcceptsPreviousPortAWhichTheWriterRefuses) {
   EXPECT_FALSE(writeEni(read->network).has_value());
 }
 
+TEST(EniReaderTest, ReadsEveryEtgSampleWithoutDroppingAnything) {
+  SKIP_WITHOUT_SAMPLES();
+  // The model covers every element these four documents carry. A warning here means a real ENI has
+  // something the model has no room for, which is exactly what a viewer must not be blind to.
+  for (const std::string_view name : kSamples) {
+    const auto read = readEni(loadSample(name));
+    ASSERT_TRUE(read.has_value()) << name << ": " << read.error();
+    EXPECT_TRUE(read->warnings.empty()) << name << ": " << read->warnings.front();
+  }
+}
+
+TEST(EniReaderTest, ReadsTheMasterMailboxCheckAndVirtualSwitch) {
+  SKIP_WITHOUT_SAMPLES();
+  const auto read = readEni(loadSample("complex.xml"));
+  ASSERT_TRUE(read.has_value()) << read.error();
+  ASSERT_TRUE(read->network.master.mailboxStates.has_value());
+  EXPECT_EQ(read->network.master.mailboxStates->startAddr, 262144u);
+  EXPECT_EQ(read->network.master.mailboxStates->count, 4u);
+  ASSERT_TRUE(read->network.master.eoe.has_value());
+  EXPECT_EQ(read->network.master.eoe->maxPorts, 3u);
+  EXPECT_EQ(read->network.master.eoe->maxFrames, 100u);
+  EXPECT_EQ(read->network.master.eoe->maxMacs, 100u);
+}
+
 TEST(EniReaderTest, NamesAnElementItDoesNotModelRatherThanDroppingItSilently) {
   const auto read = readEni(R"(<?xml version="1.0"?><EtherCATConfig><Config><Master><Info>)"
                             R"(<Name>M</Name><Destination>FFFFFFFFFFFF</Destination>)"
-                            R"(<Source>020000000001</Source></Info><MailboxStates>)"
-                            R"(<StartAddr>262144</StartAddr><Count>4</Count></MailboxStates>)"
-                            R"(</Master></Config></EtherCATConfig>)");
+                            R"(<Source>020000000001</Source></Info></Master><Slave><Info>)"
+                            R"(<Name>D</Name><PhysAddr>4097</PhysAddr><AutoIncAddr>0)"
+                            R"(</AutoIncAddr><Physics>YY</Physics><VendorId>1</VendorId>)"
+                            R"(<ProductCode>1</ProductCode><RevisionNo>1</RevisionNo>)"
+                            R"(<SerialNo>0</SerialNo></Info><HotConnect><GroupMemberCnt>2)"
+                            R"(</GroupMemberCnt></HotConnect></Slave></Config></EtherCATConfig>)");
   ASSERT_TRUE(read.has_value()) << read.error();
   ASSERT_EQ(read->warnings.size(), 1u);
-  EXPECT_NE(read->warnings[0].find("MailboxStates"), std::string::npos) << read->warnings[0];
+  EXPECT_NE(read->warnings[0].find("HotConnect"), std::string::npos) << read->warnings[0];
   EXPECT_NE(read->warnings[0].find("not modelled"), std::string::npos) << read->warnings[0];
 }
 

@@ -355,6 +355,28 @@ struct EniProcessImage {
   std::optional<EniProcessImageArea> outputs;  ///< Master-to-device half.
 };
 
+/// @brief The master's cyclic check of every mailbox on the bus (ENI @c Master/MailboxStates).
+///
+/// Where a device has a mailbox, the master can learn that a message is waiting without polling
+/// each one over the mailbox itself: it points an extra FMMU at the written bit of the device's
+/// input mailbox Sync Manager status register, and reads the whole set with one logical read in the
+/// cyclic frame. So this element is what makes that read's address meaningful.
+struct EniMailboxStates {
+  std::uint32_t startAddr = 0;  ///< Logical address the cyclic read covers.
+  std::uint32_t count = 0;      ///< Devices whose mailbox state is checked.
+};
+
+/// @brief The virtual Ethernet switch the master runs for Ethernet over EtherCAT (ENI
+///        @c Master/EoE).
+///
+/// Present only where the master and at least one device speak EoE. The switch behaves as a layer 2
+/// switch, so its limits are the three below.
+struct EniEoe {
+  std::uint32_t maxPorts = 0;   ///< Ports that may be connected to the switch.
+  std::uint32_t maxFrames = 0;  ///< Frames the switch may queue.
+  std::uint32_t maxMacs = 0;    ///< MAC addresses the switch may hold.
+};
+
 /// @brief The master itself (ENI @c Config/Master).
 ///
 /// @c destination and @c source are the Ethernet MAC addresses of the cyclic frames, so both are
@@ -365,7 +387,9 @@ struct EniMaster {
   std::vector<std::uint8_t> source;        ///< Source MAC, six bytes.
   std::optional<std::uint16_t> etherType;  ///< EtherType; unset means the EtherCAT default.
                                            ///< Written little-endian, so 0x88A4 reads @c "A488".
-  std::vector<EniEcatCmd> initCmds;        ///< Bus-wide datagrams, under @c Master/InitCmds.
+  std::optional<EniMailboxStates> mailboxStates;  ///< The cyclic mailbox-state check.
+  std::optional<EniEoe> eoe;                      ///< The virtual switch, where EoE is in use.
+  std::vector<EniEcatCmd> initCmds;               ///< Bus-wide datagrams, under @c Master/InitCmds.
 };
 
 /// @brief A complete network configuration (ENI @c EtherCATConfig/Config).

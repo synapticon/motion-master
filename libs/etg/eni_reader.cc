@@ -496,12 +496,21 @@ std::expected<EniRead, std::string> readEni(std::string_view xml) {
       warnings.add("Master", "<EtherType> is not two bytes");
     }
   }
-  result.network.master.initCmds = readEcatCmds(master, "Master", warnings);
-  for (const char* element : {"MailboxStates", "EoE"}) {
-    if (hasChild(master, element)) {
-      warnings.notModelled("Master", element);
-    }
+  if (const pugi::xml_node states = master.child("MailboxStates"); states) {
+    EniMailboxStates value;
+    value.startAddr =
+        childNumber<std::uint32_t>(states, "StartAddr", "Master", warnings).value_or(0);
+    value.count = childNumber<std::uint32_t>(states, "Count", "Master", warnings).value_or(0);
+    result.network.master.mailboxStates = value;
   }
+  if (const pugi::xml_node eoe = master.child("EoE"); eoe) {
+    EniEoe value;
+    value.maxPorts = childNumber<std::uint32_t>(eoe, "MaxPorts", "Master", warnings).value_or(0);
+    value.maxFrames = childNumber<std::uint32_t>(eoe, "MaxFrames", "Master", warnings).value_or(0);
+    value.maxMacs = childNumber<std::uint32_t>(eoe, "MaxMACs", "Master", warnings).value_or(0);
+    result.network.master.eoe = value;
+  }
+  result.network.master.initCmds = readEcatCmds(master, "Master", warnings);
 
   std::size_t index = 0;
   for (const pugi::xml_node node : config.children("Slave")) {

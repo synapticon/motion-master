@@ -632,6 +632,17 @@ std::expected<std::string, std::string> writeEni(const EniNetwork& network) {
     // other payload in the format: the ENI files ETG ships write 0x88A4 as "a488".
     addHex(masterInfo, "EtherType", mm::core::toBytes<std::uint16_t>(*network.master.etherType));
   }
+  if (network.master.mailboxStates.has_value()) {
+    pugi::xml_node states = master.append_child("MailboxStates");
+    addUint(states, "StartAddr", network.master.mailboxStates->startAddr);
+    addUint(states, "Count", network.master.mailboxStates->count);
+  }
+  if (network.master.eoe.has_value()) {
+    pugi::xml_node eoe = master.append_child("EoE");
+    addUint(eoe, "MaxPorts", network.master.eoe->maxPorts);
+    addUint(eoe, "MaxFrames", network.master.eoe->maxFrames);
+    addUint(eoe, "MaxMACs", network.master.eoe->maxMacs);
+  }
   addEcatCmds(master, network.master.initCmds);
 
   for (const EniSlave& slave : network.slaves) {

@@ -109,6 +109,15 @@ inline EniNetwork referenceNetwork() {
   network.master.name = "Motion Master";
   network.master.destination = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
   network.master.source = {0x02, 0x00, 0x00, 0x00, 0x00, 0x01};
+  EniMailboxStates mailboxStates;
+  mailboxStates.startAddr = 0x40000;
+  mailboxStates.count = 2;
+  network.master.mailboxStates = mailboxStates;
+  EniEoe eoe;
+  eoe.maxPorts = 3;
+  eoe.maxFrames = 100;
+  eoe.maxMacs = 100;
+  network.master.eoe = eoe;
 
   EniSlave slave;
   slave.info.name = "SOMANET Circulo CiA402 Drive";

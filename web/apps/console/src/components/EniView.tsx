@@ -102,6 +102,36 @@ function meaning(cmd: EniInitCmd): ReactNode {
   return <span className="text-grey-400">{cmd.comment ?? '—'}</span>
 }
 
+/// Splits a process-image variable name into the scope its writer prefixed and the signal itself.
+///
+/// The ENI gives a variable one name and no structure, and every tool builds it the same way: the
+/// device label, a dot, then the signal — `Device 1.Controlword`, `Term 4 (EL5001).Kanal 1.Value`.
+/// Splitting at the first dot separates the two, and a name with no dot is all signal.
+function splitVariableName(name: string): { scope: string | null; signal: string } {
+  const dot = name.indexOf('.')
+  if (dot < 0) {
+    return { scope: null, signal: name }
+  }
+  return { scope: name.slice(0, dot), signal: name.slice(dot + 1) }
+}
+
+/// Finds which device owns a bit offset in one half of the process image.
+///
+/// The name's prefix says which device a tool *called* it; this says which device's window the
+/// value actually lands in, which is the document's own answer and does not depend on a naming
+/// convention. Outputs are matched against each device's `send` window and inputs against `recv`,
+/// both named from the master's side.
+function deviceAt(slaves: EniSlave[], half: 'outputs' | 'inputs', bitOffs: number): number | null {
+  for (let i = 0; i < slaves.length; i += 1) {
+    const window =
+      half === 'outputs' ? slaves[i].processData?.send : slaves[i].processData?.recv
+    if (window && bitOffs >= window.bitStart && bitOffs < window.bitStart + window.bitLength) {
+      return i + 1
+    }
+  }
+  return null
+}
+
 function InitCmdTable({ cmds }: { cmds: EniInitCmd[] }) {
   if (cmds.length === 0) {
     return <p className="text-xs text-grey-500">No init commands.</p>
@@ -406,28 +436,44 @@ export default function EniView({ parsed }: { parsed: EniParseResult }) {
                   <p className="text-xs text-grey-500">No named variables.</p>
                 ) : (
                   <div className="border border-grey-200 overflow-x-auto">
-                    <table className="w-full min-w-[480px] text-xs border-collapse">
+                    <table className="w-full min-w-[560px] text-xs border-collapse">
                       <thead>
                         <tr className="border-b border-grey-200 bg-grey-50 text-left text-grey-600">
-                          <Th hint="Variable name, as the writing tool chose it">Name</Th>
+                          <Th hint="Which device's window this value lands in, worked out from the offset rather than from the name">
+                            Device
+                          </Th>
+                          <Th hint="The scope the writing tool prefixed to the name, before the first dot">
+                            Scope
+                          </Th>
+                          <Th hint="The signal itself, after the scope prefix">Name</Th>
                           <Th hint="Type name spelled the way an ESI spells it">Type</Th>
                           <Th hint="Width in bits">Size</Th>
                           <Th hint="Offset within this half of the image, in bits">Offset</Th>
                         </tr>
                       </thead>
                       <tbody>
-                        {area.variables.map((variable, j) => (
-                          <tr key={j} className="border-b border-grey-100 last:border-0">
-                            <td className="px-3 py-2">{variable.name}</td>
-                            <td className="px-3 py-2 font-mono text-grey-600">
-                              {variable.dataType ?? '—'}
-                            </td>
-                            <td className="px-3 py-2 font-mono">{variable.bitSize}</td>
-                            <td className="px-3 py-2 font-mono text-grey-500">
-                              {variable.bitOffs}
-                            </td>
-                          </tr>
-                        ))}
+                        {area.variables.map((variable, j) => {
+                          const { scope, signal } = splitVariableName(variable.name)
+                          const device = deviceAt(network.slaves, half, variable.bitOffs)
+                          return (
+                            <tr key={j} className="border-b border-grey-100 last:border-0">
+                              <td className="px-3 py-2 font-mono">
+                                {device !== null ? `#${device}` : <span className="text-grey-400">—</span>}
+                              </td>
+                              <td className="px-3 py-2 text-grey-600">
+                                {scope ?? <span className="text-grey-400">—</span>}
+                              </td>
+                              <td className="px-3 py-2">{signal}</td>
+                              <td className="px-3 py-2 font-mono text-grey-600">
+                                {variable.dataType ?? '—'}
+                              </td>
+                              <td className="px-3 py-2 font-mono">{variable.bitSize}</td>
+                              <td className="px-3 py-2 font-mono text-grey-500">
+                                {variable.bitOffs}
+                              </td>
+                            </tr>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>

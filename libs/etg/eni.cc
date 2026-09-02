@@ -98,6 +98,20 @@ constexpr std::string_view syncManagerTypeName(EniSyncManagerType type) {
   return "";
 }
 
+constexpr std::string_view portName(EniPort port) {
+  switch (port) {
+    case EniPort::A:
+      return "A";
+    case EniPort::B:
+      return "B";
+    case EniPort::C:
+      return "C";
+    case EniPort::D:
+      return "D";
+  }
+  return "";
+}
+
 constexpr std::string_view mailboxProtocolName(EniMailboxProtocol protocol) {
   switch (protocol) {
     case EniMailboxProtocol::Aoe:
@@ -129,6 +143,10 @@ void addText(pugi::xml_node parent, const char* name, std::string_view value) {
 }
 
 void addUint(pugi::xml_node parent, const char* name, std::uint64_t value) {
+  addText(parent, name, std::to_string(value));
+}
+
+void addInt(pugi::xml_node parent, const char* name, std::int64_t value) {
   addText(parent, name, std::to_string(value));
 }
 
@@ -308,6 +326,39 @@ void addProcessData(pugi::xml_node parent, const EniProcessData& processData) {
   }
 }
 
+void addPreviousPort(pugi::xml_node parent, const EniPreviousPort& previousPort) {
+  pugi::xml_node node = parent.append_child("PreviousPort");
+  // The only attribute this format puts on an element the writer emits. It is what separates the
+  // port the device is actually plugged into from the ports it could be moved to.
+  node.append_attribute("Selected") = previousPort.selected ? "1" : "0";
+  if (previousPort.deviceId.has_value()) {
+    addUint(node, "DeviceId", *previousPort.deviceId);
+  }
+  addText(node, "Port", portName(previousPort.port));
+  if (previousPort.physAddr.has_value()) {
+    addUint(node, "PhysAddr", *previousPort.physAddr);
+  }
+}
+
+void addDc(pugi::xml_node parent, const EniDc& dc) {
+  pugi::xml_node node = parent.append_child("DC");
+  if (dc.potentialReferenceClock.has_value()) {
+    addBool(node, "PotentialReferenceClock", *dc.potentialReferenceClock);
+  }
+  if (dc.referenceClock.has_value()) {
+    addBool(node, "ReferenceClock", *dc.referenceClock);
+  }
+  if (dc.cycleTime0Ns.has_value()) {
+    addInt(node, "CycleTime0", *dc.cycleTime0Ns);
+  }
+  if (dc.cycleTime1Ns.has_value()) {
+    addInt(node, "CycleTime1", *dc.cycleTime1Ns);
+  }
+  if (dc.shiftTimeNs.has_value()) {
+    addInt(node, "ShiftTime", *dc.shiftTimeNs);
+  }
+}
+
 void addSlave(pugi::xml_node parent, const EniSlave& slave) {
   pugi::xml_node node = parent.append_child("Slave");
   pugi::xml_node info = node.append_child("Info");
@@ -326,6 +377,12 @@ void addSlave(pugi::xml_node parent, const EniSlave& slave) {
     addMailbox(node, *slave.mailbox);
   }
   addEcatCmds(node, slave.initCmds);
+  for (const EniPreviousPort& previousPort : slave.previousPorts) {
+    addPreviousPort(node, previousPort);
+  }
+  if (slave.dc.has_value()) {
+    addDc(node, *slave.dc);
+  }
 }
 
 void addCyclic(pugi::xml_node parent, const EniCyclic& cyclic) {
@@ -446,6 +503,13 @@ std::expected<void, std::string> validateSlave(std::size_t position, const EniSl
             std::format("{}: sync manager index {} is used twice", where, syncManager.index));
       }
     }
+  }
+  if (std::ranges::any_of(slave.previousPorts,
+                          [](const EniPreviousPort& p) { return p.port == EniPort::A; })) {
+    return std::unexpected(
+        std::format("{}: previous port A is spec-legal but not in ENI Schema 1.7, which enumerates "
+                    "B, C and D only — a reader may accept it, a writer cannot emit it",
+                    where));
   }
   if (slave.mailbox.has_value()) {
     const EniMailbox& mailbox = *slave.mailbox;

@@ -168,6 +168,30 @@ EniNetwork referenceNetwork() {
   };
   network.slaves.push_back(slave);
 
+  // A second device, only so the reference document exercises the two elements a first device never
+  // carries: it is plugged into port 1 of the drive above, and its clock is disciplined.
+  EniSlave downstream;
+  downstream.info.name = "SOMANET Circulo CiA402 Drive";
+  downstream.info.physAddr = kFirstStationAddress + 1;
+  downstream.info.autoIncAddr = 0xFFFF;
+  downstream.info.physics = eniPhysics(0x0011);
+  downstream.info.vendorId = kSynapticonVendorId;
+  downstream.info.productCode = kCirculoProductCode;
+  downstream.info.revisionNo = kCirculoRevision;
+  EniPreviousPort previousPort;
+  previousPort.port = EniPort::B;
+  previousPort.selected = true;
+  previousPort.physAddr = kFirstStationAddress;
+  downstream.previousPorts = {previousPort};
+  EniDc dc;
+  dc.potentialReferenceClock = true;
+  dc.referenceClock = false;
+  dc.cycleTime0Ns = 1000000;
+  dc.cycleTime1Ns = 0;
+  dc.shiftTimeNs = 250000;
+  downstream.dc = dc;
+  network.slaves.push_back(downstream);
+
   EniCyclicCmd exchange;
   exchange.states = {EniState::SafeOp, EniState::Op};
   exchange.comment = "exchange the whole process image";
@@ -311,6 +335,57 @@ TEST(EniWriterTest, WritesTheElementsOfSlaveInfoInSchemaOrder) {
     EXPECT_GT(at, previous) << element << " is out of order";
     previous = at;
   }
+}
+
+TEST(EniWriterTest, WritesPreviousPortWithItsSelectedAttribute) {
+  const auto eni = writeEni(referenceNetwork());
+  ASSERT_TRUE(eni.has_value()) << eni.error();
+  // The only attribute this writer emits. Without it a master cannot tell the port the device is
+  // plugged into from a port it could be moved to.
+  EXPECT_NE(eni->find(R"(<PreviousPort Selected="1">)"), std::string::npos);
+  EXPECT_NE(eni->find("<Port>B</Port>"), std::string::npos);
+}
+
+TEST(EniWriterTest, RefusesPreviousPortAWhichTheSchemaDoesNotEnumerate) {
+  EniNetwork network = referenceNetwork();
+  network.slaves[1].previousPorts[0].port = EniPort::A;
+  const auto eni = writeEni(network);
+  ASSERT_FALSE(eni.has_value());
+  EXPECT_NE(eni.error().find("previous port A"), std::string::npos) << eni.error();
+}
+
+TEST(EniWriterTest, WritesTheDcElementInSchemaOrder) {
+  const auto eni = writeEni(referenceNetwork());
+  ASSERT_TRUE(eni.has_value()) << eni.error();
+  const std::array<std::string_view, 5> order = {"<PotentialReferenceClock>", "<ReferenceClock>",
+                                                 "<CycleTime0>", "<CycleTime1>", "<ShiftTime>"};
+  std::size_t previous = eni->find("<DC>");
+  ASSERT_NE(previous, std::string::npos);
+  for (const std::string_view element : order) {
+    const std::size_t at = eni->find(element, previous);
+    ASSERT_NE(at, std::string::npos) << element << " is missing";
+    EXPECT_GT(at, previous) << element << " is out of order";
+    previous = at;
+  }
+}
+
+TEST(EniWriterTest, WritesDcTimesAsTheSignedNanosecondsTheyAre) {
+  EniNetwork network = referenceNetwork();
+  // ETG.2100 Table 32 makes CycleTime1 a derived figure, `SYNC1 cycle - SYNC0 cycle + SYNC0 shift`,
+  // so it can legitimately be negative — which an unsigned write would turn into nonsense.
+  network.slaves[1].dc->cycleTime1Ns = -250000;
+  const auto eni = writeEni(network);
+  ASSERT_TRUE(eni.has_value()) << eni.error();
+  EXPECT_NE(eni->find("<CycleTime1>-250000</CycleTime1>"), std::string::npos);
+}
+
+TEST(EniWriterTest, WritesNoPreviousPortOrDcForADeviceThatHasNeither) {
+  EniNetwork network = referenceNetwork();
+  network.slaves.resize(1);  // The first device on a bus has no previous device.
+  const auto eni = writeEni(network);
+  ASSERT_TRUE(eni.has_value()) << eni.error();
+  EXPECT_EQ(eni->find("<PreviousPort"), std::string::npos);
+  EXPECT_EQ(eni->find("<DC>"), std::string::npos);
 }
 
 // Writes the reference document where the schema-validation test finds it. That test runs xmllint

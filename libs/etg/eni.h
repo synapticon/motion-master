@@ -245,12 +245,59 @@ struct EniSlaveInfo {
   std::uint32_t serialNo = 0;     ///< Serial number from the device's SII.
 };
 
+/// @brief A port of the device upstream of this one (ENI @c Slave/PreviousPort @c Port).
+///
+/// The letters are the ENI's own spelling of port numbers 0 to 3. **@c A is spec-legal and
+/// schema-invalid**: ETG.2100 Table 29 allows all four, and ENI Schema 1.7 enumerates only @c B,
+/// @c C and @c D. @c writeEni therefore refuses @c A, while a reader should accept it — reading a
+/// document somebody else wrote is the case that needs the tolerance.
+enum class EniPort : std::uint8_t {
+  A,  ///< Port 0. Rejected by the schema; see above.
+  B,  ///< Port 1.
+  C,  ///< Port 2.
+  D,  ///< Port 3.
+};
+
+/// @brief Where this device sits in the ring (ENI @c Slave/PreviousPort).
+///
+/// Names the port of the upstream device that this one is plugged into, which is how a master
+/// learns the physical layout and not only the logical order. A device may carry several: the one
+/// it is actually connected to has @c selected set, and any other port it could be moved to without
+/// changing the order of the devices may be listed alongside with @c selected clear.
+///
+/// The element is absent for the first device on the bus, which has no previous device.
+struct EniPreviousPort {
+  EniPort port = EniPort::B;              ///< The upstream device's port.
+  bool selected = false;                  ///< This is the connection, not merely a possible one.
+  std::optional<std::uint16_t> physAddr;  ///< Station address of the upstream device.
+  std::optional<std::uint32_t> deviceId;  ///< Deprecated by the schema; kept so a read document
+                                          ///< survives being written back out.
+};
+
+/// @brief A device's distributed-clock configuration (ENI @c Slave/DC).
+///
+/// Present only for a device the master synchronises. Motion Master runs the bus in free-run and
+/// writes no @c DC element, so today this is what a *reader* finds in somebody else's document.
+///
+/// @c cycleTime1Ns is not the SYNC1 cycle time. ETG.2100 Table 32 defines it as
+/// `SYNC1 cycle − SYNC0 cycle + SYNC0 shift`, a derived value, so it can be neither read nor
+/// written as if it were the raw register figure.
+struct EniDc {
+  std::optional<bool> potentialReferenceClock;  ///< The device has the registers to be one.
+  std::optional<bool> referenceClock;           ///< The device *is* the reference clock.
+  std::optional<std::int32_t> cycleTime0Ns;     ///< SYNC0 cycle time, in nanoseconds.
+  std::optional<std::int32_t> cycleTime1Ns;     ///< The derived SYNC1 figure above, in nanoseconds.
+  std::optional<std::int32_t> shiftTimeNs;      ///< SYNC0 shift time, in nanoseconds.
+};
+
 /// @brief One device on the bus (ENI @c Config/Slave).
 struct EniSlave {
-  EniSlaveInfo info;                          ///< Identity and address.
-  std::optional<EniProcessData> processData;  ///< Absent for a device with no process data.
-  std::optional<EniMailbox> mailbox;          ///< Absent for a device with no mailbox.
-  std::vector<EniEcatCmd> initCmds;           ///< Datagrams, under @c Slave/InitCmds.
+  EniSlaveInfo info;                           ///< Identity and address.
+  std::optional<EniProcessData> processData;   ///< Absent for a device with no process data.
+  std::optional<EniMailbox> mailbox;           ///< Absent for a device with no mailbox.
+  std::vector<EniEcatCmd> initCmds;            ///< Datagrams, under @c Slave/InitCmds.
+  std::vector<EniPreviousPort> previousPorts;  ///< Where the device sits in the ring.
+  std::optional<EniDc> dc;                     ///< Distributed clocks; absent means free-run.
 };
 
 /// @brief One datagram of a cyclic frame (ENI @c Cyclic/Frame/Cmd).

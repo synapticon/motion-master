@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <format>
+#include <nlohmann/json.hpp>
 #include <pugixml.hpp>
 #include <set>
 #include <sstream>
@@ -94,6 +95,42 @@ constexpr std::string_view syncManagerTypeName(EniSyncManagerType type) {
       return "Outputs";
     case EniSyncManagerType::Inputs:
       return "Inputs";
+  }
+  return "";
+}
+
+constexpr std::string_view cmdName(EniCmd cmd) {
+  switch (cmd) {
+    case EniCmd::Nop:
+      return "NOP";
+    case EniCmd::Aprd:
+      return "APRD";
+    case EniCmd::Apwr:
+      return "APWR";
+    case EniCmd::Aprw:
+      return "APRW";
+    case EniCmd::Fprd:
+      return "FPRD";
+    case EniCmd::Fpwr:
+      return "FPWR";
+    case EniCmd::Fprw:
+      return "FPRW";
+    case EniCmd::Brd:
+      return "BRD";
+    case EniCmd::Bwr:
+      return "BWR";
+    case EniCmd::Brw:
+      return "BRW";
+    case EniCmd::Lrd:
+      return "LRD";
+    case EniCmd::Lwr:
+      return "LWR";
+    case EniCmd::Lrw:
+      return "LRW";
+    case EniCmd::Armw:
+      return "ARMW";
+    case EniCmd::Frmw:
+      return "FRMW";
   }
   return "";
 }
@@ -578,7 +615,292 @@ std::expected<void, std::string> validateNetwork(const EniNetwork& network) {
   return {};
 }
 
+// ---------------------------------------------------------------------------------------------
+// JSON.
+//
+// One object per model type, keyed by the model's own field names. Written here rather than in a
+// separate view file because it is the same knowledge the writer already holds: which fields exist,
+// what each enumeration is called, and that a payload is bytes.
+// ---------------------------------------------------------------------------------------------
+
+nlohmann::json hexJson(std::span<const std::uint8_t> bytes) {
+  return nlohmann::json{{"hex", mm::core::toHex(bytes)}, {"bytes", bytes.size()}};
+}
+
+/// Adds an optional field, or omits the key. A viewer distinguishes "not written" from "zero" the
+/// same way the document does.
+template <typename T>
+void addOptional(nlohmann::json& j, const char* key, const std::optional<T>& value) {
+  if (value.has_value()) {
+    j[key] = *value;
+  }
+}
+
+nlohmann::json transitionsJson(const std::vector<EniTransition>& transitions) {
+  nlohmann::json out = nlohmann::json::array();
+  for (const EniTransition transition : transitions) {
+    out.push_back(transitionName(transition));
+  }
+  return out;
+}
+
+nlohmann::json ecatCmdJson(const EniEcatCmd& command) {
+  nlohmann::json j{{"transitions", transitionsJson(command.transitions)},
+                   {"cmd", static_cast<int>(command.cmd)},
+                   {"cmdName", cmdName(command.cmd)}};
+  if (command.beforeSlave) {
+    j["beforeSlave"] = true;
+  }
+  if (!command.comment.empty()) {
+    j["comment"] = command.comment;
+  }
+  if (command.requirement != EniRequires::None) {
+    j["requires"] = requiresName(command.requirement);
+  }
+  addOptional(j, "adp", command.adp);
+  addOptional(j, "ado", command.ado);
+  addOptional(j, "addr", command.addr);
+  if (!command.data.empty()) {
+    j["data"] = hexJson(command.data);
+  }
+  addOptional(j, "dataLength", command.dataLength);
+  addOptional(j, "cnt", command.cnt);
+  addOptional(j, "retries", command.retries);
+  addOptional(j, "timeoutMs", command.timeoutMs);
+  if (command.validate.has_value()) {
+    nlohmann::json validate{{"data", hexJson(command.validate->data)},
+                            {"timeoutMs", command.validate->timeoutMs}};
+    if (!command.validate->dataMask.empty()) {
+      validate["dataMask"] = hexJson(command.validate->dataMask);
+    }
+    j["validate"] = validate;
+  }
+  return j;
+}
+
+nlohmann::json coeCmdJson(const EniCoeCmd& command) {
+  nlohmann::json j{
+      {"transitions", transitionsJson(command.transitions)},
+      {"timeoutMs", command.timeoutMs},
+      {"ccs", static_cast<int>(command.ccs)},
+      {"ccsName", command.ccs == EniCoeCommandSpecifier::Download ? "download" : "upload"},
+      {"index", command.index},
+      {"subindex", command.subindex}};
+  if (!command.comment.empty()) {
+    j["comment"] = command.comment;
+  }
+  if (!command.data.empty()) {
+    j["data"] = hexJson(command.data);
+  }
+  if (command.disabled) {
+    j["disabled"] = true;
+  }
+  return j;
+}
+
+nlohmann::json syncManagerJson(const EniSyncManager& syncManager) {
+  nlohmann::json j{{"index", syncManager.index},
+                   {"type", syncManagerTypeName(syncManager.type)},
+                   {"startAddress", syncManager.startAddress},
+                   {"controlByte", syncManager.controlByte},
+                   {"enable", syncManager.enable}};
+  addOptional(j, "minSize", syncManager.minSize);
+  addOptional(j, "maxSize", syncManager.maxSize);
+  addOptional(j, "defaultSize", syncManager.defaultSize);
+  addOptional(j, "watchdog", syncManager.watchdog);
+  return j;
+}
+
+nlohmann::json mailboxWindowJson(const EniMailboxWindow& window) {
+  nlohmann::json j{{"start", window.start}, {"length", window.length}};
+  addOptional(j, "pollTime", window.pollTime);
+  addOptional(j, "statusBitAddr", window.statusBitAddr);
+  return j;
+}
+
+nlohmann::json slaveJson(const EniSlave& slave) {
+  nlohmann::json j{{"info",
+                    {{"name", slave.info.name},
+                     {"physAddr", slave.info.physAddr},
+                     {"autoIncAddr", slave.info.autoIncAddr},
+                     {"physics", slave.info.physics},
+                     {"vendorId", slave.info.vendorId},
+                     {"productCode", slave.info.productCode},
+                     {"revisionNo", slave.info.revisionNo},
+                     {"serialNo", slave.info.serialNo}}}};
+
+  if (slave.processData.has_value()) {
+    nlohmann::json processData = nlohmann::json::object();
+    if (slave.processData->send.has_value()) {
+      processData["send"] = {{"bitStart", slave.processData->send->bitStart},
+                             {"bitLength", slave.processData->send->bitLength}};
+    }
+    if (slave.processData->recv.has_value()) {
+      processData["recv"] = {{"bitStart", slave.processData->recv->bitStart},
+                             {"bitLength", slave.processData->recv->bitLength}};
+    }
+    nlohmann::json syncManagers = nlohmann::json::array();
+    for (const EniSyncManager& syncManager : slave.processData->syncManagers) {
+      syncManagers.push_back(syncManagerJson(syncManager));
+    }
+    processData["syncManagers"] = syncManagers;
+    j["processData"] = processData;
+  }
+
+  if (slave.mailbox.has_value()) {
+    nlohmann::json mailbox{{"send", mailboxWindowJson(slave.mailbox->send)},
+                           {"recv", mailboxWindowJson(slave.mailbox->recv)}};
+    if (slave.mailbox->bootstrapSend.has_value() && slave.mailbox->bootstrapRecv.has_value()) {
+      mailbox["bootstrap"] = {{"send", mailboxWindowJson(*slave.mailbox->bootstrapSend)},
+                              {"recv", mailboxWindowJson(*slave.mailbox->bootstrapRecv)}};
+    }
+    nlohmann::json protocols = nlohmann::json::array();
+    for (const EniMailboxProtocol protocol : slave.mailbox->protocols) {
+      protocols.push_back(mailboxProtocolName(protocol));
+    }
+    mailbox["protocols"] = protocols;
+    nlohmann::json coe = nlohmann::json::array();
+    for (const EniCoeCmd& command : slave.mailbox->coeInitCmds) {
+      coe.push_back(coeCmdJson(command));
+    }
+    mailbox["coeInitCmds"] = coe;
+    j["mailbox"] = mailbox;
+  }
+
+  nlohmann::json initCmds = nlohmann::json::array();
+  for (const EniEcatCmd& command : slave.initCmds) {
+    initCmds.push_back(ecatCmdJson(command));
+  }
+  j["initCmds"] = initCmds;
+
+  if (!slave.previousPorts.empty()) {
+    nlohmann::json ports = nlohmann::json::array();
+    for (const EniPreviousPort& previousPort : slave.previousPorts) {
+      nlohmann::json port{{"port", portName(previousPort.port)},
+                          {"selected", previousPort.selected}};
+      addOptional(port, "physAddr", previousPort.physAddr);
+      addOptional(port, "deviceId", previousPort.deviceId);
+      ports.push_back(port);
+    }
+    j["previousPorts"] = ports;
+  }
+
+  if (slave.dc.has_value()) {
+    nlohmann::json dc = nlohmann::json::object();
+    addOptional(dc, "potentialReferenceClock", slave.dc->potentialReferenceClock);
+    addOptional(dc, "referenceClock", slave.dc->referenceClock);
+    addOptional(dc, "cycleTime0Ns", slave.dc->cycleTime0Ns);
+    addOptional(dc, "cycleTime1Ns", slave.dc->cycleTime1Ns);
+    addOptional(dc, "shiftTimeNs", slave.dc->shiftTimeNs);
+    j["dc"] = dc;
+  }
+  return j;
+}
+
+nlohmann::json areaJson(const EniProcessImageArea& area) {
+  nlohmann::json variables = nlohmann::json::array();
+  for (const EniVariable& variable : area.variables) {
+    nlohmann::json entry{
+        {"name", variable.name}, {"bitSize", variable.bitSize}, {"bitOffs", variable.bitOffs}};
+    if (!variable.comment.empty()) {
+      entry["comment"] = variable.comment;
+    }
+    if (!variable.dataType.empty()) {
+      entry["dataType"] = variable.dataType;
+    }
+    variables.push_back(entry);
+  }
+  return nlohmann::json{{"byteSize", area.byteSize}, {"variables", variables}};
+}
+
 }  // namespace
+
+void to_json(nlohmann::json& j, const EniNetwork& network) {
+  nlohmann::json master{{"name", network.master.name},
+                        {"destination", mm::core::toHex(network.master.destination)},
+                        {"source", mm::core::toHex(network.master.source)}};
+  if (network.master.etherType.has_value()) {
+    master["etherType"] = *network.master.etherType;
+  }
+  if (network.master.mailboxStates.has_value()) {
+    master["mailboxStates"] = {{"startAddr", network.master.mailboxStates->startAddr},
+                               {"count", network.master.mailboxStates->count}};
+  }
+  if (network.master.eoe.has_value()) {
+    master["eoe"] = {{"maxPorts", network.master.eoe->maxPorts},
+                     {"maxFrames", network.master.eoe->maxFrames},
+                     {"maxMacs", network.master.eoe->maxMacs}};
+  }
+  nlohmann::json masterInitCmds = nlohmann::json::array();
+  for (const EniEcatCmd& command : network.master.initCmds) {
+    masterInitCmds.push_back(ecatCmdJson(command));
+  }
+  master["initCmds"] = masterInitCmds;
+
+  nlohmann::json slaves = nlohmann::json::array();
+  for (const EniSlave& slave : network.slaves) {
+    slaves.push_back(slaveJson(slave));
+  }
+
+  j = nlohmann::json{{"master", master}, {"slaves", slaves}};
+
+  if (network.cyclic.has_value()) {
+    nlohmann::json cyclic = nlohmann::json::object();
+    if (!network.cyclic->comment.empty()) {
+      cyclic["comment"] = network.cyclic->comment;
+    }
+    if (!network.cyclic->taskId.empty()) {
+      cyclic["taskId"] = network.cyclic->taskId;
+    }
+    addOptional(cyclic, "cycleTimeUs", network.cyclic->cycleTimeUs);
+    addOptional(cyclic, "priority", network.cyclic->priority);
+    nlohmann::json frames = nlohmann::json::array();
+    for (const EniFrame& frame : network.cyclic->frames) {
+      nlohmann::json cmds = nlohmann::json::array();
+      for (const EniCyclicCmd& command : frame.cmds) {
+        nlohmann::json cmd{{"cmd", static_cast<int>(command.cmd)},
+                           {"cmdName", cmdName(command.cmd)},
+                           {"inputOffs", command.inputOffs},
+                           {"outputOffs", command.outputOffs}};
+        nlohmann::json states = nlohmann::json::array();
+        for (const EniState state : command.states) {
+          states.push_back(stateName(state));
+        }
+        cmd["states"] = states;
+        if (!command.comment.empty()) {
+          cmd["comment"] = command.comment;
+        }
+        addOptional(cmd, "adp", command.adp);
+        addOptional(cmd, "ado", command.ado);
+        addOptional(cmd, "addr", command.addr);
+        addOptional(cmd, "dataLength", command.dataLength);
+        addOptional(cmd, "cnt", command.cnt);
+        if (!command.data.empty()) {
+          cmd["data"] = hexJson(command.data);
+        }
+        cmds.push_back(cmd);
+      }
+      nlohmann::json frameJson{{"cmds", cmds}};
+      if (!frame.comment.empty()) {
+        frameJson["comment"] = frame.comment;
+      }
+      frames.push_back(frameJson);
+    }
+    cyclic["frames"] = frames;
+    j["cyclic"] = cyclic;
+  }
+
+  if (network.processImage.has_value()) {
+    nlohmann::json image = nlohmann::json::object();
+    if (network.processImage->inputs.has_value()) {
+      image["inputs"] = areaJson(*network.processImage->inputs);
+    }
+    if (network.processImage->outputs.has_value()) {
+      image["outputs"] = areaJson(*network.processImage->outputs);
+    }
+    j["processImage"] = image;
+  }
+}
 
 std::string eniPhysics(std::uint16_t physicalPort) {
   std::string physics;

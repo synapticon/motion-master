@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <expected>
+#include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -399,6 +400,16 @@ struct EniNetwork {
   std::optional<EniCyclic> cyclic;              ///< The process-data task.
   std::optional<EniProcessImage> processImage;  ///< The image the cyclic task exchanges.
 };
+
+/// @brief Serialises a network as JSON, for a client that renders rather than replays it.
+///
+/// Keys are the model's own field names in camelCase, like every other JSON this project serves.
+/// Two things are spelled out rather than left as numbers, because a reader of the JSON is a person
+/// and not a master: every enumeration carries its ENI spelling beside its value (@c cmd 5 with
+/// @c cmdName @c "FPWR"), and every byte payload is the hex string the document holds beside its
+/// length. Nothing is decoded further here — what an FPWR to 0x0800 *means* needs the ESC register
+/// tables, which this library deliberately does not depend on.
+void to_json(nlohmann::json& j, const EniNetwork& network);
 
 /// @brief Renders the ENI @c Physics string for a device from its SII physical-port word.
 ///

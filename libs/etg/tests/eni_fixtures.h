@@ -159,7 +159,10 @@ inline EniNetwork referenceNetwork() {
       writeRegister(EniTransition::PS, kFirstStationAddress, kRegSyncManager0 + 0x10,
                     {0x00, 0x18, 0x23, 0x00, 0x64, 0x00, 0x01, 0x00}, "set sync manager 2"),
       writeRegister(EniTransition::PS, kFirstStationAddress, kRegFmmu0,
-                    {0x00, 0x00, 0x00, 0x00, 0x23, 0x00, 0x00, 0x07, 0x00, 0x18, 0x00, 0x00, 0x02,
+                    // Logical start 0, length 0x23, bits 0 to 7, physical start 0x1800 bit 0, then
+                    // the two single bytes an FMMU ends with: write enable at offset 0x0B, active
+                    // at 0x0C. mm::comm::decodeFmmu is what says which is which.
+                    {0x00, 0x00, 0x00, 0x00, 0x23, 0x00, 0x00, 0x07, 0x00, 0x18, 0x00, 0x02, 0x01,
                      0x00, 0x00, 0x00},
                     "set FMMU 0 for the outputs"),
       writeRegister(EniTransition::PS, kFirstStationAddress, kRegAlControl, {kAlStateSafeOp, 0x00},

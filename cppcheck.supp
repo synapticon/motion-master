@@ -54,6 +54,7 @@ syntaxError:*/sii_test.cc
 syntaxError:*/base_test.cc
 syntaxError:*/eni_collector_test.cc
 syntaxError:*/eni_reader_test.cc
+syntaxError:*/eni_request_test.cc
 syntaxError:*/eni_test.cc
 syntaxError:*/esi_data_type_test.cc
 syntaxError:*/esi_entry_test.cc
@@ -90,7 +91,9 @@ useStlAlgorithm:*/esi_request.cc
 // Two append-in-a-loop builders: ProcedureDescriptor's to_json collects step ids into a
 // nlohmann::json array, and listProcedures pairs each catalogue entry with its snapshot into a
 // reserved vector. Both would become a std::transform over a std::back_inserter — for the first,
-// over a json array, which is obscure rather than clearer. The loops stay.
+// over a json array, which is obscure rather than clearer. The ENI serialisers in eni.cc are the
+// same shape, a dozen times over: one json array per model type. The loops stay.
+useStlAlgorithm:*/eni.cc
 useStlAlgorithm:*/procedure.cc
 useStlAlgorithm:*/procedure_catalogue.cc
 

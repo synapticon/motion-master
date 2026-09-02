@@ -6,6 +6,7 @@ add_library(
   device_manager.cc
   device_parameter.cc
   eni_collector.cc
+  eni_request.cc
   firmware_package.cc
   hardware_description.cc
   integro_variant.cc

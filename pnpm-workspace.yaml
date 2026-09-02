@@ -8,4 +8,3 @@ packages:
 allowBuilds:
   esbuild: true
   sharp: true
-  vue-demi: set this to true or false

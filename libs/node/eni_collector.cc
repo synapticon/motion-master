@@ -252,6 +252,58 @@ void appendPdoAssignment(std::vector<mm::etg::EniCoeCmd>& commands, std::uint16_
                                  std::format("set the {} assignment count", direction)));
 }
 
+/// @brief Declares one mapping object as an ENI PDO.
+///
+/// This is the declarative half of the process data. The CoE commands say how to *configure* the
+/// mapping; this says what the mapping *is*, which is the only place in an ENI an object address
+/// for a mapped value can live. Without it a reader of the document can see that a value sits at
+/// bit 16 and is called "Target position", and cannot learn that it is 0x607A:00.
+///
+/// Names and types come from the device's enumerated dictionary. Where that has not been
+/// enumerated, an entry falls back to its own address as a name, because ETG.2100 makes a name
+/// mandatory for every entry that addresses something.
+mm::etg::EniPdo declarePdo(const PdoMappingObject& object, const DeviceHandle& device,
+                           std::optional<std::uint8_t> syncManager, bool isOutput) {
+  mm::etg::EniPdo pdo;
+  pdo.index = object.pdoIndex;
+  pdo.name = std::format("{}PDO {:#06x}", isOutput ? "Rx" : "Tx", object.pdoIndex);
+  pdo.syncManager = syncManager;
+  for (const PdoMappingEntry& entry : object.entries) {
+    mm::etg::EniPdoEntry declared;
+    declared.index = entry.index;
+    declared.subindex = entry.subindex;
+    declared.bitLen = entry.bitLength;
+    if (entry.index == 0) {
+      // Padding: it occupies the bits and addresses nothing, so it has no name and no type.
+      pdo.entries.push_back(std::move(declared));
+      continue;
+    }
+    declared.name = std::format("{:#06x}:{:02}", entry.index, entry.subindex);
+    if (device) {
+      if (const auto parameter = device->parameter(entry.index, entry.subindex); parameter) {
+        if (!parameter->name.empty()) {
+          declared.name = parameter->name;
+        }
+        declared.dataType = iecTypeName(parameter->dataType);
+      }
+    }
+    pdo.entries.push_back(std::move(declared));
+  }
+  return pdo;
+}
+
+/// The Sync Manager a direction's process data travels on, from what the master programmed.
+std::optional<std::uint8_t> processDataSyncManager(const mm::comm::SlaveConfig& config,
+                                                   bool isOutput) {
+  const std::uint8_t wanted = isOutput ? 3 : 4;  // SyncManagerConfig::type: 3 Outputs, 4 Inputs.
+  const auto found =
+      std::ranges::find(config.syncManagers, wanted, &mm::comm::SyncManagerConfig::type);
+  if (found == config.syncManagers.end()) {
+    return std::nullopt;
+  }
+  return found->index;
+}
+
 /// @brief The auto-increment address of a device, which counts down from zero along the ring.
 ///
 /// The first device is addressed with 0, the second with 0xFFFF, the third with 0xFFFE. Each
@@ -332,9 +384,34 @@ std::expected<EniCollection, std::string> collectEni(DeviceManager& manager,
       slave.info.physics = mm::etg::eniPhysics(sii->category.general.physicalPort);
     }
 
-    // Process data: the window each direction occupies in the master's image, plus every Sync
-    // Manager this master programmed.
+    // Read once and used twice: to declare what the mapping is under ProcessData, and to write the
+    // commands that configure it under the mailbox. A second read would cost another burst of SDO
+    // uploads for an answer that cannot have changed.
+    std::optional<PdoMapping> mapping;
+    if ((config.mailbox.protocols & mm::comm::MailboxConfig::kProtocolCoe) != 0 && device) {
+      if (auto read = device->readPdoMapping(); read) {
+        mapping = std::move(*read);
+      } else {
+        collection.warnings.push_back(std::format(
+            "device {}: the PDO mapping will not read, so the document neither declares "
+            "it nor configures it ({})",
+            config.slavePosition, read.error()));
+      }
+    }
+
+    // Process data: the window each direction occupies in the master's image, every Sync Manager
+    // this master programmed, and what each direction's PDOs actually carry.
     mm::etg::EniProcessData processData;
+    if (mapping) {
+      for (const PdoMappingObject& object : mapping->outputs) {
+        processData.rxPdos.push_back(
+            declarePdo(object, device, processDataSyncManager(config, true), true));
+      }
+      for (const PdoMappingObject& object : mapping->inputs) {
+        processData.txPdos.push_back(
+            declarePdo(object, device, processDataSyncManager(config, false), false));
+      }
+    }
     for (const mm::comm::SyncManagerConfig& syncManager : config.syncManagers) {
       mm::etg::EniSyncManager entry;
       entry.index = syncManager.index;
@@ -391,19 +468,9 @@ std::expected<EniCollection, std::string> collectEni(DeviceManager& manager,
         mailbox.bootstrapRecv = bootstrapRecv;
       }
 
-      // The PDO assignment is read over CoE rather than taken from the cached flat mapping, because
-      // the flat form has lost which mapping object each entry came from — and the object is what
-      // an assignment names.
-      if ((config.mailbox.protocols & mm::comm::MailboxConfig::kProtocolCoe) != 0 && device) {
-        if (auto mapping = device->readPdoMapping(); mapping) {
-          appendPdoAssignment(mailbox.coeInitCmds, kRxPdoAssign, mapping->outputs);
-          appendPdoAssignment(mailbox.coeInitCmds, kTxPdoAssign, mapping->inputs);
-        } else {
-          collection.warnings.push_back(
-              std::format("device {}: the PDO mapping will not read, so the document leaves the "
-                          "device on its own assignment ({})",
-                          config.slavePosition, mapping.error()));
-        }
+      if (mapping) {
+        appendPdoAssignment(mailbox.coeInitCmds, kRxPdoAssign, mapping->outputs);
+        appendPdoAssignment(mailbox.coeInitCmds, kTxPdoAssign, mapping->inputs);
       }
       slave.mailbox = mailbox;
     }

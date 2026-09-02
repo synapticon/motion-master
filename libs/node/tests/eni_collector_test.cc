@@ -328,6 +328,39 @@ TEST(EniCollectorTest, NamesEveryMappedObjectInTheProcessImageWithItsIecType) {
   EXPECT_EQ(outputs.variables[1].bitOffs, 16u);
 }
 
+TEST(EniCollectorTest, DeclaresWhatEachDirectionsPdosCarry) {
+  DeviceManager manager;
+  bringUp(manager, circuloBus());
+
+  const auto collected = collectEni(manager, options());
+  ASSERT_TRUE(collected.has_value()) << collected.error();
+  const auto& processData = *collected->network.slaves[0].processData;
+  ASSERT_EQ(processData.rxPdos.size(), 1u);
+  EXPECT_EQ(processData.rxPdos[0].index, 0x1600);
+  EXPECT_EQ(processData.rxPdos[0].syncManager, 2);  // The Outputs sync manager on this device.
+  ASSERT_EQ(processData.rxPdos[0].entries.size(), 2u);
+  EXPECT_EQ(processData.rxPdos[0].entries[0].index, 0x6040);
+  EXPECT_EQ(processData.rxPdos[0].entries[0].bitLen, 16);
+  EXPECT_EQ(processData.rxPdos[0].entries[0].dataType, "UINT");
+  EXPECT_EQ(processData.rxPdos[0].entries[1].index, 0x607A);
+  EXPECT_EQ(processData.rxPdos[0].entries[1].dataType, "DINT");
+
+  ASSERT_EQ(processData.txPdos.size(), 1u);
+  EXPECT_EQ(processData.txPdos[0].index, 0x1A00);
+  EXPECT_EQ(processData.txPdos[0].syncManager, 3);  // The Inputs sync manager.
+}
+
+TEST(EniCollectorTest, NamesAnEntryAfterItsAddressWhenTheDictionaryHasNoName) {
+  DeviceManager manager;
+  bringUp(manager, circuloBus());
+
+  const auto collected = collectEni(manager, options());
+  ASSERT_TRUE(collected.has_value()) << collected.error();
+  // ETG.2100 makes a name mandatory for an entry that addresses something, and the fake bus'
+  // dictionary carries types but no names. The address is the honest fallback.
+  EXPECT_EQ(collected->network.slaves[0].processData->rxPdos[0].entries[0].name, "0x6040:00");
+}
+
 TEST(EniCollectorTest, ReproducesThePdoAssignmentAsCoeDownloads) {
   DeviceManager manager;
   bringUp(manager, circuloBus());

@@ -6,6 +6,7 @@ import {
   type EniCoeCmd,
   type EniInitCmd,
   type EniParseResult,
+  type EniPdo,
   type EniSlave,
 } from '@synapticon/motion-master-client'
 
@@ -113,6 +114,38 @@ function splitVariableName(name: string): { scope: string | null; signal: string
     return { scope: null, signal: name }
   }
   return { scope: name.slice(0, dot), signal: name.slice(dot + 1) }
+}
+
+/// Locates the object a process-image value belongs to.
+///
+/// The image itself has no object address — the ENI gives a variable a name, a size and an offset,
+/// and nothing more. The PDO declarations have the address, so walking a device's PDOs in order and
+/// accumulating bit lengths from the start of its window says which object sits at a given offset.
+/// A document that declares no PDOs, as a device with fixed PDOs may well produce, yields nothing,
+/// and the column says so rather than guessing.
+function objectAt(
+  slaves: EniSlave[],
+  half: 'outputs' | 'inputs',
+  bitOffs: number,
+): { index: number; subindex: number } | null {
+  for (const slave of slaves) {
+    const window = half === 'outputs' ? slave.processData?.send : slave.processData?.recv
+    const pdos: EniPdo[] | undefined =
+      half === 'outputs' ? slave.processData?.rxPdos : slave.processData?.txPdos
+    if (!window || !pdos) {
+      continue
+    }
+    let at = window.bitStart
+    for (const pdo of pdos) {
+      for (const entry of pdo.entries) {
+        if (at === bitOffs && entry.index !== 0) {
+          return { index: entry.index, subindex: entry.subindex }
+        }
+        at += entry.bitLen
+      }
+    }
+  }
+  return null
 }
 
 /// Finds which device owns a bit offset in one half of the process image.
@@ -296,6 +329,63 @@ function SlaveCard({ slave, position }: { slave: EniSlave; position: number }) {
         </div>
       )}
 
+      {(slave.processData?.rxPdos?.length || slave.processData?.txPdos?.length) && (
+        <div className="space-y-2">
+          <p className="eyebrow text-grey-500">PDOs</p>
+          <p className="text-xs text-grey-600">
+            What each direction's process data actually carries. This is the only place in an ENI an
+            object address for a mapped value appears.
+          </p>
+          {(
+            [
+              ['Outputs', slave.processData?.rxPdos ?? []],
+              ['Inputs', slave.processData?.txPdos ?? []],
+            ] as const
+          ).map(([label, pdos]) =>
+            pdos.map(pdo => (
+              <div key={`${label}-${pdo.index}`} className="space-y-1">
+                <p className="text-xs text-grey-600 font-mono">
+                  {label} · {formatHex(pdo.index)} · {pdo.name}
+                  {pdo.syncManager !== undefined && ` · SM${pdo.syncManager}`}
+                </p>
+                <div className="border border-grey-200 overflow-x-auto">
+                  <table className="w-full min-w-[480px] text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-grey-200 bg-grey-50 text-left text-grey-600">
+                        <Th hint="CoE object index and subindex. Index 0 is padding, which occupies the window and addresses nothing">
+                          Object
+                        </Th>
+                        <Th hint="Object name from the device's dictionary">Name</Th>
+                        <Th hint="Type name spelled the way an ESI spells it">Type</Th>
+                        <Th hint="Width in bits">Bits</Th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pdo.entries.map((entry, i) => (
+                        <tr key={i} className="border-b border-grey-100 last:border-0">
+                          <td className="px-3 py-2 font-mono">
+                            {entry.index === 0 ? (
+                              <span className="text-grey-400">padding</span>
+                            ) : (
+                              `${formatHex(entry.index)}:${String(entry.subindex).padStart(2, '0')}`
+                            )}
+                          </td>
+                          <td className="px-3 py-2">{entry.name ?? '—'}</td>
+                          <td className="px-3 py-2 font-mono text-grey-600">
+                            {entry.dataType ?? '—'}
+                          </td>
+                          <td className="px-3 py-2 font-mono">{entry.bitLen}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )),
+          )}
+        </div>
+      )}
+
       {slave.mailbox && (
         <div className="space-y-2">
           <p className="eyebrow text-grey-500">Mailbox</p>
@@ -436,7 +526,7 @@ export default function EniView({ parsed }: { parsed: EniParseResult }) {
                   <p className="text-xs text-grey-500">No named variables.</p>
                 ) : (
                   <div className="border border-grey-200 overflow-x-auto">
-                    <table className="w-full min-w-[560px] text-xs border-collapse">
+                    <table className="w-full min-w-[680px] text-xs border-collapse">
                       <thead>
                         <tr className="border-b border-grey-200 bg-grey-50 text-left text-grey-600">
                           <Th hint="Which device's window this value lands in, worked out from the offset rather than from the name">
@@ -444,6 +534,9 @@ export default function EniView({ parsed }: { parsed: EniParseResult }) {
                           </Th>
                           <Th hint="The scope the writing tool prefixed to the name, before the first dot">
                             Scope
+                          </Th>
+                          <Th hint="The CoE object this value is, taken from the PDO declarations. An ENI's process image carries no object address of its own">
+                            Object
                           </Th>
                           <Th hint="The signal itself, after the scope prefix">Name</Th>
                           <Th hint="Type name spelled the way an ESI spells it">Type</Th>
@@ -455,6 +548,7 @@ export default function EniView({ parsed }: { parsed: EniParseResult }) {
                         {area.variables.map((variable, j) => {
                           const { scope, signal } = splitVariableName(variable.name)
                           const device = deviceAt(network.slaves, half, variable.bitOffs)
+                          const object = objectAt(network.slaves, half, variable.bitOffs)
                           return (
                             <tr key={j} className="border-b border-grey-100 last:border-0">
                               <td className="px-3 py-2 font-mono">
@@ -462,6 +556,13 @@ export default function EniView({ parsed }: { parsed: EniParseResult }) {
                               </td>
                               <td className="px-3 py-2 text-grey-600">
                                 {scope ?? <span className="text-grey-400">—</span>}
+                              </td>
+                              <td className="px-3 py-2 font-mono text-grey-700">
+                                {object ? (
+                                  `${formatHex(object.index)}:${String(object.subindex).padStart(2, '0')}`
+                                ) : (
+                                  <span className="text-grey-400">—</span>
+                                )}
                               </td>
                               <td className="px-3 py-2">{signal}</td>
                               <td className="px-3 py-2 font-mono text-grey-600">

@@ -185,6 +185,39 @@ TEST(EniWriterTest, WritesNoPreviousPortOrDcForADeviceThatHasNeither) {
   EXPECT_EQ(eni->find("<DC>"), std::string::npos);
 }
 
+TEST(EniWriterTest, WritesAPdoWithItsSyncManagerAndEntries) {
+  const auto eni = writeEni(referenceNetwork());
+  ASSERT_TRUE(eni.has_value()) << eni.error();
+  // The Sm attribute is what tells a master this PDO belongs in the process image.
+  EXPECT_NE(eni->find(R"(<RxPdo Sm="2">)"), std::string::npos);
+  EXPECT_NE(eni->find(R"(<TxPdo Sm="3">)"), std::string::npos);
+  // An object index is a HexDecValue, so it is written the way every ETG document writes one.
+  EXPECT_NE(eni->find("<Index>#x1600</Index>"), std::string::npos);
+  EXPECT_NE(eni->find("<Index>#x6040</Index>"), std::string::npos);
+}
+
+TEST(EniWriterTest, WritesAPaddingEntryWithNeitherNameNorType) {
+  const auto eni = writeEni(referenceNetwork());
+  ASSERT_TRUE(eni.has_value()) << eni.error();
+  // Padding occupies bits and addresses nothing, so ETG.2100's "mandatory if Index != 0" does not
+  // reach it. Inventing a name for one would be inventing an object.
+  const std::size_t padding = eni->find("<Index>#x0000</Index>\n            <SubIndex>");
+  ASSERT_NE(padding, std::string::npos);
+  const std::size_t entryEnd = eni->find("</Entry>", padding);
+  ASSERT_NE(entryEnd, std::string::npos);
+  const std::string entry = eni->substr(padding, entryEnd - padding);
+  EXPECT_EQ(entry.find("<Name>"), std::string::npos) << entry;
+  EXPECT_EQ(entry.find("<DataType>"), std::string::npos) << entry;
+}
+
+TEST(EniWriterTest, RefusesAPdoWithNoName) {
+  EniNetwork network = referenceNetwork();
+  network.slaves[0].processData->rxPdos[0].name.clear();
+  const auto eni = writeEni(network);
+  ASSERT_FALSE(eni.has_value());
+  EXPECT_NE(eni.error().find("has no name"), std::string::npos) << eni.error();
+}
+
 // Writes the reference document where the schema-validation test finds it. That test runs xmllint
 // against the ENI XML Schema and is the only machine check that this writer produces a conformant
 // document. The assertions above only cover the parts a reader would check by hand.

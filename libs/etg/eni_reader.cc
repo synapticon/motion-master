@@ -341,9 +341,34 @@ EniProcessData readProcessData(const pugi::xml_node& node, std::string_view path
     processData.syncManagers.push_back(syncManager);
   }
 
-  if (hasChild(node, "RxPdo") || hasChild(node, "TxPdo")) {
-    warnings.notModelled(path, "ProcessData/RxPdo and <TxPdo>");
-  }
+  const auto readPdos = [&](const char* element) {
+    std::vector<EniPdo> pdos;
+    for (const pugi::xml_node child : node.children(element)) {
+      EniPdo pdo;
+      pdo.index = childNumber<std::uint16_t>(child, "Index", path, warnings).value_or(0);
+      pdo.name = childText(child, "Name");
+      if (const pugi::xml_attribute sm = child.attribute("Sm"); sm) {
+        pdo.syncManager = static_cast<std::uint8_t>(sm.as_int());
+      }
+      pdo.fixed = child.attribute("Fixed").as_bool(false);
+      pdo.mandatory = child.attribute("Mandatory").as_bool(false);
+      for (const pugi::xml_node entryNode : child.children("Entry")) {
+        EniPdoEntry entry;
+        entry.index = childNumber<std::uint16_t>(entryNode, "Index", path, warnings).value_or(0);
+        entry.subindex =
+            childNumber<std::uint8_t>(entryNode, "SubIndex", path, warnings).value_or(0);
+        entry.bitLen = childNumber<std::uint16_t>(entryNode, "BitLen", path, warnings).value_or(0);
+        entry.name = childText(entryNode, "Name");
+        entry.dataType = childText(entryNode, "DataType");
+        entry.comment = childText(entryNode, "Comment");
+        pdo.entries.push_back(std::move(entry));
+      }
+      pdos.push_back(std::move(pdo));
+    }
+    return pdos;
+  };
+  processData.rxPdos = readPdos("RxPdo");
+  processData.txPdos = readPdos("TxPdo");
   return processData;
 }
 

@@ -138,6 +138,37 @@ inline EniNetwork referenceNetwork() {
       syncManager(2, EniSyncManagerType::Outputs, 0x1800, 0x64, 35),
       syncManager(3, EniSyncManagerType::Inputs, 0x1C00, 0x20, 47),
   };
+  const auto pdoEntry = [](std::uint16_t index, std::uint8_t subindex, std::uint16_t bitLen,
+                           std::string name, std::string dataType) {
+    EniPdoEntry entry;
+    entry.index = index;
+    entry.subindex = subindex;
+    entry.bitLen = bitLen;
+    entry.name = std::move(name);
+    entry.dataType = std::move(dataType);
+    return entry;
+  };
+
+  EniPdo rxPdo;
+  rxPdo.index = 0x1600;
+  rxPdo.name = "RxPDO 0x1600";
+  rxPdo.syncManager = 2;
+  rxPdo.entries = {
+      pdoEntry(0x6040, 0, 16, "Controlword", "UINT"),
+      pdoEntry(0x607A, 0, 32, "Target position", "DINT"),
+      // Padding: it occupies the window and addresses nothing, so it carries neither.
+      pdoEntry(0, 0, 8, "", ""),
+  };
+  EniPdo txPdo;
+  txPdo.index = 0x1A00;
+  txPdo.name = "TxPDO 0x1A00";
+  txPdo.syncManager = 3;
+  txPdo.entries = {
+      pdoEntry(0x6041, 0, 16, "Statusword", "UINT"),
+      pdoEntry(0x6064, 0, 32, "Position actual value", "DINT"),
+  };
+  processData.rxPdos = {rxPdo};
+  processData.txPdos = {txPdo};
   slave.processData = processData;
 
   EniMailbox mailbox;

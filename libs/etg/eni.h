@@ -204,11 +204,44 @@ struct EniSyncManager {
   std::optional<std::uint32_t> watchdog;     ///< Process-data watchdog time.
 };
 
+/// @brief One object mapped into a PDO (ENI @c EntryType).
+///
+/// An @c index of zero is padding: the entry occupies @c bitLen bits of the window and addresses
+/// nothing, which is how a device aligns a value to a byte boundary. ETG.2100 makes @c name and
+/// @c dataType mandatory for every other entry, so an entry that cannot supply a name uses its own
+/// address as one rather than going without.
+struct EniPdoEntry {
+  std::uint16_t index = 0;    ///< Object index; zero marks padding.
+  std::uint8_t subindex = 0;  ///< Object subindex.
+  std::uint16_t bitLen = 0;   ///< Width in bits, padding included.
+  std::string name;           ///< Object name.
+  std::string dataType;       ///< Type name as an ESI spells it: @c "UINT", @c "DINT".
+  std::string comment;        ///< Free text.
+};
+
+/// @brief One process-data object of a device (ENI @c PdoType).
+///
+/// This is the declarative half of the process data, and the reason it is worth writing: the
+/// @c ProcessImage says where a value sits and what it is called, and only a PDO says which CoE
+/// object it *is*. A document without these leaves a reader unable to answer that at all, because
+/// nothing else in an ENI carries an object address for a mapped value.
+struct EniPdo {
+  std::uint16_t index =
+      0;             ///< Mapping-object index: @c 0x16xx for an RxPDO, @c 0x1Axx for a TxPDO.
+  std::string name;  ///< Required by the schema; at minimum, name it after its index.
+  std::optional<std::uint8_t> syncManager;  ///< The Sync Manager carrying it (the @c Sm attribute).
+  bool fixed = false;                ///< The device does not allow this PDO to be reconfigured.
+  bool mandatory = false;            ///< The PDO must be assigned to a Sync Manager.
+  std::vector<EniPdoEntry> entries;  ///< Mapped objects, in window order.
+};
+
 /// @brief A device's process-data description (ENI @c Slave/ProcessData).
 struct EniProcessData {
   std::optional<EniProcessDataWindow> send;  ///< Window in the master's *output* image.
   std::optional<EniProcessDataWindow> recv;  ///< Window in the master's *input* image.
   std::vector<EniSyncManager> syncManagers;  ///< Sync Managers, in any order; @c index places them.
+  std::vector<EniPdo> rxPdos;                ///< Master-to-device PDOs, so the outputs.
+  std::vector<EniPdo> txPdos;                ///< Device-to-master PDOs, so the inputs.
 };
 
 /// @brief One mailbox window of a device (ENI @c MailboxSendInfoType / @c MailboxRecvInfoType).

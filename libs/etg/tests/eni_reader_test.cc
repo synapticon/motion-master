@@ -102,6 +102,31 @@ TEST(EniReaderTest, KeepsTheValuesAReaderWouldBeAskedAbout) {
   EXPECT_EQ(second.dc->cycleTime0Ns, 1000000);
 }
 
+TEST(EniReaderTest, ReadsThePdoDeclarationsThatCarryAnObjectAddress) {
+  const auto written = writeEni(referenceNetwork());
+  ASSERT_TRUE(written.has_value()) << written.error();
+  const auto read = readEni(*written);
+  ASSERT_TRUE(read.has_value()) << read.error();
+  ASSERT_TRUE(read->network.slaves[0].processData.has_value());
+  const auto& rxPdos = read->network.slaves[0].processData->rxPdos;
+  ASSERT_EQ(rxPdos.size(), 1u);
+  EXPECT_EQ(rxPdos[0].index, 0x1600);
+  EXPECT_EQ(rxPdos[0].syncManager, 2);
+  ASSERT_EQ(rxPdos[0].entries.size(), 3u);
+
+  // The point of the declaration: this is the only place in an ENI where a mapped value's object
+  // address lives, so a reader can say the value at bit 0 is 0x6040:00 rather than only that it is
+  // called Controlword.
+  EXPECT_EQ(rxPdos[0].entries[0].index, 0x6040);
+  EXPECT_EQ(rxPdos[0].entries[0].subindex, 0);
+  EXPECT_EQ(rxPdos[0].entries[0].bitLen, 16);
+  EXPECT_EQ(rxPdos[0].entries[0].dataType, "UINT");
+  // Padding keeps its width and stays anonymous.
+  EXPECT_EQ(rxPdos[0].entries[2].index, 0);
+  EXPECT_EQ(rxPdos[0].entries[2].bitLen, 8);
+  EXPECT_TRUE(rxPdos[0].entries[2].name.empty());
+}
+
 TEST(EniReaderTest, AcceptsPreviousPortAWhichTheWriterRefuses) {
   // ETG.2100 Table 29 allows A to D; ENI Schema 1.7 enumerates B, C and D. The reader takes what
   // the file says, which is the whole point of reading a file somebody else wrote.

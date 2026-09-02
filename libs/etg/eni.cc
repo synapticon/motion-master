@@ -342,6 +342,44 @@ void addSyncManager(pugi::xml_node parent, const EniSyncManager& syncManager) {
   }
 }
 
+/// HexDecValue accepts decimal or a `#x` prefix. An object index is written in hex, because that is
+/// how every ETG document and every reader of one spells one; the plain `xs:int` elements elsewhere
+/// in this writer have no such choice.
+void addHexDecValue(pugi::xml_node parent, const char* name, std::uint32_t value) {
+  addText(parent, name, std::format("#x{:04X}", value));
+}
+
+void addPdo(pugi::xml_node parent, const char* element, const EniPdo& pdo) {
+  pugi::xml_node node = parent.append_child(element);
+  if (pdo.syncManager.has_value()) {
+    node.append_attribute("Sm") = static_cast<int>(*pdo.syncManager);
+  }
+  if (pdo.fixed) {
+    node.append_attribute("Fixed") = "1";
+  }
+  if (pdo.mandatory) {
+    node.append_attribute("Mandatory") = "1";
+  }
+  addHexDecValue(node, "Index", pdo.index);
+  addText(node, "Name", pdo.name);
+  for (const EniPdoEntry& entry : pdo.entries) {
+    pugi::xml_node child = node.append_child("Entry");
+    addHexDecValue(child, "Index", entry.index);
+    addHexDecValue(child, "SubIndex", entry.subindex);
+    addUint(child, "BitLen", entry.bitLen);
+    // A padding entry addresses nothing, so it has nothing to be called and no type to be.
+    if (!entry.name.empty()) {
+      addText(child, "Name", entry.name);
+    }
+    if (!entry.comment.empty()) {
+      addText(child, "Comment", entry.comment);
+    }
+    if (!entry.dataType.empty()) {
+      addText(child, "DataType", entry.dataType);
+    }
+  }
+}
+
 void addProcessData(pugi::xml_node parent, const EniProcessData& processData) {
   pugi::xml_node node = parent.append_child("ProcessData");
   if (processData.send.has_value()) {
@@ -360,6 +398,12 @@ void addProcessData(pugi::xml_node parent, const EniProcessData& processData) {
   std::ranges::sort(ordered, {}, &EniSyncManager::index);
   for (const EniSyncManager& syncManager : ordered) {
     addSyncManager(node, syncManager);
+  }
+  for (const EniPdo& pdo : processData.rxPdos) {
+    addPdo(node, "RxPdo", pdo);
+  }
+  for (const EniPdo& pdo : processData.txPdos) {
+    addPdo(node, "TxPdo", pdo);
   }
 }
 
@@ -548,6 +592,16 @@ std::expected<void, std::string> validateSlave(std::size_t position, const EniSl
                     "B, C and D only — a reader may accept it, a writer cannot emit it",
                     where));
   }
+  if (slave.processData.has_value()) {
+    for (const auto* pdos : {&slave.processData->rxPdos, &slave.processData->txPdos}) {
+      for (const EniPdo& pdo : *pdos) {
+        if (pdo.name.empty()) {
+          return std::unexpected(std::format(
+              "{}: PDO {:#06x} has no name, and the schema requires one", where, pdo.index));
+        }
+      }
+    }
+  }
   if (slave.mailbox.has_value()) {
     const EniMailbox& mailbox = *slave.mailbox;
     if (mailbox.bootstrapSend.has_value() != mailbox.bootstrapRecv.has_value()) {
@@ -718,6 +772,33 @@ nlohmann::json mailboxWindowJson(const EniMailboxWindow& window) {
   return j;
 }
 
+nlohmann::json pdoJson(const EniPdo& pdo) {
+  nlohmann::json entries = nlohmann::json::array();
+  for (const EniPdoEntry& entry : pdo.entries) {
+    nlohmann::json child{
+        {"index", entry.index}, {"subindex", entry.subindex}, {"bitLen", entry.bitLen}};
+    if (!entry.name.empty()) {
+      child["name"] = entry.name;
+    }
+    if (!entry.dataType.empty()) {
+      child["dataType"] = entry.dataType;
+    }
+    if (!entry.comment.empty()) {
+      child["comment"] = entry.comment;
+    }
+    entries.push_back(child);
+  }
+  nlohmann::json j{{"index", pdo.index}, {"name", pdo.name}, {"entries", entries}};
+  addOptional(j, "syncManager", pdo.syncManager);
+  if (pdo.fixed) {
+    j["fixed"] = true;
+  }
+  if (pdo.mandatory) {
+    j["mandatory"] = true;
+  }
+  return j;
+}
+
 nlohmann::json slaveJson(const EniSlave& slave) {
   nlohmann::json j{{"info",
                     {{"name", slave.info.name},
@@ -744,6 +825,14 @@ nlohmann::json slaveJson(const EniSlave& slave) {
       syncManagers.push_back(syncManagerJson(syncManager));
     }
     processData["syncManagers"] = syncManagers;
+    for (const auto& [key, pdos] : {std::pair{"rxPdos", &slave.processData->rxPdos},
+                                    std::pair{"txPdos", &slave.processData->txPdos}}) {
+      nlohmann::json array = nlohmann::json::array();
+      for (const EniPdo& pdo : *pdos) {
+        array.push_back(pdoJson(pdo));
+      }
+      processData[key] = array;
+    }
     j["processData"] = processData;
   }
 

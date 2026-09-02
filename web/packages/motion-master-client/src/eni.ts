@@ -120,6 +120,30 @@ export interface EniCoeCmd {
   disabled?: boolean
 }
 
+/// One object mapped into a PDO. An `index` of zero is padding: it occupies `bitLen` bits and
+/// addresses nothing, so it carries neither a name nor a type.
+export interface EniPdoEntry {
+  index: number
+  subindex: number
+  bitLen: number
+  name?: string
+  dataType?: string
+  comment?: string
+}
+
+/// One process-data object. This is the only place in an ENI where a mapped value's object address
+/// lives: the process image says where a value sits and what it is called, and a PDO says which CoE
+/// object it is.
+export interface EniPdo {
+  index: number
+  name: string
+  /// The Sync Manager carrying it. Set means the PDO is part of the process image.
+  syncManager?: number
+  fixed?: boolean
+  mandatory?: boolean
+  entries: EniPdoEntry[]
+}
+
 export interface EniSyncManager {
   index: number
   type: string
@@ -156,6 +180,10 @@ export interface EniSlave {
     /// The window in the master's *input* image.
     recv?: { bitStart: number; bitLength: number }
     syncManagers: EniSyncManager[]
+    /// Master-to-device PDOs, so the outputs.
+    rxPdos?: EniPdo[]
+    /// Device-to-master PDOs, so the inputs.
+    txPdos?: EniPdo[]
   }
   mailbox?: {
     send: EniMailboxWindow

@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.85] - 2026-09-02
+
 ### Added
 
 - **Export the bus as an ENI file, and read one somebody else wrote.** An ENI (EtherCAT Network Information) is the vendor-neutral configuration a third-party master replays to bring a bus up — acontis EC-Master, TwinCAT, CODESYS. Where an ESI file describes one device family, an ENI describes one assembled network, so exporting one hands your bus to another master without describing it a second time by hand. `GET /api/eni` returns the document for the bus in front of you, and the new **Tools → ENI** page exports it, downloads it, and reads it back. It also loads a file from anywhere: point it at a configuration EC-Engineer or TwinCAT produced and it will tell you what that configuration does. Exporting needs the bus in SAFE-OP or OP, because the mapping it describes does not exist before then, and it reads each device's EEPROM and PDO assignment, so it takes a moment on a long bus. The generated configuration runs in free-run, which is how Motion Master runs a bus itself.
@@ -795,7 +797,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.84...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.85...HEAD
+[6.0.0-alpha.85]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.84...v6.0.0-alpha.85
 [6.0.0-alpha.84]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.83...v6.0.0-alpha.84
 [6.0.0-alpha.83]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.82...v6.0.0-alpha.83
 [6.0.0-alpha.82]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.81...v6.0.0-alpha.82

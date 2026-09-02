@@ -162,7 +162,7 @@ motion-master/
     playground/        ← scratch binary
   libs/
     core/              ← version, CyclicTimer, CyclicTask/CycleContext, RT setup, utils
-    etg/               ← mm::etg: ESI XML parser + object-dictionary flattener. Offline
+    etg/               ← mm::etg: ESI and ENI XML, both directions. Offline
     comm/              ← fieldbus interfaces; soem.cc, spoe.cc, igh.cc
     node/              ← Device, DeviceManager, CiA402, profiles, RT tasks. No HTTP
     api/               ← mm::api: HTTP glue. The only lib that knows uWebSockets
@@ -838,6 +838,64 @@ Rules that are easy to get wrong and are pinned by tests:
 `libs/etg/tests/data/somanet-v5.6.6.xml` is a real 1.9 MB Synapticon ESI, reached through the
 `MM_ETG_TEST_DATA_DIR` compile definition. It pins the parser against a document nobody shaped
 for it.
+
+### ENI (`libs/etg`, `libs/node`)
+
+An **ENI** (EtherCAT Network Information, ETG.2100) is the vendor-neutral configuration a
+third-party master replays to bring a bus up. Where an ESI describes one device family, an ENI
+describes one assembled network.
+
+**An ENI is a script, not a description, and that decides everything about handling one.** Every
+configuration step is an EtherCAT datagram or a CoE download tagged with the AL-state transition it
+belongs to. So a viewer must decode that script or show nothing, and a writer must get element order
+right, because every ENI complex type is an `xs:sequence`.
+
+Four pieces, split along the dependency rule:
+
+| Where | What |
+| --- | --- |
+| `libs/etg/eni.{h,cc}` | The model, `writeEni`, and `to_json`. Pure; no `mm::comm`. |
+| `libs/etg/eni_reader.{h,cc}` | `readEni`. Tolerant: only bad XML, a wrong root or a missing `Config` fail. |
+| `libs/node/eni_collector.{h,cc}` | `collectEni` — reads a live bus into the model. Drives the bus. |
+| `libs/node/eni_request.{h,cc}` | `buildEniResponse` — reads a document and annotates each datagram. |
+
+`GET /api/eni` exports, `POST /api/eni/parse` reads. The Console page is **Tools → ENI**.
+
+Rules that are easy to get wrong:
+
+- **The reader is more permissive than the writer, on purpose.** Reading a document *we* wrote is
+  nearly worthless. A previous port of `A` is accepted by the reader and refused by the writer,
+  because ETG.2100 Table 29 allows it and ENI Schema 1.7 enumerates only `B`, `C` and `D`.
+- **`Ccs` 1 is a download.** ETG.2100 Table 20 says the opposite. ETG.1000.6 owns the CoE protocol,
+  and every CoE command in ETG's own samples carries a payload under `Ccs` 1, which an upload has
+  none of.
+- **ETG's four sample documents do not validate against ETG's own schema.** Two omit `AutoIncAddr`
+  and `Physics`; all four give one of `InputOffs`/`OutputOffs` where both are required. They are a
+  reader fixture, never a reference for the writer, which emits the schema-valid superset.
+- **`CycleTime1` is not the SYNC1 cycle time.** ETG.2100 Table 32 makes it `SYNC1 cycle − SYNC0
+  cycle + SYNC0 shift`, which can be negative. The DC times are signed for that reason.
+- **`ProcessData/RxPdo` and `TxPdo` are the only place a mapped value's object address appears.**
+  The process image carries a name, a size and an offset and nothing else, so a document without the
+  PDO declarations cannot tell a reader that the value at bit 16 is `0x607A:00`.
+- **Export needs the bus mapped.** FMMUs and logical addresses come into being at the SAFE-OP
+  transition. PRE-OP answers 409 rather than being guessed at.
+- **The cyclic frame is an LWR plus an LRD, never one LRW.** A read-write datagram is only correct
+  where a device's two FMMUs share a logical address, and this master lays them out disjointly.
+- **A Sync Manager's `type` does not survive `decodeSyncManager`.** What a channel carries is not in
+  the register; it is the master's classification from the SII. The decode returns zero rather than
+  inventing one.
+- **The collector never fills `DC`, so an export is free-run.** The element is read and written
+  correctly. Producing one needs an `AssignActivate` word, which a SOMANET drive does not carry in
+  its SII.
+
+**The ETG schemas and sample documents are not in the repository.** ETG's download terms forbid
+redistributing them and this repository is public. `MM_ENI_SCHEMA`, `MM_ESI_SCHEMA` and
+`MM_ENI_SAMPLES_DIR` (see `cmake/schema_validation.cmake`) name them, each defaulting to a
+gitignored directory. Drop a copy in and the tests turn themselves on; leave it out and they are
+skipped with the path they wanted. xmllint validates every generated document, because pugixml
+cannot.
+
+Rationale: `NEXTGEN.md`, Session 2026-09-02.
 
 ### Generated Object Addresses
 

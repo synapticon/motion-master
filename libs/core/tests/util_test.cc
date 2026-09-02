@@ -176,3 +176,31 @@ TEST(ToHexTest, AcceptsAnyContiguousByteRange) {
   const std::array<uint8_t, 4> reply{0x01, 0x00, 0x86, 0xA0};
   EXPECT_EQ(toHex(reply, " "), "01 00 86 A0");
 }
+
+// fromHex
+
+TEST(FromHexTest, RoundTripsWithToHex) {
+  const std::vector<uint8_t> bytes = {0x00, 0x0A, 0x1B, 0xFF};
+  const auto decoded = mm::core::fromHex(mm::core::toHex(bytes));
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(*decoded, bytes);
+}
+
+TEST(FromHexTest, AcceptsEitherCase) {
+  const std::vector<uint8_t> expected = {0xAB, 0xCD};
+  EXPECT_EQ(mm::core::fromHex("abcd"), expected);
+  EXPECT_EQ(mm::core::fromHex("ABCD"), expected);
+  EXPECT_EQ(mm::core::fromHex("AbCd"), expected);
+}
+
+TEST(FromHexTest, DecodesAnEmptyStringAsNoBytes) {
+  const auto decoded = mm::core::fromHex("");
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_TRUE(decoded->empty());
+}
+
+TEST(FromHexTest, RejectsAnOddDigitCountAndANonHexDigit) {
+  EXPECT_FALSE(mm::core::fromHex("ABC").has_value());
+  EXPECT_FALSE(mm::core::fromHex("AG").has_value());
+  EXPECT_FALSE(mm::core::fromHex("A ").has_value());
+}

@@ -109,48 +109,13 @@ bool attrBool(const pugi::xml_node& node, const char* name, bool fallback = fals
   return a ? a.as_bool(fallback) : fallback;
 }
 
-/// Decodes xs:hexBinary. Byte order is the ESI's own: the FIRST byte is the LEAST significant, so
-/// "92010200" yields {0x92, 0x01, 0x02, 0x00} == 0x00020192. An odd digit count or a non-hex
-/// character means the value is unusable; the caller warns.
-std::optional<std::vector<uint8_t>> parseHexBinary(std::string_view s) {
-  if (s.empty()) {
-    return std::vector<uint8_t>{};
-  }
-  if (s.size() % 2 != 0) {
-    return std::nullopt;
-  }
-  const auto digit = [](char c) -> int {
-    if (c >= '0' && c <= '9') {
-      return c - '0';
-    }
-    if (c >= 'a' && c <= 'f') {
-      return c - 'a' + 10;
-    }
-    if (c >= 'A' && c <= 'F') {
-      return c - 'A' + 10;
-    }
-    return -1;
-  };
-  std::vector<uint8_t> out;
-  out.reserve(s.size() / 2);
-  for (std::size_t i = 0; i < s.size(); i += 2) {
-    const int hi = digit(s[i]);
-    const int lo = digit(s[i + 1]);
-    if (hi < 0 || lo < 0) {
-      return std::nullopt;
-    }
-    out.push_back(static_cast<uint8_t>((hi << 4) | lo));
-  }
-  return out;
-}
-
 /// Reads a hexBinary child into @p out, warning (and leaving @p out empty) on a malformed value.
 void readHexBinary(const pugi::xml_node& node, const char* name, std::vector<uint8_t>& out,
                    std::string_view path, Warnings& warnings) {
   if (!hasChild(node, name)) {
     return;
   }
-  auto bytes = parseHexBinary(childText(node, name));
+  auto bytes = mm::core::fromHex(childText(node, name));
   if (!bytes) {
     warnings.add(path,
                  std::format("<{}> is not valid hexBinary: '{}'", name, childText(node, name)));

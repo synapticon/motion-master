@@ -31,12 +31,15 @@
 #include "comm/sii.h"
 #include "core/system_info.h"
 #include "core/user_cache.h"
+#include "etg/eni.h"
 #include "etg/esi_request.h"
 #include "monitoring_api.h"
 #include "node/cia402_control.h"
 #include "node/cia402_drive.h"
 #include "node/device_manager.h"
 #include "node/device_parameter.h"
+#include "node/eni_collector.h"
+#include "node/eni_request.h"
 #include "node/firmware_package.h"
 #include "node/ic_haus_registers.h"
 #include "node/kuebler_registers.h"
@@ -785,6 +788,16 @@ void HttpServer::run() {
   // The response carries every device with its own assembled entry table. That is affordable
   // because object-level annotation is stored once, on subindex 0, rather than repeated onto every
   // subindex. The optional modules= query narrows the merge where a slot offers a choice.
+  // Reads an ENI somebody else's configuration tool wrote and renders it for a human: each
+  // datagram gets the name of the register its address selects, and a register block gets its
+  // fields. Offline, like the SII and ESI parsers beside it — no bus is touched and none is needed.
+  router.post("/api/eni/parse", [](const mm::api::Request& req) -> mm::api::Response {
+    // Timed through the same X-Wire-Us channel as a device operation. The figure is CPU rather than
+    // wire time here, as it is for the ESI parse.
+    return mm::api::timed([&] { return mm::node::buildEniResponse(req.body()); },
+                          "400 Bad Request");
+  });
+
   router.post("/api/esi/parse", [](const mm::api::Request& req) -> mm::api::Response {
     mm::etg::EsiParseRequest request;
     if (const auto modules = req.query("modules"); modules && !modules->empty()) {
@@ -1712,6 +1725,36 @@ void HttpServer::run() {
     auto response = mm::api::bytes("application/octet-stream", std::move(*buffer));
     response.headers.emplace_back("Content-Disposition",
                                   R"(attachment; filename="motion-master-recorder.mmpd")");
+    return response;
+  });
+
+  // Exports the bus as an ENI, the vendor-neutral configuration a third-party master replays to
+  // bring the same bus up. The document describes the bus as this master has configured it, so it
+  // needs the bus configured: a 409 says to reach SAFE-OP or OP first. Reading it drives the bus —
+  // one EEPROM read and a burst of SDO uploads per device — which is why it is an explicit export
+  // rather than something served alongside the other bus views.
+  router.get("/api/eni", [this](const mm::api::Request&) -> mm::api::Response {
+    if (!config_.eniOptions) {
+      return mm::api::error("501 Not Implemented", "this build serves no ENI options");
+    }
+    auto collected = mm::node::collectEni(deviceManager_, config_.eniOptions());
+    if (!collected) {
+      return mm::api::error("409 Conflict", collected.error());
+    }
+    auto eni = mm::etg::writeEni(collected->network);
+    if (!eni) {
+      return mm::api::error("500 Internal Server Error", eni.error());
+    }
+    // A warning means one optional element is missing, not that the document is unusable, so it
+    // travels in the log and as a count. The messages are not put in the header, because a header
+    // cannot carry what a device might have written into its own name.
+    for (const std::string& warning : collected->warnings) {
+      spdlog::warn("ENI export: {}", warning);
+    }
+    auto response = mm::api::bytes("application/xml", std::move(*eni));
+    response.headers.emplace_back("X-Eni-Warnings", std::to_string(collected->warnings.size()));
+    response.headers.emplace_back("Content-Disposition",
+                                  R"(attachment; filename="motion-master-eni.xml")");
     return response;
   });
 

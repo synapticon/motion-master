@@ -12,6 +12,7 @@
 #include <string>
 #include <string_view>
 #include <type_traits>
+#include <vector>
 
 namespace mm::core {
 
@@ -79,6 +80,48 @@ inline std::string toHex(std::span<const uint8_t> bytes, std::string_view separa
       out += separator;
     }
     out += std::format("{:02X}", bytes[i]);
+  }
+  return out;
+}
+
+/// @brief Decodes a continuous hexadecimal string into bytes — the inverse of @c toHex.
+///
+/// This is the @c xs:hexBinary XML encoding, which both ETG document formats use for a raw byte
+/// string. Either case of hex digit is accepted, because a real file is not consistent even within
+/// itself. An empty string yields no bytes, which is a valid @c hexBinary value.
+///
+/// The bytes come back in the order they are written. Neither this nor @c toHex takes a view on
+/// what that order means — an ESI writes a value least-significant byte first, and so does an ENI,
+/// but that is the format's convention rather than this function's.
+///
+/// @param hex  Source string, an even number of hex digits.
+/// @return The bytes, or @c std::nullopt for an odd digit count or a character that is not a hex
+///         digit.
+inline std::optional<std::vector<uint8_t>> fromHex(std::string_view hex) {
+  if (hex.size() % 2 != 0) {
+    return std::nullopt;
+  }
+  const auto digit = [](char c) -> int {
+    if (c >= '0' && c <= '9') {
+      return c - '0';
+    }
+    if (c >= 'a' && c <= 'f') {
+      return c - 'a' + 10;
+    }
+    if (c >= 'A' && c <= 'F') {
+      return c - 'A' + 10;
+    }
+    return -1;
+  };
+  std::vector<uint8_t> out;
+  out.reserve(hex.size() / 2);
+  for (std::size_t i = 0; i < hex.size(); i += 2) {
+    const int hi = digit(hex[i]);
+    const int lo = digit(hex[i + 1]);
+    if (hi < 0 || lo < 0) {
+      return std::nullopt;
+    }
+    out.push_back(static_cast<uint8_t>((hi << 4) | lo));
   }
   return out;
 }

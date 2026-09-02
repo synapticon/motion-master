@@ -3,12 +3,16 @@
 #include <spdlog/spdlog.h>
 
 #include <algorithm>
+#include <array>
 #include <cctype>
 #include <cstdio>
 #include <nlohmann/json.hpp>
+#include <optional>
 #include <regex>
 #include <string>
 #include <vector>
+
+#include "core/util.h"
 
 #ifdef _WIN32
 // clang-format off
@@ -100,6 +104,21 @@ std::string normalizeMac(const std::string& raw, char sep) {
     result += static_cast<char>(std::toupper(static_cast<unsigned char>(raw[i * 3 + 1])));
   }
   return result;
+}
+
+std::optional<std::array<uint8_t, 6>> parseMac(const std::string& s) {
+  if (!isMacAddress(s)) {
+    return std::nullopt;
+  }
+  std::array<uint8_t, 6> bytes{};
+  for (size_t i = 0; i < bytes.size(); ++i) {
+    const auto octet = mm::core::parseHexOrDec<uint8_t>("0x" + s.substr(i * 3, 2));
+    if (!octet) {
+      return std::nullopt;
+    }
+    bytes[i] = *octet;
+  }
+  return bytes;
 }
 
 std::vector<NetworkAdapter> enumerateNetworkAdapters() {

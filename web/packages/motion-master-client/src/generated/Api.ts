@@ -1813,6 +1813,37 @@ export class Api<
       ...params,
     });
   /**
+   * @description Decodes an ENI document supplied in the request body. No device is involved, and that is the point: the useful case is reading a configuration somebody else's tool wrote — acontis EC-Engineer, TwinCAT — rather than the one this master exports from `GET /api/eni`. **An ENI is a script, not a description.** Every configuration step in it is an EtherCAT datagram or a CoE download tagged with the AL-state transition it belongs to, so a listing of the raw elements would show `FPWR to 2064, data 0018060064000100` and leave the reading undone. Each datagram therefore carries a `register` object naming what its `ado` selects, with the instance for a repeating block, and `decoded` fields where the payload is a sync-manager or FMMU register block. A write to AL Control reports `requestsState`, and the read that follows it reports `waitsForState`. Every enumeration is spelled out beside its value — `cmd` 5 with `cmdName` `FPWR`, transitions as `IP`/`PS`/`SO` — and every payload carries its hex beside its byte count, because the reader of this JSON is a person rather than a master. Tolerant by design. Only three things fail: XML that will not parse, a root that is not `EtherCATConfig`, and a missing `Config`. Anything else costs that value and a line in `warnings`, including an element this model has no room for. The sample documents ETG itself ships need that tolerance: two of them omit elements their own schema marks mandatory, and a previous port of `A` is spec-legal while ENI Schema 1.7 enumerates only `B`, `C` and `D`.
+   *
+   * @name ParseEni
+   * @summary Parse an EtherCAT Network Information (ENI) file
+   * @request POST:/api/eni/parse
+   */
+  parseEni = (data: string, params: RequestParams = {}) =>
+    this.request<
+      {
+        /** The master, every device, the cyclic frame and the process image, keyed by the model's own field names. */
+        network: object;
+        /** One line per element seen and not modelled, or per value that would not decode. Each names a place in the document. */
+        warnings: string[];
+        summary: {
+          /** Devices in the document */
+          devices: number;
+          /** EtherCAT init commands, master and devices together */
+          datagrams: number;
+          /** CoE init commands, which live under a device's mailbox */
+          coeTransfers: number;
+        };
+      },
+      void
+    >({
+      path: `/api/eni/parse`,
+      method: "POST",
+      body: data,
+      format: "json",
+      ...params,
+    });
+  /**
    * @description Decodes a vendor's ESI XML supplied in the request body. No device is involved — the Tools page uses this to inspect an ESI with no hardware present, which is the only way to see object descriptions, enum option labels, engineering units and min/max bounds: the CoE SDO-Information service reports none of them. The response carries the vendor, every module, and **every device with its own assembled `entries` table** — one row per addressable `(index, subindex)`, merged from the device's own dictionary plus the dictionaries of the modules its slots reference, with each row recording in `source` where it came from. Object-level annotation (an object's description and raw properties) is attached to **subindex 0 only** — that row *is* the object — rather than repeated onto every subindex. A RECORD member still carries its own description on its own row; an ARRAY element carries none, because the ESI describes an array once rather than per element. To read an object's text for any subindex, look at subindex 0 of the same index. Where a slot offers mutually exclusive module variants the merge necessarily collides; it is resolved last-wins and reported in that device's `warnings`. Pass `modules` to model one concrete configuration instead.
    *
    * @name ParseEsi
@@ -2312,6 +2343,32 @@ export class Api<
       path: `/api/bus-config`,
       method: "GET",
       format: "json",
+      ...params,
+    });
+  /**
+   * @description Returns the bus as an ENI document, the vendor-neutral configuration a third-party master (acontis EC-Master, TwinCAT, CODESYS) replays to bring the same bus up. Where an ESI file describes one device family, an ENI describes one assembled network, and it is imperative rather than declarative: every configuration step is an EtherCAT datagram or a CoE download tagged with the AL-state transition it belongs to. The document carries each device's identity and addresses, its Sync Manager and FMMU register writes, its mailbox windows, its PDO assignment as CoE downloads, the AL-state walk with a read that holds the master until the device arrives, the cyclic frame, and the named process image. Conforms to ENI Schema 1.7 (ETG.2100). The bus must be configured. FMMUs and logical addresses come into being at the SAFE-OP transition, so a bus in PRE-OP has no mapping to describe and the call returns 409. **This drives the bus.** Each device's SII is read for its port layout and bootstrap mailbox, and its PDO assignment is read over CoE, so the call costs one EEPROM read and a short burst of SDO uploads per device. It is an export action, not an accessor. Distributed clocks are left out, so the generated configuration runs in free-run — which is how Motion Master runs the bus itself. The `DC` element needs an `AssignActivate` word, and a SOMANET drive does not carry the SII category that holds one. `X-Eni-Warnings` counts the parts that were asked for and not answered; each is also logged. A warning costs one optional element, never the document: a device whose SII will not read keeps every init command.
+   *
+   * @name ExportEni
+   * @summary Export the bus as an EtherCAT Network Information (ENI) file
+   * @request GET:/api/eni
+   */
+  exportEni = (params: RequestParams = {}) =>
+    this.request<
+      File,
+      | {
+          /** Human-readable reason the export could not be produced */
+          error: string;
+        }
+      | {
+          /** The field that could not be written */
+          error: string;
+        }
+      | {
+          error: string;
+        }
+    >({
+      path: `/api/eni`,
+      method: "GET",
       ...params,
     });
   /**

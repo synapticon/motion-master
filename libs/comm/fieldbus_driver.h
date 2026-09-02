@@ -227,6 +227,46 @@ struct MailboxConfig {
   uint8_t soeDetails = 0;  ///< SoE details / channel count.
 };
 
+/// @brief Register block addresses and widths for the two configurations above (ETG.1000.4 §6).
+///
+/// A master programs a Sync Manager or an FMMU by writing its whole block to the slave's ESC, and
+/// an ENI init command carries exactly those bytes. The constants sit here so the encode, the
+/// decode and any caller working out a stride all read them from one place.
+constexpr uint16_t kSyncManagerRegisterBase = 0x0800;  ///< Sync Manager channel 0 (Table 59).
+constexpr uint16_t kSyncManagerRegisterBytes = 8;      ///< Width of one channel (Table 58).
+constexpr uint16_t kFmmuRegisterBase = 0x0600;         ///< FMMU entity 0 (Table 57).
+constexpr uint16_t kFmmuRegisterBytes = 16;            ///< Width of one entity (Table 56).
+
+/// @brief Encodes a Sync Manager as the eight bytes an FPWR to its register block carries.
+///
+/// The two bytes the master may not set — status at offset 5 and PDI control at offset 7 — are
+/// written as zero. @c SyncManagerConfig::flags is the 32-bit read of offsets 4 to 7, so its low
+/// byte is the control byte and its third the activate byte.
+std::array<uint8_t, kSyncManagerRegisterBytes> encodeSyncManager(const SyncManagerConfig& config);
+
+/// @brief Decodes a Sync Manager register block — the inverse of @c encodeSyncManager.
+///
+/// **@c type is not recoverable and comes back zero.** What a Sync Manager carries — a mailbox or
+/// process data, and in which direction — is not in the register. It is the master's own
+/// classification, read from the slave's SII, so a caller that needs it must supply it.
+///
+/// @param index  Sync Manager number, which the block itself does not carry.
+/// @param bytes  The register block; at least @c kSyncManagerRegisterBytes.
+/// @return The configuration, or @c nullopt when @p bytes is short.
+std::optional<SyncManagerConfig> decodeSyncManager(uint8_t index, std::span<const uint8_t> bytes);
+
+/// @brief Encodes an FMMU as the sixteen bytes an FPWR to its register block carries.
+std::array<uint8_t, kFmmuRegisterBytes> encodeFmmu(const FmmuConfig& config);
+
+/// @brief Decodes an FMMU register block — the inverse of @c encodeFmmu.
+///
+/// Every field survives the round trip, because the register carries all of them.
+///
+/// @param index  FMMU number, which the block itself does not carry.
+/// @param bytes  The register block; at least @c kFmmuRegisterBytes.
+/// @return The configuration, or @c nullopt when @p bytes is short.
+std::optional<FmmuConfig> decodeFmmu(uint8_t index, std::span<const uint8_t> bytes);
+
 /// @brief Distributed-clock configuration for a slave.
 ///
 /// Populated by @c configureProcessData (which runs @c ecx_configdc). @c active is false for

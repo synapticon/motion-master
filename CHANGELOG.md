@@ -23,6 +23,20 @@ the HTTP/WebSocket API may break between any two alphas.
 
 - **The Console has a Learn section.** Three pages that explain the machine a drive is attached to, for anyone who is comfortable with software and new to motors. **Servo Motors** covers construction, commutation, shaft angle against electrical angle, and how current becomes torque. **Encoders** covers what the feedback on the shaft reports, how halls and incremental and absolute signals differ, and how finely any of it can be trusted. **Commutation Offset** explains the one number a drive has to be told and what a wrong one costs. Each page carries interactive figures — a rotor and encoder dial you can drag out of alignment, a three-phase field you can aim, quadrature channels with an index pulse, six-step against smooth commutation, and a torque-speed envelope — and ends with a section naming the SOMANET objects the concepts map onto. The pages need no connection to a drive.
 
+## [6.0.0-alpha.86] - 2026-09-02
+
+### Fixed
+
+- **6.0.0-alpha.85 has no downloadable binaries; install this release instead.** Its Linux builds failed to link on both architectures, and that stopped the release from publishing a package for any platform — no archive, no deb, no rpm, no Windows zip, no macOS tarball. The TypeScript client was published before the failure, so `@synapticon/motion-master-client@6.0.0-alpha.85` does exist on npm. This release carries the same changes with the link repaired.
+
+## [6.0.0-alpha.85] - 2026-09-02
+
+### Added
+
+- **Export the bus as an ENI file, and read one somebody else wrote.** An ENI (EtherCAT Network Information) is the vendor-neutral configuration a third-party master replays to bring a bus up — acontis EC-Master, TwinCAT, CODESYS. Where an ESI file describes one device family, an ENI describes one assembled network, so exporting one hands your bus to another master without describing it a second time by hand. `GET /api/eni` returns the document for the bus in front of you, and the new **Tools → ENI** page exports it, downloads it, and reads it back. It also loads a file from anywhere: point it at a configuration EC-Engineer or TwinCAT produced and it will tell you what that configuration does. Exporting needs the bus in SAFE-OP or OP, because the mapping it describes does not exist before then, and it reads each device's EEPROM and PDO assignment, so it takes a moment on a long bus. The generated configuration runs in free-run, which is how Motion Master runs a bus itself.
+
+- **An ENI is a script, and the page reads it as one.** Every configuration step in an ENI is an EtherCAT datagram or a CoE download, so a plain listing shows you `FPWR to 2064, data 0018060064000100` and leaves the work to you. The page names the register each address selects and decodes the payload: *sync manager 2, start 0x1800, length 6, enabled*, or *request SAFE-OP*, or *wait for OP*. Around that it shows the master with its bus-wide clears, a card per device carrying identity, ports, process data, sync managers, mailbox, distributed clocks and where in the ring the device is plugged in, then the cyclic frame and the process image with each value's CoE object beside it. `POST /api/eni/parse` does the same for a document you send it, with no bus involved.
+
 - **Motion Master runs on a Raspberry Pi 5 from a card image now.** Download it, write it to a microSD card, put your Wi-Fi network in one file on the card, and the board comes up as an EtherCAT master with a real-time kernel and Motion Master already running as a service. The wired port carries EtherCAT, which is why the board is reached over Wi-Fi. It holds a 1 ms cycle with no skipped cycles against a SOMANET Circulo in OP, with the real-time thread pinned to an isolated core. The Console reaches it over trusted HTTPS through the same hostname scheme as any other machine on the network, and `update-motion-master <version>` moves the board to another release without reflashing the card. The image and the guide are at [docs/RASPBERRY_PI.md](https://github.com/synapticon/motion-master/blob/main/docs/RASPBERRY_PI.md).
 
 ## [6.0.0-alpha.84] - 2026-08-26
@@ -793,7 +807,9 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.84...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.86...HEAD
+[6.0.0-alpha.86]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.85...v6.0.0-alpha.86
+[6.0.0-alpha.85]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.84...v6.0.0-alpha.85
 [6.0.0-alpha.84]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.83...v6.0.0-alpha.84
 [6.0.0-alpha.83]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.82...v6.0.0-alpha.83
 [6.0.0-alpha.82]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.81...v6.0.0-alpha.82

@@ -52,6 +52,10 @@ syntaxError:*/somanet_drive_test.cc
 syntaxError:*/somanet_procedures_test.cc
 syntaxError:*/sii_test.cc
 syntaxError:*/base_test.cc
+syntaxError:*/eni_collector_test.cc
+syntaxError:*/eni_reader_test.cc
+syntaxError:*/eni_request_test.cc
+syntaxError:*/eni_test.cc
 syntaxError:*/esi_data_type_test.cc
 syntaxError:*/esi_entry_test.cc
 syntaxError:*/esi_request_test.cc
@@ -73,11 +77,13 @@ syntaxError:*/http_client_test.cc
 syntaxError:*/process_test.cc
 syntaxError:*/notification_bus_test.cc
 
-// The ESI parser builds vectors by appending inside a range-for over an XML child range or a
-// parsed collection. cppcheck suggests std::transform/std::copy_if for each; rewriting them would
+// The ESI and ENI parsers build vectors by appending inside a range-for over an XML child range or
+// a parsed collection. cppcheck suggests std::transform/std::copy_if for each; rewriting them would
 // mean std::back_inserter over pugixml's iterators (no clearer than the loop) and, for
 // esiSlotModuleIdents, a copy_if whose predicate searches the very vector being appended to —
-// correct but needlessly subtle. The loops stay.
+// correct but needlessly subtle. Several of the ENI ones also carry an index into the breadcrumb
+// they build, which a transform has nowhere to keep. The loops stay.
+useStlAlgorithm:*/eni_reader.cc
 useStlAlgorithm:*/esi.cc
 useStlAlgorithm:*/esi_entry.cc
 useStlAlgorithm:*/esi_request.cc
@@ -85,7 +91,9 @@ useStlAlgorithm:*/esi_request.cc
 // Two append-in-a-loop builders: ProcedureDescriptor's to_json collects step ids into a
 // nlohmann::json array, and listProcedures pairs each catalogue entry with its snapshot into a
 // reserved vector. Both would become a std::transform over a std::back_inserter — for the first,
-// over a json array, which is obscure rather than clearer. The loops stay.
+// over a json array, which is obscure rather than clearer. The ENI serialisers in eni.cc are the
+// same shape, a dozen times over: one json array per model type. The loops stay.
+useStlAlgorithm:*/eni.cc
 useStlAlgorithm:*/procedure.cc
 useStlAlgorithm:*/procedure_catalogue.cc
 

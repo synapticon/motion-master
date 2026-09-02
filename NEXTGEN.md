@@ -3285,3 +3285,106 @@ a lost lock is deferred, because nothing consumes the signal yet.
 
 Nothing is built. The order of work is the servo first, then arming, then the config token, because
 the servo is the only piece with an unknown in it.
+
+## Session 2026-09-02 — An ENI is a script, not a description, and reading one is worth more than writing one (as-built)
+
+Motion Master could read a bus and could not hand that bus to anybody else. An **ENI** (EtherCAT
+Network Information, ETG.2100) is the vendor-neutral configuration a third-party master replays to
+bring a bus up: acontis EC-Master, TwinCAT, CODESYS. The bus in front of you already is the
+configuration, so this master reads it rather than asking somebody to describe it a second time.
+
+**The format is imperative, and that decides the whole design.** An ESI file is declarative, and a
+configuration tool reads one to decide what to do. An ENI is a script: every configuration step is
+an EtherCAT datagram or a CoE download, tagged with the AL-state transition it belongs to, and a
+master brings the bus up by replaying them in order. A minimal single-device document is 7 KB, of
+which 19 elements are init commands. So the library does not describe a network to a master. It
+hands the master a script, and a viewer of one has to decode that script or show the reader nothing.
+
+**Three libraries, and the split follows the dependency rule.** `libs/etg` holds the model, the
+writer and the reader, and stays a pure transform over text with no `mm::comm` in it. `libs/node`
+holds `collectEni`, which drives a live bus, and `buildEniResponse`, which annotates a read document
+with register names and decoded payloads. `libs/comm` holds the register codecs, next to the structs
+they serialise. `node` may depend on `etg`; `etg` may not depend on `comm`, and does not.
+
+**The writer validates before it writes an element.** Every ENI complex type is an `xs:sequence`, so
+element order is part of the contract and a document with the right elements in the wrong order does
+not validate. Each `xs:choice` is checked first, so `writeEni` returns a conformant document or an
+error naming the field, never a half-written one.
+
+**The reader is deliberately more permissive than the writer.** Only three things fail a read: XML
+that will not parse, a root that is not `EtherCATConfig`, and a missing `Config`. Everything else
+costs that value and a warning that names a place in the document. The reason is the point of the
+feature: reading a document this project wrote is nearly worthless, because we wrote it, and reading
+one another tool wrote is where the value is. A reader that refuses a real file is a reader nobody
+can use.
+
+**Three disagreements between specifications, all settled with evidence.** ETG.2100 Table 20 gives
+the CoE command specifier as 1 for an upload and 2 for a download. ETG.1000.6, which owns the CoE
+protocol, has them the other way round, and every CoE command in ETG's own sample documents carries
+a payload under a `Ccs` of 1 — an upload request has no payload to carry. The code follows
+ETG.1000.6. ETG.2100 Table 29 allows a previous port of `A` through `D`; ENI Schema 1.7 enumerates
+`B`, `C` and `D` only. The reader accepts all four and the writer refuses `A`, which is the same
+asymmetry stated once more. And the four sample documents ETG ships do not validate against ETG's
+own schema: two omit `AutoIncAddr` and `Physics`, and all four give one of `InputOffs`/`OutputOffs`
+where the schema requires both. So the samples cannot be a reference document, and the writer emits
+the schema-valid superset.
+
+**`CycleTime1` is not the SYNC1 cycle time.** ETG.2100 Table 32 defines it as `SYNC1 cycle − SYNC0
+cycle + SYNC0 shift`, a derived figure that can be negative, which is why the DC times are signed.
+Anyone modelling that element from its name gets it wrong.
+
+**The PDO declarations exist because nothing else carries an object address.** An ENI's process
+image gives a value a name, a size and an offset. `ProcessData/RxPdo` and `TxPdo` are the only place
+in the document where a mapped value's CoE object appears, so a document without them leaves a
+reader unable to say that the value at bit 16 is `0x607A:00`. The collector fills them from the same
+mapping read it already makes for the CoE commands: one read, serving both the declaration of what
+the mapping is and the commands that configure it.
+
+**The register codecs earned themselves on their first run.** `encodeSyncManager` and `encodeFmmu`
+had lived as file-local helpers in the collector. Moving them next to `SyncManagerConfig` and
+`FmmuConfig` and writing their inverses made a round trip testable, and `decodeFmmu` immediately
+reported an FMMU that served no service. The FMMU payload in the test fixture had been written by
+hand with the write-enable and active bytes one position out. Every schema test had been passing on
+it, because xmllint checks structure and not meaning.
+
+**A Sync Manager's `type` does not survive a round trip, and the decode says so.** What a channel
+carries — a mailbox or process data, and in which direction — is not in the register at all. It is
+the master's own classification, read from the slave's SII. `decodeSyncManager` returns zero for it
+rather than inventing a value.
+
+**The ETG schemas and samples are not in the repository.** ETG's download terms forbid copying,
+distributing or mirroring their files without written permission, and this repository is public.
+`MM_ENI_SCHEMA`, `MM_ESI_SCHEMA` and `MM_ENI_SAMPLES_DIR` name them instead, each defaulting to a
+gitignored directory, so dropping a copy in turns the tests on and nothing can be committed by
+accident. A checkout without them gets no validation test and a message naming the variable to set,
+rather than a test that silently passes.
+
+**A `.mmpd`-style export is one action, not an accessor.** `GET /api/eni` drives the bus: one EEPROM
+read and a burst of SDO uploads per device. It also needs the bus mapped, because FMMUs and logical
+addresses come into being at the SAFE-OP transition and there is nothing to describe before that. A
+bus in PRE-OP answers 409 rather than being guessed at.
+
+**The cyclic frame is a logical write and a logical read, not one read-write.** A read-write datagram
+is only correct where a device's input and output FMMUs share a logical address, and this master
+lays the two ranges out disjointly. ETG's nine-device sample does the same split, which is what
+confirmed the reading.
+
+### Open
+
+**Nothing here has run against hardware.** Every test is against a fake bus or a document on disk.
+The export drives a real bus, and `GET /api/eni` with a drive in SAFE-OP is the one path no test
+reaches.
+
+**The collector never fills `DC`, so an export is always free-run.** Reading and writing the element
+both work. Producing one needs an `AssignActivate` word, and a SOMANET drive does not carry the SII
+category that holds one, so it would have to come from the device's ESI — which `libs/etg` does not
+read the hardware sections of.
+
+**Seven elements are warned about rather than modelled**: `HotConnect`, `Info/Identification`,
+`CoE/Profile`, the SoE, AoE, EoE, FoE and VoE init commands, `Cyclic/CopyInfos`, a second `Cyclic`
+task, and a PDO's `Exclude` list. None appears in any document available here, which is why each is
+a warning rather than a gap somebody could miss.
+
+**No consuming master has accepted a generated document.** Conformance to ENI Schema 1.7 is checked
+by xmllint on every build. Whether EC-Master or TwinCAT brings a bus up from one is unverified, and
+xmllint cannot answer it.

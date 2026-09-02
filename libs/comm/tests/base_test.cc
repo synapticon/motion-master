@@ -2,7 +2,10 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <string>
+
+#include "comm/fieldbus_driver.h"
 
 namespace mm::comm {
 namespace {
@@ -19,6 +22,87 @@ TEST(IsMacAddressTest, AcceptsColonSeparated) {
 TEST(IsMacAddressTest, AcceptsDashSeparated) {
   EXPECT_TRUE(isMacAddress("AA-BB-CC-DD-EE-FF"));
   EXPECT_TRUE(isMacAddress("00-1a-2b-3c-4d-5e"));
+}
+
+// Sync Manager and FMMU register codecs
+
+TEST(RegisterCodecTest, ASyncManagerSurvivesARoundTripExceptItsType) {
+  SyncManagerConfig config{
+      .index = 2, .physicalStart = 0x1800, .length = 6, .flags = 0x10064, .type = 3};
+  const auto bytes = encodeSyncManager(config);
+  const auto decoded = decodeSyncManager(config.index, bytes);
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(decoded->index, config.index);
+  EXPECT_EQ(decoded->physicalStart, config.physicalStart);
+  EXPECT_EQ(decoded->length, config.length);
+  EXPECT_EQ(decoded->flags, config.flags);
+  // What the channel carries is the master's classification from the SII, not a register field.
+  EXPECT_EQ(decoded->type, 0);
+}
+
+TEST(RegisterCodecTest, ASyncManagerBlockIsEightBytesInRegisterOrder) {
+  const SyncManagerConfig config{
+      .index = 2, .physicalStart = 0x1800, .length = 6, .flags = 0x10064, .type = 3};
+  const auto bytes = encodeSyncManager(config);
+  // Start and length little-endian, then control, status, activate and PDI control. The two the
+  // master may not set are written as zero.
+  const std::array<uint8_t, 8> expected = {0x00, 0x18, 0x06, 0x00, 0x64, 0x00, 0x01, 0x00};
+  EXPECT_EQ(bytes, expected);
+}
+
+TEST(RegisterCodecTest, AnFmmuSurvivesARoundTripWhole) {
+  const FmmuConfig config{.index = 1,
+                          .logicalStart = 0x00010006,
+                          .length = 6,
+                          .logicalStartBit = 3,
+                          .logicalEndBit = 7,
+                          .physicalStart = 0x1C00,
+                          .physicalStartBit = 2,
+                          .type = 1,
+                          .active = 1};
+  const auto decoded = decodeFmmu(config.index, encodeFmmu(config));
+  ASSERT_TRUE(decoded.has_value());
+  EXPECT_EQ(decoded->index, config.index);
+  EXPECT_EQ(decoded->logicalStart, config.logicalStart);
+  EXPECT_EQ(decoded->length, config.length);
+  EXPECT_EQ(decoded->logicalStartBit, config.logicalStartBit);
+  EXPECT_EQ(decoded->logicalEndBit, config.logicalEndBit);
+  EXPECT_EQ(decoded->physicalStart, config.physicalStart);
+  EXPECT_EQ(decoded->physicalStartBit, config.physicalStartBit);
+  EXPECT_EQ(decoded->type, config.type);
+  EXPECT_EQ(decoded->active, config.active);
+}
+
+TEST(RegisterCodecTest, RefusesAShortBlock) {
+  const std::array<uint8_t, 4> short4{};
+  EXPECT_FALSE(decodeSyncManager(0, short4).has_value());
+  EXPECT_FALSE(decodeFmmu(0, short4).has_value());
+}
+
+TEST(RegisterCodecTest, TakesTheRegisterAddressFromTheIndexAndTheStride) {
+  // The addresses an init command targets, so a reader can recognise a block write by its Ado.
+  EXPECT_EQ(kSyncManagerRegisterBase + 2 * kSyncManagerRegisterBytes, 0x0810);
+  EXPECT_EQ(kFmmuRegisterBase + 1 * kFmmuRegisterBytes, 0x0610);
+}
+
+// parseMac
+
+TEST(ParseMacTest, DecodesBothSeparatorsAndEitherCase) {
+  const std::array<uint8_t, 6> expected = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+  EXPECT_EQ(parseMac("AA:BB:CC:DD:EE:FF"), expected);
+  EXPECT_EQ(parseMac("aa-bb-cc-dd-ee-ff"), expected);
+}
+
+TEST(ParseMacTest, KeepsTheBytesInTheOrderTheyAreWritten) {
+  const std::array<uint8_t, 6> expected = {0x00, 0x1A, 0x2B, 0x3C, 0x4D, 0x5E};
+  EXPECT_EQ(parseMac("00:1A:2B:3C:4D:5E"), expected);
+}
+
+TEST(ParseMacTest, RejectsWhatIsNotAMacAddress) {
+  EXPECT_FALSE(parseMac("").has_value());
+  EXPECT_FALSE(parseMac("AA:BB:CC:DD:EE").has_value());
+  EXPECT_FALSE(parseMac("AA:BB:CC:DD:EE:GG").has_value());
+  EXPECT_FALSE(parseMac("AA:BB-CC:DD:EE:FF").has_value());  // Mixed separators.
 }
 
 TEST(IsMacAddressTest, AcceptsLowercaseHex) { EXPECT_TRUE(isMacAddress("aa:bb:cc:dd:ee:ff")); }

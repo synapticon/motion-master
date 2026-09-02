@@ -12,7 +12,7 @@
 # is not an error), so the RT thread stays unpinned and the isolated core stays
 # idle — with GET /api/game-loop reporting no cpuAffinity field at all as the
 # only symptom. Never take this below alpha.62.
-motion_master_version: 6.0.0-alpha.84
+motion_master_version: 6.0.0-alpha.86
 motion_master_release_url: >-
   {{ motion_master_release_url_base }}/v{{ motion_master_version }}
 

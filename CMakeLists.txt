@@ -72,6 +72,8 @@ endif()
 # mm::etg and mm::comm are siblings, not a chain: etg is a pure XML->struct transform over mm::core
 # alone and deliberately does not depend on mm::comm (which links SOEM), so parsing an ESI file
 # needs no fieldbus. mm::node is where the two meet.
+include(cmake/schema_validation.cmake)
+
 add_subdirectory(libs/core)
 add_subdirectory(libs/net)
 add_subdirectory(libs/auto_tuning)

@@ -76,9 +76,19 @@ export interface EniRegisterAnnotation {
   waitsForState?: string
 }
 
-/// One EtherCAT datagram the master sends at a transition.
+/// One EtherCAT datagram, whether the master sends it at a transition or every cycle.
+///
+/// The two differ only in when they are sent and in three fields: an init command names the
+/// `transitions` it runs at, while a cyclic command names the AL `states` it is sent in and the
+/// offsets its data occupies in the process image.
 export interface EniInitCmd {
-  transitions: string[]
+  transitions?: string[]
+  /// AL states a cyclic command is sent in. Absent on an init command.
+  states?: string[]
+  /// Where a cyclic command's read data lands in the input image, in bytes.
+  inputOffs?: number
+  /// Where a cyclic command's written data comes from in the output image, in bytes.
+  outputOffs?: number
   cmd: number
   /// The datagram's mnemonic, e.g. `FPWR`.
   cmdName: string

@@ -2,8 +2,12 @@
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <nlohmann/json.hpp>
+#include <sstream>
 #include <string>
+#include <string_view>
 
 #include "etg/eni.h"
 #include "etg/tests/eni_fixtures.h"
@@ -17,6 +21,50 @@ std::string referenceDocument() {
   const auto written = mm::etg::writeEni(referenceNetwork());
   EXPECT_TRUE(written.has_value()) << written.error();
   return written.value_or("");
+}
+
+// The nine-device document ETG ships as a sample: the only ENI here nobody on this project wrote,
+// and so the only test that the annotation reads a real file rather than our own output. ETG's
+// terms forbid redistributing it, so the test skips when the gitignored directory is empty.
+std::string loadComplexSample() {
+  std::ifstream in(std::filesystem::path(MM_ENI_SAMPLES_DIR) / "complex.xml", std::ios::binary);
+  if (!in) {
+    return {};
+  }
+  std::ostringstream buffer;
+  buffer << in.rdbuf();
+  return buffer.str();
+}
+
+TEST(EniRequestTest, AnnotatesADocumentThisProjectDidNotWrite) {
+  const std::string xml = loadComplexSample();
+  if (xml.empty()) {
+    GTEST_SKIP() << "complex.xml is not present under " << MM_ENI_SAMPLES_DIR;
+  }
+  const auto response = buildEniResponse(xml);
+  ASSERT_TRUE(response.has_value()) << response.error();
+  EXPECT_EQ((*response)["summary"]["devices"], 9);
+  EXPECT_EQ((*response)["summary"]["datagrams"], 155);
+  EXPECT_EQ((*response)["summary"]["coeTransfers"], 6);
+  EXPECT_TRUE((*response)["warnings"].empty());
+
+  // Somebody else's tool wrote these commands, and the register names still come out.
+  std::size_t annotated = 0;
+  std::size_t states = 0;
+  for (const nlohmann::json& slave : (*response)["network"]["slaves"]) {
+    for (const nlohmann::json& command : slave["initCmds"]) {
+      if (!command.contains("register")) {
+        continue;
+      }
+      ++annotated;
+      if (command["register"].contains("requestsState") ||
+          command["register"].contains("waitsForState")) {
+        ++states;
+      }
+    }
+  }
+  EXPECT_GT(annotated, 0u);
+  EXPECT_GT(states, 0u);
 }
 
 TEST(EniRequestTest, RejectsADocumentThatWillNotRead) {

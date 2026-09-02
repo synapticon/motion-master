@@ -27,7 +27,7 @@ constexpr std::array<std::string_view, 4> kSamples = {"complex.xml", "eval32inpu
                                                       "eval32output.xml", "mailboxDevice.xml"};
 
 std::filesystem::path samplePath(std::string_view name) {
-  return std::filesystem::path(MM_ETG_TEST_DATA_DIR) / "eni" / "samples" / name;
+  return std::filesystem::path(MM_ENI_SAMPLES_DIR) / name;
 }
 
 /// Reads a sample, or skips the test naming the path it wanted.

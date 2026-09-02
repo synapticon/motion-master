@@ -46,3 +46,192 @@ export async function fetchEni(
     warnings: Number.isFinite(warnings) ? warnings : 0,
   }
 }
+
+// --- Parsed documents -------------------------------------------------------------------------
+//
+// The shapes `POST /api/eni/parse` returns. The generated client types `network` as a bare object,
+// because the swagger schema says only that it is one — describing every element there would
+// duplicate the C++ model in YAML. These are that description, written once, where a renderer can
+// use them.
+
+/// A byte payload as the document writes it, with its length alongside.
+export interface EniBytes {
+  hex: string
+  bytes: number
+}
+
+/// What an init command's address selects, and what its payload means. Present only where the
+/// address matches a register the server knows.
+export interface EniRegisterAnnotation {
+  /// Catalogue name, e.g. `sm2`, `fmmu0`, `al_control`.
+  name: string
+  description: string
+  /// Which channel or entity, for a register block that repeats.
+  instance?: number
+  /// Fields of a sync-manager or FMMU block. Absent for any other register.
+  decoded?: Record<string, number | boolean | string>
+  /// The AL state a write to AL Control asks for.
+  requestsState?: string
+  /// The AL state a read of AL Status waits for.
+  waitsForState?: string
+}
+
+/// One EtherCAT datagram the master sends at a transition.
+export interface EniInitCmd {
+  transitions: string[]
+  cmd: number
+  /// The datagram's mnemonic, e.g. `FPWR`.
+  cmdName: string
+  beforeSlave?: boolean
+  comment?: string
+  requires?: string
+  adp?: number
+  ado?: number
+  addr?: number
+  data?: EniBytes
+  dataLength?: number
+  cnt?: number
+  retries?: number
+  timeoutMs?: number
+  validate?: { data: EniBytes; dataMask?: EniBytes; timeoutMs: number }
+  register?: EniRegisterAnnotation
+}
+
+/// One CoE transfer, which lives under a device's mailbox rather than beside its datagrams.
+export interface EniCoeCmd {
+  transitions: string[]
+  timeoutMs: number
+  ccs: number
+  ccsName: 'download' | 'upload'
+  index: number
+  subindex: number
+  comment?: string
+  data?: EniBytes
+  disabled?: boolean
+}
+
+export interface EniSyncManager {
+  index: number
+  type: string
+  startAddress: number
+  controlByte: number
+  enable: boolean
+  minSize?: number
+  maxSize?: number
+  defaultSize?: number
+  watchdog?: number
+}
+
+export interface EniMailboxWindow {
+  start: number
+  length: number
+  pollTime?: number
+  statusBitAddr?: number
+}
+
+export interface EniSlave {
+  info: {
+    name: string
+    physAddr: number
+    autoIncAddr: number
+    physics: string
+    vendorId: number
+    productCode: number
+    revisionNo: number
+    serialNo: number
+  }
+  processData?: {
+    /// The window in the master's *output* image, named from the master's side.
+    send?: { bitStart: number; bitLength: number }
+    /// The window in the master's *input* image.
+    recv?: { bitStart: number; bitLength: number }
+    syncManagers: EniSyncManager[]
+  }
+  mailbox?: {
+    send: EniMailboxWindow
+    recv: EniMailboxWindow
+    bootstrap?: { send: EniMailboxWindow; recv: EniMailboxWindow }
+    protocols: string[]
+    coeInitCmds: EniCoeCmd[]
+  }
+  initCmds: EniInitCmd[]
+  previousPorts?: { port: string; selected: boolean; physAddr?: number; deviceId?: number }[]
+  dc?: {
+    potentialReferenceClock?: boolean
+    referenceClock?: boolean
+    cycleTime0Ns?: number
+    /// Not the SYNC1 cycle time: ETG.2100 defines it as SYNC1 cycle − SYNC0 cycle + SYNC0 shift.
+    cycleTime1Ns?: number
+    shiftTimeNs?: number
+  }
+}
+
+export interface EniVariable {
+  name: string
+  bitSize: number
+  bitOffs: number
+  comment?: string
+  dataType?: string
+}
+
+export interface EniNetwork {
+  master: {
+    name: string
+    destination: string
+    source: string
+    etherType?: number
+    mailboxStates?: { startAddr: number; count: number }
+    eoe?: { maxPorts: number; maxFrames: number; maxMacs: number }
+    initCmds: EniInitCmd[]
+  }
+  slaves: EniSlave[]
+  cyclic?: {
+    comment?: string
+    taskId?: string
+    cycleTimeUs?: number
+    priority?: number
+    frames: { comment?: string; cmds: EniInitCmd[] }[]
+  }
+  processImage?: {
+    inputs?: { byteSize: number; variables: EniVariable[] }
+    outputs?: { byteSize: number; variables: EniVariable[] }
+  }
+}
+
+/// What `POST /api/eni/parse` returns.
+export interface EniParseResult {
+  network: EniNetwork
+  /// One line per element seen and not modelled, or per value that would not decode.
+  warnings: string[]
+  summary: { devices: number; datagrams: number; coeTransfers: number }
+}
+
+/// Parses an ENI document (`POST /api/eni/parse`). `baseUrl` is the HTTP API origin. The document
+/// need not have come from this server — reading one another tool wrote is the point. Throws on a
+/// non-OK response, with the server's `error` message when there is one.
+export async function parseEni(
+  baseUrl: string,
+  xml: string,
+  options: { fetch?: typeof fetch; signal?: AbortSignal } = {},
+): Promise<EniParseResult> {
+  const doFetch = options.fetch ?? fetch
+  const res = await doFetch(`${baseUrl.replace(/\/+$/, '')}/api/eni/parse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/xml' },
+    body: xml,
+    signal: options.signal,
+  })
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`
+    try {
+      const body = (await res.json()) as { error?: string }
+      if (body?.error) {
+        message = body.error
+      }
+    } catch {
+      // Non-JSON error body — keep the status message.
+    }
+    throw new Error(message)
+  }
+  return (await res.json()) as EniParseResult
+}

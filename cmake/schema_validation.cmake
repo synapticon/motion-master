@@ -21,6 +21,14 @@ set(MM_ESI_SCHEMA
     "${CMAKE_SOURCE_DIR}/libs/etg/tests/data/esi/EtherCATInfo.xsd"
     CACHE FILEPATH "ESI XML Schema (EtherCATInfo.xsd), for the ESI validation test")
 
+# The four ENI documents ETG ships as samples. They are the only ENI files nobody on this project
+# wrote, which makes them the only real test of the reader — a round trip proves it inverts our own
+# writer and nothing more. Same licence problem as the schemas, so the same arrangement: a
+# gitignored default, and the tests skip with the path they wanted when it is empty.
+set(MM_ENI_SAMPLES_DIR
+    "${CMAKE_SOURCE_DIR}/libs/etg/tests/data/eni/samples"
+    CACHE PATH "Directory holding the ETG ENI sample documents, for the reader tests")
+
 if(NOT XMLLINT_EXECUTABLE)
   message(STATUS "Schema validation tests disabled: xmllint was not found")
 endif()

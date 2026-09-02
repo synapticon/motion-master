@@ -3131,6 +3131,82 @@ paths:
               schema:
                 type: array
                 items: { $ref: "#/components/schemas/IntegroVariantOption" }
+  /api/eni/parse:
+    post:
+      summary: Parse an EtherCAT Network Information (ENI) file
+      operationId: parseEni
+      description: >
+        Decodes an ENI document supplied in the request body. No device is involved, and
+        that is the point: the useful case is reading a configuration somebody else's tool
+        wrote — acontis EC-Engineer, TwinCAT — rather than the one this master exports from
+        `GET /api/eni`.
+
+
+        **An ENI is a script, not a description.** Every configuration step in it is an
+        EtherCAT datagram or a CoE download tagged with the AL-state transition it belongs
+        to, so a listing of the raw elements would show `FPWR to 2064, data
+        0018060064000100` and leave the reading undone. Each datagram therefore carries a
+        `register` object naming what its `ado` selects, with the instance for a repeating
+        block, and `decoded` fields where the payload is a sync-manager or FMMU register
+        block. A write to AL Control reports `requestsState`, and the read that follows it
+        reports `waitsForState`.
+
+
+        Every enumeration is spelled out beside its value — `cmd` 5 with `cmdName` `FPWR`,
+        transitions as `IP`/`PS`/`SO` — and every payload carries its hex beside its byte
+        count, because the reader of this JSON is a person rather than a master.
+
+
+        Tolerant by design. Only three things fail: XML that will not parse, a root that is
+        not `EtherCATConfig`, and a missing `Config`. Anything else costs that value and a
+        line in `warnings`, including an element this model has no room for. The sample
+        documents ETG itself ships need that tolerance: two of them omit elements their own
+        schema marks mandatory, and a previous port of `A` is spec-legal while ENI Schema
+        1.7 enumerates only `B`, `C` and `D`.
+      requestBody:
+        required: true
+        content:
+          application/xml:
+            schema:
+              type: string
+      responses:
+        "200":
+          description: The parsed ENI
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [network, warnings, summary]
+                properties:
+                  network:
+                    type: object
+                    description: >
+                      The master, every device, the cyclic frame and the process image, keyed
+                      by the model's own field names.
+                  warnings:
+                    type: array
+                    description: >
+                      One line per element seen and not modelled, or per value that would not
+                      decode. Each names a place in the document.
+                    items: { type: string }
+                  summary:
+                    type: object
+                    required: [devices, datagrams, coeTransfers]
+                    properties:
+                      devices:
+                        type: integer
+                        description: Devices in the document
+                      datagrams:
+                        type: integer
+                        description: EtherCAT init commands, master and devices together
+                      coeTransfers:
+                        type: integer
+                        description: CoE init commands, which live under a device's mailbox
+        "400":
+          description: The body is not a readable ENI document
   /api/esi/parse:
     post:
       summary: Parse an EtherCAT Slave Information (ESI) file

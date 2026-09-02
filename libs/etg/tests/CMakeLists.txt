@@ -17,8 +17,10 @@ target_link_libraries(mm_etg_tests PRIVATE mm::etg GTest::gtest GTest::gtest_mai
 # from disk, and eni_test.cc writes the reference ENI for the schema-validation test below. Hand
 # both directories to the test rather than letting it guess a path relative to cwd.
 target_compile_definitions(
-  mm_etg_tests PRIVATE MM_ETG_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
-                       MM_ETG_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}")
+  mm_etg_tests
+  PRIVATE MM_ETG_TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data"
+          MM_ETG_TEST_OUTPUT_DIR="${CMAKE_CURRENT_BINARY_DIR}"
+          MM_ENI_SAMPLES_DIR="${MM_ENI_SAMPLES_DIR}")
 
 # GCC 12-14 emit false-positive -Warray-bounds / -Wstringop-overflow inside libstdc++
 # <bits/stl_algobase.h> when test code is inlined at -O3 (release builds). Suppress for GCC on these

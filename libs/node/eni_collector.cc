@@ -340,13 +340,34 @@ std::expected<EniCollection, std::string> collectEni(DeviceManager& manager,
   collection.network.master.source = options.sourceMac;
   collection.network.master.initCmds = masterInitCmds();
 
-  // Logical addressing for the cyclic frame. The output FMMUs and the input FMMUs each occupy one
-  // contiguous logical range, so the lowest address of each is where its datagram starts, and the
-  // number of FMMUs in it is the working counter that datagram returns.
+  // The output FMMUs and the input FMMUs each occupy one contiguous logical range, so the lowest
+  // address of each is where its cyclic datagram starts, and the number of FMMUs in it is the
+  // working counter that datagram returns.
+  //
+  // The bases are found before anything is written, because a device's process-data window is
+  // reported relative to its own half of the process image rather than in the logical address
+  // space. ETG.2100 Table 14 is explicit: `Recv:BitStart` is the offset "in the input image of the
+  // MainDevice". This master lays the two ranges out one after the other, so an input FMMU's
+  // logical address is its offset plus the whole output image, and writing it unadjusted would send
+  // a consuming master looking past the end of a smaller input image.
   std::uint32_t outputBase = std::numeric_limits<std::uint32_t>::max();
   std::uint32_t inputBase = std::numeric_limits<std::uint32_t>::max();
   int outputFmmus = 0;
   int inputFmmus = 0;
+  for (const SlaveConfigInfo& info : busConfig) {
+    for (const mm::comm::FmmuConfig& fmmu : info.config.fmmus) {
+      if (fmmu.active == 0) {
+        continue;
+      }
+      if ((fmmu.type & kFmmuWrite) != 0) {
+        outputBase = std::min(outputBase, fmmu.logicalStart);
+        ++outputFmmus;
+      } else if ((fmmu.type & kFmmuRead) != 0) {
+        inputBase = std::min(inputBase, fmmu.logicalStart);
+        ++inputFmmus;
+      }
+    }
+  }
 
   for (const SlaveConfigInfo& info : busConfig) {
     const mm::comm::SlaveConfig& config = info.config;
@@ -430,17 +451,18 @@ std::expected<EniCollection, std::string> collectEni(DeviceManager& manager,
         continue;
       }
       const bool isOutput = (fmmu.type & kFmmuWrite) != 0;
-      const std::uint32_t bitLength = static_cast<std::uint32_t>(fmmu.length) * 8;
+      if (!isOutput && (fmmu.type & kFmmuRead) == 0) {
+        continue;
+      }
+      // Relative to this half of the image, not to the logical address space. See the bases above.
+      const std::uint32_t base = isOutput ? outputBase : inputBase;
       const mm::etg::EniProcessDataWindow window{
-          .bitStart = fmmu.logicalStart * 8 + fmmu.logicalStartBit, .bitLength = bitLength};
+          .bitStart = (fmmu.logicalStart - base) * 8 + fmmu.logicalStartBit,
+          .bitLength = static_cast<std::uint32_t>(fmmu.length) * 8};
       if (isOutput) {
         processData.send = window;
-        outputBase = std::min(outputBase, fmmu.logicalStart);
-        ++outputFmmus;
-      } else if ((fmmu.type & kFmmuRead) != 0) {
+      } else {
         processData.recv = window;
-        inputBase = std::min(inputBase, fmmu.logicalStart);
-        ++inputFmmus;
       }
     }
     if (processData.send.has_value() || processData.recv.has_value() ||

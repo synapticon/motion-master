@@ -201,6 +201,32 @@ TEST(EniCollectorTest, CountsTheAutoIncrementAddressDownAlongTheRing) {
   EXPECT_EQ(collected->network.slaves[1].info.autoIncAddr, 0xFFFF);
 }
 
+TEST(EniCollectorTest, ReportsAWindowRelativeToItsOwnHalfOfTheImage) {
+  DeviceManager manager;
+  bringUp(manager, circuloBus());
+
+  const auto collected = collectEni(manager, options());
+  ASSERT_TRUE(collected.has_value()) << collected.error();
+  const auto& processData = *collected->network.slaves[0].processData;
+
+  // The input FMMU sits at logical address 6, after the six output bytes, because this master lays
+  // the two ranges out one after the other. ETG.2100 Table 14 asks for the offset "in the input
+  // image of the MainDevice", so the window starts at 0 and not at 48 bits. Writing the logical
+  // address here sends a consuming master looking past the end of a smaller input image.
+  ASSERT_TRUE(processData.recv.has_value());
+  EXPECT_EQ(processData.recv->bitStart, 0u);
+  EXPECT_EQ(processData.recv->bitLength, 48u);
+  ASSERT_TRUE(processData.send.has_value());
+  EXPECT_EQ(processData.send->bitStart, 0u);
+
+  // The cyclic datagrams keep the logical addresses, because that is the space they address.
+  ASSERT_TRUE(collected->network.cyclic.has_value());
+  const auto& cmds = collected->network.cyclic->frames[0].cmds;
+  ASSERT_EQ(cmds.size(), 2u);
+  EXPECT_EQ(cmds[0].addr, 0u);  // LWR over the outputs.
+  EXPECT_EQ(cmds[1].addr, 6u);  // LRD over the inputs, which start after them.
+}
+
 TEST(EniCollectorTest, ProgramsMailboxSyncManagersBeforePreOpAndProcessDataOnesAtSafeOp) {
   DeviceManager manager;
   bringUp(manager, circuloBus());

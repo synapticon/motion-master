@@ -1,6 +1,7 @@
 #include "node/eni_collector.h"
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <format>
 #include <limits>
@@ -9,6 +10,7 @@
 #include <utility>
 #include <vector>
 
+#include "comm/fieldbus_driver.h"
 #include "comm/object_data_types.h"
 #include "comm/sii.h"
 #include "core/util.h"
@@ -27,14 +29,8 @@ using mm::etg::EniTransition;
 constexpr std::uint16_t kRegConfiguredAddress = 0x0010;
 constexpr std::uint16_t kRegAlControl = 0x0120;
 constexpr std::uint16_t kRegAlStatus = 0x0130;
-constexpr std::uint16_t kRegFmmu0 = 0x0600;
-constexpr std::uint16_t kRegSyncManager0 = 0x0800;
 constexpr std::uint16_t kRegDcSystemTime = 0x0910;
 constexpr std::uint16_t kRegDcCycleConfig = 0x0970;
-
-/// An FMMU entity is 16 bytes and a Sync Manager channel 8 (ETG.1000.4 Tables 56 to 59).
-constexpr std::uint16_t kFmmuBytes = 16;
-constexpr std::uint16_t kSyncManagerBytes = 8;
 
 /// The broadcast clears at INIT cover every channel the register block can hold, which is what the
 /// master must do before it programs the ones this bus uses.
@@ -100,45 +96,11 @@ constexpr std::string_view iecTypeName(std::uint16_t dataType) {
   }
 }
 
-/// @brief Encodes one Sync Manager channel as the eight bytes an FPWR to 0x0800+8n carries.
-///
-/// The two read-only bytes — status at 0x05 and PDI control at 0x07 — are written as zero, which is
-/// what the register accepts from the master side. @c SyncManagerConfig::flags is the 32-bit read
-/// of 0x04 to 0x07, so the control byte is its low byte and the activate byte its third.
-std::vector<std::uint8_t> encodeSyncManager(const mm::comm::SyncManagerConfig& syncManager) {
-  const auto start = mm::core::toBytes<std::uint16_t>(syncManager.physicalStart);
-  const auto length = mm::core::toBytes<std::uint16_t>(syncManager.length);
-  return {start[0],
-          start[1],
-          length[0],
-          length[1],
-          static_cast<std::uint8_t>(syncManager.flags & 0xFFu),
-          0x00,
-          static_cast<std::uint8_t>((syncManager.flags >> 16) & 0xFFu),
-          0x00};
-}
-
-/// @brief Encodes one FMMU entity as the sixteen bytes an FPWR to 0x0600+16n carries.
-std::vector<std::uint8_t> encodeFmmu(const mm::comm::FmmuConfig& fmmu) {
-  const auto logicalStart = mm::core::toBytes<std::uint32_t>(fmmu.logicalStart);
-  const auto length = mm::core::toBytes<std::uint16_t>(fmmu.length);
-  const auto physicalStart = mm::core::toBytes<std::uint16_t>(fmmu.physicalStart);
-  return {logicalStart[0],
-          logicalStart[1],
-          logicalStart[2],
-          logicalStart[3],
-          length[0],
-          length[1],
-          fmmu.logicalStartBit,
-          fmmu.logicalEndBit,
-          physicalStart[0],
-          physicalStart[1],
-          fmmu.physicalStartBit,
-          fmmu.type,
-          fmmu.active,
-          0x00,
-          0x00,
-          0x00};
+/// The register codecs return a fixed-width array, which is what says how wide the block is; an
+/// ENI payload is a vector, because most of them are not register blocks at all.
+template <std::size_t N>
+std::vector<std::uint8_t> toVector(const std::array<std::uint8_t, N>& bytes) {
+  return {bytes.begin(), bytes.end()};
 }
 
 mm::etg::EniEcatCmd registerWrite(EniTransition transition, EniCmd cmd, std::uint16_t address,
@@ -198,8 +160,9 @@ mm::etg::EniEcatCmd broadcastClear(std::uint16_t reg, std::uint32_t bytes, std::
 /// rather than in each device's list — which is what @c beforeSlave says.
 std::vector<mm::etg::EniEcatCmd> masterInitCmds() {
   return {
-      broadcastClear(kRegFmmu0, kFmmuBlockBytes, "clear every FMMU"),
-      broadcastClear(kRegSyncManager0, kSyncManagerBlockBytes, "clear every sync manager"),
+      broadcastClear(mm::comm::kFmmuRegisterBase, kFmmuBlockBytes, "clear every FMMU"),
+      broadcastClear(mm::comm::kSyncManagerRegisterBase, kSyncManagerBlockBytes,
+                     "clear every sync manager"),
       broadcastClear(kRegDcSystemTime, kDcBlockBytes, "clear the distributed-clock system time"),
       broadcastClear(kRegDcCycleConfig, kDcBlockBytes,
                      "clear the distributed-clock cycle configuration"),
@@ -461,8 +424,10 @@ std::expected<EniCollection, std::string> collectEni(DeviceManager& manager,
           carriesProcessData(syncManager) ? EniTransition::PS : EniTransition::IP;
       slave.initCmds.push_back(registerWrite(
           transition, EniCmd::Fpwr, station,
-          static_cast<std::uint16_t>(kRegSyncManager0 + syncManager.index * kSyncManagerBytes),
-          encodeSyncManager(syncManager), std::format("set sync manager {}", syncManager.index)));
+          static_cast<std::uint16_t>(mm::comm::kSyncManagerRegisterBase +
+                                     syncManager.index * mm::comm::kSyncManagerRegisterBytes),
+          toVector(mm::comm::encodeSyncManager(syncManager)),
+          std::format("set sync manager {}", syncManager.index)));
     }
     slave.initCmds.push_back(registerWrite(EniTransition::IP, EniCmd::Fpwr, station, kRegAlControl,
                                            {kAlStatePreOp, 0x00}, "request PRE-OP"));
@@ -473,10 +438,11 @@ std::expected<EniCollection, std::string> collectEni(DeviceManager& manager,
       if (fmmu.active == 0) {
         continue;
       }
-      slave.initCmds.push_back(
-          registerWrite(EniTransition::PS, EniCmd::Fpwr, station,
-                        static_cast<std::uint16_t>(kRegFmmu0 + fmmu.index * kFmmuBytes),
-                        encodeFmmu(fmmu), std::format("set FMMU {}", fmmu.index)));
+      slave.initCmds.push_back(registerWrite(
+          EniTransition::PS, EniCmd::Fpwr, station,
+          static_cast<std::uint16_t>(mm::comm::kFmmuRegisterBase +
+                                     fmmu.index * mm::comm::kFmmuRegisterBytes),
+          toVector(mm::comm::encodeFmmu(fmmu)), std::format("set FMMU {}", fmmu.index)));
     }
     slave.initCmds.push_back(registerWrite(EniTransition::PS, EniCmd::Fpwr, station, kRegAlControl,
                                            {kAlStateSafeOp, 0x00}, "request SAFE-OP"));

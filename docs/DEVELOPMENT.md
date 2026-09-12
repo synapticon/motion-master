@@ -61,7 +61,9 @@ cmake --build --preset x64-windows-debug
 ctest --test-dir build/x64-windows-debug --output-on-failure
 ```
 
-The script changes the environment of the current process, so one call serves the whole session. Call it again in each new window. To make it automatic, run `.\tools\windows-env.ps1 -Persist` once. That adds a marked block to `$PROFILE.CurrentUserAllHosts`, so every new session starts ready to build. Persistence costs about four seconds at each session start, because `vcvars64.bat` is slow. `.\tools\windows-env.ps1 -Remove` takes the block out again.
+The script changes the environment of the current process, so one call serves the whole session. Call it again in each new window. To make it automatic, run `.\tools\windows-env.ps1 -Persist` once. That adds a marked block to `$PROFILE.CurrentUserAllHosts`, so every new session starts ready to build, and `.\tools\windows-env.ps1 -Remove` takes the block out again.
+
+`vcvars64.bat` needs about four seconds, which is too much to pay at every prompt. So the first call records every change it made in `%LOCALAPPDATA%\motion-master\windows-env.json`, and each later call replays that record in about a tenth of a second. A persisted session therefore starts in about 0.8 s instead of 0.4 s. The record carries the write time of the MSVC toolset directory, of the Windows SDK include directory, and of the script itself, so an update of any of the three builds a fresh record. Pass `-Refresh` to force that by hand — you need it after you install a CMake or a Ninja of your own, because the record cannot see that.
 
 The shell scripts in `tools/` target Linux and macOS. On Windows, call `cmake` and `ctest` directly with the `x64-windows-debug` or `x64-windows-release` preset.
 

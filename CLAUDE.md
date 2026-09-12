@@ -50,7 +50,7 @@ argument. `windows-env.ps1` is the exception: it is PowerShell, and it takes swi
 
 | Script | Does |
 | --- | --- |
-| `windows-env.ps1` | **Windows.** Put MSVC, CMake and Ninja on PATH. `-Persist` adds it to the user's PowerShell profile, `-Remove` undoes that |
+| `windows-env.ps1` | **Windows.** Put MSVC, CMake and Ninja on PATH. Records the change in `%LOCALAPPDATA%` and replays it, because `vcvars64.bat` costs 4 s. `-Persist` adds it to the user's PowerShell profile, `-Remove` undoes that, `-Refresh` rebuilds the record |
 | `install-deps.sh` | Install OS packages (Debian/Ubuntu + Fedora). `--dry-run` to preview |
 | `configure.sh` | `cmake --preset` |
 | `build.sh` | Build. `--setcap` also grants raw socket + RT access via sudo |

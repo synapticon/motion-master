@@ -45,10 +45,12 @@ C++23. Warnings are errors: `-Wall -Wextra -Wpedantic -Werror`, or `/W4 /WX` on 
 
 ### Scripts
 
-Wrapper scripts live in `tools/`. Each takes an optional preset name as the first argument.
+Wrapper scripts live in `tools/`. Each shell script takes an optional preset name as the first
+argument. `windows-env.ps1` is the exception: it is PowerShell, and it takes switches.
 
 | Script | Does |
 | --- | --- |
+| `windows-env.ps1` | **Windows.** Put MSVC, CMake and Ninja on PATH. `-Persist` adds it to the user's PowerShell profile, `-Remove` undoes that |
 | `install-deps.sh` | Install OS packages (Debian/Ubuntu + Fedora). `--dry-run` to preview |
 | `configure.sh` | `cmake --preset` |
 | `build.sh` | Build. `--setcap` also grants raw socket + RT access via sudo |

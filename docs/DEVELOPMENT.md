@@ -46,6 +46,25 @@ For the inner development loop, `./tools/build-dev.sh` builds and stamps capabil
 
 On Linux, `./tools/build.sh --setcap` runs `sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip` on the binary after linking — you will be prompted for your password. This is the same set the release packages apply, and it has to be re-run after every relink because the capabilities are attached to the file; see [Linux capabilities](INSTALLATION.md#linux-capabilities) for what each one grants.
 
+### Windows
+
+Install Visual Studio with the workload **Desktop development with C++**. That workload carries the x64 compiler and the component *C++ CMake tools for Windows*, which supplies both CMake and Ninja. Nothing else is needed.
+
+Visual Studio keeps those three tools out of the system PATH, so `cmake --preset` fails in a plain PowerShell window. `tools\windows-env.ps1` puts them on PATH. It finds the Visual Studio installation with `vswhere`, imports the MSVC x64 build environment from `vcvars64.bat`, and adds the CMake and Ninja that ship inside Visual Studio. It also checks that CMake is 4.0 or newer, because an older Visual Studio ships CMake 3.x, which cannot configure this project.
+
+```powershell
+git submodule update --init --recursive
+
+.\tools\windows-env.ps1
+cmake --preset x64-windows-debug
+cmake --build --preset x64-windows-debug
+ctest --test-dir build/x64-windows-debug --output-on-failure
+```
+
+The script changes the environment of the current process, so one call serves the whole session. Call it again in each new window. To make it automatic, run `.\tools\windows-env.ps1 -Persist` once. That adds a marked block to `$PROFILE.CurrentUserAllHosts`, so every new session starts ready to build. Persistence costs about four seconds at each session start, because `vcvars64.bat` is slow. `.\tools\windows-env.ps1 -Remove` takes the block out again.
+
+The shell scripts in `tools/` target Linux and macOS. On Windows, call `cmake` and `ctest` directly with the `x64-windows-debug` or `x64-windows-release` preset.
+
 ## Running locally
 
 Production releases bundle a real Let's Encrypt TLS certificate for `local.motion-master.synapticon.com`, so the PWA at `https://motion-master.synapticon.com` connects without any browser warning.
@@ -173,10 +192,11 @@ Your `registerRoutes(uWS::SSLApp&, const mm::api::RouteContext&)` runs once on t
 
 ## Developer Scripts
 
-All scripts default to the `x64-linux-debug` preset. Pass a preset name as the first argument to override (e.g. `./tools/build.sh x64-linux-release`).
+The shell scripts target Linux and macOS, and all of them default to the `x64-linux-debug` preset. Pass a preset name as the first argument to override (e.g. `./tools/build.sh x64-linux-release`). The one PowerShell script is for Windows, and it takes switches instead of a preset.
 
 | Script | Description |
 | --- | --- |
+| `.\tools\windows-env.ps1` | **Windows only** — put MSVC, CMake, and Ninja on PATH for this session (`-Persist` calls it from your PowerShell profile, `-Remove` undoes that) |
 | `./tools/configure.sh` | Run CMake configure |
 | `./tools/build.sh` | Build all targets (`--setcap` also stamps Linux capabilities, needs `sudo`) |
 | `./tools/build-dev.sh` | Build — the inner development loop; stamps capabilities by default (`--no-setcap` to skip the `sudo`) |

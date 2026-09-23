@@ -1,6 +1,6 @@
 {
   "name": "example",
-  "version": "6.0.0-alpha.86",
+  "version": "6.0.0-alpha.87",
   "private": true,
   "type": "module",
   "scripts": {

@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.87] - 2026-09-23
+
 ### Added
 
 - **The Console has a Learn section.** Its first page, **Servo Motors**, explains the machine a drive is attached to, for anyone who is comfortable with software and new to motors. It covers what servo means, how the motor is built, how a current in the windings makes the magnetic poles that turn the rotor, commutation, shaft angle against electrical angle, and how current becomes torque. Interactive figures show a cross-section whose field lines, stator poles and phase currents turn as you drag the field round, a three-phase field you can aim, and a torque-speed envelope. Terms such as rotor, stator and back-EMF open a short definition on hover or tap. The page ends with the SOMANET objects the concepts map onto, and it needs no connection to a drive. The Learn group in the sidebar starts collapsed, and any collapsed group now opens when you are on one of its pages.
@@ -807,7 +809,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.86...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.87...HEAD
+[6.0.0-alpha.87]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.86...v6.0.0-alpha.87
 [6.0.0-alpha.86]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.85...v6.0.0-alpha.86
 [6.0.0-alpha.85]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.84...v6.0.0-alpha.85
 [6.0.0-alpha.84]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.83...v6.0.0-alpha.84

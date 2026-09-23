@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **The Console has a Learn section.** Its first page, **Servo Motors**, explains the machine a drive is attached to, for anyone who is comfortable with software and new to motors. It covers what servo means, how the motor is built, how a current in the windings makes the magnetic poles that turn the rotor, commutation, shaft angle against electrical angle, and how current becomes torque. Interactive figures show a cross-section whose field lines, stator poles and phase currents turn as you drag the field round, a three-phase field you can aim, and a torque-speed envelope. Terms such as rotor, stator and back-EMF open a short definition on hover or tap. The page ends with the SOMANET objects the concepts map onto, and it needs no connection to a drive. The Learn group in the sidebar starts collapsed, and any collapsed group now opens when you are on one of its pages.
+
 ## [6.0.0-alpha.86] - 2026-09-02
 
 ### Fixed

@@ -47,13 +47,17 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   commutationOffset.caveats = {
       "The rotating methods (0x2009:03 = 0 or 1) turn the rotor: the shaft must be free, and "
       "whatever it drives must be safe to move. The stationary method (2) does not turn it.",
-      "The brake is released only for the rotating methods, which the drive refuses to run with it "
-      "engaged — so anything it was holding is free to move, and the load must be supported first. "
-      "The stationary method leaves the brake alone.",
+      "The brake is released only for the rotating methods, which the drive refuses to run while "
+      "it "
+      "is engaged unless the brake is set to manual release — so anything it was holding is free "
+      "to "
+      "move, and the load must be supported first. The stationary method leaves the brake alone.",
       "On the rotating methods, releasing a pin brake turns the motor by design, to lift the load "
       "off the pin.",
-      "Method 1 additionally needs the gains in 0x2009:04-06 tuned. The stationary method (2) is "
-      "less precise.",
+      "Method 1 does not work at all until the gains in 0x2009:04-06 are tuned: with all three "
+      "left "
+      "at zero the drive never closes the loop it needs. The stationary method (2) is less "
+      "precise.",
       "The new offset replaces the old one and stays there. It is not saved to flash, so run "
       "store parameters to keep it across a power cycle.",
       "The drive marks the offset invalid again on its own whenever the commutation encoder's "

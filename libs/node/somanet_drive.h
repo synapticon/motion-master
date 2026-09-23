@@ -90,24 +90,37 @@ enum CommutationOffsetSetting : uint8_t {
 /// @brief How commutation offset measurement (command 5) is performed (0x2009:03).
 ///
 /// **The choice changes what the command physically does, not just its accuracy**, which is why a
-/// caller has to read it rather than assume: the two rotating methods need the brake *released*,
-/// and the stationary one needs it *engaged* — the drive cannot hold the load itself under that
-/// method.
+/// caller has to read it rather than assume: the two alignment methods turn the rotor and need the
+/// brake *released*, while the injection method turns nothing and leaves the brake as it found it.
+///
+/// The names below describe the behaviour a caller has to plan around. The firmware's own names for
+/// the same three are `METHOD_CONSTANT_RATE_MAGNETIC_ALIGNMENT`,
+/// `METHOD_PID_CONTROL_BASED_MAGNETIC_ALIGNMENT` and `METHOD_HIGH_FREQUENCY_SIGNAL_INJECTION`, in
+/// `sc_somanet_ip/module_library_bldc_torque_control`.
 enum class CommutationOffsetMethod : uint8_t {
-  /// Rotates the rotor by up to one pole pair. Holds the load, needs no tuning, good precision —
-  /// the default, and the one to use unless there is a reason not to.
+  /// Holds current on the magnet axis and sweeps that direction round at a constant rate, slowly
+  /// enough for the rotor to follow, so the shaft can turn up to one pole pair. Concludes once the
+  /// rotor has tracked to within three electrical degrees and stayed there for 500 ms, reporting
+  /// the average over that window. Needs no tuning. The default, and the one to use unless there is
+  /// a reason not to.
   kRotating = 0,
 
-  /// Rotates the rotor only a few electrical degrees and holds the load, but **requires the
-  /// Kp/Ki/Kd gains in 0x2009:04-06 to be tuned already**; intended for the prototype phase. How
-  /// few depends entirely on the quality of that tuning, and the firmware documentation quotes two
-  /// different figures for a well-tuned controller — "less than 5 degrees" in prose, "less than 20
-  /// electrical degrees" in its comparison table — so treat either as an order of magnitude rather
-  /// than a bound, and method 0 as the predictable one.
+  /// Closes a loop rather than sweeping: a PID using the gains in 0x2009:04-06 steers the field to
+  /// stay locked on the rotor, and the controller's own output is the offset. It settles inside
+  /// 100 ms, which is why a well tuned axis barely moves. **With all three gains left at zero the
+  /// loop is never closed and the method cannot work**, so this is the one method a caller must not
+  /// select blind. Intended for the prototype phase.
   kRotatingTuned = 1,
 
-  /// Does not rotate the rotor at all and completes in around 250 ms, at the cost of precision.
-  /// **Does not hold the load, so the brake stays engaged** for the duration.
+  /// Turns the rotor not at all. It probes the iron instead: at each trial angle it drives a large
+  /// current to saturate the steel, injects a voltage pulse and measures the current step, which is
+  /// largest where the trial angle lines up with the magnets because saturation lowers the
+  /// inductance. Scans the electrical circle in ten-degree steps, then rescans the winning ten
+  /// degrees one degree at a time. Needs no tuning and is the least precise of the three.
+  ///
+  /// It asks for *more* current than the alignment methods, not less — up to twice the configured
+  /// diagnostics current, clamped to the current limit — so "stationary" is about the shaft, not
+  /// about how gentle the command is.
   kStationary = 2,
 };
 
@@ -126,10 +139,13 @@ constexpr std::string_view toString(CommutationOffsetMethod method) {
 
 /// @brief Whether the method needs the brake released, as opposed to engaged.
 ///
-/// True for the rotating methods, whose restrictions require a disengaged brake. False for
-/// @c kStationary, which is the one command in this family that wants the brake **engaged** — it
-/// cannot hold the load, so releasing the brake for it would be actively wrong rather than merely
-/// unnecessary.
+/// True for the two alignment methods. The firmware refuses the command outright while the brake is
+/// engaged, with one exception it does not advertise: a drive whose brake release strategy is
+/// manual is let through regardless. Releasing the brake ourselves is what makes the command
+/// available on every other drive.
+///
+/// False for @c kStationary, which asks nothing of the brake, so the brake is left exactly as it
+/// was found and whatever it holds stays held.
 constexpr bool requiresBrakeReleased(CommutationOffsetMethod method) {
   return method != CommutationOffsetMethod::kStationary;
 }

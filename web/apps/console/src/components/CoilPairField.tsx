@@ -107,7 +107,7 @@ export default function CoilPairField() {
       <div className="grid sm:grid-cols-2 divide-y sm:divide-y-0 sm:divide-x divide-grey-200">
         <Panel
           label="One phase: a wire and its return"
-          detail="Current out through one slot, back through the other."
+          detail="The current goes out through one slot and comes back through the other."
           leftInto={false}
           rightInto
           adds
@@ -123,13 +123,13 @@ export default function CoilPairField() {
       <div className="border-t border-grey-200 p-4 text-[11px] text-grey-500 leading-4 space-y-1.5">
         <p>
           <span className="text-grey-900">Every wire carrying current is wrapped in a field.</span>{' '}
-          Right hand, thumb along the current, fingers curl the way the field goes. The grey rings
-          are that field and the small arrow is which way it runs.
+          Point the thumb of your right hand along the current, and your fingers curl the way the
+          field goes. The grey rings are that field, and the small arrow shows which way it runs.
         </p>
         <p>
           On the left, the two contributions between the wires point the same way and reinforce. On
           the right they point opposite ways and cancel. So the return leg is not a wire to be
-          routed out of the way — it is half the magnet, which is why a winding is a loop and why
+          routed out of the way. It is half the magnet, which is why a winding is a loop and why
           the two slots of a phase belong together.
         </p>
         <p>

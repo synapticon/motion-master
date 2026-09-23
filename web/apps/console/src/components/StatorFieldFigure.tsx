@@ -12,8 +12,11 @@ import { Pause, Play } from 'lucide-react'
 // contributions comes to 1.5 in the direction θ — exactly. The magnitude never varies as θ turns,
 // which is why a smoothly commutated motor produces smooth torque.
 //
-// The axes are drawn at 0, 120 and 240 degrees. Where they actually sit inside a real machine
-// depends on how it is wound; only the 120 degree spacing is common to all of them.
+// Everything is drawn DRAW_OFFSET degrees on from its electrical angle, so U's field points up. That
+// matches the cross-section, where U's two slots lie left and right and a phase's field is at right
+// angles to its slots. The slider still reads the electrical angle, the same number the
+// cross-section's slider shows. Where the axes sit inside a real machine depends on how it is
+// wound. Only the 120 degree spacing is common to every winding.
 
 const SIZE = 260
 const C = SIZE / 2
@@ -21,6 +24,8 @@ const R = 96
 
 const rad = (deg: number) => (deg * Math.PI) / 180
 const polar = (r: number, deg: number) => ({ x: C + r * Math.cos(rad(deg)), y: C - r * Math.sin(rad(deg)) })
+
+const DRAW_OFFSET = 90
 
 const PHASES = [
   { label: 'U', axis: 0 },
@@ -73,8 +78,9 @@ export default function StatorFieldFigure() {
   const lines = [-0.66, -0.33, 0, 0.33, 0.66].map(offset => {
     const d = offset * R
     const half = Math.sqrt(Math.max(R * R - d * d, 0)) * 0.92
-    const n = { x: Math.cos(rad(angle + 90)), y: -Math.sin(rad(angle + 90)) }
-    const t = { x: Math.cos(rad(angle)), y: -Math.sin(rad(angle)) }
+    const drawn = angle + DRAW_OFFSET
+    const n = { x: Math.cos(rad(drawn + 90)), y: -Math.sin(rad(drawn + 90)) }
+    const t = { x: Math.cos(rad(drawn)), y: -Math.sin(rad(drawn)) }
     const cx = C + n.x * d
     const cy = C + n.y * d
     return {
@@ -93,7 +99,7 @@ export default function StatorFieldFigure() {
             aria-label={`Three phase currents summing to one field pointing at ${angle.toFixed(0)} degrees`}>
             <defs>
               <marker id="fieldTip" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
-                <path d="M0,0 L6,3 L0,6 Z" className="fill-ocean/50" />
+                <path d="M0,0 L6,3 L0,6 Z" className="fill-grey-400" />
               </marker>
             </defs>
 
@@ -101,27 +107,27 @@ export default function StatorFieldFigure() {
 
             {/* The field in the bore: parallel lines, all running the way the sum points. */}
             {lines.map((line, i) => (
-              <line key={i} {...line} className="stroke-ocean/50" strokeWidth={1.5} markerEnd="url(#fieldTip)" />
+              <line key={i} {...line} className="stroke-grey-400" strokeWidth={1} markerEnd="url(#fieldTip)" />
             ))}
 
             {/* The three fixed axes, and each phase's contribution along its own axis. */}
             {PHASES.map((phase, i) => {
-              const a = polar(R + 12, phase.axis)
-              const b = polar(R + 12, phase.axis + 180)
+              const a = polar(R + 12, phase.axis + DRAW_OFFSET)
+              const b = polar(R + 12, phase.axis + DRAW_OFFSET + 180)
               return (
                 <g key={phase.label}>
                   <line x1={a.x} y1={a.y} x2={b.x} y2={b.y} className="stroke-grey-300" strokeWidth={1} strokeDasharray="3 3" />
-                  <text {...polar(R + 24, phase.axis)} textAnchor="middle" dominantBaseline="middle"
+                  <text {...polar(R + 24, phase.axis + DRAW_OFFSET)} textAnchor="middle" dominantBaseline="middle"
                     className="fill-grey-500 text-[11px] font-mono">
                     {phase.label}
                   </text>
-                  <Arrow deg={phase.axis} length={currents[i] * 72} className="text-grey-500" width={2} />
+                  <Arrow deg={phase.axis + DRAW_OFFSET} length={currents[i] * 72} className="text-grey-500" width={2} />
                 </g>
               )
             })}
 
             {/* The sum. Its length is 1.5 of a single phase, and never changes as the angle turns. */}
-            <Arrow deg={angle} length={78} className="text-syn-red" width={3.5} />
+            <Arrow deg={angle + DRAW_OFFSET} length={78} className="text-syn-red" width={3.5} />
             <circle cx={C} cy={C} r={4} className="fill-grey-800" />
           </svg>
         </div>
@@ -147,7 +153,10 @@ export default function StatorFieldFigure() {
           </div>
 
           <div className="space-y-2">
-            <p className="text-[11px] text-grey-500 leading-4">Current in each phase, as a share of peak</p>
+            <p className="text-[11px] text-grey-500 leading-4">
+              Current in each phase, as a share of peak. A bar right of the centre line is current
+              one way through the winding, and a bar left of it is current the other way.
+            </p>
             {PHASES.map((phase, i) => (
               <div key={phase.label}>
                 <div className="flex items-baseline justify-between text-[11px] text-grey-600 mb-1">
@@ -157,7 +166,7 @@ export default function StatorFieldFigure() {
                 <div className="relative h-2 bg-grey-100">
                   <div className="absolute inset-y-0 left-1/2 w-px bg-grey-400" />
                   <div
-                    className={currents[i] >= 0 ? 'absolute inset-y-0 bg-ocean' : 'absolute inset-y-0 bg-syn-red'}
+                    className="absolute inset-y-0 bg-status-warn"
                     style={{
                       left: currents[i] >= 0 ? '50%' : `${50 - Math.abs(currents[i]) * 50}%`,
                       width: `${Math.abs(currents[i]) * 50}%`,
@@ -187,8 +196,8 @@ export default function StatorFieldFigure() {
           when it is negative.
         </p>
         <p>
-          The red arrow is the three added together, and the blue lines are the field it makes across
-          the bore. Turn the field and watch the red arrow sweep smoothly through directions no
+          The red arrow is the three added together, and the thin grey lines are the field it makes
+          across the bore. Turn the field and watch the red arrow sweep smoothly through directions no
           single coil points in. That is the whole trick: three fixed coils, one field, aimed
           anywhere.
         </p>

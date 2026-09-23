@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from 'react'
-import { NavLink, Outlet } from 'react-router'
+import { useEffect, useState, type ReactNode } from 'react'
+import { NavLink, Outlet, useLocation } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { BookOpenText, ChevronDown, Mail, RefreshCw } from 'lucide-react'
 import PwaUpdatePrompt from '../components/PwaUpdatePrompt'
@@ -90,11 +90,15 @@ function NavItem({
 // A uniform collapsible sidebar group: an eyebrow heading with a chevron that toggles its
 // items, plus an optional trailing action (e.g. the Devices refresh button). Owns its
 // open/closed state; `defaultOpen` sets the initial state (Meta and Tools start collapsed).
+// `path` is the route prefix the group's links share. Arriving at a route under it opens the
+// group, so a collapsed group never hides the link of the page you are on. The reader can still
+// collapse it by hand while there.
 // Every group uses this so they all look and behave identically.
 function SidebarGroup({
   label,
   labelTitle,
   defaultOpen = true,
+  path,
   collapsible = true,
   trailing,
   children,
@@ -102,11 +106,19 @@ function SidebarGroup({
   label: string
   labelTitle?: string
   defaultOpen?: boolean
+  path?: string
   collapsible?: boolean
   trailing?: ReactNode
   children: ReactNode
 }) {
-  const [open, setOpen] = useState(defaultOpen)
+  const { pathname } = useLocation()
+  const onPath = path !== undefined && (pathname === path || pathname.startsWith(`${path}/`))
+  const [open, setOpen] = useState(defaultOpen || onPath)
+  useEffect(() => {
+    if (onPath) {
+      setOpen(true)
+    }
+  }, [onPath])
   const expanded = collapsible ? open : true
   const labelSpan = (
     <span
@@ -494,7 +506,7 @@ export default function RootLayout() {
           </SidebarGroup>
 
           {online && (
-            <SidebarGroup label="Tools" defaultOpen={false}>
+            <SidebarGroup label="Tools" defaultOpen={false} path="/tools">
               <NavItem to="/tools/auto-tuning" label="Auto-Tuning" />
               <NavItem to="/tools/eni" label="ENI" />
               <NavItem to="/tools/esi" label="ESI" />
@@ -511,15 +523,15 @@ export default function RootLayout() {
           {/* Learn is not gated on `online`: these pages explain concepts and call no endpoint, so
               they stay readable when nothing is connected — which is exactly when somebody is most
               likely to be reading up rather than commissioning. */}
-          <SidebarGroup label="Learn">
-            {/* Reading order, not alphabetical: the basics page is the one the others build on. */}
+          <SidebarGroup label="Learn" defaultOpen={false} path="/learn">
+            {/* Encoders and Commutation Offset are routed but not listed, because they are not
+                finished. List them after Servo Motors, in reading order: the basics page is the one
+                the others build on. */}
             <NavItem to="/learn/servo-motors" label="Servo Motors" />
-            <NavItem to="/learn/encoders" label="Encoders" />
-            <NavItem to="/learn/commutation-offset" label="Commutation Offset" />
           </SidebarGroup>
 
           {online && (
-            <SidebarGroup label="Meta" defaultOpen={false}>
+            <SidebarGroup label="Meta" defaultOpen={false} path="/meta">
               <NavItem to="/meta/al-status-codes" label="AL Status Codes" />
               <NavItem to="/meta/esc-registers" label="ESC Registers" />
               <NavItem to="/meta/foe-error-codes" label="FoE Error Codes" />

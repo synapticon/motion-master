@@ -48,21 +48,24 @@ enum class CompleteAccessSupport : uint8_t { kUnknown, kSupported, kUnsupported 
 /// of their *values* is a different request. CiA 301 says it is refused. Some devices answer
 /// anyway, and reading a SOMANET Node's free slots costs under a millisecond each.
 ///
-/// A device that refuses is the expensive case, because SOMANET firmware refuses by silence rather
-/// than by abort, at a full 700 ms mailbox timeout each. So this is discovered once and remembered:
-/// the first such read that fails marks the device, and later objects stop at their count instead
-/// of paying the timeout again. A device that answers is never marked and keeps every value.
+/// A device that refuses by silence rather than by abort is the expensive case, because each read
+/// then costs a full 700 ms mailbox timeout. A SOMANET Integro on firmware v5.6.10 refuses this
+/// way. So this is discovered once and remembered: the first such read that fails marks the device,
+/// and later objects stop at their count instead of paying the timeout again. A device that answers
+/// is never marked and keeps every value.
 ///
 /// Learned rather than assumed, because assuming the refusal throws away values a well-behaved
 /// device would have given. @c kUnknown is the state in which every declared subindex is attempted.
 ///
-/// **One timeout per device, not per entry.** On a SOMANET Integro the first sweep spends 700 ms on
-/// 0x1600:08 and every later object stops at its count without a transfer, so 53 timeouts become
-/// one: 36 s becomes 2.8 s, and 2.2 s once the state is set.
+/// **One timeout per device, not per entry.** On a SOMANET Integro with v5.6.10 the first sweep
+/// spends 700 ms on 0x1600:08 and every later object stops at its count without a transfer, so 53
+/// timeouts become one: 36 s becomes 2.8 s, and 2.2 s once the state is set.
 ///
 /// Nothing here names a product or a firmware version. The state keys on a read that failed, so a
 /// device that answers is never affected, and a device that aborts properly gets the same skipping
-/// at a fraction of the cost. If the silence is ever fixed this can be deleted for about 0.3 s.
+/// at a fraction of the cost. The firmware team changed the Integro to serve these values. That
+/// does not make this state obsolete: drives on older firmware stay in the field, and without it
+/// each of their sweeps costs 36 s again.
 enum class DeclaredSubindexReads : uint8_t { kUnknown, kServed, kRefused };
 
 /// @brief Decoded values of one object's readable sub-entries, as returned by @c

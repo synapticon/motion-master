@@ -475,10 +475,12 @@ bool readCompleteInto(mm::comm::FieldbusDriver& driver, uint16_t slavePosition,
 // like any other entry. Their *values* are a different matter, and asking for one is a request the
 // device is right to refuse.
 //
-// **Refusing is not what makes this expensive. Refusing by silence is.** SOMANET firmware answers a
-// read above the count with nothing at all, so each one costs a full 700 ms mailbox timeout rather
-// than an abort in a few milliseconds. On a SOMANET Integro that is 53 entries across ten mapping
-// objects, which turns a sub-second sweep into a thirty-six-second one.
+// **Refusing is not what makes this expensive. Refusing by silence is.** A SOMANET Integro on
+// firmware v5.6.10 answers a read above the count with nothing at all. Each such read costs a full
+// 700 ms mailbox timeout rather than an abort in a few milliseconds. On that Integro it is 53
+// entries across ten mapping objects, which turns a sub-second sweep into a thirty-six-second one.
+// The firmware team changed the Integro to serve these values in about 1 ms. Drives on older
+// firmware still refuse by silence.
 //
 // **The limit only applies once the device has refused one of these reads.** A SOMANET Node serves
 // all 58 of them, in under a millisecond each, through this same per-subindex path -- so applying

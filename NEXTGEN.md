@@ -3388,3 +3388,43 @@ a warning rather than a gap somebody could miss.
 **No consuming master has accepted a generated document.** Conformance to ENI Schema 1.7 is checked
 by xmllint on every build. Whether EC-Master or TwinCAT brings a bus up from one is unverified, and
 xmllint cannot answer it.
+
+## Session 2026-10-02 — The mailbox counter is reset with counter 0 on every INIT→PRE-OP (as-built)
+
+SOMANET firmware ignores a mailbox request whose counter equals the counter of the previous
+request (`ethercat_service.xc`, the `h.control != 0 && h.control == g_mbox_last_master_count`
+check). Firmware v5.6.0 and newer clears the stored counter on INIT→PRE-OP (somanet_software
+32780ec9b, PR #4924). Older firmware keeps it across INIT.
+
+**This master restarts its counter in two places.** `ecx_config_init` calls `ecx_init_context`,
+which zeroes the slavelist and with it every `mbx_cnt`. A new process starts with a zeroed context
+too. In both cases the first request carries counter 1. When the last request the device saw also
+carried 1, the device ignores the new request. It returns before it reads the request, so SM0 stays
+full, and `drainMailbox` cannot help because it empties SM1. Only a power cycle recovers the device.
+With seven counter values, roughly one reconnect in seven wedges the mailbox.
+
+**Two fixes were considered.**
+
+1. Keep each slave's counter across a scan, and restore it after `ecx_config_init`.
+2. Send one request with counter 0. The firmware never ignores counter 0 and stores 0 as the last
+   counter, so it accepts the next request whatever its counter is.
+
+The first fix works for every vendor, but it covers only a rescan inside one running process. It
+does not cover a restart of Motion Master, another master that used the device in between, or a
+device of the same type swapped in at the same position. The second fix covers all of them, so it
+is the one built.
+
+**`resetMailboxCounter` sends an SDO upload of 0x1000:00 with counter 0.** It runs in
+`SoemFieldbusDriver::transitionToState`, when a slave that left INIT reaches PRE-OP. It runs under
+the same `controlPlaneMutex_` hold as the state read that saw PRE-OP, so it is the first mailbox
+request the slave gets in PRE-OP. A scan leaves every slave in INIT, because `ecx_config_init`
+broadcasts INIT, so no request can reach a device before this one. The cost is one SDO for each
+device on each INIT→PRE-OP, a few milliseconds.
+
+**Only Synapticon (0x22D2) and Sensodrive (0x063A) devices get the request.** ETG1000.4 reserves
+counter 0, so the behaviour of another vendor's stack is unknown. Both IDs live in
+`libs/comm/vendor_ids.h`, because `comm` cannot depend on `node`. `mm::node::kSynapticonVendorId`
+names the same constant.
+
+**It prevents a wedge and does not recover one.** A device that already has a full SM0 cannot take
+the request. Hardware verification is open.

@@ -3,15 +3,17 @@
 #include <cstdint>
 #include <string_view>
 
+#include "comm/vendor_ids.h"
+
 namespace mm::node {
 
-/// @brief Synapticon's EtherCAT Vendor ID (object 0x1018:01) — the discriminator for a SOMANET
-///        drive and the single source of truth for the vendor check.
+/// @brief Synapticon's EtherCAT Vendor ID (object 0x1018:01), the discriminator for a SOMANET
+///        drive.
 ///
-/// Kept in its own header so both the profile-view chain (@c SomanetDrive) and the
-/// object-dictionary cache (@c ParameterCache) can share this definition without either depending
-/// on the other's headers.
-inline constexpr uint32_t kSynapticonVendorId = 0x000022D2;
+/// The value lives in @c comm/vendor_ids.h, because the fieldbus driver needs it too. This name
+/// lets the profile-view chain (@c SomanetDrive) and the object-dictionary cache
+/// (@c ParameterCache) share it without either one depending on the headers of the other.
+using mm::comm::kSynapticonVendorId;
 
 /// @brief Known SOMANET product codes (object 0x1018:02) under @c kSynapticonVendorId.
 ///

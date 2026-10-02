@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **A SOMANET drive on firmware older than v5.6.0 no longer stops answering after a rescan or a restart of Motion Master.** That firmware ignores a mailbox request when its counter repeats the counter of the request before it, and it keeps that counter across INIT. About one reconnect in seven hit this, and only a power cycle recovered the drive. Motion Master now resets the counter each time a Synapticon or Sensodrive device goes from INIT to PRE-OP.
+
 ## [6.0.0-alpha.87] - 2026-09-23
 
 ### Added

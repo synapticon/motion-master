@@ -28,6 +28,7 @@
 #include "comm/mailbox_error_codes.h"
 #include "comm/sdo_abort_codes.h"
 #include "comm/sdo_log.h"
+#include "comm/vendor_ids.h"
 #include "core/platform.h"
 
 namespace mm::comm::soem {
@@ -1604,6 +1605,58 @@ AddressState restoreStationAddress(ecx_contextt* ctx, uint16_t slave) {
   return reachable ? AddressState::Reassigned : AddressState::Unreachable;
 }
 
+// SOMANET firmware ignores a mailbox request whose counter equals the counter of the previous
+// request. Firmware before v5.6.0 keeps that counter across INIT. ecx_config_init zeroes the
+// slavelist, and a new process starts with a zeroed context, so in both cases the first request
+// carries counter 1. When the last request the device saw also carried 1, the device ignores the
+// new request without reading it. SM0 then stays full, and only a power cycle recovers the device.
+//
+// The firmware never ignores a request with counter 0, and it stores 0 as the last counter. So
+// this sends one SDO upload of 0x1000:00 with counter 0 and reads the answer. SOEM never uses
+// counter 0, so the device accepts the next request whatever its counter is. ETG1000.4 reserves
+// counter 0, which is why only Synapticon and Sensodrive devices get this request.
+bool resetMailboxCounter(ecx_contextt* ctx, uint16_t slave) {
+  OSAL_PACKED_BEGIN
+  struct OSAL_PACKED SdoUploadRequest {
+    ec_mbxheadert header;
+    uint16 canOpen;
+    uint8 command;
+    uint16 index;
+    uint8 subIndex;
+    uint32 data;
+  };
+  OSAL_PACKED_END
+
+  // The answer read below must belong to this request.
+  drainMailbox(ctx, slave);
+
+  ec_mbxbuft* out = ecx_getmbx(ctx);
+  if (out == nullptr) {
+    return false;
+  }
+  ec_clearmbx(out);
+  auto* request = reinterpret_cast<SdoUploadRequest*>(out);
+  request->header.length = htoes(sizeof(SdoUploadRequest) - sizeof(ec_mbxheadert));
+  request->header.address = htoes(0x0000);
+  request->header.priority = 0x00;
+  request->header.mbxtype = ECT_MBXT_COE + MBX_HDR_SET_CNT(0);
+  request->canOpen = htoes(0x000 + (ECT_COES_SDOREQ << 12));
+  request->command = ECT_SDO_UP_REQ;
+  request->index = htoes(0x1000);
+  request->subIndex = 0x00;
+
+  // ecx_mbxsend returns the buffer to the pool whatever the outcome.
+  if (ecx_mbxsend(ctx, slave, out, EC_TIMEOUTTXM) <= 0) {
+    return false;
+  }
+  ec_mbxbuft* in = nullptr;
+  const int wkc = ecx_mbxreceive(ctx, slave, &in, EC_TIMEOUTRXM);
+  if (in != nullptr) {
+    ecx_dropmbx(ctx, in);
+  }
+  return wkc > 0;
+}
+
 void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState targetState) {
   if (targetState == EtherCatState::Boot) {
     uint32_t data = ecx_readeeprom(ctx, slave, ECT_SII_BOOTRXMBX, EC_TIMEOUTEEP);
@@ -1753,6 +1806,8 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
   }
 
   std::set<uint16_t> pending;
+  // Slaves that leave INIT here. Reaching PRE-OP from INIT is what resets the mailbox counter.
+  std::set<uint16_t> leavingInit;
   {
     std::lock_guard<std::mutex> lock(controlPlaneMutex_);
     ecx_readstate(ctx_.get());
@@ -1767,6 +1822,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
         // INIT→PRE-OP the SMs ecx_config_init already programmed are correct, and touching
         // them here is both redundant and harmful (it seizes EEPROM from the slave's PDI).
         if (stateClean == static_cast<uint16_t>(EtherCatState::Init)) {
+          leavingInit.insert(pos);
           if (targetState == EtherCatState::Boot) {
             updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::Boot);
             bootMailboxSlaves_.insert(pos);
@@ -1847,6 +1903,14 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
         if (targetState == EtherCatState::PreOp) {
           // Confirmed out of the BOOT mailbox; a later plain INIT->PRE-OP must not touch the SMs.
           bootMailboxSlaves_.erase(pos);
+          // Under the same lock as the state read that saw PRE-OP, so this is the first mailbox
+          // request the slave gets in PRE-OP.
+          const uint32_t vendorId = ctx_->slavelist[pos].eep_man;
+          if (leavingInit.contains(pos) &&
+              (vendorId == kSynapticonVendorId || vendorId == kSensodriveVendorId) &&
+              !resetMailboxCounter(ctx_.get(), pos)) {
+            spdlog::warn("Device {}: the mailbox counter reset got no answer", pos);
+          }
         }
         it = pending.erase(it);
       } else if ((state & EC_STATE_ERROR) && isAlStatusCodeTerminal(alStatusCode)) {

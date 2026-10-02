@@ -3427,4 +3427,11 @@ counter 0, so the behaviour of another vendor's stack is unknown. Both IDs live 
 names the same constant.
 
 **It prevents a wedge and does not recover one.** A device that already has a full SM0 cannot take
-the request. Hardware verification is open.
+the request.
+
+**Verified 2026-10-02 on a Circulo with firmware v5.4.4.** It passed 100 rescans and 20 server
+restarts. In 33 of them, the request before the rescan or the restart carried counter 1. A run
+without the reset was not done, so the test does not show that this firmware drops a repeated
+counter on that drive. The firmware source shows it. A test that sends the same requests in every
+round always ends on the same counter, so it can never trigger the fault. Vary the number of
+requests per round.

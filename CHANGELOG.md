@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.88] - 2026-10-02
+
 ### Fixed
 
 - **A SOMANET drive on firmware older than v5.6.0 no longer stops answering after a rescan or a restart of Motion Master.** That firmware ignores a mailbox request when its counter repeats the counter of the request before it, and it keeps that counter across INIT. About one reconnect in seven hit this, and only a power cycle recovered the drive. Motion Master now resets the counter each time a Synapticon or Sensodrive device goes from INIT to PRE-OP.
@@ -813,7 +815,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.87...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.88...HEAD
+[6.0.0-alpha.88]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.87...v6.0.0-alpha.88
 [6.0.0-alpha.87]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.86...v6.0.0-alpha.87
 [6.0.0-alpha.86]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.85...v6.0.0-alpha.86
 [6.0.0-alpha.85]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.84...v6.0.0-alpha.85

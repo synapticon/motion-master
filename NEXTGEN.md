@@ -3435,3 +3435,80 @@ without the reset was not done, so the test does not show that this firmware dro
 counter on that drive. The firmware source shows it. A test that sends the same requests in every
 round always ends on the same counter, so it can never trigger the fault. Vary the number of
 requests per round.
+
+## Session 2026-10-03 — A coverage audit of the previous tools finds one important gap: Sensodrive devices (review)
+
+**The question.** Does v6 implement, or track as an issue, every feature of the previous tools?
+The previous tools are the previous Motion Master server with its Protobuf protocol, the oblac
+client library, and OBLAC Drives. Two earlier surveys asked the same question and produced
+issues #11 to #65. Both searched for gaps by judgement. This audit lists every feature instead, so
+a feature nobody thought of cannot slip through.
+
+**The method.** Four agents each read one source and listed every feature in it:
+
+1. The server: every request in the protocol, every handler, every command-line flag, and every
+   background behaviour.
+2. The client library: every public method and every exported helper.
+3. OBLAC Drives, the pages: every route, every user action, and every "Added" entry in its
+   changelog.
+4. OBLAC Drives, the logic: every effect, every selector that encodes a drive rule, every service
+   method, and every decode table.
+
+Each feature got one class. *Implemented* cites a v6 file, route or procedure. *Issue* cites an
+issue number. *Decided* means the owner dropped or parked it earlier. *Not a feature* covers
+transport and UI plumbing. *Gap* is what remains. An agent searched the v6 tree before it called
+a feature a gap, and every important gap was checked again by hand.
+
+| Source | Features | Implemented | Issue | Decided | Not a feature | Gap |
+| --- | --- | --- | --- | --- | --- | --- |
+| Server and protocol | 120 | 58 | 28 | 20 | 11 | 3 |
+| Client library | 183 | 63 | 82 | 23 | 11 | 4 |
+| OBLAC Drives, pages | 123 | 42 | 48 | 26 | 0 | 7 |
+| OBLAC Drives, logic | 171 | 30 | 81 | 28 | 26 | 6 |
+
+The gaps overlap between sources. The phase resistance and inductance check, for example, was
+found twice.
+
+**Three gaps were worth a decision.**
+
+1. **Sensodrive devices.** Sensodrive devices run unmodified SOMANET firmware, and their SII
+   carries vendor ID 0x063A. v6 recognised a SOMANET device by vendor ID 0x22D2 only, so a
+   Sensodrive device got no procedure, no file operation and no firmware installation. Filed as
+   #66. One function, `isSomanetDevice(uint32_t vendorId)`, accepts both IDs. SOMANET is the name
+   of a product family. It is not a vendor, so the function does not use the word "vendor".
+2. **Measured against configured phase resistance and inductance.** The firmware current
+   controller uses 0x2003:03 and 0x2003:04 directly (`initialize.xc:95-102`), so a wrong digit
+   makes current control worse. The measurements did not compare the measured value with the
+   configured value. Filed as #67, with a configurable factor that defaults to 5.
+3. **An upper limit on the chirp amplitude for plant identification.** Dropped. The firmware
+   clamps the chirp and the torque demand together to ±0x6072 (`motion_control_service.xc:5550-5581`),
+   so the motor never gets more torque than the configured maximum. A warning about a clipped
+   chirp was dropped too.
+
+**Two behaviours are not gaps, on purpose.**
+
+- A fault reset after every transition to OP. It cleared a fault that an Integro raises after a
+  PDO re-map. v6 does not act on a drive on its own, so the user resets that fault.
+- A switch that turns off SDO polling. It protected the cyclic exchange from SDO traffic on one
+  shared port. The v6 PDO path takes no lock, so the switch has nothing to protect.
+
+**Minor gaps, not yet decided.** Each is small, and most fit an existing issue.
+
+1. Analog inputs 0x2401 to 0x2404 and the LED colour 0x2215:01. #45 names them only as follow-ups.
+2. A Bode plot of the plant model stored on the drive, and a plant model edited from inertia and
+   friction. Both fit #18.
+3. Gain scheduling, 0x2013. #20 puts it out of scope, and no issue tracks it.
+4. Checks beside existing issues: a feed constant that overflows INT32 (#32), a notch filter that
+   has no effect in dual-loop control (#21), a FIR filter order above 31, and offset detection
+   with no commutation encoder.
+5. SII recovery images for the ET1100 and LAN9252 controllers. v6 can write an SII but ships no
+   image.
+6. Progress while all parameters of a device are read.
+7. A read or write of a list of objects on one device. This is close to the multi-device batch
+   that was dropped.
+8. A "has firmware" flag from 0x100A (#41), and names for the controlword bits (#40).
+9. Probably to drop: calibration firmware handling, a serial number parser, and GPIO voltage
+   labels. The last two depend on the product ID.
+
+**Every feature found in the three sources has one of the five classes.** After these
+decisions, no gap remains outside the minor list.

@@ -932,6 +932,7 @@ Managed by vcpkg (`extern/vcpkg` submodule, pinned in `vcpkg.json`). To add one:
 
 | Package | Version | Used in | CMake target |
 | --- | --- | --- | --- |
+| `asio` | 1.32.0 | `mm_comm_tests` | `asio::asio` |
 | `cli11` | 2.6.2 | `motion_master` | `CLI11::CLI11` |
 | `gtest` | 1.17.0 | test targets | `GTest::gtest`, `GTest::gtest_main` |
 | `neargye-semver` | 1.0.0-rc | `mm_core` | `semver::semver` |

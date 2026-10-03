@@ -1,8 +1,16 @@
+find_package(asio CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 
-add_executable(mm_comm_tests base_test.cc sii_test.cc soem_fieldbus_driver_test.cc)
+add_executable(mm_comm_tests base_test.cc fake_spoe_server.cc fake_spoe_server_test.cc sii_test.cc
+                             soem_fieldbus_driver_test.cc)
 
-target_link_libraries(mm_comm_tests PRIVATE mm::comm GTest::gtest GTest::gtest_main)
+target_link_libraries(mm_comm_tests PRIVATE mm::comm asio::asio GTest::gtest GTest::gtest_main)
+
+# Asio needs the oldest Windows version to target, and warns when it is not set. 0x0A00 is Windows
+# 10.
+if(WIN32)
+  target_compile_definitions(mm_comm_tests PRIVATE _WIN32_WINNT=0x0A00)
+endif()
 
 # Constructing a SoemFieldbusDriver pulls SOEM's win32 NIC driver into the link, so this executable
 # imports wpcap.dll — which ships with the Npcap driver, not with the vendored SDK we build against.

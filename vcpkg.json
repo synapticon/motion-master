@@ -3,6 +3,7 @@
   "version": "6.0.0-alpha.88",
   "builtin-baseline": "56bb2411609227288b70117ead2c47585ba07713",
   "dependencies": [
+    "asio",
     "cli11",
     "curl",
     "bshoshany-thread-pool",

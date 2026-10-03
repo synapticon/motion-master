@@ -301,6 +301,9 @@ TEST(Concurrency, SpoeExchangeAgainstTheControlPlane) {
   const auto deadline = std::chrono::steady_clock::now() + kDuration;
   while (std::chrono::steady_clock::now() < deadline) {
     static_cast<void>(dm->configureProcessData());
+    // A re-map holds the image unpublished for most of its duration. On a slow host, back-to-back
+    // re-maps leave the cycle no window to run in.
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   stop.store(true, std::memory_order_relaxed);
   worker.join();

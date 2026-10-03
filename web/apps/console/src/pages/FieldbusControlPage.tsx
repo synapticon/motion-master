@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import PageHeader from '../components/PageHeader'
 import ControlExplainer from '../components/ControlExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
-import { useConnection } from '../contexts/ConnectionContext'
+import { useConnection, type SpoeMode } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
 
 // AL state transition targets, in the order the buttons are rendered. BOOT leads
@@ -78,9 +78,25 @@ const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
 const btnCls =
   'bg-syn-red text-white px-4 py-2 text-xs hover:bg-ocean disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer w-full transition-colors'
 
+// The two roles a SPoE connection can take. The wording follows the mode-selection design.
+const SPOE_MODES: { value: SpoeMode; title: string; description: string }[] = [
+  {
+    value: 'monitor',
+    title: 'Monitoring mode',
+    description:
+      'The drive takes its commands and setpoints from a PLC or another master. Motion Master observes the process data and the control behaviour, and tunes parameters. It cannot change the drive\'s state.',
+  },
+  {
+    value: 'control',
+    title: 'Control mode',
+    description:
+      'Motion Master takes full control of the drive, to commission, maintain and configure it, send test signals and watch the response. No PLC or master controls it. If no SPoE message arrives within the watchdog time, 75 ms by default, the drive faults.',
+  },
+]
+
 export default function FieldbusControlPage() {
   const queryClient = useQueryClient()
-  const { api, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, setIsInitialized, alreadyInitialized, setAlreadyInitialized } = useConnection()
+  const { api, driver, setDriver, adapter, setAdapter, ipAddresses, setIpAddresses, spoeMode, setSpoeMode, spoePort, setSpoePort, hasScanned, setHasScanned, setIsInitialized, alreadyInitialized, setAlreadyInitialized } = useConnection()
   const AL_STATE_LABEL: Record<number, string> = { 1: 'Init', 2: 'PreOp', 3: 'Boot', 4: 'SafeOp', 8: 'Op' }
 
   const alStatusCodesQuery = useQuery({
@@ -126,8 +142,15 @@ export default function FieldbusControlPage() {
     void queryClient.invalidateQueries({ queryKey: ['deviceStates'] })
   }
 
+  // One address per line or separated by commas, in position order.
+  const spoeAddresses = ipAddresses.split(/[\s,]+/).map(a => a.trim()).filter(a => a.length > 0)
+  const canInit = driver === 'spoe' ? spoeAddresses.length > 0 : adapter.trim().length > 0
+
   const initMutation = useMutation({
-    mutationFn: () => api.init({ driver, adapter }),
+    mutationFn: () =>
+      driver === 'spoe'
+        ? api.init({ driver, ipAddresses: spoeAddresses, spoe: { mode: spoeMode, port: Number(spoePort) || 8080 } })
+        : api.init({ driver, adapter }),
     onSuccess: () => {
       setAlreadyInitialized(false)
       setIsInitialized(true)
@@ -266,7 +289,8 @@ export default function FieldbusControlPage() {
             <div className="border border-grey-200 p-5 space-y-4 2xl:col-span-3">
               <h3 className="text-sm font-display uppercase">Init</h3>
               <p className="text-xs text-grey-600">
-                Initialize the fieldbus driver with the selected protocol and network adapter. Must be called before scanning.
+                Initialize the fieldbus driver with the selected protocol: SOEM on a network adapter, or SPoE to drives at
+                IP addresses. Must be called before scanning.
               </p>
               <div className="space-y-3">
                 <div>
@@ -277,9 +301,59 @@ export default function FieldbusControlPage() {
                     className={inputCls}
                   >
                     <option value="soem">SOEM (Simple Open EtherCAT Master)</option>
-                    <option value="spoe" disabled>SPoE (SOMANET Protocol over Ethernet) — planned</option>
+                    <option value="spoe">SPoE (SOMANET Protocol over Ethernet)</option>
                   </select>
                 </div>
+                {driver === 'spoe' && (
+                  <>
+                    <div>
+                      <label className={labelCls}>Role of Motion Master</label>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {SPOE_MODES.map(m => (
+                          <button
+                            key={m.value}
+                            type="button"
+                            role="radio"
+                            aria-checked={spoeMode === m.value}
+                            onClick={() => setSpoeMode(m.value)}
+                            className={`text-left border p-3 transition-colors cursor-pointer ${
+                              spoeMode === m.value ? 'border-syn-red bg-syn-red/5' : 'border-grey-300 hover:border-grey-400'
+                            }`}
+                          >
+                            <span className="block text-xs font-display font-medium uppercase tracking-wide">{m.title}</span>
+                            <span className="block text-xs text-grey-700 mt-1 normal-case tracking-normal">{m.description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <label className={labelCls}>IP Addresses</label>
+                      <textarea
+                        value={ipAddresses}
+                        onChange={e => setIpAddresses(e.target.value)}
+                        placeholder={'192.168.0.10\n192.168.0.11'}
+                        rows={3}
+                        className={`${inputCls} font-mono`}
+                      />
+                      <p className="text-xs text-grey-600 mt-1">
+                        One drive per line. The order is the position order, and a drive that does not answer keeps its
+                        position. Each drive serves one client: while another commissioning tool or another Motion Master
+                        holds a drive, this one gets no answer from it.
+                      </p>
+                    </div>
+                    <div>
+                      <label className={labelCls}>Port</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        value={spoePort}
+                        onChange={e => setSpoePort(e.target.value)}
+                        className={inputCls}
+                      />
+                    </div>
+                  </>
+                )}
+                {driver === 'soem' && (
                 <div>
                   <label className={labelCls}>Adapter</label>
                   <input
@@ -318,16 +392,19 @@ export default function FieldbusControlPage() {
                     </ul>
                   )}
                 </div>
+                )}
               </div>
               <button
                 onClick={() => initMutation.mutate()}
-                disabled={initMutation.isPending || !adapter.trim()}
+                disabled={initMutation.isPending || !canInit}
                 className={btnCls}
               >
                 {initMutation.isPending ? 'Initializing…' : 'Init'}
               </button>
-              {!adapter.trim() && (
-                <p className="text-grey-500 text-xs">Select a network adapter to initialize.</p>
+              {!canInit && (
+                <p className="text-grey-500 text-xs">
+                  {driver === 'spoe' ? 'Enter at least one IP address to initialize.' : 'Select a network adapter to initialize.'}
+                </p>
               )}
               {initMutation.isSuccess && (
                 <p className="text-status-good text-xs">Initialized</p>

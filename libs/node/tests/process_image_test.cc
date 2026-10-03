@@ -194,6 +194,68 @@ TEST(DeviceManagerProcessData, ConfigurePublishesAndExchangePublishesInputs) {
 
 // --- bit copy helpers --------------------------------------------------------
 
+TEST(DeviceManagerFollowState, PublishesTheImageWhenAnotherMasterReachesOp) {
+  // SPoE in Monitor mode: a PLC moves the drive, and nothing calls transitionToState.
+  auto bus = mm::node::testing::makeCia402Bus();
+  bus->refusal = "a PLC owns the state";
+  bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
+  FakeBus* raw = bus.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  ASSERT_TRUE(dm.followObservedStates().has_value());
+  EXPECT_FALSE(dm.processDataConfigured());
+  EXPECT_EQ(raw->configureCalls, 0);
+
+  raw->state = static_cast<uint16_t>(EtherCatState::Op);
+  ASSERT_TRUE(dm.followObservedStates().has_value());
+  EXPECT_TRUE(dm.processDataConfigured());
+  EXPECT_EQ(raw->configureCalls, 1);
+  EXPECT_EQ(dm.expectedWorkingCounter(), 3);
+
+  // Nothing changed, so nothing is re-mapped.
+  ASSERT_TRUE(dm.followObservedStates().has_value());
+  EXPECT_EQ(raw->configureCalls, 1);
+}
+
+TEST(DeviceManagerFollowState, TearsDownWhenNoDeviceExchangesAndReMapsOnReturn) {
+  // The PLC can change the PDO mapping in PRE-OP, so a return to OP reads it again.
+  auto bus = mm::node::testing::makeCia402Bus();
+  bus->refusal = "a PLC owns the state";
+  FakeBus* raw = bus.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.followObservedStates().has_value());
+  ASSERT_TRUE(dm.processDataConfigured());
+
+  raw->state = static_cast<uint16_t>(EtherCatState::PreOp);
+  ASSERT_TRUE(dm.followObservedStates().has_value());
+  EXPECT_FALSE(dm.processDataConfigured());
+
+  raw->state = static_cast<uint16_t>(EtherCatState::Op);
+  ASSERT_TRUE(dm.followObservedStates().has_value());
+  EXPECT_TRUE(dm.processDataConfigured());
+  EXPECT_EQ(raw->configureCalls, 2);
+}
+
+TEST(DeviceManagerTransport, ReportsAMissingEscAndTheDroppedFrames) {
+  // What SPoE reports: no ESC, and input frames dropped from its queue.
+  auto bus = mm::node::testing::makeCia402Bus();
+  bus->esc = false;
+  bus->droppedFrames = 7;
+  DeviceManager dm;
+  EXPECT_TRUE(dm.supportsEsc()) << "with no driver there is nothing to refuse";
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  EXPECT_FALSE(dm.supportsEsc());
+  EXPECT_EQ(dm.processImageInfo().droppedInputFrames, 7U);
+  const auto device = dm.deviceAt(1);
+  ASSERT_TRUE(device);
+  EXPECT_FALSE(nlohmann::json(*device)["supportsEsc"].get<bool>());
+}
+
 TEST(ProcessImageBits, ByteAlignedRoundTrip) {
   std::vector<uint8_t> image(6, 0);
   const std::vector<uint8_t> value = {0x44, 0x33, 0x22, 0x11};  // 32-bit @ bit offset 16

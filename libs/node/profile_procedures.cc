@@ -4,6 +4,7 @@
 #include <format>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -101,6 +102,63 @@ std::expected<void, std::string> runRestoreDefaultParametersProcedure(
   // restored, and "restore" alone would not.
   reporter.succeed(kRestoreDefaultParametersStep,
                    nlohmann::json{{"group", toString(request.group)}});
+  return {};
+}
+
+std::expected<DeviceLocateRequest, std::string> parseDeviceLocateRequest(
+    const nlohmann::json& body) {
+  DeviceLocateRequest request;
+  if (body.is_null()) {
+    return request;
+  }
+  if (!body.is_object()) {
+    return std::unexpected("the request body must be a JSON object");
+  }
+  if (const auto it = body.find("duration"); it != body.end()) {
+    if (!it->is_number_integer() || it->get<int64_t>() < 1 || it->get<int64_t>() > 3600) {
+      return std::unexpected("'duration' must be a whole number of seconds from 1 to 3600");
+    }
+    request.duration = std::chrono::seconds(it->get<int64_t>());
+  }
+  return request;
+}
+
+std::vector<ProcedureParameter> deviceLocateParameters() {
+  return {integerParameter("duration", "Duration (s)",
+                           "How long the LEDs blink. They stop at the end, and when the run is "
+                           "cancelled.",
+                           10, 1, 3600)};
+}
+
+std::vector<ProgressStep> deviceLocateSteps() { return stepsFrom({kDeviceLocateStep}); }
+
+std::expected<void, std::string> runDeviceLocateProcedure(Device& device,
+                                                          ProgressReporter& reporter,
+                                                          const std::stop_token& stop,
+                                                          const DeviceLocateRequest& request) {
+  reporter.start(kDeviceLocateStep);
+  if (auto started = device.locate(true); !started) {
+    reporter.fail(kDeviceLocateStep, started.error());
+    return std::unexpected(started.error());
+  }
+  // Checked in slices, because a plain sleep cannot be woken by a stop request.
+  constexpr auto kSlice = std::chrono::milliseconds(50);
+  const auto deadline = std::chrono::steady_clock::now() + request.duration;
+  while (!stop.stop_requested() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(kSlice);
+  }
+  const bool cancelled = stop.stop_requested();
+  if (auto stopped = device.locate(false); !stopped) {
+    const std::string reason = std::format("the LEDs did not stop: {}", stopped.error());
+    reporter.fail(kDeviceLocateStep, reason);
+    return std::unexpected(reason);
+  }
+  if (cancelled) {
+    const std::string reason = "device locate was cancelled; the LEDs stopped";
+    reporter.fail(kDeviceLocateStep, reason);
+    return std::unexpected(reason);
+  }
+  reporter.succeed(kDeviceLocateStep, std::format("blinked for {} s", request.duration.count()));
   return {};
 }
 

@@ -78,7 +78,10 @@ struct ProcessImageInfo {
   uint64_t shortWkcCycles = 0;
   uint64_t firstShortWkcUs = 0;  ///< Epoch microseconds of the first such cycle (0 if none).
   uint64_t lastShortWkcUs = 0;   ///< Epoch microseconds of the most recent one (0 if none).
-  std::size_t generations = 0;   ///< Number of process images retained since the last reset().
+  /// Input frames the driver dropped since the process data was configured. Only a transport that
+  /// buffers input frames, such as SPoE, can drop one; every other transport reports 0.
+  uint64_t droppedInputFrames = 0;
+  std::size_t generations = 0;  ///< Number of process images retained since the last reset().
   std::vector<ProcessImageObjectInfo> outputs;  ///< Output-mapped objects in image order.
   std::vector<ProcessImageObjectInfo> inputs;   ///< Input-mapped objects in image order.
 };
@@ -583,11 +586,35 @@ class DeviceManager {
   /// @param targetState  Desired EtherCAT AL state.
   /// @param timeout      Maximum time to wait for all devices.
   /// @return The final state snapshot of each targeted device (in the order targeted), or an
-  ///         error string if no driver is initialised, no devices were discovered, or the
-  ///         final state read-back fails.
+  ///         error string if no driver is initialised, no devices were discovered, the driver
+  ///         refuses state changes (see @c stateChangeRefusal), or the final state read-back
+  ///         fails.
   std::expected<std::vector<DeviceStateInfo>, std::string> transitionToState(
       const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
       std::chrono::steady_clock::duration timeout);
+
+  /// @brief Returns why the driver refuses every state change, or nullopt when it accepts them,
+  ///        or when no driver is initialised. No bus I/O.
+  std::optional<std::string> stateChangeRefusal() const;
+
+  /// @brief Whether the devices have an EtherCAT Slave Controller: SII, ESC registers, DC and the
+  ///        ESC diagnostics. True when no driver is initialised. No bus I/O.
+  bool supportsEsc() const;
+
+  /// @brief Brings the process image in line with device states that another master set.
+  ///
+  /// For a driver that refuses state changes, such as SPoE in Monitor mode, a PLC moves the
+  /// devices and nothing here commands them. So nothing calls @c transitionToState, and that is
+  /// where the image is otherwise published. This reads every state and does what
+  /// @c transitionToState would have done. When a device is seen entering SAFE-OP or OP, the image
+  /// is re-mapped, which also reads the PDO mapping again, because the other master can change it
+  /// in PRE-OP. When no device exchanges any more, the image is torn down.
+  ///
+  /// One pass, with no thread of its own. The caller repeats it, the way the composition root does
+  /// while the driver refuses state changes. Takes @c busOperationMutex_.
+  ///
+  /// @return Void, or the error of the state read or of the re-map.
+  std::expected<void, std::string> followObservedStates();
 
   /// @brief Reads the current AL state for a set of devices.
   ///
@@ -929,6 +956,11 @@ class DeviceManager {
   // other control-plane callers — never the monitoring sampler, and never a procedure that is
   // already running.
   mutable std::mutex busOperationMutex_;
+
+  // The positions that exchanged at the last followObservedStates pass, and the device set they
+  // belong to. Touched only under busOperationMutex_.
+  std::vector<uint16_t> observedExchanging_;
+  uint64_t observedGeneration_ = 0;
 
   // currentSetMutex_ — guards the shared_ptr below, and nothing it points to. Held for exactly one
   // pointer copy, which is why a reader can never be delayed by an operation: a shared_ptr copy is

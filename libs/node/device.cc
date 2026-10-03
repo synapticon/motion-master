@@ -50,6 +50,8 @@ Device::Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver, Process
   // the scan that created this device, when nothing else can hold the bus — makes the accessor
   // honour its documented "no bus I/O" contract for the whole lifetime of the device.
   mailboxProtocols_ = driver_.mailboxProtocols(slavePosition);
+  supportsEsc_ = driver_.supportsEsc();
+  supportsLocate_ = driver_.supportsLocate();
 }
 
 uint16_t Device::slavePosition() const { return slavePosition_; }
@@ -91,6 +93,19 @@ bool Device::mailboxActive() const {
 
 bool Device::supportsCoe() const {
   return (mailboxProtocols_ & mm::comm::MailboxConfig::kProtocolCoe) != 0;
+}
+
+bool Device::supportsEsc() const { return supportsEsc_; }
+
+bool Device::supportsLocate() const { return supportsLocate_; }
+
+std::expected<void, std::string> Device::locate(bool on) const {
+  return driver_.locate(slavePosition_, on);
+}
+
+std::expected<mm::comm::FieldbusDriver::FirmwareActivation, std::string> Device::activateFirmware(
+    std::chrono::steady_clock::duration timeout) const {
+  return driver_.activateFirmware(slavePosition_, timeout);
 }
 
 bool Device::exchangesProcessData() const {
@@ -1409,6 +1424,8 @@ void to_json(nlohmann::json& j, const Device& d) {
       {"revisionNumber", d.revisionNumber()},
       {"serialNumber", d.serialNumber()},
       {"isCia402", d.isCia402()},
+      {"supportsEsc", d.supportsEsc()},
+      {"supportsLocate", d.supportsLocate()},
       {"parametersUnavailable", d.parametersUnavailable()},
   };
 }

@@ -2,11 +2,15 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <csignal>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
+#include <stop_token>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include "auto_tuning/process.h"
@@ -15,6 +19,7 @@
 #include "cert_updater.h"
 #include "comm/base.h"
 #include "comm/soem_fieldbus_driver.h"
+#include "comm/spoe_fieldbus_driver.h"
 #include "core/platform.h"
 #include "core/user_cache.h"
 #include "core/version.h"
@@ -141,8 +146,23 @@ int main(int argc, char** argv) {
   // names concrete driver types (the composition root).
   auto initDeviceManager = [&deviceManager, deviceManagerConfig, busAdapterMac, packMac,
                             mailboxStatusFmmu = opts.config.fieldbus.mailboxStatusFmmu](
-                               const std::string& type,
-                               const std::string& adapter) -> std::expected<void, std::string> {
+                               const FieldbusConfig& fieldbus) -> std::expected<void, std::string> {
+    if (fieldbus.driver == "spoe") {
+      spdlog::info("Fieldbus: SPoE, {} mode, {} address(es) on port {}", fieldbus.spoe.mode,
+                   fieldbus.ipAddresses.size(), fieldbus.spoe.port);
+      return deviceManager.init(
+          std::make_unique<mm::comm::spoe::SpoeFieldbusDriver>(
+              mm::comm::spoe::SpoeFieldbusDriverConfig{
+                  .hosts = fieldbus.ipAddresses,
+                  .port = fieldbus.spoe.port,
+                  .mode = fieldbus.spoe.mode == "control" ? mm::comm::spoe::SpoeMode::kControl
+                                                          : mm::comm::spoe::SpoeMode::kMonitor,
+                  .watchdogMs = fieldbus.spoe.watchdogMs,
+                  .requestTimeout = std::chrono::milliseconds{1000},
+                  .connectTimeout = std::chrono::milliseconds{1000}}),
+          deviceManagerConfig);
+    }
+    const std::string& adapter = fieldbus.adapter;
     std::string ifname;
     if (!adapter.empty()) {
       auto resolved = mm::comm::resolveNetworkAdapter(adapter);
@@ -168,14 +188,6 @@ int main(int argc, char** argv) {
                      resolved->macLinux);
       }
     }
-    if (type != "soem") {
-      // soem is the only driver implemented today (spoe is planned). Config validation accepts the
-      // planned names, so be explicit at runtime about why a valid-looking driver is refused.
-      spdlog::error(
-          "Fieldbus driver '{}' is not implemented in this build — only 'soem' is available", type);
-      return std::unexpected("fieldbus driver '" + type +
-                             "' is not implemented in this build (only 'soem' is available)");
-    }
     return deviceManager.init(std::make_unique<mm::comm::soem::SoemFieldbusDriver>(
                                   mm::comm::soem::SoemFieldbusDriverConfig{
                                       .ifname = ifname, .mailboxStatusFmmu = mailboxStatusFmmu}),
@@ -188,7 +200,7 @@ int main(int argc, char** argv) {
   // start up and let the user power devices on and rescan via POST /api/scan. Both log their own
   // outcome.
   if (!opts.config.fieldbus.driver.empty()) {
-    if (!initDeviceManager(opts.config.fieldbus.driver, opts.config.fieldbus.adapter)) {
+    if (!initDeviceManager(opts.config.fieldbus)) {
       return 1;
     }
     [[maybe_unused]] const auto scanResult = deviceManager.scan();
@@ -426,6 +438,30 @@ int main(int argc, char** argv) {
   notificationBus.addSource(mm::busHealthSource(deviceManager));
   notificationBus.start();
 
+  // A driver that refuses state changes leaves them to another master, as SPoE does in Monitor
+  // mode beside a PLC. Then nothing calls transitionToState, which is where the process image is
+  // otherwise published, so this thread follows the states that master sets. It does nothing while
+  // the driver accepts state changes, and it checks again on every pass because POST /api/init can
+  // replace the driver. Declared after deviceManager, so it is destroyed first.
+  std::jthread stateFollower([&deviceManager](const std::stop_token& stop) {
+    std::mutex mutex;
+    std::condition_variable_any wake;
+    std::string lastError;
+    while (!stop.stop_requested()) {
+      if (deviceManager.stateChangeRefusal()) {
+        const auto followed = deviceManager.followObservedStates();
+        // The same failure repeats every pass while its cause lasts, so it is logged once.
+        const std::string error = followed ? std::string{} : followed.error();
+        if (!error.empty() && error != lastError) {
+          spdlog::warn("Following the device states failed: {}", error);
+        }
+        lastError = error;
+      }
+      std::unique_lock lock(mutex);
+      wake.wait_for(lock, stop, std::chrono::milliseconds(500), [] { return false; });
+    }
+  });
+
   if (opts.openBrowser) {
     mm::core::openInBrowser("https://motion-master.synapticon.com/apps/console/");
   }
@@ -458,6 +494,8 @@ int main(int argc, char** argv) {
   gGameLoop.store(nullptr, std::memory_order_relaxed);
   monitoringManager.stop();  // stop sampling/publishing before the server loops go away
   notificationBus.stop();
+  stateFollower.request_stop();
+  stateFollower.join();
   wsServer.stop();
   httpServer.stop();
 

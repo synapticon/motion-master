@@ -1,10 +1,28 @@
 find_package(asio CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 
-add_executable(mm_comm_tests base_test.cc fake_spoe_server.cc fake_spoe_server_test.cc sii_test.cc
-                             soem_fieldbus_driver_test.cc)
+# The fake SPoE server is a library, because the node tests drive a whole DeviceManager against it.
+add_library(mm_comm_spoe_fake STATIC fake_spoe_server.cc)
+add_library(mm::comm_spoe_fake ALIAS mm_comm_spoe_fake)
+target_include_directories(mm_comm_spoe_fake PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(mm_comm_spoe_fake PRIVATE asio::asio)
+if(WIN32)
+  target_compile_definitions(mm_comm_spoe_fake PRIVATE _WIN32_WINNT=0x0A00)
+endif()
 
-target_link_libraries(mm_comm_tests PRIVATE mm::comm asio::asio GTest::gtest GTest::gtest_main)
+add_executable(
+  mm_comm_tests
+  base_test.cc
+  fake_spoe_server_test.cc
+  sii_test.cc
+  soem_fieldbus_driver_test.cc
+  spoe_connection_test.cc
+  spoe_fieldbus_driver_test.cc
+  spoe_process_data_test.cc
+  spoe_frame_test.cc)
+
+target_link_libraries(mm_comm_tests PRIVATE mm::comm mm::comm_spoe_fake asio::asio GTest::gtest
+                                            GTest::gtest_main)
 
 # Asio needs the oldest Windows version to target, and warns when it is not set. 0x0A00 is Windows
 # 10.

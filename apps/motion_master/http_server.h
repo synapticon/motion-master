@@ -18,6 +18,7 @@
 #include "api/router.h"
 #include "api/web_api.h"
 #include "auto_tuning/status.h"  // Status (returned by the GET /api/auto-tuning callback)
+#include "config.h"              // FieldbusConfig (the body of POST /api/init)
 #include "game_loop.h"           // GameLoopHealth (returned by the GET /api/game-loop callback)
 #include "net/http_client.h"     // net::Response (an auto-tuning reply, passed through verbatim)
 #include "node/eni_collector.h"  // EniCollectorOptions (returned by the GET /api/eni callback)
@@ -44,13 +45,13 @@ class HttpServer {
  public:
   /// @brief Callback type for `POST /api/init`.
   ///
-  /// Receives the requested driver name (e.g. `"soem"`) and adapter string
-  /// (interface name or MAC; may be empty for auto-detect).  The callback is
-  /// responsible for constructing the concrete @c FieldbusDriver and calling
+  /// Receives the requested @c "fieldbus" block, already validated: the driver name and the
+  /// settings of that driver (the adapter for SOEM, the addresses and mode for SPoE). The
+  /// callback is responsible for constructing the concrete @c FieldbusDriver and calling
   /// @c DeviceManager::init().  Lives in the composition root (main.cc) so that
   /// concrete driver types are never referenced inside the server.
   using InitDeviceManagerFn =
-      std::function<std::expected<void, std::string>(std::string driver, std::string adapter)>;
+      std::function<std::expected<void, std::string>(const FieldbusConfig& fieldbus)>;
 
   /// @brief Callback type for `GET /api/log`.
   ///

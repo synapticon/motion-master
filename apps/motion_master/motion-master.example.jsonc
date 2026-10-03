@@ -37,9 +37,19 @@
   // Omit this whole block (or leave "driver" empty) to NOT auto-init — the fieldbus then
   // waits to be initialised from the client via POST /api/init.
   "fieldbus": {
-    "driver": "soem",   // soem | spoe  (spoe planned; only soem is implemented today)
+    "driver": "soem",   // soem | spoe
     "adapter": "eth0",  // soem: NIC MAC (AA:BB:CC:DD:EE:FF or AA-BB-CC-DD-EE-FF) or interface name
-    // spoe will instead take a list of device addresses: "ipAddresses": ["192.168.0.10"]
+
+    // spoe only. One IP address per drive. The list order is the position order.
+    // "ipAddresses": ["192.168.0.10"],
+    // "spoe": {
+    //   // monitor: a PLC owns the drive's state, and Motion Master only parametrises and
+    //   // observes. control: Motion Master owns the state.
+    //   "mode": "monitor",
+    //   // control only. The drive faults when no SPoE message arrives for this long. At least 50.
+    //   "watchdogMs": 75,
+    //   "port": 8080
+    // },
 
     // SOEM only. Keep SOEM 2.0's mailbox-status FMMU active — the extra input FMMU it maps the SM1
     // mailbox-status register (0x080D) into the cyclic image on every mailbox slave. Motion Master

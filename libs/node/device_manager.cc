@@ -627,6 +627,7 @@ ProcessImageInfo DeviceManager::processImageInfo() const {
   // Reduced to microseconds at the JSON boundary, matching every other timestamp this API serves.
   info.firstShortWkcUs = pd_->firstShortWkcNs.load(std::memory_order_relaxed) / 1000;
   info.lastShortWkcUs = pd_->lastShortWkcNs.load(std::memory_order_relaxed) / 1000;
+  info.droppedInputFrames = set->driver ? set->driver->droppedInputFrames() : 0;
 
   const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
   info.configured = image != nullptr;
@@ -903,6 +904,61 @@ void DeviceManager::lowerExpectedWkc(std::span<const uint16_t> positions,
   }
 }
 
+bool DeviceManager::supportsEsc() const {
+  const std::shared_ptr<DeviceSet> set = deviceSet();
+  return !set->driver || set->driver->supportsEsc();
+}
+
+std::optional<std::string> DeviceManager::stateChangeRefusal() const {
+  const std::shared_ptr<DeviceSet> set = deviceSet();
+  return set->driver ? set->driver->stateChangeRefusal() : std::nullopt;
+}
+
+std::expected<void, std::string> DeviceManager::followObservedStates() {
+  const std::lock_guard busOperationLock(busOperationMutex_);
+  const std::shared_ptr<DeviceSet> set = deviceSet();
+  if (!set->driver || set->devices.empty()) {
+    return {};
+  }
+  std::vector<uint16_t> positions(set->devices.size());
+  std::ranges::transform(set->devices, positions.begin(),
+                         [](const Device& device) { return device.slavePosition(); });
+  // Refreshes the driver's state cache, which exchangesProcessData() reads.
+  if (auto states = set->driver->readStates(positions); !states) {
+    return std::unexpected(states.error());
+  }
+  std::vector<uint16_t> exchanging;
+  for (const auto& device : set->devices) {
+    if (device.exchangesProcessData()) {
+      exchanging.push_back(device.slavePosition());
+    }
+  }
+  // A new device set has nothing in common with the positions seen before it.
+  if (observedGeneration_ != set->topologyGeneration) {
+    observedExchanging_.clear();
+    observedGeneration_ = set->topologyGeneration;
+  }
+  const bool joined = std::ranges::any_of(exchanging, [this](uint16_t position) {
+    return std::ranges::find(observedExchanging_, position) == observedExchanging_.end();
+  });
+  observedExchanging_ = exchanging;
+
+  if (!exchanging.empty() && (joined || !processDataConfigured())) {
+    spdlog::info("{} device(s) exchange process data under another master — re-mapping",
+                 exchanging.size());
+    if (auto remapped = remapProcessImage(); !remapped) {
+      // Forget what was seen, so the next pass tries the re-map again.
+      observedExchanging_.clear();
+      return std::unexpected(remapped.error());
+    }
+  } else if (exchanging.empty() && processDataConfigured()) {
+    spdlog::info("No device exchanges process data any more — stopping the exchange");
+    static_cast<void>(stopExchange());
+  }
+  updateExpectedWkc();
+  return {};
+}
+
 std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transitionToState(
     const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
     std::chrono::steady_clock::duration timeout) {
@@ -920,6 +976,9 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   }
   if (set->devices.empty()) {
     return std::unexpected("no devices — call scan() first");
+  }
+  if (auto refusal = set->driver->stateChangeRefusal(); refusal) {
+    return std::unexpected(std::move(*refusal));
   }
   auto resolved = resolveTargets(positions);
   if (!resolved) {
@@ -1483,6 +1542,7 @@ void to_json(nlohmann::json& j, const ProcessImageInfo& info) {
        {"shortWkcCycles", info.shortWkcCycles},
        {"firstShortWkcUs", info.firstShortWkcUs},
        {"lastShortWkcUs", info.lastShortWkcUs},
+       {"droppedInputFrames", info.droppedInputFrames},
        {"generations", info.generations},
        {"outputs", info.outputs},
        {"inputs", info.inputs}};

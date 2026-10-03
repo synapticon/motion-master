@@ -3512,3 +3512,89 @@ found twice.
 
 **Every feature found in the three sources has one of the five classes.** After these
 decisions, no gap remains outside the minor list.
+
+## Session 2026-10-03 — SPoE process data runs on a thread per drive, and Monitor mode follows the PLC's states (as-built)
+
+Issue #36, slice 4. The SPoE driver exchanges process data, and v6 publishes the process image for
+a drive that a PLC controls.
+
+**A round trip cannot run on the RT thread, so each drive gets an exchange thread.** SPoE is TCP,
+one request and one reply at a time. The RT thread hands the newest outputs to the exchange thread
+through a triple buffer, and takes one input frame per cycle from a single-producer single-consumer
+queue (`libs/comm/spoe_process_data.h`). Neither side waits.
+
+**The pacing is the old client's, and it is why monitoring worked there.** The exchange thread
+starts the next request as soon as the previous one answers, with a 1 ms floor. That keeps the
+drive's 512-byte input buffer far from full. The drive returns its buffered frames in batches; the
+queue holds them, and the RT thread takes one each cycle, so monitoring sees every frame in order.
+The queue keeps the newest 30 frames, which bounds how far the inputs can lag.
+
+**A frame cut at the 500-byte limit is joined, and the framing heals itself.** One reply carries at
+most 500 bytes, which can end inside a frame. The rest starts the next reply. A reply shorter than
+500 bytes means the drive emptied its buffer, so it ends on a frame boundary; if the joined bytes
+are then not whole frames, the kept part was stale, because the firmware empties a full buffer
+outright. The stale bytes are dropped and counted.
+
+**The working counter keeps the EtherCAT rule, so nothing above the driver changes.** A drive whose
+last exchange answered contributes what `workingCounterContribution` gives for its state and its
+mapping. `expectedWkcDuring` computes the same, so the short-WKC notification works for SPoE as it
+is.
+
+**Monitor mode needed a path that does not start with a state change.** `transitionToState` is
+where the image is published, and in Monitor mode v6 sends no state change. The old client read
+the state and the mapping once, at startup, so a drive that reached OP later was probably never
+monitored. `DeviceManager::followObservedStates()` is one pass: it reads every state, re-maps when a
+device enters SAFE-OP or OP, and tears down when none exchanges. A re-map reads the mapping again,
+because the PLC can change it in PRE-OP. It reuses `remapProcessImage` and `stopExchange`.
+
+**The thread that repeats it lives in `main.cc`, not in `DeviceManager`.** `DeviceManager` owns no
+background thread, so that it stays embeddable (`docs/THREADS.md`). The state follower is thread 7.
+It runs every 500 ms and does nothing while the driver accepts state changes. It asks again on every
+pass, because `POST /api/init` can replace the driver.
+
+**A clean shutdown clears the PDO mode.** `main()` does not call `reset()` on SIGTERM, so the
+driver's destructor does what `stop()` does: it stops the exchange threads and sets each drive's
+PDO mode to none. In Control mode that keeps the drive's watchdog from tripping.
+
+**The SPoE connection's mutex is the third leaf lock.** It is held for one request and its reply,
+and nothing else is acquired under it (`docs/LOCKING.md`, mutex 11).
+
+**From the review of the old client:** a state change is judged by the state in the reply, not by
+the status, because firmware versions disagree on the status. The PDO size is read from
+`0x1C12`/`0x1C13` and the entry counts, not from every subindex of `0x1600`–`0x1A03`.
+
+## Session 2026-10-03 — SPoE files and firmware installation follow the firmware's own paths (as-built)
+
+Issue #36, slice 5. The SPoE driver transfers files, installs firmware and blinks a drive's LEDs.
+Every rule below comes from reading `somanet_software`, because the specification and the
+firmware disagree on files too.
+
+**The installation keeps one procedure, with one new step.** Over EtherCAT, leaving BOOT for INIT
+applies the firmware; the netX restarts into its update mode only if `com_firmware.bin` was written
+(`is_foe_for_update_complete`, `AppECS_Functions_Boot.c`). The SPoE handler has no such rule. It
+applies firmware on an explicit `FIRMWARE_UPDATE` message, which restarts the netX; the restart
+loads the COM firmware from flash, and the drive then starts the SoC firmware written in BOOT.
+Marko confirmed that this one message applies both binaries. So the procedure gained an
+`activate-firmware` step, backed by `FieldbusDriver::activateFirmware`. Its default does nothing,
+which is the EtherCAT case, and the existing walk out of BOOT runs after it either way.
+
+**Activation waits for the restart, not for the answer.** The firmware answers `FIRMWARE_UPDATE`
+and resets 1000 ms later (`ulTimeToReset`). A reconnect inside that second reaches the old firmware
+and looks like a finished restart. So the driver first waits for the drive to stop answering,
+then reconnects until it answers again, with a 120 s ceiling. This replaces fixed sleeps.
+
+**The first packet of `com_firmware.bin` in BOOT answers 0x00, not ACK.** The firmware returns what
+`storage_prepare_for_writing` returned, and 0 is its success. Everywhere else success is ACK
+(0x58), and 0x00 is the FoE error "undefined". The driver accepts 0x00 for that one packet only.
+Before it answers, the firmware erases 512 KB of flash, so file packets get a 30 s timeout.
+
+**An empty read is checked against `fs-getlist` before it is called a file.** The old client
+treats an empty read as a file that may be missing, and checks the file list to tell. The firmware
+source does not show what the SoC answers for a missing file, so v6 does the same check.
+
+**SPoE has no SII.** `FieldbusDriver::supportsEsc()` says so without bus I/O, and `Device` copies it
+at construction. The installation records that it did not write the SII and continues.
+
+**Device locate is a transport capability, so its procedure applies by capability.** The catalogue
+row's `applies` reads `Device::supportsLocate()`, a copy taken at construction, which is the kind of
+state the catalogue rule allows. The LEDs stop at the end of the run and when it is cancelled.

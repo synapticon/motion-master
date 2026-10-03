@@ -7,6 +7,8 @@ import SlavePositionBadge from '../components/SlavePositionBadge'
 import { WireTiming, useWireTiming } from '../components/WireTiming'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
+import NoEscNotice from '../components/NoEscNotice'
+import { useSupportsEsc } from '../hooks/useSupportsEsc'
 
 // Unwraps the {error: {error: "..."}} shape the generated client rejects with.
 function apiError(err: unknown): string {
@@ -318,13 +320,31 @@ export default function FieldbusDiagnosticsPage() {
   const { api } = useConnection()
   const { timing, measure } = useWireTiming()
 
+  const supportsEsc = useSupportsEsc()
+
   const query = useQuery({
     queryKey: ['deviceDiagnostics'],
+    enabled: supportsEsc,
     queryFn: () => measure(() => api.getDeviceDiagnostics()),
     refetchInterval: 2000,
   })
 
   const devices = query.data?.data ?? []
+
+  if (!supportsEsc) {
+    return (
+      <div>
+        <PageHeader
+          eyebrow="Fieldbus"
+          title="Diagnostics"
+          description="Live link-quality and watchdog counters read from each slave's EtherCAT Slave Controller."
+        />
+        <div className="p-4 sm:px-8 sm:py-7 space-y-6">
+          <NoEscNotice feature="ESC diagnostics" />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>

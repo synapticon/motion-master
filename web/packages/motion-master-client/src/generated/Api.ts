@@ -415,6 +415,16 @@ export class Api<
          * @example false
          */
         parametersUnavailable: boolean;
+        /**
+         * Whether the device has an EtherCAT Slave Controller: SII, ESC registers, distributed clocks and the ESC diagnostics. False over SPoE, where those endpoints answer 409.
+         * @example true
+         */
+        supportsEsc?: boolean;
+        /**
+         * Whether the transport can blink the device's LEDs, which is what the `device-locate` procedure does. True over SPoE.
+         * @example false
+         */
+        supportsLocate?: boolean;
       },
       void
     >({
@@ -424,7 +434,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Constructs the requested fieldbus driver, opens the network interface, and makes the driver available for subsequent calls to /api/scan. The driver defaults to SOEM when omitted. SOEM has no adapter auto-detect: a network adapter must be supplied, otherwise init fails.
+   * @description Constructs the requested fieldbus driver and makes it available for subsequent calls to /api/scan. The body is the `fieldbus` block of the config file, and the same rules check it. The driver defaults to SOEM when omitted. SOEM opens the network interface. It has no adapter auto-detect: a network adapter must be supplied, otherwise init fails. SPoE connects to each drive at scan time. It needs `ipAddresses`, one address per drive, and the list order is the position order.
    *
    * @name Init
    * @summary Initialise the fieldbus driver
@@ -433,16 +443,42 @@ export class Api<
   init = (
     data?: {
       /**
-       * Fieldbus driver to use (only soem is implemented today; spoe is planned)
+       * Fieldbus driver to use
        * @default "soem"
        * @example "soem"
        */
       driver?: "soem" | "spoe";
       /**
-       * Network interface name or MAC address. Required for SOEM — there is no auto-detect, so an empty value makes init fail.
+       * SOEM only. Network interface name or MAC address. Required for SOEM — there is no auto-detect, so an empty value makes init fail.
        * @example "eth0"
        */
       adapter?: string;
+      /**
+       * SPoE only. One IP address per drive, at least one. The list order is the position order, and a drive that does not answer keeps its position.
+       * @example ["192.168.0.10"]
+       */
+      ipAddresses?: string[];
+      /** SPoE only. */
+      spoe?: {
+        /**
+         * Who owns the drive's state. In `monitor` mode a PLC owns it, Motion Master only parametrises and observes, and a state change answers 409. In `control` mode Motion Master owns it.
+         * @default "monitor"
+         */
+        mode?: "monitor" | "control";
+        /**
+         * Control mode only. The drive faults when no SPoE message arrives for this long. At least 50.
+         * @min 50
+         * @default 75
+         */
+        watchdogMs?: number;
+        /**
+         * The TCP port of the SPoE server on every drive.
+         * @min 1
+         * @max 65535
+         * @default 8080
+         */
+        port?: number;
+      };
     },
     params: RequestParams = {},
   ) =>
@@ -970,13 +1006,17 @@ export class Api<
          */
         data: number[];
       },
-      void | {
-        /**
-         * Human-readable error message from the driver
-         * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
-         */
-        error: string;
-      }
+      | void
+      | {
+          error: string;
+        }
+      | {
+          /**
+           * Human-readable error message from the driver
+           * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
+           */
+          error: string;
+        }
     >({
       path: `/api/devices/${slavePosition}/registers/${address}`,
       method: "GET",
@@ -1008,13 +1048,17 @@ export class Api<
         /** @example true */
         ok: boolean;
       },
-      void | {
-        /**
-         * Human-readable error message from the driver
-         * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
-         */
-        error: string;
-      }
+      | void
+      | {
+          error: string;
+        }
+      | {
+          /**
+           * Human-readable error message from the driver
+           * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
+           */
+          error: string;
+        }
     >({
       path: `/api/devices/${slavePosition}/registers/${address}`,
       method: "POST",
@@ -1036,13 +1080,17 @@ export class Api<
   ) =>
     this.request<
       ProcessDataWatchdog,
-      void | {
-        /**
-         * Human-readable error message from the driver
-         * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
-         */
-        error: string;
-      }
+      | void
+      | {
+          error: string;
+        }
+      | {
+          /**
+           * Human-readable error message from the driver
+           * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
+           */
+          error: string;
+        }
     >({
       path: `/api/devices/${slavePosition}/watchdog`,
       method: "GET",
@@ -1070,13 +1118,17 @@ export class Api<
   ) =>
     this.request<
       ProcessDataWatchdog,
-      void | {
-        /**
-         * Human-readable error message from the driver
-         * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
-         */
-        error: string;
-      }
+      | void
+      | {
+          error: string;
+        }
+      | {
+          /**
+           * Human-readable error message from the driver
+           * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
+           */
+          error: string;
+        }
     >({
       path: `/api/devices/${slavePosition}/watchdog`,
       method: "PUT",
@@ -1688,13 +1740,17 @@ export class Api<
   readSii = (slavePosition: number, params: RequestParams = {}) =>
     this.request<
       SlaveInformationInterface,
-      void | {
-        /**
-         * Human-readable error message from the driver
-         * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
-         */
-        error: string;
-      }
+      | void
+      | {
+          error: string;
+        }
+      | {
+          /**
+           * Human-readable error message from the driver
+           * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
+           */
+          error: string;
+        }
     >({
       path: `/api/devices/${slavePosition}/sii`,
       method: "GET",
@@ -1714,13 +1770,17 @@ export class Api<
         /** @example true */
         ok?: boolean;
       },
-      void | {
-        /**
-         * Human-readable error message from the driver
-         * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
-         */
-        error: string;
-      }
+      | void
+      | {
+          error: string;
+        }
+      | {
+          /**
+           * Human-readable error message from the driver
+           * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
+           */
+          error: string;
+        }
     >({
       path: `/api/devices/${slavePosition}/sii`,
       method: "PUT",
@@ -1885,13 +1945,17 @@ export class Api<
   ) =>
     this.request<
       DeviceDiagnostics[],
-      void | {
-        /**
-         * Human-readable error message from the driver
-         * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
-         */
-        error: string;
-      }
+      | void
+      | {
+          error: string;
+        }
+      | {
+          /**
+           * Human-readable error message from the driver
+           * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
+           */
+          error: string;
+        }
     >({
       path: `/api/devices/diagnostics`,
       method: "GET",
@@ -1918,13 +1982,17 @@ export class Api<
   ) =>
     this.request<
       DcSyncStatus[],
-      void | {
-        /**
-         * Human-readable error message from the driver
-         * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
-         */
-        error: string;
-      }
+      | void
+      | {
+          error: string;
+        }
+      | {
+          /**
+           * Human-readable error message from the driver
+           * @example "SDOread slave 1 0x2345:01 failed (no response — mailbox timeout)"
+           */
+          error: string;
+        }
     >({
       path: `/api/dc-sync`,
       method: "GET",
@@ -2060,13 +2128,18 @@ export class Api<
           reached: boolean;
         }[];
       },
-      void | {
-        /**
-         * Human-readable error message from the driver
-         * @example "FPRD slave 1: wkc=0"
-         */
-        error: string;
-      }
+      | void
+      | {
+          /** Why the driver refuses state changes */
+          error: string;
+        }
+      | {
+          /**
+           * Human-readable error message from the driver
+           * @example "FPRD slave 1: wkc=0"
+           */
+          error: string;
+        }
     >({
       path: `/api/devices/state`,
       method: "POST",
@@ -2134,6 +2207,16 @@ export class Api<
          * @example false
          */
         parametersUnavailable: boolean;
+        /**
+         * Whether the device has an EtherCAT Slave Controller: SII, ESC registers, distributed clocks and the ESC diagnostics. False over SPoE, where those endpoints answer 409.
+         * @example true
+         */
+        supportsEsc?: boolean;
+        /**
+         * Whether the transport can blink the device's LEDs, which is what the `device-locate` procedure does. True over SPoE.
+         * @example false
+         */
+        supportsLocate?: boolean;
       }[],
       any
     >({
@@ -2190,6 +2273,12 @@ export class Api<
          * @example 0
          */
         shortWkcCycles: number;
+        /**
+         * Input frames the driver dropped since the process data was configured, summed over all devices. Only a transport that buffers input frames can drop one: a SPoE drive returns its frames in batches, and the oldest are dropped when the real-time loop falls more than 30 cycles behind. Every other transport reports 0.
+         * @format int64
+         * @example 0
+         */
+        droppedInputFrames: number;
         /**
          * Epoch microseconds of the first such cycle, 0 if there has been none
          * @format int64

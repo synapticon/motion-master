@@ -90,7 +90,19 @@ class FakeBus : public FieldbusDriver {
   uint16_t mailboxProtocols(uint16_t) const override {
     return mm::comm::MailboxConfig::kProtocolCoe;
   }
-  std::expected<void, std::string> configureProcessData() override { return {}; }
+  int configureCalls = 0;  // how many times configureProcessData ran, which is once per re-map
+  std::expected<void, std::string> configureProcessData() override {
+    ++configureCalls;
+    return {};
+  }
+
+  bool esc = true;             // returned by supportsEsc()
+  uint64_t droppedFrames = 0;  // returned by droppedInputFrames()
+  bool supportsEsc() const override { return esc; }
+  uint64_t droppedInputFrames() const override { return droppedFrames; }
+
+  std::optional<std::string> refusal;  // returned by stateChangeRefusal()
+  std::optional<std::string> stateChangeRefusal() const override { return refusal; }
   PdoLayout processDataLayout() override { return layout; }
 
   // Static configuration and EEPROM, for callers that describe the bus rather than drive it.

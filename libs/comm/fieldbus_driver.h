@@ -378,7 +378,7 @@ struct ProcessDataWatchdogConfig {
 
 /// @brief Abstract interface for an EtherCAT fieldbus driver.
 ///
-/// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeFieldbusDriver (SPoE, planned).
+/// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeFieldbusDriver (SPoE).
 /// The composition root (@c main.cc) constructs exactly one and injects it into @c DeviceManager
 /// via @c DeviceManager::init. @c GameLoop never references the driver — it runs @c CyclicTasks
 /// (e.g. @c ProcessDataCyclicTask) that reach the bus only through @c DeviceManager.
@@ -855,6 +855,52 @@ class FieldbusDriver {
       EtherCatState targetState, std::chrono::steady_clock::duration timeout,
       std::chrono::steady_clock::duration resendInterval = std::chrono::seconds(2),
       std::function<void()> tick = nullptr, std::function<bool()> shouldAbort = nullptr) = 0;
+
+  /// @brief True when the devices have an EtherCAT Slave Controller: SII, ESC registers, DC and
+  ///        the ESC diagnostics. No bus I/O.
+  ///
+  /// A transport without one answers those calls with "not supported". This lets a caller skip
+  /// them, or say why they are missing, without asking first.
+  virtual bool supportsEsc() const { return true; }
+
+  /// @brief Input frames dropped since the process data was configured, summed over all devices.
+  ///
+  /// A transport that buffers input frames, as SPoE does, drops the oldest when the RT loop falls
+  /// behind. A memory-mapped master has no such queue, so the default is 0. No bus I/O.
+  virtual uint64_t droppedInputFrames() const { return 0; }
+
+  /// @brief True when @c locate can blink a device's LEDs. No bus I/O.
+  virtual bool supportsLocate() const { return false; }
+
+  /// @brief Starts or stops blinking the LEDs of a device, so that someone can find it.
+  virtual std::expected<void, std::string> locate(uint16_t /*slavePosition*/, bool /*on*/) {
+    return std::unexpected("device locate not supported by this transport");
+  }
+
+  /// @brief What @c activateFirmware did.
+  enum class FirmwareActivation : uint8_t {
+    /// Nothing. The device applies the firmware it was sent when it leaves BOOT, as an EtherCAT
+    /// device does.
+    kOnBootExit,
+    /// The device restarted into the new firmware and answers again.
+    kRestarted,
+  };
+
+  /// @brief Makes a device apply the firmware files written to it in BOOT.
+  ///
+  /// Over EtherCAT, leaving BOOT does this, so the default does nothing. A transport that needs an
+  /// explicit request sends it and waits up to @p timeout for the device to answer again.
+  virtual std::expected<FirmwareActivation, std::string> activateFirmware(
+      uint16_t /*slavePosition*/, std::chrono::steady_clock::duration /*timeout*/) {
+    return FirmwareActivation::kOnBootExit;
+  }
+
+  /// @brief Returns why this driver refuses every state change, or nullopt when it accepts them.
+  ///
+  /// A driver can be configured so that another master owns the device state, as SPoE is in
+  /// Monitor mode. @c transitionToState then does nothing, and its outcome reads only as "target
+  /// not reached". This reason is what a caller shows instead. Answers without bus I/O.
+  virtual std::optional<std::string> stateChangeRefusal() const { return std::nullopt; }
 
  protected:
   /// Serialises control-plane access to the underlying fieldbus context (mailbox

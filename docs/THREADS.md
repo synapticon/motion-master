@@ -4,20 +4,24 @@
 > the Mermaid diagram below. When the threading design or the synchronisation design changes,
 > update this file in the same commit.
 
-Motion Master runs **six long-lived threads**. The main thread *is* the real-time thread. Every
+Motion Master runs **seven long-lived threads**. The main thread *is* the real-time thread. Every
 other subsystem starts its own thread *before* `gameLoop.run()` blocks the main thread.
 
 The HTTP API and the WebSocket run on **separate ports, separate event loops and separate
 threads**: 61447 and 62281. So a slow HTTP handler can never stall the WebSocket.
 
-Six is the **named** count, not the number of threads in the process. Two pools sit beside those
-six, and both matter when you reason about concurrency:
+Seven is the **named** count, not the number of threads in the process. Two pools and one set of
+driver threads sit beside those seven, and all of them matter when you reason about concurrency:
 
 - **32 HTTP worker threads** (`BS::light_thread_pool pool_{32}` in
   `apps/motion_master/http_server.h`). **Every route handler runs on one of these**, not on the
   HTTP event loop. See `mm::api::Router`. So "the HTTP thread" is a dispatcher, and two REST
   requests genuinely run at the same time.
 - **One `std::jthread` for each procedure in flight**, owned by `ProcedureManager`.
+- **One exchange `std::jthread` for each SPoE drive**, owned by `SpoeFieldbusDriver`, and only
+  while that driver has process data configured. Each one sends a process-data request to its
+  drive as soon as the previous one has its answer, so the real-time loop never waits on the
+  network. See [The SPoE exchange threads](#the-spoe-exchange-threads).
 
 One **child process** also belongs in this picture. The auto-tuning executable
 (`libs/auto_tuning/process.h`) is a separate program that serves an HTTP API on loopback. It runs
@@ -71,6 +75,9 @@ flowchart TB
     subgraph NB["Thread 6 — Notification bus"]
         BH[NotificationBus.run]
     end
+    subgraph SF["Thread 7 — State follower"]
+        FS[DeviceManager.followObservedStates]
+    end
 
     HTTP -.->|write a setpoint<br/>lock-free| CELLS[("DeviceParameter cells<br/>(atomic bits, one per object)")]
     HTTP -.->|retime the live loop<br/>atomic period_| GL
@@ -89,10 +96,11 @@ flowchart TB
     MS -.->|read SDO-only values| CELLS
     EPD -.->|count short-WKC cycles<br/>relaxed atomics| WKC[("shortWkcCycles<br/>lastWkc / expectedWkc")]
     BH -->|processImageInfo,<br/>processDataMutex_ shared| WKC
+    FS -->|re-map or tear down,<br/>busOperationMutex_| SM
     HTTP -->|blocking HTTP request<br/>on a worker thread| AT[["auto-tuning child process<br/>(loopback, own program)"]]
 ```
 
-## The six threads
+## The seven threads
 
 | # | Thread | Created in | Purpose | Scheduling |
 | --- | --- | --- | --- | --- |
@@ -102,6 +110,7 @@ flowchart TB
 | 4 | **Monitoring sampler** | `std::thread`, `monitoring_manager.cc` | Ships every recorded cycle since each monitoring's read cursor to the `setPublish` callback | Normal. `cv_.wait_until(nearest deadline)` |
 | 5 | **Parameter refresher** | `std::thread`, `parameter_refresher.cc` | Polls objects that are **not** in the PDO image over SDO, into their parameter cells | Normal. A 10 ms period floor. A failing object backs off exponentially, to a 2000 ms ceiling |
 | 6 | **Notification bus** | `std::jthread`, `notification_bus.cc` | Reads each source's version counter on that source's own interval, then renders and publishes the ones that moved. Today one source: bus health, every second | Normal. `wait_until(earliest due source)` with a `stop_token`, so `stop()` does not wait the interval out |
+| 7 | **State follower** | `std::jthread`, `main.cc` | While the driver refuses state changes, as SPoE does in Monitor mode, calls `DeviceManager::followObservedStates()` so the process image follows the states another master sets. Otherwise it does nothing | Normal. Every 500 ms, with a `stop_token` |
 
 **Thread 1 — the cycle.** `ProcessDataCyclicTask` calls `DeviceManager::exchangeProcessData()`,
 which does four things in order. It composes the output image from every output object's cell. It
@@ -176,6 +185,33 @@ all of them and a source added later would reach nobody. Clients tell events apa
 The source lives in the app, not in `DeviceManager`, because a log warning is a **policy**.
 `DeviceManager` is meant to be embeddable without one, and it owns no background thread itself.
 
+**Thread 7 — the state follower.** With SPoE in Monitor mode, a PLC owns the drive's state, and
+Motion Master sends no state change. But a state change is where `transitionToState` publishes the
+process image, so without this thread the image is never published and monitoring never sees the
+TxPDO. `followObservedStates()` reads every state, re-maps when a device enters SAFE-OP or OP, and
+tears down when no device exchanges. A re-map reads the PDO mapping again, because the PLC can
+change it in PRE-OP. The method is one pass with no thread of its own, for the same reason as
+above, and the thread lives in `main.cc`. It checks the driver on every pass, because
+`POST /api/init` can replace the driver.
+
+### The SPoE exchange threads
+
+SPoE carries process data over TCP, one request and one reply at a time, so a round trip cannot run
+on thread 1. Each drive gets an exchange thread instead, and two lock-free structures connect it
+to thread 1 (`libs/comm/spoe_process_data.h`):
+
+- **Outputs:** `SpoeOutputSlot`, a triple buffer. Thread 1 writes the newest outputs, and the
+  exchange thread sends the newest it finds. Neither waits, and neither sees a half-written frame.
+- **Inputs:** `SpoeInputQueue`, a single-producer single-consumer queue. The drive buffers its input
+  frames and returns them in batches. The exchange thread queues every frame, and thread 1 takes one
+  frame each cycle. That paces the frames to the cycle, which is what lets monitoring see each one
+  in order. Thread 1 drops the oldest frames beyond 30, so the inputs never lag by more than 30
+  cycles.
+
+The exchange thread shares its drive's `SpoeConnection` with the control plane. The connection's
+own mutex makes their requests take turns, one request at a time, which is also all the drive
+accepts. The exchange thread never takes `controlPlaneMutex_`.
+
 ## Control plane against the PDO path
 
 The single most important rule is this: **the real-time loop never takes a lock.** It touches only
@@ -184,7 +220,7 @@ order, the drain protocol, the invariants — is in [LOCKING.md](LOCKING.md). Th
 
 | Path | Thread | Synchronisation |
 | --- | --- | --- |
-| PDO exchange | 1 | None. SOEM's port layer is thread-safe internally, and PDO touches the IOmap, which is disjoint from the control plane |
+| PDO exchange | 1 | None. SOEM's port layer is thread-safe internally, and PDO touches the IOmap, which is disjoint from the control plane. With SPoE, thread 1 hands outputs to and takes inputs from the drive's exchange thread through `SpoeOutputSlot` and `SpoeInputQueue`, without a lock |
 | Value read and write | any | None. Every object's value lives in its own `DeviceParameter` cell, a `uint64_t` of raw wire bytes reached through `std::atomic_ref`. Writers store into different objects' cells without contention. The real-time loop is the sole composer of the wire image, which is what makes bit-packed objects that share a byte safe |
 | Input decode | 1 | None. Each `ProcessImageEntry` carries the owning `DeviceParameter*`, resolved at publish time. So the decode is a walk over contiguous entries, with **no lookup on the real-time path** |
 | Reach a `Device` from a cycle | 1 | `DeviceManager::CycleGuard`, taken by `GameLoop` around the whole task list. One atomic increment and one atomic load. It never blocks. A falsy guard means no image is published, and no task runs that cycle |
@@ -227,19 +263,22 @@ Startup and shutdown order (`apps/motion_master/main.cc`):
 6. `notificationBus.setPublish(...)` wires messages to `wsServer.publish`, `addSource(...)`
    registers each feature, then `notificationBus.start()` spawns thread 6. Membership is fixed
    from here on.
-7. Install the `SIGINT` and `SIGTERM` handlers. Each one flips the loop's stop flag, and both
+7. The `stateFollower` `std::jthread` starts as thread 7.
+8. Install the `SIGINT` and `SIGTERM` handlers. Each one flips the loop's stop flag, and both
    steps are async-signal-safe.
-8. `gameLoop.run()` — the main thread becomes thread 1 and blocks until stop.
-9. On a signal: `gameLoop.stop()` makes `run()` return after the current cycle.
-10. `monitoringManager.stop()` — joins threads 4 and 5 *before* the server loops go away.
-11. `notificationBus.stop()` — joins thread 6, for the same reason and before the same point.
-12. `wsServer.stop()`, then `httpServer.stop()` — close the listen sockets and join threads 3
+9. `gameLoop.run()` — the main thread becomes thread 1 and blocks until stop.
+10. On a signal: `gameLoop.stop()` makes `run()` return after the current cycle.
+11. `monitoringManager.stop()` — joins threads 4 and 5 *before* the server loops go away.
+12. `notificationBus.stop()` — joins thread 6, for the same reason and before the same point.
+13. `stateFollower` is stopped and joined, so no re-map runs while the rest shuts down.
+14. `wsServer.stop()`, then `httpServer.stop()` — close the listen sockets and join threads 3
     and 2.
-13. `autoTuning.stop()` — stops the child. It is stopped here rather than by its destructor, so
+15. `autoTuning.stop()` — stops the child. It is stopped here rather than by its destructor, so
     the outcome is logged while the log is still written.
-14. The destructors run.
+16. The destructors run. The SPoE driver's destructor stops its exchange threads and clears each
+    drive's PDO mode, so a clean shutdown does not trip a Control-mode drive's watchdog.
 
-Every `CyclicTask` is registered with `gameLoop.addTask()` **before** step 8. Membership is fixed
+Every `CyclicTask` is registered with `gameLoop.addTask()` **before** step 9. Membership is fixed
 for the lifetime of the loop.
 
 ## Synchronisation primitives
@@ -261,6 +300,8 @@ order.
 | `MonitoringManager::mutex_` and `cv_` | `libs/node/monitoring_manager.h` | The monitoring registry and the sampling schedule |
 | `ParameterRefresher::mutex_` and `cv_` | `libs/node/parameter_refresher.h` | The tracked-object set and the poll schedule |
 | `std::atomic` loop pointers | `http_server.h`, `ws_server.h` | Cross-thread access to each uWS loop, for `defer()` |
+| `SpoeOutputSlot` and `SpoeInputQueue` | `libs/comm/spoe_process_data.h` | SPoE process data between thread 1 and a drive's exchange thread. Lock-free, one writer and one reader each |
+| `SpoeConnection`'s mutex | `libs/comm/spoe_connection.cc` | One request at a time on a drive's connection, shared by the control plane and the exchange thread |
 
 See also the [class diagram](CLASS_DIAGRAM.md) for ownership, and
 [RT_SCHEDULING.md](RT_SCHEDULING.md) for a primer on the primitives thread 1 relies on.

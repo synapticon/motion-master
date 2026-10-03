@@ -15,10 +15,11 @@ info:
     created until you ask for it, so a fresh instance has no open network
     interface:
 
-    1. **Init** — `POST /api/init` constructs a fieldbus driver (`soem`, or the
-       planned `spoe`) and opens the network interface. SOEM has no adapter
-       auto-detect, so an adapter name or MAC address is required. `init` is
-       one-shot: a second call returns `409` until you reset.
+    1. **Init** — `POST /api/init` constructs a fieldbus driver, `soem` or `spoe`.
+       SOEM opens the network interface. It has no adapter auto-detect, so an
+       adapter name or MAC address is required. SPoE takes one IP address per
+       drive and connects at scan time. `init` is one-shot: a second call returns
+       `409` until you reset.
     2. **Scan** — `POST /api/scan` discovers the slaves on the bus and configures
        their sync managers and FMMUs. Slaves are left in the `INIT` state.
     3. **Transition** — `POST /api/devices/state` moves the bus to a target AL
@@ -590,6 +591,19 @@ paths:
                       `POST /api/devices/{slavePosition}/parameters/init` is called; that clears
                       the flag on success.
                     example: false
+                  supportsEsc:
+                    type: boolean
+                    description: >
+                      Whether the device has an EtherCAT Slave Controller: SII, ESC registers,
+                      distributed clocks and the ESC diagnostics. False over SPoE, where those
+                      endpoints answer 409.
+                    example: true
+                  supportsLocate:
+                    type: boolean
+                    description: >
+                      Whether the transport can blink the device's LEDs, which is what the
+                      `device-locate` procedure does. True over SPoE.
+                    example: false
         "400":
           description: slavePosition is not a valid integer
         "404":
@@ -599,10 +613,13 @@ paths:
       summary: Initialise the fieldbus driver
       operationId: init
       description: >
-        Constructs the requested fieldbus driver, opens the network interface, and
-        makes the driver available for subsequent calls to /api/scan.
-        The driver defaults to SOEM when omitted. SOEM has no adapter auto-detect:
-        a network adapter must be supplied, otherwise init fails.
+        Constructs the requested fieldbus driver and makes it available for subsequent
+        calls to /api/scan. The body is the `fieldbus` block of the config file, and the
+        same rules check it. The driver defaults to SOEM when omitted.
+        SOEM opens the network interface. It has no adapter auto-detect: a network
+        adapter must be supplied, otherwise init fails.
+        SPoE connects to each drive at scan time. It needs `ipAddresses`, one address
+        per drive, and the list order is the position order.
       requestBody:
         required: false
         content:
@@ -612,16 +629,49 @@ paths:
               properties:
                 driver:
                   type: string
-                  description: Fieldbus driver to use (only soem is implemented today; spoe is planned)
+                  description: Fieldbus driver to use
                   enum: [soem, spoe]
                   default: soem
                   example: "soem"
                 adapter:
                   type: string
                   description: >
-                    Network interface name or MAC address. Required for SOEM — there is
-                    no auto-detect, so an empty value makes init fail.
+                    SOEM only. Network interface name or MAC address. Required for SOEM — there
+                    is no auto-detect, so an empty value makes init fail.
                   example: "eth0"
+                ipAddresses:
+                  type: array
+                  description: >
+                    SPoE only. One IP address per drive, at least one. The list order is the
+                    position order, and a drive that does not answer keeps its position.
+                  items:
+                    type: string
+                  example: ["192.168.0.10"]
+                spoe:
+                  type: object
+                  description: SPoE only.
+                  properties:
+                    mode:
+                      type: string
+                      description: >
+                        Who owns the drive's state. In `monitor` mode a PLC owns it, Motion Master
+                        only parametrises and observes, and a state change answers 409. In
+                        `control` mode Motion Master owns it.
+                      enum: [monitor, control]
+                      default: monitor
+                    watchdogMs:
+                      type: integer
+                      description: >
+                        Control mode only. The drive faults when no SPoE message arrives for this
+                        long. At least 50.
+                      minimum: 50
+                      default: 75
+                    port:
+                      type: integer
+                      description: The TCP port of the SPoE server on every drive.
+                      minimum: 1
+                      maximum: 65535
+                      default: 8080
       responses:
         "200":
           description: Driver initialised successfully
@@ -635,7 +685,9 @@ paths:
                     type: boolean
                     example: true
         "400":
-          description: Request body is not valid JSON
+          description: >
+            Request body is not a JSON object, or it breaks a rule of the `fieldbus` block (an
+            unknown driver, SPoE without an address, an unknown mode, a watchdog below 50 ms)
         "409":
           description: >
             A driver is already initialised. init() is one-shot — call POST /api/reset
@@ -1504,6 +1556,18 @@ paths:
           description: slavePosition, address, or length is missing or not a valid integer
         "404":
           description: No device at the given bus position
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
     post:
@@ -1566,6 +1630,18 @@ paths:
           description: slavePosition or address is not a valid integer, or request body is malformed
         "404":
           description: No device at the given bus position
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/watchdog:
@@ -1602,6 +1678,18 @@ paths:
           description: slavePosition is not a valid integer
         "404":
           description: No device at the given bus position
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
     put:
@@ -1652,6 +1740,18 @@ paths:
             the requested timeout exceeds what the device's watchdog divider can represent
         "404":
           description: No device at the given bus position
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/pdo-mapping:
@@ -2933,6 +3033,18 @@ paths:
           description: slavePosition is not a valid integer
         "404":
           description: No device at the given bus position
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
     put:
@@ -2980,6 +3092,18 @@ paths:
           description: slavePosition is invalid, or the body is not a valid SII image
         "404":
           description: No device at the given bus position
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
   /api/sii/parse:
@@ -3299,6 +3423,18 @@ paths:
                   $ref: "#/components/schemas/DeviceDiagnostics"
         "400":
           description: A `positions` value is not a valid integer
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
   /api/dc-sync:
@@ -3340,6 +3476,18 @@ paths:
                   $ref: "#/components/schemas/DcSyncStatus"
         "400":
           description: A `positions` value is not a valid integer
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/state:
@@ -3502,6 +3650,20 @@ paths:
                           example: true
         "400":
           description: Request body is malformed or `state` is not a valid AL state value
+        "409":
+          description: >
+            The fieldbus driver refuses every state change. With SPoE in Monitor mode, the
+            PLC owns the drive's state; set `fieldbus.spoe.mode` to `control` to change it from
+            Motion Master.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: Why the driver refuses state changes
         "500":
           $ref: "#/components/responses/DriverError"
   /api/devices:
@@ -3575,6 +3737,19 @@ paths:
                         `POST /api/devices/{slavePosition}/parameters/init` is called; that clears
                         the flag on success.
                       example: false
+                    supportsEsc:
+                      type: boolean
+                      description: >
+                        Whether the device has an EtherCAT Slave Controller: SII, ESC registers,
+                        distributed clocks and the ESC diagnostics. False over SPoE, where those
+                        endpoints answer 409.
+                      example: true
+                    supportsLocate:
+                      type: boolean
+                      description: >
+                        Whether the transport can blink the device's LEDs, which is what the
+                        `device-locate` procedure does. True over SPoE.
+                      example: false
   /api/process-image:
     get:
       summary: Inspect the published EtherCAT process image
@@ -3602,7 +3777,8 @@ paths:
                 type: object
                 required:
                   [configured, outputBytes, inputBytes, expectedWkc, lastWkc, healthy,
-                   shortWkcCycles, firstShortWkcUs, lastShortWkcUs, generations, outputs, inputs]
+                   shortWkcCycles, firstShortWkcUs, lastShortWkcUs, droppedInputFrames,
+                   generations, outputs, inputs]
                 properties:
                   configured:
                     type: boolean
@@ -3644,6 +3820,15 @@ paths:
                       the count spans. Cycles missed while a device was being deliberately
                       commanded out of an exchange state are not counted: the expectation is
                       lowered before the transition is commanded.
+                    example: 0
+                  droppedInputFrames:
+                    type: integer
+                    format: int64
+                    description: >
+                      Input frames the driver dropped since the process data was configured, summed
+                      over all devices. Only a transport that buffers input frames can drop one: a
+                      SPoE drive returns its frames in batches, and the oldest are dropped when the
+                      real-time loop falls more than 30 cycles behind. Every other transport reports 0.
                     example: 0
                   firstShortWkcUs:
                     type: integer
@@ -3945,7 +4130,8 @@ paths:
         "409":
           description: >-
             The bus has no published process image (bring it to SAFE-OP or OP first),
-            or it has no devices.
+            or it has no devices. Also: the fieldbus transport has no EtherCAT Slave
+            Controller, as over SPoE, so an ENI does not exist for it.
           content:
             application/json:
               schema:
@@ -5537,6 +5723,16 @@ components:
             (0x1011:01), communication (0x1011:02), application (0x1011:03), or manufacturer
             (0x1011:04).
           example: all
+        duration:
+          type: integer
+          minimum: 1
+          maximum: 3600
+          default: 10
+          description: >
+            `device-locate` only: how long the LEDs blink, in seconds. They stop at the end, and
+            when the run is cancelled. Only a device whose transport can blink the LEDs offers
+            `device-locate`, which today is a SPoE drive.
+          example: 10
         packageContent:
           type: string
           description: >
@@ -5586,7 +5782,8 @@ components:
             after erasing one or between two installs, since a PRE-OP transition then has nothing to
             hand over to and the drive answers AL status `0x0014`, "No valid firmware". `4` and `8`
             climb through PRE-OP and re-map the whole bus on the way, briefly pausing every other
-            device. The state the device was in beforehand is not restored.
+            device. The state the device was in beforehand is not restored. Over SPoE the drive
+            restarts into the new firmware and comes up in PRE-OP, so `3` cannot keep it in BOOT.
           example: 2
     OutputStageResult:
       type: object

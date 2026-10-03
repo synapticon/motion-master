@@ -19,16 +19,20 @@
 #include <span>
 #include <stop_token>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
 #include "comm/object_data_types.h"
+#include "comm/spoe_fieldbus_driver.h"
 #include "core/base64.h"
+#include "fake_spoe_server.h"
 #include "node/cia402.h"
 #include "node/device.h"
 #include "node/device_manager.h"
 #include "node/procedure.h"
+#include "node/profile_procedures.h"
 #include "node/synapticon.h"
 
 namespace {
@@ -2280,7 +2284,7 @@ TEST(FirmwareInstallationRequest, RejectsWrongFieldTypes) {
 
 TEST(FirmwareInstallationDescriptor, StepsAndParametersLineUp) {
   const auto steps = firmwareInstallationSteps();
-  ASSERT_EQ(steps.size(), 8u);
+  ASSERT_EQ(steps.size(), 9u);
   EXPECT_EQ(steps.front().id, "package");
   EXPECT_EQ(steps.back().id, "final-state");
 
@@ -2724,6 +2728,69 @@ TEST(FirmwareInstallationBody, WritesBothBinariesOfAPackageThatHasThem) {
   ASSERT_TRUE(result) << result.error();
   EXPECT_TRUE(bus.driver->written.contains("app_firmware.bin"));
   EXPECT_TRUE(bus.driver->written.contains("com_firmware.bin"));
+}
+
+// ── Over SPoE ────────────────────────────────────────────────────────────────────────────────────
+//
+// The same installation against the SPoE driver and the fake drive. SPoE has no SII, and its drive
+// applies the firmware on an explicit request that restarts it, not on leaving BOOT.
+
+TEST(FirmwareInstallationOverSpoe, WritesBothBinariesRestartsTheDriveAndReachesPreOp) {
+  mm::comm::testing::FakeSpoeServer server;
+  server.setRestartTiming(std::chrono::milliseconds{200}, std::chrono::milliseconds{500});
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::make_unique<mm::comm::spoe::SpoeFieldbusDriver>(
+                          mm::comm::spoe::SpoeFieldbusDriverConfig{
+                              .hosts = {"127.0.0.1"},
+                              .port = server.port(),
+                              .mode = mm::comm::spoe::SpoeMode::kControl,
+                              .watchdogMs = 75,
+                              .requestTimeout = std::chrono::milliseconds{500},
+                              .connectTimeout = std::chrono::milliseconds{500},
+                              .fileTimeout = std::chrono::milliseconds{2000}}))
+                  .has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  ProgressReporter reporter(mm::node::firmwareInstallationSteps());
+  std::stop_source source;
+  auto result =
+      runFirmwareInstallationProcedure(dm, 1, reporter, source.get_token(), actilinkRequest());
+  ASSERT_TRUE(result) << result.error();
+
+  EXPECT_TRUE(server.file("app_firmware.bin").has_value());
+  EXPECT_TRUE(server.file("com_firmware.bin").has_value());
+  EXPECT_EQ(server.firmwareUpdates(), 1);
+  EXPECT_EQ(server.state(), mm::comm::testing::kSpoeStatePreOp);
+  EXPECT_EQ(stepNamed(reporter.steps(), "activate-firmware").value,
+            "the device restarted into the new firmware");
+  for (const auto& step : reporter.steps()) {
+    EXPECT_EQ(step.status, ProgressStatus::kSucceeded) << step.id;
+  }
+}
+
+TEST(DeviceLocateOverSpoe, ACancelledRunStopsTheLeds) {
+  mm::comm::testing::FakeSpoeServer server;
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::make_unique<mm::comm::spoe::SpoeFieldbusDriver>(
+                          mm::comm::spoe::SpoeFieldbusDriverConfig{.hosts = {"127.0.0.1"},
+                                                                   .port = server.port()}))
+                  .has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  const auto device = dm.deviceAt(1);
+  ASSERT_TRUE(device);
+  ASSERT_TRUE(device->supportsLocate());
+
+  ProgressReporter reporter(mm::node::deviceLocateSteps());
+  std::stop_source source;
+  std::thread canceller([&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds{200});
+    source.request_stop();
+  });
+  const auto result = mm::node::runDeviceLocateProcedure(*device, reporter, source.get_token(),
+                                                         mm::node::DeviceLocateRequest{});
+  canceller.join();
+  EXPECT_FALSE(result.has_value());
+  EXPECT_FALSE(server.locating());
 }
 
 }  // namespace

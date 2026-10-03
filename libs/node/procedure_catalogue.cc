@@ -770,6 +770,38 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       },
   });
 
+  ProcedureDescriptor deviceLocate;
+  deviceLocate.name = std::string(kDeviceLocateProcedure);
+  deviceLocate.title = "Device locate";
+  deviceLocate.description =
+      "Blinks the device's LEDs for a while, so that someone standing at the machine can find it. "
+      "The LEDs stop at the end of the run. Only a transport that can blink the LEDs offers this, "
+      "which today is SPoE.";
+  deviceLocate.caveats = {
+      "Cancelling stops the LEDs at once.",
+  };
+  deviceLocate.movesMotor = false;
+  deviceLocate.requiresEnabled = false;
+  deviceLocate.parameters = deviceLocateParameters();
+  deviceLocate.steps = deviceLocateSteps();
+
+  entries.push_back(ProcedureCatalogueEntry{
+      .descriptor = std::move(deviceLocate),
+      // A transport capability, copied when the device is constructed, so it is known at once.
+      .applies = [](Device& device) { return device.supportsLocate(); },
+      .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
+        auto spec = parseDeviceLocateRequest(request);
+        if (!spec) {
+          return std::unexpected(spec.error());
+        }
+        return [spec = *spec](const ProcedureContext& ctx, ProgressReporter& reporter,
+                              const std::stop_token& stop) {
+          Device& device = ctx.device;
+          return runDeviceLocateProcedure(device, reporter, stop, spec);
+        };
+      },
+  });
+
   ProcedureDescriptor skippedCycles;
   skippedCycles.name = std::string(kSkippedCyclesProcedure);
   skippedCycles.title = "Skipped cycles counter";

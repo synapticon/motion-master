@@ -77,6 +77,10 @@ syntaxError:*/http_client_test.cc
 syntaxError:*/process_test.cc
 syntaxError:*/notification_bus_test.cc
 syntaxError:*/fake_spoe_server_test.cc
+syntaxError:*/spoe_connection_test.cc
+syntaxError:*/spoe_frame_test.cc
+syntaxError:*/spoe_fieldbus_driver_test.cc
+syntaxError:*/spoe_process_data_test.cc
 
 // The ESI and ENI parsers build vectors by appending inside a range-for over an XML child range or
 // a parsed collection. cppcheck suggests std::transform/std::copy_if for each; rewriting them would
@@ -167,3 +171,9 @@ operatorEqVarError:*/device_parameter.h
 // guards nothing. std::condition_variable_any::wait_for requires a lock, and only its stop_token
 // overload lets a stop request cut the wait short instead of waiting out a whole poll interval.
 localMutex:*/notification_bus.cc
+
+// runUntil in the SPoE connection tests its result, runs the io_context to drain a cancelled
+// operation, and tests the result again. The completion handler writes the result during that
+// run, through a lambda capture that cppcheck does not follow, so it reads the second test as
+// identical to the first. Removing it would drop the bytes that arrive at the deadline.
+identicalConditionAfterEarlyExit:*/spoe_connection.cc

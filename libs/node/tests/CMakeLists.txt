@@ -33,7 +33,8 @@ add_executable(
   somanet_drive_test.cc
   somanet_procedures_test.cc)
 
-target_link_libraries(mm_node_tests PRIVATE mm::node GTest::gtest GTest::gtest_main)
+target_link_libraries(mm_node_tests PRIVATE mm::node mm::comm_spoe_fake GTest::gtest
+                                            GTest::gtest_main)
 
 # The firmware package fixtures are read from the source tree, and eni_collector_test.cc writes the
 # collected ENI for the schema-validation test below. Hand both directories to the test rather than

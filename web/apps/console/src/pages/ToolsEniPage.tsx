@@ -7,6 +7,8 @@ import PageHeader from '../components/PageHeader'
 import { useConnection } from '../contexts/ConnectionContext'
 import { downloadText } from '../utils/download'
 import { btnPrimary, btnOutline } from '../utils/styles'
+import NoEscNotice from '../components/NoEscNotice'
+import { useSupportsEsc } from '../hooks/useSupportsEsc'
 
 /// Where the document on screen came from. It matters to the reader: an exported document describes
 /// the bus in front of them, a loaded one describes somebody else's.
@@ -21,6 +23,7 @@ export default function ToolsEniPage() {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [showSource, setShowSource] = useState(false)
+  const supportsEsc = useSupportsEsc()
 
   /// Parses a document and shows it. The same view serves both sources, because what a reader wants
   /// to know about a document does not depend on who wrote it.
@@ -74,6 +77,7 @@ export default function ToolsEniPage() {
       />
       <div className="p-4 sm:px-8 sm:py-7 space-y-6">
         <EniExplainer />
+        {!supportsEsc && <NoEscNotice feature="ENI export" />}
 
         <section className="border border-grey-200 px-4 py-4 space-y-3">
           <h3 className="eyebrow">Export or load</h3>
@@ -86,7 +90,7 @@ export default function ToolsEniPage() {
           </p>
           <div className="flex items-center justify-between gap-3 flex-wrap">
             <div className="flex items-center gap-3">
-              <button type="button" onClick={handleExport} disabled={busy} className={btnPrimary}>
+              <button type="button" onClick={handleExport} disabled={busy || !supportsEsc} className={btnPrimary}>
                 {busy ? 'Working…' : 'Export ENI'}
               </button>
               <FilePickerButton onFile={handleFile} disabled={busy} accept=".xml,application/xml">

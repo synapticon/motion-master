@@ -10,6 +10,8 @@ import { WireTiming, useWireTiming } from '../components/WireTiming'
 import { useConnection } from '../contexts/ConnectionContext'
 import { downloadBytes } from '../utils/download'
 import { btnOutline } from '../utils/styles'
+import NoEscNotice from '../components/NoEscNotice'
+import { useSupportsEsc } from '../hooks/useSupportsEsc'
 
 export default function DeviceSiiPage() {
   const { deviceId } = useParams()
@@ -22,8 +24,11 @@ export default function DeviceSiiPage() {
   const [writing, setWriting] = useState(false)
   const [writeStatus, setWriteStatus] = useState<{ ok: boolean; msg: string } | null>(null)
 
+  const supportsEsc = useSupportsEsc(slavePosition)
+
   const query = useQuery({
     queryKey: ['sii', slavePosition],
+    enabled: supportsEsc,
     queryFn: () => measure(() => api.readSii(slavePosition)),
   })
 
@@ -40,7 +45,7 @@ export default function DeviceSiiPage() {
   const rawQuery = useQuery({
     queryKey: ['sii-raw', slavePosition],
     queryFn: fetchRaw,
-    enabled: showRaw,
+    enabled: showRaw && supportsEsc,
   })
 
   async function handleDownload() {
@@ -91,6 +96,21 @@ export default function DeviceSiiPage() {
   }
 
   const sii = query.data?.data
+
+  if (!supportsEsc) {
+    return (
+      <div>
+        <DevicePageHeader
+          slavePosition={slavePosition}
+          title="SII"
+          description="The device's SII, the EEPROM its EtherCAT Slave Controller reads at power-up."
+        />
+        <div className="p-4 sm:px-8 sm:py-7 space-y-6">
+          <NoEscNotice feature="The SII" />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>

@@ -60,12 +60,14 @@ void appendU16(std::vector<uint8_t>& out, uint16_t value) {
 
 std::vector<uint8_t> encodeFrame(uint8_t type, uint16_t sequenceId, uint16_t status,
                                  uint16_t dataLength, std::span<const uint8_t> data) {
-  std::vector<uint8_t> frame;
-  frame.reserve(kSpoeHeaderSize + data.size());
-  frame.push_back(type);
-  appendU16(frame, sequenceId);
-  appendU16(frame, status);
-  appendU16(frame, dataLength);
+  const std::array<uint8_t, kSpoeHeaderSize> header{type,
+                                                    static_cast<uint8_t>(sequenceId),
+                                                    static_cast<uint8_t>(sequenceId >> 8),
+                                                    static_cast<uint8_t>(status),
+                                                    static_cast<uint8_t>(status >> 8),
+                                                    static_cast<uint8_t>(dataLength),
+                                                    static_cast<uint8_t>(dataLength >> 8)};
+  std::vector<uint8_t> frame(header.begin(), header.end());
   frame.insert(frame.end(), data.begin(), data.end());
   return frame;
 }
@@ -254,6 +256,7 @@ asio::awaitable<void> FakeSpoeServer::Impl::serve(std::shared_ptr<tcp::socket> s
   if (client == socket) {
     client.reset();
   }
+  co_return;
 }
 
 uint16_t FakeSpoeServer::Impl::sdoLookupStatus(uint16_t index, uint16_t subindex) const {

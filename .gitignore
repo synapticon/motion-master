@@ -99,3 +99,6 @@ node_modules/
 # and the tests turn themselves on; see libs/etg/tests/CMakeLists.txt.
 /libs/etg/tests/data/eni/
 /libs/etg/tests/data/esi/
+
+# Python bytecode caches, written next to any script that runs.
+__pycache__/

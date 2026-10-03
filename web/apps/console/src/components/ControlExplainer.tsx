@@ -26,6 +26,15 @@ export default function ControlExplainer() {
       </p>
 
       <p>
+        <strong>SPoE</strong> works differently. Init takes the IP address of each drive instead of a
+        network adapter, and Scan connects to each drive over TCP, one connection per drive. Each drive
+        serves one client at a time. Choose <strong>Monitoring mode</strong> when a PLC controls the
+        drive: Motion Master then observes and tunes, and follows the states the PLC sets. Choose{' '}
+        <strong>Control mode</strong> to command the drive from here. SPoE has no EtherCAT Slave
+        Controller, so the SII, register, DC and diagnostics pages do not apply to it.
+      </p>
+
+      <p>
         <strong>Scan</strong> enumerates the bus. The master sends a broadcast datagram down the
         line; because EtherCAT slaves are wired in a daisy-chain and each one processes the frame
         on the fly and increments a working counter as it passes, the master learns how many slaves

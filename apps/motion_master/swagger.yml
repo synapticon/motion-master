@@ -591,6 +591,19 @@ paths:
                       `POST /api/devices/{slavePosition}/parameters/init` is called; that clears
                       the flag on success.
                     example: false
+                  supportsEsc:
+                    type: boolean
+                    description: >
+                      Whether the device has an EtherCAT Slave Controller: SII, ESC registers,
+                      distributed clocks and the ESC diagnostics. False over SPoE, where those
+                      endpoints answer 409.
+                    example: true
+                  supportsLocate:
+                    type: boolean
+                    description: >
+                      Whether the transport can blink the device's LEDs, which is what the
+                      `device-locate` procedure does. True over SPoE.
+                    example: false
         "400":
           description: slavePosition is not a valid integer
         "404":
@@ -1543,6 +1556,18 @@ paths:
           description: slavePosition, address, or length is missing or not a valid integer
         "404":
           description: No device at the given bus position
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
     post:
@@ -1605,6 +1630,18 @@ paths:
           description: slavePosition or address is not a valid integer, or request body is malformed
         "404":
           description: No device at the given bus position
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/watchdog:
@@ -1641,6 +1678,18 @@ paths:
           description: slavePosition is not a valid integer
         "404":
           description: No device at the given bus position
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
     put:
@@ -1691,6 +1740,18 @@ paths:
             the requested timeout exceeds what the device's watchdog divider can represent
         "404":
           description: No device at the given bus position
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/{slavePosition}/pdo-mapping:
@@ -2972,6 +3033,18 @@ paths:
           description: slavePosition is not a valid integer
         "404":
           description: No device at the given bus position
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
     put:
@@ -3019,6 +3092,18 @@ paths:
           description: slavePosition is invalid, or the body is not a valid SII image
         "404":
           description: No device at the given bus position
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
   /api/sii/parse:
@@ -3338,6 +3423,18 @@ paths:
                   $ref: "#/components/schemas/DeviceDiagnostics"
         "400":
           description: A `positions` value is not a valid integer
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
   /api/dc-sync:
@@ -3379,6 +3476,18 @@ paths:
                   $ref: "#/components/schemas/DcSyncStatus"
         "400":
           description: A `positions` value is not a valid integer
+        "409":
+          description: >
+            The fieldbus transport has no EtherCAT Slave Controller, so this does not exist
+            over it. SPoE answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
   /api/devices/state:
@@ -3628,6 +3737,19 @@ paths:
                         `POST /api/devices/{slavePosition}/parameters/init` is called; that clears
                         the flag on success.
                       example: false
+                    supportsEsc:
+                      type: boolean
+                      description: >
+                        Whether the device has an EtherCAT Slave Controller: SII, ESC registers,
+                        distributed clocks and the ESC diagnostics. False over SPoE, where those
+                        endpoints answer 409.
+                      example: true
+                    supportsLocate:
+                      type: boolean
+                      description: >
+                        Whether the transport can blink the device's LEDs, which is what the
+                        `device-locate` procedure does. True over SPoE.
+                      example: false
   /api/process-image:
     get:
       summary: Inspect the published EtherCAT process image
@@ -3655,7 +3777,8 @@ paths:
                 type: object
                 required:
                   [configured, outputBytes, inputBytes, expectedWkc, lastWkc, healthy,
-                   shortWkcCycles, firstShortWkcUs, lastShortWkcUs, generations, outputs, inputs]
+                   shortWkcCycles, firstShortWkcUs, lastShortWkcUs, droppedInputFrames,
+                   generations, outputs, inputs]
                 properties:
                   configured:
                     type: boolean
@@ -3697,6 +3820,15 @@ paths:
                       the count spans. Cycles missed while a device was being deliberately
                       commanded out of an exchange state are not counted: the expectation is
                       lowered before the transition is commanded.
+                    example: 0
+                  droppedInputFrames:
+                    type: integer
+                    format: int64
+                    description: >
+                      Input frames the driver dropped since the process data was configured, summed
+                      over all devices. Only a transport that buffers input frames can drop one: a
+                      SPoE drive returns its frames in batches, and the oldest are dropped when the
+                      real-time loop falls more than 30 cycles behind. Every other transport reports 0.
                     example: 0
                   firstShortWkcUs:
                     type: integer
@@ -3998,7 +4130,8 @@ paths:
         "409":
           description: >-
             The bus has no published process image (bring it to SAFE-OP or OP first),
-            or it has no devices.
+            or it has no devices. Also: the fieldbus transport has no EtherCAT Slave
+            Controller, as over SPoE, so an ENI does not exist for it.
           content:
             application/json:
               schema:

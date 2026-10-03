@@ -241,6 +241,18 @@ export default function FieldbusProcessImagePage() {
               />
             </div>
 
+            {img.droppedInputFrames > 0 && (
+              <Callout variant="warning">
+                <p>
+                  <strong>{img.droppedInputFrames.toLocaleString()}</strong> input{' '}
+                  {img.droppedInputFrames === 1 ? 'frame was' : 'frames were'} dropped since the process
+                  data was configured. A SPoE drive returns its input frames in batches, and Motion Master
+                  takes one per cycle. When the cycle falls more than 30 frames behind, the oldest are
+                  dropped, so monitoring has gaps.
+                </p>
+              </Callout>
+            )}
+
             {img.shortWkcCycles > 0 && (
               <Callout variant="warning">
                 <p>

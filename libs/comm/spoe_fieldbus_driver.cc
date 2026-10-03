@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <numeric>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -910,6 +911,13 @@ void SpoeFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
                     toString(alState(reply->data[0])), toString(targetState));
     }
   }
+}
+
+uint64_t SpoeFieldbusDriver::droppedInputFrames() const {
+  return std::accumulate(drives_.begin(), drives_.end(), uint64_t{0},
+                         [](uint64_t sum, const std::unique_ptr<Drive>& drive) {
+                           return sum + drive->droppedFrames.load(std::memory_order_relaxed);
+                         });
 }
 
 std::expected<void, std::string> SpoeFieldbusDriver::locate(uint16_t slavePosition, bool on) {

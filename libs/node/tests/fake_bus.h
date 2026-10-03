@@ -96,6 +96,11 @@ class FakeBus : public FieldbusDriver {
     return {};
   }
 
+  bool esc = true;             // returned by supportsEsc()
+  uint64_t droppedFrames = 0;  // returned by droppedInputFrames()
+  bool supportsEsc() const override { return esc; }
+  uint64_t droppedInputFrames() const override { return droppedFrames; }
+
   std::optional<std::string> refusal;  // returned by stateChangeRefusal()
   std::optional<std::string> stateChangeRefusal() const override { return refusal; }
   PdoLayout processDataLayout() override { return layout; }

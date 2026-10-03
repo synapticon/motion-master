@@ -70,6 +70,18 @@ std::string statusLine(int code) {
                                   : std::to_string(code) + " " + std::string{reason->second};
 }
 
+// Answers 409 on a route that needs an EtherCAT Slave Controller when the transport has none, as
+// SPoE does. The route then says why, rather than passing on a driver error as a 500.
+std::optional<mm::api::Response> escUnavailable(const mm::node::DeviceManager& deviceManager) {
+  if (deviceManager.supportsEsc()) {
+    return std::nullopt;
+  }
+  return mm::api::error("409 Conflict",
+                        "the fieldbus transport has no EtherCAT Slave Controller, so SII, ESC "
+                        "registers, distributed clocks and the ESC diagnostics do not exist over "
+                        "it (SPoE)");
+}
+
 // Runs @p fn against the device at @p position with the device set held stable for the whole call,
 // answering 404 when no device holds that position.
 //
@@ -657,6 +669,9 @@ void HttpServer::run() {
 
   // ── Bus-level reads and the game loop ───────────────────────────────────────────────────────
   router.get("/api/devices/diagnostics", [this](const mm::api::Request& req) -> mm::api::Response {
+    if (auto refused = escUnavailable(deviceManager_); refused) {
+      return *refused;
+    }
     auto positions = parsePositions(req);
     if (!positions) {
       return mm::api::badRequest(positions.error());
@@ -666,6 +681,9 @@ void HttpServer::run() {
   });
 
   router.get("/api/dc-sync", [this](const mm::api::Request& req) -> mm::api::Response {
+    if (auto refused = escUnavailable(deviceManager_); refused) {
+      return *refused;
+    }
     auto positions = parsePositions(req);
     if (!positions) {
       return mm::api::badRequest(positions.error());
@@ -819,6 +837,9 @@ void HttpServer::run() {
   // could stall the whole API for as long as the bus was busy.
   router.get("/api/devices/:slavePosition/registers/:address",
              [this](const mm::api::Request& req) -> mm::api::Response {
+               if (auto refused = escUnavailable(deviceManager_); refused) {
+                 return *refused;
+               }
                auto position = req.parameterAs<uint16_t>("slavePosition");
                auto address = req.parameterAs<uint16_t>("address");
                auto length = req.queryAs<uint16_t>("length");
@@ -841,6 +862,9 @@ void HttpServer::run() {
 
   router.post("/api/devices/:slavePosition/registers/:address",
               [this](const mm::api::Request& req) -> mm::api::Response {
+                if (auto refused = escUnavailable(deviceManager_); refused) {
+                  return *refused;
+                }
                 auto position = req.parameterAs<uint16_t>("slavePosition");
                 auto address = req.parameterAs<uint16_t>("address");
                 if (!position || !address) {
@@ -866,6 +890,9 @@ void HttpServer::run() {
   // X-Wire-Us rides every outcome.
   router.get(
       "/api/devices/:slavePosition/sii", [this](const mm::api::Request& req) -> mm::api::Response {
+        if (auto refused = escUnavailable(deviceManager_); refused) {
+          return *refused;
+        }
         auto position = req.parameterAs<uint16_t>("slavePosition");
         if (!position) {
           return mm::api::badRequest("slavePosition must be a number");
@@ -895,6 +922,9 @@ void HttpServer::run() {
 
   router.put(
       "/api/devices/:slavePosition/sii", [this](const mm::api::Request& req) -> mm::api::Response {
+        if (auto refused = escUnavailable(deviceManager_); refused) {
+          return *refused;
+        }
         auto position = req.parameterAs<uint16_t>("slavePosition");
         if (!position) {
           return mm::api::badRequest("slavePosition must be a number");
@@ -918,6 +948,9 @@ void HttpServer::run() {
 
   router.get("/api/devices/:slavePosition/watchdog",
              [this](const mm::api::Request& req) -> mm::api::Response {
+               if (auto refused = escUnavailable(deviceManager_); refused) {
+                 return *refused;
+               }
                auto position = req.parameterAs<uint16_t>("slavePosition");
                if (!position) {
                  return mm::api::badRequest("slavePosition must be a number");
@@ -937,6 +970,9 @@ void HttpServer::run() {
   router.put(
       "/api/devices/:slavePosition/watchdog",
       [this](const mm::api::Request& req) -> mm::api::Response {
+        if (auto refused = escUnavailable(deviceManager_); refused) {
+          return *refused;
+        }
         auto position = req.parameterAs<uint16_t>("slavePosition");
         if (!position) {
           return mm::api::badRequest("slavePosition must be a number");
@@ -1749,6 +1785,9 @@ void HttpServer::run() {
   // one EEPROM read and a burst of SDO uploads per device — which is why it is an explicit export
   // rather than something served alongside the other bus views.
   router.get("/api/eni", [this](const mm::api::Request&) -> mm::api::Response {
+    if (auto refused = escUnavailable(deviceManager_); refused) {
+      return *refused;
+    }
     if (!config_.eniOptions) {
       return mm::api::error("501 Not Implemented", "this build serves no ENI options");
     }

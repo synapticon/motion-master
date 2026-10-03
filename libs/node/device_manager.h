@@ -78,7 +78,10 @@ struct ProcessImageInfo {
   uint64_t shortWkcCycles = 0;
   uint64_t firstShortWkcUs = 0;  ///< Epoch microseconds of the first such cycle (0 if none).
   uint64_t lastShortWkcUs = 0;   ///< Epoch microseconds of the most recent one (0 if none).
-  std::size_t generations = 0;   ///< Number of process images retained since the last reset().
+  /// Input frames the driver dropped since the process data was configured. Only a transport that
+  /// buffers input frames, such as SPoE, can drop one; every other transport reports 0.
+  uint64_t droppedInputFrames = 0;
+  std::size_t generations = 0;  ///< Number of process images retained since the last reset().
   std::vector<ProcessImageObjectInfo> outputs;  ///< Output-mapped objects in image order.
   std::vector<ProcessImageObjectInfo> inputs;   ///< Input-mapped objects in image order.
 };
@@ -593,6 +596,10 @@ class DeviceManager {
   /// @brief Returns why the driver refuses every state change, or nullopt when it accepts them,
   ///        or when no driver is initialised. No bus I/O.
   std::optional<std::string> stateChangeRefusal() const;
+
+  /// @brief Whether the devices have an EtherCAT Slave Controller: SII, ESC registers, DC and the
+  ///        ESC diagnostics. True when no driver is initialised. No bus I/O.
+  bool supportsEsc() const;
 
   /// @brief Brings the process image in line with device states that another master set.
   ///

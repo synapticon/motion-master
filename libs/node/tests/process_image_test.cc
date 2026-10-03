@@ -240,6 +240,22 @@ TEST(DeviceManagerFollowState, TearsDownWhenNoDeviceExchangesAndReMapsOnReturn) 
   EXPECT_EQ(raw->configureCalls, 2);
 }
 
+TEST(DeviceManagerTransport, ReportsAMissingEscAndTheDroppedFrames) {
+  // What SPoE reports: no ESC, and input frames dropped from its queue.
+  auto bus = mm::node::testing::makeCia402Bus();
+  bus->esc = false;
+  bus->droppedFrames = 7;
+  DeviceManager dm;
+  EXPECT_TRUE(dm.supportsEsc()) << "with no driver there is nothing to refuse";
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  EXPECT_FALSE(dm.supportsEsc());
+  EXPECT_EQ(dm.processImageInfo().droppedInputFrames, 7U);
+  const auto device = dm.deviceAt(1);
+  ASSERT_TRUE(device);
+  EXPECT_FALSE(nlohmann::json(*device)["supportsEsc"].get<bool>());
+}
+
 TEST(ProcessImageBits, ByteAlignedRoundTrip) {
   std::vector<uint8_t> image(6, 0);
   const std::vector<uint8_t> value = {0x44, 0x33, 0x22, 0x11};  // 32-bit @ bit offset 16

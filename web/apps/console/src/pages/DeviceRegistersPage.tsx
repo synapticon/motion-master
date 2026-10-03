@@ -5,6 +5,8 @@ import DevicePageHeader from '../components/DevicePageHeader'
 import { WireTiming, useWireTiming } from '../components/WireTiming'
 import { useConnection } from '../contexts/ConnectionContext'
 import { parseHexBytes } from '@synapticon/motion-master-client'
+import NoEscNotice from '../components/NoEscNotice'
+import { useSupportsEsc } from '../hooks/useSupportsEsc'
 
 const inputCls = 'border border-grey-300 px-3 py-2 text-sm w-full bg-white'
 const labelCls = 'block text-xs text-grey-600 mb-1 uppercase tracking-wide'
@@ -34,6 +36,7 @@ export default function DeviceRegistersPage() {
   const { deviceId } = useParams()
   const { api } = useConnection()
   const slavePosition = Number(deviceId)
+  const supportsEsc = useSupportsEsc(slavePosition)
 
   const catalogueQuery = useQuery({
     queryKey: ['registers'],
@@ -141,6 +144,21 @@ export default function DeviceRegistersPage() {
   }
 
   const selectedInCatalogue = isNaN(addrNum) ? undefined : catalogue.find(r => r.address === addrNum)
+
+  if (!supportsEsc) {
+    return (
+      <div>
+        <DevicePageHeader
+          slavePosition={slavePosition}
+          title="Registers"
+          description="The device's EtherCAT Slave Controller registers, read and written by address."
+        />
+        <div className="p-4 sm:px-8 sm:py-7 space-y-6">
+          <NoEscNotice feature="ESC register access" />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>

@@ -627,6 +627,7 @@ ProcessImageInfo DeviceManager::processImageInfo() const {
   // Reduced to microseconds at the JSON boundary, matching every other timestamp this API serves.
   info.firstShortWkcUs = pd_->firstShortWkcNs.load(std::memory_order_relaxed) / 1000;
   info.lastShortWkcUs = pd_->lastShortWkcNs.load(std::memory_order_relaxed) / 1000;
+  info.droppedInputFrames = set->driver ? set->driver->droppedInputFrames() : 0;
 
   const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
   info.configured = image != nullptr;
@@ -901,6 +902,11 @@ void DeviceManager::lowerExpectedWkc(std::span<const uint16_t> positions,
   if (duringTransition < pd_->expectedWkc.load(std::memory_order_relaxed)) {
     pd_->expectedWkc.store(duringTransition, std::memory_order_relaxed);
   }
+}
+
+bool DeviceManager::supportsEsc() const {
+  const std::shared_ptr<DeviceSet> set = deviceSet();
+  return !set->driver || set->driver->supportsEsc();
 }
 
 std::optional<std::string> DeviceManager::stateChangeRefusal() const {
@@ -1536,6 +1542,7 @@ void to_json(nlohmann::json& j, const ProcessImageInfo& info) {
        {"shortWkcCycles", info.shortWkcCycles},
        {"firstShortWkcUs", info.firstShortWkcUs},
        {"lastShortWkcUs", info.lastShortWkcUs},
+       {"droppedInputFrames", info.droppedInputFrames},
        {"generations", info.generations},
        {"outputs", info.outputs},
        {"inputs", info.inputs}};

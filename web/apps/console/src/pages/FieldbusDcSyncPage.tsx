@@ -6,6 +6,8 @@ import SlavePositionBadge from '../components/SlavePositionBadge'
 import { WireTiming, useWireTiming } from '../components/WireTiming'
 import { useConnection } from '../contexts/ConnectionContext'
 import { btnOutline } from '../utils/styles'
+import NoEscNotice from '../components/NoEscNotice'
+import { useSupportsEsc } from '../hooks/useSupportsEsc'
 
 // Once the drift-compensation loop settles, a locked slave tracks the reference clock to within a
 // few tens of nanoseconds; we treat anything under 1 µs as synced and flag a larger deviation. The
@@ -57,9 +59,11 @@ function RoleBadge({ device }: { device: DcSyncStatus }) {
 export default function FieldbusDcSyncPage() {
   const { api } = useConnection()
   const { timing, measure } = useWireTiming()
+  const supportsEsc = useSupportsEsc()
 
   const query = useQuery({
     queryKey: ['dcSync'],
+    enabled: supportsEsc,
     queryFn: () => measure(() => api.getDcSync()),
     refetchInterval: 2000,
   })
@@ -70,6 +74,21 @@ export default function FieldbusDcSyncPage() {
   const reference = dcDevices.find(d => d.referenceClock)
 
   const th = 'px-4 py-2 font-display uppercase tracking-wide font-medium'
+
+  if (!supportsEsc) {
+    return (
+      <div>
+        <PageHeader
+          eyebrow="Fieldbus"
+          title="DC Sync"
+          description="Live distributed-clock synchronisation read from each slave's EtherCAT Slave Controller."
+        />
+        <div className="p-4 sm:px-8 sm:py-7 space-y-6">
+          <NoEscNotice feature="DC sync" />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div>

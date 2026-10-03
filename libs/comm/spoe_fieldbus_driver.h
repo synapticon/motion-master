@@ -135,6 +135,7 @@ class SpoeFieldbusDriver : public FieldbusDriver {
   std::optional<std::string> stateChangeRefusal() const override;
 
   bool supportsEsc() const override { return false; }
+  uint64_t droppedInputFrames() const override;
   bool supportsLocate() const override { return true; }
   std::expected<void, std::string> locate(uint16_t slavePosition, bool on) override;
   std::expected<FirmwareActivation, std::string> activateFirmware(

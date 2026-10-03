@@ -863,6 +863,12 @@ class FieldbusDriver {
   /// them, or say why they are missing, without asking first.
   virtual bool supportsEsc() const { return true; }
 
+  /// @brief Input frames dropped since the process data was configured, summed over all devices.
+  ///
+  /// A transport that buffers input frames, as SPoE does, drops the oldest when the RT loop falls
+  /// behind. A memory-mapped master has no such queue, so the default is 0. No bus I/O.
+  virtual uint64_t droppedInputFrames() const { return 0; }
+
   /// @brief True when @c locate can blink a device's LEDs. No bus I/O.
   virtual bool supportsLocate() const { return false; }
 

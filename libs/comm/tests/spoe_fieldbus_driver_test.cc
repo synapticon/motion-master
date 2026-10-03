@@ -355,6 +355,7 @@ TEST(SpoeFieldbusDriver, KeepsOnlyTheNewestThirtyFrames) {
   std::vector<uint8_t> inputs(6);
   driver.exchangeProcessData(outputs, inputs);
   EXPECT_EQ(inputs[0], 11);
+  EXPECT_EQ(driver.droppedInputFrames(), 10U);
   driver.stop();
 }
 

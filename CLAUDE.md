@@ -754,6 +754,11 @@ wake jitter is the actuation jitter. SYNC0 activation is deferred and has no com
 is necessary but not sufficient for hard coordinated multi-axis; a PREEMPT_RT host is the other
 half.
 
+**Over SPoE there is no ESC.** `FieldbusDriver::supportsEsc()` answers false, and every route that
+needs SII, ESC registers, DC or the ESC diagnostics answers 409 through `escUnavailable` in
+`http_server.cc`. A new route of that kind calls it too. Each device reports `supportsEsc` and
+`supportsLocate` in `GET /api/devices`, so the Console knows which pages apply.
+
 Out of scope for SOMANET: cable redundancy, and the non-CoE mailbox protocols (EoE, SoE, AoE,
 VoE). Deferred work is ranked in `NEXTGEN.md`, Session 2026-06-01 — read it before adding a
 fieldbus view.

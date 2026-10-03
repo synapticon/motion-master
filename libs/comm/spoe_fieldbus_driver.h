@@ -51,6 +51,10 @@ struct SpoeFieldbusDriverConfig {
   /// The time a drive has to answer one request. The specification suggests 1 s.
   std::chrono::milliseconds requestTimeout{1000};
   std::chrono::milliseconds connectTimeout{1000};
+  /// The time a drive has to answer one file packet. The firmware holds its reply while the SoC
+  /// is busy, and before it answers the first packet of `com_firmware.bin` it erases 512 KB of
+  /// flash in 64 KB sectors.
+  std::chrono::milliseconds fileTimeout{30000};
   /// The shortest time between the starts of two process-data exchanges with one drive. The
   /// exchanges otherwise run back to back, which keeps the drive's input buffer small.
   std::chrono::microseconds exchangePeriod{1000};
@@ -130,6 +134,12 @@ class SpoeFieldbusDriver : public FieldbusDriver {
 
   std::optional<std::string> stateChangeRefusal() const override;
 
+  bool supportsEsc() const override { return false; }
+  bool supportsLocate() const override { return true; }
+  std::expected<void, std::string> locate(uint16_t slavePosition, bool on) override;
+  std::expected<FirmwareActivation, std::string> activateFirmware(
+      uint16_t slavePosition, std::chrono::steady_clock::duration timeout) override;
+
  private:
   struct Drive;
 
@@ -144,6 +154,10 @@ class SpoeFieldbusDriver : public FieldbusDriver {
   std::expected<std::vector<uint8_t>, std::string> readSdoFrom(Drive& drive, uint16_t index,
                                                                uint8_t subindex);
   void connectAndIdentify(Drive& drive);
+  std::expected<Frame, FoeError> filePacket(Drive& drive, MessageType type, uint8_t packetState,
+                                            std::span<const uint8_t> data);
+  std::expected<std::vector<uint8_t>, FoeError> readFileFrom(Drive& drive,
+                                                             const std::string& filename);
 
   SpoeFieldbusDriverConfig config_;
   // Sized once in the constructor and never resized, so a position indexes it without a lock.

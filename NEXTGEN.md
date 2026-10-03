@@ -3562,3 +3562,39 @@ and nothing else is acquired under it (`docs/LOCKING.md`, mutex 11).
 **From the review of the old client:** a state change is judged by the state in the reply, not by
 the status, because firmware versions disagree on the status. The PDO size is read from
 `0x1C12`/`0x1C13` and the entry counts, not from every subindex of `0x1600`–`0x1A03`.
+
+## Session 2026-10-03 — SPoE files and firmware installation follow the firmware's own paths (as-built)
+
+Issue #36, slice 5. The SPoE driver transfers files, installs firmware and blinks a drive's LEDs.
+Every rule below comes from reading `somanet_software`, because the specification and the
+firmware disagree on files too.
+
+**The installation keeps one procedure, with one new step.** Over EtherCAT, leaving BOOT for INIT
+applies the firmware; the netX restarts into its update mode only if `com_firmware.bin` was written
+(`is_foe_for_update_complete`, `AppECS_Functions_Boot.c`). The SPoE handler has no such rule. It
+applies firmware on an explicit `FIRMWARE_UPDATE` message, which restarts the netX; the restart
+loads the COM firmware from flash, and the drive then starts the SoC firmware written in BOOT.
+Marko confirmed that this one message applies both binaries. So the procedure gained an
+`activate-firmware` step, backed by `FieldbusDriver::activateFirmware`. Its default does nothing,
+which is the EtherCAT case, and the existing walk out of BOOT runs after it either way.
+
+**Activation waits for the restart, not for the answer.** The firmware answers `FIRMWARE_UPDATE`
+and resets 1000 ms later (`ulTimeToReset`). A reconnect inside that second reaches the old firmware
+and looks like a finished restart. So the driver first waits for the drive to stop answering,
+then reconnects until it answers again, with a 120 s ceiling. This replaces fixed sleeps.
+
+**The first packet of `com_firmware.bin` in BOOT answers 0x00, not ACK.** The firmware returns what
+`storage_prepare_for_writing` returned, and 0 is its success. Everywhere else success is ACK
+(0x58), and 0x00 is the FoE error "undefined". The driver accepts 0x00 for that one packet only.
+Before it answers, the firmware erases 512 KB of flash, so file packets get a 30 s timeout.
+
+**An empty read is checked against `fs-getlist` before it is called a file.** The old client
+treats an empty read as a file that may be missing, and checks the file list to tell. The firmware
+source does not show what the SoC answers for a missing file, so v6 does the same check.
+
+**SPoE has no SII.** `FieldbusDriver::supportsEsc()` says so without bus I/O, and `Device` copies it
+at construction. The installation records that it did not write the SII and continues.
+
+**Device locate is a transport capability, so its procedure applies by capability.** The catalogue
+row's `applies` reads `Device::supportsLocate()`, a copy taken at construction, which is the kind of
+state the catalogue rule allows. The LEDs stop at the end of the run and when it is cancelled.

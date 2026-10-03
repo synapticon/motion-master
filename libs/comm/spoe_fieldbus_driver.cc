@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -681,19 +682,172 @@ std::expected<OdRead, std::string> SpoeFieldbusDriver::readObjectDictionary(
   return od;
 }
 
-std::expected<std::vector<uint8_t>, FoeError> SpoeFieldbusDriver::readFile(
-    uint16_t /*slavePosition*/, const std::string& /*filename*/) {
-  return std::unexpected(FoeError{.kind = FoeErrorKind::Protocol,
-                                  .retry = Retry::Permanent,
-                                  .message = "file transfer over SPoE is not implemented yet"});
+namespace {
+
+// The FoE error codes the firmware puts in the low status byte of a file reply
+// (`SqiBridgeFoeError_t`, `sqi_bridge_common.h`). A successful packet carries kReplyAck instead.
+constexpr uint8_t kFoeNotFound = 0x01;
+constexpr uint8_t kFoePacketNumber = 0x05;
+constexpr uint8_t kFoeBusy = 0x0C;
+constexpr uint8_t kFoeTimeout = 0x0E;
+
+// File packets carry at most this much data. The size is proven on hardware, and the firmware
+// accepts up to SQI_ACYCLIC_MAX_FOE_SIZE (1024).
+constexpr std::size_t kFileChunk = 500;
+
+// The firmware stores this file in its own flash, and answers its first packet in BOOT with the
+// return value of `storage_prepare_for_writing`, where 0 is success, rather than with kReplyAck.
+constexpr std::string_view kComFirmwareFile = "com_firmware.bin";
+
+// The firmware sends no file larger than this. The bound only stops a drive that never sends the
+// last packet.
+constexpr int kMaxFilePackets = 200000;
+
+FoeError foeErrorFromStatus(const std::string& host, const std::string& filename, uint8_t code) {
+  const auto message = [&](std::string_view reason) {
+    return std::format("SPoE {}: file '{}' failed: {} (code 0x{:02X})", host, filename, reason,
+                       code);
+  };
+  switch (code) {
+    case kFoeNotFound:
+      return FoeError{.kind = FoeErrorKind::FileNotFound,
+                      .retry = Retry::Permanent,
+                      .message = message("file not found")};
+    case kFoePacketNumber:
+      return FoeError{.kind = FoeErrorKind::PacketMismatch,
+                      .retry = Retry::Transient,
+                      .message = message("packet number mismatch")};
+    case kFoeBusy:
+      return FoeError{
+          .kind = FoeErrorKind::Protocol, .retry = Retry::Transient, .message = message("busy")};
+    case kFoeTimeout:
+      return FoeError{.kind = FoeErrorKind::NoResponse,
+                      .retry = Retry::Transient,
+                      .message = message("timeout inside the drive")};
+    case kReplyError:
+      return FoeError{.kind = FoeErrorKind::Protocol,
+                      .retry = Retry::Transient,
+                      .message = message("communication bridge error")};
+    default:
+      return FoeError{.kind = FoeErrorKind::Protocol,
+                      .retry = Retry::Permanent,
+                      .message = message("file error")};
+  }
 }
 
-std::expected<void, FoeError> SpoeFieldbusDriver::writeFile(uint16_t /*slavePosition*/,
-                                                            const std::string& /*filename*/,
-                                                            std::span<const uint8_t> /*data*/) {
-  return std::unexpected(FoeError{.kind = FoeErrorKind::Protocol,
-                                  .retry = Retry::Permanent,
-                                  .message = "file transfer over SPoE is not implemented yet"});
+}  // namespace
+
+std::expected<Frame, FoeError> SpoeFieldbusDriver::filePacket(Drive& drive, MessageType type,
+                                                              uint8_t packetState,
+                                                              std::span<const uint8_t> data) {
+  auto reply = drive.connection.request(type, packetState, data, config_.fileTimeout);
+  if (!reply) {
+    if (reply.error().kind == ConnectionError::Kind::kClosed) {
+      drive.state.store(0);
+    }
+    return std::unexpected(FoeError{.kind = FoeErrorKind::NoResponse,
+                                    .retry = Retry::Transient,
+                                    .message = reply.error().message});
+  }
+  return std::move(*reply);
+}
+
+std::expected<std::vector<uint8_t>, FoeError> SpoeFieldbusDriver::readFileFrom(
+    Drive& drive, const std::string& filename) {
+  const std::vector<uint8_t> name(filename.begin(), filename.end());
+  std::vector<uint8_t> content;
+  auto reply = filePacket(drive, MessageType::kFileRead, kPacketFirst, name);
+  for (int packet = 0; packet < kMaxFilePackets; ++packet) {
+    if (!reply) {
+      return std::unexpected(reply.error());
+    }
+    const auto code = static_cast<uint8_t>(reply->status & 0xFF);
+    if (code != kReplyAck) {
+      return std::unexpected(foeErrorFromStatus(drive.host, filename, code));
+    }
+    content.insert(content.end(), reply->data.begin(), reply->data.end());
+    if (static_cast<uint8_t>(reply->status >> 8) == kPacketLast) {
+      return content;
+    }
+    reply = filePacket(drive, MessageType::kFileRead, kPacketMiddle, {});
+  }
+  return std::unexpected(
+      FoeError{.kind = FoeErrorKind::Protocol,
+               .retry = Retry::Permanent,
+               .message = std::format("SPoE {}: file '{}' never ended", drive.host, filename)});
+}
+
+std::expected<std::vector<uint8_t>, FoeError> SpoeFieldbusDriver::readFile(
+    uint16_t slavePosition, const std::string& filename) {
+  Drive* found = driveAt(slavePosition);
+  if (found == nullptr) {
+    return std::unexpected(
+        FoeError{.kind = FoeErrorKind::Protocol,
+                 .retry = Retry::Permanent,
+                 .message = std::format("no SPoE device at position {}", slavePosition)});
+  }
+  auto content = readFileFrom(*found, filename);
+  if (!content || !content->empty() || filename == "fs-getlist") {
+    return content;
+  }
+  // An empty read can be a missing file, and the firmware source does not show what the SoC answers
+  // for one. The file list tells the two apart.
+  const auto list = readFileFrom(*found, "fs-getlist");
+  if (!list) {
+    return content;
+  }
+  const std::string text(list->begin(), list->end());
+  for (std::size_t begin = 0; begin < text.size();) {
+    const std::size_t end = std::min(text.find('\n', begin), text.size());
+    const std::string line = text.substr(begin, end - begin);
+    if (line.substr(0, line.find(',')) == filename) {
+      return content;
+    }
+    begin = end + 1;
+  }
+  return std::unexpected(
+      FoeError{.kind = FoeErrorKind::FileNotFound,
+               .retry = Retry::Permanent,
+               .message = std::format("SPoE {}: file '{}' not found", found->host, filename)});
+}
+
+std::expected<void, FoeError> SpoeFieldbusDriver::writeFile(uint16_t slavePosition,
+                                                            const std::string& filename,
+                                                            std::span<const uint8_t> data) {
+  Drive* found = driveAt(slavePosition);
+  if (found == nullptr) {
+    return std::unexpected(
+        FoeError{.kind = FoeErrorKind::Protocol,
+                 .retry = Retry::Permanent,
+                 .message = std::format("no SPoE device at position {}", slavePosition)});
+  }
+  Drive& drive = *found;
+  const std::vector<uint8_t> name(filename.begin(), filename.end());
+  const auto first = filePacket(drive, MessageType::kFileWrite, kPacketFirst, name);
+  if (!first) {
+    return std::unexpected(first.error());
+  }
+  const auto firstCode = static_cast<uint8_t>(first->status & 0xFF);
+  const bool storageReady = filename == kComFirmwareFile && firstCode == 0;
+  if (firstCode != kReplyAck && !storageReady) {
+    return std::unexpected(foeErrorFromStatus(drive.host, filename, firstCode));
+  }
+  // An empty file still sends its last packet, which is what closes the file on the drive.
+  std::size_t offset = 0;
+  do {
+    const std::size_t chunk = std::min(kFileChunk, data.size() - offset);
+    const bool last = offset + chunk >= data.size();
+    const auto reply = filePacket(drive, MessageType::kFileWrite,
+                                  last ? kPacketLast : kPacketMiddle, data.subspan(offset, chunk));
+    if (!reply) {
+      return std::unexpected(reply.error());
+    }
+    if (const auto code = static_cast<uint8_t>(reply->status & 0xFF); code != kReplyAck) {
+      return std::unexpected(foeErrorFromStatus(drive.host, filename, code));
+    }
+    offset += chunk;
+  } while (offset < data.size());
+  return {};
 }
 
 std::expected<void, std::string> SpoeFieldbusDriver::readRegister(uint16_t /*slavePosition*/,
@@ -744,7 +898,7 @@ void SpoeFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
       continue;
     }
     // Success is the state the drive reports, not the status. `AppUtil_ChangeState` puts a bool
-    // in the status, and the old client found firmware versions that disagree on its value.
+    // in the status, and firmware versions disagree on its value.
     if (reply->data.empty()) {
       spdlog::error("SPoE {}: the reply to the state change to {} carries no state", found->host,
                     toString(targetState));
@@ -756,6 +910,66 @@ void SpoeFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
                     toString(alState(reply->data[0])), toString(targetState));
     }
   }
+}
+
+std::expected<void, std::string> SpoeFieldbusDriver::locate(uint16_t slavePosition, bool on) {
+  Drive* found = driveAt(slavePosition);
+  if (found == nullptr) {
+    return std::unexpected(std::format("no SPoE device at position {}", slavePosition));
+  }
+  // The status echoes the LED state, 1 for blinking and 0 for stopped, so any answer is success.
+  const std::vector<uint8_t> command{static_cast<uint8_t>(on ? 1 : 0)};
+  if (auto reply = request(*found, MessageType::kDeviceLocate, command); !reply) {
+    return std::unexpected(reply.error());
+  }
+  return {};
+}
+
+std::expected<FieldbusDriver::FirmwareActivation, std::string> SpoeFieldbusDriver::activateFirmware(
+    uint16_t slavePosition, std::chrono::steady_clock::duration timeout) {
+  Drive* found = driveAt(slavePosition);
+  if (found == nullptr) {
+    return std::unexpected(std::format("no SPoE device at position {}", slavePosition));
+  }
+  Drive& drive = *found;
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  // The firmware answers, then resets the netX into its update mode, which loads the COM firmware
+  // from flash and restarts the drive. The restart also starts the SoC firmware written in BOOT.
+  if (auto reply = request(drive, MessageType::kFirmwareUpdate, {}); !reply) {
+    return std::unexpected(reply.error());
+  }
+  // The reset follows the answer by `ulTimeToReset`, 1000 ms. A connection made before it would
+  // reach the old firmware and look like a finished restart, so first wait for the drive to stop
+  // answering.
+  while (request(drive, MessageType::kServerInfo, {})) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      return std::unexpected(std::format(
+          "SPoE {}: the drive kept answering and did not restart for the firmware update",
+          drive.host));
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  }
+  drive.connection.close();
+  drive.state.store(0);
+  while (std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    if (!drive.connection.connect(drive.host, config_.port, config_.connectTimeout)) {
+      continue;
+    }
+    const auto info = request(drive, MessageType::kServerInfo, {});
+    const auto state =
+        info ? request(drive, MessageType::kStateRead, {}) : std::unexpected(info.error());
+    if (state && !state->data.empty()) {
+      drive.state.store(state->data[0]);
+      spdlog::info("SPoE {}: the drive answers again after the firmware update, in {}", drive.host,
+                   toString(alState(state->data[0])));
+      return FirmwareActivation::kRestarted;
+    }
+    drive.connection.close();
+  }
+  return std::unexpected(
+      std::format("SPoE {}: the drive did not answer again within {} s of the firmware update",
+                  drive.host, std::chrono::duration_cast<std::chrono::seconds>(timeout).count()));
 }
 
 std::optional<std::string> SpoeFieldbusDriver::stateChangeRefusal() const {

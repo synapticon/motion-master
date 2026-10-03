@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -353,10 +354,12 @@ TEST(FakeSpoeServer, AnUnknownTypeGetsAnEmptyReplyAndClearsSpoeActive) {
   EXPECT_FALSE(server.spoeActive());
 }
 
-TEST(FakeSpoeServer, AnUnmodelledTypeClosesTheConnection) {
+TEST(FakeSpoeServer, AnUnmodelledRequestClosesTheConnection) {
+  // An empty batch read: the firmware decrements its count past zero and reads stale bytes, so
+  // there is no answer to model.
   FakeSpoeServer server;
   Client client(server.port());
-  client.send(SpoeMessage::kFileRead, 1, {'a'});
+  client.send(SpoeMessage::kSdoBatchRead, 1, {});
   EXPECT_TRUE(client.closed());
   EXPECT_EQ(server.unmodelledRequests(), 1);
 }
@@ -481,6 +484,54 @@ TEST(FakeSpoeServer, AnEntryDescriptionComesAlone) {
   ASSERT_EQ(frame.data.size(), mm::comm::testing::kSpoeEntrySize);
   EXPECT_EQ(u16At(frame.data, 0), 0x1018);
   EXPECT_EQ(frame.data[2], 2);
+}
+
+TEST(FakeSpoeServer, ReadsAFileInPackets) {
+  // `AppSockIf_StartReadingFile` only opens the file, so the first reply is empty.
+  FakeSpoeServer server;
+  server.setFile("config.csv", std::vector<uint8_t>(600, 'x'));
+  Client client(server.port());
+  const Frame first =
+      client.request(SpoeMessage::kFileRead, 1, {'c', 'o', 'n', 'f', 'i', 'g', '.', 'c', 's', 'v'},
+                     mm::comm::testing::kSpoePacketFirst);
+  EXPECT_EQ(first.status & 0xFF, mm::comm::testing::kSpoeReplyAck);
+  EXPECT_TRUE(first.data.empty());
+  const Frame second =
+      client.request(SpoeMessage::kFileRead, 2, {}, mm::comm::testing::kSpoePacketMiddle);
+  EXPECT_EQ(second.data.size(), 512U);
+  EXPECT_EQ(packetState(second), mm::comm::testing::kSpoePacketMiddle);
+  const Frame third =
+      client.request(SpoeMessage::kFileRead, 3, {}, mm::comm::testing::kSpoePacketMiddle);
+  EXPECT_EQ(third.data.size(), 88U);
+  EXPECT_EQ(packetState(third), mm::comm::testing::kSpoePacketLast);
+}
+
+TEST(FakeSpoeServer, TheComFirmwareInBootAnswersZeroForItsFirstPacket) {
+  FakeSpoeServer server;
+  server.setState(mm::comm::testing::kSpoeStateBoot);
+  Client client(server.port());
+  const std::string name = "com_firmware.bin";
+  const Frame first = client.request(SpoeMessage::kFileWrite, 1, {name.begin(), name.end()},
+                                     mm::comm::testing::kSpoePacketFirst);
+  EXPECT_EQ(first.status & 0xFF, 0x00);
+  const Frame last =
+      client.request(SpoeMessage::kFileWrite, 2, {1, 2, 3}, mm::comm::testing::kSpoePacketLast);
+  EXPECT_EQ(last.status & 0xFF, mm::comm::testing::kSpoeReplyAck);
+  EXPECT_EQ(server.file(name), (std::vector<uint8_t>{1, 2, 3}));
+}
+
+TEST(FakeSpoeServer, TheFirmwareUpdateRestartsTheDriveInPreOp) {
+  FakeSpoeServer server;
+  server.setRestartTiming(milliseconds{100}, milliseconds{200});
+  server.setState(mm::comm::testing::kSpoeStateBoot);
+  Client client(server.port());
+  EXPECT_EQ(client.request(SpoeMessage::kFirmwareUpdate, 1).status, 0);
+  EXPECT_TRUE(client.closed());
+  EXPECT_EQ(server.firmwareUpdates(), 1);
+  std::this_thread::sleep_for(milliseconds{300});
+  Client after(server.port());
+  EXPECT_EQ(after.request(SpoeMessage::kStateRead, 1).data,
+            (std::vector<uint8_t>{mm::comm::testing::kSpoeStatePreOp}));
 }
 
 TEST(FakeSpoeServer, SplitReplyArrivesWhole) {

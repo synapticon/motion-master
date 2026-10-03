@@ -5590,6 +5590,16 @@ components:
             (0x1011:01), communication (0x1011:02), application (0x1011:03), or manufacturer
             (0x1011:04).
           example: all
+        duration:
+          type: integer
+          minimum: 1
+          maximum: 3600
+          default: 10
+          description: >
+            `device-locate` only: how long the LEDs blink, in seconds. They stop at the end, and
+            when the run is cancelled. Only a device whose transport can blink the LEDs offers
+            `device-locate`, which today is a SPoE drive.
+          example: 10
         packageContent:
           type: string
           description: >
@@ -5639,7 +5649,8 @@ components:
             after erasing one or between two installs, since a PRE-OP transition then has nothing to
             hand over to and the drive answers AL status `0x0014`, "No valid firmware". `4` and `8`
             climb through PRE-OP and re-map the whole bus on the way, briefly pausing every other
-            device. The state the device was in beforehand is not restored.
+            device. The state the device was in beforehand is not restored. Over SPoE the drive
+            restarts into the new firmware and comes up in PRE-OP, so `3` cannot keep it in BOOT.
           example: 2
     OutputStageResult:
       type: object

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <expected>
 #include <nlohmann/json_fwd.hpp>
 #include <stop_token>
@@ -115,5 +116,37 @@ std::vector<ProgressStep> restoreDefaultParametersSteps();
 std::expected<void, std::string> runRestoreDefaultParametersProcedure(
     Device& device, ProgressReporter& reporter, std::stop_token stop,
     const RestoreDefaultParametersRequest& request, RestoreDefaultParametersConfig config = {});
+
+/// @brief Procedure name for blinking a device's LEDs, as it appears in its URL and snapshot key.
+inline constexpr std::string_view kDeviceLocateProcedure = "device-locate";
+
+/// @brief The single step blinking the LEDs reports against.
+inline constexpr std::string_view kDeviceLocateStep = "locate";
+
+/// @brief What one locate run was asked to do.
+struct DeviceLocateRequest {
+  /// How long the LEDs blink before they stop.
+  std::chrono::seconds duration{10};
+};
+
+/// @brief Parses and validates a client's locate request body: `{"duration": 10}`, in seconds,
+///        optional.
+std::expected<DeviceLocateRequest, std::string> parseDeviceLocateRequest(
+    const nlohmann::json& body);
+
+/// @brief What blinking the LEDs accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> deviceLocateParameters();
+
+/// @brief The locate procedure's step template — one step, idle.
+std::vector<ProgressStep> deviceLocateSteps();
+
+/// @brief Blinks the device's LEDs for @c request.duration, so that someone can find it.
+///
+/// The LEDs stop at the end, and also when the run is cancelled or the wait fails, so a run never
+/// leaves a device blinking.
+std::expected<void, std::string> runDeviceLocateProcedure(Device& device,
+                                                          ProgressReporter& reporter,
+                                                          const std::stop_token& stop,
+                                                          const DeviceLocateRequest& request);
 
 }  // namespace mm::node

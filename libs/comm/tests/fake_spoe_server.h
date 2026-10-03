@@ -12,10 +12,19 @@
 // codec bug that both sides shared would make the tests pass against a drive that rejects the
 // bytes.
 //
-// Not modelled yet: the firmware update and the file transfer messages. A request of one of those
-// types closes the connection and is counted in `unmodelledRequests()`, so a test that reaches one
-// fails clearly instead of passing on an invented answer. The watchdog value is stored and does
+// The file messages follow `AppSockIf_ReadFile` and `AppSockIf_WriteFile`. A read answers its first
+// packet with no data and then sends 512-byte chunks. A file the drive does not have reads as an
+// empty one, so the driver's check of the file list runs; what the SoC really answers for a missing
+// file is not in the firmware source. The first packet of `com_firmware.bin` in BOOT answers 0x00
+// rather than ACK, because the firmware returns what `storage_prepare_for_writing` returned. The
+// firmware update answers, then goes silent until its reset, drops the connection, refuses
+// connections while it restarts, and comes back in PRE-OP. The watchdog value is stored and does
 // not fault the device.
+//
+// A request whose firmware answer cannot be modelled closes the connection and is counted in
+// `unmodelledRequests()`, so a test that reaches one fails clearly instead of passing on an
+// invented answer. Today that is an empty batch read. A message type the firmware does not know
+// gets an empty reply, as the firmware sends.
 //
 // The parameter list follows `AppSockIf_ReadObjectInfo` and `AppSockIf_GetObjectInfoBuf`. Each
 // entry is the firmware's `struct _sdoinfo_entry_description` copied as it lies in memory: 68
@@ -158,6 +167,16 @@ class FakeSpoeServer {
   // The device.
 
   void setObject(uint16_t index, uint16_t subindex, std::vector<uint8_t> value);
+
+  void setFile(const std::string& name, std::vector<uint8_t> content);
+  std::optional<std::vector<uint8_t>> file(const std::string& name) const;
+
+  int firmwareUpdates() const;
+
+  /// Sets how long after its answer the firmware update resets the drive, and how long the drive
+  /// then refuses connections. The firmware resets after 1000 ms; tests use less.
+  void setRestartTiming(std::chrono::milliseconds resetDelay,
+                        std::chrono::milliseconds restartDuration);
 
   /// Adds an entry to the dictionary the parameter list reports. An object reports its highest
   /// described subindex as its subindex count.

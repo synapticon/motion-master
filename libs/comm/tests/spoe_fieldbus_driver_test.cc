@@ -34,7 +34,8 @@ SpoeFieldbusDriverConfig configFor(const FakeSpoeServer& server,
                                   .mode = mode,
                                   .watchdogMs = 75,
                                   .requestTimeout = milliseconds{300},
-                                  .connectTimeout = milliseconds{300}};
+                                  .connectTimeout = milliseconds{300},
+                                  .fileTimeout = milliseconds{2000}};
 }
 
 std::vector<uint8_t> u32le(uint32_t value) {
@@ -412,6 +413,94 @@ TEST(SpoeFieldbusDriver, StopClearsThePdoMode) {
   ASSERT_TRUE(driver.configureProcessData().has_value());
   driver.stop();
   EXPECT_EQ(server.pdoMode(), mm::comm::testing::kSpoePdoModeNone);
+}
+
+TEST(SpoeFieldbusDriver, WritesAndReadsAFileInChunks) {
+  FakeSpoeServer server;
+  SpoeFieldbusDriver driver(configFor(server));
+  ASSERT_TRUE(driver.scan().has_value());
+  std::vector<uint8_t> content(1234);
+  for (std::size_t i = 0; i < content.size(); ++i) {
+    content[i] = static_cast<uint8_t>(i);
+  }
+  ASSERT_TRUE(driver.writeFile(1, "config.csv", content).has_value());
+  EXPECT_EQ(server.file("config.csv"), content);
+  const auto read = driver.readFile(1, "config.csv");
+  ASSERT_TRUE(read.has_value()) << read.error().message;
+  EXPECT_EQ(*read, content);
+}
+
+TEST(SpoeFieldbusDriver, AnEmptyFileStillSendsItsLastPacket) {
+  FakeSpoeServer server;
+  SpoeFieldbusDriver driver(configFor(server));
+  ASSERT_TRUE(driver.scan().has_value());
+  ASSERT_TRUE(driver.writeFile(1, "empty.txt", {}).has_value());
+  EXPECT_EQ(server.file("empty.txt"), std::vector<uint8_t>{});
+  // The file list shows it exists, so an empty read is the file and not a missing one.
+  const auto read = driver.readFile(1, "empty.txt");
+  ASSERT_TRUE(read.has_value()) << read.error().message;
+  EXPECT_TRUE(read->empty());
+}
+
+TEST(SpoeFieldbusDriver, AMissingFileIsNotFound) {
+  // The firmware reads a missing file as an empty one. The file list tells the two apart.
+  FakeSpoeServer server;
+  SpoeFieldbusDriver driver(configFor(server));
+  ASSERT_TRUE(driver.scan().has_value());
+  const auto read = driver.readFile(1, "missing.txt");
+  ASSERT_FALSE(read.has_value());
+  EXPECT_EQ(read.error().kind, mm::comm::FoeErrorKind::FileNotFound);
+}
+
+TEST(SpoeFieldbusDriver, AcceptsTheComFirmwareInBoot) {
+  FakeSpoeServer server;
+  server.setState(mm::comm::testing::kSpoeStateBoot);
+  SpoeFieldbusDriver driver(configFor(server));
+  ASSERT_TRUE(driver.scan().has_value());
+  const std::vector<uint8_t> binary(700, 0xAB);
+  const auto written = driver.writeFile(1, "com_firmware.bin", binary);
+  ASSERT_TRUE(written.has_value()) << written.error().message;
+  EXPECT_EQ(server.file("com_firmware.bin"), binary);
+}
+
+TEST(SpoeFieldbusDriver, WaitsForAFileReplyTheDriveHolds) {
+  // The firmware holds a reply while the SoC is busy. That is longer than an SDO may take.
+  FakeSpoeServer server;
+  server.setFile("config.csv", {1, 2, 3});
+  SpoeFieldbusDriver driver(configFor(server));
+  ASSERT_TRUE(driver.scan().has_value());
+  server.setReplyDelay(milliseconds{500});
+  const auto read = driver.readFile(1, "config.csv");
+  ASSERT_TRUE(read.has_value()) << read.error().message;
+  EXPECT_EQ(*read, (std::vector<uint8_t>{1, 2, 3}));
+}
+
+TEST(SpoeFieldbusDriver, LocateStartsAndStopsTheLeds) {
+  FakeSpoeServer server;
+  SpoeFieldbusDriver driver(configFor(server));
+  ASSERT_TRUE(driver.scan().has_value());
+  EXPECT_TRUE(driver.supportsLocate());
+  EXPECT_FALSE(driver.supportsEsc());
+  ASSERT_TRUE(driver.locate(1, true).has_value());
+  EXPECT_TRUE(server.locating());
+  ASSERT_TRUE(driver.locate(1, false).has_value());
+  EXPECT_FALSE(server.locating());
+}
+
+TEST(SpoeFieldbusDriver, ActivatingFirmwareWaitsForTheRestart) {
+  FakeSpoeServer server;
+  server.setRestartTiming(milliseconds{300}, milliseconds{1000});
+  server.setState(mm::comm::testing::kSpoeStateBoot);
+  SpoeFieldbusDriver driver(configFor(server));
+  ASSERT_TRUE(driver.scan().has_value());
+  const auto started = std::chrono::steady_clock::now();
+  const auto activation = driver.activateFirmware(1, std::chrono::seconds(10));
+  ASSERT_TRUE(activation.has_value()) << activation.error();
+  EXPECT_EQ(*activation, mm::comm::FieldbusDriver::FirmwareActivation::kRestarted);
+  // It returned after the restart, not after the answer that came before it.
+  EXPECT_GE(std::chrono::steady_clock::now() - started, milliseconds{1300});
+  EXPECT_EQ(server.firmwareUpdates(), 1);
+  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(EtherCatState::PreOp));
 }
 
 TEST(SpoeParameterEntries, DecodesTheFirmwareLayout) {

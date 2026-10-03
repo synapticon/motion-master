@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <cstdint>
 #include <cstring>
 #include <deque>
@@ -189,6 +190,23 @@ class Device {
   /// I/O terminal), so its PDO mapping is read from the SII EEPROM rather than the @c 0x1C12 /
   /// @c 0x1C13 CoE objects. No bus I/O.
   bool supportsCoe() const;
+
+  /// @brief Whether the device has an EtherCAT Slave Controller: SII, ESC registers, DC and the
+  ///        ESC diagnostics. Copied from @c FieldbusDriver::supportsEsc at construction. No bus
+  ///        I/O.
+  bool supportsEsc() const;
+
+  /// @brief Whether @c locate can blink this device's LEDs. Copied from
+  ///        @c FieldbusDriver::supportsLocate at construction. No bus I/O.
+  bool supportsLocate() const;
+
+  /// @brief Starts or stops blinking this device's LEDs. Delegates to @c FieldbusDriver::locate.
+  std::expected<void, std::string> locate(bool on) const;
+
+  /// @brief Makes this device apply the firmware files written to it in BOOT. Delegates to
+  ///        @c FieldbusDriver::activateFirmware.
+  std::expected<mm::comm::FieldbusDriver::FirmwareActivation, std::string> activateFirmware(
+      std::chrono::steady_clock::duration timeout) const;
 
   /// @brief Whether the device is in a process-data-exchanging state (SAFE-OP or OP, error
   ///        bit clear).
@@ -849,6 +867,9 @@ class Device {
   // and cached for the same reason the constructor explains: reading it from the driver on demand
   // would take the control-plane mutex and so block behind whatever bus operation holds it.
   uint16_t mailboxProtocols_ = 0;
+  // Transport capabilities, copied at construction for the reason given above.
+  bool supportsEsc_ = true;
+  bool supportsLocate_ = false;
   // Guards parameters_ (and caSupport_) against the off-RT monitoring threads (the refresher
   // refreshes cached values, the sampler reads them) racing the control-plane thread.
   //

@@ -3512,3 +3512,53 @@ found twice.
 
 **Every feature found in the three sources has one of the five classes.** After these
 decisions, no gap remains outside the minor list.
+
+## Session 2026-10-03 — SPoE process data runs on a thread per drive, and Monitor mode follows the PLC's states (as-built)
+
+Issue #36, slice 4. The SPoE driver exchanges process data, and v6 publishes the process image for
+a drive that a PLC controls.
+
+**A round trip cannot run on the RT thread, so each drive gets an exchange thread.** SPoE is TCP,
+one request and one reply at a time. The RT thread hands the newest outputs to the exchange thread
+through a triple buffer, and takes one input frame per cycle from a single-producer single-consumer
+queue (`libs/comm/spoe_process_data.h`). Neither side waits.
+
+**The pacing is the old client's, and it is why monitoring worked there.** The exchange thread
+starts the next request as soon as the previous one answers, with a 1 ms floor. That keeps the
+drive's 512-byte input buffer far from full. The drive returns its buffered frames in batches; the
+queue holds them, and the RT thread takes one each cycle, so monitoring sees every frame in order.
+The queue keeps the newest 30 frames, which bounds how far the inputs can lag.
+
+**A frame cut at the 500-byte limit is joined, and the framing heals itself.** One reply carries at
+most 500 bytes, which can end inside a frame. The rest starts the next reply. A reply shorter than
+500 bytes means the drive emptied its buffer, so it ends on a frame boundary; if the joined bytes
+are then not whole frames, the kept part was stale, because the firmware empties a full buffer
+outright. The stale bytes are dropped and counted.
+
+**The working counter keeps the EtherCAT rule, so nothing above the driver changes.** A drive whose
+last exchange answered contributes what `workingCounterContribution` gives for its state and its
+mapping. `expectedWkcDuring` computes the same, so the short-WKC notification works for SPoE as it
+is.
+
+**Monitor mode needed a path that does not start with a state change.** `transitionToState` is
+where the image is published, and in Monitor mode v6 sends no state change. The old client read
+the state and the mapping once, at startup, so a drive that reached OP later was probably never
+monitored. `DeviceManager::followObservedStates()` is one pass: it reads every state, re-maps when a
+device enters SAFE-OP or OP, and tears down when none exchanges. A re-map reads the mapping again,
+because the PLC can change it in PRE-OP. It reuses `remapProcessImage` and `stopExchange`.
+
+**The thread that repeats it lives in `main.cc`, not in `DeviceManager`.** `DeviceManager` owns no
+background thread, so that it stays embeddable (`docs/THREADS.md`). The state follower is thread 7.
+It runs every 500 ms and does nothing while the driver accepts state changes. It asks again on every
+pass, because `POST /api/init` can replace the driver.
+
+**A clean shutdown clears the PDO mode.** `main()` does not call `reset()` on SIGTERM, so the
+driver's destructor does what `stop()` does: it stops the exchange threads and sets each drive's
+PDO mode to none. In Control mode that keeps the drive's watchdog from tripping.
+
+**The SPoE connection's mutex is the third leaf lock.** It is held for one request and its reply,
+and nothing else is acquired under it (`docs/LOCKING.md`, mutex 11).
+
+**From the review of the old client:** a state change is judged by the state in the reply, not by
+the status, because firmware versions disagree on the status. The PDO size is read from
+`0x1C12`/`0x1C13` and the entry counts, not from every subindex of `0x1600`–`0x1A03`.

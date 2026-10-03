@@ -12,7 +12,8 @@ add_library(
   soem_fieldbus_driver.cc
   spoe_connection.cc
   spoe_fieldbus_driver.cc
-  spoe_frame.cc)
+  spoe_frame.cc
+  spoe_process_data.cc)
 add_library(mm::comm ALIAS comm)
 
 target_include_directories(comm PUBLIC ${CMAKE_SOURCE_DIR}/libs)

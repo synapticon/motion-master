@@ -2,11 +2,15 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <csignal>
 #include <filesystem>
 #include <memory>
+#include <mutex>
 #include <nlohmann/json.hpp>
+#include <stop_token>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include "auto_tuning/process.h"
@@ -434,6 +438,30 @@ int main(int argc, char** argv) {
   notificationBus.addSource(mm::busHealthSource(deviceManager));
   notificationBus.start();
 
+  // A driver that refuses state changes leaves them to another master, as SPoE does in Monitor
+  // mode beside a PLC. Then nothing calls transitionToState, which is where the process image is
+  // otherwise published, so this thread follows the states that master sets. It does nothing while
+  // the driver accepts state changes, and it checks again on every pass because POST /api/init can
+  // replace the driver. Declared after deviceManager, so it is destroyed first.
+  std::jthread stateFollower([&deviceManager](const std::stop_token& stop) {
+    std::mutex mutex;
+    std::condition_variable_any wake;
+    std::string lastError;
+    while (!stop.stop_requested()) {
+      if (deviceManager.stateChangeRefusal()) {
+        const auto followed = deviceManager.followObservedStates();
+        // The same failure repeats every pass while its cause lasts, so it is logged once.
+        const std::string error = followed ? std::string{} : followed.error();
+        if (!error.empty() && error != lastError) {
+          spdlog::warn("Following the device states failed: {}", error);
+        }
+        lastError = error;
+      }
+      std::unique_lock lock(mutex);
+      wake.wait_for(lock, stop, std::chrono::milliseconds(500), [] { return false; });
+    }
+  });
+
   if (opts.openBrowser) {
     mm::core::openInBrowser("https://motion-master.synapticon.com/apps/console/");
   }
@@ -466,6 +494,8 @@ int main(int argc, char** argv) {
   gGameLoop.store(nullptr, std::memory_order_relaxed);
   monitoringManager.stop();  // stop sampling/publishing before the server loops go away
   notificationBus.stop();
+  stateFollower.request_stop();
+  stateFollower.join();
   wsServer.stop();
   httpServer.stop();
 

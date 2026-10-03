@@ -56,6 +56,9 @@ struct SpoeConnection::Impl {
   asio::io_context io;
   tcp::socket socket{io};
 
+  // Held for one request and its reply, which is bus I/O of up to the request timeout. The drive
+  // answers one request at a time, so this is all the exclusion the connection needs. A leaf: no
+  // other lock is taken while it is held. See docs/LOCKING.md, mutex 11.
   std::mutex mutex;
   std::atomic<bool> open{false};
   std::atomic<uint64_t> discarded{0};

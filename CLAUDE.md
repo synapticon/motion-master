@@ -249,7 +249,8 @@ main.cc  (composition root)
  ├── WebSocketServer (port 62281, own loop and thread)
  ├── MonitoringManager  (off-RT; owns ParameterRefresher and a sampler thread)
  ├── ProcedureManager   (off-RT jthreads, busy token, retained snapshot; poll-only)
- └── NotificationBus    (off-RT poll thread; Source[] → the "notifications" topic)
+ ├── NotificationBus    (off-RT poll thread; Source[] → the "notifications" topic)
+ └── stateFollower      (off-RT jthread; followObservedStates while the driver refuses state changes)
 ```
 
 Planned, not in code: `SetpointCyclicTask`.
@@ -356,10 +357,11 @@ busOperationMutex_ → Device::parametersMutex_ → controlPlaneMutex_
   state access. Hold it for one socket transaction only, never across a sleep, a blocking
   wait, or a user callback.
 
-Two leaf locks sit outside that order and are never held while anything else is acquired:
-`DeviceManager::currentSetMutex_`, held only long enough to copy a `shared_ptr`, and
+Three leaf locks sit outside that order and are never held while anything else is acquired:
+`DeviceManager::currentSetMutex_`, held only long enough to copy a `shared_ptr`;
 `processDataMutex_`, which guards the recorder ring's storage and the retained image
-generations against `allocate`/`clear`.
+generations against `allocate`/`clear`; and the SPoE connection's mutex, held for one request and
+its reply, which the control plane and that drive's exchange thread share.
 
 **The PDO path runs lock-free.** `exchangeProcessData` touches the IOmap, which is disjoint
 from the control plane, and SOEM's port layer is internally thread-safe. A slow SDO never
@@ -932,7 +934,7 @@ Managed by vcpkg (`extern/vcpkg` submodule, pinned in `vcpkg.json`). To add one:
 
 | Package | Version | Used in | CMake target |
 | --- | --- | --- | --- |
-| `asio` | 1.32.0 | `mm_comm_tests` | `asio::asio` |
+| `asio` | 1.32.0 | `mm_comm` (private), the fake SPoE server | `asio::asio` |
 | `cli11` | 2.6.2 | `motion_master` | `CLI11::CLI11` |
 | `gtest` | 1.17.0 | test targets | `GTest::gtest`, `GTest::gtest_main` |
 | `neargye-semver` | 1.0.0-rc | `mm_core` | `semver::semver` |

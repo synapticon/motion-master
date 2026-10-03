@@ -25,7 +25,9 @@
 #include <utility>
 #include <vector>
 
+#include "comm/spoe_fieldbus_driver.h"
 #include "fake_bus.h"
+#include "fake_spoe_server.h"
 #include "node/device.h"
 #include "node/device_manager.h"
 #include "node/process_data_ring.h"
@@ -200,6 +202,154 @@ TEST(Concurrency, ResetAgainstARunningCycle) {
     stop.store(true, std::memory_order_relaxed);
     rt.join();
   }
+}
+
+// ── SPoE ─────────────────────────────────────────────────────────────────────────────────────────
+//
+// The same manager over the SPoE driver and the fake drive. This driver adds threads of its own:
+// one exchange thread per drive, which shares the drive's connection with the control plane. The
+// RT stand-in hands outputs to it and takes inputs from it without waiting.
+
+using mm::comm::spoe::SpoeFieldbusDriver;
+using mm::comm::spoe::SpoeFieldbusDriverConfig;
+using mm::comm::spoe::SpoeMode;
+using mm::comm::testing::FakeSpoeEntry;
+using mm::comm::testing::FakeSpoeServer;
+
+std::vector<uint8_t> le32(uint32_t v) {
+  return {static_cast<uint8_t>(v), static_cast<uint8_t>(v >> 8), static_cast<uint8_t>(v >> 16),
+          static_cast<uint8_t>(v >> 24)};
+}
+
+/// A CiA 402 drive on the fake: the same four mapped objects as makeCia402Bus, in OP.
+void programSpoeDrive(FakeSpoeServer& server) {
+  server.setObject(0x1C12, 0, {1});
+  server.setObject(0x1C12, 1, {0x00, 0x16});
+  server.setObject(0x1600, 0, {2});
+  server.setObject(0x1600, 1, le32(0x60400010));
+  server.setObject(0x1600, 2, le32(0x607A0020));
+  server.setObject(0x1C13, 0, {1});
+  server.setObject(0x1C13, 1, {0x00, 0x1A});
+  server.setObject(0x1A00, 0, {2});
+  server.setObject(0x1A00, 1, le32(0x60410010));
+  server.setObject(0x1A00, 2, le32(0x60640020));
+  server.setObject(0x6040, 0, {0, 0});
+  server.setObject(0x607A, 0, {0, 0, 0, 0});
+  server.setObject(0x6041, 0, {0, 0});
+  server.setObject(0x6064, 0, {0, 0, 0, 0});
+  const auto entry = [](uint16_t dataType, uint16_t bits, const char* name) {
+    return FakeSpoeEntry{
+        .dataType = dataType, .objectCode = 0x07, .bitLength = bits, .access = 0x3F, .name = name};
+  };
+  server.describeEntry(0x6040, 0, entry(0x0006, 16, "Controlword"));
+  server.describeEntry(0x6041, 0, entry(0x0006, 16, "Statusword"));
+  server.describeEntry(0x6064, 0, entry(0x0004, 32, "Position actual value"));
+  server.describeEntry(0x607A, 0, entry(0x0004, 32, "Target position"));
+  server.setState(mm::comm::testing::kSpoeStateOp);
+}
+
+std::unique_ptr<DeviceManager> spoeManager(const FakeSpoeServer& server, SpoeMode mode) {
+  auto driver = std::make_unique<SpoeFieldbusDriver>(
+      SpoeFieldbusDriverConfig{.hosts = {"127.0.0.1"},
+                               .port = server.port(),
+                               .mode = mode,
+                               .watchdogMs = 75,
+                               .requestTimeout = std::chrono::milliseconds(500),
+                               .connectTimeout = std::chrono::milliseconds(500),
+                               .exchangePeriod = std::chrono::microseconds(500)});
+  auto dm = std::make_unique<DeviceManager>();
+  if (!dm->init(std::move(driver)) || !dm->scan() || !dm->initializeDeviceParameters(1, false)) {
+    return nullptr;
+  }
+  return dm;
+}
+
+/// The drive's side of the cycle: one input frame per millisecond, as the firmware buffers them.
+void produceInputs(FakeSpoeServer& server, const std::atomic<bool>& stop) {
+  uint32_t counter = 0;
+  while (!stop.load(std::memory_order_relaxed)) {
+    std::vector<uint8_t> frame{0x37, 0x02};
+    const auto position = le32(++counter);
+    frame.insert(frame.end(), position.begin(), position.end());
+    server.pushInputFrame(frame);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+}
+
+// Control mode: the cycle exchanges through the drive's exchange thread while SDO traffic, state
+// reads and re-maps share the same connection.
+TEST(Concurrency, SpoeExchangeAgainstTheControlPlane) {
+  FakeSpoeServer server;
+  programSpoeDrive(server);
+  auto dm = spoeManager(server, SpoeMode::kControl);
+  ASSERT_NE(dm, nullptr);
+  ASSERT_TRUE(dm->configureProcessData().has_value());
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> cycles{0};
+  std::thread drive([&] { produceInputs(server, stop); });
+  std::thread rt([&] { runCycleLoop(*dm, stop, cycles); });
+  std::thread worker([&] {
+    while (!stop.load(std::memory_order_relaxed)) {
+      static_cast<void>(dm->deviceStates({}));
+      if (auto device = dm->deviceAt(1); device) {
+        static_cast<void>(device->readSdo(0x6041, 0x00));
+      }
+    }
+  });
+
+  const auto deadline = std::chrono::steady_clock::now() + kDuration;
+  while (std::chrono::steady_clock::now() < deadline) {
+    static_cast<void>(dm->configureProcessData());
+  }
+  stop.store(true, std::memory_order_relaxed);
+  worker.join();
+  rt.join();
+  drive.join();
+
+  EXPECT_GT(cycles.load(), 0U);
+  ASSERT_TRUE(dm->configureProcessData().has_value());
+  EXPECT_TRUE(dm->processDataConfigured());
+  dm->reset();
+}
+
+// Monitor mode: another master moves the drive in and out of OP, and the follower re-maps and
+// tears down under a running cycle.
+TEST(Concurrency, SpoeFollowerAgainstARunningCycle) {
+  FakeSpoeServer server;
+  programSpoeDrive(server);
+  auto dm = spoeManager(server, SpoeMode::kMonitor);
+  ASSERT_NE(dm, nullptr);
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> cycles{0};
+  std::atomic<uint64_t> passes{0};
+  std::thread drive([&] { produceInputs(server, stop); });
+  std::thread rt([&] { runCycleLoop(*dm, stop, cycles); });
+  std::thread follower([&] {
+    while (!stop.load(std::memory_order_relaxed)) {
+      static_cast<void>(dm->followObservedStates());
+      passes.fetch_add(1, std::memory_order_relaxed);
+    }
+  });
+
+  const auto deadline = std::chrono::steady_clock::now() + kDuration;
+  bool op = true;
+  while (std::chrono::steady_clock::now() < deadline) {
+    op = !op;
+    server.setState(op ? mm::comm::testing::kSpoeStateOp : mm::comm::testing::kSpoeStatePreOp);
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  stop.store(true, std::memory_order_relaxed);
+  follower.join();
+  rt.join();
+  drive.join();
+
+  EXPECT_GT(passes.load(), 0U);
+  server.setState(mm::comm::testing::kSpoeStateOp);
+  ASSERT_TRUE(dm->followObservedStates().has_value());
+  EXPECT_TRUE(dm->processDataConfigured());
+  dm->reset();
 }
 
 }  // namespace

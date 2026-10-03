@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -252,6 +253,165 @@ TEST(SpoeFieldbusDriver, TheEscCallsAreNotSupported) {
   EXPECT_FALSE(driver.readDiagnostics({1}).has_value());
   EXPECT_FALSE(driver.readDcSync({1}).has_value());
   EXPECT_TRUE(driver.busConfig().empty());
+}
+
+// One RxPDO of 24 bits (0x6040, 0x6060) and one TxPDO of 48 bits (0x6041, 0x6064), so 3 output
+// bytes and 6 input bytes.
+void setPdoMapping(FakeSpoeServer& server) {
+  server.setObject(0x1C12, 0, {1});
+  server.setObject(0x1C12, 1, {0x00, 0x16});
+  server.setObject(0x1600, 0, {2});
+  server.setObject(0x1600, 1, u32le(0x60400010));
+  server.setObject(0x1600, 2, u32le(0x60600008));
+  // An entry past the count holds a stale mapping, which must not be counted.
+  server.setObject(0x1600, 3, u32le(0x607A0020));
+  server.setObject(0x1C13, 0, {1});
+  server.setObject(0x1C13, 1, {0x00, 0x1A});
+  server.setObject(0x1A00, 0, {2});
+  server.setObject(0x1A00, 1, u32le(0x60410010));
+  server.setObject(0x1A00, 2, u32le(0x60640020));
+}
+
+// Calls the RT side once per millisecond until @p done is true or a second passes.
+template <typename Done>
+bool exchangeUntil(SpoeFieldbusDriver& driver, std::vector<uint8_t>& outputs,
+                   std::vector<uint8_t>& inputs, Done done) {
+  for (int i = 0; i < 1000; ++i) {
+    driver.exchangeProcessData(outputs, inputs);
+    if (done()) {
+      return true;
+    }
+    std::this_thread::sleep_for(milliseconds{1});
+  }
+  return false;
+}
+
+TEST(SpoeFieldbusDriver, LaysOutTheAssignedPdosAndSetsControlMode) {
+  FakeSpoeServer server;
+  setPdoMapping(server);
+  SpoeFieldbusDriver driver(configFor(server, SpoeMode::kControl));
+  ASSERT_TRUE(driver.scan().has_value());
+  const auto configured = driver.configureProcessData();
+  ASSERT_TRUE(configured.has_value()) << configured.error();
+  const auto layout = driver.processDataLayout();
+  EXPECT_EQ(layout.outputBytes, 3U);
+  EXPECT_EQ(layout.inputBytes, 6U);
+  EXPECT_EQ(layout.expectedWkc, 3);
+  ASSERT_EQ(layout.slaves.size(), 1U);
+  EXPECT_EQ(layout.slaves[0].inputOffset, 0U);
+  EXPECT_EQ(server.pdoMode(), mm::comm::testing::kSpoePdoModeControl);
+  EXPECT_EQ(server.watchdogTimeoutMs(), 75U);
+  driver.stop();
+}
+
+TEST(SpoeFieldbusDriver, MonitorModeSetsNoWatchdog) {
+  FakeSpoeServer server;
+  setPdoMapping(server);
+  SpoeFieldbusDriver driver(configFor(server, SpoeMode::kMonitor));
+  ASSERT_TRUE(driver.scan().has_value());
+  ASSERT_TRUE(driver.configureProcessData().has_value());
+  EXPECT_EQ(server.pdoMode(), mm::comm::testing::kSpoePdoModeMonitor);
+  EXPECT_FALSE(server.watchdogTimeoutMs().has_value());
+  driver.stop();
+}
+
+TEST(SpoeFieldbusDriver, DeliversTheInputFramesInOrderOnePerCycle) {
+  FakeSpoeServer server;
+  setPdoMapping(server);
+  server.setState(mm::comm::testing::kSpoeStateOp);
+  SpoeFieldbusDriver driver(configFor(server, SpoeMode::kMonitor));
+  ASSERT_TRUE(driver.scan().has_value());
+  ASSERT_TRUE(driver.configureProcessData().has_value());
+  for (uint8_t i = 1; i <= 5; ++i) {
+    server.pushInputFrame(std::vector<uint8_t>(6, i));
+  }
+  std::vector<uint8_t> outputs(3);
+  std::vector<uint8_t> inputs(6);
+  std::vector<uint8_t> seen;
+  ASSERT_TRUE(exchangeUntil(driver, outputs, inputs, [&] {
+    if (inputs[0] != 0 && (seen.empty() || seen.back() != inputs[0])) {
+      seen.push_back(inputs[0]);
+    }
+    return seen.size() == 5;
+  }));
+  EXPECT_EQ(seen, (std::vector<uint8_t>{1, 2, 3, 4, 5}));
+  driver.stop();
+}
+
+TEST(SpoeFieldbusDriver, KeepsOnlyTheNewestThirtyFrames) {
+  FakeSpoeServer server;
+  setPdoMapping(server);
+  server.setState(mm::comm::testing::kSpoeStateOp);
+  SpoeFieldbusDriver driver(configFor(server, SpoeMode::kMonitor));
+  ASSERT_TRUE(driver.scan().has_value());
+  ASSERT_TRUE(driver.configureProcessData().has_value());
+  for (uint8_t i = 1; i <= 40; ++i) {
+    server.pushInputFrame(std::vector<uint8_t>(6, i));
+  }
+  // Let the exchange thread collect all forty before the RT side takes one.
+  std::this_thread::sleep_for(milliseconds{200});
+  std::vector<uint8_t> outputs(3);
+  std::vector<uint8_t> inputs(6);
+  driver.exchangeProcessData(outputs, inputs);
+  EXPECT_EQ(inputs[0], 11);
+  driver.stop();
+}
+
+TEST(SpoeFieldbusDriver, SendsTheOutputsInControlMode) {
+  FakeSpoeServer server;
+  setPdoMapping(server);
+  server.setState(mm::comm::testing::kSpoeStateOp);
+  SpoeFieldbusDriver driver(configFor(server, SpoeMode::kControl));
+  ASSERT_TRUE(driver.scan().has_value());
+  ASSERT_TRUE(driver.configureProcessData().has_value());
+  std::vector<uint8_t> outputs{0x0F, 0x00, 0x08};
+  std::vector<uint8_t> inputs(6);
+  EXPECT_TRUE(
+      exchangeUntil(driver, outputs, inputs, [&] { return server.lastOutputs() == outputs; }));
+  driver.stop();
+}
+
+TEST(SpoeFieldbusDriver, SendsNoOutputsInMonitorMode) {
+  FakeSpoeServer server;
+  setPdoMapping(server);
+  server.setState(mm::comm::testing::kSpoeStateOp);
+  SpoeFieldbusDriver driver(configFor(server, SpoeMode::kMonitor));
+  ASSERT_TRUE(driver.scan().has_value());
+  ASSERT_TRUE(driver.configureProcessData().has_value());
+  std::vector<uint8_t> outputs{0x0F, 0x00, 0x08};
+  std::vector<uint8_t> inputs(6);
+  const int before = server.requestCount();
+  ASSERT_TRUE(
+      exchangeUntil(driver, outputs, inputs, [&] { return server.requestCount() > before + 10; }));
+  EXPECT_TRUE(server.lastOutputs().empty());
+  driver.stop();
+}
+
+TEST(SpoeFieldbusDriver, TheWorkingCounterFollowsTheConnection) {
+  FakeSpoeServer server;
+  setPdoMapping(server);
+  server.setState(mm::comm::testing::kSpoeStateOp);
+  SpoeFieldbusDriver driver(configFor(server, SpoeMode::kControl));
+  ASSERT_TRUE(driver.scan().has_value());
+  ASSERT_TRUE(driver.configureProcessData().has_value());
+  std::vector<uint8_t> outputs(3);
+  std::vector<uint8_t> inputs(6);
+  EXPECT_TRUE(exchangeUntil(driver, outputs, inputs,
+                            [&] { return driver.exchangeProcessData(outputs, inputs) == 3; }));
+  server.dropClient();
+  EXPECT_TRUE(exchangeUntil(driver, outputs, inputs,
+                            [&] { return driver.exchangeProcessData(outputs, inputs) == 0; }));
+  driver.stop();
+}
+
+TEST(SpoeFieldbusDriver, StopClearsThePdoMode) {
+  FakeSpoeServer server;
+  setPdoMapping(server);
+  SpoeFieldbusDriver driver(configFor(server, SpoeMode::kControl));
+  ASSERT_TRUE(driver.scan().has_value());
+  ASSERT_TRUE(driver.configureProcessData().has_value());
+  driver.stop();
+  EXPECT_EQ(server.pdoMode(), mm::comm::testing::kSpoePdoModeNone);
 }
 
 TEST(SpoeParameterEntries, DecodesTheFirmwareLayout) {

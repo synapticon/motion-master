@@ -9,10 +9,12 @@
 #include <memory>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
 #include "comm/spoe_connection.h"
+#include "comm/spoe_process_data.h"
 
 namespace mm::comm::spoe {
 
@@ -33,9 +35,6 @@ constexpr uint8_t kPacketLast = 0x40;
 // dictionary fits far fewer packets than this. The bound only stops a drive that never sends the
 // last packet.
 constexpr int kMaxParameterListPackets = 2000;
-
-// `AppUtil_ChangeState` returns a bool, so a state change reports 1 for success.
-constexpr uint16_t kStateChangeSucceeded = 1;
 
 // The SDO status `AppUtil_GetParameter` and `AppUtil_SetParameter` answer in INIT and BOOT.
 constexpr uint16_t kSdoNotAllowedInState = 0xFFFF;
@@ -133,6 +132,19 @@ struct SpoeFieldbusDriver::Drive {
   std::atomic<uint16_t> state{0};
   // Written by scan and read by slaveInfo, both under controlPlaneMutex_.
   SlaveInfo info;
+
+  // Process data. The window is written by configureProcessData while no exchange runs, and is
+  // read by the RT thread and the exchange thread after that.
+  SlaveIo io;
+  SpoeOutputSlot outputs;
+  SpoeInputQueue inputs;
+  // Touched by the exchange thread only.
+  SpoeFrameAssembler assembler;
+  // True while the last process-data exchange got an answer. It decides this drive's share of the
+  // working counter.
+  std::atomic<bool> exchanging{false};
+  std::atomic<uint64_t> droppedFrames{0};
+  std::jthread exchange;
 };
 
 SpoeFieldbusDriver::SpoeFieldbusDriver(SpoeFieldbusDriverConfig config)
@@ -145,9 +157,21 @@ SpoeFieldbusDriver::SpoeFieldbusDriver(SpoeFieldbusDriverConfig config)
   }
 }
 
-SpoeFieldbusDriver::~SpoeFieldbusDriver() { closeAll(); }
+// A clean shutdown destroys the driver without stop(), so this releases the drives too.
+SpoeFieldbusDriver::~SpoeFieldbusDriver() { releaseDrives(); }
+
+void SpoeFieldbusDriver::stopExchanges() {
+  for (const auto& drive : drives_) {
+    if (drive->exchange.joinable()) {
+      drive->exchange.request_stop();
+      drive->exchange.join();
+    }
+    drive->exchanging.store(false);
+  }
+}
 
 void SpoeFieldbusDriver::closeAll() {
+  stopExchanges();
   for (const auto& drive : drives_) {
     drive->connection.close();
     drive->state.store(0);
@@ -241,6 +265,9 @@ void SpoeFieldbusDriver::connectAndIdentify(Drive& drive) {
 
 std::expected<int, std::string> SpoeFieldbusDriver::scan() {
   const std::scoped_lock lock(controlPlaneMutex_);
+  // A scan rebuilds every connection, so no exchange may run across it.
+  stopExchanges();
+  layout_ = PdoLayout{};
   for (const auto& drive : drives_) {
     connectAndIdentify(*drive);
   }
@@ -265,18 +292,214 @@ uint16_t SpoeFieldbusDriver::mailboxProtocols(uint16_t position) const {
   return driveAt(position) != nullptr ? static_cast<uint16_t>(kCoe | kFoe) : 0;
 }
 
+std::expected<uint32_t, std::string> SpoeFieldbusDriver::assignedBits(Drive& drive,
+                                                                      uint16_t assignIndex) {
+  // The assignment object lists the PDOs in use, and each PDO's subindex 0 counts its entries.
+  // Entries beyond that count can hold stale mappings, so they are never read.
+  const auto readU8 = [this, &drive](uint16_t index,
+                                     uint8_t subindex) -> std::expected<uint8_t, std::string> {
+    auto bytes = readSdoFrom(drive, index, subindex);
+    if (!bytes) {
+      return std::unexpected(bytes.error());
+    }
+    if (bytes->empty()) {
+      return std::unexpected(
+          std::format("SPoE {}: 0x{:04X}:{:02X} is empty", drive.host, index, subindex));
+    }
+    return (*bytes)[0];
+  };
+  const auto pdoCount = readU8(assignIndex, 0);
+  if (!pdoCount) {
+    return std::unexpected(pdoCount.error());
+  }
+  uint32_t bits = 0;
+  for (uint8_t i = 1; i <= *pdoCount; ++i) {
+    const auto pdo = readSdoFrom(drive, assignIndex, i);
+    if (!pdo || pdo->size() < 2) {
+      return std::unexpected(
+          pdo ? std::format("SPoE {}: 0x{:04X}:{:02X} is too short", drive.host, assignIndex, i)
+              : pdo.error());
+    }
+    const uint16_t pdoIndex = readU16(*pdo, 0);
+    const auto entryCount = readU8(pdoIndex, 0);
+    if (!entryCount) {
+      return std::unexpected(entryCount.error());
+    }
+    for (uint8_t entry = 1; entry <= *entryCount; ++entry) {
+      const auto mapping = readSdoFrom(drive, pdoIndex, entry);
+      if (!mapping || mapping->empty()) {
+        return std::unexpected(
+            mapping ? std::format("SPoE {}: 0x{:04X}:{:02X} is empty", drive.host, pdoIndex, entry)
+                    : mapping.error());
+      }
+      // A mapping entry is index u16, subindex u8 and bit length u8, low byte first.
+      bits += (*mapping)[0];
+    }
+  }
+  return bits;
+}
+
 std::expected<void, std::string> SpoeFieldbusDriver::configureProcessData() {
-  return std::unexpected("process data over SPoE is not implemented yet");
+  const std::scoped_lock lock(controlPlaneMutex_);
+  stopExchanges();
+  PdoLayout layout;
+  uint16_t position = 0;
+  for (const auto& drive : drives_) {
+    ++position;
+    drive->io = SlaveIo{.slavePosition = position,
+                        .outputOffset = layout.outputBytes,
+                        .outputBytes = 0,
+                        .inputOffset = layout.inputBytes,
+                        .inputBytes = 0};
+    if (drive->state.load() == 0 || !drive->connection.isOpen()) {
+      layout.slaves.push_back(drive->io);
+      continue;
+    }
+    const auto outputBits = assignedBits(*drive, 0x1C12);
+    if (!outputBits) {
+      return std::unexpected(outputBits.error());
+    }
+    const auto inputBits = assignedBits(*drive, 0x1C13);
+    if (!inputBits) {
+      return std::unexpected(inputBits.error());
+    }
+    drive->io.outputBytes = (*outputBits + 7) / 8;
+    drive->io.inputBytes = (*inputBits + 7) / 8;
+
+    const PdoMode mode = config_.mode == SpoeMode::kControl ? PdoMode::kControl : PdoMode::kMonitor;
+    const std::vector<uint8_t> modeByte{static_cast<uint8_t>(mode)};
+    const auto modeSet = request(*drive, MessageType::kPdoControl, modeByte);
+    if (!modeSet) {
+      return std::unexpected(modeSet.error());
+    }
+    if (modeSet->status != 0) {
+      return std::unexpected(std::format("SPoE {}: the drive refused PDO mode {}", drive->host,
+                                         static_cast<int>(mode)));
+    }
+    if (config_.mode == SpoeMode::kControl) {
+      const uint32_t ms = config_.watchdogMs;
+      const std::vector<uint8_t> timeout{static_cast<uint8_t>(ms), static_cast<uint8_t>(ms >> 8),
+                                         static_cast<uint8_t>(ms >> 16),
+                                         static_cast<uint8_t>(ms >> 24)};
+      if (const auto set = request(*drive, MessageType::kWatchdogTimeout, timeout); !set) {
+        return std::unexpected(set.error());
+      }
+    }
+
+    drive->outputs.reset(drive->io.outputBytes);
+    // The queue holds more than the limit, so that a burst the RT thread has not trimmed yet still
+    // fits. The RT thread trims it back to the limit every cycle.
+    drive->inputs.reset(drive->io.inputBytes, 2 * kInputQueueLimit);
+    drive->assembler.reset(drive->io.inputBytes);
+    drive->droppedFrames.store(0);
+    layout.outputBytes += drive->io.outputBytes;
+    layout.inputBytes += drive->io.inputBytes;
+    layout.expectedWkc += (drive->io.outputBytes > 0 ? 2 : 0) + (drive->io.inputBytes > 0 ? 1 : 0);
+    layout.slaves.push_back(drive->io);
+  }
+  layout_ = layout;
+  for (const auto& drive : drives_) {
+    if (drive->io.outputBytes > 0 || drive->io.inputBytes > 0) {
+      Drive& target = *drive;
+      drive->exchange = std::jthread(
+          [this, &target](const std::stop_token& stopToken) { runExchange(target, stopToken); });
+    }
+  }
+  spdlog::info("SPoE process data: {} output bytes, {} input bytes", layout_.outputBytes,
+               layout_.inputBytes);
+  return {};
 }
 
-PdoLayout SpoeFieldbusDriver::processDataLayout() { return {}; }
-
-int SpoeFieldbusDriver::exchangeProcessData(std::span<const uint8_t> /*outputs*/,
-                                            std::span<uint8_t> /*inputs*/) {
-  return 0;
+void SpoeFieldbusDriver::runExchange(Drive& drive, const std::stop_token& stopToken) {
+  // In Monitor mode the request carries no outputs, as the specification asks. The drive still
+  // needs the request: it is how the drive sees that the client is there.
+  const bool control = config_.mode == SpoeMode::kControl;
+  auto next = std::chrono::steady_clock::now();
+  while (!stopToken.stop_requested()) {
+    next += config_.exchangePeriod;
+    const std::span<const uint8_t> outputs =
+        control ? drive.outputs.read() : std::span<const uint8_t>{};
+    auto reply =
+        drive.connection.request(MessageType::kPdoFrame, 0, outputs, config_.requestTimeout);
+    if (!reply) {
+      drive.exchanging.store(false);
+      if (reply.error().kind == ConnectionError::Kind::kClosed) {
+        drive.state.store(0);
+        // Only a rescan reconnects. Wait for it without spinning.
+        for (int i = 0; i < 10 && !stopToken.stop_requested(); ++i) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        next = std::chrono::steady_clock::now();
+      }
+      continue;
+    }
+    // The firmware answers status 1 while no PDO mode is set, which a drive that restarted has.
+    drive.exchanging.store(reply->status == 0);
+    if (reply->status == 0) {
+      const std::vector<uint8_t> frames = drive.assembler.add(reply->data);
+      const std::size_t frameBytes = drive.io.inputBytes;
+      for (std::size_t offset = 0; frameBytes > 0 && offset + frameBytes <= frames.size();
+           offset += frameBytes) {
+        if (!drive.inputs.push(std::span<const uint8_t>(frames).subspan(offset, frameBytes))) {
+          drive.droppedFrames.fetch_add(1, std::memory_order_relaxed);
+        }
+      }
+    }
+    const auto now = std::chrono::steady_clock::now();
+    if (next > now) {
+      std::this_thread::sleep_until(next);
+    } else {
+      next = now;
+    }
+  }
 }
 
-void SpoeFieldbusDriver::stop() { closeAll(); }
+PdoLayout SpoeFieldbusDriver::processDataLayout() {
+  const std::scoped_lock lock(controlPlaneMutex_);
+  return layout_;
+}
+
+int SpoeFieldbusDriver::exchangeProcessData(std::span<const uint8_t> outputs,
+                                            std::span<uint8_t> inputs) {
+  // The RT side. It hands over the newest outputs, takes one input frame per drive, and never
+  // waits: the network round trip runs on each drive's exchange thread.
+  const bool control = config_.mode == SpoeMode::kControl;
+  int workingCounter = 0;
+  for (const auto& drive : drives_) {
+    const SlaveIo& io = drive->io;
+    if (control && io.outputBytes > 0 && io.outputOffset + io.outputBytes <= outputs.size()) {
+      drive->outputs.write(outputs.subspan(io.outputOffset, io.outputBytes));
+    }
+    if (io.inputBytes > 0 && io.inputOffset + io.inputBytes <= inputs.size()) {
+      const std::size_t dropped = drive->inputs.dropOldest(kInputQueueLimit);
+      if (dropped > 0) {
+        drive->droppedFrames.fetch_add(dropped, std::memory_order_relaxed);
+      }
+      // No new frame leaves the previous inputs in place, as a lost EtherCAT frame does.
+      drive->inputs.pop(inputs.subspan(io.inputOffset, io.inputBytes));
+    }
+    if (drive->exchanging.load(std::memory_order_relaxed)) {
+      workingCounter += workingCounterContribution(alState(drive->state.load()), io.outputBytes > 0,
+                                                   io.inputBytes > 0);
+    }
+  }
+  return workingCounter;
+}
+
+void SpoeFieldbusDriver::stop() { releaseDrives(); }
+
+void SpoeFieldbusDriver::releaseDrives() {
+  stopExchanges();
+  // Without a PDO mode, a Control-mode drive has no watchdog to trip, so a clean shutdown does not
+  // fault it. The firmware runs the watchdog in Control mode only (`check_spoe_heartbeat`).
+  const std::vector<uint8_t> none{static_cast<uint8_t>(PdoMode::kNone)};
+  for (const auto& drive : drives_) {
+    if (drive->connection.isOpen()) {
+      (void)request(*drive, MessageType::kPdoControl, none);
+    }
+  }
+  closeAll();
+}
 
 std::expected<std::vector<FieldbusDriver::SlaveStateRaw>, std::string>
 SpoeFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
@@ -520,12 +743,17 @@ void SpoeFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
                     reply.error().message);
       continue;
     }
-    if (!reply->data.empty()) {
-      found->state.store(reply->data[0]);
-    }
-    if (reply->status != kStateChangeSucceeded) {
-      spdlog::error("SPoE {}: the drive refused the state change to {}", found->host,
+    // Success is the state the drive reports, not the status. `AppUtil_ChangeState` puts a bool
+    // in the status, and the old client found firmware versions that disagree on its value.
+    if (reply->data.empty()) {
+      spdlog::error("SPoE {}: the reply to the state change to {} carries no state", found->host,
                     toString(targetState));
+      continue;
+    }
+    found->state.store(reply->data[0]);
+    if (alState(reply->data[0]) != targetState) {
+      spdlog::error("SPoE {}: the drive stayed in {} instead of changing to {}", found->host,
+                    toString(alState(reply->data[0])), toString(targetState));
     }
   }
 }

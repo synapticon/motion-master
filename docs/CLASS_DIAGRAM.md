@@ -402,8 +402,8 @@ points; the third is a stateless view chain:
 
 Two classes implement `FieldbusDriver`. `SoemFieldbusDriver` drives an EtherCAT bus through a raw
 socket. `SpoeFieldbusDriver` reaches each drive over SPoE (SOMANET Protocol over Ethernet), one TCP
-connection per drive. The SPoE driver does not exchange process data yet. Issue #36 tracks the
-work that remains.
+connection per drive, and runs one exchange thread per drive for process data. Issue #36 tracks
+the work that remains.
 
 **The drive-profile chain is *not* `Device` inheritance.** `ProfileDevice` and its subclasses do
 **not** derive from `Device` and are not owned by `DeviceManager`; each *borrows* a `Device&` and

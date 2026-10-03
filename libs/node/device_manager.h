@@ -594,6 +594,21 @@ class DeviceManager {
   ///        or when no driver is initialised. No bus I/O.
   std::optional<std::string> stateChangeRefusal() const;
 
+  /// @brief Brings the process image in line with device states that another master set.
+  ///
+  /// For a driver that refuses state changes, such as SPoE in Monitor mode, a PLC moves the
+  /// devices and nothing here commands them. So nothing calls @c transitionToState, and that is
+  /// where the image is otherwise published. This reads every state and does what
+  /// @c transitionToState would have done. When a device is seen entering SAFE-OP or OP, the image
+  /// is re-mapped, which also reads the PDO mapping again, because the other master can change it
+  /// in PRE-OP. When no device exchanges any more, the image is torn down.
+  ///
+  /// One pass, with no thread of its own. The caller repeats it, the way the composition root does
+  /// while the driver refuses state changes. Takes @c busOperationMutex_.
+  ///
+  /// @return Void, or the error of the state read or of the re-map.
+  std::expected<void, std::string> followObservedStates();
+
   /// @brief Reads the current AL state for a set of devices.
   ///
   /// If @p positions is empty, all discovered devices are queried.
@@ -934,6 +949,11 @@ class DeviceManager {
   // other control-plane callers — never the monitoring sampler, and never a procedure that is
   // already running.
   mutable std::mutex busOperationMutex_;
+
+  // The positions that exchanged at the last followObservedStates pass, and the device set they
+  // belong to. Touched only under busOperationMutex_.
+  std::vector<uint16_t> observedExchanging_;
+  uint64_t observedGeneration_ = 0;
 
   // currentSetMutex_ — guards the shared_ptr below, and nothing it points to. Held for exactly one
   // pointer copy, which is why a reader can never be delayed by an operation: a shared_ptr copy is

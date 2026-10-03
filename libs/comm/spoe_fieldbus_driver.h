@@ -18,6 +18,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <string>
 #include <vector>
 
@@ -50,7 +51,14 @@ struct SpoeFieldbusDriverConfig {
   /// The time a drive has to answer one request. The specification suggests 1 s.
   std::chrono::milliseconds requestTimeout{1000};
   std::chrono::milliseconds connectTimeout{1000};
+  /// The shortest time between the starts of two process-data exchanges with one drive. The
+  /// exchanges otherwise run back to back, which keeps the drive's input buffer small.
+  std::chrono::microseconds exchangePeriod{1000};
 };
+
+/// The most input frames one drive's queue holds for the RT thread. Older frames are dropped, so
+/// the inputs never lag the drive by more than this many RT cycles.
+constexpr std::size_t kInputQueueLimit = 30;
 
 /// The SPoE protocol versions this driver speaks. The firmware reports 0x0102.
 constexpr uint16_t kSupportedProtocolVersion = 0x0102;
@@ -127,6 +135,10 @@ class SpoeFieldbusDriver : public FieldbusDriver {
 
   Drive* driveAt(uint16_t position) const;
   void closeAll();
+  void releaseDrives();
+  void stopExchanges();
+  void runExchange(Drive& drive, const std::stop_token& stopToken);
+  std::expected<uint32_t, std::string> assignedBits(Drive& drive, uint16_t assignIndex);
   std::expected<Frame, std::string> request(Drive& drive, MessageType type,
                                             std::span<const uint8_t> data, uint16_t status = 0);
   std::expected<std::vector<uint8_t>, std::string> readSdoFrom(Drive& drive, uint16_t index,
@@ -136,6 +148,8 @@ class SpoeFieldbusDriver : public FieldbusDriver {
   SpoeFieldbusDriverConfig config_;
   // Sized once in the constructor and never resized, so a position indexes it without a lock.
   std::vector<std::unique_ptr<Drive>> drives_;
+  // Written by configureProcessData while no exchange runs, read by processDataLayout.
+  PdoLayout layout_;
 };
 
 }  // namespace mm::comm::spoe

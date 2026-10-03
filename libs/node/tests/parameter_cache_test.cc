@@ -118,13 +118,15 @@ TEST(ParameterCacheTest, MissesOnDifferentIdentity) {
   EXPECT_TRUE(cache.load(kSynapticonVendorId, 0x0201, 0x0A).has_value());   // exact match
 }
 
-// Default policy: Synapticon is cached, other vendors are not — store is a no-op and load misses.
+// Default policy: SOMANET devices are cached, other vendors are not — store is a no-op and load
+// misses.
 TEST(ParameterCacheTest, OtherVendorsDisabledByDefault) {
   ParameterCache cache({.cacheAllVendors = false,
                         .directory = makeTempDir("vendor-default").string(),
                         .enabled = true});
 
   EXPECT_TRUE(cache.enabledForVendor(kSynapticonVendorId));
+  EXPECT_TRUE(cache.enabledForVendor(mm::comm::kSensodriveVendorId));
   EXPECT_FALSE(cache.enabledForVendor(kOtherVendor));
 
   cache.store(kOtherVendor, 1, 1, {makeParam(0x6040, 0, kUnsigned32)});

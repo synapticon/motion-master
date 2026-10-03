@@ -2,7 +2,7 @@ find_package(asio CONFIG REQUIRED)
 find_package(GTest CONFIG REQUIRED)
 
 add_executable(mm_comm_tests base_test.cc fake_spoe_server.cc fake_spoe_server_test.cc sii_test.cc
-                             soem_fieldbus_driver_test.cc)
+                             soem_fieldbus_driver_test.cc vendor_ids_test.cc)
 
 target_link_libraries(mm_comm_tests PRIVATE mm::comm asio::asio GTest::gtest GTest::gtest_main)
 

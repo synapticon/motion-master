@@ -94,9 +94,9 @@ struct RecorderConfig {
 /// Only definitions are cached — live values are always read from the device.
 struct ParameterCacheConfig {
   bool enabled = true;  ///< Master switch for the whole cache.
-  /// false: cache only Synapticon devices (vendor 0x22D2), whose object dictionary is uniquely
-  /// determined by product + revision. true: cache every vendor — only safe when a vendor bumps
-  /// its revision whenever the dictionary changes (Motion Master cannot verify that for you).
+  /// false: cache only SOMANET devices (vendor 0x22D2 or 0x063A), whose object dictionary is
+  /// uniquely determined by product + revision. true: cache every vendor — only safe when a vendor
+  /// bumps its revision whenever the dictionary changes (Motion Master cannot verify that for you).
   bool cacheAllVendors = false;
   std::string directory;  ///< "" = a standard per-user cache directory; set to override.
 };

@@ -2019,10 +2019,9 @@ std::expected<void, std::string> SomanetDrive::setOperationMode(somanet::Operati
 }
 
 std::expected<SomanetDrive, std::string> createSomanetDrive(Device& device) {
-  if (device.vendorId() != kSynapticonVendorId) {
-    return std::unexpected(
-        std::format("device {} is not a SOMANET drive (vendor 0x{:08X}, expected 0x{:08X})",
-                    device.slavePosition(), device.vendorId(), kSynapticonVendorId));
+  if (!isSomanetDevice(device.vendorId())) {
+    return std::unexpected(std::format("device {} is not a SOMANET drive (vendor 0x{:08X})",
+                                       device.slavePosition(), device.vendorId()));
   }
   // A SOMANET drive must also be a CiA402 drive; reuse that check rather than duplicating it.
   if (auto cia = createCia402Drive(device); !cia) {

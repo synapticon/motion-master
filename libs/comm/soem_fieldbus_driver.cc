@@ -1906,8 +1906,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
           // Under the same lock as the state read that saw PRE-OP, so this is the first mailbox
           // request the slave gets in PRE-OP.
           const uint32_t vendorId = ctx_->slavelist[pos].eep_man;
-          if (leavingInit.contains(pos) &&
-              (vendorId == kSynapticonVendorId || vendorId == kSensodriveVendorId) &&
+          if (leavingInit.contains(pos) && isSomanetDevice(vendorId) &&
               !resetMailboxCounter(ctx_.get(), pos)) {
             spdlog::warn("Device {}: the mailbox counter reset got no answer", pos);
           }

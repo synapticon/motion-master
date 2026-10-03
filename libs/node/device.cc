@@ -1409,6 +1409,7 @@ void to_json(nlohmann::json& j, const Device& d) {
       {"revisionNumber", d.revisionNumber()},
       {"serialNumber", d.serialNumber()},
       {"isCia402", d.isCia402()},
+      {"isSomanet", isSomanetDevice(d.vendorId())},
       {"parametersUnavailable", d.parametersUnavailable()},
   };
 }

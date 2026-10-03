@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <functional>
 #include <map>
+#include <nlohmann/json.hpp>
 #include <optional>
 #include <set>
 #include <span>
@@ -1451,6 +1452,26 @@ TEST(DeviceProductName, FallsBackToSiiNameForForeignVendor) {
   // Product codes are only unique within a vendor, so a foreign vendor never resolves to a
   // SOMANET name even if the code collides.
   EXPECT_EQ(device.productName(), "Some Other Drive");
+}
+
+// --- isSomanet in the device JSON --------------------------------------------
+
+TEST(DeviceJson, ReportsASensodriveDeviceAsSomanet) {
+  SdoFakeDriver driver;
+  driver.info.vendorId = mm::comm::kSensodriveVendorId;
+  Device device(1, driver);
+
+  const nlohmann::json j = device;
+  EXPECT_EQ(j.at("isSomanet"), true);
+}
+
+TEST(DeviceJson, ReportsAForeignVendorAsNotSomanet) {
+  SdoFakeDriver driver;
+  driver.info.vendorId = 0x00000539;
+  Device device(1, driver);
+
+  const nlohmann::json j = device;
+  EXPECT_EQ(j.at("isSomanet"), false);
 }
 
 // --- parametersMutex_ is never held across bus I/O ---------------------------

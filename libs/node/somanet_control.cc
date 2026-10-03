@@ -64,7 +64,7 @@ std::expected<void, std::string> removeFile(DeviceManager& deviceManager, uint16
   }
   // The vendor id, and not a SomanetDrive: see removeDeviceFile on why a profile view would break
   // removal in BOOT. The vendor id comes from SII and is there as soon as the device is.
-  if (device->vendorId() != kSynapticonVendorId) {
+  if (!isSomanetDevice(device->vendorId())) {
     return std::unexpected(std::format("device {} is not a SOMANET drive", slavePosition));
   }
   return removeDeviceFile(*device, filename);

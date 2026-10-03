@@ -72,7 +72,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(commutationOffset),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
         return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
           Device& device = ctx.device;
@@ -110,7 +110,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(encoderRegister),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
         auto spec = parseEncoderRegisterRequest(request);
         if (!spec) {
@@ -156,7 +156,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(firmware),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
         auto spec = parseFirmwareInstallationRequest(request);
         if (!spec) {
@@ -205,7 +205,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(firmwareLatency),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
         auto request = parseFirmwareLatencyRequest(body);
         if (!request) {
@@ -254,7 +254,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(hrdStreaming),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
         auto spec = parseHrdStreamingRequest(request);
         if (!spec) {
@@ -299,7 +299,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(icMuCalibrationMode),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
         auto spec = parseIcMuCalibrationModeRequest(request);
         if (!spec) {
@@ -346,7 +346,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(ignoreBissStatusBits),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
         auto request = parseIgnoreBissStatusBitsRequest(body);
         if (!request) {
@@ -391,7 +391,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(kueblerRegister),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
         auto request = parseKueblerRegisterRequest(body);
         if (!request) {
@@ -435,7 +435,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(motorPhaseOrder),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
         return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
           Device& device = ctx.device;
@@ -483,7 +483,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(commissioning),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
         return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
           Device& device = ctx.device;
@@ -520,7 +520,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(openPhase),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       // Takes no parameters: the timings are properties of the command, not a caller's choice.
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
         return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
@@ -571,7 +571,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       // a late one. The vendor ID comes from SII at scan time and is always known. Whether the
       // device is also a conformant CiA402 drive stays the body's business, where it fails with a
       // reason.
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
         auto spec = parseOsCommandRequest(request);
         if (!spec) {
@@ -613,7 +613,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(readObjectDictionary),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
         return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
           Device& device = ctx.device;
@@ -650,7 +650,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(phaseInductance),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
         return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
           Device& device = ctx.device;
@@ -686,7 +686,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(phaseResistance),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
         return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
           Device& device = ctx.device;
@@ -724,7 +724,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(polePair),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
         return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
           Device& device = ctx.device;
@@ -797,7 +797,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(skippedCycles),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
         auto request = parseSkippedCyclesRequest(body);
         if (!request) {
@@ -874,7 +874,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(systemIdentification),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
         auto request = parseSystemIdentificationRequest(body);
         if (!request) {
@@ -922,7 +922,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(torqueConstant),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
         return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
           Device& device = ctx.device;
@@ -961,7 +961,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(triggerError),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
         auto request = parseTriggerErrorRequest(body);
         if (!request) {
@@ -1008,7 +1008,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
 
   entries.push_back(ProcedureCatalogueEntry{
       .descriptor = std::move(velocitySource),
-      .applies = [](Device& device) { return device.vendorId() == kSynapticonVendorId; },
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
         auto request = parseVelocitySourceRequest(body);
         if (!request) {

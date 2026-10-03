@@ -411,6 +411,11 @@ export class Api<
          */
         isCia402: boolean;
         /**
+         * Whether the device is a SOMANET device, which runs SOMANET firmware. The server decides this from the vendor ID: Synapticon (0x22D2) or Sensodrive (0x063A). Gates the SOMANET features, such as the SOMANET files and the SOMANET procedures.
+         * @example true
+         */
+        isSomanet: boolean;
+        /**
          * Whether an object-dictionary read for this device has failed since it was scanned. The automatic read on reaching a mailbox-active state is attempted once, so a device flagged here keeps an empty parameter list until `POST /api/devices/{slavePosition}/parameters/init` is called; that clears the flag on success.
          * @example false
          */
@@ -2129,6 +2134,11 @@ export class Api<
          * @example true
          */
         isCia402: boolean;
+        /**
+         * Whether the device is a SOMANET device, which runs SOMANET firmware. The server decides this from the vendor ID: Synapticon (0x22D2) or Sensodrive (0x063A). Gates the SOMANET features, such as the SOMANET files and the SOMANET procedures.
+         * @example true
+         */
+        isSomanet: boolean;
         /**
          * Whether an object-dictionary read for this device has failed since it was scanned. The automatic read on reaching a mailbox-active state is attempted once, so a device flagged here keeps an empty parameter list until `POST /api/devices/{slavePosition}/parameters/init` is called; that clears the flag on success.
          * @example false

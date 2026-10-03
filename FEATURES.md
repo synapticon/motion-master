@@ -16,7 +16,7 @@ The **ESC** is the EtherCAT Slave Controller, the chip in each device that talks
 
 ## Fieldbus and EtherCAT bus control
 
-- **Driver lifecycle** — bring the fieldbus driver up on a chosen network adapter (`POST /api/init`), scan the bus for devices (`POST /api/scan`), and clear the device list again (`POST /api/reset`). The driver sits behind a `FieldbusDriver` interface, so the transport can be replaced. Today that transport is SOEM on a raw socket. SPoE is planned.
+- **Driver lifecycle** — bring the fieldbus driver up on a chosen network adapter (`POST /api/init`), scan the bus for devices (`POST /api/scan`), and clear the device list again (`POST /api/reset`). The driver sits behind a `FieldbusDriver` interface, so the transport can be replaced. Two transports exist. SOEM drives an EtherCAT bus through a raw socket. SPoE (SOMANET Protocol over Ethernet) reaches each drive over TCP, one connection per drive. SPoE reads and writes parameters and states, and does not exchange process data yet.
 - **Network adapter discovery** — list the host's network adapters, so you can pick the one wired to the bus (`GET /api/adapters`).
 - **AL state control** — read the current AL state of every device and command a new one (`GET`/`POST /api/devices/state`). A transition the standard does not allow is rejected before it reaches the bus. Entering a state that exchanges process data maps the process image, or re-maps it, as needed.
 - **Partial-bus operations** — one or more devices can go to BOOT, where firmware is installed over FoE, or to PRE-OP, where PDO mapping can be rewritten, while the rest keep exchanging process data. Bringing one back re-maps the whole bus, which pauses every device for the duration.

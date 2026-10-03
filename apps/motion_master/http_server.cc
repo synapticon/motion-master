@@ -1684,8 +1684,23 @@ void HttpServer::run() {
         return mm::api::badRequest("body must be a JSON object");
       }
     }
-    if (auto r = config_.initDeviceManager(body.value("driver", "soem"), body.value("adapter", ""));
-        !r) {
+    // The body is the "fieldbus" block of the config file, and the config file's rules check it.
+    if (!body.contains("driver")) {
+      body["driver"] = "soem";
+    }
+    FieldbusConfig fieldbus;
+    try {
+      fieldbus = body.get<FieldbusConfig>();
+    } catch (const nlohmann::json::exception& e) {
+      return mm::api::badRequest(e.what());
+    }
+    if (fieldbus.driver.empty()) {
+      return mm::api::badRequest("driver must not be empty");
+    }
+    if (auto valid = validateFieldbusConfig(fieldbus); !valid) {
+      return mm::api::badRequest(valid.error());
+    }
+    if (auto r = config_.initDeviceManager(fieldbus); !r) {
       return mm::api::error("500 Internal Server Error", r.error());
     }
     return mm::api::json(nlohmann::json{{"ok", true}});
@@ -1806,6 +1821,11 @@ void HttpServer::run() {
         return mm::api::badRequest("'timeout' must be a number of milliseconds");
       }
       timeoutMs = body["timeout"].get<int>();
+    }
+    // A driver that refuses every state change is a conflict with how the bus is configured, not
+    // a failure of the request.
+    if (auto refusal = deviceManager_.stateChangeRefusal(); refusal) {
+      return mm::api::error("409 Conflict", *refusal);
     }
     auto states = deviceManager_.transitionToState(positions, static_cast<S>(requested),
                                                    std::chrono::milliseconds(timeoutMs));

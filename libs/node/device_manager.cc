@@ -903,6 +903,11 @@ void DeviceManager::lowerExpectedWkc(std::span<const uint16_t> positions,
   }
 }
 
+std::optional<std::string> DeviceManager::stateChangeRefusal() const {
+  const std::shared_ptr<DeviceSet> set = deviceSet();
+  return set->driver ? set->driver->stateChangeRefusal() : std::nullopt;
+}
+
 std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transitionToState(
     const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
     std::chrono::steady_clock::duration timeout) {
@@ -920,6 +925,9 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   }
   if (set->devices.empty()) {
     return std::unexpected("no devices — call scan() first");
+  }
+  if (auto refusal = set->driver->stateChangeRefusal(); refusal) {
+    return std::unexpected(std::move(*refusal));
   }
   auto resolved = resolveTargets(positions);
   if (!resolved) {

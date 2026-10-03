@@ -396,11 +396,14 @@ points; the third is a stateless view chain:
 | `ProcessDataCyclicTask` | `mm::core::CyclicTask` (`libs/core/cyclic_task.h`) | `libs/node/process_data_cyclic_task.h` |
 | `ExampleCyclicTask` | `mm::core::CyclicTask` | `libs/example/example_cyclic_task.h` |
 | `SoemFieldbusDriver` | `FieldbusDriver` | `libs/comm/soem_fieldbus_driver.h` |
+| `SpoeFieldbusDriver` | `FieldbusDriver` | `libs/comm/spoe_fieldbus_driver.h` |
 | `Cia402Drive` | `ProfileDevice` | `libs/node/cia402_drive.h` |
 | `SomanetDrive` | `Cia402Drive` | `libs/node/somanet_drive.h` |
 
-`SoemFieldbusDriver` is the only `FieldbusDriver` implementation in the code today. A second one for
-SPoE is planned, and `NEXTGEN.md` records it. Do not look for it in `libs/comm`.
+Two classes implement `FieldbusDriver`. `SoemFieldbusDriver` drives an EtherCAT bus through a raw
+socket. `SpoeFieldbusDriver` reaches each drive over SPoE (SOMANET Protocol over Ethernet), one TCP
+connection per drive. The SPoE driver does not exchange process data yet. Issue #36 tracks the
+work that remains.
 
 **The drive-profile chain is *not* `Device` inheritance.** `ProfileDevice` and its subclasses do
 **not** derive from `Device` and are not owned by `DeviceManager`; each *borrows* a `Device&` and

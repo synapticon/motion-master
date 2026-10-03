@@ -15,6 +15,7 @@
 #include "cert_updater.h"
 #include "comm/base.h"
 #include "comm/soem_fieldbus_driver.h"
+#include "comm/spoe_fieldbus_driver.h"
 #include "core/platform.h"
 #include "core/user_cache.h"
 #include "core/version.h"
@@ -141,8 +142,23 @@ int main(int argc, char** argv) {
   // names concrete driver types (the composition root).
   auto initDeviceManager = [&deviceManager, deviceManagerConfig, busAdapterMac, packMac,
                             mailboxStatusFmmu = opts.config.fieldbus.mailboxStatusFmmu](
-                               const std::string& type,
-                               const std::string& adapter) -> std::expected<void, std::string> {
+                               const FieldbusConfig& fieldbus) -> std::expected<void, std::string> {
+    if (fieldbus.driver == "spoe") {
+      spdlog::info("Fieldbus: SPoE, {} mode, {} address(es) on port {}", fieldbus.spoe.mode,
+                   fieldbus.ipAddresses.size(), fieldbus.spoe.port);
+      return deviceManager.init(
+          std::make_unique<mm::comm::spoe::SpoeFieldbusDriver>(
+              mm::comm::spoe::SpoeFieldbusDriverConfig{
+                  .hosts = fieldbus.ipAddresses,
+                  .port = fieldbus.spoe.port,
+                  .mode = fieldbus.spoe.mode == "control" ? mm::comm::spoe::SpoeMode::kControl
+                                                          : mm::comm::spoe::SpoeMode::kMonitor,
+                  .watchdogMs = fieldbus.spoe.watchdogMs,
+                  .requestTimeout = std::chrono::milliseconds{1000},
+                  .connectTimeout = std::chrono::milliseconds{1000}}),
+          deviceManagerConfig);
+    }
+    const std::string& adapter = fieldbus.adapter;
     std::string ifname;
     if (!adapter.empty()) {
       auto resolved = mm::comm::resolveNetworkAdapter(adapter);
@@ -168,14 +184,6 @@ int main(int argc, char** argv) {
                      resolved->macLinux);
       }
     }
-    if (type != "soem") {
-      // soem is the only driver implemented today (spoe is planned). Config validation accepts the
-      // planned names, so be explicit at runtime about why a valid-looking driver is refused.
-      spdlog::error(
-          "Fieldbus driver '{}' is not implemented in this build — only 'soem' is available", type);
-      return std::unexpected("fieldbus driver '" + type +
-                             "' is not implemented in this build (only 'soem' is available)");
-    }
     return deviceManager.init(std::make_unique<mm::comm::soem::SoemFieldbusDriver>(
                                   mm::comm::soem::SoemFieldbusDriverConfig{
                                       .ifname = ifname, .mailboxStatusFmmu = mailboxStatusFmmu}),
@@ -188,7 +196,7 @@ int main(int argc, char** argv) {
   // start up and let the user power devices on and rescan via POST /api/scan. Both log their own
   // outcome.
   if (!opts.config.fieldbus.driver.empty()) {
-    if (!initDeviceManager(opts.config.fieldbus.driver, opts.config.fieldbus.adapter)) {
+    if (!initDeviceManager(opts.config.fieldbus)) {
       return 1;
     }
     [[maybe_unused]] const auto scanResult = deviceManager.scan();

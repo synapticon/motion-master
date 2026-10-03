@@ -9,6 +9,7 @@ add_executable(
   sii_test.cc
   soem_fieldbus_driver_test.cc
   spoe_connection_test.cc
+  spoe_fieldbus_driver_test.cc
   spoe_frame_test.cc)
 
 target_link_libraries(mm_comm_tests PRIVATE mm::comm asio::asio GTest::gtest GTest::gtest_main)

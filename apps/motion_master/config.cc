@@ -46,11 +46,8 @@ std::expected<Config, std::string> parseConfig(const nlohmann::json& doc) {
     return std::unexpected("logging.file.maxFiles must be greater than 0");
   }
 
-  if (!config.fieldbus.driver.empty()) {
-    static constexpr std::array kDrivers{"soem", "spoe"};
-    if (std::find(kDrivers.begin(), kDrivers.end(), config.fieldbus.driver) == kDrivers.end()) {
-      return std::unexpected("fieldbus.driver must be one of: soem, spoe");
-    }
+  if (auto fieldbus = validateFieldbusConfig(config.fieldbus); !fieldbus) {
+    return std::unexpected(fieldbus.error());
   }
 
   if (config.gameLoop.periodUs == 0) {
@@ -80,4 +77,36 @@ std::expected<Config, std::string> parseConfig(const nlohmann::json& doc) {
   }
 
   return config;
+}
+
+std::expected<void, std::string> validateFieldbusConfig(const FieldbusConfig& fieldbus) {
+  if (fieldbus.driver.empty()) {
+    return {};
+  }
+  static constexpr std::array kDrivers{"soem", "spoe"};
+  if (std::find(kDrivers.begin(), kDrivers.end(), fieldbus.driver) == kDrivers.end()) {
+    return std::unexpected("fieldbus.driver must be one of: soem, spoe");
+  }
+  if (fieldbus.driver != "spoe") {
+    return {};
+  }
+  if (fieldbus.ipAddresses.empty()) {
+    return std::unexpected("fieldbus.ipAddresses must list at least one drive for spoe");
+  }
+  const auto isEmpty = [](const std::string& address) { return address.empty(); };
+  if (std::ranges::any_of(fieldbus.ipAddresses, isEmpty)) {
+    return std::unexpected("fieldbus.ipAddresses must not contain an empty address");
+  }
+  static constexpr std::array kModes{"monitor", "control"};
+  if (std::find(kModes.begin(), kModes.end(), fieldbus.spoe.mode) == kModes.end()) {
+    return std::unexpected("fieldbus.spoe.mode must be one of: monitor, control");
+  }
+  // SPOE_WATCHDOG_TIMEOUT_MIN_MS in the firmware. A smaller value would be raised to it silently.
+  if (fieldbus.spoe.watchdogMs < 50) {
+    return std::unexpected("fieldbus.spoe.watchdogMs must be at least 50");
+  }
+  if (fieldbus.spoe.port == 0) {
+    return std::unexpected("fieldbus.spoe.port must be greater than 0");
+  }
+  return {};
 }

@@ -15,10 +15,11 @@ info:
     created until you ask for it, so a fresh instance has no open network
     interface:
 
-    1. **Init** — `POST /api/init` constructs a fieldbus driver (`soem`, or the
-       planned `spoe`) and opens the network interface. SOEM has no adapter
-       auto-detect, so an adapter name or MAC address is required. `init` is
-       one-shot: a second call returns `409` until you reset.
+    1. **Init** — `POST /api/init` constructs a fieldbus driver, `soem` or `spoe`.
+       SOEM opens the network interface. It has no adapter auto-detect, so an
+       adapter name or MAC address is required. SPoE takes one IP address per
+       drive and connects at scan time. `init` is one-shot: a second call returns
+       `409` until you reset.
     2. **Scan** — `POST /api/scan` discovers the slaves on the bus and configures
        their sync managers and FMMUs. Slaves are left in the `INIT` state.
     3. **Transition** — `POST /api/devices/state` moves the bus to a target AL
@@ -599,10 +600,13 @@ paths:
       summary: Initialise the fieldbus driver
       operationId: init
       description: >
-        Constructs the requested fieldbus driver, opens the network interface, and
-        makes the driver available for subsequent calls to /api/scan.
-        The driver defaults to SOEM when omitted. SOEM has no adapter auto-detect:
-        a network adapter must be supplied, otherwise init fails.
+        Constructs the requested fieldbus driver and makes it available for subsequent
+        calls to /api/scan. The body is the `fieldbus` block of the config file, and the
+        same rules check it. The driver defaults to SOEM when omitted.
+        SOEM opens the network interface. It has no adapter auto-detect: a network
+        adapter must be supplied, otherwise init fails.
+        SPoE connects to each drive at scan time. It needs `ipAddresses`, one address
+        per drive, and the list order is the position order.
       requestBody:
         required: false
         content:
@@ -612,16 +616,49 @@ paths:
               properties:
                 driver:
                   type: string
-                  description: Fieldbus driver to use (only soem is implemented today; spoe is planned)
+                  description: Fieldbus driver to use
                   enum: [soem, spoe]
                   default: soem
                   example: "soem"
                 adapter:
                   type: string
                   description: >
-                    Network interface name or MAC address. Required for SOEM — there is
-                    no auto-detect, so an empty value makes init fail.
+                    SOEM only. Network interface name or MAC address. Required for SOEM — there
+                    is no auto-detect, so an empty value makes init fail.
                   example: "eth0"
+                ipAddresses:
+                  type: array
+                  description: >
+                    SPoE only. One IP address per drive, at least one. The list order is the
+                    position order, and a drive that does not answer keeps its position.
+                  items:
+                    type: string
+                  example: ["192.168.0.10"]
+                spoe:
+                  type: object
+                  description: SPoE only.
+                  properties:
+                    mode:
+                      type: string
+                      description: >
+                        Who owns the drive's state. In `monitor` mode a PLC owns it, Motion Master
+                        only parametrises and observes, and a state change answers 409. In
+                        `control` mode Motion Master owns it.
+                      enum: [monitor, control]
+                      default: monitor
+                    watchdogMs:
+                      type: integer
+                      description: >
+                        Control mode only. The drive faults when no SPoE message arrives for this
+                        long. At least 50.
+                      minimum: 50
+                      default: 75
+                    port:
+                      type: integer
+                      description: The TCP port of the SPoE server on every drive.
+                      minimum: 1
+                      maximum: 65535
+                      default: 8080
       responses:
         "200":
           description: Driver initialised successfully
@@ -635,7 +672,9 @@ paths:
                     type: boolean
                     example: true
         "400":
-          description: Request body is not valid JSON
+          description: >
+            Request body is not a JSON object, or it breaks a rule of the `fieldbus` block (an
+            unknown driver, SPoE without an address, an unknown mode, a watchdog below 50 ms)
         "409":
           description: >
             A driver is already initialised. init() is one-shot — call POST /api/reset
@@ -3502,6 +3541,20 @@ paths:
                           example: true
         "400":
           description: Request body is malformed or `state` is not a valid AL state value
+        "409":
+          description: >
+            The fieldbus driver refuses every state change. With SPoE in Monitor mode, the
+            PLC owns the drive's state; set `fieldbus.spoe.mode` to `control` to change it from
+            Motion Master.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+                    description: Why the driver refuses state changes
         "500":
           $ref: "#/components/responses/DriverError"
   /api/devices:

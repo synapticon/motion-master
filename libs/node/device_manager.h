@@ -583,11 +583,16 @@ class DeviceManager {
   /// @param targetState  Desired EtherCAT AL state.
   /// @param timeout      Maximum time to wait for all devices.
   /// @return The final state snapshot of each targeted device (in the order targeted), or an
-  ///         error string if no driver is initialised, no devices were discovered, or the
-  ///         final state read-back fails.
+  ///         error string if no driver is initialised, no devices were discovered, the driver
+  ///         refuses state changes (see @c stateChangeRefusal), or the final state read-back
+  ///         fails.
   std::expected<std::vector<DeviceStateInfo>, std::string> transitionToState(
       const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
       std::chrono::steady_clock::duration timeout);
+
+  /// @brief Returns why the driver refuses every state change, or nullopt when it accepts them,
+  ///        or when no driver is initialised. No bus I/O.
+  std::optional<std::string> stateChangeRefusal() const;
 
   /// @brief Reads the current AL state for a set of devices.
   ///

@@ -11,6 +11,7 @@ add_library(
   sii.cc
   soem_fieldbus_driver.cc
   spoe_connection.cc
+  spoe_fieldbus_driver.cc
   spoe_frame.cc)
 add_library(mm::comm ALIAS comm)
 

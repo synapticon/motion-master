@@ -378,7 +378,7 @@ struct ProcessDataWatchdogConfig {
 
 /// @brief Abstract interface for an EtherCAT fieldbus driver.
 ///
-/// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeFieldbusDriver (SPoE, planned).
+/// Concrete implementations: @c SoemFieldbusDriver (SOEM), @c SpoeFieldbusDriver (SPoE).
 /// The composition root (@c main.cc) constructs exactly one and injects it into @c DeviceManager
 /// via @c DeviceManager::init. @c GameLoop never references the driver — it runs @c CyclicTasks
 /// (e.g. @c ProcessDataCyclicTask) that reach the bus only through @c DeviceManager.
@@ -855,6 +855,13 @@ class FieldbusDriver {
       EtherCatState targetState, std::chrono::steady_clock::duration timeout,
       std::chrono::steady_clock::duration resendInterval = std::chrono::seconds(2),
       std::function<void()> tick = nullptr, std::function<bool()> shouldAbort = nullptr) = 0;
+
+  /// @brief Returns why this driver refuses every state change, or nullopt when it accepts them.
+  ///
+  /// A driver can be configured so that another master owns the device state, as SPoE is in
+  /// Monitor mode. @c transitionToState then does nothing, and its outcome reads only as "target
+  /// not reached". This reason is what a caller shows instead. Answers without bus I/O.
+  virtual std::optional<std::string> stateChangeRefusal() const { return std::nullopt; }
 
  protected:
   /// Serialises control-plane access to the underlying fieldbus context (mailbox

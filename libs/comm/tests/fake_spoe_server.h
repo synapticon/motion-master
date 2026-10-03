@@ -12,10 +12,15 @@
 // codec bug that both sides shared would make the tests pass against a drive that rejects the
 // bytes.
 //
-// Not modelled yet: the firmware update, the file transfer and the parameter list messages. A
-// request of one of those types closes the connection and is counted in `unmodelledRequests()`,
-// so a test that reaches one fails clearly instead of passing on an invented answer. The watchdog
-// value is stored and does not fault the device.
+// Not modelled yet: the firmware update and the file transfer messages. A request of one of those
+// types closes the connection and is counted in `unmodelledRequests()`, so a test that reaches one
+// fails clearly instead of passing on an invented answer. The watchdog value is stored and does
+// not fault the device.
+//
+// The parameter list follows `AppSockIf_ReadObjectInfo` and `AppSockIf_GetObjectInfoBuf`. Each
+// entry is the firmware's `struct _sdoinfo_entry_description` copied as it lies in memory: 68
+// bytes, laid out by the natural alignment of its members. That layout is not confirmed on
+// hardware.
 //
 // A second client gets a connection and no answer, while the first client keeps the drive. The
 // firmware keeps its listen socket in the poll set and accepts every new connection. Then
@@ -37,6 +42,7 @@
 #include <cstdint>
 #include <memory>
 #include <optional>
+#include <string>
 #include <vector>
 
 namespace mm::comm::testing {
@@ -87,6 +93,23 @@ constexpr uint8_t kSpoeStateOp = 8;
 constexpr uint16_t kSpoeSdoNotFound = 2;
 constexpr uint16_t kSpoeSdoSubNotFound = 13;
 
+/// `SQI_REPLY_STATUS_*` in the firmware: the low status byte of a parameter-list reply.
+constexpr uint8_t kSpoeReplyAck = 0x58;
+constexpr uint8_t kSpoeReplyBusy = 0x28;
+constexpr uint8_t kSpoeReplyError = 0x63;
+
+/// The packet states of a segmented transfer. A request carries one in the low status byte, and a
+/// reply in the high status byte.
+constexpr uint8_t kSpoePacketFirst = 0x80;
+constexpr uint8_t kSpoePacketMiddle = 0xC0;
+constexpr uint8_t kSpoePacketLast = 0x40;
+
+/// `MAX_INDEX_LIST` in the firmware: the most objects the index list and the parameter list hold.
+constexpr std::size_t kSpoeMaxIndexList = 200;
+
+/// The size of one parameter-list entry, `struct _sdoinfo_entry_description`.
+constexpr std::size_t kSpoeEntrySize = 68;
+
 /// `AppUtil_GetParameter` and `AppUtil_SetParameter` answer this in INIT and BOOT.
 constexpr uint16_t kSpoeSdoNotAllowedInState = 0xFFFF;
 
@@ -105,6 +128,19 @@ enum class SpoeFault {
   kNoReply,
   /// Close the connection instead of a reply.
   kDropConnection,
+  /// Answer a middle packet of the parameter list with status BUSY and no entries, while the list
+  /// still moves past them. The firmware does this when the uninitialised status of a middle
+  /// packet happens to equal BUSY, and the entries of that packet are lost.
+  kLoseParamListPacket,
+};
+
+/// One dictionary entry, as the firmware's object dictionary describes it.
+struct FakeSpoeEntry {
+  uint16_t dataType = 0;
+  uint8_t objectCode = 0x07;
+  uint16_t bitLength = 0;
+  uint16_t access = 0;
+  std::string name;
 };
 
 /// A loopback SPoE server that holds one device.
@@ -122,6 +158,10 @@ class FakeSpoeServer {
   // The device.
 
   void setObject(uint16_t index, uint16_t subindex, std::vector<uint8_t> value);
+
+  /// Adds an entry to the dictionary the parameter list reports. An object reports its highest
+  /// described subindex as its subindex count.
+  void describeEntry(uint16_t index, uint8_t subindex, FakeSpoeEntry entry);
   std::optional<std::vector<uint8_t>> object(uint16_t index, uint16_t subindex) const;
 
   uint8_t state() const;
@@ -149,6 +189,9 @@ class FakeSpoeServer {
 
   /// Applies @p fault to the reply of the next request.
   void injectFault(SpoeFault fault);
+
+  /// Lets @p skip requests pass, then applies @p fault to the reply of the request after them.
+  void injectFaultAfter(int skip, SpoeFault fault);
 
   /// Holds every later reply back by @p delay before it is sent.
   void setReplyDelay(std::chrono::milliseconds delay);

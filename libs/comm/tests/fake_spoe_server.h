@@ -160,7 +160,8 @@ class FakeSpoeServer {
   int requestCount() const;
   int unmodelledRequests() const;
 
-  /// Closes the connection of the current client, as a drive that resets does.
+  /// Closes the connection of the current client, as a drive that resets does. A client counts as
+  /// current once the fake accepted it, which a reply to its first request proves.
   void dropClient();
 
  private:

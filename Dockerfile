@@ -149,6 +149,8 @@ RUN ldconfig
 
 WORKDIR /opt/motion-master
 COPY --from=build /src/build/x64-linux-release/apps/motion_master/motion-master .
+# The binary loads MU_3SL from its own directory through an $ORIGIN run path.
+COPY --from=build /src/build/x64-linux-release/apps/motion_master/libMU_3SL_interface.so.3 .
 COPY --from=build /src/auto-tuning ./
 # Bake the cert/key fetched in the build stage (empty if that build ran offline).
 COPY --from=build /src/cert.pem /src/key.pem ./

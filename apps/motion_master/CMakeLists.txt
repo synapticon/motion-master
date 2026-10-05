@@ -58,6 +58,10 @@ target_link_libraries(
           unofficial::uwebsockets::uwebsockets
           OpenSSL::Crypto)
 
+if(MM_HAVE_MU_3SL)
+  mm_link_mu_3sl(motion_master)
+endif()
+
 if(NOT WIN32)
   find_package(Threads REQUIRED)
   target_link_libraries(motion_master PRIVATE Threads::Threads)

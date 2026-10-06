@@ -147,6 +147,14 @@ export default function DeviceMotionPage() {
     onSuccess: (r) => queryClient.setQueryData(statusKey, r.data),
   })
 
+  // Halt is one bit, so one button toggles it. The status says which way it is set.
+  const halted = status?.halt ?? false
+  const haltMutation = useMutation({
+    mutationFn: (halt: boolean) =>
+      halt ? api.setCia402Halt(slavePosition) : api.clearCia402Halt(slavePosition),
+    onSuccess: (r) => queryClient.setQueryData(statusKey, r.data),
+  })
+
   // The target write is tied to the drive's ACTIVE mode (0x6061), not the dropdown selection — you
   // command the setpoint for the mode the drive is actually in.
   const targetKind = targetKindForMode(activeMode)
@@ -245,6 +253,15 @@ export default function DeviceMotionPage() {
                   <strong>Quick stop</strong> triggers a controlled quick stop;{' '}
                   <strong>Reset fault</strong> clears a latched fault.
                 </p>
+                <p className="text-xs text-grey-600">
+                  <strong>Halt</strong> sets controlword bit 8 and keeps the drive in Operation
+                  Enabled. What it does depends on the mode and the drive. A SOMANET drive stops
+                  with the quick stop deceleration in CSP and CSV, stops with the profile
+                  deceleration in PP, and idles the profile in PV and PT.{' '}
+                  <strong>A SOMANET drive ignores halt in CST.</strong>{' '}
+                  <strong>Release halt</strong> clears the bit. The drive then follows the target
+                  again in CSP and CSV, and continues the interrupted motion in PP.
+                </p>
               </div>
               <div className="mt-auto pt-4 space-y-3">
                 <div className="flex flex-wrap gap-2">
@@ -276,9 +293,19 @@ export default function DeviceMotionPage() {
                   >
                     Reset fault
                   </button>
+                  <button
+                    className={btnGhostCls}
+                    disabled={haltMutation.isPending || !status}
+                    onClick={() => haltMutation.mutate(!halted)}
+                  >
+                    {halted ? 'Release halt' : 'Halt'}
+                  </button>
                 </div>
                 {commandMutation.isError && (
                   <p className="text-status-bad text-xs">{apiError(commandMutation.error)}</p>
+                )}
+                {haltMutation.isError && (
+                  <p className="text-status-bad text-xs">{apiError(haltMutation.error)}</p>
                 )}
               </div>
             </div>

@@ -21,6 +21,8 @@ struct Cia402Status {
   uint16_t statusword = 0;                         ///< Raw statusword (0x6041).
   uint16_t controlword = 0;                        ///< Last-commanded controlword (0x6040).
   cia402::OperationMode modeOfOperationDisplay{};  ///< Active operation mode (0x6061).
+  /// Controlword bit 8. What the drive does while it is set depends on the mode and on the drive.
+  bool halt = false;
   /// The setpoint object for the active mode — target position 0x607A (PP/CSP), velocity 0x60FF
   /// (PV/CSV), or torque 0x6071 (PT/CST), widened to int32. 0 only when the active mode has no
   /// linear setpoint (NoMode / Homing). Lets a UI seed its target input from the drive.
@@ -164,6 +166,18 @@ class Cia402Drive : public ProfileDevice {
   ///         in instead, with its 0x603F error code when that can be read.
   std::expected<void, std::string> applyOperationMode(
       int8_t mode, std::chrono::milliseconds timeout = std::chrono::milliseconds(200));
+
+  /// @brief Reads the halt bit, controlword (0x6040) bit 8.
+  std::expected<bool, std::string> halt() const;
+
+  /// @brief Sets or clears the halt bit, controlword (0x6040) bit 8, and changes no other bit.
+  ///
+  /// Halt is not a state-machine transition: the drive stays in Operation Enabled while it is set.
+  /// What it does depends on the operation mode and on the drive. A SOMANET drive decelerates to
+  /// zero velocity in CSP and CSV, decelerates with the profile deceleration in PP, and ignores
+  /// the bit in CST. The bit is set in every mode all the same, because another vendor's drive may
+  /// act on it where a SOMANET drive does not.
+  std::expected<void, std::string> setHalt(bool halt);
 
   /// @brief Reads state, statusword, controlword, and the active mode in one shot.
   std::expected<Cia402Status, std::string> readStatus() const;

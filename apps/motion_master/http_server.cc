@@ -1180,6 +1180,27 @@ void HttpServer::run() {
                 return mm::api::json(nlohmann::json(*r));
               });
 
+  // The value is in the path and there is no body, so a plain curl command can set or clear the
+  // bit. GET /api/devices/:slavePosition/cia402 reads it back as `halt`.
+  const auto haltHandler = [this](bool halt) {
+    return [this, halt](const mm::api::Request& req) -> mm::api::Response {
+      auto position = req.parameterAs<uint16_t>("slavePosition");
+      if (!position) {
+        return mm::api::badRequest("slavePosition must be a number");
+      }
+      if (!deviceManager_.hasDevice(*position)) {
+        return mm::api::notFound("no device at that bus position");
+      }
+      auto r = mm::node::setCia402Halt(deviceManager_, *position, halt);
+      if (!r) {
+        return mm::api::error("409 Conflict", r.error());
+      }
+      return mm::api::json(nlohmann::json(*r));
+    };
+  };
+  router.post("/api/devices/:slavePosition/cia402/halt/true", haltHandler(true));
+  router.post("/api/devices/:slavePosition/cia402/halt/false", haltHandler(false));
+
   router.post(
       "/api/devices/:slavePosition/cia402/target",
       [this](const mm::api::Request& req) -> mm::api::Response {

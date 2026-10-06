@@ -15,6 +15,7 @@ void to_json(nlohmann::json& j, const Cia402Status& s) {
       {"state", cia402::toString(s.state)},
       {"statusword", s.statusword},
       {"controlword", s.controlword},
+      {"halt", s.halt},
       {"modeOfOperation", static_cast<int>(s.modeOfOperationDisplay)},
       {"modeName", cia402::toString(s.modeOfOperationDisplay)},
       // 0 only when the active mode has no linear setpoint (NoMode / Homing).
@@ -114,6 +115,20 @@ std::expected<uint16_t, std::string> Cia402Drive::controlword() const {
 
 std::expected<void, std::string> Cia402Drive::setControlword(uint16_t value) {
   return device_.writeValue(Object::kControlword, 0, value);
+}
+
+std::expected<bool, std::string> Cia402Drive::halt() const {
+  return controlword().transform([](uint16_t cw) { return (cw & cia402::kHalt) != 0; });
+}
+
+std::expected<void, std::string> Cia402Drive::setHalt(bool halt) {
+  auto current = controlword();
+  if (!current) {
+    return std::unexpected(current.error());
+  }
+  const uint16_t next = halt ? static_cast<uint16_t>(*current | cia402::kHalt)
+                             : static_cast<uint16_t>(*current & ~cia402::kHalt);
+  return setControlword(next);
 }
 
 std::expected<State, std::string> Cia402Drive::state() const {
@@ -221,7 +236,12 @@ std::expected<Cia402Status, std::string> Cia402Drive::readStatus() const {
     case cia402::OperationMode::kInterpolatedPosition:
       break;
   }
-  return Cia402Status{cia402::decodeState(*sw), *sw, *cw, *mode, target};
+  return Cia402Status{.state = cia402::decodeState(*sw),
+                      .statusword = *sw,
+                      .controlword = *cw,
+                      .modeOfOperationDisplay = *mode,
+                      .halt = (*cw & cia402::kHalt) != 0,
+                      .target = target};
 }
 
 std::expected<void, std::string> Cia402Drive::applyCommand(uint16_t command) {

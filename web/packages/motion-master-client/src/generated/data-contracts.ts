@@ -38,6 +38,11 @@ export interface Cia402Status {
    */
   controlword: number;
   /**
+   * The halt bit, controlword bit 8. Set it with POST /api/devices/{slavePosition}/cia402/halt/true and clear it with /api/devices/{slavePosition}/cia402/halt/false.
+   * @example false
+   */
+  halt: boolean;
+  /**
    * Active operation mode (display object 0x6061), as an INTEGER8 value.
    * @example 9
    */

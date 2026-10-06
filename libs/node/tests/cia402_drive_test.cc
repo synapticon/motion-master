@@ -356,6 +356,41 @@ TEST(Cia402Drive, TransitionPreservesNonCommandBits) {
   EXPECT_EQ(w.data, u16le(0x0116));
 }
 
+TEST(Cia402DriveHalt, SetsAndClearsBitEightOnly) {
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  // Enable operation plus the mode-specific bit 4.
+  driver.store[Cia402FakeDriver::key(Object::kControlword, 0)] = u16le(0x001F);
+  Cia402Drive drive(device);
+
+  ASSERT_TRUE(drive.setHalt(true).has_value());
+  EXPECT_EQ(driver.writes.back().data, u16le(0x011F));
+  auto halted = drive.halt();
+  ASSERT_TRUE(halted.has_value()) << halted.error();
+  EXPECT_TRUE(*halted);
+
+  ASSERT_TRUE(drive.setHalt(false).has_value());
+  EXPECT_EQ(driver.writes.back().data, u16le(0x001F));
+  auto released = drive.halt();
+  ASSERT_TRUE(released.has_value()) << released.error();
+  EXPECT_FALSE(*released);
+}
+
+TEST(Cia402DriveHalt, StateMachineCommandsKeepTheBit) {
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  driver.store[Cia402FakeDriver::key(Object::kControlword, 0)] = u16le(0x000F);
+  Cia402Drive drive(device);
+  ASSERT_TRUE(drive.setHalt(true).has_value());
+
+  ASSERT_TRUE(drive.quickStop().has_value());
+  EXPECT_EQ(driver.writes.back().data, u16le(0x0102));
+  ASSERT_TRUE(drive.shutdown().has_value());
+  EXPECT_EQ(driver.writes.back().data, u16le(0x0106));
+  ASSERT_TRUE(drive.disableVoltage().has_value());
+  EXPECT_EQ(driver.writes.back().data, u16le(0x0100));
+}
+
 TEST(Cia402Drive, EnableWalksToOperationEnabled) {
   Cia402FakeDriver driver;
   Device device = makeCia402Device(driver);
@@ -806,7 +841,19 @@ TEST(Cia402Drive, ReadStatusReportsAllFields) {
   EXPECT_EQ(status->statusword, statuswordFor(State::kOperationEnabled));
   EXPECT_EQ(status->controlword, 0x000F);
   EXPECT_EQ(status->modeOfOperationDisplay, OperationMode::kCyclicSyncVelocity);
+  EXPECT_FALSE(status->halt);
   EXPECT_EQ(status->target, 250000);
+}
+
+TEST(Cia402Drive, ReadStatusReportsTheHaltBit) {
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);
+  driver.store[Cia402FakeDriver::key(Object::kControlword, 0)] = u16le(0x010F);
+  Cia402Drive drive(device);
+
+  auto status = drive.readStatus();
+  ASSERT_TRUE(status.has_value()) << status.error();
+  EXPECT_TRUE(status->halt);
 }
 
 TEST(Cia402Drive, ReadStatusTargetTracksActiveModeQuantity) {
@@ -1006,12 +1053,17 @@ TEST(Cia402Drive, StructSetterAbortsOnFirstFailure) {
 }
 
 TEST(Cia402Status, JsonEmitsNamesAndNumbers) {
-  const mm::node::Cia402Status s{State::kOperationEnabled, 0x1237, 0x000F,
-                                 OperationMode::kCyclicSyncVelocity, 100000};
+  const mm::node::Cia402Status s{.state = State::kOperationEnabled,
+                                 .statusword = 0x1237,
+                                 .controlword = 0x010F,
+                                 .modeOfOperationDisplay = OperationMode::kCyclicSyncVelocity,
+                                 .halt = true,
+                                 .target = 100000};
   const nlohmann::json j = s;
   EXPECT_EQ(j.at("state"), "OperationEnabled");
   EXPECT_EQ(j.at("statusword"), 0x1237);
-  EXPECT_EQ(j.at("controlword"), 0x000F);
+  EXPECT_EQ(j.at("controlword"), 0x010F);
+  EXPECT_EQ(j.at("halt"), true);
   EXPECT_EQ(j.at("modeOfOperation"), 9);
   EXPECT_EQ(j.at("modeName"), "CyclicSyncVelocity");
   EXPECT_EQ(j.at("target"), 100000);

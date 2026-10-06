@@ -76,6 +76,17 @@ std::expected<Cia402Status, std::string> runCia402Command(DeviceManager& deviceM
       });
 }
 
+std::expected<Cia402Status, std::string> setCia402Halt(DeviceManager& deviceManager,
+                                                       uint16_t slavePosition, bool halt) {
+  return withDrive(deviceManager, slavePosition,
+                   [halt](Cia402Drive& drive) -> std::expected<Cia402Status, std::string> {
+                     if (auto r = drive.setHalt(halt); !r) {
+                       return std::unexpected(r.error());
+                     }
+                     return drive.readStatus();
+                   });
+}
+
 std::expected<Cia402Status, std::string> transitionToCia402State(
     DeviceManager& deviceManager, uint16_t slavePosition, cia402::State target,
     std::chrono::milliseconds timeout) {

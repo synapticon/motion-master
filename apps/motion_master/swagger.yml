@@ -2016,6 +2016,80 @@ paths:
           description: >
             The device is not a CiA402 drive, or the command failed (including an enable that did
             not reach Operation Enabled before timing out)
+  /api/devices/{slavePosition}/cia402/halt/true:
+    post:
+      summary: Set a drive's halt bit
+      description: >
+        Sets the halt bit, bit 8 of the controlword (0x6040), and changes no other bit. Takes no
+        body. Halt is not a state-machine transition: the drive stays in Operation Enabled while
+        the bit is set, and a later state-machine command keeps the bit as it is. Returns the
+        resulting control snapshot, whose halt field reads back the bit.
+
+
+        What the drive does while halted depends on the operation mode and on the drive. A SOMANET
+        drive is one example. In CSP and CSV it decelerates to zero velocity with the quick stop
+        deceleration (0x6085) and ignores new targets. In PP it decelerates with the profile
+        deceleration (0x6084). In PV and PT the profile goes idle. In homing, the homing routine
+        receives the halt.
+
+
+        **A SOMANET drive ignores the halt bit in CST.** Motion Master sets the bit in that mode
+        all the same, because a drive from another vendor may act on it.
+
+
+        A SOMANET drive sets statusword bit 10, target reached, once the axis is stationary. It
+        does not implement the halt option code (0x605D).
+      operationId: setCia402Halt
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The CiA402 control snapshot after the write
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cia402Status"
+        "400":
+          description: slavePosition is invalid
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: The device is not a CiA402 drive, or the write failed
+  /api/devices/{slavePosition}/cia402/halt/false:
+    post:
+      summary: Clear a drive's halt bit
+      description: >
+        Clears the halt bit, bit 8 of the controlword (0x6040), and changes no other bit. Takes no
+        body. What the drive does next depends on the operation mode and on the drive. A SOMANET
+        drive follows the target object again in CSP and CSV, continues the interrupted motion in
+        PP, and takes a new setpoint in PV and PT. In CST it ignored the bit, so nothing changes.
+        Returns the resulting control snapshot.
+      operationId: clearCia402Halt
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The CiA402 control snapshot after the write
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Cia402Status"
+        "400":
+          description: slavePosition is invalid
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: The device is not a CiA402 drive, or the write failed
   /api/devices/{slavePosition}/cia402/target:
     post:
       summary: Set a CiA402 cyclic setpoint (target)
@@ -4314,7 +4388,7 @@ components:
     Cia402Status:
       type: object
       description: A CiA402 drive's control snapshot — its state machine, control words, and mode.
-      required: [state, statusword, controlword, modeOfOperation, modeName, target]
+      required: [state, statusword, controlword, halt, modeOfOperation, modeName, target]
       properties:
         state:
           type: string
@@ -4331,6 +4405,13 @@ components:
           type: integer
           description: Last-commanded controlword (0x6040), 0–65535.
           example: 15
+        halt:
+          type: boolean
+          description: >-
+            The halt bit, controlword bit 8. Set it with POST
+            /api/devices/{slavePosition}/cia402/halt/true and clear it with
+            /api/devices/{slavePosition}/cia402/halt/false.
+          example: false
         modeOfOperation:
           type: integer
           description: Active operation mode (display object 0x6061), as an INTEGER8 value.

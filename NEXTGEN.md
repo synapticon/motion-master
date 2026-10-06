@@ -3512,3 +3512,42 @@ found twice.
 
 **Every feature found in the three sources has one of the five classes.** After these
 decisions, no gap remains outside the minor list.
+
+## Session 2026-10-05 — `GET` reads a state and `POST` changes it, with the value in the path (as-built)
+
+**The question.** Issue #14 adds the CiA402 halt bit, controlword bit 8. How should the API set
+and clear one boolean, and should every such control look the same?
+
+**Three shapes were tried and two were dropped.**
+
+1. **`POST …/cia402/halt` with the body `{"halt": true}`.** Dropped because a JSON body that
+   carries one boolean is awkward to type in curl, and a control like this is often issued by
+   hand.
+2. **`PUT` to set and `DELETE` to clear, on `…/cia402/halt`.** It is idempotent and needs no
+   second name for "clear". Dropped because the same rule applied to the brake gives
+   `PUT …/brake/release` and `DELETE …/brake/release`, which reads much worse than the
+   `brake/release` and `brake/engage` it would replace. A shape that only fits one control is not
+   a rule.
+3. **`POST …/cia402/halt/true` and `POST …/cia402/halt/false`.** Kept. The path segment is the
+   field name that `GET …/cia402` returns, and the value is what that field reads afterwards. So
+   the URL says what the caller will see.
+
+**Why `POST` and not `PUT` for the third shape.** `PUT` means "store this body at this URL". With
+the value in the path there is no body, and nothing is stored at `…/halt/true`, so `PUT` would
+disagree with its own URL. The repository already splits the two this way: every `PUT` writes a
+body (a parameter, an SDO, the watchdog, the loop period, the PDO mapping, a file), and every
+command is a `POST` (`init`, `scan`, `cia402/command`, `brake/release`). Idempotency would be the
+reason to prefer `PUT`, and only a client or proxy that retries on its own cares about it. Nothing
+in this stack retries, and `halt/true` is harmless to repeat anyway.
+
+**The rule, now in `CLAUDE.md`.**
+
+- `GET` reads a state. Nothing that changes the drive is a `GET`.
+- A change is a `POST` to a path that names it. It takes no body when it has no other parameters.
+  It returns the state read back.
+- A command on a state names the verb: `brake/release`, `brake/engage`. The brake is a state and
+  not a boolean, because `GET …/brake` returns a `status` string read from 0x2004:07.
+- A boolean the client sets puts its value in the path: `cia402/halt/true`, `cia402/halt/false`.
+  No separate `GET` exists per flag, because the parent `GET` already returns it.
+
+**What it does not change.** The brake routes stay as they are. They already follow the rule.

@@ -92,6 +92,20 @@ std::expected<Cia402Status, std::string> runCia402Command(
     DeviceManager& deviceManager, uint16_t slavePosition, Cia402Command command,
     std::chrono::milliseconds timeout = std::chrono::milliseconds(2000));
 
+/// @brief Sets or clears a drive's halt bit, controlword (0x6040) bit 8, then reads back the
+///        resulting snapshot.
+///
+/// Accepted in every state and every mode. The effect depends on both and on the drive, and a
+/// SOMANET drive ignores the bit in CST. See @c Cia402Drive::setHalt.
+///
+/// @param deviceManager  Owner of the device set; lends locked access for the call.
+/// @param slavePosition  1-based bus position of the target device.
+/// @param halt           True to set the bit, false to clear it.
+/// @return The snapshot after the write, or an error string if the device is unknown, not a
+///         CiA402 drive, or the write fails.
+std::expected<Cia402Status, std::string> setCia402Halt(DeviceManager& deviceManager,
+                                                       uint16_t slavePosition, bool halt);
+
 /// @brief Brings a drive to @p target, walking whatever transitions that takes, then reads back
 ///        the resulting snapshot.
 ///

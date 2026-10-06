@@ -191,6 +191,12 @@ Flat layout inside each lib is intentional. Navigate by filename and grep.
   See `NEXTGEN.md`, Session 2026-07-17.
 - **Two servers, two ports, two threads.** HTTP on 61447, WebSocket on 62281. Separate
   uWS apps and loops, so a slow HTTP handler cannot stall the WebSocket. No Protobuf.
+- **`GET` reads a state; `POST` changes it.** A change is a `POST` to a path that names it, with
+  no body when the call has no other parameters, so a plain `curl -X POST` issues it. It returns
+  the state read back. A command on a state names the verb: `brake/release`, `brake/engage`. A
+  boolean the client sets puts its value in the path, under the field name its parent `GET`
+  returns: `cia402/halt/true`, `cia402/halt/false`. `PUT` is only for storing a body: a
+  parameter, an SDO, a file. Never toggle a flag with `PUT` and `DELETE`.
 - **No service layer.** SDO, file transfer, state control, and bus inspection are methods
   on `Device` and `DeviceManager`.
 - **`Device` and `DeviceManager` are profile-ignorant.** `device_manager.h` names no

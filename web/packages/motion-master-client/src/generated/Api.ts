@@ -1256,6 +1256,34 @@ export class Api<
       ...params,
     });
   /**
+   * @description Sets the halt bit, bit 8 of the controlword (0x6040), and changes no other bit. Takes no body. Halt is not a state-machine transition: the drive stays in Operation Enabled while the bit is set, and a later state-machine command keeps the bit as it is. Returns the resulting control snapshot, whose halt field reads back the bit. What the drive does while halted depends on the operation mode and on the drive. A SOMANET drive is one example. In CSP and CSV it decelerates to zero velocity with the quick stop deceleration (0x6085) and ignores new targets. In PP it decelerates with the profile deceleration (0x6084). In PV and PT the profile goes idle. In homing, the homing routine receives the halt. **A SOMANET drive ignores the halt bit in CST.** Motion Master sets the bit in that mode all the same, because a drive from another vendor may act on it. A SOMANET drive sets statusword bit 10, target reached, once the axis is stationary. It does not implement the halt option code (0x605D).
+   *
+   * @name SetCia402Halt
+   * @summary Set a drive's halt bit
+   * @request POST:/api/devices/{slavePosition}/cia402/halt/true
+   */
+  setCia402Halt = (slavePosition: number, params: RequestParams = {}) =>
+    this.request<Cia402Status, void>({
+      path: `/api/devices/${slavePosition}/cia402/halt/true`,
+      method: "POST",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Clears the halt bit, bit 8 of the controlword (0x6040), and changes no other bit. Takes no body. What the drive does next depends on the operation mode and on the drive. A SOMANET drive follows the target object again in CSP and CSV, continues the interrupted motion in PP, and takes a new setpoint in PV and PT. In CST it ignored the bit, so nothing changes. Returns the resulting control snapshot.
+   *
+   * @name ClearCia402Halt
+   * @summary Clear a drive's halt bit
+   * @request POST:/api/devices/{slavePosition}/cia402/halt/false
+   */
+  clearCia402Halt = (slavePosition: number, params: RequestParams = {}) =>
+    this.request<Cia402Status, void>({
+      path: `/api/devices/${slavePosition}/cia402/halt/false`,
+      method: "POST",
+      format: "json",
+      ...params,
+    });
+  /**
    * @description Writes the one setpoint that matches the active operation mode — target position (0x607A, INTEGER32) in PP/CSP, target velocity (0x60FF, INTEGER32) in PV/CSV, or target torque (0x6071, INTEGER16, per-mille of rated) in PT/CST. All are signed: negative values command reverse motion or regenerative torque. Routes through the live process image when the object is PDO-mapped and the device is exchanging, else an SDO download.
    *
    * @name SetCia402Target

@@ -154,6 +154,10 @@ enum class State : uint8_t {
 /// across a transition by a read-modify-write masked with this value.
 constexpr uint16_t kCommandMask = 0x008F;
 
+/// @brief Controlword (0x6040) bit 8, halt. Outside @c kCommandMask, so a state-machine transition
+///        keeps it as it is.
+constexpr uint16_t kHalt = 0x0100;
+
 /// @brief Canonical controlword command-bit patterns (the value of the bits in @c kCommandMask).
 enum Command : uint16_t {
   kCmdShutdown = 0x0006,         ///< → ReadyToSwitchOn (enable voltage + no quick stop).

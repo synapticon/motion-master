@@ -500,6 +500,19 @@ TEST(SpoeFieldbusDriver, AcceptsTheComFirmwareInBoot) {
   EXPECT_EQ(server.file("com_firmware.bin"), binary);
 }
 
+TEST(SpoeFieldbusDriver, AFirstFileReplyInTheLastPacketStateIsAnError) {
+  // The firmware's error code can be 0, so only the packet state tells a refusal from a 0 that
+  // means success.
+  FakeSpoeServer server;
+  server.setState(mm::comm::testing::kSpoeStateBoot);
+  SpoeFieldbusDriver driver(configFor(server));
+  ASSERT_TRUE(driver.scan().has_value());
+  server.setRefuseFileWrites(true);
+  const auto written = driver.writeFile(1, "com_firmware.bin", std::vector<uint8_t>(10, 1));
+  ASSERT_FALSE(written.has_value());
+  EXPECT_FALSE(server.file("com_firmware.bin").has_value());
+}
+
 TEST(SpoeFieldbusDriver, WaitsForAFileReplyTheDriveHolds) {
   // The firmware holds a reply while the SoC is busy. That is longer than an SDO may take.
   FakeSpoeServer server;

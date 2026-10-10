@@ -129,6 +129,7 @@ struct FakeSpoeServer::Impl {
   uint16_t maxSubindexLatch = 0;
   uint8_t state = kSpoeStatePreOp;
   bool refuseStateChanges = false;
+  bool refuseFileWrites = false;
   uint16_t protocolVersion = kSpoeProtocolVersion;
   uint8_t pdoMode = kSpoePdoModeNone;
   bool locating = false;
@@ -498,6 +499,11 @@ Reply FakeSpoeServer::Impl::fileWrite(uint8_t packetState, std::span<const uint8
     writeName.assign(data.begin(), std::find(data.begin(), data.end(), uint8_t{0}));
     writeContent.clear();
     writing = true;
+    if (refuseFileWrites) {
+      // The firmware's error path: the last-packet state, and `SQI_BRG_FOE_ERR_UNDEFINED`.
+      writing = false;
+      return {.status = withState(kSpoePacketLast, 0x00), .data = {}};
+    }
     // In BOOT the COM firmware goes to the netX flash, and the reply carries the return value of
     // `storage_prepare_for_writing`, 0 for success, instead of ACK.
     const bool storage = state == kSpoeStateBoot && writeName == "com_firmware.bin";
@@ -734,6 +740,11 @@ uint8_t FakeSpoeServer::pdoMode() const {
 bool FakeSpoeServer::locating() const {
   const std::scoped_lock lock(impl_->mutex);
   return impl_->locating;
+}
+
+void FakeSpoeServer::setRefuseFileWrites(bool refuse) {
+  const std::scoped_lock lock(impl_->mutex);
+  impl_->refuseFileWrites = refuse;
 }
 
 void FakeSpoeServer::setProtocolVersion(uint16_t version) {

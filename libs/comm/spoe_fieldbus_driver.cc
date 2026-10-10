@@ -719,10 +719,6 @@ constexpr uint8_t kFoeTimeout = 0x0E;
 // accepts up to SQI_ACYCLIC_MAX_FOE_SIZE (1024).
 constexpr std::size_t kFileChunk = 500;
 
-// The firmware stores this file in its own flash, and answers its first packet in BOOT with the
-// return value of `storage_prepare_for_writing`, where 0 is success, rather than with kReplyAck.
-constexpr std::string_view kComFirmwareFile = "com_firmware.bin";
-
 // The firmware sends no file larger than this. The bound only stops a drive that never sends the
 // last packet.
 constexpr int kMaxFilePackets = 200000;
@@ -851,9 +847,12 @@ std::expected<void, FoeError> SpoeFieldbusDriver::writeFile(uint16_t slavePositi
   if (!first) {
     return std::unexpected(first.error());
   }
+  // A refusal carries the last-packet state, and its code is the FoE error, which can be 0. An
+  // acceptance keeps the first-packet state. In BOOT the COM firmware answers with the return
+  // value of `storage_prepare_for_writing` instead of kReplyAck, and 0 is success.
   const auto firstCode = static_cast<uint8_t>(first->status & 0xFF);
-  const bool storageReady = filename == kComFirmwareFile && firstCode == 0;
-  if (firstCode != kReplyAck && !storageReady) {
+  const auto firstState = static_cast<uint8_t>(first->status >> 8);
+  if (firstState == kPacketLast || (firstCode != kReplyAck && firstCode != 0)) {
     return std::unexpected(foeErrorFromStatus(drive.host, filename, firstCode));
   }
   // An empty file still sends its last packet, which is what closes the file on the drive.

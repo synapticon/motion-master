@@ -192,6 +192,10 @@ class FakeSpoeServer {
   /// Makes every later state change fail, as the firmware does when the variant check fails.
   void setRefuseStateChanges(bool refuse);
 
+  /// Makes the first packet of every later file write fail, as the firmware does when it cannot
+  /// open the file.
+  void setRefuseFileWrites(bool refuse);
+
   /// Answers as the firmware of this protocol version: `kSpoeProtocolVersion` or
   /// `kSpoeProtocolVersion100`.
   void setProtocolVersion(uint16_t version);

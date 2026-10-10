@@ -21,6 +21,17 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Added
 
+- **Motion Master connects to SOMANET drives over SPoE (SOMANET Protocol over Ethernet).** You give one IP address per drive, either on the Console's **Fieldbus → Control** page or as `ipAddresses` in the config file with `"driver": "spoe"`. Each drive is reached over TCP, on port 8080 by default, and no EtherCAT master is involved. The object dictionary, SDO reads and writes, process data, monitoring, the recorder, file transfer, firmware installation and the LED locate all work over SPoE. SII, ESC registers, distributed clocks, ESC diagnostics and ENI export need an EtherCAT Slave Controller, so they answer 409 over SPoE, and the Console says why. Drives with SPoE protocol 1.0 and 1.2 are supported.
+
+- **SPoE has two modes.** In **Monitor** mode a PLC owns the drive's state, and Motion Master only parametrises and observes it. A state change from Motion Master is refused, and the process image follows the states the PLC sets. In **Control** mode Motion Master owns the state. The drive then faults when no SPoE message arrives within the watchdog time, 75 ms by default and at least 50 ms. Firmware with protocol 1.0 cannot set the watchdog and uses its own fixed time.
+
+- **A drive that is already in SAFE-OP or OP exchanges process data as soon as it is scanned.** An SPoE drive starts in OP, so no state change brings it there. The scan reads the drive's object dictionary and publishes the process image, so its values reach monitoring and the Console at once.
+
+- **SPoE in this release is for testing.** Most of it ran on hardware only in PRE-OP and in Monitor mode. Process data in Control mode, the watchdog, and monitoring beside a PLC are not yet tested on protocol 1.2. Known limits:
+  - A drive serves one SPoE client at a time. While another tool is connected to a drive, Motion Master cannot reach it.
+  - Firmware installation over SPoE is not reliable yet. One install stopped while it wrote the application firmware, and the drive then refused every connection until a power cycle. An install that changes the drive to EtherCAT firmware succeeds, but it reports a failure, because the drive never answers over SPoE again.
+  - A drive accepts only the file names its firmware knows. Writing any other name fails with "file not found", and deleting such a name reports success while the file stays.
+
 - **`GET /api/devices` reports `isSomanet` for each device.** It is true for a device that runs SOMANET firmware, which the server decides from the vendor ID.
 
 ### Fixed

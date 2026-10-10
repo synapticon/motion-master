@@ -3598,3 +3598,96 @@ at construction. The installation records that it did not write the SII and cont
 **Device locate is a transport capability, so its procedure applies by capability.** The catalogue
 row's `applies` reads `Device::supportsLocate()`, a copy taken at construction, which is the kind of
 state the catalogue rule allows. The LEDs stop at the end of the run and when it is cancelled.
+
+## Session 2026-10-10 — SPoE meets hardware: a drive starts in OP, and the netX filters file names (as-built)
+
+Issue #36. The first runs against real drives. One drive spoke SPoE protocol 1.0. A second drive,
+an ACTILINK-S, spoke protocol 1.2 and ran firmware that keeps it in PRE-OP. Neither drive could
+reach SAFE-OP in Control mode on this bench, so process data in Control mode is still untested on
+1.2. PR #68 ships as a test release, and the remaining hardware checks run elsewhere.
+
+**A drive that starts in OP is mapped by the scan.** An SPoE drive starts in OP. The image is
+otherwise published only by `transitionToState`, so in Control mode no state change ever brought
+the drive there, and nothing was exchanged. `DeviceManager::scan()` now reads every state. When a
+device is in SAFE-OP or OP, it reads that device's object dictionary and calls
+`remapProcessImage`. A failure there is logged, and the scan still succeeds, because every device
+was found. A SOEM scan leaves every slave in INIT, so the step does nothing for EtherCAT. The scan
+also records what it mapped in `observedExchanging_`, so the Monitor-mode follower does not map the
+same drive a second time.
+
+**The dictionary comes before the image, in every path that maps.** `buildProcessImage` binds each
+entry to its parameter cell when it builds the image. A device with no dictionary gets entries with
+no cell, so its values arrive and nothing decodes them until the next re-map. `transitionToState`
+was the only path that read the dictionary. `readMissingObjectDictionaries` now serves it, the scan
+and `followObservedStates`. It reads only devices with a live mailbox and no parameters, and it
+loads the parameter cache first.
+
+**The cost of the scan grows with the drives already in OP.** Measured on the 1.0 drive, one
+re-map took about 0.74 s: 0.35 s for the driver set-up and 0.38 s for the PDO mapping read. The
+first dictionary read of a drive model took about 12.5 s for 519 entries. The start time of that
+read is not certain, so treat the figure as rough. A cached dictionary loads in milliseconds. One SDO
+read on the 1.2 drive took about 10 ms. Every request goes through the driver-wide
+`controlPlaneMutex_`, so drives are read one after another.
+
+**The netX accepts only file names on a fixed list.** `AppSockIf_WriteFile` and
+`AppSockIf_ReadFile` (`AppSockIf_MessageHandler.c`) check every first packet with
+`AppUtil_ValidateFileName` (`App_Utils.c`). Read at firmware tag v5.6.11. The check is an exact
+`strcmp` against `filenames_whitelist`. It also accepts `fs-remove=` followed by a listed name,
+and it refuses a name of 49 characters or more. An unlisted name gets `SQI_BRG_FOE_ERR_NOT_FOUND`,
+0x01, and the SoC never sees the request. Only the SPoE handler calls this check, so FoE over
+EtherCAT does not have this limit. Three things follow from it:
+
+1. The EDS file in a firmware package is not on the list, so the install logs a warning on every
+   SPoE install.
+2. `removeDeviceFile` counts `FileNotFound` as success. A refused name therefore reports a delete
+   that did not happen.
+3. The driver reports 0x01 as "file not found", which is wrong when the drive refuses the name.
+
+**A second client is refused on 1.2 as on 1.0.** `hil/spoe/second_client.py` showed the firmware
+behaviour, not the specification's. The second client cannot connect, and the first keeps working.
+
+**A file write that gets no answer can leave the drive holding its only connection.** An install of
+a package for another fieldbus build sent the first packet of `app_firmware.bin` in BOOT. No reply
+came within 30 s, on all five attempts. A rescan closed the socket, which then stayed in FIN-WAIT-2,
+so the drive never closed its side. The port refused every connect until a power cycle. The drive
+survived that power cycle. The 1.0 drive failed an install in the same step earlier the same day,
+and after its power cycle it showed no link. The cause of either is not confirmed. Nobody read the
+SoC side.
+
+**Activation assumes the drive answers over SPoE afterwards.** A package that changes the drive to
+EtherCAT firmware installed correctly. The drive came up on EtherCAT with the new version in
+0x100A. But `activate-firmware` waits up to 120 s for an SPoE answer that never comes, and the
+procedure reports a failure.
+
+### Open
+
+Untested on hardware:
+
+- Process data in Control mode on protocol 1.2, and the scan mapping a drive that starts in OP.
+- The Control-mode watchdog, and what happens to the drive's single connection when Motion Master
+  stops without closing it. Protocol 1.0 has no idle timeout.
+- Monitor mode beside a PLC, including the follower reading the dictionary before a re-map.
+- Monitoring and the recorder over SPoE on 1.2.
+- A live dictionary read over 1.2. The 1.2 run loaded the dictionary from the cache, written by a
+  different firmware.
+- An SDO write, and a file write of a listed name.
+- A complete firmware install that stays on SPoE firmware.
+
+Known problems:
+
+- **Firmware install over SPoE.** A first packet with no reply leaves the drive unreachable until a
+  power cycle. The error does not say which packet went unanswered. Add the packet number and state
+  to file errors before the next investigation.
+- **A fieldbus change reports failure.** `activate-firmware` needs to accept a drive that stops
+  answering over SPoE, when the package changes the fieldbus.
+- **File names.** Report a refused first packet as a refused name, not as a missing file. Do not
+  count that refusal as a successful delete. Skip the EDS file over SPoE.
+- **One reply out of step.** The client discarded a reply with sequence id 1286 while it waited for
+  1290. The cause is unknown, and it did not repeat.
+
+Later:
+
+- **A lock per connection.** Drives are separate TCP connections, but `controlPlaneMutex_` is
+  driver-wide, so a scan or a re-map reads them one after another. A per-connection lock would let
+  them run in parallel. It changes the lock inventory in `docs/LOCKING.md`, so it needs its own
+  review.

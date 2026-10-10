@@ -2364,7 +2364,7 @@ class SomanetDrive : public Cia402Drive {
 
 /// @brief Validates that @p device is a SOMANET drive, then binds a view to it.
 ///
-/// Requires the vendor ID to be Synapticon's (@c kSynapticonVendorId) and the device to satisfy
+/// Requires the vendor ID to be a SOMANET one (@c isSomanetDevice) and the device to satisfy
 /// the CiA402 check (@c createCia402Drive). Both are offline-safe — vendor ID is immutable
 /// identity read at scan, the CiA402 check reads the parameter map — so no bus I/O is performed.
 ///

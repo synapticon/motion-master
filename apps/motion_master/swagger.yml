@@ -536,7 +536,7 @@ paths:
                 type: object
                 required:
                   [slavePosition, name, productName, vendorId, productCode, revisionNumber,
-                   serialNumber, isCia402, parametersUnavailable]
+                   serialNumber, isCia402, isSomanet, parametersUnavailable]
                 properties:
                   slavePosition:
                     type: integer
@@ -581,6 +581,14 @@ paths:
                       Whether the device implements the CiA402 drive profile (both controlword
                       0x6040 and statusword 0x6041 present in its object dictionary). Gates the
                       CiA402 motion-control endpoints under /api/devices/{slavePosition}/cia402.
+                    example: true
+                  isSomanet:
+                    type: boolean
+                    description: >
+                      Whether the device is a SOMANET device, which runs SOMANET firmware. The
+                      server decides this from the vendor ID: Synapticon (0x22D2) or Sensodrive
+                      (0x063A). Gates the SOMANET features, such as the SOMANET files and the
+                      SOMANET procedures.
                     example: true
                   parametersUnavailable:
                     type: boolean
@@ -3681,7 +3689,7 @@ paths:
                   type: object
                   required:
                     [slavePosition, name, productName, vendorId, productCode, revisionNumber,
-                     serialNumber, isCia402, parametersUnavailable]
+                     serialNumber, isCia402, isSomanet, parametersUnavailable]
                   properties:
                     slavePosition:
                       type: integer
@@ -3727,6 +3735,14 @@ paths:
                         0x6040 and statusword 0x6041 present in its object dictionary). Gates the
                         CiA402 motion-control endpoints under
                         /api/devices/{slavePosition}/cia402.
+                      example: true
+                    isSomanet:
+                      type: boolean
+                      description: >
+                        Whether the device is a SOMANET device, which runs SOMANET firmware. The
+                        server decides this from the vendor ID: Synapticon (0x22D2) or Sensodrive
+                        (0x063A). Gates the SOMANET features, such as the SOMANET files and the
+                        SOMANET procedures.
                       example: true
                     parametersUnavailable:
                       type: boolean

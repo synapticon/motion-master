@@ -81,6 +81,7 @@ syntaxError:*/spoe_connection_test.cc
 syntaxError:*/spoe_frame_test.cc
 syntaxError:*/spoe_fieldbus_driver_test.cc
 syntaxError:*/spoe_process_data_test.cc
+syntaxError:*/vendor_ids_test.cc
 
 // The ESI and ENI parsers build vectors by appending inside a range-for over an XML child range or
 // a parsed collection. cppcheck suggests std::transform/std::copy_if for each; rewriting them would

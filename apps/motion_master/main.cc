@@ -1,5 +1,9 @@
 #include <spdlog/spdlog.h>
 
+#ifdef MM_HAVE_MU_3SL
+#include <MU_3SL_interface.h>
+#endif
+
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
@@ -73,6 +77,10 @@ int main(int argc, char** argv) {
       mm::applyLoggingConfig(logSinks, opts.config.logging, userCacheRoot);
 
   spdlog::info("Motion Master v{}", mm::core::kVersion);
+#ifdef MM_HAVE_MU_3SL
+  // MU_3SL computes the iC-MU calibration, so a support log must say which build of it was loaded.
+  spdlog::info("MU_3SL v{}", MU_GetVersionString());
+#endif
   // Named once the file sink is up, so a support log says which config was in effect and where the
   // log itself is — neither of which is recoverable from the log's contents afterwards.
   spdlog::info("Config: {}", opts.configPath.empty() ? "built-in defaults" : opts.configPath);

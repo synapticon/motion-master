@@ -130,7 +130,7 @@ bool ParameterCache::enabledForVendor(uint32_t vendorId) const {
   if (!config_.enabled) {
     return false;
   }
-  return config_.cacheAllVendors || vendorId == kSynapticonVendorId;
+  return config_.cacheAllVendors || isSomanetDevice(vendorId);
 }
 
 fs::path ParameterCache::resolveDir() const {

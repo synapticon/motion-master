@@ -33,9 +33,6 @@ function apiError(err: unknown): string {
 // DD1317 is the fixed unlock key the firmware expects.
 const SOMANET_UNLOCK_COMMAND = 'fs-stackunlock=DD1317'
 
-// Synapticon vendor ID — gates the SOMANET-specific filesystem features below.
-const SYNAPTICON_VENDOR_ID = 0x000022d2
-
 // Well-known files present on SOMANET drives, with whether each may be written
 // back via FoE. `fs-getlist` is not a real file but a pseudo-command the firmware
 // interprets on read; it is read-only. Removal has its own pseudo-command, which the
@@ -159,7 +156,8 @@ export default function DeviceFoePage() {
     staleTime: Infinity,
   })
   const device = devicesQuery.data?.data.find(d => d.slavePosition === slavePosition)
-  const isSynapticon = device?.vendorId === SYNAPTICON_VENDOR_ID
+  // The server decides which devices are SOMANET. It gates the filesystem features below.
+  const isSomanet = device?.isSomanet ?? false
 
   const [filename, setFilename] = useState('')
   const [reading, setReading] = useState(false)
@@ -328,7 +326,7 @@ export default function DeviceFoePage() {
         throw new Error(json?.error ?? `HTTP ${response.status}`)
       }
       setWriteOk(true)
-      if (isSynapticon && files) handleList()
+      if (isSomanet && files) handleList()
     } catch (err) {
       setWriteError(err instanceof Error ? err.message : 'Unknown error')
     } finally {
@@ -392,7 +390,7 @@ export default function DeviceFoePage() {
                 className={inputCls}
               />
             </div>
-            {isSynapticon && (
+            {isSomanet && (
               <SomanetFileLinks files={SOMANET_READ_FILES} selected={filename} onPick={pickFilename} />
             )}
             <button onClick={() => handleRead()} disabled={!filename || reading} className={btnCls}>
@@ -413,7 +411,7 @@ export default function DeviceFoePage() {
         <section>
           <p className="eyebrow mb-5">Write File</p>
           <div className="border border-grey-200 p-5 space-y-4">
-            {isSynapticon && (
+            {isSomanet && (
               <div className="border-b border-grey-100 pb-4">
                 <label className={labelCls}>Stack Unlock</label>
                 <button onClick={handleUnlock} disabled={unlocking} className={btnOutlineCls}>
@@ -443,7 +441,7 @@ export default function DeviceFoePage() {
                 className={inputCls}
               />
             </div>
-            {isSynapticon && (
+            {isSomanet && (
               <SomanetFileLinks
                 files={SOMANET_WRITE_FILES}
                 selected={writeFilename}
@@ -495,7 +493,7 @@ export default function DeviceFoePage() {
 
         </div>
 
-        {isSynapticon && (
+        {isSomanet && (
           <section>
             <div className="flex items-center gap-4 mb-5">
               <p className="eyebrow">Files on Drive</p>

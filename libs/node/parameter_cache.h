@@ -10,24 +10,23 @@
 #include <vector>
 
 #include "node/device_parameter.h"
-#include "node/synapticon.h"  // kSynapticonVendorId
+#include "node/synapticon.h"  // isSomanetDevice
 
 namespace mm::node {
 
-// The cache is enabled by default only for @c kSynapticonVendorId: for this vendor the CoE object
-// dictionary is uniquely determined by @c (productCode, revisionNumber) — Synapticon bumps the
-// revision whenever the dictionary changes, so an on-disk cache keyed on identity alone can never
-// serve definitions that do not match the device. That guarantee does not hold for arbitrary
-// third-party vendors (see @c ParameterCacheConfig::cacheAllVendors).
+// The cache is enabled by default only for a SOMANET device (@c isSomanetDevice): for SOMANET
+// firmware the CoE object dictionary is uniquely determined by @c (productCode, revisionNumber) —
+// Synapticon bumps the revision whenever the dictionary changes, so an on-disk cache keyed on
+// identity alone can never serve definitions that do not match the device. That guarantee does not
+// hold for arbitrary third-party vendors (see @c ParameterCacheConfig::cacheAllVendors).
 
 /// @brief Policy and location for the on-disk parameter cache.
 ///
 /// Mirrors the JSONC @c parameterCache block (mapped into this struct in @c main.cc).
 struct ParameterCacheConfig {
-  bool cacheAllVendors =
-      false;              ///< false: cache Synapticon (0x22D2) only; true: cache every vendor.
-  std::string directory;  ///< "" = a standard per-user cache directory (see @c resolveDir).
-  bool enabled = true;    ///< Master switch for the whole cache (false disables it entirely).
+  bool cacheAllVendors = false;  ///< false: cache SOMANET devices only; true: cache every vendor.
+  std::string directory;         ///< "" = a standard per-user cache directory (see @c resolveDir).
+  bool enabled = true;  ///< Master switch for the whole cache (false disables it entirely).
 };
 
 /// @brief On-disk cache of CoE parameter *definitions*, keyed by device identity.

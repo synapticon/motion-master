@@ -250,6 +250,26 @@ TEST(ListProcedures, OffersNothingOnAnotherVendorsDevice) {
   EXPECT_TRUE(listings->empty());
 }
 
+TEST(ListProcedures, OffersASensodriveDeviceWhatASynapticonDeviceGets) {
+  // A Sensodrive device runs SOMANET firmware, so with the same object dictionary it supports the
+  // same procedures.
+  auto names = [](uint32_t vendorId) {
+    Bus bus(vendorId);
+    ProcedureManager manager(bus.dm);
+    auto listings = listProcedures(bus.dm, manager, 1);
+    EXPECT_TRUE(listings) << listings.error();
+    std::vector<std::string> result;
+    for (const auto& listing : listings.value_or(std::vector<mm::node::ProcedureListing>{})) {
+      result.push_back(listing.descriptor.name);
+    }
+    return result;
+  };
+
+  const auto synapticon = names(kSynapticonVendorId);
+  EXPECT_FALSE(synapticon.empty());
+  EXPECT_EQ(names(mm::comm::kSensodriveVendorId), synapticon);
+}
+
 TEST(ListProcedures, RejectsAnUnknownDevice) {
   Bus bus;
   ProcedureManager manager(bus.dm);

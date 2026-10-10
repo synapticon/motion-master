@@ -38,6 +38,10 @@
 # they are needed to link the Windows build.
 !extern/npcap-sdk-1.16/Lib/x64/*.lib
 
+# The vendored iC-Haus MU_3SL library is committed for the same reason. Its runtime files are
+# needed to run the iC-MU calibration.
+!extern/MU_3SL-3.4.2/bin/**
+
 # Executables
 *.exe
 *.out

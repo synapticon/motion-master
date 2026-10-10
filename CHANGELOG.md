@@ -19,6 +19,14 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **`GET /api/devices` reports `isSomanet` for each device.** It is true for a device that runs SOMANET firmware, which the server decides from the vendor ID.
+
+### Fixed
+
+- **A Sensodrive device is now treated as the SOMANET drive it is.** Sensodrive devices run SOMANET firmware under their own vendor ID, `0x063A`. They now get every SOMANET procedure, the SOMANET operation modes, file delete, the parameter cache by default, and the SOMANET files on the Console's FoE page.
+
 ## [6.0.0-alpha.88] - 2026-10-02
 
 ### Fixed

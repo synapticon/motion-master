@@ -36,6 +36,13 @@ add_executable(
 target_link_libraries(mm_node_tests PRIVATE mm::node mm::comm_spoe_fake GTest::gtest
                                             GTest::gtest_main)
 
+# mu_3sl_test.cc checks that the vendored MU_3SL links and loads. On Windows, test discovery runs
+# the test binary at build time, so the DLL must sit next to it by then.
+if(MM_HAVE_MU_3SL)
+  target_sources(mm_node_tests PRIVATE mu_3sl_test.cc)
+  mm_link_mu_3sl(mm_node_tests)
+endif()
+
 # The firmware package fixtures are read from the source tree, and eni_collector_test.cc writes the
 # collected ENI for the schema-validation test below. Hand both directories to the test rather than
 # letting it guess a path relative to cwd.

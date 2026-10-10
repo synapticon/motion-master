@@ -13,14 +13,15 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="$REPO_DIR/build/$PRESET/apps/motion_master"
 VERSION=$(cat "$REPO_DIR/VERSION")
 
-# deb and rpm spell the same machine differently, so each preset maps to a pair.
+# deb and rpm spell the same machine differently, so each preset maps to a pair. iC-Haus builds
+# MU_3SL for x86_64 only, so only the x64 packages carry it. The binary needs it to start.
 case "$PRESET" in
-    x64-linux-*)   DEB_ARCH=amd64; RPM_ARCH=x86_64 ;;
-    arm64-linux-*) DEB_ARCH=arm64; RPM_ARCH=aarch64 ;;
+    x64-linux-*)   DEB_ARCH=amd64; RPM_ARCH=x86_64; MU_3SL=libMU_3SL_interface.so.3 ;;
+    arm64-linux-*) DEB_ARCH=arm64; RPM_ARCH=aarch64; MU_3SL= ;;
     *) echo "Not a Linux packaging preset: $PRESET" >&2; exit 1 ;;
 esac
 
-for f in motion-master cert.pem key.pem; do
+for f in motion-master cert.pem key.pem $MU_3SL; do
     [[ -f "$BUILD_DIR/$f" ]] || { echo "Missing: $BUILD_DIR/$f" >&2; exit 1; }
 done
 
@@ -46,6 +47,9 @@ chmod 755 "$deb_root/opt/motion-master/motion-master" \
 chmod 644 "$deb_root/opt/motion-master/cert.pem" \
           "$deb_root/opt/motion-master/key.pem" \
           "$deb_root/opt/motion-master/motion-master.example.jsonc"
+if [[ -n "$MU_3SL" ]]; then
+    install -m 644 "$BUILD_DIR/$MU_3SL" "$deb_root/opt/motion-master/$MU_3SL"
+fi
 ln -sf /opt/motion-master/motion-master "$deb_root/usr/local/bin/motion-master"
 
 cat > "$deb_root/DEBIAN/control" <<EOF
@@ -84,6 +88,14 @@ cp "$REPO_DIR/setup.sh"       "$rpm_root/SOURCES/"
 cp "$REPO_DIR/install-auto-tuning.sh" "$rpm_root/SOURCES/"
 cp "$REPO_DIR/apps/motion_master/motion-master.example.jsonc" "$rpm_root/SOURCES/"
 
+MU_3SL_INSTALL=
+MU_3SL_FILES=
+if [[ -n "$MU_3SL" ]]; then
+    cp "$BUILD_DIR/$MU_3SL" "$rpm_root/SOURCES/"
+    MU_3SL_INSTALL="install -m 644 %{_sourcedir}/$MU_3SL %{buildroot}/opt/motion-master/"
+    MU_3SL_FILES="/opt/motion-master/$MU_3SL"
+fi
+
 cat > "$rpm_root/SPECS/motion-master.spec" <<SPEC
 Name:           motion-master
 Version:        ${RPM_VERSION}
@@ -108,6 +120,7 @@ install -m 644 %{_sourcedir}/key.pem       %{buildroot}/opt/motion-master/
 install -m 755 %{_sourcedir}/setup.sh      %{buildroot}/opt/motion-master/
 install -m 755 %{_sourcedir}/install-auto-tuning.sh %{buildroot}/opt/motion-master/
 install -m 644 %{_sourcedir}/motion-master.example.jsonc %{buildroot}/opt/motion-master/
+${MU_3SL_INSTALL}
 ln -sf /opt/motion-master/motion-master %{buildroot}/usr/local/bin/motion-master
 
 %post
@@ -131,6 +144,7 @@ fi
 /opt/motion-master/setup.sh
 /opt/motion-master/install-auto-tuning.sh
 /opt/motion-master/motion-master.example.jsonc
+${MU_3SL_FILES}
 /usr/local/bin/motion-master
 
 %changelog

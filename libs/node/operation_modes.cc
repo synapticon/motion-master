@@ -72,7 +72,7 @@ std::expected<OperationModes, std::string> deviceOperationModes(Device& device) 
 
   // Manufacturer modes first, so the list comes out ascending by value without a sort — SOMANET's
   // are all negative and already in order.
-  if (device.vendorId() == kSynapticonVendorId) {
+  if (isSomanetDevice(device.vendorId())) {
     for (const auto mode : somanet::kOperationModes) {
       result.modes.push_back(OperationModeInfo{
           .value = static_cast<int>(mode),

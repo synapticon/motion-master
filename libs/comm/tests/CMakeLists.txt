@@ -19,7 +19,8 @@ add_executable(
   spoe_connection_test.cc
   spoe_fieldbus_driver_test.cc
   spoe_process_data_test.cc
-  spoe_frame_test.cc)
+  spoe_frame_test.cc
+  vendor_ids_test.cc)
 
 target_link_libraries(mm_comm_tests PRIVATE mm::comm mm::comm_spoe_fake asio::asio GTest::gtest
                                             GTest::gtest_main)

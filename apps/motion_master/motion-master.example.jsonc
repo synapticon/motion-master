@@ -166,7 +166,8 @@
 
     // Which vendors to cache. The cache is keyed only on (vendor, product, revision), so it is only
     // correct for a vendor that bumps its revision whenever the object dictionary changes.
-    //   false (default): cache ONLY Synapticon devices (vendor 0x22D2), for which this holds.
+    //   false (default): cache ONLY SOMANET devices (vendor 0x22D2 or 0x063A), for which this
+    //                    holds.
     //   true:            cache EVERY vendor — enable only if you trust your other vendors' revision
     //                    discipline; otherwise a firmware change that reuses a revision could serve
     //                    mismatched definitions.

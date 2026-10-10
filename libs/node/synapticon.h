@@ -7,13 +7,18 @@
 
 namespace mm::node {
 
-/// @brief Synapticon's EtherCAT Vendor ID (object 0x1018:01), the discriminator for a SOMANET
-///        drive.
+/// @brief Synapticon's EtherCAT Vendor ID (object 0x1018:01).
 ///
-/// The value lives in @c comm/vendor_ids.h, because the fieldbus driver needs it too. This name
-/// lets the profile-view chain (@c SomanetDrive) and the object-dictionary cache
-/// (@c ParameterCache) share it without either one depending on the headers of the other.
+/// The value lives in @c comm/vendor_ids.h, because the fieldbus driver needs it too. A SOMANET
+/// device is not recognised by this ID alone. Use @c isSomanetDevice for that.
 using mm::comm::kSynapticonVendorId;
+
+/// @brief Whether a device with this vendor ID is a SOMANET device.
+///
+/// Lives in @c comm/vendor_ids.h for the same reason as @c kSynapticonVendorId. This name lets the
+/// profile-view chain (@c SomanetDrive), the procedure catalogue and the object-dictionary cache
+/// (@c ParameterCache) share it without either one depending on the headers of the other.
+using mm::comm::isSomanetDevice;
 
 /// @brief Known SOMANET product codes (object 0x1018:02) under @c kSynapticonVendorId.
 ///

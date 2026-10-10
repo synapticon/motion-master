@@ -247,11 +247,8 @@ TEST(DeviceManagerMailbox, PreOpStateMarksMailboxActive) {
   ASSERT_TRUE(dm.init(std::move(driver)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
-  // Devices start with no mailbox until a state read establishes availability.
+  // The scan reads the device states, so the mailbox is known to be live at once.
   ASSERT_TRUE(dm.hasDevice(1));
-  EXPECT_FALSE(mailboxActive(dm, 1));
-
-  ASSERT_TRUE(dm.deviceStates({}).has_value());
   EXPECT_TRUE(mailboxActive(dm, 1));
 
   // Dropping back to INIT must flip the mailbox inactive again.

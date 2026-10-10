@@ -721,8 +721,16 @@ paths:
       operationId: scan
       description: >
         Scans the fieldbus for slaves and configures their sync managers and FMMUs.
-        Must be called after a successful POST /api/init. Slaves remain in INIT state
-        after this call; state transitions are driven by subsequent API calls.
+        Must be called after a successful POST /api/init. With SOEM, slaves remain in INIT
+        state after this call, and state transitions are driven by subsequent API calls.
+
+
+        An SPoE drive starts in OP. When a scan finds a device already in SAFE-OP or OP, it
+        reads that device's object dictionary and publishes the process image, so the
+        exchange starts with no state change. The dictionary comes from the parameter cache
+        when the cache has it. Otherwise the first read of a drive model takes several
+        seconds. If this step fails, the scan still returns 200 and the server logs a
+        warning. A later state change to SAFE-OP or OP maps the image again.
 
 
         An empty bus is a successful scan returning 0 slaves, not an error: the master

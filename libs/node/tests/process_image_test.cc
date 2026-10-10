@@ -213,9 +213,61 @@ TEST(DeviceManagerFollowState, PublishesTheImageWhenAnotherMasterReachesOp) {
   EXPECT_TRUE(dm.processDataConfigured());
   EXPECT_EQ(raw->configureCalls, 1);
   EXPECT_EQ(dm.expectedWorkingCounter(), 3);
+  // The dictionary is read before the image is built, so each entry has a cell to decode into.
+  EXPECT_TRUE(dm.deviceAt(1)->hasParameters());
+  raw->cannedInputs = {0x37, 0x02, 0x44, 0x33, 0x22, 0x11};
+  dm.exchangeProcessData();
+  EXPECT_EQ(dm.deviceAt(1)->value<uint16_t>(0x6041, 0x00), std::optional<uint16_t>(0x0237));
 
   // Nothing changed, so nothing is re-mapped.
   ASSERT_TRUE(dm.followObservedStates().has_value());
+  EXPECT_EQ(raw->configureCalls, 1);
+}
+
+TEST(DeviceManagerScan, MapsADeviceTheScanFindsInOp) {
+  // An SPoE drive starts in OP, so no transitionToState publishes its image.
+  auto bus = mm::node::testing::makeCia402Bus();
+  FakeBus* raw = bus.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  EXPECT_TRUE(dm.processDataConfigured());
+  EXPECT_EQ(raw->configureCalls, 1);
+  EXPECT_EQ(dm.expectedWorkingCounter(), 3);
+  // The dictionary is read before the image is built, so each entry has a cell to decode into.
+  EXPECT_TRUE(dm.deviceAt(1)->hasParameters());
+  raw->cannedInputs = {0x37, 0x02, 0x44, 0x33, 0x22, 0x11};
+  dm.exchangeProcessData();
+  EXPECT_EQ(dm.deviceAt(1)->value<uint16_t>(0x6041, 0x00), std::optional<uint16_t>(0x0237));
+}
+
+TEST(DeviceManagerScan, LeavesADeviceBelowSafeOpUnmapped) {
+  // A SOEM scan leaves every slave below SAFE-OP. The scan then reads nothing more.
+  auto bus = mm::node::testing::makeCia402Bus();
+  bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
+  FakeBus* raw = bus.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  EXPECT_FALSE(dm.processDataConfigured());
+  EXPECT_EQ(raw->configureCalls, 0);
+  EXPECT_FALSE(dm.deviceAt(1)->hasParameters());
+}
+
+TEST(DeviceManagerFollowState, DoesNotReMapWhatTheScanMapped) {
+  // SPoE in Monitor mode with the drive in OP: the scan maps it, and the follower agrees.
+  auto bus = mm::node::testing::makeCia402Bus();
+  bus->refusal = "a PLC owns the state";
+  FakeBus* raw = bus.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_EQ(raw->configureCalls, 1);
+
+  ASSERT_TRUE(dm.followObservedStates().has_value());
+  EXPECT_TRUE(dm.processDataConfigured());
   EXPECT_EQ(raw->configureCalls, 1);
 }
 
@@ -402,6 +454,8 @@ TEST(CycleGuard, IsFalsyBeforeAnImageIsPublished) {
     EXPECT_FALSE(static_cast<bool>(cycle));
   }
   auto bus = makeCia402Bus();
+  // Below SAFE-OP, so the scan publishes no image.
+  bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
   const DeviceManager::CycleGuard cycle(dm);  // scanned, but not yet mapped
@@ -802,12 +856,17 @@ TEST(DeviceManagerProcessData, MappingConfiguredAndTornDownReactingToState) {
   const auto kTimeout = std::chrono::milliseconds(10);
   auto bus = makeCia402Bus();
   bus->cannedInputs = {0x01, 0x02, 0x03, 0x04, 0x05, 0x06};
+  // Below SAFE-OP, as a SOEM scan leaves every slave, so the scan publishes no image.
+  bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
   FakeBus* busPtr = bus.get();
 
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
   ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  // The fake reports one state and does not follow a transition. From OP every step below passes
+  // the transition check.
+  busPtr->state = static_cast<uint16_t>(EtherCatState::Op);
 
   EXPECT_FALSE(dm.processDataConfigured());
 
@@ -863,8 +922,8 @@ TEST(DeviceManagerProcessData, SubsetDownKeepsOthersExchangingAndRejoinRemaps) {
 
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  // The scan finds both devices in OP and maps them.
   ASSERT_TRUE(dm.scan().has_value());
-  ASSERT_TRUE(dm.configureProcessData().has_value());
   EXPECT_TRUE(dm.processDataConfigured());
   EXPECT_EQ(dm.processImageInfo().generations, 1u);
 
@@ -1022,8 +1081,8 @@ TEST(DeviceManagerProcessData, CountsCyclesTheBusDidNotFullyAnswer) {
 
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  // The scan finds both devices in OP and maps them.
   ASSERT_TRUE(dm.scan().has_value());
-  ASSERT_TRUE(dm.configureProcessData().has_value());
   dm.exchangeProcessData();
   ASSERT_EQ(dm.processImageInfo().shortWkcCycles, 0u);
 
@@ -1232,6 +1291,8 @@ TEST(DeviceManagerSampling, PdoSampleSpecResolvesInputAndOutputObjects) {
 
 TEST(DeviceManagerSampling, PdoSampleSpecRejectsUnmappedAndUnconfigured) {
   auto bus = makeCia402Bus();
+  // Below SAFE-OP, so the scan publishes no image.
+  bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
   DeviceManager dm;
   ASSERT_TRUE(dm.init(std::move(bus)).has_value());
   ASSERT_TRUE(dm.scan().has_value());

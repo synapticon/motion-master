@@ -14,6 +14,7 @@
 #include <shared_mutex>
 #include <span>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -325,6 +326,10 @@ class DeviceManager {
   ///
   /// Must be called after @c init(). Forwards to @c FieldbusDriver::scan().
   ///
+  /// When a device is already in SAFE-OP or OP after the scan, this reads its object dictionary and
+  /// publishes the process image, as @c transitionToState would. An SPoE drive starts in OP, so no
+  /// state change brings it there. A failure of that step is logged, and the scan still succeeds.
+  ///
   /// @return Number of nodes found on success, or an error string on failure.
   std::expected<int, std::string> scan();
 
@@ -608,7 +613,8 @@ class DeviceManager {
   /// where the image is otherwise published. This reads every state and does what
   /// @c transitionToState would have done. When a device is seen entering SAFE-OP or OP, the image
   /// is re-mapped, which also reads the PDO mapping again, because the other master can change it
-  /// in PRE-OP. When no device exchanges any more, the image is torn down.
+  /// in PRE-OP. The object dictionary of that device is read before the re-map, when it has none.
+  /// When no device exchanges any more, the image is torn down.
   ///
   /// One pass, with no thread of its own. The caller repeats it, the way the composition root does
   /// while the driver refuses state changes. Takes @c busOperationMutex_.
@@ -879,10 +885,28 @@ class DeviceManager {
   /// since each output object's value already lives in its own parameter's cell, which is what the
   /// composer reads. **The caller must hold @c busOperationMutex_**, which is what keeps the
   /// published set from changing underneath it; the ring re-allocation takes @c processDataMutex_
-  /// exclusively for its own brief window. Two callers compose it: the public
-  /// @c configureProcessData and @c transitionToState (when a (re)joining device requires a
-  /// re-map).
+  /// exclusively for its own brief window. Its callers are the public @c configureProcessData,
+  /// @c transitionToState when a (re)joining device requires a re-map, @c followObservedStates,
+  /// and @c scan when it finds a device already in SAFE-OP or OP.
   std::expected<void, std::string> remapProcessImage();
+
+  /// @brief Reads the object dictionary of each device in @p positions that has no parameters yet.
+  ///
+  /// Only devices with a live CoE mailbox are read, which is PRE-OP and up. The read is definitions
+  /// only and cache-first, so a device model pays for the slow enumeration once, and every later
+  /// scan of the same hardware loads the cache. With the dictionary in place, recorder dumps,
+  /// monitoring and the Parameters page have names and data types without a manual read. A failure
+  /// is logged and not returned. @p occasion completes the log line, for example "on reaching OP".
+  /// The caller must hold @c busOperationMutex_.
+  void readMissingObjectDictionaries(DeviceSet& set, std::span<const uint16_t> positions,
+                                     std::string_view occasion);
+
+  /// @brief Publishes the process image when a scan finds devices already in SAFE-OP or OP.
+  ///
+  /// The dictionary of those devices is read first, because @c buildProcessImage binds each entry
+  /// to its parameter cell. A failure is logged and not returned. The caller must hold
+  /// @c busOperationMutex_.
+  void mapDevicesAlreadyExchanging(DeviceSet& set);
 
   /// @brief Resolves a caller-supplied position list to validated bus positions.
   ///

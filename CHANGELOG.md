@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.90] - 2026-10-10
+
 ### Fixed
 
 - **The Console's Update button now loads the new version every time.** It often did nothing when the new version was downloaded in an earlier visit or in another tab, and the old Console stayed on screen. The button now shows "Updating…" and reloads the page once the new version takes over. If you run 6.0.0-alpha.89 or older, reload the page once by hand, because the old button is part of the version you run.
@@ -840,7 +842,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.89...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.90...HEAD
+[6.0.0-alpha.90]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.89...v6.0.0-alpha.90
 [6.0.0-alpha.89]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.88...v6.0.0-alpha.89
 [6.0.0-alpha.88]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.87...v6.0.0-alpha.88
 [6.0.0-alpha.87]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.86...v6.0.0-alpha.87

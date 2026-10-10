@@ -64,8 +64,11 @@ struct SpoeFieldbusDriverConfig {
 /// the inputs never lag the drive by more than this many RT cycles.
 constexpr std::size_t kInputQueueLimit = 30;
 
-/// The SPoE protocol versions this driver speaks. The firmware reports 0x0102.
-constexpr uint16_t kSupportedProtocolVersion = 0x0102;
+/// The SPoE protocol versions this driver speaks. Version 1.0 reports no PDO mode in its server
+/// information and has no `WATCHDOG_TIMEOUT` message, so its Control-mode watchdog is fixed in the
+/// firmware.
+constexpr uint16_t kProtocolVersion100 = 0x0100;
+constexpr uint16_t kProtocolVersion102 = 0x0102;
 
 /// The size of one parameter-list entry, the firmware's `struct _sdoinfo_entry_description` as it
 /// lies in memory. The layout follows the natural alignment of its members, which is not confirmed

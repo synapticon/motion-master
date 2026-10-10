@@ -80,6 +80,26 @@ TEST(SpoeFieldbusDriver, ScanReadsTheIdentityAndTheState) {
   EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(EtherCatState::PreOp));
 }
 
+TEST(SpoeFieldbusDriver, ScanIdentifiesAProtocolVersion100Drive) {
+  FakeSpoeServer server;
+  setIdentity(server);
+  server.setProtocolVersion(mm::comm::testing::kSpoeProtocolVersion100);
+  SpoeFieldbusDriver driver(configFor(server));
+  ASSERT_EQ(driver.scan().value_or(0), 1);
+  EXPECT_EQ(driver.slaveInfo(1).vendorId, 0x22D2U);
+  EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(EtherCatState::PreOp));
+}
+
+TEST(SpoeFieldbusDriver, ScanRefusesAnUnknownProtocolVersion) {
+  FakeSpoeServer server;
+  setIdentity(server);
+  server.setProtocolVersion(0x0200);
+  SpoeFieldbusDriver driver(configFor(server));
+  ASSERT_EQ(driver.scan().value_or(0), 1);
+  EXPECT_EQ(driver.slaveInfo(1).vendorId, 0U);
+  EXPECT_EQ(driver.slaveState(1), 0U);
+}
+
 TEST(SpoeFieldbusDriver, ScanLeavesTheIdentityEmptyInInit) {
   // The firmware refuses every SDO in INIT and BOOT, the identity objects included.
   FakeSpoeServer server;
@@ -313,6 +333,22 @@ TEST(SpoeFieldbusDriver, MonitorModeSetsNoWatchdog) {
   ASSERT_TRUE(driver.configureProcessData().has_value());
   EXPECT_EQ(server.pdoMode(), mm::comm::testing::kSpoePdoModeMonitor);
   EXPECT_FALSE(server.watchdogTimeoutMs().has_value());
+  driver.stop();
+}
+
+TEST(SpoeFieldbusDriver, ProtocolVersion100ControlModeSetsNoWatchdog) {
+  // Version 1.0 has no WATCHDOG_TIMEOUT, and the firmware clears its "SPoE active" flag on a
+  // message it does not know.
+  FakeSpoeServer server;
+  setPdoMapping(server);
+  server.setProtocolVersion(mm::comm::testing::kSpoeProtocolVersion100);
+  SpoeFieldbusDriver driver(configFor(server, SpoeMode::kControl));
+  ASSERT_TRUE(driver.scan().has_value());
+  const auto configured = driver.configureProcessData();
+  ASSERT_TRUE(configured.has_value()) << configured.error();
+  EXPECT_EQ(server.pdoMode(), mm::comm::testing::kSpoePdoModeControl);
+  EXPECT_FALSE(server.watchdogTimeoutMs().has_value());
+  EXPECT_TRUE(server.spoeActive());
   driver.stop();
 }
 

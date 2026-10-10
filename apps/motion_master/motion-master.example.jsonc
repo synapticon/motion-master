@@ -47,6 +47,7 @@
     //   // observes. control: Motion Master owns the state.
     //   "mode": "monitor",
     //   // control only. The drive faults when no SPoE message arrives for this long. At least 50.
+    //   // Firmware with SPoE protocol 1.0 cannot set it and uses a fixed watchdog.
     //   "watchdogMs": 75,
     //   "port": 8080
     // },

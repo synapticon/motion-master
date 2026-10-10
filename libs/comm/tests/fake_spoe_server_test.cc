@@ -155,6 +155,16 @@ TEST(FakeSpoeServer, ServerInfoReportsTheVersionLittleEndianAndThePdoMode) {
   EXPECT_EQ(frame.data, (std::vector<uint8_t>{0x02, 0x01, mm::comm::testing::kSpoePdoModeNone}));
 }
 
+TEST(FakeSpoeServer, ProtocolVersion100ReportsNoPdoModeAndNoWatchdog) {
+  FakeSpoeServer server;
+  server.setProtocolVersion(mm::comm::testing::kSpoeProtocolVersion100);
+  Client client(server.port());
+  EXPECT_EQ(client.request(SpoeMessage::kServerInfo, 1).data, (std::vector<uint8_t>{0x00, 0x01}));
+  client.request(SpoeMessage::kWatchdogTimeout, 2, {75, 0, 0, 0});
+  EXPECT_FALSE(server.watchdogTimeoutMs().has_value());
+  EXPECT_FALSE(server.spoeActive());
+}
+
 TEST(FakeSpoeServer, SdoReadAnswersTheValueOrTheFirmwareError) {
   FakeSpoeServer server;
   server.setObject(0x6041, 0, {0x37, 0x02});

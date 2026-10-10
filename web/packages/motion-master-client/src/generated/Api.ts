@@ -471,7 +471,7 @@ export class Api<
          */
         mode?: "monitor" | "control";
         /**
-         * Control mode only. The drive faults when no SPoE message arrives for this long. At least 50.
+         * Control mode only. The drive faults when no SPoE message arrives for this long. At least 50. Firmware with SPoE protocol 1.0 cannot set it and uses a fixed watchdog.
          * @min 50
          * @default 75
          */

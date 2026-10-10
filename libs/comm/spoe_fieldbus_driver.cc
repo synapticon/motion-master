@@ -9,6 +9,7 @@
 #include <memory>
 #include <mutex>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -37,6 +38,14 @@ constexpr uint8_t kPacketLast = 0x40;
 // dictionary fits far fewer packets than this. The bound only stops a drive that never sends the
 // last packet.
 constexpr int kMaxParameterListPackets = 2000;
+
+// The protocol version from a server information reply. The firmware writes it low byte first.
+std::optional<uint16_t> protocolVersion(const Frame& reply) {
+  if (reply.data.size() < 2) {
+    return std::nullopt;
+  }
+  return static_cast<uint16_t>(reply.data[0] | (reply.data[1] << 8));
+}
 
 // The SDO status `AppUtil_GetParameter` and `AppUtil_SetParameter` answer in INIT and BOOT.
 constexpr uint16_t kSdoNotAllowedInState = 0xFFFF;
@@ -134,6 +143,8 @@ struct SpoeFieldbusDriver::Drive {
   std::atomic<uint16_t> state{0};
   // Written by scan and read by slaveInfo, both under controlPlaneMutex_.
   SlaveInfo info;
+  // The protocol version from the server information, or 0 when none is known.
+  std::atomic<uint16_t> protocolVersion{0};
 
   // Process data. The window is written by configureProcessData while no exchange runs, and is
   // read by the RT thread and the exchange thread after that.
@@ -212,6 +223,7 @@ std::expected<void, std::string> SpoeFieldbusDriver::init() {
 void SpoeFieldbusDriver::connectAndIdentify(Drive& drive) {
   drive.info = SlaveInfo{};
   drive.state.store(0);
+  drive.protocolVersion.store(0);
   if (auto connected = drive.connection.connect(drive.host, config_.port, config_.connectTimeout);
       !connected) {
     spdlog::warn("{}. The device keeps its position with no state known.", connected.error());
@@ -219,22 +231,27 @@ void SpoeFieldbusDriver::connectAndIdentify(Drive& drive) {
   }
 
   const auto info = request(drive, MessageType::kServerInfo, {});
-  if (!info || info->data.size() < 3) {
+  const auto version = info ? protocolVersion(*info) : std::nullopt;
+  if (!version) {
     spdlog::warn("SPoE {}: no server information: {}", drive.host,
                  info ? "the reply is too short" : info.error());
     drive.connection.close();
     return;
   }
-  // The firmware writes the version low byte first.
-  const auto version = static_cast<uint16_t>(info->data[0] | (info->data[1] << 8));
-  if (version != kSupportedProtocolVersion) {
-    spdlog::error("SPoE {}: protocol version 0x{:04X} is not supported, only 0x{:04X} is",
-                  drive.host, version, kSupportedProtocolVersion);
+  if (*version != kProtocolVersion100 && *version != kProtocolVersion102) {
+    spdlog::error(
+        "SPoE {}: protocol version 0x{:04X} is not supported, only 0x{:04X} and 0x{:04X} are",
+        drive.host, *version, kProtocolVersion100, kProtocolVersion102);
     drive.connection.close();
     return;
   }
-  spdlog::info("SPoE {}: protocol version 0x{:04X}, PDO mode {}", drive.host, version,
-               info->data[2]);
+  drive.protocolVersion.store(*version);
+  if (info->data.size() >= 3) {
+    spdlog::info("SPoE {}: protocol version 0x{:04X}, PDO mode {}", drive.host, *version,
+                 info->data[2]);
+  } else {
+    spdlog::info("SPoE {}: protocol version 0x{:04X}", drive.host, *version);
+  }
 
   const auto state = request(drive, MessageType::kStateRead, {});
   if (!state || state->data.empty()) {
@@ -378,7 +395,13 @@ std::expected<void, std::string> SpoeFieldbusDriver::configureProcessData() {
       return std::unexpected(std::format("SPoE {}: the drive refused PDO mode {}", drive->host,
                                          static_cast<int>(mode)));
     }
-    if (config_.mode == SpoeMode::kControl) {
+    if (config_.mode == SpoeMode::kControl &&
+        drive->protocolVersion.load() == kProtocolVersion100) {
+      spdlog::warn(
+          "SPoE {}: protocol version 0x{:04X} cannot set the watchdog, so the firmware's fixed "
+          "watchdog applies and spoe.watchdogMs has no effect",
+          drive->host, kProtocolVersion100);
+    } else if (config_.mode == SpoeMode::kControl) {
       const uint32_t ms = config_.watchdogMs;
       const std::vector<uint8_t> timeout{static_cast<uint8_t>(ms), static_cast<uint8_t>(ms >> 8),
                                          static_cast<uint8_t>(ms >> 16),
@@ -968,6 +991,8 @@ std::expected<FieldbusDriver::FirmwareActivation, std::string> SpoeFieldbusDrive
     const auto state =
         info ? request(drive, MessageType::kStateRead, {}) : std::unexpected(info.error());
     if (state && !state->data.empty()) {
+      // The new firmware can speak another protocol version.
+      drive.protocolVersion.store(protocolVersion(*info).value_or(0));
       drive.state.store(state->data[0]);
       spdlog::info("SPoE {}: the drive answers again after the firmware update, in {}", drive.host,
                    toString(alState(state->data[0])));

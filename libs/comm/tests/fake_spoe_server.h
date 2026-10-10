@@ -85,6 +85,9 @@ constexpr std::size_t kSpoeMaxDataSize = 512;
 
 /// The protocol version the firmware reports in the server information, 1.2.
 constexpr uint16_t kSpoeProtocolVersion = 0x0102;
+/// The protocol version of firmware before `WATCHDOG_TIMEOUT` existed, 1.0. Its server information
+/// carries no PDO mode, and it does not know `WATCHDOG_TIMEOUT`.
+constexpr uint16_t kSpoeProtocolVersion100 = 0x0100;
 
 /// `ETHERNET_PDO_MODE_*` in the firmware.
 constexpr uint8_t kSpoePdoModeNone = 0x00;
@@ -188,6 +191,10 @@ class FakeSpoeServer {
 
   /// Makes every later state change fail, as the firmware does when the variant check fails.
   void setRefuseStateChanges(bool refuse);
+
+  /// Answers as the firmware of this protocol version: `kSpoeProtocolVersion` or
+  /// `kSpoeProtocolVersion100`.
+  void setProtocolVersion(uint16_t version);
 
   uint8_t pdoMode() const;
   bool locating() const;

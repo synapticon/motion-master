@@ -39,7 +39,8 @@ struct SpoeConfig {
   /// PLC controls.
   std::string mode = "monitor";
   /// Control mode only. The drive faults when no SPoE message arrives for this long. The firmware
-  /// accepts 50 ms at least.
+  /// accepts 50 ms at least. Firmware with SPoE protocol 1.0 cannot set it and uses a fixed
+  /// watchdog.
   uint32_t watchdogMs = 75;
   uint16_t port = 8080;  ///< The TCP port of the SPoE server on every drive.
 };

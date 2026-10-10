@@ -129,6 +129,7 @@ struct FakeSpoeServer::Impl {
   uint16_t maxSubindexLatch = 0;
   uint8_t state = kSpoeStatePreOp;
   bool refuseStateChanges = false;
+  uint16_t protocolVersion = kSpoeProtocolVersion;
   uint8_t pdoMode = kSpoePdoModeNone;
   bool locating = false;
   std::optional<uint32_t> watchdogTimeoutMs;
@@ -590,10 +591,15 @@ std::optional<Reply> FakeSpoeServer::Impl::handle(const Request& request) {
     case SpoeMessage::kStateRead:
       return Reply{.status = 0, .data = {state}};
 
-    case SpoeMessage::kServerInfo:
-      return Reply{.status = 0,
-                   .data = {static_cast<uint8_t>(kSpoeProtocolVersion & 0xFF),
-                            static_cast<uint8_t>(kSpoeProtocolVersion >> 8), pdoMode}};
+    case SpoeMessage::kServerInfo: {
+      Reply reply{.status = 0,
+                  .data = {static_cast<uint8_t>(protocolVersion & 0xFF),
+                           static_cast<uint8_t>(protocolVersion >> 8)}};
+      if (protocolVersion != kSpoeProtocolVersion100) {
+        reply.data.push_back(pdoMode);
+      }
+      return reply;
+    }
 
     case SpoeMessage::kDeviceLocate:
       // The status echoes the LED state: 1 when it starts, 0 when it stops.
@@ -601,6 +607,9 @@ std::optional<Reply> FakeSpoeServer::Impl::handle(const Request& request) {
       return Reply{.status = static_cast<uint16_t>(locating ? 1 : 0), .data = {}};
 
     case SpoeMessage::kWatchdogTimeout:
+      if (protocolVersion == kSpoeProtocolVersion100) {
+        break;
+      }
       watchdogTimeoutMs = std::max(readU32(data, 0), kWatchdogMinimumMs);
       return Reply{};
 
@@ -725,6 +734,11 @@ uint8_t FakeSpoeServer::pdoMode() const {
 bool FakeSpoeServer::locating() const {
   const std::scoped_lock lock(impl_->mutex);
   return impl_->locating;
+}
+
+void FakeSpoeServer::setProtocolVersion(uint16_t version) {
+  const std::scoped_lock lock(impl_->mutex);
+  impl_->protocolVersion = version;
 }
 
 std::optional<uint32_t> FakeSpoeServer::watchdogTimeoutMs() const {

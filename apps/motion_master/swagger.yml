@@ -671,7 +671,8 @@ paths:
                       type: integer
                       description: >
                         Control mode only. The drive faults when no SPoE message arrives for this
-                        long. At least 50.
+                        long. At least 50. Firmware with SPoE protocol 1.0 cannot set it and uses a
+                        fixed watchdog.
                       minimum: 50
                       default: 75
                     port:

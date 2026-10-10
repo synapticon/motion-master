@@ -5,11 +5,13 @@
 #include <asio.hpp>
 #include <chrono>
 #include <cstdio>
+#include <format>
 #include <future>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <span>
+#include <string>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -105,8 +107,30 @@ struct FakeSpoeServer::Impl {
 
   mutable std::mutex mutex;
   std::map<std::pair<uint16_t, uint16_t>, std::vector<uint8_t>> objects;
+  std::map<std::pair<uint16_t, uint16_t>, FakeSpoeEntry> descriptions;
+  // Files, and the transfer in progress. The firmware keeps one transfer at a time.
+  std::map<std::string, std::vector<uint8_t>> files;
+  std::string readName;
+  std::vector<uint8_t> readContent;
+  std::size_t readOffset = 0;
+  std::string writeName;
+  std::vector<uint8_t> writeContent;
+  bool writing = false;
+  // The firmware update: requests counted, and the restart that follows.
+  int firmwareUpdates = 0;
+  std::chrono::milliseconds resetDelay{300};
+  std::chrono::milliseconds restartDuration{500};
+  std::chrono::steady_clock::time_point restartedAt{};
+  bool restarting = false;
+  // The parameter-list cursor, as `AppSockIf_ReadObjectInfo` keeps it in static variables.
+  std::vector<uint16_t> listedIndexes;
+  std::size_t nextIndexPosition = 0;
+  uint16_t nextSubindex = 0;
+  uint16_t maxSubindexLatch = 0;
   uint8_t state = kSpoeStatePreOp;
   bool refuseStateChanges = false;
+  bool refuseFileWrites = false;
+  uint16_t protocolVersion = kSpoeProtocolVersion;
   uint8_t pdoMode = kSpoePdoModeNone;
   bool locating = false;
   std::optional<uint32_t> watchdogTimeoutMs;
@@ -114,6 +138,7 @@ struct FakeSpoeServer::Impl {
   std::vector<uint8_t> inputBuffer;
   std::vector<uint8_t> lastOutputs;
   std::optional<SpoeFault> nextFault;
+  int requestsBeforeFault = 0;
   std::chrono::milliseconds replyDelay{0};
   int connections = 0;
   int ignoredConnections = 0;
@@ -128,6 +153,13 @@ struct FakeSpoeServer::Impl {
   // Called with `mutex` held. Returns no reply for a request the fake does not model.
   std::optional<Reply> handle(const Request& request);
   Reply readSdo(uint16_t index, uint16_t subindex) const;
+  std::vector<uint16_t> indexList() const;
+  uint16_t maxSubindex(uint16_t index) const;
+  std::vector<uint8_t> encodeEntry(uint16_t index, uint16_t subindex) const;
+  Reply paramFullDesc(uint8_t packetState);
+  Reply fileRead(uint8_t packetState, std::span<const uint8_t> data);
+  Reply fileWrite(uint8_t packetState, std::span<const uint8_t> data);
+  std::vector<uint8_t> fileList() const;
   uint16_t sdoLookupStatus(uint16_t index, uint16_t subindex) const;
 };
 
@@ -138,6 +170,20 @@ asio::awaitable<void> FakeSpoeServer::Impl::acceptLoop() {
       co_return;
     }
     asio::error_code ignored;
+    {
+      // While the drive restarts after a firmware update, nothing serves the port.
+      const std::scoped_lock lock(mutex);
+      if (restarting && std::chrono::steady_clock::now() < restartedAt) {
+        closeSocket(socket);
+        continue;
+      }
+      if (restarting) {
+        // The new firmware comes up in PRE-OP, as the firmware does outside EtherCAT.
+        restarting = false;
+        state = kSpoeStatePreOp;
+        pdoMode = kSpoePdoModeNone;
+      }
+    }
     // A split reply must leave in several segments. Nagle's algorithm would merge them again.
     (void)socket.set_option(tcp::no_delay(true), ignored);
     if (client) {
@@ -187,7 +233,11 @@ asio::awaitable<void> FakeSpoeServer::Impl::serve(std::shared_ptr<tcp::socket> s
     {
       const std::scoped_lock lock(mutex);
       ++requests;
-      fault = std::exchange(nextFault, std::nullopt);
+      if (requestsBeforeFault > 0) {
+        --requestsBeforeFault;
+      } else {
+        fault = std::exchange(nextFault, std::nullopt);
+      }
       delay = replyDelay;
       reply = handle(request);
       if (!reply) {
@@ -196,6 +246,11 @@ asio::awaitable<void> FakeSpoeServer::Impl::serve(std::shared_ptr<tcp::socket> s
     }
     if (!reply) {
       break;
+    }
+    if (fault == SpoeFault::kLoseParamListPacket &&
+        request.type == static_cast<uint8_t>(SpoeMessage::kParamFullDesc)) {
+      reply->data.clear();
+      reply->status = static_cast<uint16_t>((reply->status & 0xFF00) | kSpoeReplyBusy);
     }
     if (delay.count() > 0) {
       asio::steady_timer timer(io, delay);
@@ -251,6 +306,20 @@ asio::awaitable<void> FakeSpoeServer::Impl::serve(std::shared_ptr<tcp::socket> s
     if (auto [ec, n] = co_await asio::async_write(*socket, asio::buffer(frame), kNoThrow); ec) {
       break;
     }
+    if (request.type == static_cast<uint8_t>(SpoeMessage::kFirmwareUpdate)) {
+      // `AppSockIf_StartUpdateReq` asks for the reset after `ulTimeToReset`. Until then the drive
+      // reads nothing more, and the reset drops the connection without a word.
+      std::chrono::milliseconds wait{0};
+      {
+        const std::scoped_lock lock(mutex);
+        wait = resetDelay;
+        restarting = true;
+        restartedAt = std::chrono::steady_clock::now() + resetDelay + restartDuration;
+      }
+      asio::steady_timer timer(io, wait);
+      co_await timer.async_wait(kNoThrow);
+      break;
+    }
   }
   closeSocket(*socket);
   if (client == socket) {
@@ -278,6 +347,177 @@ Reply FakeSpoeServer::Impl::readSdo(uint16_t index, uint16_t subindex) const {
     return {.status = status, .data = {}};
   }
   return {.status = 0, .data = objects.at({index, subindex})};
+}
+
+std::vector<uint16_t> FakeSpoeServer::Impl::indexList() const {
+  // `sdoinfo_get_list` stops at `MAX_INDEX_LIST`, so a larger dictionary is cut short.
+  std::vector<uint16_t> indexes;
+  for (const auto& [address, entry] : descriptions) {
+    if ((indexes.empty() || indexes.back() != address.first) &&
+        indexes.size() < kSpoeMaxIndexList) {
+      indexes.push_back(address.first);
+    }
+  }
+  return indexes;
+}
+
+uint16_t FakeSpoeServer::Impl::maxSubindex(uint16_t index) const {
+  uint16_t highest = 0;
+  for (auto it = descriptions.lower_bound({index, 0});
+       it != descriptions.end() && it->first.first == index; ++it) {
+    highest = it->first.second;
+  }
+  return highest;
+}
+
+std::vector<uint8_t> FakeSpoeServer::Impl::encodeEntry(uint16_t index, uint16_t subindex) const {
+  // `AppSockIf_GetObjectInfoBuf` clears the description and copies it whether the lookup found
+  // the entry or not. What the lookup writes for a missing entry is not confirmed, so the fake
+  // sends the cleared description.
+  std::vector<uint8_t> bytes(kSpoeEntrySize, 0);
+  const auto it = descriptions.find({index, subindex});
+  if (it == descriptions.end()) {
+    return bytes;
+  }
+  const FakeSpoeEntry& entry = it->second;
+  const auto putU16 = [&bytes](std::size_t offset, uint16_t value) {
+    bytes[offset] = static_cast<uint8_t>(value);
+    bytes[offset + 1] = static_cast<uint8_t>(value >> 8);
+  };
+  // `obj.value` is overwritten with the subindex count of subindex 0, which stays zero for every
+  // other subindex.
+  const uint32_t value = subindex == 0 ? maxSubindex(index) : 0;
+  putU16(0, index);
+  bytes[2] = static_cast<uint8_t>(subindex);
+  putU16(4, entry.dataType);
+  bytes[6] = entry.objectCode;
+  putU16(8, entry.bitLength);
+  putU16(10, entry.access);
+  putU16(12, static_cast<uint16_t>(value));
+  putU16(14, static_cast<uint16_t>(value >> 16));
+  const std::size_t nameLength = std::min<std::size_t>(entry.name.size(), 49);
+  std::copy_n(entry.name.begin(), nameLength, bytes.begin() + 16);
+  return bytes;
+}
+
+Reply FakeSpoeServer::Impl::paramFullDesc(uint8_t packetState) {
+  const auto withState = [](uint8_t state, uint8_t status) {
+    return static_cast<uint16_t>((state << 8) | status);
+  };
+  if (packetState == kSpoePacketFirst) {
+    listedIndexes = indexList();
+    nextIndexPosition = 0;
+    nextSubindex = 0;
+    maxSubindexLatch = 0;
+    if (listedIndexes.empty()) {
+      return {.status = withState(kSpoePacketLast, kSpoeReplyError), .data = {}};
+    }
+    // `*p_data_buf = (uint16_t) index_count` stores into a byte pointer, so only the low byte of
+    // the count is written. The second byte of the two-byte field is whatever the buffer held.
+    return {.status = withState(kSpoePacketMiddle, kSpoeReplyAck),
+            .data = {static_cast<uint8_t>(listedIndexes.size()), 0x00}};
+  }
+  if (packetState != kSpoePacketMiddle) {
+    return {.status = withState(kSpoePacketLast, kSpoeReplyError), .data = {}};
+  }
+  Reply reply{.status = withState(kSpoePacketMiddle, kSpoeReplyAck), .data = {}};
+  for (int count = 0; count < 7; ++count) {
+    const uint16_t index = listedIndexes[nextIndexPosition];
+    const std::vector<uint8_t> entry = encodeEntry(index, nextSubindex);
+    reply.data.insert(reply.data.end(), entry.begin(), entry.end());
+    if (nextSubindex == 0) {
+      maxSubindexLatch = maxSubindex(index);
+      if (maxSubindexLatch == 0) {
+        ++nextIndexPosition;
+      } else {
+        ++nextSubindex;
+      }
+    } else if (nextSubindex < maxSubindexLatch) {
+      ++nextSubindex;
+    } else {
+      ++nextIndexPosition;
+      nextSubindex = 0;
+    }
+    if (nextIndexPosition >= listedIndexes.size()) {
+      reply.status = withState(kSpoePacketLast, kSpoeReplyAck);
+      break;
+    }
+  }
+  return reply;
+}
+
+std::vector<uint8_t> FakeSpoeServer::Impl::fileList() const {
+  std::string list;
+  for (const auto& [name, content] : files) {
+    list += std::format("{}, size: {}\n", name, content.size());
+  }
+  return {list.begin(), list.end()};
+}
+
+Reply FakeSpoeServer::Impl::fileRead(uint8_t packetState, std::span<const uint8_t> data) {
+  const auto withState = [](uint8_t state, uint8_t status) {
+    return static_cast<uint16_t>((state << 8) | status);
+  };
+  if (packetState == kSpoePacketFirst) {
+    readName.assign(data.begin(), std::find(data.begin(), data.end(), uint8_t{0}));
+    readOffset = 0;
+    if (readName == "fs-getlist") {
+      readContent = fileList();
+    } else if (readName.starts_with("fs-remove=")) {
+      const std::string message =
+          files.erase(readName.substr(10)) > 0 ? "File successfully removed" : "File not found";
+      readContent.assign(message.begin(), message.end());
+    } else if (const auto it = files.find(readName); it != files.end()) {
+      readContent = it->second;
+    } else {
+      // An empty read, so the driver's check of the file list runs. What the SoC answers for a
+      // missing file is not in the firmware source.
+      readContent.clear();
+    }
+    // `AppSockIf_StartReadingFile` only opens the file, so the first reply carries no data.
+    return {.status = withState(kSpoePacketMiddle, kSpoeReplyAck), .data = {}};
+  }
+  if (packetState != kSpoePacketMiddle) {
+    return {.status = withState(kSpoePacketLast, 0x00), .data = {}};
+  }
+  // `READ_BUFFER_SIZE` is 512.
+  const std::size_t count = std::min<std::size_t>(512, readContent.size() - readOffset);
+  Reply reply{.status = 0,
+              .data = {readContent.begin() + static_cast<std::ptrdiff_t>(readOffset),
+                       readContent.begin() + static_cast<std::ptrdiff_t>(readOffset + count)}};
+  readOffset += count;
+  const bool last = readOffset >= readContent.size();
+  reply.status = withState(last ? kSpoePacketLast : kSpoePacketMiddle, kSpoeReplyAck);
+  return reply;
+}
+
+Reply FakeSpoeServer::Impl::fileWrite(uint8_t packetState, std::span<const uint8_t> data) {
+  const auto withState = [](uint8_t state, uint8_t status) {
+    return static_cast<uint16_t>((state << 8) | status);
+  };
+  if (packetState == kSpoePacketFirst) {
+    writeName.assign(data.begin(), std::find(data.begin(), data.end(), uint8_t{0}));
+    writeContent.clear();
+    writing = true;
+    if (refuseFileWrites) {
+      // The firmware's error path: the last-packet state, and `SQI_BRG_FOE_ERR_UNDEFINED`.
+      writing = false;
+      return {.status = withState(kSpoePacketLast, 0x00), .data = {}};
+    }
+    // In BOOT the COM firmware goes to the netX flash, and the reply carries the return value of
+    // `storage_prepare_for_writing`, 0 for success, instead of ACK.
+    const bool storage = state == kSpoeStateBoot && writeName == "com_firmware.bin";
+    return {.status = withState(kSpoePacketFirst, storage ? 0x00 : kSpoeReplyAck), .data = {}};
+  }
+  if (!writing) {
+    return {.status = withState(kSpoePacketLast, 0x00), .data = {}};
+  }
+  writeContent.insert(writeContent.end(), data.begin(), data.end());
+  if (packetState == kSpoePacketLast) {
+    files[writeName] = writeContent;
+    writing = false;
+  }
+  return {.status = withState(packetState, kSpoeReplyAck), .data = {}};
 }
 
 std::optional<Reply> FakeSpoeServer::Impl::handle(const Request& request) {
@@ -357,10 +597,15 @@ std::optional<Reply> FakeSpoeServer::Impl::handle(const Request& request) {
     case SpoeMessage::kStateRead:
       return Reply{.status = 0, .data = {state}};
 
-    case SpoeMessage::kServerInfo:
-      return Reply{.status = 0,
-                   .data = {static_cast<uint8_t>(kSpoeProtocolVersion & 0xFF),
-                            static_cast<uint8_t>(kSpoeProtocolVersion >> 8), pdoMode}};
+    case SpoeMessage::kServerInfo: {
+      Reply reply{.status = 0,
+                  .data = {static_cast<uint8_t>(protocolVersion & 0xFF),
+                           static_cast<uint8_t>(protocolVersion >> 8)}};
+      if (protocolVersion != kSpoeProtocolVersion100) {
+        reply.data.push_back(pdoMode);
+      }
+      return reply;
+    }
 
     case SpoeMessage::kDeviceLocate:
       // The status echoes the LED state: 1 when it starts, 0 when it stops.
@@ -368,17 +613,36 @@ std::optional<Reply> FakeSpoeServer::Impl::handle(const Request& request) {
       return Reply{.status = static_cast<uint16_t>(locating ? 1 : 0), .data = {}};
 
     case SpoeMessage::kWatchdogTimeout:
+      if (protocolVersion == kSpoeProtocolVersion100) {
+        break;
+      }
       watchdogTimeoutMs = std::max(readU32(data, 0), kWatchdogMinimumMs);
       return Reply{};
 
-    case SpoeMessage::kFirmwareUpdate:
-    case SpoeMessage::kFileRead:
-    case SpoeMessage::kFileWrite:
-    case SpoeMessage::kParamList:
+    case SpoeMessage::kParamList: {
+      Reply reply;
+      for (const uint16_t index : indexList()) {
+        appendU16(reply.data, index);
+      }
+      return reply;
+    }
+
     case SpoeMessage::kParamDesc:
     case SpoeMessage::kParamSubDesc:
+      return Reply{.status = 0, .data = encodeEntry(readU16(data, 0), readU16(data, 2))};
+
     case SpoeMessage::kParamFullDesc:
-      return std::nullopt;
+      return paramFullDesc(static_cast<uint8_t>(request.status & 0xFF));
+
+    case SpoeMessage::kFileRead:
+      return fileRead(static_cast<uint8_t>(request.status & 0xFF), data);
+
+    case SpoeMessage::kFileWrite:
+      return fileWrite(static_cast<uint8_t>(request.status & 0xFF), data);
+
+    case SpoeMessage::kFirmwareUpdate:
+      ++firmwareUpdates;
+      return Reply{};
   }
   // The firmware's default case: an empty reply, and the "SPoE active" flag is cleared.
   spoeActive = false;
@@ -410,6 +674,37 @@ uint16_t FakeSpoeServer::port() const { return impl_->port; }
 void FakeSpoeServer::setObject(uint16_t index, uint16_t subindex, std::vector<uint8_t> value) {
   const std::scoped_lock lock(impl_->mutex);
   impl_->objects[{index, subindex}] = std::move(value);
+}
+
+void FakeSpoeServer::setFile(const std::string& name, std::vector<uint8_t> content) {
+  const std::scoped_lock lock(impl_->mutex);
+  impl_->files[name] = std::move(content);
+}
+
+std::optional<std::vector<uint8_t>> FakeSpoeServer::file(const std::string& name) const {
+  const std::scoped_lock lock(impl_->mutex);
+  const auto it = impl_->files.find(name);
+  if (it == impl_->files.end()) {
+    return std::nullopt;
+  }
+  return it->second;
+}
+
+int FakeSpoeServer::firmwareUpdates() const {
+  const std::scoped_lock lock(impl_->mutex);
+  return impl_->firmwareUpdates;
+}
+
+void FakeSpoeServer::setRestartTiming(std::chrono::milliseconds resetDelay,
+                                      std::chrono::milliseconds restartDuration) {
+  const std::scoped_lock lock(impl_->mutex);
+  impl_->resetDelay = resetDelay;
+  impl_->restartDuration = restartDuration;
+}
+
+void FakeSpoeServer::describeEntry(uint16_t index, uint8_t subindex, FakeSpoeEntry entry) {
+  const std::scoped_lock lock(impl_->mutex);
+  impl_->descriptions[{index, subindex}] = std::move(entry);
 }
 
 std::optional<std::vector<uint8_t>> FakeSpoeServer::object(uint16_t index,
@@ -447,6 +742,16 @@ bool FakeSpoeServer::locating() const {
   return impl_->locating;
 }
 
+void FakeSpoeServer::setRefuseFileWrites(bool refuse) {
+  const std::scoped_lock lock(impl_->mutex);
+  impl_->refuseFileWrites = refuse;
+}
+
+void FakeSpoeServer::setProtocolVersion(uint16_t version) {
+  const std::scoped_lock lock(impl_->mutex);
+  impl_->protocolVersion = version;
+}
+
 std::optional<uint32_t> FakeSpoeServer::watchdogTimeoutMs() const {
   const std::scoped_lock lock(impl_->mutex);
   return impl_->watchdogTimeoutMs;
@@ -478,6 +783,13 @@ std::vector<uint8_t> FakeSpoeServer::lastOutputs() const {
 void FakeSpoeServer::injectFault(SpoeFault fault) {
   const std::scoped_lock lock(impl_->mutex);
   impl_->nextFault = fault;
+  impl_->requestsBeforeFault = 0;
+}
+
+void FakeSpoeServer::injectFaultAfter(int skip, SpoeFault fault) {
+  const std::scoped_lock lock(impl_->mutex);
+  impl_->nextFault = fault;
+  impl_->requestsBeforeFault = skip;
 }
 
 void FakeSpoeServer::setReplyDelay(std::chrono::milliseconds delay) {

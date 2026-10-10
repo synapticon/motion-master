@@ -14,6 +14,7 @@
 #include <shared_mutex>
 #include <span>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -78,7 +79,10 @@ struct ProcessImageInfo {
   uint64_t shortWkcCycles = 0;
   uint64_t firstShortWkcUs = 0;  ///< Epoch microseconds of the first such cycle (0 if none).
   uint64_t lastShortWkcUs = 0;   ///< Epoch microseconds of the most recent one (0 if none).
-  std::size_t generations = 0;   ///< Number of process images retained since the last reset().
+  /// Input frames the driver dropped since the process data was configured. Only a transport that
+  /// buffers input frames, such as SPoE, can drop one; every other transport reports 0.
+  uint64_t droppedInputFrames = 0;
+  std::size_t generations = 0;  ///< Number of process images retained since the last reset().
   std::vector<ProcessImageObjectInfo> outputs;  ///< Output-mapped objects in image order.
   std::vector<ProcessImageObjectInfo> inputs;   ///< Input-mapped objects in image order.
 };
@@ -321,6 +325,10 @@ class DeviceManager {
   /// @brief Scans the bus for nodes and populates the device list.
   ///
   /// Must be called after @c init(). Forwards to @c FieldbusDriver::scan().
+  ///
+  /// When a device is already in SAFE-OP or OP after the scan, this reads its object dictionary and
+  /// publishes the process image, as @c transitionToState would. An SPoE drive starts in OP, so no
+  /// state change brings it there. A failure of that step is logged, and the scan still succeeds.
   ///
   /// @return Number of nodes found on success, or an error string on failure.
   std::expected<int, std::string> scan();
@@ -583,11 +591,36 @@ class DeviceManager {
   /// @param targetState  Desired EtherCAT AL state.
   /// @param timeout      Maximum time to wait for all devices.
   /// @return The final state snapshot of each targeted device (in the order targeted), or an
-  ///         error string if no driver is initialised, no devices were discovered, or the
-  ///         final state read-back fails.
+  ///         error string if no driver is initialised, no devices were discovered, the driver
+  ///         refuses state changes (see @c stateChangeRefusal), or the final state read-back
+  ///         fails.
   std::expected<std::vector<DeviceStateInfo>, std::string> transitionToState(
       const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
       std::chrono::steady_clock::duration timeout);
+
+  /// @brief Returns why the driver refuses every state change, or nullopt when it accepts them,
+  ///        or when no driver is initialised. No bus I/O.
+  std::optional<std::string> stateChangeRefusal() const;
+
+  /// @brief Whether the devices have an EtherCAT Slave Controller: SII, ESC registers, DC and the
+  ///        ESC diagnostics. True when no driver is initialised. No bus I/O.
+  bool supportsEsc() const;
+
+  /// @brief Brings the process image in line with device states that another master set.
+  ///
+  /// For a driver that refuses state changes, such as SPoE in Monitor mode, a PLC moves the
+  /// devices and nothing here commands them. So nothing calls @c transitionToState, and that is
+  /// where the image is otherwise published. This reads every state and does what
+  /// @c transitionToState would have done. When a device is seen entering SAFE-OP or OP, the image
+  /// is re-mapped, which also reads the PDO mapping again, because the other master can change it
+  /// in PRE-OP. The object dictionary of that device is read before the re-map, when it has none.
+  /// When no device exchanges any more, the image is torn down.
+  ///
+  /// One pass, with no thread of its own. The caller repeats it, the way the composition root does
+  /// while the driver refuses state changes. Takes @c busOperationMutex_.
+  ///
+  /// @return Void, or the error of the state read or of the re-map.
+  std::expected<void, std::string> followObservedStates();
 
   /// @brief Reads the current AL state for a set of devices.
   ///
@@ -852,10 +885,28 @@ class DeviceManager {
   /// since each output object's value already lives in its own parameter's cell, which is what the
   /// composer reads. **The caller must hold @c busOperationMutex_**, which is what keeps the
   /// published set from changing underneath it; the ring re-allocation takes @c processDataMutex_
-  /// exclusively for its own brief window. Two callers compose it: the public
-  /// @c configureProcessData and @c transitionToState (when a (re)joining device requires a
-  /// re-map).
+  /// exclusively for its own brief window. Its callers are the public @c configureProcessData,
+  /// @c transitionToState when a (re)joining device requires a re-map, @c followObservedStates,
+  /// and @c scan when it finds a device already in SAFE-OP or OP.
   std::expected<void, std::string> remapProcessImage();
+
+  /// @brief Reads the object dictionary of each device in @p positions that has no parameters yet.
+  ///
+  /// Only devices with a live CoE mailbox are read, which is PRE-OP and up. The read is definitions
+  /// only and cache-first, so a device model pays for the slow enumeration once, and every later
+  /// scan of the same hardware loads the cache. With the dictionary in place, recorder dumps,
+  /// monitoring and the Parameters page have names and data types without a manual read. A failure
+  /// is logged and not returned. @p occasion completes the log line, for example "on reaching OP".
+  /// The caller must hold @c busOperationMutex_.
+  void readMissingObjectDictionaries(DeviceSet& set, std::span<const uint16_t> positions,
+                                     std::string_view occasion);
+
+  /// @brief Publishes the process image when a scan finds devices already in SAFE-OP or OP.
+  ///
+  /// The dictionary of those devices is read first, because @c buildProcessImage binds each entry
+  /// to its parameter cell. A failure is logged and not returned. The caller must hold
+  /// @c busOperationMutex_.
+  void mapDevicesAlreadyExchanging(DeviceSet& set);
 
   /// @brief Resolves a caller-supplied position list to validated bus positions.
   ///
@@ -929,6 +980,11 @@ class DeviceManager {
   // other control-plane callers — never the monitoring sampler, and never a procedure that is
   // already running.
   mutable std::mutex busOperationMutex_;
+
+  // The positions that exchanged at the last followObservedStates pass, and the device set they
+  // belong to. Touched only under busOperationMutex_.
+  std::vector<uint16_t> observedExchanging_;
+  uint64_t observedGeneration_ = 0;
 
   // currentSetMutex_ — guards the shared_ptr below, and nothing it points to. Held for exactly one
   // pointer copy, which is why a reader can never be delayed by an operation: a shared_ptr copy is

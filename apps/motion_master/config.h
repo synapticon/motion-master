@@ -4,6 +4,7 @@
 #include <expected>
 #include <nlohmann/json.hpp>
 #include <string>
+#include <vector>
 
 /// @file
 /// The on-disk configuration, modelled as a struct tree that maps 1-1 to the JSONC file.
@@ -31,11 +32,27 @@ struct ServerConfig {
   std::string corsOrigin = "https://motion-master.synapticon.com";
 };
 
+/// @brief @c "fieldbus.spoe" block — settings that apply only to the SPoE driver.
+struct SpoeConfig {
+  /// "monitor" | "control". In Monitor mode a PLC owns the drive's state, and Motion Master only
+  /// parametrises and observes. Monitor is the default, because it cannot fault a drive that a
+  /// PLC controls.
+  std::string mode = "monitor";
+  /// Control mode only. The drive faults when no SPoE message arrives for this long. The firmware
+  /// accepts 50 ms at least. Firmware with SPoE protocol 1.0 cannot set it and uses a fixed
+  /// watchdog.
+  uint32_t watchdogMs = 75;
+  uint16_t port = 8080;  ///< The TCP port of the SPoE server on every drive.
+};
+
 /// @brief @c "fieldbus" block — the driver to auto-init at startup.
 /// An empty @c driver means "do not auto-init"; the fieldbus then waits for @c POST @c /api/init.
 struct FieldbusConfig {
-  std::string driver;   ///< "" | "soem" | "spoe" (spoe planned; only soem is implemented today).
+  std::string driver;   ///< "" | "soem" | "spoe".
   std::string adapter;  ///< SOEM NIC: MAC or interface name. "" = none.
+  /// SPoE only. One IP address per drive. The list order is the position order.
+  std::vector<std::string> ipAddresses;
+  SpoeConfig spoe;  ///< SPoE only.
   /// SOEM only. Keep SOEM 2.0's mailbox-status FMMU active — the extra input FMMU it maps the SM1
   /// mailbox-status register (0x080D) into the cyclic image on every mailbox slave, letting the
   /// master notice a waiting mailbox message without a separate read. Motion Master does not use
@@ -209,7 +226,9 @@ struct Config {
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(ServerConfig, bindAddress, httpPort, wsPort,
                                                 corsOrigin)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FieldbusConfig, driver, adapter, mailboxStatusFmmu)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(SpoeConfig, mode, watchdogMs, port)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(FieldbusConfig, driver, adapter, ipAddresses, spoe,
+                                                mailboxStatusFmmu)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(TlsConfig, certPath, keyPath, autoUpdate)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(GameLoopConfig, periodUs, cpuAffinity)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(RecorderConfig, capacity, dumpDir)
@@ -237,3 +256,9 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE_WITH_DEFAULT(Config, server, fieldbus, loggin
 /// @return The populated @c Config, or an error string on a wrong top-level type, a field type
 ///         mismatch (from nlohmann), or an invalid enum value.
 std::expected<Config, std::string> parseConfig(const nlohmann::json& doc);
+
+/// @brief Checks the @c "fieldbus" block. The config file and @c POST @c /api/init share it.
+///
+/// An empty @c driver passes, because it means "do not init". For @c "spoe" it needs at least one
+/// address, a known @c mode, a @c watchdogMs of at least 50 and a nonzero @c port.
+std::expected<void, std::string> validateFieldbusConfig(const FieldbusConfig& fieldbus);

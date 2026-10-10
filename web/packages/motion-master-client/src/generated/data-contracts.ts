@@ -1019,6 +1019,14 @@ export interface ProcedureRequest {
    * @example "all"
    */
   group?: "all" | "communication" | "application" | "manufacturer";
+  /**
+   * `device-locate` only: how long the LEDs blink, in seconds. They stop at the end, and when the run is cancelled. Only a device whose transport can blink the LEDs offers `device-locate`, which today is a SPoE drive.
+   * @min 1
+   * @max 3600
+   * @default 10
+   * @example 10
+   */
+  duration?: number;
   /** `firmware-installation`: the .zip firmware package, base64-encoded into this JSON string. One of this or a `packageFilename` naming an already-cached package must be present; this wins when both are given. To avoid base64 entirely, `PUT` the raw bytes to `/api/user-cache/firmwares/<name>.zip` first and then send only `packageFilename` — the firmware cache is that directory. (Deliberately not `format: byte`: that is the correct OpenAPI spelling for base64, but generators map it to a binary type — `Blob` in TypeScript — which is not what goes on the wire here and would serialise to `{}`.) */
   packageContent?: string;
   /**
@@ -1037,7 +1045,7 @@ export interface ProcedureRequest {
    */
   cachePackage?: boolean;
   /**
-   * `firmware-installation`: where the device is left, as an AL state number — the same ETG.1000.6 encoding `POST /api/devices/state` takes and `alState` reports, so a client holds one way to name a state rather than two. `2` (PRE-OP) is the default and the confirmation that the install worked: the bootloader hands over to the newly written firmware on that transition, so reaching PRE-OP means the new firmware booted. No power cycle is needed for the firmware (an SII written from the package does need one — the ESC reads its EEPROM at reset). Choose `3` (BOOT) when no application will be present, after erasing one or between two installs, since a PRE-OP transition then has nothing to hand over to and the drive answers AL status `0x0014`, "No valid firmware". `4` and `8` climb through PRE-OP and re-map the whole bus on the way, briefly pausing every other device. The state the device was in beforehand is not restored.
+   * `firmware-installation`: where the device is left, as an AL state number — the same ETG.1000.6 encoding `POST /api/devices/state` takes and `alState` reports, so a client holds one way to name a state rather than two. `2` (PRE-OP) is the default and the confirmation that the install worked: the bootloader hands over to the newly written firmware on that transition, so reaching PRE-OP means the new firmware booted. No power cycle is needed for the firmware (an SII written from the package does need one — the ESC reads its EEPROM at reset). Choose `3` (BOOT) when no application will be present, after erasing one or between two installs, since a PRE-OP transition then has nothing to hand over to and the drive answers AL status `0x0014`, "No valid firmware". `4` and `8` climb through PRE-OP and re-map the whole bus on the way, briefly pausing every other device. The state the device was in beforehand is not restored. Over SPoE the drive restarts into the new firmware and comes up in PRE-OP, so `3` cannot keep it in BOOT.
    * @default 2
    * @example 2
    */

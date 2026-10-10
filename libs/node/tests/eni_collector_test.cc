@@ -143,6 +143,8 @@ const mm::etg::EniEcatCmd* findWrite(const mm::etg::EniSlave& slave, mm::etg::En
 TEST(EniCollectorTest, RefusesABusWithNoPublishedImage) {
   DeviceManager manager;
   auto bus = circuloBus();
+  // Below SAFE-OP, so the scan publishes no image.
+  bus->state = static_cast<uint16_t>(EtherCatState::PreOp);
   ASSERT_TRUE(manager.init(std::move(bus)).has_value());
   ASSERT_TRUE(manager.scan().has_value());
 

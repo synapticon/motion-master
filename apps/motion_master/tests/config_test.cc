@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <nlohmann/json.hpp>
+#include <string>
+#include <vector>
 
 using nlohmann::json;
 
@@ -81,10 +83,45 @@ TEST(ConfigTest, TlsBlockParsed) {
 }
 
 TEST(ConfigTest, AllValidDriversAccepted) {
-  for (const char* d : {"soem", "spoe"}) {
-    json doc = {{"fieldbus", {{"driver", d}}}};
-    EXPECT_TRUE(parseConfig(doc).has_value()) << d;
-  }
+  EXPECT_TRUE(parseConfig(json{{"fieldbus", {{"driver", "soem"}}}}).has_value());
+  EXPECT_TRUE(
+      parseConfig(json{{"fieldbus", {{"driver", "spoe"}, {"ipAddresses", {"192.168.0.10"}}}}})
+          .has_value());
+}
+
+TEST(ConfigTest, SpoeDefaultsToMonitorModeOnPort8080) {
+  auto r =
+      parseConfig(json::parse(R"({"fieldbus": {"driver": "spoe", "ipAddresses": ["10.0.0.2"]}})"));
+  ASSERT_TRUE(r.has_value()) << r.error();
+  EXPECT_EQ(r->fieldbus.ipAddresses, std::vector<std::string>{"10.0.0.2"});
+  EXPECT_EQ(r->fieldbus.spoe.mode, "monitor");
+  EXPECT_EQ(r->fieldbus.spoe.watchdogMs, 75U);
+  EXPECT_EQ(r->fieldbus.spoe.port, 8080);
+}
+
+TEST(ConfigTest, SpoeNeedsAnAddress) {
+  EXPECT_FALSE(parseConfig(json::parse(R"({"fieldbus": {"driver": "spoe"}})")).has_value());
+  EXPECT_FALSE(parseConfig(json::parse(R"({"fieldbus": {"driver": "spoe", "ipAddresses": [""]}})"))
+                   .has_value());
+}
+
+TEST(ConfigTest, SpoeRejectsAnUnknownModeAndAShortWatchdog) {
+  EXPECT_FALSE(parseConfig(json::parse(R"({"fieldbus": {"driver": "spoe",
+      "ipAddresses": ["10.0.0.2"], "spoe": {"mode": "master"}}})"))
+                   .has_value());
+  // SPOE_WATCHDOG_TIMEOUT_MIN_MS in the firmware.
+  EXPECT_FALSE(parseConfig(json::parse(R"({"fieldbus": {"driver": "spoe",
+      "ipAddresses": ["10.0.0.2"], "spoe": {"watchdogMs": 49}}})"))
+                   .has_value());
+  EXPECT_TRUE(parseConfig(json::parse(R"({"fieldbus": {"driver": "spoe",
+      "ipAddresses": ["10.0.0.2"], "spoe": {"mode": "control", "watchdogMs": 50}}})"))
+                  .has_value());
+}
+
+TEST(ConfigTest, SoemIgnoresTheSpoeKeys) {
+  EXPECT_TRUE(parseConfig(json::parse(R"({"fieldbus": {"driver": "soem",
+      "spoe": {"watchdogMs": 1}}})"))
+                  .has_value());
 }
 
 TEST(ConfigTest, EmptyDriverMeansNoAutoInit) {

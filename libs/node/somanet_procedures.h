@@ -1210,7 +1210,10 @@ std::expected<FirmwareInstallationRequest, std::string> parseFirmwareInstallatio
 ///   - @c extra-files — **best effort**. These are descriptive files (an ESI, a picture); a failure
 ///     is recorded in the step's value and the install continues, because aborting a firmware
 ///     update over a picture would be worse than not having the picture.
-///   - @c sii, @c app-firmware, @c com-firmware — fatal. These are the firmware.
+///   - @c sii, @c app-firmware, @c com-firmware — fatal. These are the firmware. A transport with
+///     no SII, such as SPoE, records that the SII was not written and continues.
+///   - @c activate-firmware — fatal. Over EtherCAT it does nothing, because leaving BOOT applies
+///     the firmware. Over SPoE it restarts the drive into the firmware just written.
 ///   - @c final-state — fatal, but reported so it cannot be confused with a write failure: the
 ///     bytes are on the drive either way, and which of the two happened changes what a user does
 ///     next.

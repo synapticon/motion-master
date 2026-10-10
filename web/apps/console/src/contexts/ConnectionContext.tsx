@@ -9,6 +9,7 @@ const DEFAULT_HTTP_PORT = '61447'
 const DEFAULT_WS_PORT = '62281'
 
 type Driver = 'soem' | 'spoe'
+export type SpoeMode = 'monitor' | 'control'
 
 interface Endpoint {
   host: string
@@ -19,6 +20,10 @@ interface Endpoint {
   // open (see ServerStateProbe), never from storage.
   driver: Driver
   adapter: string
+  // SPoE only: one IP address per line, in position order, the mode and the drive's port.
+  ipAddresses: string
+  spoeMode: SpoeMode
+  spoePort: string
 }
 
 // The endpoint config persists to localStorage so a configured host/port survives reloads.
@@ -29,6 +34,9 @@ function readEndpoint(): Endpoint {
     wsPort: DEFAULT_WS_PORT,
     driver: 'soem',
     adapter: '',
+    ipAddresses: '',
+    spoeMode: 'monitor',
+    spoePort: '8080',
   }
   try {
     const raw = localStorage.getItem(ENDPOINT_KEY)
@@ -67,6 +75,12 @@ interface ConnectionContextValue {
   setDriver: (d: Driver) => void
   adapter: string
   setAdapter: (a: string) => void
+  ipAddresses: string
+  setIpAddresses: (a: string) => void
+  spoeMode: SpoeMode
+  setSpoeMode: (m: SpoeMode) => void
+  spoePort: string
+  setSpoePort: (p: string) => void
   hasScanned: boolean
   setHasScanned: (val: boolean) => void
   /// True once the fieldbus driver is initialized on the server (after a
@@ -90,6 +104,9 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   const [wsPort, setWsPort] = useState(endpoint.wsPort)
   const [driver, setDriver] = useState<Driver>(endpoint.driver)
   const [adapter, setAdapter] = useState(endpoint.adapter)
+  const [ipAddresses, setIpAddresses] = useState(endpoint.ipAddresses)
+  const [spoeMode, setSpoeMode] = useState<SpoeMode>(endpoint.spoeMode)
+  const [spoePort, setSpoePort] = useState(endpoint.spoePort)
   const [hasScanned, setHasScanned] = useState(false)
   const [isInitialized, setIsInitialized] = useState(false)
   const [alreadyInitialized, setAlreadyInitialized] = useState(false)
@@ -98,8 +115,8 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
   // so it survives reloads. This is a convenience default only; connection *state* is
   // derived from the server on open (see ServerStateProbe), never from storage.
   useEffect(() => {
-    writeEndpoint({ host, httpPort, wsPort, driver, adapter })
-  }, [host, httpPort, wsPort, driver, adapter])
+    writeEndpoint({ host, httpPort, wsPort, driver, adapter, ipAddresses, spoeMode, spoePort })
+  }, [host, httpPort, wsPort, driver, adapter, ipAddresses, spoeMode, spoePort])
 
   const resetEndpoint = useCallback(() => {
     setHost(DEFAULT_HOST)
@@ -116,7 +133,7 @@ export function ConnectionProvider({ children }: { children: React.ReactNode }) 
 
   return (
     <ConnectionContext.Provider
-      value={{ host, httpPort, wsPort, setHost, setHttpPort, setWsPort, resetEndpoint, api, online, driver, setDriver, adapter, setAdapter, hasScanned, setHasScanned, isInitialized, setIsInitialized, alreadyInitialized, setAlreadyInitialized }}
+      value={{ host, httpPort, wsPort, setHost, setHttpPort, setWsPort, resetEndpoint, api, online, driver, setDriver, adapter, setAdapter, ipAddresses, setIpAddresses, spoeMode, setSpoeMode, spoePort, setSpoePort, hasScanned, setHasScanned, isInitialized, setIsInitialized, alreadyInitialized, setAlreadyInitialized }}
     >
       {children}
     </ConnectionContext.Provider>

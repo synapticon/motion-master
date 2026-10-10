@@ -20,6 +20,7 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -193,7 +194,11 @@ std::expected<int, std::string> DeviceManager::scan() {
                  found.slavePosition(), found.name(), found.vendorId(), found.productCode(),
                  found.revisionNumber(), found.serialNumber());
   }
-  publishDeviceSet(std::move(set));
+  publishDeviceSet(set);
+  // An SPoE drive starts in OP, so no transitionToState ever brings it there, and that is where the
+  // image is otherwise published. A failure here leaves the scan valid, because every device was
+  // found, and the caller can still map with a state change.
+  mapDevicesAlreadyExchanging(*set);
   return *result;
 }
 
@@ -627,6 +632,7 @@ ProcessImageInfo DeviceManager::processImageInfo() const {
   // Reduced to microseconds at the JSON boundary, matching every other timestamp this API serves.
   info.firstShortWkcUs = pd_->firstShortWkcNs.load(std::memory_order_relaxed) / 1000;
   info.lastShortWkcUs = pd_->lastShortWkcNs.load(std::memory_order_relaxed) / 1000;
+  info.droppedInputFrames = set->driver ? set->driver->droppedInputFrames() : 0;
 
   const ProcessImage* image = pd_->image.load(std::memory_order_acquire);
   info.configured = image != nullptr;
@@ -903,6 +909,64 @@ void DeviceManager::lowerExpectedWkc(std::span<const uint16_t> positions,
   }
 }
 
+bool DeviceManager::supportsEsc() const {
+  const std::shared_ptr<DeviceSet> set = deviceSet();
+  return !set->driver || set->driver->supportsEsc();
+}
+
+std::optional<std::string> DeviceManager::stateChangeRefusal() const {
+  const std::shared_ptr<DeviceSet> set = deviceSet();
+  return set->driver ? set->driver->stateChangeRefusal() : std::nullopt;
+}
+
+std::expected<void, std::string> DeviceManager::followObservedStates() {
+  const std::lock_guard busOperationLock(busOperationMutex_);
+  const std::shared_ptr<DeviceSet> set = deviceSet();
+  if (!set->driver || set->devices.empty()) {
+    return {};
+  }
+  std::vector<uint16_t> positions(set->devices.size());
+  std::ranges::transform(set->devices, positions.begin(),
+                         [](const Device& device) { return device.slavePosition(); });
+  // Refreshes the driver's state cache, which exchangesProcessData() reads.
+  if (auto states = set->driver->readStates(positions); !states) {
+    return std::unexpected(states.error());
+  }
+  std::vector<uint16_t> exchanging;
+  for (const auto& device : set->devices) {
+    if (device.exchangesProcessData()) {
+      exchanging.push_back(device.slavePosition());
+    }
+  }
+  // A new device set has nothing in common with the positions seen before it.
+  if (observedGeneration_ != set->topologyGeneration) {
+    observedExchanging_.clear();
+    observedGeneration_ = set->topologyGeneration;
+  }
+  const bool joined = std::ranges::any_of(exchanging, [this](uint16_t position) {
+    return std::ranges::find(observedExchanging_, position) == observedExchanging_.end();
+  });
+  observedExchanging_ = exchanging;
+
+  if (!exchanging.empty() && (joined || !processDataConfigured())) {
+    spdlog::info("{} device(s) exchange process data under another master — re-mapping",
+                 exchanging.size());
+    // The image binds each entry to its parameter cell when it is built, so the dictionary is read
+    // first. Otherwise the values arrive and nothing decodes them until the next re-map.
+    readMissingObjectDictionaries(*set, exchanging, "under another master");
+    if (auto remapped = remapProcessImage(); !remapped) {
+      // Forget what was seen, so the next pass tries the re-map again.
+      observedExchanging_.clear();
+      return std::unexpected(remapped.error());
+    }
+  } else if (exchanging.empty() && processDataConfigured()) {
+    spdlog::info("No device exchanges process data any more — stopping the exchange");
+    static_cast<void>(stopExchange());
+  }
+  updateExpectedWkc();
+  return {};
+}
+
 std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transitionToState(
     const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
     std::chrono::steady_clock::duration timeout) {
@@ -920,6 +984,9 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   }
   if (set->devices.empty()) {
     return std::unexpected("no devices — call scan() first");
+  }
+  if (auto refusal = set->driver->stateChangeRefusal(); refusal) {
+    return std::unexpected(std::move(*refusal));
   }
   auto resolved = resolveTargets(positions);
   if (!resolved) {
@@ -1077,46 +1144,83 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
     }
   }
 
-  // Read the object dictionary of any device that just reached an exchange-capable state
-  // (CoE mailbox live from PRE-OP up) and has no parameters yet, so recorder dumps, monitoring, and
-  // the Parameters page have object names and data types without a manual read. Definitions only
-  // (no value uploads) and cache-first, so a given device model pays the (slow, hundreds of
-  // SDO-Info round-trips) enumeration only once — every later scan of the same hardware is an
-  // instant cache load. Done here under the same exclusive lock as the module reconcile above; the
-  // RT loop (lock-free PDO) and the WebSocket (separate loop) are unaffected — only other
-  // control-plane calls wait, and only during that one-time first read.
-  if (config_.readObjectDictionaryOnPreop) {
-    for (const auto& info : result) {
-      Device* device = set->find(info.slavePosition);
-      if (!device || !device->mailboxActive() || device->hasParameters()) {
-        continue;
-      }
-      // Attempted once per scan, not once per transition. The CoE mailbox is live from PRE-OP up,
-      // so without this a device whose enumeration failed pays for it again on SAFE-OP and again on
-      // OP — three passes over a bus that has already said it cannot answer, which on a large chain
-      // is minutes. Deliberately not a retry-with-backoff: the explicit reads (POST
-      // .../parameters/init) are the way back, and they clear this on success.
-      if (device->parametersUnavailable()) {
-        spdlog::debug(
-            "Device {}: skipping the object-dictionary read on reaching {} — an earlier "
-            "read failed; use POST /api/devices/{}/parameters/init to retry",
-            info.slavePosition, mm::comm::toString(targetState), info.slavePosition);
-        continue;
-      }
-      if (auto r = device->initializeParameters(/*readValues=*/false); !r) {
-        // Names the state actually reached: the CoE mailbox is live from PRE-OP up, so this block
-        // runs on entry to SAFE-OP and OP too. It also says that this was the only automatic
-        // attempt and how to ask for another, because that is the one thing the device cannot
-        // convey afterwards — from here on it simply looks like a device with no parameters.
-        spdlog::warn(
-            "Device {}: object-dictionary read on reaching {} failed: {}. It will not be "
-            "attempted again automatically — use POST /api/devices/{}/parameters/init to retry",
-            info.slavePosition, mm::comm::toString(targetState), r.error(), info.slavePosition);
-      }
-    }
-  }
+  // Done here under the same exclusive lock as the module reconcile above. The RT loop (lock-free
+  // PDO) and the WebSocket (separate loop) are unaffected. Only other control-plane calls wait, and
+  // only during the one-time first read.
+  readMissingObjectDictionaries(*set, targets,
+                                std::format("on reaching {}", mm::comm::toString(targetState)));
 
   return result;
+}
+
+void DeviceManager::readMissingObjectDictionaries(DeviceSet& set,
+                                                  std::span<const uint16_t> positions,
+                                                  std::string_view occasion) {
+  if (!config_.readObjectDictionaryOnPreop) {
+    return;
+  }
+  for (const uint16_t position : positions) {
+    Device* device = set.find(position);
+    if (!device || !device->mailboxActive() || device->hasParameters()) {
+      continue;
+    }
+    // Attempted once per scan, not once per transition. The CoE mailbox is live from PRE-OP up,
+    // so without this a device whose enumeration failed pays for it again on SAFE-OP and again on
+    // OP — three passes over a bus that has already said it cannot answer, which on a large chain
+    // is minutes. Deliberately not a retry-with-backoff: the explicit reads (POST
+    // .../parameters/init) are the way back, and they clear this on success.
+    if (device->parametersUnavailable()) {
+      spdlog::debug(
+          "Device {}: skipping the object-dictionary read {} — an earlier read failed; use POST "
+          "/api/devices/{}/parameters/init to retry",
+          position, occasion, position);
+      continue;
+    }
+    if (auto r = device->initializeParameters(/*readValues=*/false); !r) {
+      // Names the occasion: the CoE mailbox is live from PRE-OP up, so this runs on entry to
+      // SAFE-OP and OP too, and at a scan that finds a device already there. It also says that
+      // this was the only automatic attempt and how to ask for another, because that is the one
+      // thing the device cannot convey afterwards — from here on it simply looks like a device
+      // with no parameters.
+      spdlog::warn(
+          "Device {}: object-dictionary read {} failed: {}. It will not be attempted again "
+          "automatically — use POST /api/devices/{}/parameters/init to retry",
+          position, occasion, r.error(), position);
+    }
+  }
+}
+
+void DeviceManager::mapDevicesAlreadyExchanging(DeviceSet& set) {
+  std::vector<uint16_t> positions(set.devices.size());
+  std::ranges::transform(set.devices, positions.begin(),
+                         [](const Device& device) { return device.slavePosition(); });
+  // Refreshes the driver's state cache, which exchangesProcessData() reads.
+  if (auto states = set.driver->readStates(positions); !states) {
+    spdlog::warn("Reading the device states after the scan failed: {}", states.error());
+    return;
+  }
+  std::vector<uint16_t> exchanging;
+  for (const auto& device : set.devices) {
+    if (device.exchangesProcessData()) {
+      exchanging.push_back(device.slavePosition());
+    }
+  }
+  if (exchanging.empty()) {
+    return;
+  }
+  spdlog::info("{} device(s) already exchange process data — mapping the process image",
+               exchanging.size());
+  // The image binds each entry to its parameter cell when it is built, so the dictionary is read
+  // first. Otherwise the values arrive and nothing decodes them until the next re-map.
+  readMissingObjectDictionaries(set, exchanging, "at the scan");
+  if (auto remapped = remapProcessImage(); !remapped) {
+    spdlog::warn("Mapping the process image after the scan failed: {}", remapped.error());
+    return;
+  }
+  // The state follower then sees these devices as known, and does not re-map them a second time.
+  observedExchanging_ = std::move(exchanging);
+  observedGeneration_ = set.topologyGeneration;
+  updateExpectedWkc();
 }
 
 void to_json(nlohmann::json& j, const DeviceStateInfo& info) {
@@ -1483,6 +1587,7 @@ void to_json(nlohmann::json& j, const ProcessImageInfo& info) {
        {"shortWkcCycles", info.shortWkcCycles},
        {"firstShortWkcUs", info.firstShortWkcUs},
        {"lastShortWkcUs", info.lastShortWkcUs},
+       {"droppedInputFrames", info.droppedInputFrames},
        {"generations", info.generations},
        {"outputs", info.outputs},
        {"inputs", info.inputs}};

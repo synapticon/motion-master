@@ -7,6 +7,8 @@
 #include <chrono>
 #include <cstdint>
 #include <optional>
+#include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -44,14 +46,20 @@ class Client {
         << ec.message();
   }
 
-  void send(SpoeMessage type, uint16_t sequenceId, const std::vector<uint8_t>& data = {}) {
-    sendRaw(static_cast<uint8_t>(type), sequenceId, data);
+  void send(SpoeMessage type, uint16_t sequenceId, const std::vector<uint8_t>& data = {},
+            uint16_t status = 0) {
+    sendRaw(static_cast<uint8_t>(type), sequenceId, data, status);
   }
 
-  void sendRaw(uint8_t type, uint16_t sequenceId, const std::vector<uint8_t>& data) {
-    std::vector<uint8_t> frame{
-        type, static_cast<uint8_t>(sequenceId),  static_cast<uint8_t>(sequenceId >> 8), 0,
-        0,    static_cast<uint8_t>(data.size()), static_cast<uint8_t>(data.size() >> 8)};
+  void sendRaw(uint8_t type, uint16_t sequenceId, const std::vector<uint8_t>& data,
+               uint16_t status = 0) {
+    std::vector<uint8_t> frame{type,
+                               static_cast<uint8_t>(sequenceId),
+                               static_cast<uint8_t>(sequenceId >> 8),
+                               static_cast<uint8_t>(status),
+                               static_cast<uint8_t>(status >> 8),
+                               static_cast<uint8_t>(data.size()),
+                               static_cast<uint8_t>(data.size() >> 8)};
     frame.insert(frame.end(), data.begin(), data.end());
     asio::error_code ec;
     asio::write(socket_, asio::buffer(frame), ec);
@@ -100,8 +108,9 @@ class Client {
     return frame;
   }
 
-  Frame request(SpoeMessage type, uint16_t sequenceId, const std::vector<uint8_t>& data = {}) {
-    send(type, sequenceId, data);
+  Frame request(SpoeMessage type, uint16_t sequenceId, const std::vector<uint8_t>& data = {},
+                uint16_t status = 0) {
+    send(type, sequenceId, data, status);
     const auto frame = receive();
     EXPECT_TRUE(frame.has_value());
     return frame.value_or(Frame{});
@@ -144,6 +153,16 @@ TEST(FakeSpoeServer, ServerInfoReportsTheVersionLittleEndianAndThePdoMode) {
   EXPECT_EQ(frame.sequenceId, 7);
   EXPECT_EQ(frame.status, 0);
   EXPECT_EQ(frame.data, (std::vector<uint8_t>{0x02, 0x01, mm::comm::testing::kSpoePdoModeNone}));
+}
+
+TEST(FakeSpoeServer, ProtocolVersion100ReportsNoPdoModeAndNoWatchdog) {
+  FakeSpoeServer server;
+  server.setProtocolVersion(mm::comm::testing::kSpoeProtocolVersion100);
+  Client client(server.port());
+  EXPECT_EQ(client.request(SpoeMessage::kServerInfo, 1).data, (std::vector<uint8_t>{0x00, 0x01}));
+  client.request(SpoeMessage::kWatchdogTimeout, 2, {75, 0, 0, 0});
+  EXPECT_FALSE(server.watchdogTimeoutMs().has_value());
+  EXPECT_FALSE(server.spoeActive());
 }
 
 TEST(FakeSpoeServer, SdoReadAnswersTheValueOrTheFirmwareError) {
@@ -345,12 +364,184 @@ TEST(FakeSpoeServer, AnUnknownTypeGetsAnEmptyReplyAndClearsSpoeActive) {
   EXPECT_FALSE(server.spoeActive());
 }
 
-TEST(FakeSpoeServer, AnUnmodelledTypeClosesTheConnection) {
+TEST(FakeSpoeServer, AnUnmodelledRequestClosesTheConnection) {
+  // An empty batch read: the firmware decrements its count past zero and reads stale bytes, so
+  // there is no answer to model.
   FakeSpoeServer server;
   Client client(server.port());
-  client.send(SpoeMessage::kFileRead, 1, {'a'});
+  client.send(SpoeMessage::kSdoBatchRead, 1, {});
   EXPECT_TRUE(client.closed());
   EXPECT_EQ(server.unmodelledRequests(), 1);
+}
+
+// A small dictionary: one VAR object and one RECORD with two entries.
+void describeSmallDictionary(FakeSpoeServer& server) {
+  server.describeEntry(0x1000, 0,
+                       {.dataType = 0x0007,
+                        .objectCode = 0x07,
+                        .bitLength = 32,
+                        .access = 0x07,
+                        .name = "Device type"});
+  server.describeEntry(
+      0x1018, 0,
+      {.dataType = 0x0005, .objectCode = 0x09, .bitLength = 8, .access = 0x07, .name = "Identity"});
+  server.describeEntry(0x1018, 1,
+                       {.dataType = 0x0007,
+                        .objectCode = 0x07,
+                        .bitLength = 32,
+                        .access = 0x07,
+                        .name = "Vendor ID"});
+  server.describeEntry(0x1018, 2,
+                       {.dataType = 0x0007,
+                        .objectCode = 0x07,
+                        .bitLength = 32,
+                        .access = 0x07,
+                        .name = "Product code"});
+}
+
+const mm::comm::testing::FakeSpoeEntry kByteEntry{
+    .dataType = 0x0005, .objectCode = 0x07, .bitLength = 8, .access = 0x07, .name = "Byte"};
+
+uint8_t packetState(const Frame& frame) { return static_cast<uint8_t>(frame.status >> 8); }
+
+TEST(FakeSpoeServer, IndexListHoldsEveryObjectOnce) {
+  FakeSpoeServer server;
+  describeSmallDictionary(server);
+  Client client(server.port());
+  EXPECT_EQ(client.request(SpoeMessage::kParamList, 1).data,
+            (std::vector<uint8_t>{0x00, 0x10, 0x18, 0x10}));
+}
+
+TEST(FakeSpoeServer, IndexListStopsAtTwoHundredObjects) {
+  // `sdoinfo_get_list` is called with `MAX_INDEX_LIST`, which is 200.
+  FakeSpoeServer server;
+  for (uint16_t i = 0; i < 250; ++i) {
+    server.describeEntry(static_cast<uint16_t>(0x2000 + i), 0, kByteEntry);
+  }
+  Client client(server.port());
+  EXPECT_EQ(client.request(SpoeMessage::kParamList, 1).data.size(), 400U);
+}
+
+TEST(FakeSpoeServer, ParameterListSendsTheCountThenEntriesInPacketsOfSeven) {
+  FakeSpoeServer server;
+  describeSmallDictionary(server);
+  Client client(server.port());
+
+  // The first packet carries only the object count, as one byte of a two-byte field.
+  const Frame first =
+      client.request(SpoeMessage::kParamFullDesc, 1, {}, mm::comm::testing::kSpoePacketFirst);
+  EXPECT_EQ(packetState(first), mm::comm::testing::kSpoePacketMiddle);
+  ASSERT_EQ(first.data.size(), 2U);
+  EXPECT_EQ(first.data[0], 2);
+
+  // Four entries in all: 0x1000:00, 0x1018:00, 0x1018:01 and 0x1018:02. They fit one packet.
+  const Frame middle =
+      client.request(SpoeMessage::kParamFullDesc, 2, {}, mm::comm::testing::kSpoePacketMiddle);
+  EXPECT_EQ(packetState(middle), mm::comm::testing::kSpoePacketLast);
+  EXPECT_EQ(middle.status & 0xFF, mm::comm::testing::kSpoeReplyAck);
+  ASSERT_EQ(middle.data.size(), 4 * mm::comm::testing::kSpoeEntrySize);
+
+  // Subindex 0 of a record carries the subindex count in `value`, at offset 12.
+  const std::size_t record = mm::comm::testing::kSpoeEntrySize;
+  EXPECT_EQ(u16At(middle.data, record), 0x1018);
+  EXPECT_EQ(middle.data[record + 2], 0);
+  EXPECT_EQ(middle.data[record + 6], 0x09);
+  EXPECT_EQ(middle.data[record + 12], 2);
+  EXPECT_EQ(std::string(reinterpret_cast<const char*>(&middle.data[record + 16])), "Identity");
+}
+
+TEST(FakeSpoeServer, ParameterListCountKeepsOnlyTheLowByte) {
+  FakeSpoeServer server;
+  for (uint16_t i = 0; i < 200; ++i) {
+    server.describeEntry(static_cast<uint16_t>(0x2000 + i), 0, kByteEntry);
+  }
+  for (uint16_t i = 0; i < 60; ++i) {
+    server.describeEntry(static_cast<uint16_t>(0x3000 + i), 0, kByteEntry);
+  }
+  Client client(server.port());
+  // 260 objects are capped at 200, which still fits one byte.
+  const Frame first =
+      client.request(SpoeMessage::kParamFullDesc, 1, {}, mm::comm::testing::kSpoePacketFirst);
+  EXPECT_EQ(first.data[0], 200);
+}
+
+TEST(FakeSpoeServer, ALostParameterListPacketMovesTheListOnAnyway) {
+  FakeSpoeServer server;
+  for (uint16_t i = 0; i < 10; ++i) {
+    server.describeEntry(static_cast<uint16_t>(0x2000 + i), 0, kByteEntry);
+  }
+  Client client(server.port());
+  client.request(SpoeMessage::kParamFullDesc, 1, {}, mm::comm::testing::kSpoePacketFirst);
+  server.injectFault(SpoeFault::kLoseParamListPacket);
+  const Frame lost =
+      client.request(SpoeMessage::kParamFullDesc, 2, {}, mm::comm::testing::kSpoePacketMiddle);
+  EXPECT_EQ(lost.status & 0xFF, mm::comm::testing::kSpoeReplyBusy);
+  EXPECT_TRUE(lost.data.empty());
+  // The first seven objects are gone. The next packet holds the last three.
+  const Frame rest =
+      client.request(SpoeMessage::kParamFullDesc, 3, {}, mm::comm::testing::kSpoePacketMiddle);
+  EXPECT_EQ(packetState(rest), mm::comm::testing::kSpoePacketLast);
+  ASSERT_EQ(rest.data.size(), 3 * mm::comm::testing::kSpoeEntrySize);
+  EXPECT_EQ(u16At(rest.data, 0), 0x2007);
+}
+
+TEST(FakeSpoeServer, AnEntryDescriptionComesAlone) {
+  FakeSpoeServer server;
+  describeSmallDictionary(server);
+  Client client(server.port());
+  const Frame frame = client.request(SpoeMessage::kParamSubDesc, 1, address(0x1018, 2));
+  EXPECT_EQ(frame.status, 0);
+  ASSERT_EQ(frame.data.size(), mm::comm::testing::kSpoeEntrySize);
+  EXPECT_EQ(u16At(frame.data, 0), 0x1018);
+  EXPECT_EQ(frame.data[2], 2);
+}
+
+TEST(FakeSpoeServer, ReadsAFileInPackets) {
+  // `AppSockIf_StartReadingFile` only opens the file, so the first reply is empty.
+  FakeSpoeServer server;
+  server.setFile("config.csv", std::vector<uint8_t>(600, 'x'));
+  Client client(server.port());
+  const Frame first =
+      client.request(SpoeMessage::kFileRead, 1, {'c', 'o', 'n', 'f', 'i', 'g', '.', 'c', 's', 'v'},
+                     mm::comm::testing::kSpoePacketFirst);
+  EXPECT_EQ(first.status & 0xFF, mm::comm::testing::kSpoeReplyAck);
+  EXPECT_TRUE(first.data.empty());
+  const Frame second =
+      client.request(SpoeMessage::kFileRead, 2, {}, mm::comm::testing::kSpoePacketMiddle);
+  EXPECT_EQ(second.data.size(), 512U);
+  EXPECT_EQ(packetState(second), mm::comm::testing::kSpoePacketMiddle);
+  const Frame third =
+      client.request(SpoeMessage::kFileRead, 3, {}, mm::comm::testing::kSpoePacketMiddle);
+  EXPECT_EQ(third.data.size(), 88U);
+  EXPECT_EQ(packetState(third), mm::comm::testing::kSpoePacketLast);
+}
+
+TEST(FakeSpoeServer, TheComFirmwareInBootAnswersZeroForItsFirstPacket) {
+  FakeSpoeServer server;
+  server.setState(mm::comm::testing::kSpoeStateBoot);
+  Client client(server.port());
+  const std::string name = "com_firmware.bin";
+  const Frame first = client.request(SpoeMessage::kFileWrite, 1, {name.begin(), name.end()},
+                                     mm::comm::testing::kSpoePacketFirst);
+  EXPECT_EQ(first.status & 0xFF, 0x00);
+  const Frame last =
+      client.request(SpoeMessage::kFileWrite, 2, {1, 2, 3}, mm::comm::testing::kSpoePacketLast);
+  EXPECT_EQ(last.status & 0xFF, mm::comm::testing::kSpoeReplyAck);
+  EXPECT_EQ(server.file(name), (std::vector<uint8_t>{1, 2, 3}));
+}
+
+TEST(FakeSpoeServer, TheFirmwareUpdateRestartsTheDriveInPreOp) {
+  FakeSpoeServer server;
+  server.setRestartTiming(milliseconds{100}, milliseconds{200});
+  server.setState(mm::comm::testing::kSpoeStateBoot);
+  Client client(server.port());
+  EXPECT_EQ(client.request(SpoeMessage::kFirmwareUpdate, 1).status, 0);
+  EXPECT_TRUE(client.closed());
+  EXPECT_EQ(server.firmwareUpdates(), 1);
+  std::this_thread::sleep_for(milliseconds{300});
+  Client after(server.port());
+  EXPECT_EQ(after.request(SpoeMessage::kStateRead, 1).data,
+            (std::vector<uint8_t>{mm::comm::testing::kSpoeStatePreOp}));
 }
 
 TEST(FakeSpoeServer, SplitReplyArrivesWhole) {

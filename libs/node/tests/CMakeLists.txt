@@ -33,7 +33,8 @@ add_executable(
   somanet_drive_test.cc
   somanet_procedures_test.cc)
 
-target_link_libraries(mm_node_tests PRIVATE mm::node GTest::gtest GTest::gtest_main)
+target_link_libraries(mm_node_tests PRIVATE mm::node mm::comm_spoe_fake GTest::gtest
+                                            GTest::gtest_main)
 
 # mu_3sl_test.cc checks that the vendored MU_3SL links and loads. On Windows, test discovery runs
 # the test binary at build time, so the DLL must sit next to it by then.

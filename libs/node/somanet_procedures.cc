@@ -495,6 +495,7 @@ constexpr std::string_view kExtraFilesStep = "extra-files";
 constexpr std::string_view kSiiStep = "sii";
 constexpr std::string_view kAppFirmwareStep = "app-firmware";
 constexpr std::string_view kComFirmwareStep = "com-firmware";
+constexpr std::string_view kActivateFirmwareStep = "activate-firmware";
 constexpr std::string_view kFinalStateStep = "final-state";
 
 /// The names the bootloader is written under, regardless of what the package calls them.
@@ -513,6 +514,11 @@ constexpr auto kStateTimeout = std::chrono::seconds(10);
 /// so this has to cover a reboot, plus the drive's own internal timeout for deciding no valid
 /// application started (after which it answers AL status 0x0014 rather than nothing).
 constexpr auto kBootExitTimeout = std::chrono::seconds(30);
+
+/// Ceiling on a firmware activation that restarts the device, as SPoE does: the restart loads the
+/// COM firmware from flash before the drive answers again. A ceiling, not a wait: the activation
+/// returns as soon as the drive answers.
+constexpr auto kActivationTimeout = std::chrono::seconds(120);
 
 /// How many times a transient FoE failure is re-issued before giving up, and the pause between
 /// attempts. Only kinds that @c FoeError classifies as transient are retried; a missing file or an
@@ -2373,7 +2379,7 @@ std::vector<ProcedureParameter> firmwareInstallationParameters() {
 
 std::vector<ProgressStep> firmwareInstallationSteps() {
   return stepsFrom({kPackageStep, kCacheStep, kBootStep, kExtraFilesStep, kSiiStep,
-                    kAppFirmwareStep, kComFirmwareStep, kFinalStateStep});
+                    kAppFirmwareStep, kComFirmwareStep, kActivateFirmwareStep, kFinalStateStep});
 }
 
 std::expected<FirmwareInstallationRequest, std::string> parseFirmwareInstallationRequest(
@@ -2616,8 +2622,12 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
   reporter.start(kSiiStep);
   if (!package->sii) {
     reporter.succeed(kSiiStep, "the package carries no SII image");
+  } else if (const auto device = deviceManager.deviceAt(devicePosition);
+             device && !device->supportsEsc()) {
+    // SPoE reaches the drive without an EtherCAT Slave Controller, so there is no EEPROM to write.
+    reporter.succeed(kSiiStep,
+                     std::format("{} not written: this transport has no SII", package->sii->name));
   } else {
-    const auto device = deviceManager.deviceAt(devicePosition);
     std::expected<void, std::string> written = deviceNotFound(devicePosition);
     if (device) {
       written = device->writeSii(package->sii->content);
@@ -2664,6 +2674,33 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
   if (!writeBinary(kComFirmwareStep, package->comBinary, kComFirmwareFoeName,
                    "the package carries no COM firmware")) {
     return finish();
+  }
+
+  // ── activate-firmware ──────────────────────────────────────────────────────────────────────
+  // Over EtherCAT, leaving BOOT applies the firmware, and this does nothing. Over SPoE the drive
+  // needs an explicit request, which restarts it into the firmware that both binaries hold.
+  reporter.start(kActivateFirmwareStep);
+  if (!package->appBinary && !package->comBinary) {
+    reporter.succeed(kActivateFirmwareStep, "no firmware was written");
+    return finish();
+  }
+  {
+    const auto device = deviceManager.deviceAt(devicePosition);
+    if (!device) {
+      failure = deviceNotFound(devicePosition).error();
+      reporter.fail(kActivateFirmwareStep, *failure);
+      return finish();
+    }
+    const auto activation = device->activateFirmware(kActivationTimeout);
+    if (!activation) {
+      failure = std::format("activating the firmware failed: {}", activation.error());
+      reporter.fail(kActivateFirmwareStep, *failure);
+      return finish();
+    }
+    reporter.succeed(kActivateFirmwareStep,
+                     *activation == mm::comm::FieldbusDriver::FirmwareActivation::kRestarted
+                         ? "the device restarted into the new firmware"
+                         : "applied when the device leaves BOOT");
   }
 
   return finish();

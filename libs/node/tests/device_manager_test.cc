@@ -167,7 +167,16 @@ class FakeDriver : public FieldbusDriver {
 
   void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>, EtherCatState,
                          std::chrono::steady_clock::duration, std::chrono::steady_clock::duration,
-                         std::function<void()>, std::function<bool()>) override {}
+                         std::function<void()>, std::function<bool()>) override {
+    ++transitions;
+  }
+
+  std::optional<std::string> stateChangeRefusal() const override { return refusal; }
+
+  /// Returned by stateChangeRefusal() — nullopt unless a test sets it.
+  std::optional<std::string> refusal;
+  /// Counts transitionToState() calls.
+  int transitions = 0;
 
  private:
   bool initSucceeds_;
@@ -238,17 +247,38 @@ TEST(DeviceManagerMailbox, PreOpStateMarksMailboxActive) {
   ASSERT_TRUE(dm.init(std::move(driver)).has_value());
   ASSERT_TRUE(dm.scan().has_value());
 
-  // Devices start with no mailbox until a state read establishes availability.
+  // The scan reads the device states, so the mailbox is known to be live at once.
   ASSERT_TRUE(dm.hasDevice(1));
-  EXPECT_FALSE(mailboxActive(dm, 1));
-
-  ASSERT_TRUE(dm.deviceStates({}).has_value());
   EXPECT_TRUE(mailboxActive(dm, 1));
 
   // Dropping back to INIT must flip the mailbox inactive again.
   raw->reportState = static_cast<uint16_t>(EtherCatState::Init);
   ASSERT_TRUE(dm.deviceStates({}).has_value());
   EXPECT_FALSE(mailboxActive(dm, 1));
+}
+
+TEST(DeviceManagerState, ADriverThatRefusesStateChangesIsNeverCommanded) {
+  // SPoE in Monitor mode refuses every state change, because a PLC owns the state. The reason must
+  // reach the caller as the error, and the driver must not be asked to transition at all.
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->reportState = static_cast<uint16_t>(EtherCatState::PreOp);
+  driver->refusal = "the PLC owns the state";
+  FakeDriver* raw = driver.get();
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  EXPECT_EQ(dm.stateChangeRefusal(), std::optional<std::string>("the PLC owns the state"));
+
+  const auto result = dm.transitionToState({}, EtherCatState::SafeOp, std::chrono::seconds(1));
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), "the PLC owns the state");
+  EXPECT_EQ(raw->transitions, 0);
+}
+
+TEST(DeviceManagerState, NoRefusalWithoutADriver) {
+  const DeviceManager dm;
+  EXPECT_FALSE(dm.stateChangeRefusal().has_value());
 }
 
 TEST(DeviceManagerMailbox, ErrorIndicatorDoesNotDisableMailbox) {

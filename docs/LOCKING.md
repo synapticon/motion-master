@@ -157,8 +157,10 @@ HTTP thread, so the two calls are serialised."
 | 8 | `ProcedureManager::mutex_` | `std::mutex` | `libs/node/procedure_manager.h` | `runs_` | `start`, `snapshot`, `cancel`, and the destructor | no |
 | 9 | `ProcedureManager::Run::errorMutex_` | `std::mutex` | `libs/node/procedure_manager.h` | one `std::optional<std::string>` | the thread of the run, which writes. Pollers read | no |
 | 10 | `ProgressReporter::mutex_` | `std::mutex` | `libs/node/procedure.h` | the step array | the thread of the run, which writes. Pollers read | no |
+| 11 | `SpoeConnection::Impl::mutex` | `std::mutex` | `libs/comm/spoe_connection.cc` | one drive's TCP connection and its receive buffer | every SPoE request: the control plane, and that drive's exchange thread | **yes**, for one request and its reply, at most the request timeout |
 | — | `RingLogSink`, through the spdlog `base_sink::mutex_` | `std::mutex` | `apps/motion_master/ring_log_sink.h` | the log ring buffer | every thread that logs | no |
 | — | the bus's wait mutex | `std::mutex` plus `std::condition_variable_any`, both local to the thread body | `libs/node/notification_bus.cc` | nothing. One thread owns it, and it exists only so the wait takes a `std::stop_token` and ends at once on shutdown | that one thread | no |
+| — | the state follower's wait mutex | `std::mutex` plus `std::condition_variable_any`, both local to the thread body | `apps/motion_master/main.cc` | nothing, for the same reason as the bus's wait mutex | that one thread | no |
 | — | single-instance lock | `flock`, or a named mutex on Windows | `libs/core/platform.cc` | the *process*, not a data structure | startup only | not applicable |
 
 Entries 9 and 10 exist for one reason. **A procedure thread that finishes must never need
@@ -178,8 +180,11 @@ FieldbusDriver::controlPlaneMutex_
 
 `libs/node/device_manager.h` declares this order. `libs/node/device.h` restates it.
 
-**Two mutexes are outside the chain, because they are leaves.** `currentSetMutex_` and
-`processDataMutex_` are never held while anything else is acquired. Nothing orders against them.
+**Three mutexes are outside the chain, because they are leaves.** `currentSetMutex_`,
+`processDataMutex_` and the SPoE connection's mutex are never held while anything else is
+acquired. Nothing orders against them. The SPoE connection's mutex is taken under
+`controlPlaneMutex_` by a scan or a re-map, and on its own by an SDO or a drive's exchange thread.
+It is the one leaf held across bus I/O: one request and its reply.
 
 **No real-time primitive appears in the chain, by design.** `CycleGuard` is not a mutex, and no
 order relates it to these three. A control-plane operation waits *for* it, through
@@ -354,6 +359,18 @@ way.**
 **FoE is the one long hold.** `readFile` and `writeFile` hold the lock for the entire transfer.
 That is the reason that the [AL-state mirror](#the-al-state-mirror) exists. Without the mirror,
 every reader that asks for the state of device 3 waits out a firmware write of 12 seconds.
+
+### 11. The SPoE connection's mutex — one request at a time on one drive
+
+A drive's SPoE server answers one request at a time, and a reply is matched to its request by
+sequence id. So the requests on one connection must take turns, and the connection's own mutex is
+how they do. It is held for one request and its reply, which is at most the request timeout.
+
+Two kinds of thread take it. The control plane takes it for every SDO, state read and parameter
+list packet, and that drive's exchange thread takes it for every process-data request. The exchange
+thread takes no other lock, and it never takes `controlPlaneMutex_`, so a slow SDO delays one
+process-data exchange and never the real-time loop. The real-time loop reaches the exchange thread
+through `SpoeOutputSlot` and `SpoeInputQueue`, which are lock-free.
 
 ### 6 and 7. `MonitoringManager::mutex_` and `ParameterRefresher::mutex_`
 

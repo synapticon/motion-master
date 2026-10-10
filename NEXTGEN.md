@@ -3512,3 +3512,182 @@ found twice.
 
 **Every feature found in the three sources has one of the five classes.** After these
 decisions, no gap remains outside the minor list.
+
+## Session 2026-10-03 — SPoE process data runs on a thread per drive, and Monitor mode follows the PLC's states (as-built)
+
+Issue #36, slice 4. The SPoE driver exchanges process data, and v6 publishes the process image for
+a drive that a PLC controls.
+
+**A round trip cannot run on the RT thread, so each drive gets an exchange thread.** SPoE is TCP,
+one request and one reply at a time. The RT thread hands the newest outputs to the exchange thread
+through a triple buffer, and takes one input frame per cycle from a single-producer single-consumer
+queue (`libs/comm/spoe_process_data.h`). Neither side waits.
+
+**The pacing is the old client's, and it is why monitoring worked there.** The exchange thread
+starts the next request as soon as the previous one answers, with a 1 ms floor. That keeps the
+drive's 512-byte input buffer far from full. The drive returns its buffered frames in batches; the
+queue holds them, and the RT thread takes one each cycle, so monitoring sees every frame in order.
+The queue keeps the newest 30 frames, which bounds how far the inputs can lag.
+
+**A frame cut at the 500-byte limit is joined, and the framing heals itself.** One reply carries at
+most 500 bytes, which can end inside a frame. The rest starts the next reply. A reply shorter than
+500 bytes means the drive emptied its buffer, so it ends on a frame boundary; if the joined bytes
+are then not whole frames, the kept part was stale, because the firmware empties a full buffer
+outright. The stale bytes are dropped and counted.
+
+**The working counter keeps the EtherCAT rule, so nothing above the driver changes.** A drive whose
+last exchange answered contributes what `workingCounterContribution` gives for its state and its
+mapping. `expectedWkcDuring` computes the same, so the short-WKC notification works for SPoE as it
+is.
+
+**Monitor mode needed a path that does not start with a state change.** `transitionToState` is
+where the image is published, and in Monitor mode v6 sends no state change. The old client read
+the state and the mapping once, at startup, so a drive that reached OP later was probably never
+monitored. `DeviceManager::followObservedStates()` is one pass: it reads every state, re-maps when a
+device enters SAFE-OP or OP, and tears down when none exchanges. A re-map reads the mapping again,
+because the PLC can change it in PRE-OP. It reuses `remapProcessImage` and `stopExchange`.
+
+**The thread that repeats it lives in `main.cc`, not in `DeviceManager`.** `DeviceManager` owns no
+background thread, so that it stays embeddable (`docs/THREADS.md`). The state follower is thread 7.
+It runs every 500 ms and does nothing while the driver accepts state changes. It asks again on every
+pass, because `POST /api/init` can replace the driver.
+
+**A clean shutdown clears the PDO mode.** `main()` does not call `reset()` on SIGTERM, so the
+driver's destructor does what `stop()` does: it stops the exchange threads and sets each drive's
+PDO mode to none. In Control mode that keeps the drive's watchdog from tripping.
+
+**The SPoE connection's mutex is the third leaf lock.** It is held for one request and its reply,
+and nothing else is acquired under it (`docs/LOCKING.md`, mutex 11).
+
+**From the review of the old client:** a state change is judged by the state in the reply, not by
+the status, because firmware versions disagree on the status. The PDO size is read from
+`0x1C12`/`0x1C13` and the entry counts, not from every subindex of `0x1600`–`0x1A03`.
+
+## Session 2026-10-03 — SPoE files and firmware installation follow the firmware's own paths (as-built)
+
+Issue #36, slice 5. The SPoE driver transfers files, installs firmware and blinks a drive's LEDs.
+Every rule below comes from reading `somanet_software`, because the specification and the
+firmware disagree on files too.
+
+**The installation keeps one procedure, with one new step.** Over EtherCAT, leaving BOOT for INIT
+applies the firmware; the netX restarts into its update mode only if `com_firmware.bin` was written
+(`is_foe_for_update_complete`, `AppECS_Functions_Boot.c`). The SPoE handler has no such rule. It
+applies firmware on an explicit `FIRMWARE_UPDATE` message, which restarts the netX; the restart
+loads the COM firmware from flash, and the drive then starts the SoC firmware written in BOOT.
+Marko confirmed that this one message applies both binaries. So the procedure gained an
+`activate-firmware` step, backed by `FieldbusDriver::activateFirmware`. Its default does nothing,
+which is the EtherCAT case, and the existing walk out of BOOT runs after it either way.
+
+**Activation waits for the restart, not for the answer.** The firmware answers `FIRMWARE_UPDATE`
+and resets 1000 ms later (`ulTimeToReset`). A reconnect inside that second reaches the old firmware
+and looks like a finished restart. So the driver first waits for the drive to stop answering,
+then reconnects until it answers again, with a 120 s ceiling. This replaces fixed sleeps.
+
+**The first packet of `com_firmware.bin` in BOOT answers 0x00, not ACK.** The firmware returns what
+`storage_prepare_for_writing` returned, and 0 is its success. Everywhere else success is ACK
+(0x58), and 0x00 is the FoE error "undefined". The driver accepts 0x00 for that one packet only.
+Before it answers, the firmware erases 512 KB of flash, so file packets get a 30 s timeout.
+
+**An empty read is checked against `fs-getlist` before it is called a file.** The old client
+treats an empty read as a file that may be missing, and checks the file list to tell. The firmware
+source does not show what the SoC answers for a missing file, so v6 does the same check.
+
+**SPoE has no SII.** `FieldbusDriver::supportsEsc()` says so without bus I/O, and `Device` copies it
+at construction. The installation records that it did not write the SII and continues.
+
+**Device locate is a transport capability, so its procedure applies by capability.** The catalogue
+row's `applies` reads `Device::supportsLocate()`, a copy taken at construction, which is the kind of
+state the catalogue rule allows. The LEDs stop at the end of the run and when it is cancelled.
+
+## Session 2026-10-10 — SPoE meets hardware: a drive starts in OP, and the netX filters file names (as-built)
+
+Issue #36. The first runs against real drives. One drive spoke SPoE protocol 1.0. A second drive,
+an ACTILINK-S, spoke protocol 1.2 and ran firmware that keeps it in PRE-OP. Neither drive could
+reach SAFE-OP in Control mode on this bench, so process data in Control mode is still untested on
+1.2. PR #68 ships as a test release, and the remaining hardware checks run elsewhere.
+
+**A drive that starts in OP is mapped by the scan.** An SPoE drive starts in OP. The image is
+otherwise published only by `transitionToState`, so in Control mode no state change ever brought
+the drive there, and nothing was exchanged. `DeviceManager::scan()` now reads every state. When a
+device is in SAFE-OP or OP, it reads that device's object dictionary and calls
+`remapProcessImage`. A failure there is logged, and the scan still succeeds, because every device
+was found. A SOEM scan leaves every slave in INIT, so the step does nothing for EtherCAT. The scan
+also records what it mapped in `observedExchanging_`, so the Monitor-mode follower does not map the
+same drive a second time.
+
+**The dictionary comes before the image, in every path that maps.** `buildProcessImage` binds each
+entry to its parameter cell when it builds the image. A device with no dictionary gets entries with
+no cell, so its values arrive and nothing decodes them until the next re-map. `transitionToState`
+was the only path that read the dictionary. `readMissingObjectDictionaries` now serves it, the scan
+and `followObservedStates`. It reads only devices with a live mailbox and no parameters, and it
+loads the parameter cache first.
+
+**The cost of the scan grows with the drives already in OP.** Measured on the 1.0 drive, one
+re-map took about 0.74 s: 0.35 s for the driver set-up and 0.38 s for the PDO mapping read. The
+first dictionary read of a drive model took about 12.5 s for 519 entries. The start time of that
+read is not certain, so treat the figure as rough. A cached dictionary loads in milliseconds. One SDO
+read on the 1.2 drive took about 10 ms. Every request goes through the driver-wide
+`controlPlaneMutex_`, so drives are read one after another.
+
+**The netX accepts only file names on a fixed list.** `AppSockIf_WriteFile` and
+`AppSockIf_ReadFile` (`AppSockIf_MessageHandler.c`) check every first packet with
+`AppUtil_ValidateFileName` (`App_Utils.c`). Read at firmware tag v5.6.11. The check is an exact
+`strcmp` against `filenames_whitelist`. It also accepts `fs-remove=` followed by a listed name,
+and it refuses a name of 49 characters or more. An unlisted name gets `SQI_BRG_FOE_ERR_NOT_FOUND`,
+0x01, and the SoC never sees the request. Only the SPoE handler calls this check, so FoE over
+EtherCAT does not have this limit. Three things follow from it:
+
+1. The EDS file in a firmware package is not on the list, so the install logs a warning on every
+   SPoE install.
+2. `removeDeviceFile` counts `FileNotFound` as success. A refused name therefore reports a delete
+   that did not happen.
+3. The driver reports 0x01 as "file not found", which is wrong when the drive refuses the name.
+
+**A second client is refused on 1.2 as on 1.0.** `hil/spoe/second_client.py` showed the firmware
+behaviour, not the specification's. The second client cannot connect, and the first keeps working.
+
+**A file write that gets no answer can leave the drive holding its only connection.** An install of
+a package for another fieldbus build sent the first packet of `app_firmware.bin` in BOOT. No reply
+came within 30 s, on all five attempts. A rescan closed the socket, which then stayed in FIN-WAIT-2,
+so the drive never closed its side. The port refused every connect until a power cycle. The drive
+survived that power cycle. The 1.0 drive failed an install in the same step earlier the same day,
+and after its power cycle it showed no link. The cause of either is not confirmed. Nobody read the
+SoC side.
+
+**Activation assumes the drive answers over SPoE afterwards.** A package that changes the drive to
+EtherCAT firmware installed correctly. The drive came up on EtherCAT with the new version in
+0x100A. But `activate-firmware` waits up to 120 s for an SPoE answer that never comes, and the
+procedure reports a failure.
+
+### Open
+
+Untested on hardware:
+
+- Process data in Control mode on protocol 1.2, and the scan mapping a drive that starts in OP.
+- The Control-mode watchdog, and what happens to the drive's single connection when Motion Master
+  stops without closing it. Protocol 1.0 has no idle timeout.
+- Monitor mode beside a PLC, including the follower reading the dictionary before a re-map.
+- Monitoring and the recorder over SPoE on 1.2.
+- A live dictionary read over 1.2. The 1.2 run loaded the dictionary from the cache, written by a
+  different firmware.
+- An SDO write, and a file write of a listed name.
+- A complete firmware install that stays on SPoE firmware.
+
+Known problems:
+
+- **Firmware install over SPoE.** A first packet with no reply leaves the drive unreachable until a
+  power cycle. The error does not say which packet went unanswered. Add the packet number and state
+  to file errors before the next investigation.
+- **A fieldbus change reports failure.** `activate-firmware` needs to accept a drive that stops
+  answering over SPoE, when the package changes the fieldbus.
+- **File names.** Report a refused first packet as a refused name, not as a missing file. Do not
+  count that refusal as a successful delete. Skip the EDS file over SPoE.
+- **One reply out of step.** The client discarded a reply with sequence id 1286 while it waited for
+  1290. The cause is unknown, and it did not repeat.
+
+Later:
+
+- **A lock per connection.** Drives are separate TCP connections, but `controlPlaneMutex_` is
+  driver-wide, so a scan or a re-map reads them one after another. A per-connection lock would let
+  them run in parallel. It changes the lock inventory in `docs/LOCKING.md`, so it needs its own
+  review.

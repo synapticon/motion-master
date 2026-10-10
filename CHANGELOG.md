@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Console's Update button now loads the new version every time.** It often did nothing when the new version was downloaded in an earlier visit or in another tab, and the old Console stayed on screen. The button now shows "Updating…" and reloads the page once the new version takes over. If you run 6.0.0-alpha.89 or older, reload the page once by hand, because the old button is part of the version you run.
+
 ## [6.0.0-alpha.89] - 2026-10-10
 
 ### Added

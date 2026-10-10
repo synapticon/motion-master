@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.89] - 2026-10-10
+
 ### Added
 
 - **Motion Master connects to SOMANET drives over SPoE (SOMANET Protocol over Ethernet).** You give one IP address per drive, either on the Console's **Fieldbus → Control** page or as `ipAddresses` in the config file with `"driver": "spoe"`. Each drive is reached over TCP, on port 8080 by default, and no EtherCAT master is involved. The object dictionary, SDO reads and writes, process data, monitoring, the recorder, file transfer, firmware installation and the LED locate all work over SPoE. SII, ESC registers, distributed clocks, ESC diagnostics and ENI export need an EtherCAT Slave Controller, so they answer 409 over SPoE, and the Console says why. Drives with SPoE protocol 1.0 and 1.2 are supported.
@@ -834,7 +836,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.88...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.89...HEAD
+[6.0.0-alpha.89]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.88...v6.0.0-alpha.89
 [6.0.0-alpha.88]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.87...v6.0.0-alpha.88
 [6.0.0-alpha.87]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.86...v6.0.0-alpha.87
 [6.0.0-alpha.86]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.85...v6.0.0-alpha.86

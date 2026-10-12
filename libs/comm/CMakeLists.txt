@@ -2,6 +2,7 @@ add_library(
   comm STATIC
   al_status_codes.cc
   base.cc
+  esc_diagnostics.cc
   esc_registers.cc
   fieldbus_driver.cc
   foe_error_codes.cc

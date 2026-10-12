@@ -25,6 +25,7 @@
 #include <vector>
 
 #include "comm/al_status_codes.h"
+#include "comm/esc_diagnostics.h"
 #include "comm/mailbox_error_codes.h"
 #include "comm/sdo_abort_codes.h"
 #include "comm/sdo_log.h"
@@ -685,51 +686,26 @@ std::expected<std::vector<SlaveDiagnostics>, std::string> SoemFieldbusDriver::re
   for (uint16_t pos : positions) {
     const uint16_t configAddr = ctx_->slavelist[pos].configadr;
 
-    // DL Status (0x0110): link/loop/communication per port. Bits 4–7 = link on ports 0–3; for
-    // port p, bit (8 + 2p) = loop closed, bit (9 + 2p) = communication established.
+    // decodeSlaveDiagnostics explains the layout of the three blocks.
     uint16_t dlStatus = 0;
-    if (ecx_FPRD(&ctx_->port, configAddr, 0x0110, sizeof(dlStatus), &dlStatus, EC_TIMEOUTRET) !=
-        1) {
+    if (ecx_FPRD(&ctx_->port, configAddr, kDlStatusRegister, sizeof(dlStatus), &dlStatus,
+                 EC_TIMEOUTRET) != 1) {
       return std::unexpected(std::format("FPRD slave {} DL status (0x0110) failed", pos));
     }
 
-    // Error-counter block (0x0300–0x0313), read contiguously in one datagram:
-    //   [0..7]   RX error counter   — per port: byte 2p = invalid frame, byte 2p+1 = RX error
-    //   [8..11]  forwarded RX error — 1 byte per port
-    //   [12]     processing-unit error (0x030C)   [13] PDI error (0x030D)   [14,15] reserved
-    //   [16..19] lost-link counter  — 1 byte per port
-    std::array<uint8_t, 20> errs{};
-    if (ecx_FPRD(&ctx_->port, configAddr, 0x0300, static_cast<uint16_t>(errs.size()), errs.data(),
-                 EC_TIMEOUTRET) != 1) {
+    std::array<uint8_t, kErrorCounterBytes> errs{};
+    if (ecx_FPRD(&ctx_->port, configAddr, kErrorCounterRegisters,
+                 static_cast<uint16_t>(errs.size()), errs.data(), EC_TIMEOUTRET) != 1) {
       return std::unexpected(std::format("FPRD slave {} error counters (0x0300) failed", pos));
     }
 
-    // Watchdog block (0x0440–0x0443): [0,1] PD watchdog status, [2] PD watchdog expirations
-    // (0x0442), [3] PDI watchdog expirations (0x0443).
-    std::array<uint8_t, 4> wd{};
-    if (ecx_FPRD(&ctx_->port, configAddr, 0x0440, static_cast<uint16_t>(wd.size()), wd.data(),
-                 EC_TIMEOUTRET) != 1) {
+    std::array<uint8_t, kWatchdogCounterBytes> wd{};
+    if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogCounterRegisters,
+                 static_cast<uint16_t>(wd.size()), wd.data(), EC_TIMEOUTRET) != 1) {
       return std::unexpected(std::format("FPRD slave {} watchdog (0x0440) failed", pos));
     }
 
-    SlaveDiagnostics d{};
-    d.slavePosition = pos;
-    for (size_t p = 0; p < 4; ++p) {
-      d.ports[p] = PortDiagnostics{
-          .linkUp = (dlStatus & (1u << (4 + p))) != 0,
-          .loopClosed = (dlStatus & (1u << (8 + 2 * p))) != 0,
-          .communication = (dlStatus & (1u << (9 + 2 * p))) != 0,
-          .invalidFrame = errs[2 * p],
-          .rxError = errs[2 * p + 1],
-          .forwardedError = errs[8 + p],
-          .lostLink = errs[16 + p],
-      };
-    }
-    d.processingUnitError = errs[12];
-    d.pdiError = errs[13];
-    d.processDataWatchdog = wd[2];
-    d.pdiWatchdog = wd[3];
-    result.push_back(d);
+    result.push_back(decodeSlaveDiagnostics(pos, dlStatus, errs, wd));
   }
   return result;
 }
@@ -765,29 +741,15 @@ std::expected<std::vector<DcSyncDiagnostics>, std::string> SoemFieldbusDriver::r
       continue;
     }
 
-    // System-time delay (0x0928, 4 bytes) and system-time difference (0x092C, 4 bytes) are
-    // contiguous — read both in one FPRD. Both are little-endian on the wire.
+    // System-time delay (0x0928) and system-time difference (0x092C) are contiguous, so one FPRD
+    // reads both.
     const uint16_t configAddr = ctx_->slavelist[pos].configadr;
-    std::array<uint8_t, 8> dc{};
-    if (ecx_FPRD(&ctx_->port, configAddr, 0x0928, static_cast<uint16_t>(dc.size()), dc.data(),
-                 EC_TIMEOUTRET) != 1) {
+    std::array<uint8_t, kDcSyncBytes> dc{};
+    if (ecx_FPRD(&ctx_->port, configAddr, kDcSyncRegisters, static_cast<uint16_t>(dc.size()),
+                 dc.data(), EC_TIMEOUTRET) != 1) {
       return std::unexpected(std::format("FPRD slave {} DC sync registers (0x0928) failed", pos));
     }
-
-    const uint32_t delay = dc[0] | (static_cast<uint32_t>(dc[1]) << 8) |
-                           (static_cast<uint32_t>(dc[2]) << 16) |
-                           (static_cast<uint32_t>(dc[3]) << 24);
-    const uint32_t diffRaw = dc[4] | (static_cast<uint32_t>(dc[5]) << 8) |
-                             (static_cast<uint32_t>(dc[6]) << 16) |
-                             (static_cast<uint32_t>(dc[7]) << 24);
-
-    // System-time difference (0x092C): bits 0–30 are the mean deviation magnitude in ns; bit 31 is
-    // the sign — set when the local copy of the system time is smaller than the reference (the
-    // local clock is behind). Map to a signed figure where positive = ahead, negative = behind.
-    const int32_t magnitude = static_cast<int32_t>(diffRaw & 0x7FFFFFFFu);
-    d.propagationDelay = static_cast<int32_t>(delay);
-    d.systemTimeDifference = (diffRaw & 0x80000000u) ? -magnitude : magnitude;
-    result.push_back(d);
+    result.push_back(decodeDcSync(pos, d.referenceClock, dc));
   }
   return result;
 }
@@ -1454,29 +1416,6 @@ std::expected<void, std::string> SoemFieldbusDriver::writeRegister(uint16_t slav
   return {};
 }
 
-namespace {
-// ESC watchdog registers (ETG.1000.4 §Table 32). The divider (0x0400) is the common time base
-// for both the process-data (0x0420) and PDI (0x0410) watchdogs; the time register counts ticks
-// of that base. One tick = 40 ns × (divider + 2). A zero time register disables the watchdog.
-constexpr uint16_t kWatchdogDividerReg = 0x0400;
-constexpr uint16_t kWatchdogTimePdReg = 0x0420;
-constexpr uint16_t kWatchdogStatusPdReg = 0x0440;  // bit 0: 1 = running, 0 = expired.
-constexpr int64_t kEscClockNs = 40;  // ESC reference clock period feeding the watchdog divider.
-
-int64_t watchdogTickNs(uint16_t divider) {
-  return kEscClockNs * (static_cast<int64_t>(divider) + 2);
-}
-
-mm::comm::ProcessDataWatchdogConfig decodeWatchdog(uint16_t divider, uint16_t ticks,
-                                                   uint16_t status) {
-  return {.enabled = ticks != 0,
-          .running = (status & 0x0001u) != 0,
-          .timeout = std::chrono::nanoseconds(watchdogTickNs(divider) * ticks),
-          .divider = divider,
-          .ticks = ticks};
-}
-}  // namespace
-
 std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::processDataWatchdog(
     uint16_t slavePosition) {
   std::lock_guard<std::mutex> lock(controlPlaneMutex_);
@@ -1488,18 +1427,18 @@ std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::proces
   uint16_t ticks = 0;
   // ESC registers are little-endian on the wire; reading straight into a uint16_t is correct on
   // the x86 host (matches the readDiagnostics DL-status read above).
-  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogDividerReg, sizeof(divider), &divider,
+  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogDividerRegister, sizeof(divider), &divider,
                EC_TIMEOUTRET) != 1) {
     return std::unexpected(
         std::format("FPRD slave {} watchdog divider (0x0400) failed", slavePosition));
   }
-  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogTimePdReg, sizeof(ticks), &ticks, EC_TIMEOUTRET) !=
-      1) {
+  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogTimePdRegister, sizeof(ticks), &ticks,
+               EC_TIMEOUTRET) != 1) {
     return std::unexpected(
         std::format("FPRD slave {} PD watchdog time (0x0420) failed", slavePosition));
   }
   uint16_t status = 0;
-  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogStatusPdReg, sizeof(status), &status,
+  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogStatusPdRegister, sizeof(status), &status,
                EC_TIMEOUTRET) != 1) {
     return std::unexpected(
         std::format("FPRD slave {} PD watchdog status (0x0440) failed", slavePosition));
@@ -1520,37 +1459,27 @@ std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::setPro
   // Read the existing divider and leave it untouched — it is shared with the PDI watchdog, so we
   // only scale the process-data time register against whatever time base the device already uses.
   uint16_t divider = 0;
-  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogDividerReg, sizeof(divider), &divider,
+  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogDividerRegister, sizeof(divider), &divider,
                EC_TIMEOUTRET) != 1) {
     return std::unexpected(
         std::format("FPRD slave {} watchdog divider (0x0400) failed", slavePosition));
   }
-  const int64_t tickNs = watchdogTickNs(divider);
-  // Round to the nearest tick. A zero timeout maps to zero ticks (watchdog disabled).
-  int64_t ticks64 = (timeout.count() + tickNs / 2) / tickNs;
-  if (ticks64 > 0xFFFF) {
-    return std::unexpected(std::format(
-        "watchdog timeout {} ns exceeds the maximum {} ns representable with this device's divider "
-        "({} ns per tick)",
-        timeout.count(), tickNs * 0xFFFF, tickNs));
+  auto converted = watchdogTicks(divider, timeout);
+  if (!converted) {
+    return std::unexpected(converted.error());
   }
-  // A non-zero request that rounds to zero would silently disable the watchdog — floor it to one
-  // tick so "set a tiny timeout" never reads as "disable".
-  if (timeout.count() > 0 && ticks64 == 0) {
-    ticks64 = 1;
-  }
-  auto ticks = static_cast<uint16_t>(ticks64);
-  if (ecx_FPWR(&ctx_->port, configAddr, kWatchdogTimePdReg, sizeof(ticks), &ticks, EC_TIMEOUTRET) !=
-      1) {
+  uint16_t ticks = *converted;
+  if (ecx_FPWR(&ctx_->port, configAddr, kWatchdogTimePdRegister, sizeof(ticks), &ticks,
+               EC_TIMEOUTRET) != 1) {
     return std::unexpected(
         std::format("FPWR slave {} PD watchdog time (0x0420) failed", slavePosition));
   }
-  spdlog::info("Device {}: process-data watchdog set to {} ns ({} ticks @ {} ns/tick)",
-               slavePosition, tickNs * ticks, ticks, tickNs);
+  spdlog::info("Device {}: process-data watchdog set to {} ns ({} ticks, divider {})",
+               slavePosition, decodeWatchdog(divider, ticks, 0).timeout.count(), ticks, divider);
   // Read back the status so the caller sees whether the freshly programmed watchdog is running
   // (it counts down only once process data is flowing).
   uint16_t status = 0;
-  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogStatusPdReg, sizeof(status), &status,
+  if (ecx_FPRD(&ctx_->port, configAddr, kWatchdogStatusPdRegister, sizeof(status), &status,
                EC_TIMEOUTRET) != 1) {
     return std::unexpected(
         std::format("FPRD slave {} PD watchdog status (0x0440) failed", slavePosition));

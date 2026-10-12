@@ -18,12 +18,15 @@
 #include <numeric>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <system_error>
 #include <thread>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
+#include "comm/esc_diagnostics.h"
+#include "comm/foe_error_codes.h"
 #include "comm/sdo_abort_codes.h"
 #include "comm/sdo_log.h"
 #include "master/ioctl.h"
@@ -195,6 +198,68 @@ std::optional<StandardObject> standardObject(uint16_t index) {
         .objectCode = kObjectCodeArray, .entryDataType = kDataTypeUnsigned16, .entryBitLength = 16};
   }
   return std::nullopt;
+}
+
+// The same cap the SOEM driver uses for one file.
+constexpr std::size_t kFoeBufferBytes = 10 * 1024 * 1024;
+
+// The FoE request results of master/foe.h, by value.
+constexpr std::array<std::string_view, 16> kFoeResultNames{"busy",
+                                                           "ready",
+                                                           "idle",
+                                                           "working counter error",
+                                                           "receive error",
+                                                           "protocol error",
+                                                           "no data",
+                                                           "packet number error",
+                                                           "opcode error",
+                                                           "timeout",
+                                                           "error sending received data",
+                                                           "error acknowledging received data",
+                                                           "acknowledge error",
+                                                           "error fetching data from mailbox",
+                                                           "no data while reading",
+                                                           "mailbox protocol error"};
+constexpr uint32_t kFoeResultWorkingCounterError = 3;
+constexpr uint32_t kFoeResultReceiveError = 4;
+constexpr uint32_t kFoeResultPacketNumberError = 7;
+constexpr uint32_t kFoeResultOpcodeError = 8;
+constexpr uint32_t kFoeResultTimeout = 9;
+constexpr uint32_t kFoeErrorNotFound = 0x8001;
+
+// Classifies a failed FoE ioctl. The kernel reports what went wrong in two fields: the request
+// result, and the error code of an FoE Error packet when the slave sent one. The master captures
+// that code only while it reads a file; on a write the slave's error packet ends as "acknowledge
+// error" with no code (master/fsm_foe.c).
+FoeError ighFoeError(int error, uint32_t result, uint32_t errorCode, std::string_view op,
+                     uint16_t slave, std::string_view filename) {
+  FoeErrorKind kind = FoeErrorKind::Protocol;
+  if (error == ENOBUFS) {
+    kind = FoeErrorKind::BufferTooSmall;
+  } else if (result == kFoeResultTimeout || result == kFoeResultWorkingCounterError ||
+             result == kFoeResultReceiveError) {
+    kind = FoeErrorKind::NoResponse;
+  } else if (result == kFoeResultPacketNumberError) {
+    kind = FoeErrorKind::PacketMismatch;
+  } else if (result == kFoeResultOpcodeError && errorCode == kFoeErrorNotFound) {
+    kind = FoeErrorKind::FileNotFound;
+  }
+  FoeError foeError = makeFoeError(kind, op, slave, filename);
+  const std::string_view resultName =
+      result < kFoeResultNames.size() ? kFoeResultNames[result] : std::string_view{"unknown"};
+  std::string detail = std::format("IgH result {} ({})", result, resultName);
+  if (errorCode != 0) {
+    const auto* code = std::ranges::find_if(
+        kFoeErrorCodes, [errorCode](const FoeErrorCode& c) { return c.code == errorCode; });
+    detail += code != kFoeErrorCodes.end()
+                  ? std::format(", FoE error 0x{:04X}: {}", errorCode, code->description)
+                  : std::format(", FoE error 0x{:08X}", errorCode);
+  }
+  if (error != EIO) {
+    detail += std::format(", {}", errnoText(error));
+  }
+  foeError.message += std::format(" [{}]", detail);
+  return foeError;
 }
 
 uint16_t readLe16(std::span<const uint8_t> bytes) {
@@ -1164,18 +1229,232 @@ std::expected<OdRead, std::string> IghFieldbusDriver::readObjectDictionary(uint1
 }
 
 std::expected<std::vector<uint8_t>, FoeError> IghFieldbusDriver::readFile(
-    uint16_t /*slavePosition*/, const std::string& /*filename*/) {
-  return std::unexpected(FoeError{.kind = FoeErrorKind::Protocol,
-                                  .retry = Retry::Permanent,
-                                  .message = "FoE over the IgH master is not supported yet"});
+    uint16_t slavePosition, const std::string& filename) {
+  if (auto open = requireOpen(); !open) {
+    return std::unexpected(FoeError{FoeErrorKind::Protocol, Retry::Permanent, open.error()});
+  }
+  ec_ioctl_slave_foe_t foe{};
+  if (filename.size() >= sizeof(foe.file_name)) {
+    return std::unexpected(FoeError{
+        FoeErrorKind::Protocol, Retry::Permanent,
+        std::format("FOEread slave {} '{}' failed (IgH takes a file name of at most {} characters)",
+                    slavePosition, filename, sizeof(foe.file_name) - 1)});
+  }
+  spdlog::debug("FOEread slave {} '{}'", slavePosition, filename);
+  // The same cap the SOEM driver uses. IgH refuses a larger file with ENOBUFS rather than
+  // truncating it.
+  std::vector<uint8_t> data(kFoeBufferBytes);
+  foe.slave_position = static_cast<uint16_t>(slavePosition - 1);
+  foe.offset = 0;
+  foe.buffer_size = data.size();
+  foe.buffer = data.data();
+  std::memcpy(foe.file_name, filename.c_str(), filename.size() + 1);
+  if (const int error = callIoctl(fd_, EC_IOCTL_SLAVE_FOE_READ, &foe); error != 0) {
+    FoeError foeError =
+        ighFoeError(error, foe.result, foe.error_code, "FOEread", slavePosition, filename);
+    spdlog::debug("{}", foeError.message);
+    return std::unexpected(std::move(foeError));
+  }
+  data.resize(foe.data_size);
+  spdlog::debug("FOEread slave {} '{}' ok ({} bytes)", slavePosition, filename, data.size());
+  return data;
 }
 
-std::expected<void, FoeError> IghFieldbusDriver::writeFile(uint16_t /*slavePosition*/,
-                                                           const std::string& /*filename*/,
-                                                           std::span<const uint8_t> /*data*/) {
-  return std::unexpected(FoeError{.kind = FoeErrorKind::Protocol,
-                                  .retry = Retry::Permanent,
-                                  .message = "FoE over the IgH master is not supported yet"});
+std::expected<void, FoeError> IghFieldbusDriver::writeFile(uint16_t slavePosition,
+                                                           const std::string& filename,
+                                                           std::span<const uint8_t> data) {
+  if (auto open = requireOpen(); !open) {
+    return std::unexpected(FoeError{FoeErrorKind::Protocol, Retry::Permanent, open.error()});
+  }
+  ec_ioctl_slave_foe_t foe{};
+  if (filename.size() >= sizeof(foe.file_name)) {
+    return std::unexpected(FoeError{
+        FoeErrorKind::Protocol, Retry::Permanent,
+        std::format(
+            "FOEwrite slave {} '{}' failed (IgH takes a file name of at most {} characters)",
+            slavePosition, filename, sizeof(foe.file_name) - 1)});
+  }
+  spdlog::debug("FOEwrite slave {} '{}' ({} bytes)", slavePosition, filename, data.size());
+  // The request carries a pointer to mutable bytes, although the kernel only reads them.
+  std::vector<uint8_t> bytes(data.begin(), data.end());
+  foe.slave_position = static_cast<uint16_t>(slavePosition - 1);
+  foe.offset = 0;
+  foe.buffer_size = bytes.size();
+  foe.buffer = bytes.data();
+  std::memcpy(foe.file_name, filename.c_str(), filename.size() + 1);
+  if (const int error = callIoctl(fd_, EC_IOCTL_SLAVE_FOE_WRITE, &foe); error != 0) {
+    FoeError foeError =
+        ighFoeError(error, foe.result, foe.error_code, "FOEwrite", slavePosition, filename);
+    spdlog::debug("{}", foeError.message);
+    return std::unexpected(std::move(foeError));
+  }
+  spdlog::debug("FOEwrite slave {} '{}' ok", slavePosition, filename);
+  return {};
+}
+
+std::expected<std::vector<uint8_t>, std::string> IghFieldbusDriver::readSii(
+    uint16_t slavePosition) {
+  if (auto open = requireOpen(); !open) {
+    return std::unexpected(open.error());
+  }
+  ec_ioctl_slave_t slave{};
+  slave.position = static_cast<uint16_t>(slavePosition - 1);
+  if (const int error = callIoctl(fd_, EC_IOCTL_SLAVE, &slave); error != 0) {
+    return std::unexpected(
+        std::format("cannot read slave {}: {}", slavePosition, errnoText(error)));
+  }
+  if (slave.sii_nwords == 0) {
+    return std::unexpected(std::format("the IgH master holds no SII for slave {}", slavePosition));
+  }
+  std::vector<uint16_t> words(slave.sii_nwords);
+  ec_ioctl_slave_sii_t sii{};
+  sii.slave_position = slave.position;
+  sii.offset = 0;
+  sii.nwords = static_cast<uint32_t>(words.size());
+  sii.words = words.data();
+  if (const int error = callIoctl(fd_, EC_IOCTL_SLAVE_SII_READ, &sii); error != 0) {
+    return std::unexpected(
+        std::format("SII read slave {} failed: {}", slavePosition, errnoText(error)));
+  }
+  std::vector<uint8_t> bytes;
+  bytes.reserve(words.size() * 2);
+  for (const uint16_t word : words) {
+    bytes.push_back(static_cast<uint8_t>(word & 0xFF));
+    bytes.push_back(static_cast<uint8_t>(word >> 8));
+  }
+  spdlog::debug("readSii slave {} ({} bytes, the master's copy from the last scan)", slavePosition,
+                bytes.size());
+  return bytes;
+}
+
+std::expected<void, std::string> IghFieldbusDriver::writeSii(uint16_t slavePosition,
+                                                             std::span<const uint8_t> data) {
+  if (auto open = requireOpen(); !open) {
+    return std::unexpected(open.error());
+  }
+  if (data.size() % 2 != 0) {
+    return std::unexpected(
+        std::format("SII image length {} is odd; EEPROM is written in 16-bit words", data.size()));
+  }
+  std::vector<uint16_t> words(data.size() / 2);
+  for (std::size_t i = 0; i < words.size(); ++i) {
+    words[i] = static_cast<uint16_t>(data[2 * i] | (data[2 * i + 1] << 8));
+  }
+  ec_ioctl_slave_sii_t sii{};
+  sii.slave_position = static_cast<uint16_t>(slavePosition - 1);
+  sii.offset = 0;
+  sii.nwords = static_cast<uint32_t>(words.size());
+  sii.words = words.data();
+  if (const int error = callIoctl(fd_, EC_IOCTL_SLAVE_SII_WRITE, &sii); error != 0) {
+    return std::unexpected(
+        std::format("EEPROM write to slave {} failed: {}", slavePosition, errnoText(error)));
+  }
+  spdlog::info("writeSii slave {} ({} bytes) ok — power-cycle the device to apply", slavePosition,
+               data.size());
+  return {};
+}
+
+std::expected<std::vector<SlaveDiagnostics>, std::string> IghFieldbusDriver::readDiagnostics(
+    const std::vector<uint16_t>& positions) {
+  std::vector<SlaveDiagnostics> result;
+  result.reserve(positions.size());
+  for (const uint16_t position : positions) {
+    std::array<uint8_t, 2> dlStatus{};
+    std::array<uint8_t, kErrorCounterBytes> errorCounters{};
+    std::array<uint8_t, kWatchdogCounterBytes> watchdogCounters{};
+    if (auto read = readRegister(position, kDlStatusRegister, dlStatus); !read) {
+      return std::unexpected(read.error());
+    }
+    if (auto read = readRegister(position, kErrorCounterRegisters, errorCounters); !read) {
+      return std::unexpected(read.error());
+    }
+    if (auto read = readRegister(position, kWatchdogCounterRegisters, watchdogCounters); !read) {
+      return std::unexpected(read.error());
+    }
+    result.push_back(
+        decodeSlaveDiagnostics(position, readLe16(dlStatus), errorCounters, watchdogCounters));
+  }
+  return result;
+}
+
+std::expected<std::vector<DcSyncDiagnostics>, std::string> IghFieldbusDriver::readDcSync(
+    const std::vector<uint16_t>& positions) {
+  if (auto open = requireOpen(); !open) {
+    return std::unexpected(open.error());
+  }
+  // The master elects the reference clock and reports its ring position, or 0xFFFF for none.
+  ec_ioctl_master_t master{};
+  if (const int error = callIoctl(fd_, EC_IOCTL_MASTER, &master); error != 0) {
+    return std::unexpected(std::format("cannot read the master: {}", errnoText(error)));
+  }
+  std::vector<DcSyncDiagnostics> result;
+  result.reserve(positions.size());
+  for (const uint16_t position : positions) {
+    ec_ioctl_slave_t slave{};
+    slave.position = static_cast<uint16_t>(position - 1);
+    if (const int error = callIoctl(fd_, EC_IOCTL_SLAVE, &slave); error != 0) {
+      return std::unexpected(std::format("cannot read slave {}: {}", position, errnoText(error)));
+    }
+    const bool referenceClock = master.ref_clock == slave.position;
+    if (slave.dc_supported == 0) {
+      result.push_back(DcSyncDiagnostics{.slavePosition = position,
+                                         .dcCapable = false,
+                                         .referenceClock = referenceClock,
+                                         .propagationDelay = 0,
+                                         .systemTimeDifference = 0});
+      continue;
+    }
+    std::array<uint8_t, kDcSyncBytes> registers{};
+    if (auto read = readRegister(position, kDcSyncRegisters, registers); !read) {
+      return std::unexpected(read.error());
+    }
+    result.push_back(decodeDcSync(position, referenceClock, registers));
+  }
+  return result;
+}
+
+std::expected<ProcessDataWatchdogConfig, std::string> IghFieldbusDriver::processDataWatchdog(
+    uint16_t slavePosition) {
+  std::array<uint8_t, 2> divider{};
+  std::array<uint8_t, 2> ticks{};
+  std::array<uint8_t, 2> status{};
+  if (auto read = readRegister(slavePosition, kWatchdogDividerRegister, divider); !read) {
+    return std::unexpected(read.error());
+  }
+  if (auto read = readRegister(slavePosition, kWatchdogTimePdRegister, ticks); !read) {
+    return std::unexpected(read.error());
+  }
+  if (auto read = readRegister(slavePosition, kWatchdogStatusPdRegister, status); !read) {
+    return std::unexpected(read.error());
+  }
+  return decodeWatchdog(readLe16(divider), readLe16(ticks), readLe16(status));
+}
+
+std::expected<ProcessDataWatchdogConfig, std::string> IghFieldbusDriver::setProcessDataWatchdog(
+    uint16_t slavePosition, std::chrono::nanoseconds timeout) {
+  // The divider is shared with the PDI watchdog, so it stays as the device has it, and only the
+  // process-data time register is scaled against it.
+  std::array<uint8_t, 2> divider{};
+  if (auto read = readRegister(slavePosition, kWatchdogDividerRegister, divider); !read) {
+    return std::unexpected(read.error());
+  }
+  auto ticks = watchdogTicks(readLe16(divider), timeout);
+  if (!ticks) {
+    return std::unexpected(ticks.error());
+  }
+  const std::array<uint8_t, 2> ticksBytes{static_cast<uint8_t>(*ticks & 0xFF),
+                                          static_cast<uint8_t>(*ticks >> 8)};
+  if (auto write = writeRegister(slavePosition, kWatchdogTimePdRegister, ticksBytes); !write) {
+    return std::unexpected(write.error());
+  }
+  std::array<uint8_t, 2> status{};
+  if (auto read = readRegister(slavePosition, kWatchdogStatusPdRegister, status); !read) {
+    return std::unexpected(read.error());
+  }
+  const auto config = decodeWatchdog(readLe16(divider), *ticks, readLe16(status));
+  spdlog::info("Device {}: process-data watchdog set to {} ns ({} ticks, divider {})",
+               slavePosition, config.timeout.count(), *ticks, config.divider);
+  return config;
 }
 
 std::expected<void, std::string> IghFieldbusDriver::readRegister(uint16_t slavePosition,

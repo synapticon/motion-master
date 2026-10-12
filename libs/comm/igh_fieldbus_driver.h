@@ -33,7 +33,9 @@
 // The driver holds the master only between configureProcessData and the next scan() or stop(),
 // because a held master that is not active ignores every rescan request.
 //
-// FoE is not supported yet.
+// SII comes from the copy the master read at the last scan, not from the EEPROM. A write goes to
+// the EEPROM, and the master does not update its copy, so readSii returns the old image until the
+// next scan.
 
 #include <atomic>
 #include <chrono>
@@ -105,6 +107,10 @@ class IghFieldbusDriver : public FieldbusDriver {
 
   std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& positions) override;
+  std::expected<std::vector<SlaveDiagnostics>, std::string> readDiagnostics(
+      const std::vector<uint16_t>& positions) override;
+  std::expected<std::vector<DcSyncDiagnostics>, std::string> readDcSync(
+      const std::vector<uint16_t>& positions) override;
 
   std::expected<std::vector<uint8_t>, std::string> readSdo(uint16_t slavePosition, uint16_t index,
                                                            uint8_t subindex) override;
@@ -112,6 +118,10 @@ class IghFieldbusDriver : public FieldbusDriver {
                                             uint8_t subindex,
                                             std::span<const uint8_t> data) override;
   std::expected<OdRead, std::string> readObjectDictionary(uint16_t slavePosition) override;
+
+  std::expected<std::vector<uint8_t>, std::string> readSii(uint16_t slavePosition) override;
+  std::expected<void, std::string> writeSii(uint16_t slavePosition,
+                                            std::span<const uint8_t> data) override;
 
   std::expected<std::vector<uint8_t>, FoeError> readFile(uint16_t slavePosition,
                                                          const std::string& filename) override;
@@ -122,6 +132,11 @@ class IghFieldbusDriver : public FieldbusDriver {
                                                 std::span<uint8_t> data) override;
   std::expected<void, std::string> writeRegister(uint16_t slavePosition, uint16_t address,
                                                  std::span<const uint8_t> data) override;
+
+  std::expected<ProcessDataWatchdogConfig, std::string> processDataWatchdog(
+      uint16_t slavePosition) override;
+  std::expected<ProcessDataWatchdogConfig, std::string> setProcessDataWatchdog(
+      uint16_t slavePosition, std::chrono::nanoseconds timeout) override;
 
   void transitionToState(const std::vector<uint16_t>& positions,
                          std::optional<EtherCatState> requiredState, EtherCatState targetState,

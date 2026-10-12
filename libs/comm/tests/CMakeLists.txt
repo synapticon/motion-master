@@ -13,6 +13,7 @@ endif()
 add_executable(
   mm_comm_tests
   base_test.cc
+  esc_diagnostics_test.cc
   fake_spoe_server_test.cc
   sii_test.cc
   soem_fieldbus_driver_test.cc

@@ -313,8 +313,9 @@ export default function FieldbusControlPage() {
                     Uses IgH EtherCAT Master 0. The IgH kernel module must be loaded, and it holds the network interface
                     set in its own configuration. The master keeps each device in the last state requested, and it moves a
                     device back to that state when the device leaves it. Each time a device joins the process data, every
-                    device drops to PRE-OP and returns to its state. File transfer is not supported yet. Only a Motion
-                    Master built with the IgH driver accepts this choice.
+                    device drops to PRE-OP and returns to its state. The SII shown is the copy the master read at the last
+                    scan, so an SII write shows only after the next scan. Only a Motion Master built with the IgH driver
+                    accepts this choice.
                   </p>
                 )}
                 {driver === 'spoe' && (

@@ -3691,3 +3691,126 @@ Later:
   driver-wide, so a scan or a re-map reads them one after another. A per-connection lock would let
   them run in parallel. It changes the lock inventory in `docs/LOCKING.md`, so it needs its own
   review.
+
+## Session 2026-10-12 — IgH EtherCAT Master: an experimental driver that stays off main (as-built)
+
+Branch `igh`, three commits on top of `main`: `1c35edd`, `e733491` and `46b701d`. The branch is
+not merged. Support for the IgH EtherCAT Master is experimental and is announced as such. Work on
+it stops here, and it continues only when a real need for it comes in. Everything below records
+what the branch does and what it learned, so that work can pick up from here.
+
+**The driver talks to the kernel master through its ioctl interface.** `IghFieldbusDriver` opens
+`/dev/EtherCAT<n>` and uses the ioctls of `master/ioctl.h`, as the `ethercat` tool does. That
+header is LGPL 2.1, the same as `libethercat`. It is internal to IgH and changes with the module
+version, so `init()` compares the module's ioctl version with the one the build used. IgH does not
+install the header, so the build needs the IgH source tree: `-DMM_WITH_IGH=ON
+-DMM_IGH_SOURCE_DIR=<tree>`. `igh_config.h.in` stands in for the `config.h` of an unconfigured
+tree. `libethercat` serves the process data only, because it covers nothing else that the driver
+needs, and it prints to stderr on every failed SDO.
+
+**IgH owns the AL state, and that shapes the whole driver.** The master holds a requested state per
+slave and drives the slave to it, and back to it after the slave leaves it. `transitionToState`
+sets that requested state through `EC_IOCTL_SLAVE_STATE`. Three master actions override it:
+
+1. A scan requests PRE-OP for every slave.
+2. Requesting the master requests PRE-OP for every slave. That also pulls a slave out of BOOT.
+3. Activation requests OP for every configured slave, from its state machine, some cycles later
+   (`master/fsm_master.c`, after the DC system times are written).
+
+The driver records the state Motion Master last asked for. After activation it requests that state
+again every 2 ms for at least 500 ms, and until each slave is back in it. The 500 ms is an estimate
+from the source, not a measurement.
+
+**After activation the master moves only when the application sends.** The idle kernel thread
+stops at `ecrt_master_activate`. The thread that replaces it prepares each frame, but only the
+application's `ecrt_master_send` puts it on the wire. So every SDO, state and register request waits
+for the next send, without a timeout. `DeviceManager` stops the exchange and then reads SDOs while
+it rebuilds the image, which would wait for ever. A pump thread in the driver therefore sends and
+receives whenever the RT loop has not exchanged for 3 ms. The pump also acts as a state keeper: it
+pulls back a slave that climbs above its requested state. It reacts only to a climb, because a slave
+on its way down is above its requested state too.
+
+**A new layout means releasing the master, not deactivating it.** IgH changes a layout only while
+it is not active. Deactivation hands the bus back to the idle thread, and at that switch the master
+lost a frame on the bench, counted no responding slave and scheduled a rescan. A held master runs
+that rescan only after the next activation, and there it rebuilt the slaves in the middle of the
+new layout. The SAFE-OP request failed. A released master runs the rescan at once, so the driver
+releases, waits for any rescan, and requests the master again. A held master that is not active
+also ignores every rescan request (`master/fsm_master.c`). So the driver holds the master only from
+the first layout on, and `scan()` releases it. Every rebuild drops every slave to PRE-OP, and the
+driver returns each one to its state before it returns. A rebuild is therefore heavier than with
+SOEM, which drops only the devices in OP, and only to SAFE-OP.
+
+**Two domains, so IgH never sends LRW.** A domain that carries both directions sends LRW, which a TI
+PRU-ICSS ESC cannot process. One domain carries the outputs (LWR) and one the inputs (LRD). The
+driver weighs the two working counters as one LRW would count them, so the node layer's expected
+working counter applies unchanged. An entry can join a domain only when the application passes the
+slave's PDOs explicitly (`master/slave_config.c`). The driver reads the assignment and the mapping
+by SDO and passes them back, so IgH writes nothing to the slave's PDO configuration.
+
+**The object dictionary is IgH's copy, and it is never cached.** The ioctl interface serves the
+dictionary the master read itself, about 3 s after a slave reaches PRE-OP. Three things are wrong
+with that copy:
+
+1. It is short. SOMANET firmware reports the runtime value of subindex 0 as the object size, so the
+   unused PDO mapping slots are missing. The driver probes past that size by SDO upload and fills
+   the slots of `0x16xx`, `0x1Axx` and `0x1C10`–`0x1C2F` from ETG.1000.6, Tables 74, 75 and 77.
+2. The probe works only on those objects. SOMANET firmware answers an upload of any subindex of a
+   VAR with the value of the VAR: `0x6080:C8` returns the 4 bytes of `0x6080:00`. The ioctl does not
+   carry the object code, so a probe cannot tell a VAR from a record. Probing every object walked 90
+   VARs to subindex 255 and took 3.5 minutes.
+3. It lacks the object code and the PDO-mappable and backup access bits. The Console's PDO mapping
+   picker offers only mappable objects, so it offered nothing.
+
+The parameter cache file is keyed on vendor, product and revision only, and every driver shares it.
+An IgH dictionary written there would replace a complete SOEM one. `OdRead::fullDescriptions`
+therefore tells the node layer not to cache it. IgH reads a cache that another driver wrote, so on
+a host that ran SOEM once, IgH gets the complete dictionary. On the bench, IgH's filled dictionary
+matched SOEM's in all 564 entries, apart from the object codes and the upper access bits.
+
+**IgH cannot send a Complete Access upload.** `ec_fsm_coe_prepare_up` never sets the bit.
+
+**FoE errors carry less over IgH.** The master captures the slave's FoE error code only while it
+reads a file. On a write, an FoE Error packet ends as "acknowledge error" with no code, so a write
+to a missing file is reported as a protocol error, not as file not found.
+
+**The SII is the master's copy from the last scan.** A write goes to the EEPROM, and the master does
+not update its copy, so the new image shows only after the next scan. The copy is 252 bytes on a
+SOMANET Circulo, because IgH stops at the end category.
+
+**The ESC register decoding is shared now.** Diagnostics, DC sync and the process-data watchdog are
+register reads in both drivers. Their decoding moved out of the SOEM driver into
+`libs/comm/esc_diagnostics.{h,cc}`, which stays on the branch with the rest.
+
+**Measured on one SOMANET Circulo, IgH 1.6.13, Fedora kernel 7.2:**
+
+- PRE-OP in 65 ms. SAFE-OP with a fresh layout in 1.5 to 1.8 s. OP in about 210 ms.
+- An SDO read through the API in 15 to 21 ms, in PRE-OP and in OP alike.
+- Monitoring at 1 kHz for 5 s: 4995 rows, a maximum row gap of 1050 µs, no lost cycle.
+- An RT cycle took 35 µs, and the slowest 123 µs. Send and receive do not wait for the frame, so the
+  inputs are one cycle old. That age is inferred from the call order, not measured.
+- Diagnostics, DC sync, SII, an FoE read of the hardware description, and the watchdog all read
+  correctly. The SII matched `ethercat sii_read`.
+
+### Open
+
+Untested on hardware:
+
+- FoE write, so firmware installation. SII write. Watchdog write.
+- A bus with more than one slave.
+- The rescan after a release. The wait for it is built, but no rescan happened in the runs that
+  passed.
+- How soon after activation the master's OP request comes, and whether a slave reaches OP for a
+  moment before the driver pulls it back.
+
+Known gaps:
+
+- **A short working counter around SAFE-OP → OP.** Each transition gave about 170 short cycles
+  within about 200 ms. It is not compared with SOEM yet.
+- **`busConfig` returns nothing over IgH**, so the Console's bus configuration view is empty.
+- **The dictionary over IgH is reduced** when no cache exists: no object codes, and no PDO-mappable
+  flags.
+- **No DC.** The driver calls no `ecrt_slave_config_dc` and sends no application time, so the
+  kernel warns "No application time received". SOEM runs DC in free-run, so this is not a
+  regression for the drives. It is a gap for SYNC0.
+- **IgH holds the network interface.** SOEM cannot use it while `ec_generic` is attached to it.

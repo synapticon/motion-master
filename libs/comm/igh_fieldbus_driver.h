@@ -17,7 +17,23 @@
 // dictionary entry. So a dictionary read here is never cached, and a cache written by another
 // driver serves the full description.
 //
-// Process data and FoE are not supported yet.
+// Process data runs through two domains, one for outputs and one for inputs. A domain that carries
+// both directions sends LRW, which a TI PRU-ICSS ESC cannot process.
+//
+// IgH changes the process-data layout only while it is not active, so configureProcessData
+// releases and requests it again first, and every slave drops to PRE-OP. Activation requests OP for
+// every configured slave. The driver then requests again the state each slave had been asked for,
+// and waits until each slave is back in that state.
+//
+// While the master is active, its state machine moves only when the application sends and receives.
+// SDO, state and register requests would wait for ever while the RT loop does not exchange. A pump
+// thread sends and receives in that time, and pulls back a slave that the master pushed above the
+// state it was asked for.
+//
+// The driver holds the master only between configureProcessData and the next scan() or stop(),
+// because a held master that is not active ignores every rescan request.
+//
+// FoE is not supported yet.
 
 #include <atomic>
 #include <chrono>
@@ -25,14 +41,40 @@
 #include <expected>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
+#include <stop_token>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
 
+struct ec_master;
+struct ec_domain;
+
 namespace mm::comm::igh {
+
+/// Where one slave's process data sits in the output domain and the input domain.
+struct IghSlaveWindow {
+  uint16_t slavePosition = 0;
+  bool hasOutputs = false;    ///< The slave has an output sync manager in the output domain.
+  uint32_t outputOffset = 0;  ///< Byte offset in the output domain.
+  uint32_t outputBits = 0;    ///< Mapped output bits.
+  bool hasInputs = false;     ///< The slave has an input sync manager in the input domain.
+  uint32_t inputOffset = 0;   ///< Byte offset in the input domain.
+  uint32_t inputBits = 0;     ///< Mapped input bits.
+};
+
+/// @brief Builds the layout from the slaves' domain windows. The output image is the output
+///        domain and the input image is the input domain, byte for byte.
+///
+/// The expected working counter counts an output slave twice and an input slave once. That is
+/// what an LRW datagram gives, and exchangeProcessData weighs the LWR and LRD counters the same
+/// way, so the node layer's per-state expectation applies unchanged.
+PdoLayout buildIghLayout(std::span<const IghSlaveWindow> windows, uint32_t outputDomainBytes,
+                         uint32_t inputDomainBytes);
 
 struct IghFieldbusDriverConfig {
   /// The IgH master to use, as in /dev/EtherCAT<masterIndex>.
@@ -96,13 +138,29 @@ class IghFieldbusDriver : public FieldbusDriver {
     uint16_t sdoCount = 0;  ///< Objects in the master's copy of the dictionary when read.
   };
 
+  // One sync manager that carries process data, with the PDOs assigned to it.
+  struct SyncManagerPdos;
+
   std::expected<void, std::string> requireOpen() const;
+  std::expected<std::vector<SyncManagerPdos>, std::string> readPdoConfiguration(uint16_t position,
+                                                                                uint16_t protocols);
+  std::expected<std::vector<IghSlaveWindow>, std::string> configureSlaves(
+      const std::vector<Slave>& slaves);
+  void restoreRequestedStates(const std::vector<uint16_t>& positions);
+  void runPump(const std::stop_token& stopToken);
+  void releaseMaster();
+  // Stops the pump, releases the master and closes the device. Not virtual, so the destructor can
+  // call it.
+  void shutdown();
+  // Releases the master with masterMutex_ held.
+  void releaseMasterLocked();
+  // Waits for a rescan the master may start after its release, and for its end.
+  std::expected<void, std::string> waitForSettledBus() const;
   // Reads one slave from the master and stores its AL state for slaveState().
   std::expected<Slave, std::string> readSlave(uint16_t position) const;
   std::expected<void, std::string> requestState(uint16_t position, EtherCatState state) const;
   // Waits until the master's copy of the dictionary stops growing, and returns its object count.
   std::expected<uint16_t, std::string> waitForDictionary(uint16_t position) const;
-  void closeDevice();
 
   IghFieldbusDriverConfig config_;
   // Opened by init() and closed by stop(). The kernel serialises every request on it, so the
@@ -114,6 +172,29 @@ class IghFieldbusDriver : public FieldbusDriver {
   // so it reads this without a lock. Allocated once at the largest position IgH can address and
   // never reallocated, so a reader can index it at any time.
   std::unique_ptr<std::atomic<uint16_t>[]> slaveStates_;
+  // The state Motion Master last asked for, per position, sized like slaveStates_. The master
+  // overrides a requested state when it activates, and this is what the driver restores.
+  // Sequentially consistent, so the pump never sees a state a slave reached together with the
+  // request before it, which would make it pull back a transition Motion Master asked for.
+  std::unique_ptr<std::atomic<uint8_t>[]> requestedStates_;
+
+  // Guards master_, the domains, configuredPositions_ and layout_ against the pump thread. Held
+  // by the pump for one send and receive, and by configureProcessData, scan() and stop() while they
+  // change the master.
+  mutable std::mutex masterMutex_;
+  ec_master* master_ = nullptr;  // Held from configureProcessData until releaseMaster().
+  ec_domain* outputDomain_ = nullptr;
+  ec_domain* inputDomain_ = nullptr;
+  uint8_t* outputData_ = nullptr;  // The output domain's memory, mapped after activation.
+  uint8_t* inputData_ = nullptr;
+  std::vector<uint16_t> configuredPositions_;
+  PdoLayout layout_;
+  // True between activation and the next deactivation. The RT thread reads it without a lock.
+  std::atomic<bool> active_ = false;
+  // steady_clock nanoseconds of the last exchangeProcessData. The pump sends only when the RT loop
+  // has stopped.
+  std::atomic<int64_t> lastExchangeNs_ = 0;
+  std::jthread pump_;
 };
 
 }  // namespace mm::comm::igh

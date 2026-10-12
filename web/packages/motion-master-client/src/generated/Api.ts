@@ -439,7 +439,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Constructs the requested fieldbus driver and makes it available for subsequent calls to /api/scan. The body is the `fieldbus` block of the config file, and the same rules check it. The driver defaults to SOEM when omitted. SOEM opens the network interface. It has no adapter auto-detect: a network adapter must be supplied, otherwise init fails. SPoE connects to each drive at scan time. It needs `ipAddresses`, one address per drive, and the list order is the position order. IgH opens IgH EtherCAT Master 0 through its character device. The master holds its own network interface, so IgH takes no adapter. Only a build with the IgH driver accepts it. Process data over IgH is not supported yet.
+   * @description Constructs the requested fieldbus driver and makes it available for subsequent calls to /api/scan. The body is the `fieldbus` block of the config file, and the same rules check it. The driver defaults to SOEM when omitted. SOEM opens the network interface. It has no adapter auto-detect: a network adapter must be supplied, otherwise init fails. SPoE connects to each drive at scan time. It needs `ipAddresses`, one address per drive, and the list order is the position order. IgH opens IgH EtherCAT Master 0 through its character device. The master holds its own network interface, so IgH takes no adapter. Only a build with the IgH driver accepts it. A process-data re-map over IgH drops every device to PRE-OP and returns each one to its state before the call ends. File transfer over IgH is not supported yet.
    *
    * @name Init
    * @summary Initialise the fieldbus driver

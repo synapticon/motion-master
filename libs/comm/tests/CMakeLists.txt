@@ -25,6 +25,10 @@ add_executable(
 target_link_libraries(mm_comm_tests PRIVATE mm::comm mm::comm_spoe_fake asio::asio GTest::gtest
                                             GTest::gtest_main)
 
+if(MM_WITH_IGH)
+  target_sources(mm_comm_tests PRIVATE igh_layout_test.cc)
+endif()
+
 # Asio needs the oldest Windows version to target, and warns when it is not set. 0x0A00 is Windows
 # 10.
 if(WIN32)

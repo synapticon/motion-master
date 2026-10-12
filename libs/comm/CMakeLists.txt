@@ -57,11 +57,14 @@ if(MM_WITH_IGH)
   if(NOT EXISTS "${MM_IGH_SOURCE_DIR}/master/ioctl.h")
     message(FATAL_ERROR "MM_IGH_SOURCE_DIR must name an IgH source tree that holds master/ioctl.h")
   endif()
+  # The user-space library of the same IgH version. It is LGPL, so it is linked dynamically.
+  find_library(MM_IGH_LIBRARY ethercat REQUIRED)
   configure_file(igh_config.h.in ${CMAKE_CURRENT_BINARY_DIR}/igh/config.h @ONLY)
   target_sources(comm PRIVATE igh_fieldbus_driver.cc)
   # SYSTEM, because the IgH headers are C and are not held to the warning flags of this project.
   target_include_directories(comm SYSTEM PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/igh
                                                  ${MM_IGH_SOURCE_DIR})
+  target_link_libraries(comm PRIVATE ${MM_IGH_LIBRARY})
   target_compile_definitions(comm PUBLIC MM_WITH_IGH)
 endif()
 

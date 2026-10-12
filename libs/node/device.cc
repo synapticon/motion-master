@@ -246,14 +246,24 @@ std::expected<void, std::string> Device::readParameterDefinitions(bool readValue
     // which is a fault nobody else can reproduce and nothing corrects. Reading the dictionary from
     // the device again on the next scan costs seconds; the alternative costs a support case. The
     // definitions in hand are still used for this session: every entry that was read is correct.
+    //
+    // A dictionary whose entries lack fields is not persisted for the same reason. The cache file
+    // is shared by every driver, so a driver that reads the whole description would load the
+    // reduced one.
     if (parameterCache_) {
-      if (read->missingEntries == 0) {
-        parameterCache_->store(vendorId_, productCode_, revisionNumber_, built);
-      } else {
+      if (read->missingEntries > 0) {
         spdlog::warn(
             "Device {}: the object dictionary read is short {} entry(ies), so it is not cached; "
             "the next scan reads it from the device again",
             slavePosition_, read->missingEntries);
+      } else if (!read->fullDescriptions) {
+        spdlog::warn(
+            "Device {}: this fieldbus driver reads only part of each object dictionary entry, so "
+            "the dictionary is not cached; object codes and PDO-mappable flags are missing until "
+            "a cache written by another driver is present",
+            slavePosition_);
+      } else {
+        parameterCache_->store(vendorId_, productCode_, revisionNumber_, built);
       }
     }
     definitions = std::move(built);

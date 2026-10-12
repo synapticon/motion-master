@@ -1,0 +1,8 @@
+#pragma once
+
+// Stands in for the config.h that the IgH configure script generates. The IgH headers that the
+// driver includes need one value from it. The driver uses no other value from it.
+
+// The number of Ethernet devices per master. It sets the size of ec_ioctl_master_t, and so the
+// request number of EC_IOCTL_MASTER. It must match the --with-devices option of the loaded module.
+#define EC_MAX_NUM_DEVICES @MM_IGH_MAX_NUM_DEVICES@

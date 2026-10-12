@@ -141,9 +141,16 @@ struct OdEntry {
 /// zero. A cache file is keyed on the device's identity and read back on every later scan, so a
 /// short dictionary written once is what the master believes for as long as the file exists — on
 /// that host alone, which is a fault nobody else can reproduce and nothing corrects.
+///
+/// @c fullDescriptions is false when the transport cannot deliver part of every entry's
+/// description, as the IgH master's ioctl interface drops the object code and the access bits
+/// above write-in-OP. The entries are correct as far as they go, but a cache file is shared by
+/// every driver on the host. So a caller must not persist such a dictionary either, or a later
+/// driver that can read the whole description loads the reduced one instead.
 struct OdRead {
   std::vector<OdEntry> entries;  ///< One per @c (index, subindex) pair the device answered for.
   int missingEntries = 0;  ///< Entries asked for and never answered. Above zero, do not cache.
+  bool fullDescriptions = true;  ///< False when each entry lacks fields. Then do not cache.
 };
 
 /// @brief One slave's input and output windows within the process-data images.

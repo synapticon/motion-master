@@ -71,6 +71,8 @@ class SdoFakeDriver : public FieldbusDriver {
   std::vector<OdEntry> ods;
   /// Entries the enumeration asked for and never got. Above zero, @c ods is short by that many.
   int odMissingEntries = 0;
+  /// False when each entry lacks fields the transport cannot deliver.
+  bool odFullDescriptions = true;
   /// Programmed Complete Access blobs, keyed by object index. An unprogrammed index reports
   /// complete access unsupported (an SDO abort in reality).
   std::map<uint16_t, std::expected<std::vector<uint8_t>, std::string>> completeReads;
@@ -171,7 +173,8 @@ class SdoFakeDriver : public FieldbusDriver {
   }
 
   std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override {
-    return OdRead{.entries = ods, .missingEntries = odMissingEntries};
+    return OdRead{
+        .entries = ods, .missingEntries = odMissingEntries, .fullDescriptions = odFullDescriptions};
   }
 
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
@@ -1622,6 +1625,24 @@ TEST(DeviceParameterCache, LossyEnumerationIsNotCached) {
   EXPECT_FALSE(
       cache.load(driver.info.vendorId, driver.info.productCode, driver.info.revisionNumber))
       << "a short dictionary must not be written, or every later scan reads it back";
+  std::error_code ec;
+  std::filesystem::remove_all(dir, ec);
+}
+
+TEST(DeviceParameterCache, ReducedDescriptionsAreNotCached) {
+  const auto dir = makeCacheDir("reduced");
+  mm::node::ParameterCache cache({.directory = dir.string(), .enabled = true});
+  SdoFakeDriver driver;
+  makeCacheable(driver);
+  driver.odFullDescriptions = false;  // the transport drops fields of every entry
+  Device device(1, driver, nullptr, &cache);
+
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  EXPECT_NE(device.findParameter(0x6040, 0), nullptr);
+
+  EXPECT_FALSE(
+      cache.load(driver.info.vendorId, driver.info.productCode, driver.info.revisionNumber))
+      << "a reduced dictionary must not be written, or another driver on this host reads it back";
   std::error_code ec;
   std::filesystem::remove_all(dir, ec);
 }

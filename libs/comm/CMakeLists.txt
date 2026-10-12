@@ -41,4 +41,28 @@ if(WIN32)
   target_link_libraries(comm PUBLIC mm::npcap)
 endif()
 
+# The IgH EtherCAT Master driver. Off by default, because it needs the IgH kernel module on the host
+# and its source tree at build time. The driver includes master/ioctl.h, which IgH does not install.
+option(MM_WITH_IGH "Build the IgH EtherCAT Master fieldbus driver (Linux only)" OFF)
+if(MM_WITH_IGH)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    message(FATAL_ERROR "MM_WITH_IGH needs Linux")
+  endif()
+  set(MM_IGH_SOURCE_DIR
+      ""
+      CACHE PATH "IgH EtherCAT Master source tree, of the same version as the loaded module")
+  set(MM_IGH_MAX_NUM_DEVICES
+      1
+      CACHE STRING "The --with-devices option the IgH module was configured with")
+  if(NOT EXISTS "${MM_IGH_SOURCE_DIR}/master/ioctl.h")
+    message(FATAL_ERROR "MM_IGH_SOURCE_DIR must name an IgH source tree that holds master/ioctl.h")
+  endif()
+  configure_file(igh_config.h.in ${CMAKE_CURRENT_BINARY_DIR}/igh/config.h @ONLY)
+  target_sources(comm PRIVATE igh_fieldbus_driver.cc)
+  # SYSTEM, because the IgH headers are C and are not held to the warning flags of this project.
+  target_include_directories(comm SYSTEM PRIVATE ${CMAKE_CURRENT_BINARY_DIR}/igh
+                                                 ${MM_IGH_SOURCE_DIR})
+  target_compile_definitions(comm PUBLIC MM_WITH_IGH)
+endif()
+
 add_subdirectory(tests)

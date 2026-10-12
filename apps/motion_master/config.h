@@ -48,7 +48,7 @@ struct SpoeConfig {
 /// @brief @c "fieldbus" block — the driver to auto-init at startup.
 /// An empty @c driver means "do not auto-init"; the fieldbus then waits for @c POST @c /api/init.
 struct FieldbusConfig {
-  std::string driver;   ///< "" | "soem" | "spoe".
+  std::string driver;   ///< "" | "soem" | "spoe" | "igh". "igh" needs a build with MM_WITH_IGH.
   std::string adapter;  ///< SOEM NIC: MAC or interface name. "" = none.
   /// SPoE only. One IP address per drive. The list order is the position order.
   std::vector<std::string> ipAddresses;

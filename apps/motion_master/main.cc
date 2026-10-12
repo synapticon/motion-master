@@ -22,6 +22,9 @@
 #include "bus_health_source.h"
 #include "cert_updater.h"
 #include "comm/base.h"
+#ifdef MM_WITH_IGH
+#include "comm/igh_fieldbus_driver.h"
+#endif
 #include "comm/soem_fieldbus_driver.h"
 #include "comm/spoe_fieldbus_driver.h"
 #include "core/platform.h"
@@ -170,6 +173,16 @@ int main(int argc, char** argv) {
                   .connectTimeout = std::chrono::milliseconds{1000}}),
           deviceManagerConfig);
     }
+#ifdef MM_WITH_IGH
+    // The IgH master holds its network interface itself, set in its own configuration, so this
+    // driver takes no adapter.
+    if (fieldbus.driver == "igh") {
+      spdlog::info("Fieldbus: IgH EtherCAT Master 0");
+      return deviceManager.init(std::make_unique<mm::comm::igh::IghFieldbusDriver>(
+                                    mm::comm::igh::IghFieldbusDriverConfig{}),
+                                deviceManagerConfig);
+    }
+#endif
     const std::string& adapter = fieldbus.adapter;
     std::string ifname;
     if (!adapter.empty()) {

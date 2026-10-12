@@ -2,7 +2,9 @@
 
 #include <algorithm>
 #include <array>
+#include <format>
 #include <string>
+#include <string_view>
 #include <thread>
 
 std::expected<Config, std::string> parseConfig(const nlohmann::json& doc) {
@@ -83,9 +85,15 @@ std::expected<void, std::string> validateFieldbusConfig(const FieldbusConfig& fi
   if (fieldbus.driver.empty()) {
     return {};
   }
+#ifdef MM_WITH_IGH
+  static constexpr std::array kDrivers{"soem", "spoe", "igh"};
+  static constexpr std::string_view kDriverList = "soem, spoe, igh";
+#else
   static constexpr std::array kDrivers{"soem", "spoe"};
+  static constexpr std::string_view kDriverList = "soem, spoe";
+#endif
   if (std::find(kDrivers.begin(), kDrivers.end(), fieldbus.driver) == kDrivers.end()) {
-    return std::unexpected("fieldbus.driver must be one of: soem, spoe");
+    return std::unexpected(std::format("fieldbus.driver must be one of: {}", kDriverList));
   }
   if (fieldbus.driver != "spoe") {
     return {};

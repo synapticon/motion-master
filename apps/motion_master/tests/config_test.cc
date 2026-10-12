@@ -168,11 +168,18 @@ TEST(ConfigTest, PartialFileLoggingKeepsSiblingDefaults) {
 }
 
 TEST(ConfigTest, InvalidDriverRejected) {
-  // "igh" was dropped from the accepted set; an unknown driver is likewise rejected.
-  for (const char* d : {"ethercat", "igh"}) {
-    json doc = {{"fieldbus", {{"driver", d}}}};
-    EXPECT_FALSE(parseConfig(doc).has_value()) << d;
-  }
+  json doc = {{"fieldbus", {{"driver", "ethercat"}}}};
+  EXPECT_FALSE(parseConfig(doc).has_value());
+}
+
+// The IgH driver is compiled only with MM_WITH_IGH, so only such a build accepts it.
+TEST(ConfigTest, IghDriverAcceptedOnlyByIghBuild) {
+  json doc = {{"fieldbus", {{"driver", "igh"}}}};
+#ifdef MM_WITH_IGH
+  EXPECT_TRUE(parseConfig(doc).has_value());
+#else
+  EXPECT_FALSE(parseConfig(doc).has_value());
+#endif
 }
 
 TEST(ConfigTest, WrongScalarTypeRejected) {

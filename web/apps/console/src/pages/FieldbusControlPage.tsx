@@ -144,13 +144,16 @@ export default function FieldbusControlPage() {
 
   // One address per line or separated by commas, in position order.
   const spoeAddresses = ipAddresses.split(/[\s,]+/).map(a => a.trim()).filter(a => a.length > 0)
-  const canInit = driver === 'spoe' ? spoeAddresses.length > 0 : adapter.trim().length > 0
+  // IgH holds its own network interface, so it needs nothing here.
+  const canInit = driver === 'spoe' ? spoeAddresses.length > 0 : driver === 'igh' || adapter.trim().length > 0
 
   const initMutation = useMutation({
     mutationFn: () =>
       driver === 'spoe'
         ? api.init({ driver, ipAddresses: spoeAddresses, spoe: { mode: spoeMode, port: Number(spoePort) || 8080 } })
-        : api.init({ driver, adapter }),
+        : driver === 'igh'
+          ? api.init({ driver })
+          : api.init({ driver, adapter }),
     onSuccess: () => {
       setAlreadyInitialized(false)
       setIsInitialized(true)
@@ -289,21 +292,30 @@ export default function FieldbusControlPage() {
             <div className="border border-grey-200 p-5 space-y-4 2xl:col-span-3">
               <h3 className="text-sm font-display uppercase">Init</h3>
               <p className="text-xs text-grey-600">
-                Initialize the fieldbus driver with the selected protocol: SOEM on a network adapter, or SPoE to drives at
-                IP addresses. Must be called before scanning.
+                Initialize the fieldbus driver with the selected protocol: SOEM on a network adapter, SPoE to drives at
+                IP addresses, or the IgH EtherCAT Master. Must be called before scanning.
               </p>
               <div className="space-y-3">
                 <div>
                   <label className={labelCls}>Driver</label>
                   <select
                     value={driver}
-                    onChange={e => setDriver(e.target.value as 'soem' | 'spoe')}
+                    onChange={e => setDriver(e.target.value as 'soem' | 'spoe' | 'igh')}
                     className={inputCls}
                   >
                     <option value="soem">SOEM (Simple Open EtherCAT Master)</option>
                     <option value="spoe">SPoE (SOMANET Protocol over Ethernet)</option>
+                    <option value="igh">IgH EtherCAT Master</option>
                   </select>
                 </div>
+                {driver === 'igh' && (
+                  <p className="text-xs text-grey-600">
+                    Uses IgH EtherCAT Master 0. The IgH kernel module must be loaded, and it holds the network interface
+                    set in its own configuration. The master keeps each device in the last state requested, and it moves a
+                    device back to that state when the device leaves it. Process data and file transfer are not supported
+                    yet. Only a Motion Master built with the IgH driver accepts this choice.
+                  </p>
+                )}
                 {driver === 'spoe' && (
                   <>
                     <div>

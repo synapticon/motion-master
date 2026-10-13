@@ -978,8 +978,10 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
       "moment.",
       "Seven types are named after exceptions this firmware never raises: the case bodies are "
       "empty, so the command is accepted and nothing at all happens. The list marks which.",
-      "Only resettable-firmware-error leaves a usable drive: it reports a DiagErr and the drive "
-      "reacts as its quick stop option code (0x605A) says, which a fault reset then clears.",
+      "Only resettable-firmware-error leaves a usable drive: it reports a DiagErr, which a fault "
+      "reset then clears. On firmware v5.6 the drive ramps down on its quick stop deceleration "
+      "(0x6085), whatever its quick stop option code (0x605A) says. From firmware v5.7 it reacts "
+      "as 0x605A says.",
       "For the types that stop a service, the command never being answered is the intended "
       "outcome, and this reports it as one after a short wait. A drive that answers means the "
       "error was not triggered.",

@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The `trigger-error` procedure now describes the fault reaction of firmware v5.6 correctly.** Its caveat and its result said that `resettable-firmware-error` makes the drive react as the quick stop option code (`0x605A`) says. That is true only from firmware v5.7. On v5.6 the drive ramps down on the quick stop deceleration (`0x6085`), whatever `0x605A` says. Both texts now name the firmware line they describe.
+
 ## [6.0.0-alpha.90] - 2026-10-10
 
 ### Fixed

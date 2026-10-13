@@ -24,6 +24,33 @@ TEST(IsMacAddressTest, AcceptsDashSeparated) {
   EXPECT_TRUE(isMacAddress("00-1a-2b-3c-4d-5e"));
 }
 
+// workingCounterContribution
+
+TEST(WorkingCounterContributionTest, SafeOpCountsOutputsAndInputsLikeOp) {
+  // The output Sync Manager stays enabled in SAFE-OP, so the slave still counts the write.
+  for (const EtherCatState state : {EtherCatState::SafeOp, EtherCatState::Op}) {
+    const auto status = static_cast<uint16_t>(state);
+    EXPECT_EQ(workingCounterContribution(status, true, true), 3);
+    EXPECT_EQ(workingCounterContribution(status, true, false), 2);
+    EXPECT_EQ(workingCounterContribution(status, false, true), 1);
+    EXPECT_EQ(workingCounterContribution(status, false, false), 0);
+  }
+}
+
+TEST(WorkingCounterContributionTest, BelowSafeOpNothingCounts) {
+  for (const EtherCatState state :
+       {EtherCatState::Init, EtherCatState::PreOp, EtherCatState::Boot}) {
+    EXPECT_EQ(workingCounterContribution(static_cast<uint16_t>(state), true, true), 0);
+  }
+}
+
+TEST(WorkingCounterContributionTest, TheErrorFlagCountsNothing) {
+  constexpr uint16_t kErrorFlag = 0x0010;
+  for (const EtherCatState state : {EtherCatState::SafeOp, EtherCatState::Op}) {
+    EXPECT_EQ(workingCounterContribution(static_cast<uint16_t>(state) | kErrorFlag, true, true), 0);
+  }
+}
+
 // Sync Manager and FMMU register codecs
 
 TEST(RegisterCodecTest, ASyncManagerSurvivesARoundTripExceptItsType) {

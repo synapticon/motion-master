@@ -1001,11 +1001,11 @@ TEST(DeviceManagerProcessData, DroppingOneDeviceIsNotCountedAsABusFault) {
   EXPECT_TRUE(dm.processImageInfo().healthy);
 }
 
-TEST(DeviceManagerProcessData, ADropAndAClimbInOneCallDoNotNetOut) {
-  // One call can carry both: {1, 2} -> SAFE-OP with device 1 in OP (dropping, 3 -> 1) and device 2
-  // in PRE-OP (climbing, 0 -> 1). Netted across the bus those cancel to 4 -> 2, a figure the bus
-  // does not answer until the climbing device arrives — so every cycle in between would be counted
-  // as a fault. The expectation has to take the lower of the two per device, not per bus.
+TEST(DeviceManagerProcessData, ADeviceGoingFromOpToSafeOpKeepsItsShare) {
+  // One call can carry both: {1, 2} -> SAFE-OP with device 1 in OP and device 2 in PRE-OP. A device
+  // in SAFE-OP still takes its outputs, so device 1 keeps answering 3 for the whole transition.
+  // Device 2 answers nothing until it arrives, so the expectation takes the lower of where it is
+  // and where it is going.
   const auto kTimeout = std::chrono::milliseconds(10);
   auto bus = makeTwoAxisOpBus();
   bus->slaveStates[2] = static_cast<uint16_t>(EtherCatState::PreOp);
@@ -1019,18 +1019,22 @@ TEST(DeviceManagerProcessData, ADropAndAClimbInOneCallDoNotNetOut) {
   dm.exchangeProcessData();
   ASSERT_EQ(dm.processImageInfo().shortWkcCycles, 0u);
 
-  // Device 1 leaves at once; device 2 is not there yet, so the bus answers 1 for most of the
-  // transition and only reaches 2 at the end.
+  // Device 1 reaches SAFE-OP at once and device 2 is not there yet, so the bus answers 3 for most
+  // of the transition. Device 2 arrives at the end.
   busPtr->whileTransitioning = [&] {
     busPtr->slaveStates[1] = static_cast<uint16_t>(EtherCatState::SafeOp);
-    busPtr->wkc = 1;
+    busPtr->wkc = 3;
     dm.exchangeProcessData();
     dm.exchangeProcessData();
+    busPtr->slaveStates[2] = static_cast<uint16_t>(EtherCatState::SafeOp);
+    busPtr->wkc = 6;
   };
   ASSERT_TRUE(dm.transitionToState({1, 2}, EtherCatState::SafeOp, kTimeout).has_value());
   busPtr->whileTransitioning = nullptr;
-
   EXPECT_EQ(dm.processImageInfo().shortWkcCycles, 0u);
+
+  // With both in SAFE-OP, each counts its outputs and its inputs, as in OP.
+  EXPECT_EQ(dm.processImageInfo().expectedWkc, 6);
 }
 
 TEST(DeviceManagerProcessData, FailedObjectDictionaryReadIsAttemptedOncePerScan) {

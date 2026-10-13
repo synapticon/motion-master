@@ -61,8 +61,9 @@ enum class Retry {
   Permanent,  ///< The identical call will fail the same way (no such file, undersized buffer).
 };
 
-/// @brief Specific File-over-EtherCAT failure kind. Transport-agnostic: a SOEM driver decodes it
-/// from a negated @c ec_err_type, a future SPoE driver from its own protocol codes.
+/// @brief Specific File-over-EtherCAT failure kind. Transport-agnostic: the SOEM driver decodes it
+/// from the error code of the slave's FoE Error packet, or from a negated @c ec_err_type when the
+/// slave sent none. The SPoE driver decodes it from its own protocol codes.
 enum class FoeErrorKind {
   NoResponse,      ///< The slave answered nothing (work counter 0 — timeout or not ready).
   FileNotFound,    ///< Firmware recognises no such filename.
@@ -126,5 +127,17 @@ inline FoeError makeFoeError(FoeErrorKind kind, std::string_view op, uint16_t sl
   return {kind, foeRetry(kind),
           std::format("{} slave {} '{}' failed ({})", op, slave, filename, foeReason(kind))};
 }
+
+/// @brief Builds the FoeError for a transfer the slave refused with an FoE Error packet, naming
+/// the code as an SDO failure names its abort code: "(FoE error 0x8001: Not found)".
+///
+/// Only 0x8001 Not found has a kind of its own, because a caller branches on it: removing a file
+/// that is not there is a success. The slave's text often repeats the code's name, so it is added
+/// only when it says more.
+///
+/// @param code      ETG.1000.6 error code from the Error packet.
+/// @param text      The packet's error text, empty when it carried none.
+FoeError makeFoeRefusal(uint32_t code, std::string_view text, std::string_view op, uint16_t slave,
+                        std::string_view filename);
 
 }  // namespace mm::comm

@@ -1648,7 +1648,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Sends an FoE read request for `filename` to the device at `slavePosition` and returns the raw file bytes.  FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is responsible for ensuring the device is in a suitable state before calling.  The call blocks until the full file has been received or a per-packet timeout of 700 ms is exceeded.
+   * @description Sends an FoE read request for `filename` to the device at `slavePosition` and returns the raw file bytes.  FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is responsible for ensuring the device is in a suitable state before calling.  The call blocks until the full file has been received or a per-packet timeout of 700 ms is exceeded. When the device refuses the read, the error names the FoE error code it sent and its meaning, and the device's error text when that adds anything, e.g. `FOEread slave 1 'x.bin' failed (FoE error 0x8001: Not found)`. A device that never answered gives `(no response)`.
    *
    * @name FoeReadFile
    * @summary Read a file from a device via FoE (File over EtherCAT)

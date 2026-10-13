@@ -15,6 +15,7 @@
 #include <mutex>
 #include <nlohmann/json.hpp>
 #include <optional>
+#include <ostream>
 #include <set>
 #include <shared_mutex>
 #include <span>
@@ -1442,7 +1443,21 @@ bool DeviceManager::deviceExchangesProcessData(uint16_t slavePosition) const {
   return device != nullptr && device->exchangesProcessData();
 }
 
-std::expected<DeviceParameter, std::string> DeviceManager::deviceParameterView(
+std::ostream& operator<<(std::ostream& os, const ParameterError& error) {
+  return os << error.message;
+}
+
+namespace {
+
+ParameterError unknownParameter(uint16_t slavePosition, uint16_t index, uint8_t subindex) {
+  return {ParameterError::Kind::kUnknownParameter,
+          std::format("device {}: parameter 0x{:04X}:{:02X} not found", slavePosition, index,
+                      subindex)};
+}
+
+}  // namespace
+
+std::expected<DeviceParameter, ParameterError> DeviceManager::deviceParameterView(
     uint16_t slavePosition, uint16_t index, uint8_t subindex, bool refreshFromBus) {
   // Shared lock for the same reason as readDeviceParameter: serialise against the exclusive
   // mutators that rebuild set->devices, so the device pointer and its parameter map stay valid for
@@ -1450,25 +1465,30 @@ std::expected<DeviceParameter, std::string> DeviceManager::deviceParameterView(
   const std::shared_ptr<DeviceSet> set = deviceSet();
   Device* device = set->find(slavePosition);
   if (!device) {
-    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
+    return std::unexpected(ParameterError{ParameterError::Kind::kUnknownDevice,
+                                          deviceNotFound(slavePosition).error()});
+  }
+  // Looked up before the refresh, so an unknown address is told apart from a failed read.
+  if (!device->parameter(index, subindex)) {
+    return std::unexpected(unknownParameter(slavePosition, index, subindex));
   }
   // refreshFromBus == false is the ?source=cache path: serve the cached struct without any bus I/O.
   // refreshFromBus == true (?source=auto) first syncs the cache via the live PDO image or an SDO
   // upload (routing lives in Device::readParameter), then returns the updated struct.
   if (refreshFromBus) {
     if (auto r = device->readParameter(index, subindex); !r) {
-      return std::unexpected(r.error());
+      return std::unexpected(
+          ParameterError{ParameterError::Kind::kTransferFailed, std::move(r.error())});
     }
   }
   auto copy = device->parameter(index, subindex);
   if (!copy) {
-    return std::unexpected(std::format("device {}: parameter 0x{:04X}:{:02X} not found",
-                                       slavePosition, index, subindex));
+    return std::unexpected(unknownParameter(slavePosition, index, subindex));
   }
   return *copy;
 }
 
-std::expected<DeviceParameter, std::string> DeviceManager::writeDeviceParameter(
+std::expected<DeviceParameter, ParameterError> DeviceManager::writeDeviceParameter(
     uint16_t slavePosition, uint16_t index, uint8_t subindex,
     const DeviceParameterValue& newValue) {
   // Shared lock: serialise against the exclusive mutators that rebuild set->devices/set->driver, so
@@ -1477,23 +1497,35 @@ std::expected<DeviceParameter, std::string> DeviceManager::writeDeviceParameter(
   const std::shared_ptr<DeviceSet> set = deviceSet();
   Device* device = set->find(slavePosition);
   if (!device) {
-    return std::unexpected("device " + std::to_string(slavePosition) + " not found");
+    return std::unexpected(ParameterError{ParameterError::Kind::kUnknownDevice,
+                                          deviceNotFound(slavePosition).error()});
+  }
+  // The address and the value are checked here, so each of those failures has its own kind.
+  // writeParameter checks both again, and any error it returns is reported as a failed transfer.
+  const auto current = device->parameter(index, subindex);
+  if (!current) {
+    return std::unexpected(unknownParameter(slavePosition, index, subindex));
+  }
+  if (auto encoded = current->encode(newValue); !encoded) {
+    return std::unexpected(
+        ParameterError{ParameterError::Kind::kInvalidValue, std::move(encoded.error())});
   }
   // Routing (stage into the output image when exchanging + output-mapped, SDO otherwise) lives in
   // Device. This entry point only resolves the position and takes the shared lock so an off-thread
   // caller is serialised against a device-set rebuild.
   if (auto written = device->writeParameter(index, subindex, newValue); !written) {
-    return std::unexpected(std::move(written.error()));
+    return std::unexpected(
+        ParameterError{ParameterError::Kind::kTransferFailed, std::move(written.error())});
   }
   auto updated = device->parameter(index, subindex);
   if (!updated) {
     // Unreachable, and reported rather than dereferenced: writeParameter resolved this parameter a
     // line ago, a device's parameter map is insert-only for its lifetime, and the shared lock spans
     // both halves — so an empty optional here means one of those three no longer holds.
-    return std::unexpected(
-        std::format("device {}: parameter 0x{:04X}:{:02X} vanished after a "
-                    "successful write",
-                    slavePosition, index, subindex));
+    return std::unexpected(ParameterError{
+        ParameterError::Kind::kTransferFailed,
+        std::format("device {}: parameter 0x{:04X}:{:02X} vanished after a successful write",
+                    slavePosition, index, subindex)});
   }
   return *updated;
 }

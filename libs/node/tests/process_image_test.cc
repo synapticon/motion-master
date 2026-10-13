@@ -744,6 +744,46 @@ TEST(CycleGuard, GoesFalsyAgainWhenTheImageIsTornDown) {
   EXPECT_EQ(dm.findDevice(1), nullptr);
 }
 
+TEST(DeviceManagerProcessData, AWriteSaysWhichPartOfTheRequestFailed) {
+  // The HTTP layer answers each kind with its own status, so the kind must name the cause.
+  auto bus = makeCia402Bus();
+  bus->wkc = 3;
+  FakeBus* busPtr = bus.get();
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  ASSERT_TRUE(dm.writeDeviceParameter(1, 0x6040, 0x00, DeviceParameterValue{uint16_t{0x000F}}));
+
+  using Kind = mm::node::ParameterError::Kind;
+  auto unknownDevice = dm.writeDeviceParameter(99, 0x6040, 0x00, DeviceParameterValue{1});
+  ASSERT_FALSE(unknownDevice.has_value());
+  EXPECT_EQ(unknownDevice.error().kind, Kind::kUnknownDevice);
+  auto unknownParameter = dm.writeDeviceParameter(1, 0x1234, 0x00, DeviceParameterValue{1});
+  ASSERT_FALSE(unknownParameter.has_value());
+  EXPECT_EQ(unknownParameter.error().kind, Kind::kUnknownParameter);
+
+  // 0x6040 is an UNSIGNED16, so 70000 does not fit. Nothing reaches the cell or the wire.
+  auto invalid = dm.writeDeviceParameter(1, 0x6040, 0x00, DeviceParameterValue{uint64_t{70000}});
+  ASSERT_FALSE(invalid.has_value());
+  EXPECT_EQ(invalid.error().kind, Kind::kInvalidValue);
+  dm.exchangeProcessData();
+  ASSERT_GE(busPtr->lastOutputs.size(), 2u);
+  EXPECT_EQ(busPtr->lastOutputs[0], 0x0F);
+  EXPECT_EQ(busPtr->lastOutputs[1], 0x00);
+
+  auto viewDevice = dm.deviceParameterView(99, 0x6040, 0x00, /*refreshFromBus=*/false);
+  ASSERT_FALSE(viewDevice.has_value());
+  EXPECT_EQ(viewDevice.error().kind, Kind::kUnknownDevice);
+  for (const bool refresh : {false, true}) {
+    auto viewParameter = dm.deviceParameterView(1, 0x1234, 0x00, refresh);
+    ASSERT_FALSE(viewParameter.has_value());
+    EXPECT_EQ(viewParameter.error().kind, Kind::kUnknownParameter);
+  }
+}
+
 TEST(DeviceManagerProcessData, IndependentOutputSlotsComposeIntoOneImage) {
   auto bus = makeCia402Bus();
   bus->wkc = 3;

@@ -174,14 +174,29 @@ constexpr std::string_view procedureErrorStatus(mm::node::ProcedureError::Kind k
   return "500 Internal Server Error";
 }
 
+// Maps a failed read or write of one parameter to its status line, in one place for both routes.
+constexpr std::string_view parameterErrorStatus(const mm::node::ParameterError& error) {
+  switch (error.kind) {
+    case mm::node::ParameterError::Kind::kUnknownDevice:
+    case mm::node::ParameterError::Kind::kUnknownParameter:
+      return "404 Not Found";
+    case mm::node::ParameterError::Kind::kInvalidValue:
+      return "400 Bad Request";
+    case mm::node::ParameterError::Kind::kTransferFailed:
+      return "500 Internal Server Error";
+  }
+  return "500 Internal Server Error";
+}
+
 // Release or engage a device's brake, which differ only in which operation runs — everything around
 // it (position, the optional settle, the timed call, the state read back) is identical, so the two
 // routes share this rather than duplicating it. A template because the uWS response/request types
 // are the loop's, deduced at the route.
 // Parses the "value" field of a smart parameter-write body into a DeviceParameterValue. The exact
-// numeric width does not matter here — DeviceManager::writeDeviceParameter coerces the value to the
-// parameter's declared data type — so a JSON integer becomes int64/uint64, a real becomes double, a
-// string stays a string, and an array becomes a byte vector.
+// numeric width does not matter here — DeviceManager::writeDeviceParameter converts the value to
+// the parameter's declared data type, and refuses one the type cannot hold — so a JSON integer
+// becomes int64/uint64, a real becomes double, a string stays a string, and an array becomes a byte
+// vector.
 std::expected<mm::node::DeviceParameterValue, std::string> parseParameterValue(
     const nlohmann::json& v) {
   if (v.is_number_unsigned()) {
@@ -1600,6 +1615,9 @@ void HttpServer::run() {
                 if (!position) {
                   return mm::api::badRequest("slavePosition must be a number");
                 }
+                if (!deviceManager_.hasDevice(*position)) {
+                  return mm::api::notFound("no device at that bus position");
+                }
                 const auto readValues = req.query("readValues").value_or("");
                 const bool withValues = readValues == "true" || readValues == "1";
                 return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
@@ -1621,6 +1639,9 @@ void HttpServer::run() {
                 auto position = req.parameterAs<uint16_t>("slavePosition");
                 if (!position) {
                   return mm::api::badRequest("slavePosition must be a number");
+                }
+                if (!deviceManager_.hasDevice(*position)) {
+                  return mm::api::notFound("no device at that bus position");
                 }
                 return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
                   if (auto r = deviceManager_.readAllDeviceParameters(*position); !r) {
@@ -1658,10 +1679,12 @@ void HttpServer::run() {
                // absent source) is the smart "auto" read that refreshes from the live PDO image or
                // an SDO upload. The routing itself lives in Device::readParameter.
                const bool refreshFromBus = req.query("source").value_or("") != "cache";
-               return mm::api::timed([&] {
-                 return deviceManager_.deviceParameterView(*position, *index, *subindex,
-                                                           refreshFromBus);
-               });
+               return mm::api::timed(
+                   [&] {
+                     return deviceManager_.deviceParameterView(*position, *index, *subindex,
+                                                               refreshFromBus);
+                   },
+                   parameterErrorStatus);
              });
 
   router.put("/api/devices/:slavePosition/parameters/:index/:subindex",
@@ -1681,19 +1704,17 @@ void HttpServer::run() {
                  return mm::api::badRequest(value.error());
                }
                // Smart write: PDO-staged when the object is output-mapped and exchanging, else SDO,
-               // else held in the cache (offline). Coercion to the declared type happens in
-               // DeviceParameter::setValue. The write returns the updated parameter, so the client
-               // gets the coerced value and the resulting syncState in the same round trip; that
-               // echo is memory-only, so timing the whole lambda still reports the write's wire
-               // cost.
-               return mm::api::timed([&]() -> std::expected<nlohmann::json, std::string> {
-                 auto updated =
-                     deviceManager_.writeDeviceParameter(*position, *index, *subindex, *value);
-                 if (!updated) {
-                   return std::unexpected(updated.error());
-                 }
-                 return nlohmann::json(*updated);
-               });
+               // else held in the cache (offline). Conversion to the declared type happens in
+               // DeviceParameter::encode, which refuses a value the type cannot hold. The write
+               // returns the updated parameter, so the client gets the converted value and the
+               // resulting syncState in the same round trip; that echo is memory-only, so timing
+               // the whole lambda still reports the write's wire cost.
+               return mm::api::timed(
+                   [&] {
+                     return deviceManager_.writeDeviceParameter(*position, *index, *subindex,
+                                                                *value);
+                   },
+                   parameterErrorStatus);
              });
 
   router.get("/api/meta/object-data-types", [](const mm::api::Request&) {

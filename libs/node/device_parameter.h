@@ -306,18 +306,26 @@ struct DeviceParameter {
   /// @return The numeric value, or an error string if @c value is a string / raw bytes.
   std::expected<double, std::string> numeric() const;
 
-  /// @brief Sets @c value, coercing @p v into the parameter's declared data type.
+  /// @brief Encodes @p v as the wire bytes of the parameter's declared data type. Stores nothing.
   ///
-  /// Numeric inputs are @c static_cast into the alternative matching @c dataType, so
-  /// @c setValue(5) works regardless of whether the parameter is UNSIGNED8 or
-  /// UNSIGNED32 — unlike a bare variant assignment, which would store the wrong
-  /// alternative. Does not touch @c syncState; the caller decides that.
+  /// A number of any width is converted to the type @c dataType declares, so @c encode(5) works
+  /// whether the parameter is UNSIGNED8 or UNSIGNED32. The conversion never changes the value. A
+  /// number the type cannot hold is refused: one outside an integer type's limits, a fraction or a
+  /// value that is not finite for an integer type, and a finite value outside the range of a
+  /// REAL32. The minimum and maximum the object declares are not checked, because the drive decides
+  /// whether a value is valid.
   ///
-  /// @return Void on success, or an error string when @p v cannot be coerced (e.g. a
-  ///         string into a numeric parameter, or a number into a string parameter).
+  /// @return The wire bytes, or an error string when @p v cannot be encoded: a number the type
+  ///         cannot hold, a string into a numeric parameter, or a number into a string parameter.
+  std::expected<std::vector<uint8_t>, std::string> encode(const DeviceParameterValue& v) const;
+
+  /// @brief Sets the value to @p v, encoded as @c encode does. Does not touch @c syncState; the
+  ///        caller decides that.
+  ///
+  /// @return Void on success, or the error from @c encode, in which case nothing is stored.
   std::expected<void, std::string> setValue(const DeviceParameterValue& v);
 
-  /// @brief Strongly-typed @c setValue overload; wraps @p v and coerces as above.
+  /// @brief Strongly-typed @c setValue overload; wraps @p v and converts as above.
   template <typename T>
   std::expected<void, std::string> setValue(const T& v) {
     return setValue(DeviceParameterValue{v});
@@ -328,18 +336,6 @@ struct DeviceParameter {
   /// Write-only objects (e.g. a command/trigger sub-object) report no read bits; an SDO upload of
   /// one aborts, so a bulk value refresh should skip them rather than log a spurious failure.
   bool isReadable() const { return (access & 0x07) != 0; }
-
-  /// @brief Whether @p v lies within @c [minValue, maxValue].
-  ///
-  /// Bounds are compared via numeric coercion. Returns @c true when @p v is
-  /// non-numeric or when a bound is unset/non-numeric (i.e. no constraint to violate).
-  bool inRange(const DeviceParameterValue& v) const;
-
-  /// @brief Returns @p v clamped to @c [minValue, maxValue].
-  ///
-  /// Clamps numerically and returns a value of the same alternative as @p v. Returns
-  /// @p v unchanged when it is non-numeric or no numeric bounds apply.
-  DeviceParameterValue clampToRange(const DeviceParameterValue& v) const;
 };
 
 /// @brief Decodes a raw SDO byte sequence according to an ETG.1020 data type code.

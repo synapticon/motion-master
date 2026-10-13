@@ -256,6 +256,29 @@ inline std::unexpected<std::string> deviceNotFound(uint16_t slavePosition) {
   return std::unexpected(std::format("device {} not found", slavePosition));
 }
 
+/// @brief Why reading or writing one parameter by its address failed.
+///
+/// Structured rather than a string because the HTTP layer answers each kind with a different
+/// status: an address that names nothing is 404, a value that does not fit the data type is 400,
+/// and a failed transfer is 500.
+struct ParameterError {
+  enum class Kind : uint8_t {
+    kUnknownDevice,     ///< No device holds that bus position. → 404
+    kUnknownParameter,  ///< The device has no parameter at that index and subindex. → 404
+    kInvalidValue,      ///< The value cannot be encoded in the parameter's data type. → 400
+    kTransferFailed,    ///< The read or the write over the bus failed. → 500
+  };
+
+  Kind kind = Kind::kTransferFailed;
+  std::string message;
+
+  /// @brief Exception-shaped accessor for the message, for call sites that prefer @c .what().
+  const std::string& what() const { return message; }
+};
+
+/// @brief Streams the message, so `ASSERT_TRUE(r) << r.error()` and spdlog `{}` work unchanged.
+std::ostream& operator<<(std::ostream& os, const ParameterError& error);
+
 /// @brief Owns the fieldbus driver and node collection, and drives PDO exchange.
 ///
 /// **The surface, grouped — every member is documented at its declaration below.** The
@@ -729,11 +752,12 @@ class DeviceManager {
   /// @param index          CoE object index.
   /// @param subindex       CoE object subindex.
   /// @param refreshFromBus When @c true, sync the cache from the device before copying.
-  /// @return The parameter, or an error string if the device or parameter is unknown, or (when
-  ///         refreshing) the read fails.
-  std::expected<DeviceParameter, std::string> deviceParameterView(uint16_t slavePosition,
-                                                                  uint16_t index, uint8_t subindex,
-                                                                  bool refreshFromBus);
+  /// @return The parameter, or why not: the device or the parameter is unknown, or (when
+  ///         refreshing) the read failed.
+  std::expected<DeviceParameter, ParameterError> deviceParameterView(uint16_t slavePosition,
+                                                                     uint16_t index,
+                                                                     uint8_t subindex,
+                                                                     bool refreshFromBus);
 
   /// @brief Convenience: finds a device by position, writes one of its parameters, returns it.
   ///
@@ -751,11 +775,12 @@ class DeviceManager {
   /// @param slavePosition  1-based bus position of the target device.
   /// @param index          CoE object index.
   /// @param subindex       CoE object subindex.
-  /// @param value          Value to set; coerced to the parameter's declared type.
-  /// @return The parameter as it stands after the write — coerced value and resulting
-  ///         @c syncState — or an error string if the device or parameter is unknown, the value
-  ///         cannot be coerced, or an online download fails.
-  std::expected<DeviceParameter, std::string> writeDeviceParameter(
+  /// @param value          Value to set; converted to the parameter's declared type, and refused
+  ///                       when that type cannot hold it (see @c DeviceParameter::encode).
+  /// @return The parameter as it stands after the write — converted value and resulting
+  ///         @c syncState — or why not: the device or the parameter is unknown, the value does not
+  ///         fit the data type, or an online download failed. A refused value writes nothing.
+  std::expected<DeviceParameter, ParameterError> writeDeviceParameter(
       uint16_t slavePosition, uint16_t index, uint8_t subindex,
       const DeviceParameterValue& newValue);
 

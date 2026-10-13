@@ -947,7 +947,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Writes one parameter of the device at `slavePosition`. The value is coerced to the parameter's declared data type, then routed: staged into the process image when the device is exchanging and the object is output (RxPDO) mapped — sent on the next cycle — otherwise written via an SDO download, otherwise held in the cache as pending until the device is back online. This is the endpoint to set a target (e.g. target torque 0x6071) or the modes of operation: it knows which objects are PDO-mapped and stages them into the process data, falling back to SDO transparently. Returns the updated `DeviceParameter` (with the coerced value and resulting sync state). Both `index` and `subindex` accept decimal or hexadecimal notation; prefix with `0x` for hex.
+   * @description Writes one parameter of the device at `slavePosition`. The value is converted to the parameter's declared data type, then routed: staged into the process image when the device is exchanging and the object is output (RxPDO) mapped — sent on the next cycle — otherwise written via an SDO download, otherwise held in the cache as pending until the device is back online. This is the endpoint to set a target (e.g. target torque 0x6071) or the modes of operation: it knows which objects are PDO-mapped and stages them into the process data, falling back to SDO transparently. Returns the updated `DeviceParameter` (with the converted value and resulting sync state). A value the data type cannot hold is refused with 400, and nothing is written. That is a number outside the limits of an integer type (300 or -1 for an UNSIGNED8), a number with a fraction for an integer type, or a number outside the range of a REAL32. Every value that fits the data type is sent unchanged, even one outside the object's documented range, because the drive decides whether a value is valid. To send arbitrary bytes, use `sdoDownload`. Both `index` and `subindex` accept decimal or hexadecimal notation; prefix with `0x` for hex.
    *
    * @name WriteParameter
    * @summary Write a single parameter value (PDO-aware)
@@ -959,7 +959,7 @@ export class Api<
     subindex: number,
     data: {
       /**
-       * The value to set, coerced to the parameter's declared type. A number for integer/real objects, a string for string objects, or an array of bytes for octet/domain objects.
+       * The value to set, converted to the parameter's declared type. A number for integer/real objects, a string for string objects, or an array of bytes for octet/domain objects.
        * @example 100
        */
       value: number | string | number[];
@@ -2408,7 +2408,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Stages many output (RxPDO) objects at once — the "send all" action of the Process Data page. Each value is coerced to the object's declared data type and, when the object is output-mapped and its device is exchanging (SAFE-OP/OP), written into the output image so it is sent on the next real-time cycle and re-sent every cycle thereafter (set-once, sent-continuously). The batch is best-effort atomic: values are staged sequentially, so a batch can straddle two consecutive ~1 ms cycles. The request never fails as a whole — each object gets its own result, so the client can flag any object that was not cyclically staged (unknown device, coercion failure, object not output-mapped, or bus not exchanging; in the last two cases the value is still written via SDO/cache, just not cyclically driven).
+   * @description Stages many output (RxPDO) objects at once — the "send all" action of the Process Data page. Each value is converted to the object's declared data type and, when the object is output-mapped and its device is exchanging (SAFE-OP/OP), written into the output image so it is sent on the next real-time cycle and re-sent every cycle thereafter (set-once, sent-continuously). The batch is best-effort atomic: values are staged sequentially, so a batch can straddle two consecutive ~1 ms cycles. The request never fails as a whole — each object gets its own result, so the client can flag any object that was not cyclically staged (unknown device, a value the data type cannot hold, object not output-mapped, or bus not exchanging; in the last two cases the value is still written via SDO/cache, just not cyclically driven). A value the data type cannot hold is refused in its own result and nothing is written for it, by the same rule as `writeParameter`.
    *
    * @name StageProcessDataOutputs
    * @summary Stage a batch of output values into the process image

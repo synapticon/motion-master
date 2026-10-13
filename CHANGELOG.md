@@ -19,8 +19,13 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Changed
+
+- **An unknown device or parameter answers 404 on every parameter endpoint.** `GET` and `PUT /api/devices/{slavePosition}/parameters/{index}/{subindex}`, and `POST /api/devices/{slavePosition}/parameters/init` and `…/parameters/read`, answered 500 for a device that is not on the bus. The two single-parameter endpoints also answered 500 for an index and subindex the device does not have. Both now answer 404, as the other device endpoints do. A failed transfer still answers 500.
+
 ### Fixed
 
+- **A parameter write refuses a value that does not fit the data type, instead of changing it.** `PUT /api/devices/{slavePosition}/parameters/{index}/{subindex}` wrote 300 to an UNSIGNED8 as 44, -1 as 255, and 1.7 to an INTEGER32 as 1, and answered 200. It now answers 400 and writes nothing. Every value that fits the data type is still sent unchanged, even one outside the object's documented range, because the drive decides whether a value is valid. `POST /api/process-data/outputs` refuses such a value in that item's result. Procedures that write a parameter fail on such a value too.
 - **A device in SAFE-OP now counts its outputs in the expected working counter.** A device in SAFE-OP still takes its outputs, so it answers the process-data datagram as in OP: 2 for the outputs and 1 for the inputs. Motion Master expected 1, for the inputs only. Because the expected value is a lower limit, a device in SAFE-OP that stopped delivering its inputs looked healthy, and one device in SAFE-OP could hide another that stopped answering. A device that does not count its outputs in SAFE-OP now shows a short working counter, and its inputs are then read over SDO.
 - **The `trigger-error` procedure now describes the fault reaction of firmware v5.6 correctly.** Its caveat and its result said that `resettable-firmware-error` makes the drive react as the quick stop option code (`0x605A`) says. That is true only from firmware v5.7. On v5.6 the drive ramps down on the quick stop deceleration (`0x6085`), whatever `0x605A` says. Both texts now name the firmware line they describe.
 

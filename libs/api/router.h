@@ -6,11 +6,13 @@
 #include <atomic>
 #include <charconv>
 #include <chrono>
+#include <concepts>
 #include <functional>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -260,6 +262,25 @@ Response timed(Op&& op, std::string errorStatus = "500 Internal Server Error") {
       std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0);
   if (!result) {
     return withWireTime(error(std::move(errorStatus), result.error()), wireUs);
+  }
+  return withWireTime(json(nlohmann::json(*result)), wireUs);
+}
+
+/// @brief @c timed for an operation whose error carries its reason: @p statusOf picks the status
+///        line from the error, and the error's @c message is the body.
+///
+/// For a surface with a structured error, such as @c ParameterError, where one route answers
+/// several statuses.
+template <typename Op, typename StatusOf>
+  requires std::invocable<StatusOf&, const typename std::invoke_result_t<Op&>::error_type&>
+Response timed(Op&& op, StatusOf&& statusOf) {
+  const auto t0 = std::chrono::steady_clock::now();
+  auto result = std::forward<Op>(op)();
+  const auto wireUs =
+      std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now() - t0);
+  if (!result) {
+    return withWireTime(error(std::string(statusOf(result.error())), result.error().message),
+                        wireUs);
   }
   return withWireTime(json(nlohmann::json(*result)), wireUs);
 }

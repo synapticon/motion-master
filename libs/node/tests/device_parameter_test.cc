@@ -3,9 +3,12 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -41,15 +44,6 @@ DeviceParameter param(uint16_t dataType, const DeviceParameterValue& value) {
   // Through the typed setter, so the fixture exercises the same coerce-and-encode path production
   // does rather than reaching into storage.
   (void)p.setValue(value);
-  return p;
-}
-
-// As param(), additionally setting the slave-reported min/max bounds.
-DeviceParameter paramWithBounds(uint16_t dataType, const DeviceParameterValue& value,
-                                DeviceParameterValue lo, DeviceParameterValue hi) {
-  DeviceParameter p = param(dataType, value);
-  p.minValue = std::move(lo);
-  p.maxValue = std::move(hi);
   return p;
 }
 
@@ -155,32 +149,105 @@ TEST(DeviceParameterValueEquality, IsExactType) {
   EXPECT_NE(DeviceParameterValue{int32_t{5}}, DeviceParameterValue{uint32_t{5}});
 }
 
-// --- bounds: inRange / clampToRange ------------------------------------------
+// --- a value that does not fit the data type ---------------------------------
 
-TEST(DeviceParameterBounds, InRangeRespectsMinMax) {
-  DeviceParameter p =
-      paramWithBounds(kI32, DeviceParameterValue{int32_t{0}}, DeviceParameterValue{int32_t{0}},
-                      DeviceParameterValue{int32_t{100}});
-  EXPECT_TRUE(p.inRange(DeviceParameterValue{int32_t{50}}));
-  EXPECT_TRUE(p.inRange(DeviceParameterValue{int32_t{0}}));
-  EXPECT_TRUE(p.inRange(DeviceParameterValue{int32_t{100}}));
-  EXPECT_FALSE(p.inRange(DeviceParameterValue{int32_t{150}}));
-  EXPECT_FALSE(p.inRange(DeviceParameterValue{int32_t{-5}}));
+// Each integer type with its code, checked at both limits and one past each. The incoming value is
+// the widest of its kind, as the HTTP layer passes it.
+template <typename T>
+void expectIntegerLimits(uint16_t dataType) {
+  constexpr auto lo = std::numeric_limits<T>::min();
+  constexpr auto hi = std::numeric_limits<T>::max();
+  DeviceParameter p = param(dataType, DeviceParameterValue{T{0}});
+
+  ASSERT_TRUE(p.setValue(DeviceParameterValue{static_cast<int64_t>(lo)}).has_value());
+  EXPECT_EQ(p.currentValue(), DeviceParameterValue{lo});
+  ASSERT_TRUE(p.setValue(DeviceParameterValue{static_cast<uint64_t>(hi)}).has_value());
+  EXPECT_EQ(p.currentValue(), DeviceParameterValue{hi});
+
+  if constexpr (std::is_signed_v<T> && sizeof(T) < sizeof(int64_t)) {
+    EXPECT_FALSE(p.setValue(DeviceParameterValue{int64_t{lo} - 1}).has_value());
+  }
+  if constexpr (std::is_unsigned_v<T>) {
+    EXPECT_FALSE(p.setValue(DeviceParameterValue{int64_t{-1}}).has_value());
+  }
+  if constexpr (sizeof(T) < sizeof(uint64_t)) {
+    EXPECT_FALSE(p.setValue(DeviceParameterValue{uint64_t{hi} + 1}).has_value());
+  }
+  if constexpr (std::is_same_v<T, int64_t>) {
+    EXPECT_FALSE(p.setValue(DeviceParameterValue{uint64_t{hi} + 1}).has_value());
+  }
+  // A refused value leaves the stored one alone.
+  EXPECT_EQ(p.currentValue(), DeviceParameterValue{hi});
 }
 
-TEST(DeviceParameterBounds, InRangeTrueWhenNoBounds) {
+TEST(DeviceParameterFit, EveryIntegerTypeTakesItsLimitsAndRefusesOnePast) {
+  expectIntegerLimits<int8_t>(0x0002);
+  expectIntegerLimits<int16_t>(kI16);
+  expectIntegerLimits<int32_t>(kI32);
+  expectIntegerLimits<int64_t>(0x0015);
+  expectIntegerLimits<uint8_t>(kU8);
+  expectIntegerLimits<uint16_t>(kU16);
+  expectIntegerLimits<uint32_t>(kU32);
+  expectIntegerLimits<uint64_t>(0x001B);
+}
+
+TEST(DeviceParameterFit, RefusesWhatTheBenchWrapped) {
+  // 300 into an UNSIGNED8 used to reach the drive as 44, and -1 as 255.
+  DeviceParameter p = param(kU8, DeviceParameterValue{uint8_t{20}});
+  const auto refused = p.setValue(DeviceParameterValue{uint64_t{300}});
+  ASSERT_FALSE(refused.has_value());
+  EXPECT_NE(refused.error().find("UNSIGNED8"), std::string::npos) << refused.error();
+  EXPECT_FALSE(p.setValue(DeviceParameterValue{int64_t{-1}}).has_value());
+  EXPECT_EQ(p.currentValue(), DeviceParameterValue{uint8_t{20}});
+}
+
+TEST(DeviceParameterFit, AnIntegerTypeTakesAWholeRealAndRefusesAFraction) {
   DeviceParameter p = param(kI32, DeviceParameterValue{int32_t{0}});
-  EXPECT_TRUE(p.inRange(DeviceParameterValue{int32_t{999999}}));
+  ASSERT_TRUE(p.setValue(DeviceParameterValue{-2.0}).has_value());
+  EXPECT_EQ(p.currentValue(), DeviceParameterValue{int32_t{-2}});
+  EXPECT_FALSE(p.setValue(DeviceParameterValue{1.7}).has_value());
+  EXPECT_FALSE(p.setValue(DeviceParameterValue{std::numeric_limits<double>::quiet_NaN()}));
+  EXPECT_FALSE(p.setValue(DeviceParameterValue{std::numeric_limits<double>::infinity()}));
+  EXPECT_FALSE(p.setValue(DeviceParameterValue{2147483648.0}).has_value());
+  ASSERT_TRUE(p.setValue(DeviceParameterValue{2147483647.0}).has_value());
+  ASSERT_TRUE(p.setValue(DeviceParameterValue{-2147483648.0}).has_value());
+  EXPECT_FALSE(p.setValue(DeviceParameterValue{-2147483649.0}).has_value());
+
+  // The largest whole double below 2^64 fits an UNSIGNED64, and 2^64 does not.
+  DeviceParameter u64 = param(0x001B, DeviceParameterValue{uint64_t{0}});
+  EXPECT_TRUE(u64.setValue(DeviceParameterValue{std::nextafter(18446744073709551616.0, 0.0)}));
+  EXPECT_FALSE(u64.setValue(DeviceParameterValue{18446744073709551616.0}).has_value());
 }
 
-TEST(DeviceParameterBounds, ClampToRangeClampsAndPreservesType) {
-  DeviceParameter p =
-      paramWithBounds(kI32, DeviceParameterValue{int32_t{0}}, DeviceParameterValue{int32_t{0}},
-                      DeviceParameterValue{int32_t{100}});
-  EXPECT_EQ(p.clampToRange(DeviceParameterValue{int32_t{150}}), DeviceParameterValue{int32_t{100}});
-  EXPECT_EQ(p.clampToRange(DeviceParameterValue{int32_t{-5}}), DeviceParameterValue{int32_t{0}});
-  // Within range: returned unchanged, same alternative.
-  EXPECT_EQ(p.clampToRange(DeviceParameterValue{int32_t{50}}), DeviceParameterValue{int32_t{50}});
+TEST(DeviceParameterFit, Real32RefusesAFiniteValueItCannotHold) {
+  DeviceParameter p = param(kReal32, DeviceParameterValue{0.0F});
+  EXPECT_FALSE(p.setValue(DeviceParameterValue{1e39}).has_value());
+  EXPECT_FALSE(p.setValue(DeviceParameterValue{-1e39}).has_value());
+  ASSERT_TRUE(
+      p.setValue(DeviceParameterValue{static_cast<double>(std::numeric_limits<float>::max())})
+          .has_value());
+  // REAL32 carries infinity and NaN, so they pass as themselves.
+  ASSERT_TRUE(p.setValue(DeviceParameterValue{std::numeric_limits<double>::infinity()}));
+  EXPECT_TRUE(std::isinf(std::get<float>(p.currentValue())));
+  ASSERT_TRUE(p.setValue(DeviceParameterValue{std::numeric_limits<double>::quiet_NaN()}));
+  EXPECT_TRUE(std::isnan(std::get<float>(p.currentValue())));
+  // Every integer fits, with rounding.
+  EXPECT_TRUE(p.setValue(DeviceParameterValue{std::numeric_limits<uint64_t>::max()}));
+}
+
+TEST(DeviceParameterFit, Real64TakesAnything) {
+  DeviceParameter p = param(kReal64, DeviceParameterValue{0.0});
+  EXPECT_TRUE(p.setValue(DeviceParameterValue{1e300}));
+  EXPECT_TRUE(p.setValue(DeviceParameterValue{std::numeric_limits<int64_t>::min()}));
+}
+
+TEST(DeviceParameterFit, TheDeclaredRangeIsNotChecked) {
+  // The drive decides whether a value is valid, so a caller can send one it will refuse.
+  DeviceParameter p = param(kI32, DeviceParameterValue{int32_t{0}});
+  p.minValue = DeviceParameterValue{int32_t{0}};
+  p.maxValue = DeviceParameterValue{int32_t{100}};
+  EXPECT_TRUE(p.setValue(DeviceParameterValue{int64_t{150}}));
+  EXPECT_TRUE(p.setValue(DeviceParameterValue{int64_t{-5}}));
 }
 
 // --- default sync state ------------------------------------------------------

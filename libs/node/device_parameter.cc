@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstring>
 #include <expected>
 #include <format>
+#include <limits>
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <span>
@@ -319,11 +321,56 @@ std::expected<double, std::string> DeviceParameter::numeric() const {
   return std::unexpected(std::format("parameter 0x{:04X}:{:02X} is not numeric", index, subindex));
 }
 
-std::expected<void, std::string> DeviceParameter::setValue(const DeviceParameterValue& v) {
-  // Two steps, because storage is wire bytes and the caller may pass any numeric width: coerce the
+namespace {
+
+// Converts a number to Target, or says why it cannot be done without changing the value. A cast
+// would wrap 300 to 44 in an UNSIGNED8 and cut 1.7 to 1 in an INTEGER32, and the drive would then
+// receive a value nobody sent. Only the data type is checked. Whether the value is valid for the
+// object is the drive's decision.
+template <typename Target, typename In>
+std::expected<Target, std::string> convertExactly(In incoming) {
+  if constexpr (std::is_integral_v<Target> && std::is_integral_v<In>) {
+    if (!std::in_range<Target>(incoming)) {
+      return std::unexpected(std::format("{} is outside [{}, {}]", incoming,
+                                         std::numeric_limits<Target>::min(),
+                                         std::numeric_limits<Target>::max()));
+    }
+    return static_cast<Target>(incoming);
+  } else if constexpr (std::is_integral_v<Target>) {
+    const auto x = static_cast<double>(incoming);
+    if (!std::isfinite(x) || std::trunc(x) != x) {
+      return std::unexpected(std::format("{} is not a whole number", x));
+    }
+    // Both limits are powers of two, or zero, so a double holds them exactly. The upper one is
+    // the first value past the type's maximum.
+    const double lowest = static_cast<double>(std::numeric_limits<Target>::min());
+    const double pastHighest = std::ldexp(1.0, std::numeric_limits<Target>::digits);
+    if (x < lowest || x >= pastHighest) {
+      return std::unexpected(std::format("{} is outside [{}, {}]", x,
+                                         std::numeric_limits<Target>::min(),
+                                         std::numeric_limits<Target>::max()));
+    }
+    return static_cast<Target>(x);
+  } else if constexpr (std::is_same_v<Target, float>) {
+    // An integer always fits, with rounding. A double that is not finite carries over as itself.
+    const auto x = static_cast<double>(incoming);
+    if (std::isfinite(x) && std::abs(x) > static_cast<double>(std::numeric_limits<float>::max())) {
+      return std::unexpected(std::format("{} is outside the range of a REAL32", x));
+    }
+    return static_cast<float>(x);
+  } else {
+    return static_cast<Target>(incoming);
+  }
+}
+
+}  // namespace
+
+std::expected<std::vector<uint8_t>, std::string> DeviceParameter::encode(
+    const DeviceParameterValue& v) const {
+  // Two steps, because storage is wire bytes and the caller may pass any numeric width: convert the
   // incoming value into the alternative the declared data type dictates, then encode that to bytes.
-  // Coercion is what makes setValue(5) work whether the object is UNSIGNED8 or UNSIGNED32 — a bare
-  // assignment would encode the wrong width.
+  // The conversion is what makes encode(5) work whether the object is UNSIGNED8 or UNSIGNED32 — a
+  // bare assignment would encode the wrong width.
   DeviceParameterValue target = defaultValueForDataType(dataType);
   auto coerced = std::visit(
       [this](const auto& proto,
@@ -332,7 +379,13 @@ std::expected<void, std::string> DeviceParameter::setValue(const DeviceParameter
         using In = std::decay_t<decltype(incoming)>;
         if constexpr (std::is_arithmetic_v<Target>) {
           if constexpr (std::is_arithmetic_v<In>) {
-            return DeviceParameterValue{static_cast<Target>(incoming)};
+            auto converted = convertExactly<Target>(incoming);
+            if (!converted) {
+              return std::unexpected(std::format("parameter 0x{:04X}:{:02X} is {}: {}", index,
+                                                 subindex, mm::comm::objectDataTypeName(dataType),
+                                                 converted.error()));
+            }
+            return DeviceParameterValue{*converted};
           } else {
             return std::unexpected(std::format(
                 "parameter 0x{:04X}:{:02X} is numeric; cannot assign a non-numeric value", index,
@@ -360,62 +413,16 @@ std::expected<void, std::string> DeviceParameter::setValue(const DeviceParameter
   if (!coerced) {
     return std::unexpected(coerced.error());
   }
-  auto bytes = encodeSdoBytes(dataType, *coerced);
+  return encodeSdoBytes(dataType, *coerced);
+}
+
+std::expected<void, std::string> DeviceParameter::setValue(const DeviceParameterValue& v) {
+  auto bytes = encode(v);
   if (!bytes) {
     return std::unexpected(bytes.error());
   }
   setRawValue(*bytes);
   return {};
-}
-
-bool DeviceParameter::inRange(const DeviceParameterValue& v) const {
-  auto n = numericValue(v);
-  if (!n) {
-    return true;  // non-numeric values have no range to violate
-  }
-  if (minValue) {
-    if (auto lo = numericValue(*minValue); lo && *n < *lo) {
-      return false;
-    }
-  }
-  if (maxValue) {
-    if (auto hi = numericValue(*maxValue); hi && *n > *hi) {
-      return false;
-    }
-  }
-  return true;
-}
-
-DeviceParameterValue DeviceParameter::clampToRange(const DeviceParameterValue& v) const {
-  auto n = numericValue(v);
-  if (!n) {
-    return v;
-  }
-  double r = *n;
-  if (minValue) {
-    if (auto lo = numericValue(*minValue); lo && r < *lo) {
-      r = *lo;
-    }
-  }
-  if (maxValue) {
-    if (auto hi = numericValue(*maxValue); hi && r > *hi) {
-      r = *hi;
-    }
-  }
-  if (r == *n) {
-    return v;  // unchanged — preserve the exact alternative and value
-  }
-  // Re-cast the clamped number back into v's own alternative.
-  return std::visit(
-      [r](const auto& x) -> DeviceParameterValue {
-        using T = std::decay_t<decltype(x)>;
-        if constexpr (std::is_arithmetic_v<T>) {
-          return static_cast<T>(r);
-        } else {
-          return x;  // unreachable: numericValue(v) succeeded above
-        }
-      },
-      v);
 }
 
 void to_json(nlohmann::json& j, const DeviceParameter& p) {

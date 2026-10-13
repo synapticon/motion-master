@@ -37,7 +37,7 @@ enum class EtherCatState : uint16_t {
   Init = 0x01,    ///< INIT — reset state, no communication.
   PreOp = 0x02,   ///< PRE-OPERATIONAL — mailbox communication active.
   Boot = 0x03,    ///< BOOT — firmware download mode.
-  SafeOp = 0x04,  ///< SAFE-OPERATIONAL — inputs only; outputs ignored.
+  SafeOp = 0x04,  ///< SAFE-OPERATIONAL — outputs are received but not applied.
   Op = 0x08,      ///< OPERATIONAL — full PDO exchange.
 };
 
@@ -70,25 +70,35 @@ inline std::string_view toString(EtherCatState state) {
   return "UNKNOWN";
 }
 
-/// @brief Working-counter contribution of one slave for a given AL state and PDO presence.
+/// @brief Working-counter contribution of one slave for a given AL status and PDO presence.
 ///
-/// EtherCAT increments the working counter per successful datagram access: a slave exchanging
-/// outputs contributes 2 (the process-data LRW both reads and writes its output region) and
-/// inputs contribute 1.  Process data flows only in SAFE-OP (inputs only) and OP (outputs +
-/// inputs); below that a slave does not contribute.  Summed across the bus this is the WKC a
-/// (possibly partially operational) bus is expected to produce — the figure a health check
-/// compares the live working counter against.  The protocol rule lives here, with the other AL
-/// vocabulary, rather than in the transport-agnostic node layer.
+/// A slave increments the working counter of an LRW by 2 when it takes the outputs and by 1 when it
+/// delivers the inputs (ETG.1000.4, section 5.4.3.5). SAFE-OP and OP contribute the same. The
+/// PRE-OP to SAFE-OP transition enables the output Sync Manager as well as the input one, and
+/// leaving OP only sets the outputs to their safe values (ETG.1000.6, Tables 99 and 103). The slave
+/// must also receive outputs in SAFE-OP, or it refuses the step to OP with AL status code 0x0019.
+/// Below SAFE-OP a slave does not contribute.
 ///
-/// @param state       Current AL state of the slave.
+/// A slave with the error flag set contributes 0. One that enters SAFE-OP with the flag set
+/// disables Sync Manager 2 and may still deliver its inputs, so 0 is lower than what it answers.
+/// The expected value is a lower limit, so that is safe, and the error itself is reported in the
+/// AL status.
+///
+/// Summed across the bus, this is the working counter a partially operational bus is expected to
+/// produce, and a health check compares the live working counter against it. The protocol rule
+/// lives here, with the other AL vocabulary, and not in the node layer, which knows no transport.
+///
+/// @param alStatus    AL status of the slave: the state in the low four bits, and the error flag.
 /// @param hasOutputs  Whether the slave has any mapped output (RxPDO) bits.
 /// @param hasInputs   Whether the slave has any mapped input (TxPDO) bits.
-inline int workingCounterContribution(EtherCatState state, bool hasOutputs, bool hasInputs) {
-  switch (state) {
+inline int workingCounterContribution(uint16_t alStatus, bool hasOutputs, bool hasInputs) {
+  if (alHasError(alStatus)) {
+    return 0;
+  }
+  switch (alState(alStatus)) {
+    case EtherCatState::SafeOp:
     case EtherCatState::Op:
       return (hasOutputs ? 2 : 0) + (hasInputs ? 1 : 0);
-    case EtherCatState::SafeOp:
-      return hasInputs ? 1 : 0;
     default:
       return 0;
   }

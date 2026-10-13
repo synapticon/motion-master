@@ -866,29 +866,26 @@ std::expected<std::vector<uint16_t>, std::string> DeviceManager::resolveTargets(
 int DeviceManager::expectedWkcDuring(std::span<const uint16_t> transitioning,
                                      std::optional<mm::comm::EtherCatState> target) const {
   const std::shared_ptr<DeviceSet> set = deviceSet();
-  // Sum each non-errored device's working-counter contribution for its AL state and PDO presence.
-  // The protocol rule (how outputs/inputs and SAFE-OP/OP map to a WKC increment) lives in the comm
-  // layer; here we only know each device's state and whether it maps any PDO, so the figure tracks
-  // a partially-operational bus — what a health check compares against.
+  // Sum each device's working-counter contribution for its AL status and PDO presence. The protocol
+  // rule (how outputs, inputs, AL state and the error flag map to a WKC increment) lives in the
+  // comm layer; here we only know each device's status and whether it maps any PDO, so the figure
+  // tracks a partially-operational bus — what a health check compares against.
   int expected = 0;
   if (!set->driver) {
     return expected;
   }
   for (const auto& device : set->devices) {
     const uint16_t status = set->driver->slaveState(device.slavePosition());
-    if (mm::comm::alHasError(status)) {
-      continue;  // error indicator set — treat as not contributing
-    }
     const bool hasOutputs = device.flatPdoMapping().outputBits > 0;
     const bool hasInputs = device.flatPdoMapping().inputBits > 0;
-    int contribution =
-        mm::comm::workingCounterContribution(mm::comm::alState(status), hasOutputs, hasInputs);
+    int contribution = mm::comm::workingCounterContribution(status, hasOutputs, hasInputs);
     // A device being commanded counts for the lower of where it is and where it is going. Down is
     // immediate — it stops answering the moment it leaves — while up is not true until it arrives,
     // and an errored device is left out either way: a transition is not a promise the error clears.
     if (target && std::ranges::find(transitioning, device.slavePosition()) != transitioning.end()) {
-      contribution = std::min(contribution,
-                              mm::comm::workingCounterContribution(*target, hasOutputs, hasInputs));
+      contribution =
+          std::min(contribution, mm::comm::workingCounterContribution(
+                                     static_cast<uint16_t>(*target), hasOutputs, hasInputs));
     }
     expected += contribution;
   }

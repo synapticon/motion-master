@@ -504,8 +504,8 @@ int SpoeFieldbusDriver::exchangeProcessData(std::span<const uint8_t> outputs,
       drive->inputs.pop(inputs.subspan(io.inputOffset, io.inputBytes));
     }
     if (drive->exchanging.load(std::memory_order_relaxed)) {
-      workingCounter += workingCounterContribution(alState(drive->state.load()), io.outputBytes > 0,
-                                                   io.inputBytes > 0);
+      workingCounter +=
+          workingCounterContribution(drive->state.load(), io.outputBytes > 0, io.inputBytes > 0);
     }
   }
   return workingCounter;

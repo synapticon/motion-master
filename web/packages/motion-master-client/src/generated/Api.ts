@@ -2261,7 +2261,7 @@ export class Api<
          */
         inputBytes: number;
         /**
-         * Working counter expected from the devices currently exchanging
+         * Working counter expected from the devices currently exchanging. A device in SAFE-OP or OP counts 2 for mapped outputs and 1 for mapped inputs. A device below SAFE-OP, or with the AL error flag set, counts 0.
          * @example 3
          */
         expectedWkc: number;

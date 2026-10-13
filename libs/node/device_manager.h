@@ -506,9 +506,9 @@ class DeviceManager {
   /// @brief The working counter expected from the devices currently exchanging (SAFE-OP/OP).
   ///
   /// Computed from each device's PDO presence and current AL state, so it tracks a partially
-  /// operational bus: an OP device with outputs and inputs contributes 3, a SAFE-OP device
-  /// contributes 1 (inputs only), and PRE-OP/below contribute 0. Recomputed on configure and
-  /// on each state transition — not the whole-bus all-OP figure.
+  /// operational bus. A device in SAFE-OP or OP with outputs and inputs contributes 3, and a device
+  /// in PRE-OP or below contributes 0. Recomputed on configure and on each state transition — not
+  /// the whole-bus all-OP figure.
   int expectedWorkingCounter() const;
 
   /// @brief Whether every device that should be exchanging is contributing to the cycle.
@@ -944,7 +944,7 @@ class DeviceManager {
   ///        if that is less than what is expected now.
   ///
   /// Called *before* commanding a drop, and it is what keeps a deliberate transition from being
-  /// counted as a bus fault. A device commanded out of OP stops answering the moment it leaves,
+  /// counted as a bus fault. A device commanded below SAFE-OP stops answering the moment it leaves,
   /// while @c updateExpectedWkc only runs once the transition settles — so without this the RT
   /// loop spends the whole multi-second transition comparing the bus against an expectation that
   /// still includes a device we told to stop, and @c shortWkcCycles fills up with our own doing.

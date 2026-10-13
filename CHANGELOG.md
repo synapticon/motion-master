@@ -21,6 +21,7 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Fixed
 
+- **A device in SAFE-OP now counts its outputs in the expected working counter.** A device in SAFE-OP still takes its outputs, so it answers the process-data datagram as in OP: 2 for the outputs and 1 for the inputs. Motion Master expected 1, for the inputs only. Because the expected value is a lower limit, a device in SAFE-OP that stopped delivering its inputs looked healthy, and one device in SAFE-OP could hide another that stopped answering. A device that does not count its outputs in SAFE-OP now shows a short working counter, and its inputs are then read over SDO.
 - **The `trigger-error` procedure now describes the fault reaction of firmware v5.6 correctly.** Its caveat and its result said that `resettable-firmware-error` makes the drive react as the quick stop option code (`0x605A`) says. That is true only from firmware v5.7. On v5.6 the drive ramps down on the quick stop deceleration (`0x6085`), whatever `0x605A` says. Both texts now name the firmware line they describe.
 
 ## [6.0.0-alpha.90] - 2026-10-10

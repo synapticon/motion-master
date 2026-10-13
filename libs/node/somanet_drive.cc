@@ -1165,13 +1165,9 @@ std::expected<HardwareDescription, std::string> SomanetDrive::readHardwareDescri
 std::expected<std::optional<IntegroVariant>, std::string> SomanetDrive::readIntegroVariant() const {
   auto content = device().readFile(std::string(kVariantName));
   if (!content) {
-    // Any FoE failure means "no variant here", not just FileNotFound. A device without the file
-    // answers with a generic FoE Error packet, which SOEM reports as EC_ERR_TYPE_FOE_ERROR — the
-    // same return as no answer at all (see foeError in soem_fieldbus_driver.cc). Missing and failed
-    // cannot be told apart, so checking for FileNotFound alone made every Node and Circulo fail.
-    //
-    // Callers read the hardware description first, where a failure is fatal. FoE is therefore known
-    // to work by the time this runs, so a failure here is about the file rather than the bus.
+    // Any FoE failure means "no variant here", not just FileNotFound. Callers read the hardware
+    // description first, where a failure is fatal. FoE is therefore known to work by the time this
+    // runs, so a failure here is about the file rather than the bus.
     return std::nullopt;
   }
   auto variant = parseIntegroVariant(*content);

@@ -264,6 +264,93 @@ vcpkg_replace_string(
    if (MbxIn) ecx_dropmbx(context, MbxIn);
    MbxIn = NULL;")
 
+# An FoE Error packet loses its code and its text, and reads like a slave that never answered.
+#
+# When a slave refuses an FoE transfer it sends an Error packet carrying an ETG.1000.6 error code,
+# 0x8001 "Not found" for a missing file, and usually a short text. SOEM 2.0 keeps neither.
+# ecx_FOEread sets the return value to -EC_ERR_TYPE_FOE_ERROR and nothing else, and ecx_FOEwrite
+# keeps only whether the code was 0x8001. Neither pushes an entry onto the error list, which is
+# where ecx_SDOread puts an SDO abort code. And EC_ERR_TYPE_FOE_ERROR is 5 while EC_TIMEOUT is -5,
+# so a refusal and a slave that never answered return the same value. A caller cannot say why a
+# drive refused a file, or whether it answered at all.
+#
+# Fixed the way SOEM reports an SDO abort: on an Error packet both functions push an ec_errort with
+# Etype EC_ERR_TYPE_FOE_ERROR, the slave, and the error code in AbortCode. The return values are
+# unchanged. A failed transfer with an FoE entry on the error list was refused; one without it
+# never got an answer.
+#
+# The error text has no field in ec_errort, so it goes into a new context field, FOEerrortext,
+# which every Error packet overwrites. It is only meaningful next to the error-list entry that the
+# same packet pushed. Text past EC_MAXFOEERRORTEXT - 1 bytes is cut, and the result is always
+# NUL-terminated.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/include/soem/ec_main.h"
+"   int (*FOEhook)(uint16 slave, int packetnumber, int datasize);"
+"   int (*FOEhook)(uint16 slave, int packetnumber, int datasize);
+   /** Text of the last FoE Error packet a slave sent, NUL-terminated, empty when it carried none */
+   char FOEerrortext[EC_MAXFOEERRORTEXT];")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/include/soem/ec_main.h"
+"typedef struct ecx_context ecx_contextt;"
+"typedef struct ecx_context ecx_contextt;
+
+/** Size of ecx_contextt::FOEerrortext, the terminating NUL included */
+#define EC_MAXFOEERRORTEXT 128")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_foe.c"
+"int ecx_FOEdefinehook(ecx_contextt *context, void *hook)"
+"/** Records an FoE Error packet: its code on the error list, its text in context->FOEerrortext */
+static void ecx_FOEerror(ecx_contextt *context, uint16 slave, const ec_FOEt *aFOEp)
+{
+   ec_errort Ec;
+   uint16 textlength;
+
+   memset(&Ec, 0, sizeof(Ec));
+   Ec.Time = osal_current_time();
+   Ec.Slave = slave;
+   Ec.Etype = EC_ERR_TYPE_FOE_ERROR;
+   Ec.AbortCode = (int32)etohl(aFOEp->ErrorCode);
+   context->ecaterror = TRUE;
+   ecx_pusherror(context, &Ec);
+
+   textlength = etohs(aFOEp->MbxHeader.length);
+   textlength = (textlength > 0x0006) ? (uint16)(textlength - 0x0006) : 0;
+   if (textlength > EC_MAXFOEERRORTEXT - 1)
+   {
+      textlength = EC_MAXFOEERRORTEXT - 1;
+   }
+   memcpy(context->FOEerrortext, aFOEp->ErrorText, textlength);
+   context->FOEerrortext[textlength] = '\\0';
+}
+
+int ecx_FOEdefinehook(ecx_contextt *context, void *hook)")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_foe.c"
+"                  if (aFOEp->OpCode == ECT_FOE_ERROR)
+                  {
+                     /* FoE error */
+                     wkc = -EC_ERR_TYPE_FOE_ERROR;"
+"                  if (aFOEp->OpCode == ECT_FOE_ERROR)
+                  {
+                     /* FoE error */
+                     ecx_FOEerror(context, slave, aFOEp);
+                     wkc = -EC_ERR_TYPE_FOE_ERROR;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_foe.c"
+"               case ECT_FOE_ERROR:
+               {
+                  /* FoE error */
+                  if (aFOEp->ErrorCode == 0x8001)"
+"               case ECT_FOE_ERROR:
+               {
+                  /* FoE error */
+                  ecx_FOEerror(context, slave, aFOEp);
+                  if (aFOEp->ErrorCode == 0x8001)")
+
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS

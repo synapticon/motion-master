@@ -53,6 +53,7 @@ syntaxError:*/somanet_procedures_test.cc
 syntaxError:*/sii_test.cc
 syntaxError:*/base_test.cc
 syntaxError:*/eni_collector_test.cc
+syntaxError:*/foe_error_test.cc
 syntaxError:*/eni_reader_test.cc
 syntaxError:*/eni_request_test.cc
 syntaxError:*/eni_test.cc

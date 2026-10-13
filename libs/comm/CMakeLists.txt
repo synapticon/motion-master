@@ -4,6 +4,7 @@ add_library(
   base.cc
   esc_registers.cc
   fieldbus_driver.cc
+  foe_error.cc
   foe_error_codes.cc
   mailbox_error_codes.cc
   object_data_types.cc

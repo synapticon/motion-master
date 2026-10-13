@@ -14,6 +14,7 @@ add_executable(
   mm_comm_tests
   base_test.cc
   fake_spoe_server_test.cc
+  foe_error_test.cc
   sii_test.cc
   soem_fieldbus_driver_test.cc
   spoe_connection_test.cc

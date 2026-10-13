@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <nlohmann/json_fwd.hpp>
@@ -43,5 +44,13 @@ inline constexpr auto kFoeErrorCodes = std::to_array<FoeErrorCode>({
     {0x0000800A, "No rights", "Insufficient rights to perform the requested operation"},
     {0x0000800B, "Program error", "A program error occurred on the slave"},
 });
+
+/// @brief Returns the name of @p code, or an empty view if @p code is not a known FoE error code
+///        (vendor-specific, or a slave that put something else in the field).
+constexpr std::string_view foeErrorCodeName(uint32_t code) {
+  const auto it = std::find_if(kFoeErrorCodes.begin(), kFoeErrorCodes.end(),
+                               [code](const FoeErrorCode& e) { return e.code == code; });
+  return it != kFoeErrorCodes.end() ? it->name : std::string_view{};
+}
 
 }  // namespace mm::comm

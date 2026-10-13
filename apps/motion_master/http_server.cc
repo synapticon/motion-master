@@ -1476,8 +1476,13 @@ void HttpServer::run() {
                  const auto wireUs = std::chrono::duration_cast<std::chrono::microseconds>(
                      std::chrono::steady_clock::now() - t0);
                  if (!contents) {
+                   // A file the drive does not hold is a missing resource, as a missing .variant
+                   // is. Every other failure is the transfer's.
+                   const bool notFound =
+                       contents.error().kind == mm::comm::FoeErrorKind::FileNotFound;
                    return mm::api::withWireTime(
-                       mm::api::error("500 Internal Server Error", contents.error().message),
+                       mm::api::error(notFound ? "404 Not Found" : "500 Internal Server Error",
+                                      contents.error().message),
                        wireUs);
                  }
                  return mm::api::withWireTime(

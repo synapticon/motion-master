@@ -1053,11 +1053,35 @@ struct SdoInfoCounters {
   }
 };
 
-// Decodes an ecx_FOEread/ecx_FOEwrite failure return value into a FoeError. SOEM reports the FoE
-// error kind as a negated ec_err_type in the return value (not via the error list, and without the
-// wire error code), so we classify from -wkc. This SOEM-specific decode stays here, beside the
-// include that defines those constants; the transport-agnostic vocabulary it maps onto lives in
-// comm/foe_error.h, so a future SPoE driver maps its own codes to the same kinds.
+// An FoE Error packet a slave sent: its ETG.1000.6 error code, and its text, empty when it carried
+// none. The SOEM port records both, the code on the error list and the text in FOEerrortext.
+struct FoeRefusal {
+  uint32_t code = 0;
+  std::string text;
+};
+
+// Pops every error SOEM queued, and returns the FoE Error packet of @p slavePosition if one is
+// among them. A failed transfer that comes back with a refusal was refused; one without it never
+// got an answer, because the return value alone cannot tell the two apart (EC_TIMEOUT is -5 and
+// -EC_ERR_TYPE_FOE_ERROR is too). Draining to empty keeps an entry from being blamed on the next
+// transfer, as in drainSdoErrors. Called with controlPlaneMutex_ held.
+std::optional<FoeRefusal> drainFoeErrors(ecx_contextt* ctx, uint16_t slavePosition) {
+  std::optional<FoeRefusal> refusal;
+  ec_errort err{};
+  while (ecx_poperror(ctx, &err)) {
+    if (!refusal && err.Etype == EC_ERR_TYPE_FOE_ERROR && err.Slave == slavePosition) {
+      // One transfer ends at the first Error packet, so the text beside the error list is this
+      // packet's.
+      refusal = FoeRefusal{.code = static_cast<uint32_t>(err.AbortCode), .text = ctx->FOEerrortext};
+    }
+  }
+  return refusal;
+}
+
+// Decodes an ecx_FOEread/ecx_FOEwrite failure that came with no FoE Error packet. SOEM reports
+// those through the negated return value, so we classify from -wkc. This SOEM-specific decode
+// stays here, beside the include that defines those constants; the transport-agnostic vocabulary it
+// maps onto lives in comm/foe_error.h.
 FoeError foeError(int wkc, std::string_view op, uint16_t slave, std::string_view filename) {
   switch (-wkc) {
     case EC_ERR_TYPE_FOE_FILE_NOTFOUND:
@@ -1066,32 +1090,32 @@ FoeError foeError(int wkc, std::string_view op, uint16_t slave, std::string_view
       return makeFoeError(FoeErrorKind::BufferTooSmall, op, slave, filename);
     case EC_ERR_TYPE_FOE_PACKETNUMBER:
       return makeFoeError(FoeErrorKind::PacketMismatch, op, slave, filename);
-    case EC_ERR_TYPE_FOE_ERROR: {
-      // Ambiguous, and saying so is the point: EC_TIMEOUT is -5 and EC_ERR_TYPE_FOE_ERROR is 5, so
-      // a -5 return means *either* the slave answered with an FoE Error packet or it never answered
-      // at all, and nothing in the return distinguishes them. Reporting only the first cost a round
-      // of misdiagnosis on a firmware install that was in fact timing out. The wall time tells them
-      // apart: a refusal is immediate, a timeout takes the full FoE timeout.
-      FoeError error = makeFoeError(FoeErrorKind::Protocol, op, slave, filename);
-      error.message = std::format(
-          "{} slave {} '{}' failed (FoE error, or no response — SOEM "
-          "returns the same code for both)",
-          op, slave, filename);
-      return error;
-    }
     default:
       break;
   }
-  // Zero is the working counter proper: the slave answered nothing at all. Any other unmapped
-  // value is an ec_err_type this driver does not classify; it keeps the raw number in the message
-  // so an unrecognised code is still diagnosable, and the transient default so a caller retries it.
-  if (wkc == 0) {
+  // EC_TIMEOUT: the slave never answered. It shares its value with -EC_ERR_TYPE_FOE_ERROR, but an
+  // Error packet always leaves a refusal on the error list, and the caller has already looked for
+  // one. Zero is the working counter proper: the slave answered nothing at all either.
+  if (wkc == EC_TIMEOUT || wkc == 0) {
     return makeFoeError(FoeErrorKind::NoResponse, op, slave, filename);
   }
+  // Any other value is an ec_err_type this driver does not classify. The message keeps the raw
+  // number so it is still diagnosable, and the kind keeps the transient default so a caller
+  // retries.
   FoeError error = makeFoeError(FoeErrorKind::Protocol, op, slave, filename);
   error.message =
       std::format("{} slave {} '{}' failed (FoE error, wkc {})", op, slave, filename, wkc);
   return error;
+}
+
+// Explains a failed ecx_FOEread/ecx_FOEwrite: the slave's own refusal when it sent one, the return
+// value otherwise. Called with controlPlaneMutex_ held.
+FoeError foeFailure(ecx_contextt* ctx, int wkc, std::string_view op, uint16_t slave,
+                    std::string_view filename) {
+  if (const auto refusal = drainFoeErrors(ctx, slave)) {
+    return makeFoeRefusal(refusal->code, refusal->text, op, slave, filename);
+  }
+  return foeError(wkc, op, slave, filename);
 }
 
 // Discards whatever is sitting in a slave's read mailbox, ignoring the contents.
@@ -1367,6 +1391,8 @@ std::expected<std::vector<uint8_t>, FoeError> SoemFieldbusDriver::readFile(
   }
   spdlog::debug("FOEread slave {} '{}'", slavePosition, filename);
   drainMailbox(ctx_.get(), slavePosition);
+  // Left over from an earlier transfer, and not this one's to report.
+  drainFoeErrors(ctx_.get(), slavePosition);
   // 10 MiB receive buffer: a conservative upper bound covering any file a SOMANET drive serves over
   // FoE. FoE has no size-ahead handshake, so ecx_FOEread fills this buffer and reports the actual
   // length back through `size` (in/out, like SDO's psize).
@@ -1380,10 +1406,7 @@ std::expected<std::vector<uint8_t>, FoeError> SoemFieldbusDriver::readFile(
   int wkc =
       ecx_FOEread(ctx_.get(), slavePosition, name.data(), 0, &size, data.data(), EC_TIMEOUTRXM);
   if (wkc <= 0) {
-    // SOEM signals the FoE error kind through the negated return value, not the error list: the
-    // FoE path never calls ecx_pusherror, so ecx_poperror would return nothing here. It also
-    // discards the wire error code (0x800x), keeping only file-not-found vs. generic. Decode -wkc.
-    FoeError error = foeError(wkc, "FOEread", slavePosition, filename);
+    FoeError error = foeFailure(ctx_.get(), wkc, "FOEread", slavePosition, filename);
     spdlog::debug("{}", error.message);
     return std::unexpected(std::move(error));
   }
@@ -1402,12 +1425,13 @@ std::expected<void, FoeError> SoemFieldbusDriver::writeFile(uint16_t slavePositi
   }
   spdlog::debug("FOEwrite slave {} '{}' ({} bytes)", slavePosition, filename, data.size());
   drainMailbox(ctx_.get(), slavePosition);
+  // Left over from an earlier transfer, and not this one's to report.
+  drainFoeErrors(ctx_.get(), slavePosition);
   std::string name = filename;  // ecx_FOEwrite takes non-const char*
   int wkc = ecx_FOEwrite(ctx_.get(), slavePosition, name.data(), 0, static_cast<int>(data.size()),
                          const_cast<uint8_t*>(data.data()), EC_TIMEOUTRXM);
   if (wkc <= 0) {
-    // See readFile: the FoE error kind is in the negated return value, not the error list.
-    FoeError error = foeError(wkc, "FOEwrite", slavePosition, filename);
+    FoeError error = foeFailure(ctx_.get(), wkc, "FOEwrite", slavePosition, filename);
     spdlog::debug("{}", error.message);
     return std::unexpected(std::move(error));
   }

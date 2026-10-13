@@ -1641,8 +1641,8 @@ std::string TriggerErrorResult::describe() const {
                                somanet::toString(service), somanet::toString(type));
     case somanet::FirmwareErrorEffect::kRaisesResettableError:
       return std::format(
-          "{} reported a resettable DiagErr; the drive reacted per 0x605A and a "
-          "fault reset clears it",
+          "{} reported a resettable DiagErr, and a fault reset clears it. On firmware v5.6 the "
+          "drive ramps down on 0x6085; from v5.7 it reacts as 0x605A says",
           somanet::toString(service));
   }
   return "unknown outcome";

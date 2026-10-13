@@ -354,8 +354,9 @@ enum class FirmwareErrorType : uint8_t {
   kResourceDependency = 8,  ///< ET_RESOURCE_DEP. Not implemented.
   kKcall = 9,               ///< ET_KCALL. Not implemented.
   kEndlessLoop = 10,        ///< Spins forever in the service loop. Stops the service.
-  /// Reports a resettable @c DiagErr with the drive's configured quick-stop reaction. **The only
-  /// type that leaves the drive usable** — it faults, and a fault reset clears it.
+  /// Reports a resettable @c DiagErr. **The only type that leaves the drive usable** — it faults,
+  /// and a fault reset clears it. The fault reaction depends on the firmware line, see
+  /// @c FirmwareErrorEffect::kRaisesResettableError.
   kResettableFirmwareError = 11,
 };
 
@@ -369,7 +370,8 @@ enum class FirmwareErrorEffect : uint8_t {
   /// The service executes faulty code or hangs, and stops answering for good. **Only a power cycle
   /// brings it back**; the drive does not fault, it stops participating.
   kStopsService,
-  /// A resettable error is reported and the drive reacts as 0x605A says. Recoverable.
+  /// A resettable error is reported. Recoverable. On firmware v5.6 the drive ramps down on 0x6085
+  /// whatever 0x605A says. From firmware v5.7 it reacts as 0x605A says.
   kRaisesResettableError,
 };
 
@@ -2138,8 +2140,9 @@ class SomanetDrive : public Cia402Drive {
   ///     **the command timing out is the intended outcome**, reported as such rather than as a
   ///     failure. The drive keeps its other services; the one addressed is gone until a power
   ///     cycle. A drive that *does* answer means the error was not triggered.
-  ///   - @c kRaisesResettableError — a @c DiagErr is reported and the drive reacts per 0x605A. It
-  ///     faults and a fault reset clears it.
+  ///   - @c kRaisesResettableError — a @c DiagErr is reported. The drive faults and a fault reset
+  ///     clears it. The fault reaction depends on the firmware line, see
+  ///     @c somanet::FirmwareErrorEffect.
   ///
   /// **The two services do not answer this alike, and it is a firmware defect rather than a
   /// design.** Motion control sets its failure status before the switch, so the resettable type

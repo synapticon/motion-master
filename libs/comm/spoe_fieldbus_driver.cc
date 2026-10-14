@@ -907,6 +907,15 @@ void SpoeFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
     if (found == nullptr) {
       continue;
     }
+    // State 0 means the last state read got no reply. A request to a silent drive waits out the
+    // whole timeout, and the next state read tries the drive again.
+    if (found->state.load() == 0) {
+      spdlog::error(
+          "SPoE {}: the drive did not answer the last state read, so it is not commanded. Check "
+          "the cabling and the power.",
+          found->host);
+      continue;
+    }
     if (requiredState && alState(found->state.load()) != *requiredState) {
       continue;
     }

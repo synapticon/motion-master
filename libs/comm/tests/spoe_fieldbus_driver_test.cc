@@ -174,6 +174,21 @@ TEST(SpoeFieldbusDriver, ReadStatesReportsADriveThatDoesNotAnswer) {
   EXPECT_EQ((*states)[0].reachability, mm::comm::Reachability::NotAnswering);
 }
 
+TEST(SpoeFieldbusDriver, DoesNotCommandADriveThatDidNotAnswer) {
+  FakeSpoeServer server;
+  SpoeFieldbusDriver driver(configFor(server, SpoeMode::kControl));
+  ASSERT_TRUE(driver.scan().has_value());
+  server.setReplyDelay(milliseconds{600});
+  ASSERT_TRUE(driver.readStates({1}).has_value());
+  server.setReplyDelay(milliseconds{0});
+  // A command would wait out the timeout against a silent drive, so it is not sent at all.
+  const auto start = std::chrono::steady_clock::now();
+  driver.transitionToState({1}, std::nullopt, EtherCatState::SafeOp, milliseconds{2000},
+                           milliseconds{2000}, nullptr, nullptr);
+  EXPECT_LT(std::chrono::steady_clock::now() - start, milliseconds{100});
+  EXPECT_NE(server.state(), mm::comm::testing::kSpoeStateSafeOp);
+}
+
 TEST(SpoeFieldbusDriver, ChangesTheStateInControlMode) {
   FakeSpoeServer server;
   SpoeFieldbusDriver driver(configFor(server, SpoeMode::kControl));

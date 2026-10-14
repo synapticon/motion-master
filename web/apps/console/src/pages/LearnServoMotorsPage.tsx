@@ -2,6 +2,7 @@ import { useState } from 'react'
 import PageHeader from '../components/PageHeader'
 import LearnSections from '../components/LearnSections'
 import type { LearnSectionEntry } from '../components/LearnSections'
+import Callout from '../components/Callout'
 import MotorCrossSection from '../components/MotorCrossSection'
 import CoilPairField from '../components/CoilPairField'
 import StatorFieldFigure from '../components/StatorFieldFigure'
@@ -452,6 +453,11 @@ export default function LearnServoMotorsPage() {
         title="Servo Motors"
         description="What servo means, how a servo motor is built and commutated, how current becomes torque, and how a SOMANET drive is set up for its motor."
       />
+      <div className="px-4 py-4 sm:px-8 sm:py-7">
+        <Callout variant="warning" className="max-w-3xl">
+          Work in progress. This page is a draft, and parts of it can change or be incomplete.
+        </Callout>
+      </div>
       <LearnSections sections={sections} />
     </div>
   )

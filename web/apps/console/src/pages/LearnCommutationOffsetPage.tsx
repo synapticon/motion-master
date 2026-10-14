@@ -430,6 +430,11 @@ export default function LearnCommutationOffsetPage() {
         title="Commutation Offset"
         description="The angle between the encoder's zero and the rotor's magnets, and why the drive has to be told it."
       />
+      <div className="px-4 py-4 sm:px-8 sm:py-7">
+        <Callout variant="warning" className="max-w-3xl">
+          Work in progress. This page is a draft, and parts of it can change or be incomplete.
+        </Callout>
+      </div>
       <LearnSections sections={sections} />
     </div>
   )

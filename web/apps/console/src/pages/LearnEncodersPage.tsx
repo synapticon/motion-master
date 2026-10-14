@@ -1,6 +1,7 @@
 import { Link } from 'react-router'
 import PageHeader from '../components/PageHeader'
 import LearnSections from '../components/LearnSections'
+import Callout from '../components/Callout'
 import type { LearnSectionEntry } from '../components/LearnSections'
 import MotorSideView from '../components/MotorSideView'
 import QuadratureFigure from '../components/QuadratureFigure'
@@ -347,6 +348,11 @@ export default function LearnEncodersPage() {
         title="Encoders"
         description="What the feedback on a motor shaft reports, how the kinds differ, and how finely any of it can be trusted."
       />
+      <div className="px-4 py-4 sm:px-8 sm:py-7">
+        <Callout variant="warning" className="max-w-3xl">
+          Work in progress. This page is a draft, and parts of it can change or be incomplete.
+        </Callout>
+      </div>
       <LearnSections sections={sections} />
     </div>
   )

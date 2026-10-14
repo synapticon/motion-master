@@ -17,6 +17,7 @@ import ReferenceApiDocsPage from './pages/ReferenceApiDocsPage'
 import LearnServoMotorsPage from './pages/LearnServoMotorsPage'
 import LearnEncodersPage from './pages/LearnEncodersPage'
 import LearnCommutationOffsetPage from './pages/LearnCommutationOffsetPage'
+import LearnComingSoonPage from './pages/LearnComingSoonPage'
 import MetaAlStatusCodesPage from './pages/MetaAlStatusCodesPage'
 import MetaEscRegistersPage from './pages/MetaEscRegistersPage'
 import MetaFoeErrorCodesPage from './pages/MetaFoeErrorCodesPage'
@@ -76,6 +77,15 @@ export default function App() {
           <Route path="servo-motors" element={<LearnServoMotorsPage />} />
           <Route path="encoders" element={<LearnEncodersPage />} />
           <Route path="commutation-offset" element={<LearnCommutationOffsetPage />} />
+          <Route
+            path="encoder-calibration"
+            element={<LearnComingSoonPage title="Encoder Calibration" topic="encoder calibration" />}
+          />
+          <Route
+            path="filters"
+            element={<LearnComingSoonPage title="Filters" topic="the filters used in motion control" />}
+          />
+          <Route path="tuning" element={<LearnComingSoonPage title="Tuning" topic="control loop tuning" />} />
         </Route>
         <Route path="meta">
           <Route path="al-status-codes" element={<MetaAlStatusCodesPage />} />

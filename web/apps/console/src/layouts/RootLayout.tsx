@@ -524,10 +524,13 @@ export default function RootLayout() {
               they stay readable when nothing is connected — which is exactly when somebody is most
               likely to be reading up rather than commissioning. */}
           <SidebarGroup label="Learn" defaultOpen={false} path="/learn">
-            {/* Encoders and Commutation Offset are routed but not listed, because they are not
-                finished. List them after Servo Motors, in reading order: the basics page is the one
-                the others build on. */}
+            {/* Reading order: the basics page is the one the others build on. */}
             <NavItem to="/learn/servo-motors" label="Servo Motors" />
+            <NavItem to="/learn/encoders" label="Encoders" />
+            <NavItem to="/learn/commutation-offset" label="Commutation Offset" />
+            <NavItem to="/learn/encoder-calibration" label="Encoder Calibration" />
+            <NavItem to="/learn/filters" label="Filters" />
+            <NavItem to="/learn/tuning" label="Tuning" />
           </SidebarGroup>
 
           {online && (

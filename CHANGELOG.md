@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **The Console's Learn section lists every topic.** Encoders and Commutation Offset appear beside Servo Motors, and each of the three carries a work-in-progress note. Encoder Calibration, Filters and Tuning have a page that says the text is coming soon.
+
 ### Changed
 
 - **An unknown device or parameter answers 404 on every parameter endpoint.** `GET` and `PUT /api/devices/{slavePosition}/parameters/{index}/{subindex}`, and `POST /api/devices/{slavePosition}/parameters/init` and `…/parameters/read`, answered 500 for a device that is not on the bus. The two single-parameter endpoints also answered 500 for an index and subindex the device does not have. Both now answer 404, as the other device endpoints do. A failed transfer still answers 500.

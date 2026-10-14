@@ -68,6 +68,41 @@ int foeProgressHook(uint16 slave, int packetnumber, int datasize) {
   return 1;
 }
 
+// Two reads tell the cases apart. FPRD reaches the slave through its Configured Station Address
+// (0x0010), which a reset sets back to 0. APRD reaches it by wire position, which needs no address.
+// The station alias cannot make a reset slave answer the FPRD, because the DL Control bit that
+// enables it (0x0100[24]) also resets to 0 and SOEM never sets it.
+Reachability probeReachability(ecx_contextt* ctx, uint16_t slave) {
+  uint16_t probe = 0;
+  if (ecx_FPRD(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_ALSTAT, sizeof(probe), &probe,
+               EC_TIMEOUTRET) > 0) {
+    return Reachability::Answering;
+  }
+  // Auto-increment address: 0 for slave 1, -1 for slave 2, and so on (ec_config.c's ADPh).
+  if (ecx_APRD(&ctx->port, static_cast<uint16_t>(1 - slave), ECT_REG_ALSTAT, sizeof(probe), &probe,
+               EC_TIMEOUTRET) > 0) {
+    return Reachability::AddressLost;
+  }
+  return Reachability::NotAnswering;
+}
+
+// Names the next step, because the caller sees only a device that did not reach its state. A
+// device that answers by wire position can be a different one when the chain changed, and a
+// shorter chain leaves nothing at the last positions, so neither message blames the device.
+void logUnreachable(ecx_contextt* ctx, uint16_t slave, Reachability reachability) {
+  if (reachability == Reachability::AddressLost) {
+    spdlog::error(
+        "Device {}: nothing answers at its configured address 0x{:04X}, but a device answers at "
+        "its wire position. A reset, such as a power cycle, clears the address. Run a scan.",
+        slave, ctx->slavelist[slave].configadr);
+  } else {
+    spdlog::error(
+        "Device {}: nothing answers at its configured address 0x{:04X} or at its wire position. "
+        "Check the cabling and the power. If devices were removed from the chain, run a scan.",
+        slave, ctx->slavelist[slave].configadr);
+  }
+}
+
 }  // namespace
 
 std::expected<void, std::string> SoemFieldbusDriver::init() {
@@ -665,9 +700,15 @@ SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
   }
   ecx_readstate(ctx_.get());
   publishSlaveStates();
+  // ecx_readstate cannot be trusted per slave. Its broadcast reaches a slave without an address,
+  // and its per-slave FPRD leaves the last value in place when the slave does not answer.
   std::vector<SlaveStateRaw> result;
   result.reserve(positions.size());
   std::ranges::transform(positions, std::back_inserter(result), [this](uint16_t pos) {
+    const Reachability reachability = probeReachability(ctx_.get(), pos);
+    if (reachability != Reachability::Answering) {
+      return SlaveStateRaw{.reachability = reachability};
+    }
     return SlaveStateRaw{.alStatus = ctx_->slavelist[pos].state,
                          .alStatusCode = ctx_->slavelist[pos].ALstatuscode};
   });
@@ -1776,19 +1817,37 @@ void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState 
 
 }  // namespace
 
-void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& positions,
+void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requested,
                                            std::optional<EtherCatState> requiredState,
                                            EtherCatState targetState,
                                            std::chrono::steady_clock::duration timeout,
                                            std::chrono::steady_clock::duration resendInterval,
                                            std::function<void()> tick,
                                            std::function<bool()> shouldAbort) {
+  // A slave that lost its station address cannot receive the request, so commanding it only waits
+  // out the timeout. The exception is a slave this driver sent to BOOT and now wants in PRE-OP:
+  // leaving BOOT restarts it, and the resend loop below gives it its address back.
+  std::vector<uint16_t> positions;
   {
     std::lock_guard<std::mutex> lock(controlPlaneMutex_);
     if (!ctx_) {
       spdlog::error("transitionToState: no driver — call init() first");
       return;
     }
+    for (const uint16_t pos : requested) {
+      const Reachability reachability = probeReachability(ctx_.get(), pos);
+      const bool recoverable =
+          targetState == EtherCatState::PreOp && bootMailboxSlaves_.contains(pos);
+      if (reachability == Reachability::Answering ||
+          (reachability == Reachability::AddressLost && recoverable)) {
+        positions.push_back(pos);
+      } else {
+        logUnreachable(ctx_.get(), pos, reachability);
+      }
+    }
+  }
+  if (positions.empty()) {
+    return;
   }
   const auto targetRaw = static_cast<uint16_t>(targetState);
 
@@ -2007,34 +2066,17 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
           targetRaw, alStatus, alStatusCode,
           name.empty() ? "unknown — not a known AL status code" : name);
 
-      // Say whether the slave is even reachable, because the AL status above cannot: SOEM keeps the
-      // last value it read, so a slave that stopped answering reports whatever it last said —
-      // indistinguishable from one that is genuinely sitting in that state. The distinction decides
-      // what to do next, and nothing else in the log carries it.
-      //
-      // Two reads. FPRD addresses the slave by the station address the master assigned it; APRD
-      // addresses it by position on the wire, which needs no configuration. A slave that answers
-      // the second but not the first lost its station address — which is what a device reset
-      // does, and the firmware handover out of BOOT is a reset.
-      uint16_t alStatusProbe = 0;
-      const int configuredWkc =
-          ecx_FPRD(&ctx_->port, ctx_->slavelist[pos].configadr, ECT_REG_ALSTAT,
-                   sizeof(alStatusProbe), &alStatusProbe, EC_TIMEOUTRET);
-      const int positionWkc = ecx_APRD(&ctx_->port, static_cast<uint16_t>(1 - pos), ECT_REG_ALSTAT,
-                                       sizeof(alStatusProbe), &alStatusProbe, EC_TIMEOUTRET);
-      if (configuredWkc > 0) {
+      // Say whether the slave is even reachable, because the AL status above cannot. SOEM keeps the
+      // last value it read, so a slave that stopped answering reports whatever it last said. That
+      // decides what to do next, and nothing else in the log carries it.
+      const Reachability reachability = probeReachability(ctx_.get(), pos);
+      if (reachability == Reachability::Answering) {
         spdlog::error(
             "Device {}: it is answering at its configured address 0x{:04X}, so the state above is "
             "live — the slave is refusing or ignoring the request rather than absent",
             pos, ctx_->slavelist[pos].configadr);
-      } else if (positionWkc > 0) {
-        spdlog::error(
-            "Device {}: it answers by wire position but NOT at its configured address 0x{:04X} — "
-            "it has been reset and lost the address the master gave it, so the AL status above is "
-            "stale. It needs re-addressing (a scan) before it can be commanded again.",
-            pos, ctx_->slavelist[pos].configadr);
       } else {
-        spdlog::error("Device {}: it is not answering at all — check the cabling and power", pos);
+        logUnreachable(ctx_.get(), pos, reachability);
       }
     }
   }

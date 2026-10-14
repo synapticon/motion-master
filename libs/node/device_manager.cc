@@ -58,6 +58,7 @@ DeviceStateInfo decodeState(uint16_t slavePosition,
       .alState = static_cast<uint16_t>(mm::comm::alState(raw.alStatus)),
       .error = mm::comm::alHasError(raw.alStatus),
       .alStatusCode = raw.alStatusCode,
+      .reachability = raw.reachability,
   };
 }
 
@@ -1018,7 +1019,14 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   if (!currentStates) {
     return std::unexpected(currentStates.error());
   }
+  // A device that does not answer has no known state to validate. The driver decides whether it
+  // can command such a device, and the read-back below reports it either way.
+  std::vector<uint16_t> unreachable;
   for (std::size_t i = 0; i < targets.size(); ++i) {
+    if ((*currentStates)[i].reachability != mm::comm::Reachability::Answering) {
+      unreachable.push_back(targets[i]);
+      continue;
+    }
     const auto currentState = mm::comm::alState((*currentStates)[i].alStatus);
     if (!isValidStateTransition(currentState, targetState)) {
       return std::unexpected(std::format(
@@ -1042,9 +1050,10 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
     // already exchanging being re-commanded (SAFE-OP -> OP) needs no re-map; the published image
     // still describes it. Re-mapping briefly pauses exchange for the whole bus (stopExchange
     // inside configureProcessData) — the accepted cost of bringing a device back online.
-    const bool anyJoining = std::ranges::any_of(targets, [&set](uint16_t pos) {
+    // A device that does not answer cannot reach an exchange state, so it does not count.
+    const bool anyJoining = std::ranges::any_of(targets, [&set, &unreachable](uint16_t pos) {
       const Device* d = set->find(pos);
-      return d && !d->exchangesProcessData();
+      return d && !d->exchangesProcessData() && !std::ranges::contains(unreachable, pos);
     });
     if (!processDataConfigured() || anyJoining) {
       // Re-mapping rebuilds the single whole-bus IOmap in one shot, so remapProcessImage()
@@ -1243,7 +1252,8 @@ void to_json(nlohmann::json& j, const DeviceStateInfo& info) {
        {"alStatus", info.alStatus},
        {"alState", info.alState},
        {"error", info.error},
-       {"alStatusCode", info.alStatusCode}};
+       {"alStatusCode", info.alStatusCode},
+       {"reachability", mm::comm::toString(info.reachability)}};
 }
 
 std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::deviceStates(

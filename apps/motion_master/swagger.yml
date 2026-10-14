@@ -3561,7 +3561,7 @@ paths:
                 type: array
                 items:
                   type: object
-                  required: [slavePosition, alStatus, alState, error, alStatusCode]
+                  required: [slavePosition, alStatus, alState, error, alStatusCode, reachability]
                   properties:
                     slavePosition:
                       type: integer
@@ -3575,10 +3575,11 @@ paths:
                       example: 17
                     alState:
                       type: integer
-                      enum: [1, 2, 3, 4, 8]
+                      enum: [0, 1, 2, 3, 4, 8]
                       description: >
                         Current AL state decoded from alStatus (ETG.1000.6 encoding):
                         1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+                        0 when the device does not answer (see `reachability`).
                       example: 1
                     error:
                       type: boolean
@@ -3591,6 +3592,21 @@ paths:
                         Non-zero when error is true; identifies the error cause
                         (e.g. 0x0014 = No valid firmware).
                       example: 20
+                    reachability:
+                      type: string
+                      enum: [answering, addressLost, notAnswering]
+                      description: >
+                        Whether the device answers at the station address the master gave it.
+                        `addressLost`: nothing answers at that address, but a device answers at its wire
+                        position. A reset, such as a power cycle, clears the address. Run `POST /api/scan`
+                        to command it again.
+                        `notAnswering`: nothing answers at that address or at its wire position. Check
+                        the cabling and the power. If devices were removed from the chain, run a scan.
+                        The wire position is checked by position only, so after a change to the chain the
+                        device that answers there can be a different one. When the value is not
+                        `answering`, the state of the device is unknown, and `alStatus`, `alState` and
+                        `alStatusCode` are 0.
+                      example: answering
         "400":
           description: A `positions` value is not a valid integer
         "500":
@@ -3604,6 +3620,9 @@ paths:
         state of every targeted device is then read back and returned in `devices`, each
         with a `reached` flag; `ok` is true only when every device reached the target.
         A device that did not reach it carries an `alStatusCode` explaining why.
+        A device that does not answer at its address is not commanded, so the request does not
+        wait out the timeout for it. Its `reachability` says why, and the other devices are
+        still commanded.
         Omit `positions` or pass an empty array to target all discovered devices.
         State values are the standard AL state register encodings from ETG.1000.6:
         1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
@@ -3657,7 +3676,7 @@ paths:
                     description: Settled state of each targeted device, in the order targeted.
                     items:
                       type: object
-                      required: [slavePosition, alStatus, alState, error, alStatusCode, reached]
+                      required: [slavePosition, alStatus, alState, error, alStatusCode, reachability, reached]
                       properties:
                         slavePosition:
                           type: integer
@@ -3671,10 +3690,11 @@ paths:
                           example: 2
                         alState:
                           type: integer
-                          enum: [1, 2, 3, 4, 8]
+                          enum: [0, 1, 2, 3, 4, 8]
                           description: >
                             Current AL state decoded from alStatus (ETG.1000.6 encoding):
                             1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+                            0 when the device does not answer (see `reachability`).
                           example: 2
                         error:
                           type: boolean
@@ -3687,6 +3707,21 @@ paths:
                             Non-zero when error is true; identifies the error cause
                             (e.g. 0x0014 = No valid firmware).
                           example: 0
+                        reachability:
+                          type: string
+                          enum: [answering, addressLost, notAnswering]
+                          description: >
+                            Whether the device answers at the station address the master gave it.
+                            `addressLost`: nothing answers at that address, but a device answers at its wire
+                            position. A reset, such as a power cycle, clears the address. Run `POST /api/scan`
+                            to command it again.
+                            `notAnswering`: nothing answers at that address or at its wire position. Check
+                            the cabling and the power. If devices were removed from the chain, run a scan.
+                            The wire position is checked by position only, so after a change to the chain the
+                            device that answers there can be a different one. When the value is not
+                            `answering`, the state of the device is unknown, and `alStatus`, `alState` and
+                            `alStatusCode` are 0.
+                          example: answering
                         reached:
                           type: boolean
                           description: >

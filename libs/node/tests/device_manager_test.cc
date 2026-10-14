@@ -6,6 +6,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <expected>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <nlohmann/json.hpp>
@@ -45,6 +46,9 @@ class FakeDriver : public FieldbusDriver {
 
   /// AL Status reported by readStates() for every queried slave (bits 3:0 = state).
   uint16_t reportState = 0;
+
+  /// Slaves that readStates() reports as not answering, with the reason. Every other slave answers.
+  std::map<uint16_t, mm::comm::Reachability> unreachable;
 
   /// Name returned by slaveInfo() for every position (drives Device::name()).
   std::string deviceName;
@@ -99,8 +103,14 @@ class FakeDriver : public FieldbusDriver {
       const std::vector<uint16_t>& positions) override {
     // Mimic ecx_readstate: a read refreshes the cached state that slaveState() returns.
     cachedState_ = reportState;
-    return std::vector<SlaveStateRaw>(positions.size(),
-                                      SlaveStateRaw{.alStatus = reportState, .alStatusCode = 0});
+    std::vector<SlaveStateRaw> states;
+    for (const uint16_t position : positions) {
+      const auto it = unreachable.find(position);
+      states.push_back(it == unreachable.end()
+                           ? SlaveStateRaw{.alStatus = reportState, .alStatusCode = 0}
+                           : SlaveStateRaw{.reachability = it->second});
+    }
+    return states;
   }
 
   uint16_t slaveState(uint16_t) const override { return cachedState_; }
@@ -274,6 +284,47 @@ TEST(DeviceManagerState, ADriverThatRefusesStateChangesIsNeverCommanded) {
   ASSERT_FALSE(result.has_value());
   EXPECT_EQ(result.error(), "the PLC owns the state");
   EXPECT_EQ(raw->transitions, 0);
+}
+
+TEST(DeviceManagerState, ReportsADeviceThatDoesNotAnswer) {
+  auto driver = std::make_unique<FakeDriver>(true, 2);
+  driver->reportState = static_cast<uint16_t>(EtherCatState::PreOp);
+  driver->unreachable[2] = mm::comm::Reachability::AddressLost;
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  const auto states = dm.deviceStates({});
+  ASSERT_TRUE(states.has_value());
+  ASSERT_EQ(states->size(), 2U);
+  EXPECT_EQ((*states)[0].reachability, mm::comm::Reachability::Answering);
+  EXPECT_EQ((*states)[0].alState, static_cast<uint16_t>(EtherCatState::PreOp));
+  EXPECT_EQ((*states)[1].reachability, mm::comm::Reachability::AddressLost);
+  EXPECT_EQ((*states)[1].alState, 0);
+
+  const nlohmann::json json = (*states)[1];
+  EXPECT_EQ(json["reachability"], "addressLost");
+}
+
+TEST(DeviceManagerState, ADeviceThatDoesNotAnswerDoesNotFailTheOthers) {
+  // A device that does not answer has no state to validate. Validating its zeroed state anyway
+  // would refuse the whole request as an illegal transition.
+  auto driver = std::make_unique<FakeDriver>(true, 2);
+  driver->reportState = static_cast<uint16_t>(EtherCatState::Init);
+  driver->unreachable[2] = mm::comm::Reachability::NotAnswering;
+  FakeDriver* raw = driver.get();
+
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+
+  const auto result = dm.transitionToState({}, EtherCatState::PreOp, std::chrono::seconds(1));
+  ASSERT_TRUE(result.has_value()) << result.error();
+  EXPECT_EQ(raw->transitions, 1);
+  ASSERT_EQ(result->size(), 2U);
+  EXPECT_EQ((*result)[0].reachability, mm::comm::Reachability::Answering);
+  EXPECT_EQ((*result)[1].reachability, mm::comm::Reachability::NotAnswering);
 }
 
 TEST(DeviceManagerState, NoRefusalWithoutADriver) {

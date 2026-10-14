@@ -99,7 +99,8 @@ export default function DeviceStatusBar({ slavePosition }: DeviceStatusBarProps)
   })
 
   const device = devicesQuery.data?.data.find((d) => d.slavePosition === slavePosition)
-  const alState = statesQuery.data?.data.find((s) => s.slavePosition === slavePosition)?.alState
+  const deviceState = statesQuery.data?.data.find((s) => s.slavePosition === slavePosition)
+  const alState = deviceState?.alState
   const isCia402 = device?.isCia402 ?? false
   const mailboxActive = alState !== undefined && MAILBOX_ACTIVE_STATES.has(alState)
 
@@ -166,7 +167,11 @@ export default function DeviceStatusBar({ slavePosition }: DeviceStatusBarProps)
     ? 'this device is not a CiA402 drive'
     : alState === undefined
       ? 'the device’s EtherCAT state is not known yet'
-      : 'the device is not in the OP EtherCAT state, so its CiA402 state machine is not advancing'
+      : deviceState?.reachability === 'addressLost'
+        ? 'the device lost its station address, so it cannot be commanded until a scan'
+        : deviceState?.reachability === 'notAnswering'
+          ? 'nothing answers at the device’s address or at its wire position'
+          : 'the device is not in the OP EtherCAT state, so its CiA402 state machine is not advancing'
 
   return (
     <div className="sticky top-0 z-20 flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-b border-grey-200 bg-white px-4 py-2 sm:px-8">

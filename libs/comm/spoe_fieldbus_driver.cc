@@ -536,14 +536,14 @@ SpoeFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
       return std::unexpected(std::format("no SPoE device at position {}", position));
     }
     // SPoE has no error indicator and no AL status code. A drive that does not answer reads as
-    // "no state known", and the others are still read.
+    // "no state known", and the others are still read. There is no station address to lose.
     const auto reply = request(*found, MessageType::kStateRead, {});
-    if (reply && !reply->data.empty()) {
-      found->state.store(reply->data[0]);
-    } else {
-      found->state.store(0);
-    }
-    states.push_back(SlaveStateRaw{.alStatus = found->state.load(), .alStatusCode = 0});
+    const bool answered = reply && !reply->data.empty();
+    found->state.store(answered ? reply->data[0] : 0);
+    states.push_back(SlaveStateRaw{
+        .alStatus = found->state.load(),
+        .alStatusCode = 0,
+        .reachability = answered ? Reachability::Answering : Reachability::NotAnswering});
   }
   return states;
 }

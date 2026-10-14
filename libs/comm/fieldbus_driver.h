@@ -70,6 +70,34 @@ inline std::string_view toString(EtherCatState state) {
   return "UNKNOWN";
 }
 
+/// @brief Whether a slave answers at the station address the master gave it.
+///
+/// A reset sets the Configured Station Address register (0x0010) back to 0, and only the master
+/// can write it again. From then on every configured-address read and write misses the slave, so
+/// its AL state is unknown although it is still on the wire.
+///
+/// The wire position is checked by position only. When devices were added to or removed from the
+/// chain, the device at that position can be a different one, and a device near the end can find
+/// nothing at its position. Both outcomes need a scan.
+enum class Reachability : uint8_t {
+  Answering,     ///< It answers at its configured station address.
+  AddressLost,   ///< It answers at its wire position only. A scan gives it an address again.
+  NotAnswering,  ///< Nothing answers at its address or at its wire position.
+};
+
+/// @brief API name of a reachability, as the HTTP API and the client spell it.
+inline std::string_view toString(Reachability reachability) {
+  switch (reachability) {
+    case Reachability::Answering:
+      return "answering";
+    case Reachability::AddressLost:
+      return "addressLost";
+    case Reachability::NotAnswering:
+      return "notAnswering";
+  }
+  return "notAnswering";
+}
+
 /// @brief Working-counter contribution of one slave for a given AL status and PDO presence.
 ///
 /// A slave increments the working counter of an LRW by 2 when it takes the outputs and by 1 when it
@@ -562,6 +590,7 @@ class FieldbusDriver {
   struct SlaveStateRaw {
     uint16_t alStatus = 0;      ///< AL Status register 0x0130: state (bits 3:0) + error bit 4.
     uint16_t alStatusCode = 0;  ///< AL Status Code register 0x0134: error reason; 0 when no error.
+    Reachability reachability = Reachability::Answering;  ///< Whether the two values are live.
   };
 
   /// @brief Reads the current AL Status for each slave in @p positions.
@@ -571,6 +600,9 @@ class FieldbusDriver {
   /// AL Status bits 3:0 encode the current state (1=Init, 2=PreOp, 3=Boot,
   /// 4=SafeOp, 8=Op); bit 4 is the error indicator.  AL Status Code is non-zero
   /// when an error is present and identifies the cause (ETG.1000.6 §6.4.1).
+  ///
+  /// A slave that does not answer reports both registers as 0 and says why in @c reachability,
+  /// because a value the master read before the slave stopped answering is not its state now.
   ///
   /// @param positions  1-based slave positions to read.
   /// @return Raw state per position in the same order as @p positions, or an
@@ -857,6 +889,10 @@ class FieldbusDriver {
   ///
   /// Devices whose current state (error bit masked) does not match @p requiredState are
   /// skipped; pass @c std::nullopt to command all @p positions unconditionally.
+  ///
+  /// A device that does not answer at its address is skipped too, with an error logged, because
+  /// a command it cannot receive only waits out @p timeout. The one exception is a device the
+  /// driver can give its address back to itself.
   ///
   /// The call polls at ~100 ms intervals, re-sending the command to lagging devices every
   /// @p resendInterval.  Devices that do not arrive in time are logged at error level; no

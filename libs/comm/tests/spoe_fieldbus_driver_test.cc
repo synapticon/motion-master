@@ -158,7 +158,20 @@ TEST(SpoeFieldbusDriver, ReadStatesReadsTheDrive) {
   const auto states = driver.readStates({1});
   ASSERT_TRUE(states.has_value());
   EXPECT_EQ((*states)[0].alStatus, static_cast<uint16_t>(EtherCatState::SafeOp));
+  EXPECT_EQ((*states)[0].reachability, mm::comm::Reachability::Answering);
   EXPECT_EQ(driver.slaveState(1), static_cast<uint16_t>(EtherCatState::SafeOp));
+}
+
+TEST(SpoeFieldbusDriver, ReadStatesReportsADriveThatDoesNotAnswer) {
+  FakeSpoeServer server;
+  SpoeFieldbusDriver driver(configFor(server));
+  ASSERT_TRUE(driver.scan().has_value());
+  // Longer than the request timeout, so the state read gets no reply.
+  server.setReplyDelay(milliseconds{600});
+  const auto states = driver.readStates({1});
+  ASSERT_TRUE(states.has_value());
+  EXPECT_EQ((*states)[0].alStatus, 0);
+  EXPECT_EQ((*states)[0].reachability, mm::comm::Reachability::NotAnswering);
 }
 
 TEST(SpoeFieldbusDriver, ChangesTheStateInControlMode) {

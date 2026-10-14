@@ -2035,10 +2035,10 @@ export class Api<
          */
         alStatus: number;
         /**
-         * Current AL state decoded from alStatus (ETG.1000.6 encoding): 1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+         * Current AL state decoded from alStatus (ETG.1000.6 encoding): 1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op. 0 when the device does not answer (see `reachability`).
          * @example 1
          */
-        alState: 1 | 2 | 3 | 4 | 8;
+        alState: 0 | 1 | 2 | 3 | 4 | 8;
         /**
          * True when the AL Status error indicator bit (bit 4) is set
          * @example true
@@ -2049,6 +2049,11 @@ export class Api<
          * @example 20
          */
         alStatusCode: number;
+        /**
+         * Whether the device answers at the station address the master gave it. `addressLost`: nothing answers at that address, but a device answers at its wire position. A reset, such as a power cycle, clears the address. Run `POST /api/scan` to command it again. `notAnswering`: nothing answers at that address or at its wire position. Check the cabling and the power. If devices were removed from the chain, run a scan. The wire position is checked by position only, so after a change to the chain the device that answers there can be a different one. When the value is not `answering`, the state of the device is unknown, and `alStatus`, `alState` and `alStatusCode` are 0.
+         * @example "answering"
+         */
+        reachability: "answering" | "addressLost" | "notAnswering";
       }[],
       void | {
         /**
@@ -2065,7 +2070,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Commands one or more devices to the requested EtherCAT Application Layer state and blocks until all targeted devices arrive or the timeout elapses. The settled state of every targeted device is then read back and returned in `devices`, each with a `reached` flag; `ok` is true only when every device reached the target. A device that did not reach it carries an `alStatusCode` explaining why. Omit `positions` or pass an empty array to target all discovered devices. State values are the standard AL state register encodings from ETG.1000.6: 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
+   * @description Commands one or more devices to the requested EtherCAT Application Layer state and blocks until all targeted devices arrive or the timeout elapses. The settled state of every targeted device is then read back and returned in `devices`, each with a `reached` flag; `ok` is true only when every device reached the target. A device that did not reach it carries an `alStatusCode` explaining why. A device that does not answer at its address is not commanded, so the request does not wait out the timeout for it. Its `reachability` says why, and the other devices are still commanded. Omit `positions` or pass an empty array to target all discovered devices. State values are the standard AL state register encodings from ETG.1000.6: 1 (Init), 2 (PreOp), 3 (Boot), 4 (SafeOp), 8 (Op).
    *
    * @name TransitionToState
    * @summary Transition devices to an EtherCAT AL state
@@ -2112,10 +2117,10 @@ export class Api<
            */
           alStatus: number;
           /**
-           * Current AL state decoded from alStatus (ETG.1000.6 encoding): 1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op.
+           * Current AL state decoded from alStatus (ETG.1000.6 encoding): 1 = Init, 2 = PreOp, 3 = Boot, 4 = SafeOp, 8 = Op. 0 when the device does not answer (see `reachability`).
            * @example 2
            */
-          alState: 1 | 2 | 3 | 4 | 8;
+          alState: 0 | 1 | 2 | 3 | 4 | 8;
           /**
            * True when the AL Status error indicator bit (bit 4) is set
            * @example false
@@ -2126,6 +2131,11 @@ export class Api<
            * @example 0
            */
           alStatusCode: number;
+          /**
+           * Whether the device answers at the station address the master gave it. `addressLost`: nothing answers at that address, but a device answers at its wire position. A reset, such as a power cycle, clears the address. Run `POST /api/scan` to command it again. `notAnswering`: nothing answers at that address or at its wire position. Check the cabling and the power. If devices were removed from the chain, run a scan. The wire position is checked by position only, so after a change to the chain the device that answers there can be a different one. When the value is not `answering`, the state of the device is unknown, and `alStatus`, `alState` and `alStatusCode` are 0.
+           * @example "answering"
+           */
+          reachability: "answering" | "addressLost" | "notAnswering";
           /**
            * True when this device reached the requested target state (error clear and alState equal to the requested state).
            * @example true

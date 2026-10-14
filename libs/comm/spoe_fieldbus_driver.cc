@@ -536,14 +536,14 @@ SpoeFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
       return std::unexpected(std::format("no SPoE device at position {}", position));
     }
     // SPoE has no error indicator and no AL status code. A drive that does not answer reads as
-    // "no state known", and the others are still read.
+    // "no state known", and the others are still read. There is no station address to lose.
     const auto reply = request(*found, MessageType::kStateRead, {});
-    if (reply && !reply->data.empty()) {
-      found->state.store(reply->data[0]);
-    } else {
-      found->state.store(0);
-    }
-    states.push_back(SlaveStateRaw{.alStatus = found->state.load(), .alStatusCode = 0});
+    const bool answered = reply && !reply->data.empty();
+    found->state.store(answered ? reply->data[0] : 0);
+    states.push_back(SlaveStateRaw{
+        .alStatus = found->state.load(),
+        .alStatusCode = 0,
+        .reachability = answered ? Reachability::Answering : Reachability::NotAnswering});
   }
   return states;
 }
@@ -905,6 +905,15 @@ void SpoeFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
     }
     Drive* found = driveAt(position);
     if (found == nullptr) {
+      continue;
+    }
+    // State 0 means the last state read got no reply. A request to a silent drive waits out the
+    // whole timeout, and the next state read tries the drive again.
+    if (found->state.load() == 0) {
+      spdlog::error(
+          "SPoE {}: the drive did not answer the last state read, so it is not commanded. Check "
+          "the cabling and the power.",
+          found->host);
       continue;
     }
     if (requiredState && alState(found->state.load()) != *requiredState) {

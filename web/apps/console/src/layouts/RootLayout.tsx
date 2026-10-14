@@ -41,10 +41,34 @@ const AL_STATE_BADGE: Record<number, string> = {
 interface DeviceState {
   alState: number
   error: boolean
+  reachability: 'answering' | 'addressLost' | 'notAnswering'
+}
+
+// A device that does not answer at its station address has no known AL state, so the badge says
+// why instead of showing one.
+const REACHABILITY_LABEL: Record<string, string> = {
+  addressLost: 'Address lost',
+  notAnswering: 'Not answering',
+}
+
+const REACHABILITY_TITLE: Record<string, string> = {
+  addressLost:
+    'Address lost — nothing answers at the station address the master gave this device, but a device answers at its wire position. A reset, such as a power cycle, clears the address. Run a scan to command it again. If the chain changed, the device at this position can be a different one.',
+  notAnswering:
+    'Not answering — nothing answers at the station address the master gave this device or at its wire position. Check the cabling and the power. If devices were removed from the chain, run a scan.',
+}
+
+function isUnreachable(state?: DeviceState): boolean {
+  return state !== undefined && state.reachability !== 'answering'
 }
 
 function alStateLabel(state?: DeviceState): string | null {
-  if (!state) return null
+  if (!state) {
+    return null
+  }
+  if (isUnreachable(state)) {
+    return REACHABILITY_LABEL[state.reachability]
+  }
   return AL_STATE_LABEL[state.alState] ?? `0x${state.alState.toString(16)}`
 }
 
@@ -299,18 +323,20 @@ function DeviceSection({
         <div className="mt-1.5 flex items-center gap-1 text-[10px] font-display tracking-wide">
           {stateLabel && (
             <span
-              className={`shrink-0 inline-flex items-center h-[18px] px-1.5 rounded-sm cursor-help ${state?.error
+              className={`shrink-0 inline-flex items-center h-[18px] px-1.5 rounded-sm cursor-help ${state?.error || isUnreachable(state)
                 ? 'bg-status-bad text-white'
                 : AL_STATE_BADGE[state?.alState ?? -1] ?? 'bg-white/10 text-white/60'
                 }`}
               title={
-                state?.error
+                state && isUnreachable(state)
+                  ? REACHABILITY_TITLE[state.reachability]
+                  : state?.error
                   ? 'AL state — the device’s EtherCAT Application Layer state, the low nibble of the AL Status register (0x0130). The error indicator (bit 4) is set; the reason is in the AL Status Code register (0x0134).'
                   : 'AL state — the device’s EtherCAT Application Layer state, the low nibble of the AL Status register (0x0130).'
               }
             >
               {stateLabel}
-              {state && ` (${state.alState})`}
+              {state && !isUnreachable(state) && ` (${state.alState})`}
               {state?.error && ' · err'}
             </span>
           )}

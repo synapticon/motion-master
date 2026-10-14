@@ -112,6 +112,7 @@ class FakeBus : public FieldbusDriver {
   std::vector<uint8_t> siiImage;
   std::string siiError;    // non-empty makes every SII read fail
   std::string deviceName;  // returned by slaveInfo(), which callers use as the device's name
+  uint32_t vendorId = 0;   // returned by slaveInfo(); 0 is no known vendor
   std::vector<mm::comm::SlaveConfig> busConfig() const override { return slaveConfigs; }
   std::expected<std::vector<uint8_t>, std::string> readSii(uint16_t) override {
     if (!siiError.empty()) {
@@ -140,7 +141,9 @@ class FakeBus : public FieldbusDriver {
 
   // --- unused stubs ---------------------------------------------------------
   std::expected<void, std::string> init() override { return {}; }
-  SlaveInfo slaveInfo(uint16_t) const override { return SlaveInfo{.name = deviceName}; }
+  SlaveInfo slaveInfo(uint16_t) const override {
+    return SlaveInfo{.name = deviceName, .vendorId = vendorId};
+  }
   void stop() override {}
   std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& p) override {

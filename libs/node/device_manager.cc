@@ -1281,6 +1281,40 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::deviceSt
   return result;
 }
 
+void to_json(nlohmann::json& j, const ScanStatus& status) {
+  j = {{"required", status.required},
+       {"devicesOnWire", status.devicesOnWire ? nlohmann::json(*status.devicesOnWire) : nullptr},
+       {"devicesScanned", status.devicesScanned},
+       {"unreachable", status.unreachable}};
+}
+
+std::expected<ScanStatus, std::string> DeviceManager::scanStatus() {
+  const std::shared_ptr<DeviceSet> set = deviceSet();
+  if (!set->driver) {
+    return std::unexpected("no driver — call init() first");
+  }
+  ScanStatus status;
+  status.devicesOnWire = set->driver->readDevicesOnWire();
+  status.devicesScanned = static_cast<int>(set->devices.size());
+  if (!set->devices.empty()) {
+    std::vector<uint16_t> positions(set->devices.size());
+    std::ranges::transform(set->devices, positions.begin(),
+                           [](const Device& device) { return device.slavePosition(); });
+    auto states = set->driver->readStates(positions);
+    if (!states) {
+      return std::unexpected(states.error());
+    }
+    for (std::size_t i = 0; i < positions.size(); ++i) {
+      if ((*states)[i].reachability != mm::comm::Reachability::Answering) {
+        status.unreachable.push_back(positions[i]);
+      }
+    }
+  }
+  status.required = !status.unreachable.empty() ||
+                    (status.devicesOnWire && *status.devicesOnWire != status.devicesScanned);
+  return status;
+}
+
 std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> DeviceManager::deviceDiagnostics(
     const std::vector<uint16_t>& positions) {
   const std::shared_ptr<DeviceSet> set = deviceSet();

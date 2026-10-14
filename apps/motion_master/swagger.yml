@@ -716,6 +716,63 @@ paths:
         "501":
           description: No driver factory configured on this instance
   /api/scan:
+    get:
+      summary: Read whether the bus needs a new scan
+      operationId: getScanStatus
+      description: >
+        Compares the bus with the last scan. Two changes make that scan wrong. A device that
+        resets, for example after a power cycle, loses the station address the scan gave it, and
+        no longer answers at it. A device added to or removed from the chain changes the number
+        of devices on the wire, even when every known device still answers.
+
+
+        The server reads the AL state of every scanned device, as `GET /api/devices/state` does,
+        and with SOEM it counts the devices on the wire with one broadcast read. A device that
+        lost its station address still answers a broadcast, so it is counted.
+
+
+        Before the first scan, `devicesScanned` is 0, so any device on the wire makes `required`
+        true. A device swapped for another at the same position without a reset is not detected,
+        because it keeps the old address and answers normally.
+      responses:
+        "200":
+          description: Whether a scan is required, and the facts it is decided from
+          headers:
+            X-Wire-Us:
+              $ref: "#/components/headers/WireTime"
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [required, devicesOnWire, devicesScanned, unreachable]
+                properties:
+                  required:
+                    type: boolean
+                    description: >
+                      True when `unreachable` is not empty, or when `devicesOnWire` is not null and
+                      differs from `devicesScanned`.
+                    example: true
+                  devicesOnWire:
+                    type: integer
+                    nullable: true
+                    description: >
+                      The number of devices on the wire now. Null over SPoE, which cannot count
+                      them.
+                    example: 3
+                  devicesScanned:
+                    type: integer
+                    description: The number of devices the last scan found
+                    example: 2
+                  unreachable:
+                    type: array
+                    items:
+                      type: integer
+                    description: >
+                      Positions whose `reachability` is not `answering`, in position order.
+                      `GET /api/devices/state` tells why for each one.
+                    example: [2]
+        "500":
+          $ref: "#/components/responses/DriverError"
     post:
       summary: Scan the bus for slaves
       operationId: scan

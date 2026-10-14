@@ -47,6 +47,19 @@ struct DeviceStateInfo {
 /// @brief Serialises a DeviceStateInfo to JSON.
 void to_json(nlohmann::json& j, const DeviceStateInfo& info);
 
+/// @brief Whether the devices of the last scan still match the bus.
+struct ScanStatus {
+  /// True when a device does not answer at its address, or the device count changed.
+  bool required = false;
+  /// Devices on the wire now, or nothing when the transport cannot count them.
+  std::optional<int> devicesOnWire;
+  int devicesScanned = 0;             ///< Devices the last scan found.
+  std::vector<uint16_t> unreachable;  ///< Positions whose reachability is not answering.
+};
+
+/// @brief Serialises a ScanStatus to JSON.
+void to_json(nlohmann::json& j, const ScanStatus& status);
+
 /// @brief One mapped object in the published process image, with its name resolved.
 ///
 /// A flattened, API-facing view of a @c ProcessImageEntry: the raw entry plus the textual
@@ -658,6 +671,15 @@ class DeviceManager {
   ///         not initialised or the hardware read fails.
   std::expected<std::vector<DeviceStateInfo>, std::string> deviceStates(
       const std::vector<uint16_t>& positions);
+
+  /// @brief Reads whether the bus still matches the last scan.
+  ///
+  /// A reset device answers by wire position only, and a device added without a reset sits where
+  /// the last scan did not look. The first shows in the device states, the second only in the
+  /// count of devices on the wire, so both are read.
+  ///
+  /// @return The status, or an error string if the driver is not initialised or a read fails.
+  std::expected<ScanStatus, std::string> scanStatus();
 
   /// @brief Reads live ESC health diagnostics (link quality, error counters, watchdogs) for a set
   ///        of devices, resolving each slave's device name.

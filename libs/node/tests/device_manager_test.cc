@@ -50,6 +50,9 @@ class FakeDriver : public FieldbusDriver {
   /// Slaves that readStates() reports as not answering, with the reason. Every other slave answers.
   std::map<uint16_t, mm::comm::Reachability> unreachable;
 
+  /// Returned by readDevicesOnWire(). Nothing means the transport cannot count, as over SPoE.
+  std::optional<int> devicesOnWire;
+
   /// Name returned by slaveInfo() for every position (drives Device::name()).
   std::string deviceName;
 
@@ -112,6 +115,8 @@ class FakeDriver : public FieldbusDriver {
     }
     return states;
   }
+
+  std::optional<int> readDevicesOnWire() override { return devicesOnWire; }
 
   uint16_t slaveState(uint16_t) const override { return cachedState_; }
   // Emulated SOMANET drives all speak CoE, so their PDO mapping is read over the mailbox
@@ -325,6 +330,83 @@ TEST(DeviceManagerState, ADeviceThatDoesNotAnswerDoesNotFailTheOthers) {
   ASSERT_EQ(result->size(), 2U);
   EXPECT_EQ((*result)[0].reachability, mm::comm::Reachability::Answering);
   EXPECT_EQ((*result)[1].reachability, mm::comm::Reachability::NotAnswering);
+}
+
+// Scans a bus of @p slaves devices, all in PRE-OP, with as many on the wire.
+std::pair<std::unique_ptr<DeviceManager>, FakeDriver*> scannedBus(int slaves) {
+  auto driver = std::make_unique<FakeDriver>(true, slaves);
+  driver->reportState = static_cast<uint16_t>(EtherCatState::PreOp);
+  driver->devicesOnWire = slaves;
+  FakeDriver* raw = driver.get();
+  auto dm = std::make_unique<DeviceManager>();
+  EXPECT_TRUE(dm->init(std::move(driver)).has_value());
+  EXPECT_TRUE(dm->scan().has_value());
+  return {std::move(dm), raw};
+}
+
+TEST(DeviceManagerScanStatus, NotRequiredWhileTheBusMatchesTheScan) {
+  auto [dm, driver] = scannedBus(2);
+  const auto status = dm->scanStatus();
+  ASSERT_TRUE(status.has_value()) << status.error();
+  EXPECT_FALSE(status->required);
+  EXPECT_EQ(status->devicesOnWire, std::optional<int>(2));
+  EXPECT_EQ(status->devicesScanned, 2);
+  EXPECT_TRUE(status->unreachable.empty());
+}
+
+TEST(DeviceManagerScanStatus, RequiredWhenADeviceIsAddedWithoutAReset) {
+  // Every known device keeps its address and answers, so only the count shows the change.
+  auto [dm, driver] = scannedBus(2);
+  driver->devicesOnWire = 3;
+  const auto status = dm->scanStatus();
+  ASSERT_TRUE(status.has_value()) << status.error();
+  EXPECT_TRUE(status->required);
+  EXPECT_TRUE(status->unreachable.empty());
+}
+
+TEST(DeviceManagerScanStatus, RequiredWhenADeviceDoesNotAnswer) {
+  auto [dm, driver] = scannedBus(3);
+  driver->unreachable[2] = mm::comm::Reachability::AddressLost;
+  driver->unreachable[3] = mm::comm::Reachability::NotAnswering;
+  const auto status = dm->scanStatus();
+  ASSERT_TRUE(status.has_value()) << status.error();
+  EXPECT_TRUE(status->required);
+  EXPECT_EQ(status->unreachable, (std::vector<uint16_t>{2, 3}));
+
+  const nlohmann::json json = *status;
+  EXPECT_EQ(json["unreachable"], nlohmann::json::array({2, 3}));
+  EXPECT_EQ(json["devicesOnWire"], 3);
+}
+
+TEST(DeviceManagerScanStatus, WithoutACountOnlyTheDevicesDecide) {
+  auto [dm, driver] = scannedBus(2);
+  driver->devicesOnWire = std::nullopt;
+  auto status = dm->scanStatus();
+  ASSERT_TRUE(status.has_value()) << status.error();
+  EXPECT_FALSE(status->required);
+  const nlohmann::json json = *status;
+  EXPECT_TRUE(json["devicesOnWire"].is_null());
+
+  driver->unreachable[1] = mm::comm::Reachability::NotAnswering;
+  status = dm->scanStatus();
+  ASSERT_TRUE(status.has_value()) << status.error();
+  EXPECT_TRUE(status->required);
+}
+
+TEST(DeviceManagerScanStatus, RequiredBeforeTheFirstScan) {
+  auto driver = std::make_unique<FakeDriver>(true, 1);
+  driver->devicesOnWire = 1;
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(driver)).has_value());
+  const auto status = dm.scanStatus();
+  ASSERT_TRUE(status.has_value()) << status.error();
+  EXPECT_TRUE(status->required);
+  EXPECT_EQ(status->devicesScanned, 0);
+}
+
+TEST(DeviceManagerScanStatus, FailsWithoutADriver) {
+  DeviceManager dm;
+  EXPECT_FALSE(dm.scanStatus().has_value());
 }
 
 TEST(DeviceManagerState, NoRefusalWithoutADriver) {

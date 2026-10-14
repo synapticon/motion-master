@@ -1768,6 +1768,12 @@ void HttpServer::run() {
     return mm::api::json(nlohmann::json{{"ok", true}});
   });
 
+  // Reads the bus, under the driver's control-plane lock, so it runs off the loop like the state
+  // poll the Console sends beside it.
+  router.get("/api/scan", [this](const mm::api::Request&) -> mm::api::Response {
+    return mm::api::timed([this] { return deviceManager_.scanStatus(); });
+  });
+
   router.post("/api/scan", [this](const mm::api::Request&) -> mm::api::Response {
     auto slaves = deviceManager_.scan();
     if (!slaves) {

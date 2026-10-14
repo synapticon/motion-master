@@ -692,6 +692,18 @@ uint16_t SoemFieldbusDriver::mailboxProtocols(uint16_t position) const {
   return ctx_ ? ctx_->slavelist[position].mbx_proto : 0;
 }
 
+std::optional<int> SoemFieldbusDriver::readDevicesOnWire() {
+  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  if (!ctx_) {
+    return std::nullopt;
+  }
+  uint16_t alStatus = 0;
+  const int wkc =
+      ecx_BRD(&ctx_->port, 0, ECT_REG_ALSTAT, sizeof(alStatus), &alStatus, EC_TIMEOUTRET);
+  // EC_NOFRAME means the frame did not come back, which is what an empty or unplugged bus does.
+  return std::max(wkc, 0);
+}
+
 std::expected<std::vector<FieldbusDriver::SlaveStateRaw>, std::string>
 SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
   std::lock_guard<std::mutex> lock(controlPlaneMutex_);

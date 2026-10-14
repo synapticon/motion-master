@@ -109,11 +109,7 @@ std::expected<mm::comm::FieldbusDriver::FirmwareActivation, std::string> Device:
 }
 
 bool Device::exchangesProcessData() const {
-  using mm::comm::EtherCatState;
-  const uint16_t status = driver_.slaveState(slavePosition_);
-  const EtherCatState state = mm::comm::alState(status);
-  return !mm::comm::alHasError(status) &&
-         (state == EtherCatState::SafeOp || state == EtherCatState::Op);
+  return mm::comm::exchangesProcessData(driver_.slaveState(slavePosition_));
 }
 
 std::expected<std::vector<uint8_t>, std::string> Device::readSdo(uint16_t index,

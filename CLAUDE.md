@@ -469,7 +469,11 @@ decision.
   object per cycle is fatal at bus scale: 50 devices × 40 objects is 60–100 µs against a
   1 ms grid. A task's own reads are per-signal, which is fine.
 - **The decode is eager.** Right after the frame arrives, the RT thread copies every mapped
-  object into its cell whether anything reads it or not. This is a read-path decision: it
+  object of every exchanging device into its cell whether anything reads it or not. A device
+  below SAFE-OP keeps its region in the whole-bus image but writes nothing into the frame, so
+  the decode skips it and its cells keep the last value it sent. A device with the AL error bit
+  set is skipped too. The rule is `mm::comm::exchangesProcessData`, the same one `Device` uses
+  to choose between the image and an SDO read. This is a read-path decision: it
   makes `value<T>()` a hash lookup plus an atomic load, instead of making every reader
   locate the object in the published image. Eager loses the sparse case. The escape hatch,
   if it ever bites, is a per-entry "someone has bound this" flag.

@@ -466,14 +466,22 @@ void DeviceManager::exchangeProcessData() {
   pd_->ring.write(timestampNs, wkc,
                   std::span<const uint8_t>(pd_->inScratch.bytes.data(), image->inputBytes),
                   std::span<const uint8_t>(pd_->outScratch.bytes.data(), outputBytes));
-  decodeInputsIntoCells(*image);
+  decodeInputsIntoCells(*image, *set->driver);
   pd_->inCycle.fetch_sub(1, std::memory_order_release);
 }
 
-void DeviceManager::decodeInputsIntoCells(const ProcessImage& image) {
-  // Every mapped input lands in its parameter's cell, every cycle, read or not. That is what makes
-  // Device::value<T>() a single atomic load rather than an image lookup plus a bit extraction, and
-  // it is what a cyclic task's whole read path rests on.
+void DeviceManager::decodeInputsIntoCells(const ProcessImage& image,
+                                          const mm::comm::FieldbusDriver& driver) {
+  // Every mapped input of an exchanging device lands in its parameter's cell, every cycle, read or
+  // not. That is what makes Device::value<T>() a single atomic load rather than an image lookup
+  // plus a bit extraction, and it is what a cyclic task's whole read path rests on.
+  //
+  // Gated on the AL state of the owning device. The image is one whole-bus layout, so a device
+  // below SAFE-OP still has a region in it, but it writes nothing into the frame. Its region holds
+  // whatever the master sent, which after a re-map can be zeros or another device's old bytes.
+  // Skipping it keeps the last value the device did send. The state comes from the driver's
+  // lock-free mirror, loaded once per device: the entries of one device are contiguous, and a
+  // change of position is what triggers a new load.
   //
   // Deliberately ungated on the working counter. A short WKC means the driver left the previous
   // cycle's bytes in the IOmap, so the cells hold the last value that did arrive — which is what
@@ -485,7 +493,16 @@ void DeviceManager::decodeInputsIntoCells(const ProcessImage& image) {
   // parameter resolved when the image was built.
   const std::span<const uint8_t> inputs(pd_->inScratch.bytes.data(), image.inputBytes);
   std::array<uint8_t, sizeof(uint64_t)> buf{};
+  uint16_t position = 0;  // positions are 1-based, so 0 forces a load on the first entry
+  bool exchanging = false;
   for (const ProcessImageEntry& entry : image.inputs) {
+    if (entry.slavePosition != position) {
+      position = entry.slavePosition;
+      exchanging = mm::comm::exchangesProcessData(driver.slaveState(position));
+    }
+    if (!exchanging) {
+      continue;  // below SAFE-OP or in error — the region was not written by the device
+    }
     if (entry.parameter == nullptr) {
       continue;  // dictionary not enumerated — the object exchanges, it just has no cell
     }

@@ -1007,6 +1007,79 @@ std::unique_ptr<FakeBus> makeTwoAxisOpBus() {
   return bus;
 }
 
+// Builds the two-axis bus with an enumerated dictionary, so each input entry has a cell to decode
+// into. Device 1's inputs occupy bytes 0-5 of the image and device 2's bytes 6-11.
+std::unique_ptr<FakeBus> makeTwoAxisOpBusWithCells() {
+  auto bus = makeTwoAxisOpBus();
+  bus->programOd(0x6040, 0x00, kU16);  // controlword
+  bus->programOd(0x607A, 0x00, kI32);  // target position
+  bus->programOd(0x6041, 0x00, kU16);  // statusword
+  bus->programOd(0x6064, 0x00, kI32);  // actual position
+  return bus;
+}
+
+// The image is one whole-bus layout, so a device below SAFE-OP keeps its region in it. It writes
+// nothing into the frame, so whatever its region holds was not sent by it, and its cells keep the
+// last value it did send.
+TEST(CycleGuard, DecodeSkipsADeviceThatDoesNotExchange) {
+  auto bus = makeTwoAxisOpBusWithCells();
+  bus->cannedInputs = {0x37, 0x02, 0x01, 0x00, 0x00, 0x00,   // device 1: statusword, position
+                       0x37, 0x02, 0x44, 0x33, 0x22, 0x11};  // device 2: statusword, position
+  FakeBus* busPtr = bus.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(2, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  dm.exchangeProcessData();
+
+  const Device* drive1 = dm.findDevice(1);
+  const Device* drive2 = dm.findDevice(2);
+  ASSERT_NE(drive1, nullptr);
+  ASSERT_NE(drive2, nullptr);
+  ASSERT_EQ(drive2->value<int32_t>(0x6064, 0x00), std::optional<int32_t>{0x11223344});
+
+  // Device 2 drops to PRE-OP while device 1 stays in OP, so the image stays published and the
+  // frame still carries bytes in device 2's region.
+  busPtr->slaveStates[2] = static_cast<uint16_t>(EtherCatState::PreOp);
+  busPtr->cannedInputs = {0x27, 0x06, 0x02, 0x00, 0x00, 0x00,   // device 1
+                          0x00, 0x00, 0x00, 0x00, 0x00, 0x00};  // device 2: not sent by it
+  dm.exchangeProcessData();
+
+  EXPECT_EQ(drive1->value<uint16_t>(0x6041, 0x00), std::optional<uint16_t>{0x0627});
+  EXPECT_EQ(drive1->value<int32_t>(0x6064, 0x00), std::optional<int32_t>{2});
+  EXPECT_EQ(drive2->value<uint16_t>(0x6041, 0x00), std::optional<uint16_t>{0x0237});
+  EXPECT_EQ(drive2->value<int32_t>(0x6064, 0x00), std::optional<int32_t>{0x11223344});
+}
+
+// The decode and Device::exchangesProcessData() share one rule, so a device in SAFE-OP with the
+// error flag set is skipped as well.
+TEST(CycleGuard, DecodeSkipsADeviceInSafeOpWithAnError) {
+  auto bus = makeTwoAxisOpBusWithCells();
+  bus->cannedInputs = {0x37, 0x02, 0x01, 0x00, 0x00, 0x00,   // device 1
+                       0x37, 0x02, 0x44, 0x33, 0x22, 0x11};  // device 2
+  FakeBus* busPtr = bus.get();
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(2, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+  dm.exchangeProcessData();
+
+  const Device* drive2 = dm.findDevice(2);
+  ASSERT_NE(drive2, nullptr);
+
+  busPtr->slaveStates[2] = static_cast<uint16_t>(EtherCatState::SafeOp) | 0x0010u;
+  busPtr->cannedInputs = {0x37, 0x02, 0x01, 0x00, 0x00, 0x00,   // device 1
+                          0x00, 0x00, 0x00, 0x00, 0x00, 0x00};  // device 2
+  dm.exchangeProcessData();
+
+  EXPECT_FALSE(drive2->exchangesProcessData());
+  EXPECT_EQ(drive2->value<int32_t>(0x6064, 0x00), std::optional<int32_t>{0x11223344});
+}
+
 TEST(DeviceManagerProcessData, DroppingOneDeviceIsNotCountedAsABusFault) {
   // A drop that leaves another device exchanging keeps the image published, so the RT loop runs
   // for the whole multi-second transition — during which the dropping device already stopped

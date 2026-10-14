@@ -104,6 +104,20 @@ inline int workingCounterContribution(uint16_t alStatus, bool hasOutputs, bool h
   }
 }
 
+/// @brief Returns whether a slave with this AL status exchanges process data: SAFE-OP or OP, with
+///        the error flag clear.
+///
+/// Below SAFE-OP a slave writes nothing into the frame, so its input region holds bytes it never
+/// sent. The control plane uses this rule to choose between the process image and an SDO upload,
+/// and the RT decode uses it to leave such a slave's cells alone. The two must agree, so the rule
+/// has one definition.
+///
+/// @param alStatus  AL status of the slave: the state in the low four bits, and the error flag.
+inline bool exchangesProcessData(uint16_t alStatus) {
+  const EtherCatState state = alState(alStatus);
+  return !alHasError(alStatus) && (state == EtherCatState::SafeOp || state == EtherCatState::Op);
+}
+
 /// @brief Immutable identity fields read from a slave's EEPROM during configuration.
 struct SlaveInfo {
   std::string name;             ///< Human-readable name from SII.

@@ -880,13 +880,15 @@ class DeviceManager {
   bool deviceExchangesProcessData(uint16_t slavePosition) const;
 
  private:
-  /// @brief Decodes every mapped input from the just-exchanged image into its parameter's cell.
+  /// @brief Decodes the mapped inputs of every exchanging device from the just-exchanged image
+  ///        into their parameters' cells.
   ///
   /// The RT half of the value path: called on the game-loop thread at the end of
   /// @c exchangeProcessData, once the input bytes are in hand. Non-allocating, lock-free and
   /// lookup-free — each entry carries the parameter it belongs to, resolved when the image was
-  /// built. See the definition for why it is not gated on the working counter.
-  void decodeInputsIntoCells(const ProcessImage& image);
+  /// built. @p driver answers each device's AL status from its lock-free mirror. See the
+  /// definition for why it is gated on the AL state and not on the working counter.
+  void decodeInputsIntoCells(const ProcessImage& image, const mm::comm::FieldbusDriver& driver);
 
   /// @brief Rows written and the @c [startSeq, endSeq) sequence span of a serialised dump.
   struct DumpSpan {

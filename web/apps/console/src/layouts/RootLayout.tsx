@@ -83,6 +83,37 @@ function mailboxActiveFor(state?: DeviceState): boolean | null {
   return MAILBOX_ACTIVE_STATES.has(state.alState)
 }
 
+interface ScanStatus {
+  required: boolean
+  devicesOnWire: number | null
+  devicesScanned: number
+  unreachable: number[]
+}
+
+// The server decides whether the bus still matches the last scan. This only shows the facts it
+// decided from, and sends the user to the Control page, where the scan is.
+function ScanNotice({ status }: { status: ScanStatus }) {
+  const countChanged = status.devicesOnWire !== null && status.devicesOnWire !== status.devicesScanned
+  const details = [
+    ...(countChanged ? [`${status.devicesOnWire} on the wire, ${status.devicesScanned} scanned`] : []),
+    ...(status.unreachable.length > 0 ? [`Not answering: ${status.unreachable.join(', ')}`] : []),
+  ]
+  return (
+    <NavLink
+      to="/fieldbus/control"
+      title="Scan needed — the bus no longer matches the last scan. A device that was reset, for example by a power cycle, lost the address the scan gave it, or devices were added to or removed from the chain. A scan finds the devices again and sets every one of them to INIT. Open the Control page to scan."
+      className="block mx-5 mb-2 px-2 py-1.5 rounded-sm bg-status-bad text-white hover:opacity-90 transition-opacity"
+    >
+      <span className="block text-[10px] font-display tracking-wide">Scan needed</span>
+      {details.map(d => (
+        <span key={d} className="block text-[11px] text-white/80">
+          {d}
+        </span>
+      ))}
+    </NavLink>
+  )
+}
+
 function NavItem({
   to,
   label,
@@ -406,6 +437,16 @@ export default function RootLayout() {
     refetchInterval: 3000,
   })
 
+  // Polled beside the states, because a device added to the chain shows only in the count of
+  // devices on the wire, which no per-device state carries.
+  const scanStatusQuery = useQuery({
+    queryKey: ['scanStatus'],
+    queryFn: () => api.getScanStatus(),
+    enabled: online && hasScanned,
+    refetchInterval: 3000,
+  })
+  const scanStatus = scanStatusQuery.data?.data
+
   const stateByPosition = new Map<number, DeviceState>(
     (statesQuery.data?.data ?? []).map(s => [s.slavePosition, s]),
   )
@@ -423,6 +464,7 @@ export default function RootLayout() {
       if ((res.data?.data.length ?? 0) > 0) {
         await statesQuery.refetch()
       }
+      await scanStatusQuery.refetch()
     } finally {
       const remaining = Math.max(0, 900 - (performance.now() - start))
       setTimeout(() => setSpinning(false), remaining)
@@ -613,7 +655,9 @@ export default function RootLayout() {
                   </span>
                 </div>
               ) : (
-                devices.map(d => (
+                <>
+                {scanStatus?.required && <ScanNotice status={scanStatus} />}
+                {devices.map(d => (
                   <DeviceSection
                     key={d.slavePosition}
                     deviceId={String(d.slavePosition)}
@@ -626,7 +670,8 @@ export default function RootLayout() {
                     isCia402={d.isCia402}
                     state={stateByPosition.get(d.slavePosition)}
                   />
-                ))
+                ))}
+                </>
               )}
             </SidebarGroup>
           )}

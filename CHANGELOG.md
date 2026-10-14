@@ -21,6 +21,7 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Added
 
+- **`GET /api/scan` tells whether the bus needs a new scan.** It answers `required`, `devicesOnWire`, `devicesScanned` and `unreachable`. A scan is required when a device no longer answers at the address the last scan gave it, or when the number of devices on the wire differs from the last scan. The count is what shows a device added to the chain without a reset, because every known device still answers then. Over SPoE `devicesOnWire` is `null`. The Console shows a "Scan needed" notice in the sidebar, with the counts and the positions, and links it to the Control page.
 - **The Console's Learn section lists every topic.** Encoders and Commutation Offset appear beside Servo Motors, and each of the three carries a work-in-progress note. Encoder Calibration, Filters and Tuning have a page that says the text is coming soon.
 
 ### Changed

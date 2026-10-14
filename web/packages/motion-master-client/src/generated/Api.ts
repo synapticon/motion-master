@@ -513,6 +513,50 @@ export class Api<
       ...params,
     });
   /**
+   * @description Compares the bus with the last scan. Two changes make that scan wrong. A device that resets, for example after a power cycle, loses the station address the scan gave it, and no longer answers at it. A device added to or removed from the chain changes the number of devices on the wire, even when every known device still answers. The server reads the AL state of every scanned device, as `GET /api/devices/state` does, and with SOEM it counts the devices on the wire with one broadcast read. A device that lost its station address still answers a broadcast, so it is counted. Before the first scan, `devicesScanned` is 0, so any device on the wire makes `required` true. A device swapped for another at the same position without a reset is not detected, because it keeps the old address and answers normally.
+   *
+   * @name GetScanStatus
+   * @summary Read whether the bus needs a new scan
+   * @request GET:/api/scan
+   */
+  getScanStatus = (params: RequestParams = {}) =>
+    this.request<
+      {
+        /**
+         * True when `unreachable` is not empty, or when `devicesOnWire` is not null and differs from `devicesScanned`.
+         * @example true
+         */
+        required: boolean;
+        /**
+         * The number of devices on the wire now. Null over SPoE, which cannot count them.
+         * @example 3
+         */
+        devicesOnWire: number | null;
+        /**
+         * The number of devices the last scan found
+         * @example 2
+         */
+        devicesScanned: number;
+        /**
+         * Positions whose `reachability` is not `answering`, in position order. `GET /api/devices/state` tells why for each one.
+         * @example [2]
+         */
+        unreachable: number[];
+      },
+      {
+        /**
+         * Human-readable error message from the driver
+         * @example "FPRD slave 1: wkc=0"
+         */
+        error: string;
+      }
+    >({
+      path: `/api/scan`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
    * @description Scans the fieldbus for slaves and configures their sync managers and FMMUs. Must be called after a successful POST /api/init. With SOEM, slaves remain in INIT state after this call, and state transitions are driven by subsequent API calls. An SPoE drive starts in OP. When a scan finds a device already in SAFE-OP or OP, it reads that device's object dictionary and publishes the process image, so the exchange starts with no state change. The dictionary comes from the parameter cache when the cache has it. Otherwise the first read of a drive model takes several seconds. If this step fails, the scan still returns 200 and the server logs a warning. A later state change to SAFE-OP or OP maps the image again. An empty bus is a successful scan returning 0 slaves, not an error: the master cannot distinguish a bus with no devices powered from a disconnected one, and the user recovers by powering devices on and scanning again. A 500 is returned only on a genuine driver failure (e.g. no driver initialised). A scan does not wait for work already in flight. A procedure that is running keeps running against the devices it started on, and fails at its next bus transfer. Retained procedure snapshots are discarded, because a position may name different hardware after a scan. A scan frees the recording, the retained process images and the previous device set, so it first waits up to 200 ms for the real-time loop to leave the cycle it is in. If the loop is stalled — a cyclic task that overruns, or severe CPU contention — the scan fails with 500 and changes nothing, rather than freeing memory the loop is still reading. `GET /api/game-loop` shows the stall. The same applies to `POST /api/process-data`, which re-allocates the recorder. `POST /api/reset` never fails this way: it holds the memory back instead and reclaims it later.
    *
    * @name Scan

@@ -109,6 +109,12 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// @brief Closes the NIC and releases all driver resources.
   void stop() override;
 
+  /// @copydoc FieldbusDriver::readDevicesOnWire
+  ///
+  /// One broadcast read of the AL Status register. Every device on the wire answers a broadcast,
+  /// with or without a station address, so the working counter is the count.
+  std::optional<int> readDevicesOnWire() override;
+
   /// @copydoc FieldbusDriver::readStates
   std::expected<std::vector<FieldbusDriver::SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& positions) override;

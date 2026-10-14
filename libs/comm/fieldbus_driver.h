@@ -610,6 +610,12 @@ class FieldbusDriver {
   virtual std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& positions) = 0;
 
+  /// @brief Counts the devices on the wire, or returns nothing when the transport cannot.
+  ///
+  /// The count is what shows that devices were added to or removed from the chain since the last
+  /// scan. A device that lost its station address is still on the wire, so it is counted.
+  virtual std::optional<int> readDevicesOnWire() { return std::nullopt; }
+
   /// @brief Reads live link-quality and watchdog diagnostics for each slave in @p positions.
   ///
   /// Performs FPRD reads of the DL Status (0x0110), error-counter (0x0300–0x0313), and watchdog

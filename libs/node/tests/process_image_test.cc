@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "comm/fieldbus_driver.h"
+#include "comm/vendor_ids.h"
 #include "fake_bus.h"
 #include "node/device.h"
 #include "node/device_manager.h"
@@ -104,6 +105,100 @@ TEST(BuildProcessImage, RebasesEntriesOntoEachSlaveWindow) {
   EXPECT_EQ(image->inputs[2].slavePosition, 2);
   EXPECT_EQ(image->inputs[2].index, 0x6041);
   EXPECT_EQ(image->inputs[2].bitOffset, 48u);
+}
+
+// Programs one 8-byte mapping per direction that names 0x2001 and 0x2007 between real objects, as
+// a SOMANET dictionary does in place of 0x0000 padding.
+void programSomanetPaddingMapping(FakeBus& bus) {
+  bus.program(0x1C12, 0x00, u8le(1));
+  bus.program(0x1C12, 0x01, u16le(0x1600));
+  bus.program(0x1600, 0x00, u8le(4));
+  bus.program(0x1600, 0x01, pdoEntry(0x6040, 0x00, 16));  // controlword @0
+  bus.program(0x1600, 0x02, pdoEntry(0x2001, 0x00, 8));   // padding @16
+  bus.program(0x1600, 0x03, pdoEntry(0x2007, 0x00, 8));   // padding @24
+  bus.program(0x1600, 0x04, pdoEntry(0x607A, 0x00, 32));  // target position @32
+  bus.program(0x1C13, 0x00, u8le(1));
+  bus.program(0x1C13, 0x01, u16le(0x1A00));
+  bus.program(0x1A00, 0x00, u8le(3));
+  bus.program(0x1A00, 0x01, pdoEntry(0x6041, 0x00, 16));  // statusword @0
+  bus.program(0x1A00, 0x02, pdoEntry(0x2001, 0x00, 16));  // padding @16
+  bus.program(0x1A00, 0x03, pdoEntry(0x6064, 0x00, 32));  // actual position @32
+}
+
+std::expected<mm::node::ProcessImage, std::string> buildOneDeviceImage(FakeBus& bus,
+                                                                       uint32_t windowBytes) {
+  Device d(1, bus);
+  if (auto r = d.readFlatPdoMapping(); !r) {
+    return std::unexpected(r.error());
+  }
+  std::vector<Device> devices;
+  devices.push_back(std::move(d));
+  PdoLayout layout;
+  layout.outputBytes = windowBytes;
+  layout.inputBytes = windowBytes;
+  layout.slaves = {SlaveIo{.slavePosition = 1,
+                           .outputOffset = 0,
+                           .outputBytes = windowBytes,
+                           .inputOffset = 0,
+                           .inputBytes = windowBytes}};
+  return buildProcessImage(layout, devices);
+}
+
+TEST(BuildProcessImage, TreatsSomanetPaddingIndicesAsPadding) {
+  FakeBus bus;
+  bus.vendorId = mm::comm::kSynapticonVendorId;
+  programSomanetPaddingMapping(bus);
+
+  auto image = buildOneDeviceImage(bus, 8);
+  ASSERT_TRUE(image.has_value());
+
+  // The padding entries bind nothing, and every other entry keeps its offset.
+  ASSERT_EQ(image->outputs.size(), 2u);
+  EXPECT_EQ(image->outputs[0].index, 0x6040);
+  EXPECT_EQ(image->outputs[1].index, 0x607A);
+  EXPECT_EQ(image->outputs[1].bitOffset, 32u);
+  ASSERT_EQ(image->inputs.size(), 2u);
+  EXPECT_EQ(image->inputs[0].index, 0x6041);
+  EXPECT_EQ(image->inputs[1].index, 0x6064);
+  EXPECT_EQ(image->inputs[1].bitOffset, 32u);
+
+  // Not found means not mapped, so a read or a write of the object goes over SDO.
+  EXPECT_FALSE(image->find(1, 0x2001, 0x00).has_value());
+  EXPECT_FALSE(image->find(1, 0x2007, 0x00).has_value());
+}
+
+TEST(BuildProcessImage, KeepsTheSameIndicesOnADeviceOfAnotherVendor) {
+  FakeBus bus;
+  bus.vendorId = 0x00000002;
+  programSomanetPaddingMapping(bus);
+
+  auto image = buildOneDeviceImage(bus, 8);
+  ASSERT_TRUE(image.has_value());
+
+  ASSERT_EQ(image->outputs.size(), 4u);
+  EXPECT_EQ(image->outputs[1].index, 0x2001);
+  EXPECT_EQ(image->outputs[1].bitOffset, 16u);
+  EXPECT_EQ(image->outputs[2].index, 0x2007);
+  EXPECT_EQ(image->outputs[2].bitOffset, 24u);
+  ASSERT_EQ(image->inputs.size(), 3u);
+  EXPECT_EQ(image->inputs[1].index, 0x2001);
+  EXPECT_TRUE(image->find(1, 0x2001, 0x00).has_value());
+}
+
+TEST(BuildProcessImage, KeepsAnOrdinarySomanetMapping) {
+  FakeBus bus;
+  bus.vendorId = mm::comm::kSynapticonVendorId;
+  programMapping(bus);
+
+  auto image = buildOneDeviceImage(bus, 6);
+  ASSERT_TRUE(image.has_value());
+
+  ASSERT_EQ(image->outputs.size(), 2u);
+  EXPECT_EQ(image->outputs[0].index, 0x6040);
+  EXPECT_EQ(image->outputs[1].index, 0x607A);
+  EXPECT_EQ(image->outputs[1].bitOffset, 16u);
+  ASSERT_EQ(image->inputs.size(), 2u);
+  EXPECT_EQ(image->inputs[1].index, 0x6064);
 }
 
 TEST(BuildProcessImage, RejectsMappingWiderThanItsWindow) {

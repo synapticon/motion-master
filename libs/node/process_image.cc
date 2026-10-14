@@ -1,25 +1,46 @@
 #include "node/process_image.h"
 
+#include <spdlog/spdlog.h>
+
 #include <algorithm>
+#include <array>
 #include <format>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
 #include "node/device.h"
+#include "node/synapticon.h"
 
 namespace mm::node {
 
 namespace {
 
+// Indices that a SOMANET dictionary uses as padding in place of 0x0000, which ETG.1000.6 requires.
+// 0x2001: ecatgen gives padding the first index its own dictionary does not contain. It searches
+// the FSoE Module dictionary alone, so the safety PDOs 0x1700 and 0x1B00 name 0x2001, and on the
+// drive that is Commutation angle offset. 0x2007: the firmware's scan_pdo_mapping skips it as
+// padding at any subindex and any length. A dictionary with correct padding contains neither.
+constexpr std::array<uint16_t, 2> kSomanetPaddingIndices = {0x2001, 0x2007};
+
+bool isPadding(const Device& device, const PdoMappingEntry& entry) {
+  if (entry.index == 0) {
+    return true;
+  }
+  return isSomanetDevice(device.vendorId()) &&
+         std::ranges::find(kSomanetPaddingIndices, entry.index) != kSomanetPaddingIndices.end();
+}
+
 // Appends one direction's mapped objects to @p out, converting each entry's window-relative
-// bit offset to an absolute offset within the direction's image. Padding entries (index 0)
-// are skipped. Returns an error if the mapping overflows the window the driver reserved.
-std::expected<void, std::string> appendEntries(std::vector<ProcessImageEntry>& out,
-                                               const Device& device,
-                                               const std::vector<PdoMappingEntry>& entries,
-                                               uint32_t mappedBits, uint32_t windowOffsetBytes,
-                                               uint32_t windowBytes, const char* direction) {
+// bit offset to an absolute offset within the direction's image. Padding entries are skipped, so
+// they bind no cell and ProcessImage::find never returns them. Returns how many entries were
+// skipped under the SOMANET padding rule, or an error if the mapping overflows the window the
+// driver reserved.
+std::expected<uint32_t, std::string> appendEntries(std::vector<ProcessImageEntry>& out,
+                                                   const Device& device,
+                                                   const std::vector<PdoMappingEntry>& entries,
+                                                   uint32_t mappedBits, uint32_t windowOffsetBytes,
+                                                   uint32_t windowBytes, const char* direction) {
   const uint16_t slavePosition = device.slavePosition();
   if (mappedBits > windowBytes * 8u) {
     return std::unexpected(
@@ -27,9 +48,13 @@ std::expected<void, std::string> appendEntries(std::vector<ProcessImageEntry>& o
                     slavePosition, direction, mappedBits, windowBytes));
   }
   const uint32_t windowOffsetBits = windowOffsetBytes * 8u;
+  uint32_t somanetPadding = 0;
   for (const auto& e : entries) {
-    if (e.index == 0) {
-      continue;  // alignment gap — binds to no object
+    if (isPadding(device, e)) {
+      if (e.index != 0) {
+        ++somanetPadding;
+      }
+      continue;  // a gap in the PDO — binds to no object
     }
     out.push_back(ProcessImageEntry{
         .slavePosition = slavePosition,
@@ -42,7 +67,7 @@ std::expected<void, std::string> appendEntries(std::vector<ProcessImageEntry>& o
         .parameter = device.findParameter(e.index, e.subindex),
     });
   }
-  return {};
+  return somanetPadding;
 }
 
 }  // namespace
@@ -87,15 +112,23 @@ std::expected<ProcessImage, std::string> buildProcessImage(const mm::comm::PdoLa
           device.slavePosition()));
     }
     const mm::comm::SlaveIo& io = *it->second;
-    if (auto r = appendEntries(image.outputs, device, mappings.outputs, mappings.outputBits,
-                               io.outputOffset, io.outputBytes, "output");
-        !r) {
-      return std::unexpected(r.error());
+    auto outputPadding = appendEntries(image.outputs, device, mappings.outputs, mappings.outputBits,
+                                       io.outputOffset, io.outputBytes, "output");
+    if (!outputPadding) {
+      return std::unexpected(outputPadding.error());
     }
-    if (auto r = appendEntries(image.inputs, device, mappings.inputs, mappings.inputBits,
-                               io.inputOffset, io.inputBytes, "input");
-        !r) {
-      return std::unexpected(r.error());
+    auto inputPadding = appendEntries(image.inputs, device, mappings.inputs, mappings.inputBits,
+                                      io.inputOffset, io.inputBytes, "input");
+    if (!inputPadding) {
+      return std::unexpected(inputPadding.error());
+    }
+    if (const uint32_t padding = *outputPadding + *inputPadding; padding > 0) {
+      // A warning, because it names a fault in the drive's dictionary that a support log must show.
+      spdlog::warn(
+          "Device {}: {} PDO mapping entries name index 0x2001 or 0x2007, which this SOMANET "
+          "dictionary uses as padding. Motion Master treats them as padding and reads and writes "
+          "those objects over SDO.",
+          device.slavePosition(), padding);
     }
   }
   return image;

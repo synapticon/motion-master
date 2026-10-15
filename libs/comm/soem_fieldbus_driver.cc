@@ -1430,9 +1430,10 @@ std::expected<std::vector<uint8_t>, FoeError> SoemFieldbusDriver::readFile(
   int size = kMaxSize;
   std::string name = filename;  // ecx_FOEread takes non-const char*
   // A SOMANET bootloader can take seconds to answer a read, and it sends nothing until it answers.
-  // It never sends FOE_BUSY. A read given up too early costs an abort and the whole read again,
-  // so the wait is long. It is spent only when the slave does not answer.
-  constexpr int kReadTimeoutUs = 10'000'000;
+  // It never sends FOE_BUSY. A read given up too early fails on every attempt, because each
+  // attempt starts the read again after the abort. 6 s is the timeout known to work on such
+  // drives in the field. The wait is spent only when the slave does not answer.
+  constexpr int kReadTimeoutUs = 6'000'000;
   int wkc =
       ecx_FOEread(ctx_.get(), slavePosition, name.data(), 0, &size, data.data(), kReadTimeoutUs);
   if (wkc <= 0) {

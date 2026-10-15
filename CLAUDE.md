@@ -793,7 +793,7 @@ reply `FOE_BUSY`, and `ports/soem` patches the `FOE_BUSY` branch for that. Upstr
 the resend went to the address of a NULL pointer, so a BUSY mid-transfer stalled until timeout,
 and a BUSY before the first data packet returned success having sent nothing.
 
-**A SOMANET bootloader never sends `FOE_BUSY` for a read, so `readFile` waits 10 s.** The FoE
+**A SOMANET bootloader never sends `FOE_BUSY` for a read, so `readFile` waits 6 s.** The FoE
 layer of the bootloader (`lib_ethercat/libsrc/foe.xc` in synapticon/somanet_ethercat) stays
 silent until it answers, and its answer can take seconds. **A transfer that the master gives up
 on stays open on the drive.** In that state the bootloader answers every new READ and WRITE with

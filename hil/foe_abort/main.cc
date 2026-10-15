@@ -38,7 +38,7 @@ namespace {
 
 using mm::comm::EtherCatState;
 
-constexpr int kReadTimeoutUs = 10'000'000;
+constexpr int kReadTimeoutUs = 6'000'000;
 constexpr int kStateTimeoutUs = 10'000'000;
 
 struct Options {

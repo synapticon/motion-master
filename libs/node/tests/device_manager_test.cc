@@ -146,8 +146,8 @@ class FakeDriver : public FieldbusDriver {
 
   std::expected<OdRead, std::string> readObjectDictionary(uint16_t) override { return OdRead{}; }
 
-  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
-                                                                   const std::string&) override {
+  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
+      uint16_t, const std::string&, std::chrono::milliseconds) override {
     return std::vector<uint8_t>{};
   }
 

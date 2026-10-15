@@ -321,7 +321,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
   std::vector<std::pair<std::string, std::vector<uint8_t>>> fileWrites;
 
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
-      uint16_t, const std::string& name) override {
+      uint16_t, const std::string& name, std::chrono::milliseconds) override {
     fileReads.push_back(name);
     auto it = files.find(name);
     if (it == files.end()) {
@@ -2360,7 +2360,7 @@ class FirmwareFakeDriver : public FieldbusDriver {
     return {};
   }
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
-      uint16_t, const std::string& name) override {
+      uint16_t, const std::string& name, std::chrono::milliseconds) override {
     constexpr std::string_view kRemove = "fs-remove=";
     if (name.starts_with(kRemove)) {
       removed.push_back(name.substr(kRemove.size()));

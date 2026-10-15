@@ -243,12 +243,14 @@ class Device {
   /// @brief Reads a file from this device via File over EtherCAT (FoE).
   ///
   /// @param filename  FoE filename as recognised by the slave firmware.
+  /// @param timeout   How long to wait for the device's answer. See @c FieldbusDriver::readFile.
   /// @return File bytes on success, or a @c mm::comm::FoeError — the one structured error on this
   ///         class, because FoE callers branch on the failure (retry a transient one, treat a
   ///         missing file as nothing to do). It keeps a string face, so a caller that only forwards
   ///         the reason uses @c .error().message and is otherwise unaffected.
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
-      const std::string& filename) const;
+      const std::string& filename,
+      std::chrono::milliseconds timeout = mm::comm::kFoeReadTimeout) const;
 
   /// @brief Writes a file to this device via File over EtherCAT (FoE).
   ///

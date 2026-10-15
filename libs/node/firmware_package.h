@@ -31,6 +31,9 @@ namespace mm::node {
 /// version the filename ends with ("v5.6.10"). Hence @c softwareName / @c softwareVersion for that
 /// pair.
 
+/// @brief The name of the ESI in a SOMANET firmware package and on the drive.
+inline constexpr std::string_view kEsiFileName = "SOMANET_CiA_402.xml.zip";
+
 /// @brief The entries an install skips unless the request names a different set.
 ///
 /// Both are descriptive extras rather than firmware: @c SOMANET_CiA_402.xml.zip is the ESI, which a
@@ -40,7 +43,7 @@ namespace mm::node {
 /// store something nothing on the drive reads. They are skipped by default and un-skippable only
 /// deliberately, by sending a request that omits them from the list.
 inline constexpr std::array<std::string_view, 2> kDefaultSkippedFirmwareFiles = {
-    "SOMANET_CiA_402.xml.zip",
+    kEsiFileName,
     "stack_image.svg.zip",
 };
 

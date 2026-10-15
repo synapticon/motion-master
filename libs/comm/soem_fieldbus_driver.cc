@@ -1409,7 +1409,7 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSii(uint16_t slavePosi
 }
 
 std::expected<std::vector<uint8_t>, FoeError> SoemFieldbusDriver::readFile(
-    uint16_t slavePosition, const std::string& filename) {
+    uint16_t slavePosition, const std::string& filename, std::chrono::milliseconds timeout) {
   std::lock_guard<std::mutex> lock(controlPlaneMutex_);
   if (!ctx_) {
     return std::unexpected(
@@ -1429,13 +1429,9 @@ std::expected<std::vector<uint8_t>, FoeError> SoemFieldbusDriver::readFile(
   std::vector<uint8_t> data(kMaxSize);
   int size = kMaxSize;
   std::string name = filename;  // ecx_FOEread takes non-const char*
-  // A SOMANET bootloader can take seconds to answer a read, and it sends nothing until it answers.
-  // It never sends FOE_BUSY. A read given up too early fails on every attempt, because each
-  // attempt starts the read again after the abort. 6 s is the timeout known to work on such
-  // drives in the field. The wait is spent only when the slave does not answer.
-  constexpr int kReadTimeoutUs = 6'000'000;
-  int wkc =
-      ecx_FOEread(ctx_.get(), slavePosition, name.data(), 0, &size, data.data(), kReadTimeoutUs);
+  const auto timeoutUs =
+      static_cast<int>(std::chrono::duration_cast<std::chrono::microseconds>(timeout).count());
+  int wkc = ecx_FOEread(ctx_.get(), slavePosition, name.data(), 0, &size, data.data(), timeoutUs);
   if (wkc <= 0) {
     FoeError error = endFailedFoeTransfer(ctx_.get(), wkc, "FOEread", slavePosition, filename);
     spdlog::debug("{}", error.message);

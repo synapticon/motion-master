@@ -800,6 +800,10 @@ on stays open on the drive.** In that state the bootloader answers every new REA
 mailbox error `0x0008`, through every AL state change, until a power cycle. So every FoE failure
 without an FoE Error packet from the drive ends with `abortFoeTransfer` (`comm/soem_mailbox.h`),
 which sends an FoE ERROR request. `hil/foe_abort` shows both on a drive. See issue #97.
+**A read can ask for a longer timeout.** A SOMANET file removal is an FoE read of
+`fs-remove=<name>`, which the drive answers only after the erase, so `removeDeviceFile` waits
+10 s, and 30 s for the ESI (about 17 s to erase). An abort sent during the erase would end the
+removal on the drive.
 
 **Practical upshot: probing unknown subindices is expensive, and a bare failure means "no
 answer", not "no such object".** See `NEXTGEN.md`, Session 2026-07-20.

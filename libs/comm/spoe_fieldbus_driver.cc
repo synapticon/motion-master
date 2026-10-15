@@ -759,8 +759,9 @@ FoeError foeErrorFromStatus(const std::string& host, const std::string& filename
 
 std::expected<Frame, FoeError> SpoeFieldbusDriver::filePacket(Drive& drive, MessageType type,
                                                               uint8_t packetState,
-                                                              std::span<const uint8_t> data) {
-  auto reply = drive.connection.request(type, packetState, data, config_.fileTimeout);
+                                                              std::span<const uint8_t> data,
+                                                              std::chrono::milliseconds timeout) {
+  auto reply = drive.connection.request(type, packetState, data, timeout);
   if (!reply) {
     if (reply.error().kind == ConnectionError::Kind::kClosed) {
       drive.state.store(0);
@@ -773,10 +774,13 @@ std::expected<Frame, FoeError> SpoeFieldbusDriver::filePacket(Drive& drive, Mess
 }
 
 std::expected<std::vector<uint8_t>, FoeError> SpoeFieldbusDriver::readFileFrom(
-    Drive& drive, const std::string& filename) {
+    Drive& drive, const std::string& filename, std::chrono::milliseconds timeout) {
+  // The configured file timeout already covers the drive's slow file work, so a caller can only
+  // make the wait longer.
+  const std::chrono::milliseconds packetTimeout = std::max(config_.fileTimeout, timeout);
   const std::vector<uint8_t> name(filename.begin(), filename.end());
   std::vector<uint8_t> content;
-  auto reply = filePacket(drive, MessageType::kFileRead, kPacketFirst, name);
+  auto reply = filePacket(drive, MessageType::kFileRead, kPacketFirst, name, packetTimeout);
   for (int packet = 0; packet < kMaxFilePackets; ++packet) {
     if (!reply) {
       return std::unexpected(reply.error());
@@ -789,7 +793,7 @@ std::expected<std::vector<uint8_t>, FoeError> SpoeFieldbusDriver::readFileFrom(
     if (static_cast<uint8_t>(reply->status >> 8) == kPacketLast) {
       return content;
     }
-    reply = filePacket(drive, MessageType::kFileRead, kPacketMiddle, {});
+    reply = filePacket(drive, MessageType::kFileRead, kPacketMiddle, {}, packetTimeout);
   }
   return std::unexpected(
       FoeError{.kind = FoeErrorKind::Protocol,
@@ -798,7 +802,7 @@ std::expected<std::vector<uint8_t>, FoeError> SpoeFieldbusDriver::readFileFrom(
 }
 
 std::expected<std::vector<uint8_t>, FoeError> SpoeFieldbusDriver::readFile(
-    uint16_t slavePosition, const std::string& filename) {
+    uint16_t slavePosition, const std::string& filename, std::chrono::milliseconds timeout) {
   Drive* found = driveAt(slavePosition);
   if (found == nullptr) {
     return std::unexpected(
@@ -806,13 +810,13 @@ std::expected<std::vector<uint8_t>, FoeError> SpoeFieldbusDriver::readFile(
                  .retry = Retry::Permanent,
                  .message = std::format("no SPoE device at position {}", slavePosition)});
   }
-  auto content = readFileFrom(*found, filename);
+  auto content = readFileFrom(*found, filename, timeout);
   if (!content || !content->empty() || filename == "fs-getlist") {
     return content;
   }
   // An empty read can be a missing file, and the firmware source does not show what the SoC answers
   // for one. The file list tells the two apart.
-  const auto list = readFileFrom(*found, "fs-getlist");
+  const auto list = readFileFrom(*found, "fs-getlist", kFoeReadTimeout);
   if (!list) {
     return content;
   }
@@ -843,7 +847,8 @@ std::expected<void, FoeError> SpoeFieldbusDriver::writeFile(uint16_t slavePositi
   }
   Drive& drive = *found;
   const std::vector<uint8_t> name(filename.begin(), filename.end());
-  const auto first = filePacket(drive, MessageType::kFileWrite, kPacketFirst, name);
+  const auto first =
+      filePacket(drive, MessageType::kFileWrite, kPacketFirst, name, config_.fileTimeout);
   if (!first) {
     return std::unexpected(first.error());
   }
@@ -860,8 +865,9 @@ std::expected<void, FoeError> SpoeFieldbusDriver::writeFile(uint16_t slavePositi
   do {
     const std::size_t chunk = std::min(kFileChunk, data.size() - offset);
     const bool last = offset + chunk >= data.size();
-    const auto reply = filePacket(drive, MessageType::kFileWrite,
-                                  last ? kPacketLast : kPacketMiddle, data.subspan(offset, chunk));
+    const auto reply =
+        filePacket(drive, MessageType::kFileWrite, last ? kPacketLast : kPacketMiddle,
+                   data.subspan(offset, chunk), config_.fileTimeout);
     if (!reply) {
       return std::unexpected(reply.error());
     }

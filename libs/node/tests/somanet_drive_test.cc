@@ -95,8 +95,8 @@ class IdentityFakeDriver : public FieldbusDriver {
       const std::vector<uint16_t>& positions) override {
     return std::vector<SlaveStateRaw>(positions.size(), SlaveStateRaw{});
   }
-  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
-                                                                   const std::string&) override {
+  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
+      uint16_t, const std::string&, std::chrono::milliseconds) override {
     return std::vector<uint8_t>{};
   }
   std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string&,
@@ -295,6 +295,9 @@ class OsCommandFakeDriver : public FieldbusDriver {
   /// An fs-buffer transfer has to follow the command write, so the order is asserted, not assumed.
   int commandWritesAtFirstTransfer = -1;
 
+  /// The timeout of every read, in the order of @c reads.
+  std::vector<std::chrono::milliseconds> readTimeouts;
+
   void recordTransferOrder() {
     if (commandWritesAtFirstTransfer < 0) {
       commandWritesAtFirstTransfer = commandWrites;
@@ -302,8 +305,9 @@ class OsCommandFakeDriver : public FieldbusDriver {
   }
 
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
-      uint16_t, const std::string& name) override {
+      uint16_t, const std::string& name, std::chrono::milliseconds timeout) override {
     reads.push_back(name);
+    readTimeouts.push_back(timeout);
     recordTransferOrder();
     if (readFailure) {
       return std::unexpected(mm::comm::makeFoeError(*readFailure, "FOEread", 1, name));
@@ -1363,6 +1367,30 @@ TEST(RemoveFile, DeletesThroughThePseudoFile) {
   // The prefix is the whole operation: the drive deletes what the name carries.
   ASSERT_FALSE(driver.reads.empty());
   EXPECT_EQ(driver.reads.back(), "fs-remove=config.csv");
+}
+
+TEST(RemoveFile, WaitsForTheEraseOfAFile) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  // The drive answers a removal only after it has erased the file, which takes longer than any
+  // plain read. A removal given up too early is aborted while the erase still runs.
+  ASSERT_TRUE(removeDeviceFile(device, "config.csv").has_value());
+  ASSERT_FALSE(driver.readTimeouts.empty());
+  EXPECT_EQ(driver.readTimeouts.back(), std::chrono::seconds(10));
+}
+
+TEST(RemoveFile, WaitsLongerForTheEraseOfTheEsi) {
+  OsCommandFakeDriver driver;
+  Device device = makeOsCommandDevice(driver);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  ASSERT_TRUE(removeDeviceFile(device, "SOMANET_CiA_402.xml.zip").has_value());
+  ASSERT_FALSE(driver.readTimeouts.empty());
+  EXPECT_EQ(driver.readTimeouts.back(), std::chrono::seconds(30));
 }
 
 TEST(RemoveFile, TreatsAMissingFileAsRemoved) {

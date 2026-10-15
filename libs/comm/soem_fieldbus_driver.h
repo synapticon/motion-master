@@ -151,8 +151,9 @@ class SoemFieldbusDriver : public FieldbusDriver {
                                             std::span<const uint8_t> data) override;
 
   /// @copydoc FieldbusDriver::readFile
-  std::expected<std::vector<uint8_t>, FoeError> readFile(uint16_t slavePosition,
-                                                         const std::string& filename) override;
+  std::expected<std::vector<uint8_t>, FoeError> readFile(
+      uint16_t slavePosition, const std::string& filename,
+      std::chrono::milliseconds timeout) override;
 
   /// @copydoc FieldbusDriver::writeFile
   std::expected<void, FoeError> writeFile(uint16_t slavePosition, const std::string& filename,

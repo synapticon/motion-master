@@ -1162,19 +1162,39 @@ FoeError foeError(int wkc, std::string_view op, uint16_t slave, std::string_view
   return error;
 }
 
+// A failed FoE transfer, and whether the slave answered it.
+struct FailedFoeTransfer {
+  FoeError error;
+  // True when the slave refused the transfer with an FoE Error packet. That is the slave's
+  // answer, and asking again gets the same answer.
+  bool refused = false;
+};
+
 // Explains a failed ecx_FOEread/ecx_FOEwrite: the slave's own refusal when it sent one, the return
 // value otherwise. A slave that sent an FoE Error packet ended the transfer itself. Every other
 // failure leaves the transfer open on the slave, and a SOMANET bootloader then rejects every new
 // request with mailbox error 0x0008 until a power cycle, so the transfer is aborted here. Called
 // with controlPlaneMutex_ held.
-FoeError endFailedFoeTransfer(ecx_contextt* ctx, int wkc, std::string_view op, uint16_t slave,
-                              std::string_view filename) {
+FailedFoeTransfer endFailedFoeTransfer(ecx_contextt* ctx, int wkc, std::string_view op,
+                                       uint16_t slave, std::string_view filename) {
   if (const auto refusal = drainFoeErrors(ctx, slave)) {
-    return makeFoeRefusal(refusal->code, refusal->text, op, slave, filename);
+    return {.error = makeFoeRefusal(refusal->code, refusal->text, op, slave, filename),
+            .refused = true};
   }
   abortFoeTransfer(ctx, slave);
-  return foeError(wkc, op, slave, filename);
+  return {.error = foeError(wkc, op, slave, filename), .refused = false};
 }
+
+// How often a read the slave did not answer is asked again, and the pause between attempts.
+// Motion Master v5 uses the same 3 attempts and the same pause, and it reads files from SOMANET
+// bootloaders reliably in the field.
+constexpr int kFoeReadAttempts = 3;
+constexpr auto kFoeReadRetryDelay = std::chrono::milliseconds(100);
+
+// The wait for the slave to acknowledge one packet of a write. A SOMANET bootloader erases flash
+// before it acknowledges the first packet of a firmware binary. Motion Master v5 uses the same
+// 10 s, and it installs firmware reliably in the field.
+constexpr int kFoeWriteTimeoutUs = 10'000'000;
 
 }  // namespace
 
@@ -1431,11 +1451,22 @@ std::expected<std::vector<uint8_t>, FoeError> SoemFieldbusDriver::readFile(
   std::string name = filename;  // ecx_FOEread takes non-const char*
   const auto timeoutUs =
       static_cast<int>(std::chrono::duration_cast<std::chrono::microseconds>(timeout).count());
-  int wkc = ecx_FOEread(ctx_.get(), slavePosition, name.data(), 0, &size, data.data(), timeoutUs);
-  if (wkc <= 0) {
-    FoeError error = endFailedFoeTransfer(ctx_.get(), wkc, "FOEread", slavePosition, filename);
-    spdlog::debug("{}", error.message);
-    return std::unexpected(std::move(error));
+  for (int attempt = 1;; ++attempt) {
+    size = kMaxSize;
+    const int wkc =
+        ecx_FOEread(ctx_.get(), slavePosition, name.data(), 0, &size, data.data(), timeoutUs);
+    if (wkc > 0) {
+      break;
+    }
+    FailedFoeTransfer failed =
+        endFailedFoeTransfer(ctx_.get(), wkc, "FOEread", slavePosition, filename);
+    if (failed.refused || failed.error.retry == Retry::Permanent || attempt == kFoeReadAttempts) {
+      spdlog::debug("{}", failed.error.message);
+      return std::unexpected(std::move(failed.error));
+    }
+    spdlog::warn("{}; attempt {} of {}", failed.error.message, attempt, kFoeReadAttempts);
+    std::this_thread::sleep_for(kFoeReadRetryDelay);
+    drainMailbox(ctx_.get(), slavePosition);
   }
   data.resize(size);
   spdlog::debug("FOEread slave {} '{}' ok ({} bytes)", slavePosition, filename, data.size());
@@ -1456,11 +1487,12 @@ std::expected<void, FoeError> SoemFieldbusDriver::writeFile(uint16_t slavePositi
   drainFoeErrors(ctx_.get(), slavePosition);
   std::string name = filename;  // ecx_FOEwrite takes non-const char*
   int wkc = ecx_FOEwrite(ctx_.get(), slavePosition, name.data(), 0, static_cast<int>(data.size()),
-                         const_cast<uint8_t*>(data.data()), EC_TIMEOUTRXM);
+                         const_cast<uint8_t*>(data.data()), kFoeWriteTimeoutUs);
   if (wkc <= 0) {
-    FoeError error = endFailedFoeTransfer(ctx_.get(), wkc, "FOEwrite", slavePosition, filename);
-    spdlog::debug("{}", error.message);
-    return std::unexpected(std::move(error));
+    FailedFoeTransfer failed =
+        endFailedFoeTransfer(ctx_.get(), wkc, "FOEwrite", slavePosition, filename);
+    spdlog::debug("{}", failed.error.message);
+    return std::unexpected(std::move(failed.error));
   }
   spdlog::debug("FOEwrite slave {} '{}' ok", slavePosition, filename);
   return {};

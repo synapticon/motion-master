@@ -33,8 +33,9 @@ inline constexpr std::size_t kMaxProcessImageBytes = 32768;
 ///
 /// A SOMANET bootloader can take seconds to answer a read, and it sends nothing until it answers.
 /// A read given up too early fails on every attempt, because each attempt starts the read again.
-/// 6 s is the timeout known to work on such drives in the field. The wait is spent only when the
-/// slave does not answer.
+/// 6 s is the timeout known to work on such drives in the field: Motion Master v5 waits the same
+/// 6 s, and it reads files from SOMANET bootloaders reliably. The wait is spent only when the slave
+/// does not answer.
 inline constexpr std::chrono::milliseconds kFoeReadTimeout{6000};
 
 /// @brief EtherCAT Application Layer state values.

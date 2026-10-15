@@ -787,9 +787,10 @@ queued reason and decodes the sentinel otherwise.
 `EC_ERR_TYPE_*`, so a negative FoE return is an error *code*, not a working counter, with
 nothing queued. `readFile`/`writeFile` decode it into a `FoeError` via `switch (-wkc)`.
 
-FoE writes use `EC_TIMEOUTRXM` (700 ms) per *packet acknowledgement*, not per transfer, so a
-bare write failure costs about 700 ms per attempt. A drive that needs longer during a write can
-reply `FOE_BUSY`, and `ports/soem` patches the `FOE_BUSY` branch for that. Upstream 2.0 broke it:
+FoE writes wait 10 s per *packet acknowledgement*, not per transfer, because a SOMANET
+bootloader erases flash before it acknowledges the first packet of a firmware binary. A drive
+that needs longer during a write can reply `FOE_BUSY`, and `ports/soem` patches the `FOE_BUSY`
+branch for that. Upstream 2.0 broke it:
 the resend went to the address of a NULL pointer, so a BUSY mid-transfer stalled until timeout,
 and a BUSY before the first data packet returned success having sent nothing.
 
@@ -800,6 +801,10 @@ on stays open on the drive.** In that state the bootloader answers every new REA
 mailbox error `0x0008`, through every AL state change, until a power cycle. So every FoE failure
 without an FoE Error packet from the drive ends with `abortFoeTransfer` (`comm/soem_mailbox.h`),
 which sends an FoE ERROR request. `hil/foe_abort` shows both on a drive. See issue #97.
+**The FoE timeouts and attempts follow Motion Master v5, which works reliably in the field:**
+reads 6 s with 3 attempts in `SoemFieldbusDriver::readFile`, writes 10 s per packet with 3
+attempts in the firmware installation, removals 10 s (30 s for the ESI), and 2 s after entering
+BOOT. A read or write is asked again only when the drive gave no answer.
 **A read can ask for a longer timeout.** A SOMANET file removal is an FoE read of
 `fs-remove=<name>`, which the drive answers only after the erase, so `removeDeviceFile` waits
 10 s, and 30 s for the ESI (about 17 s to erase). An abort sent during the erase would end the

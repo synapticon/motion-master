@@ -1144,7 +1144,7 @@ std::expected<std::vector<DeviceFile>, std::string> SomanetDrive::readFileList()
 std::expected<void, std::string> removeDeviceFile(Device& device, const std::string& filename) {
   // The drive answers a removal only after it has erased the file. A removal given up earlier is
   // aborted while the erase still runs, so the wait covers the erase: the ESI takes about 17 s, and
-  // other files take less.
+  // other files take less. Motion Master v5 uses the same 10 s and 30 s.
   constexpr std::chrono::seconds kRemoveTimeout{10};
   constexpr std::chrono::seconds kRemoveEsiTimeout{30};
   const auto timeout = filename == kEsiFileName ? kRemoveEsiTimeout : kRemoveTimeout;

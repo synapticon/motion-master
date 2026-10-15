@@ -787,12 +787,19 @@ queued reason and decodes the sentinel otherwise.
 `EC_ERR_TYPE_*`, so a negative FoE return is an error *code*, not a working counter, with
 nothing queued. `readFile`/`writeFile` decode it into a `FoeError` via `switch (-wkc)`.
 
-FoE uses `EC_TIMEOUTRXM` (700 ms) per *packet acknowledgement*, not per transfer, so a bare
-failure costs about 700 ms per attempt. **A bootloader needing longer is expected to reply
-`FOE_BUSY` rather than go silent**, which is why the timeout does not need raising and why
-`ports/soem` patches the `FOE_BUSY` branch instead. Upstream 2.0 broke it: the resend went to
-the address of a NULL pointer, so a BUSY mid-transfer stalled until timeout, and a BUSY before
-the first data packet returned success having sent nothing.
+FoE writes use `EC_TIMEOUTRXM` (700 ms) per *packet acknowledgement*, not per transfer, so a
+bare write failure costs about 700 ms per attempt. A drive that needs longer during a write can
+reply `FOE_BUSY`, and `ports/soem` patches the `FOE_BUSY` branch for that. Upstream 2.0 broke it:
+the resend went to the address of a NULL pointer, so a BUSY mid-transfer stalled until timeout,
+and a BUSY before the first data packet returned success having sent nothing.
+
+**A SOMANET bootloader never sends `FOE_BUSY` for a read, so `readFile` waits 10 s.** The FoE
+layer of the bootloader (`lib_ethercat/libsrc/foe.xc` in synapticon/somanet_ethercat) stays
+silent until it answers, and its answer can take seconds. **A transfer that the master gives up
+on stays open on the drive.** In that state the bootloader answers every new READ and WRITE with
+mailbox error `0x0008`, through every AL state change, until a power cycle. So every FoE failure
+without an FoE Error packet from the drive ends with `abortFoeTransfer` (`comm/soem_mailbox.h`),
+which sends an FoE ERROR request. `hil/foe_abort` shows both on a drive. See issue #97.
 
 **Practical upshot: probing unknown subindices is expensive, and a bare failure means "no
 answer", not "no such object".** See `NEXTGEN.md`, Session 2026-07-20.
@@ -995,6 +1002,18 @@ python3 hil/jitter_bench/plot_jitter.py jitter.csv -o report.png
 
 `--workload` simulates task load with a CPU-bound spin, so you can test whether a realistic
 budget causes overruns on a given kernel. The CSV has `cycle`, `elapsed_ms`, `jitter_ns`.
+
+### foe_abort
+
+Shows on a SOMANET drive that its bootloader stays stuck after the master gives up on an FoE
+read, and that `abortFoeTransfer` frees it. It puts the drive into BOOT, reads a file with a
+timeout of 0, expects mailbox error `0x0008` on the next read, aborts, and reads again. It leaves
+the drive in INIT. It needs raw socket access, and no other master may use the adapter.
+
+```bash
+sudo ./build/x64-linux-debug/hil/foe_abort/foe_abort --ifname <interface> [--slave 1] \
+  [--file .hardware_description]
+```
 
 ### api
 

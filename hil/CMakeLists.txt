@@ -1,1 +1,2 @@
 add_subdirectory(jitter_bench)
+add_subdirectory(foe_abort)

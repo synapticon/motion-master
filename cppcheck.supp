@@ -74,6 +74,7 @@ syntaxError:*/router_test.cc
 syntaxError:*/game_loop_test.cc
 syntaxError:*/concurrency_test.cc
 syntaxError:*/soem_fieldbus_driver_test.cc
+syntaxError:*/soem_mailbox_test.cc
 syntaxError:*/http_client_test.cc
 syntaxError:*/process_test.cc
 syntaxError:*/notification_bus_test.cc
@@ -179,3 +180,9 @@ localMutex:*/notification_bus.cc
 // run, through a lambda capture that cppcheck does not follow, so it reads the second test as
 // identical to the first. Removing it would drop the bytes that arrive at the deadline.
 identicalConditionAfterEarlyExit:*/spoe_connection.cc
+
+// resetMailboxCounter declares a packed request struct between OSAL_PACKED_BEGIN and
+// OSAL_PACKED_END, and the next statement is a call to drainMailbox. cppcheck cannot expand
+// OSAL_PACKED_END, reads the macro and the call together as a variable named drainMailbox of type
+// OSAL_PACKED_END, and reports that variable as shadowing the function. There is no variable.
+shadowFunction:*/soem_fieldbus_driver.cc

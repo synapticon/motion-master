@@ -247,13 +247,13 @@ std::string mailboxRefusalSuffix(ecx_contextt* ctx, uint16_t slavePosition) {
 }
 
 // Explains a failed SDO transfer (wkc <= 0) as a short human-readable suffix. Prefers the specific
-// reason SOEM enqueues — SDO abort code, mailbox error — popped via ecx_poperror (" (SDO abort
+// reason SOEM enqueues — SDO abort code, mailbox error — popped via ecx_popslaveerror (" (SDO abort
 // 0x...)", " (mailbox error)", ...). When the queue is empty it falls back to the wkc return value,
 // which for CoE is a negative EC_* sentinel (e.g. EC_TIMEOUT when the slave never answers) rather
 // than a working counter, so a "no response" timeout reads differently from a bare failure. The one
 // case neither describes — wkc == 0 with nothing queued — is handed to mailboxRefusalSuffix, which
 // asks the slave. Never empty for a failed transfer. Called with controlPlaneMutex_ held (it
-// touches the SOEM context error stack, and mailboxRefusalSuffix reads a register).
+// pops the slave's errors, and mailboxRefusalSuffix reads one of its registers).
 //
 // Reached through drainSdoErrors, which is what every failing CoE path calls — popping one entry
 // and leaving the rest would hand them to the next transfer to report as its own.
@@ -266,7 +266,7 @@ std::string mailboxRefusalSuffix(ecx_contextt* ctx, uint16_t slavePosition) {
 std::string sdoErrorSuffix(ecx_contextt* ctx, uint16_t slavePosition, int wkc,
                            bool explainRefusal) {
   ec_errort err{};
-  if (ecx_poperror(ctx, &err)) {
+  if (ecx_popslaveerror(ctx, slavePosition, &err)) {
     switch (err.Etype) {
       case EC_ERR_TYPE_SDO_ERROR: {
         const auto code = static_cast<uint32_t>(err.AbortCode);
@@ -309,27 +309,43 @@ std::string sdoErrorSuffix(ecx_contextt* ctx, uint16_t slavePosition, int wkc,
   }
 }
 
-// Pops every error SOEM queued for one failed transfer, returning the decoded reason of the first.
+// Removes every error SOEM queued for one slave. Called with controlPlaneMutex_ held.
+void discardSlaveErrors(ecx_contextt* ctx, uint16_t slavePosition) {
+  ec_errort discarded{};
+  while (ecx_popslaveerror(ctx, slavePosition, &discarded)) {
+  }
+}
+
+// Pops every error SOEM queued for one slave's failed transfer, returning the decoded reason of the
+// first.
+//
+// Only the errors of @p slavePosition are popped, because every entry carries the slave that caused
+// it. An entry of another slave belongs to the work on that slave. ecx_popslaveerror is the SOEM
+// port's pop that selects one slave.
 //
 // Draining matters because the error list is a fixed-size FIFO ring (EC_MAXELIST) that drops its
-// oldest entry on overflow, and ecx_poperror pops the *oldest*: an entry left behind is not merely
-// wasted, it is later popped by an unrelated transfer and reported as that transfer's reason. One
-// failed attempt can push more than one entry (a mailbox error and an SDO abort), and a retry loop
-// multiplies that, so leaving the queue dirty misattributes reasons across slaves and objects
-// arbitrarily far apart in time. Draining to empty keeps every reason attached to the transfer that
-// produced it. Called with controlPlaneMutex_ held, like sdoErrorSuffix.
+// oldest entry on overflow, and a pop returns the *oldest* entry of the slave: an entry left behind
+// is not merely wasted, it is later popped by an unrelated transfer to the same slave and reported
+// as that transfer's reason. One failed attempt can push more than one entry (a mailbox error and
+// an SDO abort), and a retry loop multiplies that, so leaving the slave's entries behind
+// misattributes reasons across objects arbitrarily far apart in time. Draining them keeps every
+// reason attached to the transfer that produced it. Called with controlPlaneMutex_ held, like
+// sdoErrorSuffix.
 //
 // Every failing CoE path goes through here — readSdo, readSdoComplete, writeSdo and the SDO Info
 // retry alike. A single-shot transfer can queue two entries just as a retried one can, so there is
 // no path for which popping one and leaving the rest is safe.
+//
+// A drain after a failure is not enough on its own. Some entries are pushed outside a failing
+// transfer of their slave: an emergency during a transfer that succeeds, or an abort during a scan
+// or a re-map. Each of those paths therefore discards the slave's entries before it starts, with
+// discardSlaveErrors.
 std::string drainSdoErrors(ecx_contextt* ctx, uint16_t slavePosition, int wkc,
                            bool explainRefusal = true) {
   std::string reason = sdoErrorSuffix(ctx, slavePosition, wkc, explainRefusal);
-  ec_errort discarded{};
-  while (ecx_poperror(ctx, &discarded)) {
-    // Discarded on purpose: the first entry is the one that describes this transfer, and the rest
-    // must not survive to be blamed on the next one.
-  }
+  // The first entry is the one that describes this transfer, and the rest must not survive to be
+  // blamed on the next one.
+  discardSlaveErrors(ctx, slavePosition);
   return reason;
 }
 
@@ -856,6 +872,8 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
   // so they don't flood the log, while a direct (user-initiated) read keeps its debug trace.
   const auto sdoLevel = sdoLogQuiet ? spdlog::level::trace : spdlog::level::debug;
   spdlog::log(sdoLevel, "SDOread slave {} 0x{:04X}:{:02X}", slavePosition, index, subindex);
+  // Left over from an earlier transfer, and not this one's to report.
+  discardSlaveErrors(ctx_.get(), slavePosition);
   // 4096-byte upload buffer: ample for every scalar/string parameter a SOMANET drive exposes at a
   // single subindex. ecx_SDOread clamps the transfer to the buffer and reports the bytes read with
   // a positive wkc, giving no truncation flag — so rather than hand back silently-short data for an
@@ -902,6 +920,8 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComp
   }
   const auto sdoLevel = sdoLogQuiet ? spdlog::level::trace : spdlog::level::debug;
   spdlog::log(sdoLevel, "SDOread(CA) slave {} 0x{:04X}", slavePosition, index);
+  // Left over from an earlier transfer, and not this one's to report.
+  discardSlaveErrors(ctx_.get(), slavePosition);
   // 64 KiB upload buffer. Complete Access returns *every* subindex of an object in one (internally
   // segmented) transfer, so unlike the single-subindex readSdo this must hold a whole ARRAY/RECORD
   // — potentially hundreds of entries. 64 KiB covers every object a SOMANET drive exposes with wide
@@ -944,6 +964,8 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSdo(uint16_t slavePosi
   }
   spdlog::debug("SDOwrite slave {} 0x{:04X}:{:02X} ({} bytes)", slavePosition, index, subindex,
                 data.size());
+  // Left over from an earlier transfer, and not this one's to report.
+  discardSlaveErrors(ctx_.get(), slavePosition);
   // ecx_SDOwrite takes void*, not const void*.
   int wkc =
       ecx_SDOwrite(ctx_.get(), slavePosition, index, subindex, FALSE, static_cast<int>(data.size()),
@@ -1034,6 +1056,8 @@ SdoInfoResult retrySdoInfo(ecx_contextt* ctx, uint16_t slavePosition, std::mutex
     }
     {
       const std::lock_guard<std::mutex> lock(mutex);
+      // Left over from an earlier transfer, and not this one's to report.
+      discardSlaveErrors(ctx, slavePosition);
       result.wkc = call();
       ++result.attempts;
       if (result.wkc <= 0) {
@@ -1107,25 +1131,26 @@ struct SdoInfoCounters {
 };
 
 // An FoE Error packet a slave sent: its ETG.1000.6 error code, and its text, empty when it carried
-// none. The SOEM port records both, the code on the error list and the text in FOEerrortext.
+// none. The SOEM port records both, the code on the error list and the text in the slave's
+// FOEerrortext entry.
 struct FoeRefusal {
   uint32_t code = 0;
   std::string text;
 };
 
-// Pops every error SOEM queued, and returns the FoE Error packet of @p slavePosition if one is
+// Pops every error SOEM queued for @p slavePosition, and returns its FoE Error packet if one is
 // among them. A failed transfer that comes back with a refusal was refused; one without it never
 // got an answer, because the return value alone cannot tell the two apart (EC_TIMEOUT is -5 and
-// -EC_ERR_TYPE_FOE_ERROR is too). Draining to empty keeps an entry from being blamed on the next
-// transfer, as in drainSdoErrors. Called with controlPlaneMutex_ held.
+// -EC_ERR_TYPE_FOE_ERROR is too). Draining the slave's entries keeps one from being blamed on its
+// next transfer, as in drainSdoErrors. Called with controlPlaneMutex_ held.
 std::optional<FoeRefusal> drainFoeErrors(ecx_contextt* ctx, uint16_t slavePosition) {
   std::optional<FoeRefusal> refusal;
   ec_errort err{};
-  while (ecx_poperror(ctx, &err)) {
-    if (!refusal && err.Etype == EC_ERR_TYPE_FOE_ERROR && err.Slave == slavePosition) {
-      // One transfer ends at the first Error packet, so the text beside the error list is this
-      // packet's.
-      refusal = FoeRefusal{.code = static_cast<uint32_t>(err.AbortCode), .text = ctx->FOEerrortext};
+  while (ecx_popslaveerror(ctx, slavePosition, &err)) {
+    if (!refusal && err.Etype == EC_ERR_TYPE_FOE_ERROR) {
+      // One transfer ends at the first Error packet, so the slave's text is this packet's.
+      refusal = FoeRefusal{.code = static_cast<uint32_t>(err.AbortCode),
+                           .text = ctx->FOEerrortext[slavePosition]};
     }
   }
   return refusal;

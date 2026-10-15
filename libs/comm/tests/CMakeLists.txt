@@ -16,6 +16,7 @@ add_executable(
   fake_spoe_server_test.cc
   foe_error_test.cc
   sii_test.cc
+  soem_error_list_test.cc
   soem_fieldbus_driver_test.cc
   spoe_connection_test.cc
   spoe_fieldbus_driver_test.cc

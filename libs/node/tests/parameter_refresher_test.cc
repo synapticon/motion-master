@@ -214,11 +214,31 @@ FakeDriver* setUp(DeviceManager& dm, uint32_t value, int slaves = 1) {
   return raw;
 }
 
-/// Runs the refresher's workers for @p duration, then stops them.
-void runFor(ParameterRefresher& refresher, std::chrono::milliseconds duration) {
+/// The longest a test waits for the refresher. A shared CI runner can sleep far longer than it was
+/// asked to, so a test waits for the outcome it checks rather than for a fixed time.
+constexpr auto kPatience = std::chrono::seconds{10};
+
+/// Runs the refresher's workers until @p done returns true or kPatience passes, then stops them.
+/// Returns whether @p done became true.
+bool runUntil(ParameterRefresher& refresher, const std::function<bool()>& done) {
   refresher.start();
-  std::this_thread::sleep_for(duration);
+  const auto deadline = std::chrono::steady_clock::now() + kPatience;
+  bool reached = done();
+  while (!reached && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    reached = done();
+  }
   refresher.stop();
+  return reached;
+}
+
+/// Checks that each read of @p reads started no sooner than the previous read's duration after
+/// that read ended.
+void expectAGapAfterEachRead(const std::vector<FakeDriver::Read>& reads) {
+  for (std::size_t i = 1; i < reads.size(); ++i) {
+    const auto duration = reads[i - 1].end - reads[i - 1].start;
+    EXPECT_GE(reads[i].start - reads[i - 1].end, duration) << "read " << i;
+  }
 }
 
 TEST(ParameterRefresherTest, PollsDueParameterViaSdo) {
@@ -313,19 +333,25 @@ TEST(ParameterRefresherTest, AReadClosesItsDriveForThePass) {
   driver->delays[1] = std::chrono::milliseconds{5};
   ParameterRefresher refresher(dm);
 
-  refresher.acquire(1, 0x2030, 0x01, std::chrono::milliseconds{50});
-  refresher.acquire(1, 0x2030, 0x02, std::chrono::milliseconds{50});
-  refresher.acquire(2, 0x2030, 0x01, std::chrono::milliseconds{50});
+  // A long period, so that no object becomes due again while the test runs.
+  refresher.acquire(1, 0x2030, 0x01, std::chrono::seconds{60});
+  refresher.acquire(1, 0x2030, 0x02, std::chrono::seconds{60});
+  refresher.acquire(2, 0x2030, 0x01, std::chrono::seconds{60});
   refresher.pollDue();
 
   EXPECT_EQ(driver->readsOf(1).size(), 1u) << "the second object of drive 1 waits for the gap";
   EXPECT_EQ(driver->readsOf(2).size(), 1u) << "drive 2 has its own gate";
 
   // Once the gap has passed, the other object of drive 1 is read.
-  std::this_thread::sleep_for(std::chrono::milliseconds{10});
-  refresher.pollDue();
-  EXPECT_EQ(driver->readsOf(1).size(), 2u);
+  const auto deadline = std::chrono::steady_clock::now() + kPatience;
+  while (driver->readCount(0x2030, 0x02) == 0 && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    refresher.pollDue();
+  }
   EXPECT_EQ(driver->readCount(0x2030, 0x02), 1);
+  EXPECT_EQ(driver->readsOf(1).size(), 2u);
+  EXPECT_EQ(driver->readsOf(2).size(), 1u);
+  expectAGapAfterEachRead(driver->readsOf(1));
 }
 
 // The refresher uses at most half of a drive's control-plane time. After each read, the next read
@@ -339,14 +365,9 @@ TEST(ParameterRefresherTest, LeavesAGapAsLongAsEachRead) {
   for (uint8_t subindex = 1; subindex <= 3; ++subindex) {
     refresher.acquire(1, 0x2030, subindex, std::chrono::milliseconds{10});
   }
-  runFor(refresher, std::chrono::milliseconds{500});
+  ASSERT_TRUE(runUntil(refresher, [&] { return driver->readsOf(1).size() >= 6; }));
 
-  const auto reads = driver->readsOf(1);
-  ASSERT_GE(reads.size(), 3u);
-  for (std::size_t i = 1; i < reads.size(); ++i) {
-    const auto duration = reads[i - 1].end - reads[i - 1].start;
-    EXPECT_GE(reads[i].start - reads[i - 1].end, duration) << "read " << i;
-  }
+  expectAGapAfterEachRead(driver->readsOf(1));
   EXPECT_EQ(driver->maxInFlightOnOneDrive(), 1);
 }
 
@@ -360,7 +381,7 @@ TEST(ParameterRefresherTest, ReadsTwoDrivesAtTheSameTime) {
 
   refresher.acquire(1, 0x2030, 0x01, std::chrono::milliseconds{10});
   refresher.acquire(2, 0x2030, 0x01, std::chrono::milliseconds{10});
-  runFor(refresher, std::chrono::milliseconds{300});
+  EXPECT_TRUE(runUntil(refresher, [&] { return driver->maxInFlight.load() >= 2; }));
 
   EXPECT_EQ(driver->maxInFlight.load(), 2);
   EXPECT_EQ(driver->maxInFlightOnOneDrive(), 1);
@@ -376,12 +397,10 @@ TEST(ParameterRefresherTest, ASlowDriveDoesNotDelayAnother) {
 
   refresher.acquire(1, 0x2030, 0x01, std::chrono::milliseconds{10});
   refresher.acquire(2, 0x2030, 0x01, std::chrono::milliseconds{10});
-  runFor(refresher, std::chrono::milliseconds{1000});
+  ASSERT_TRUE(runUntil(refresher, [&] { return driver->readsOf(2).size() >= 20; }));
 
-  // At a 10 ms period drive 2 is read about 100 times. One thread for both drives would read it
-  // about twice, once after each slow read of drive 1.
-  EXPECT_GE(driver->readsOf(2).size(), 20u);
-  EXPECT_LE(driver->readsOf(1).size(), 3u);
+  // One thread for both drives reads drive 2 about once for each slow read of drive 1.
+  EXPECT_LE(driver->readsOf(1).size(), 4u);
 }
 
 // No more reads are in flight than the pool has workers, however many drives are due.
@@ -396,7 +415,7 @@ TEST(ParameterRefresherTest, NoMoreReadsInFlightThanWorkers) {
   for (uint16_t position = 1; position <= 8; ++position) {
     refresher.acquire(position, 0x2030, 0x01, std::chrono::milliseconds{10});
   }
-  runFor(refresher, std::chrono::milliseconds{300});
+  ASSERT_TRUE(runUntil(refresher, [&] { return driver->totalReads.load() >= 32; }));
 
   EXPECT_LE(driver->maxInFlight.load(), 4);
   EXPECT_GE(driver->maxInFlight.load(), 2) << "the workers read in parallel";

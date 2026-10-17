@@ -30,12 +30,14 @@
 #include "fake_spoe_server.h"
 #include "node/device.h"
 #include "node/device_manager.h"
+#include "node/parameter_refresher.h"
 #include "node/process_data_ring.h"
 
 namespace {
 
 using mm::node::Device;
 using mm::node::DeviceManager;
+using mm::node::ParameterRefresher;
 using mm::node::testing::makeCia402Bus;
 
 /// How long each scenario runs. Long enough for thousands of cycles against hundreds of
@@ -202,6 +204,77 @@ TEST(Concurrency, ResetAgainstARunningCycle) {
     stop.store(true, std::memory_order_relaxed);
     rt.join();
   }
+}
+
+// The refresher's workers read two drives over SDO while other threads add and drop objects, a
+// rescan replaces the device set, and the cycle runs. A worker holds a DeviceHandle across its
+// read, so a rescan must leave it reading a retired device rather than a freed one.
+TEST(Concurrency, RefresherWorkersAgainstRescanAndTheCycle) {
+  auto bus = makeCia402Bus();
+  bus->slaves = 2;
+  bus->layout.outputBytes = 12;
+  bus->layout.inputBytes = 12;
+  bus->layout.expectedWkc = 6;
+  bus->layout.slaves.push_back(mm::comm::SlaveIo{
+      .slavePosition = 2, .outputOffset = 6, .outputBytes = 6, .inputOffset = 6, .inputBytes = 6});
+  bus->wkc = 6;
+  bus->programOd(0x2030, 0x01, mm::node::testing::kU16);
+  bus->program(0x2030, 0x01, mm::node::testing::u16le(7));
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(1, false).has_value());
+  ASSERT_TRUE(dm.initializeDeviceParameters(2, false).has_value());
+  ASSERT_TRUE(dm.configureProcessData().has_value());
+
+  ParameterRefresher refresher(dm);
+  refresher.start();
+
+  std::atomic<bool> stop{false};
+  std::atomic<uint64_t> cycles{0};
+  std::thread rt([&] { runCycleLoop(dm, stop, cycles); });
+
+  // Each thread adds and drops the SDO object and a PDO-mapped one, on both drives.
+  std::vector<std::thread> clients;
+  clients.reserve(2);
+  for (int i = 0; i < 2; ++i) {
+    clients.emplace_back([&] {
+      const auto deadline = std::chrono::steady_clock::now() + kDuration;
+      while (std::chrono::steady_clock::now() < deadline) {
+        for (uint16_t position = 1; position <= 2; ++position) {
+          refresher.acquire(position, 0x2030, 0x01, std::chrono::milliseconds(10));
+          refresher.acquire(position, 0x6041, 0x00, std::chrono::milliseconds(10));
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+        for (uint16_t position = 1; position <= 2; ++position) {
+          refresher.release(position, 0x2030, 0x01);
+          refresher.release(position, 0x6041, 0x00);
+        }
+      }
+    });
+  }
+
+  uint64_t scans = 0;
+  const auto deadline = std::chrono::steady_clock::now() + kDuration;
+  while (std::chrono::steady_clock::now() < deadline) {
+    if (dm.scan()) {
+      ++scans;
+      static_cast<void>(dm.initializeDeviceParameters(1, false));
+      static_cast<void>(dm.initializeDeviceParameters(2, false));
+      static_cast<void>(dm.configureProcessData());
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  }
+  for (auto& client : clients) {
+    client.join();
+  }
+  refresher.stop();
+  stop.store(true, std::memory_order_relaxed);
+  rt.join();
+
+  EXPECT_GT(scans, 0U);
+  EXPECT_GT(cycles.load(), 0U);
+  EXPECT_EQ(refresher.trackedCount(), 0U) << "every acquire was released";
 }
 
 // ── SPoE ─────────────────────────────────────────────────────────────────────────────────────────

@@ -140,7 +140,7 @@ This file uses the vocabulary of the code. Read this table first if the reposito
 | **HTTP worker pool** | **32** | `BS::light_thread_pool pool_{32}` in `http_server.h` | **every route handler runs here**, through `pool->detach_task` in `libs/api/router.cc` |
 | WebSocket event loop | 1 | `ws_server.cc` | |
 | Monitoring sampler | 1 | `monitoring_manager.cc` | |
-| Parameter refresher | 1 | `parameter_refresher.cc` | |
+| Parameter refresher | 4 | `std::jthread` in `parameter_refresher.cc` | never two workers on one drive; see section 6 and 7 |
 | Notification bus | 1 | `std::jthread` in `notification_bus.cc` | reads a source's version counter with no lock; only a render that fires takes anything, and today's one source takes `processDataMutex_` shared |
 | Procedure runs | 0 to N | `std::jthread` in `procedure_manager.cc` | one thread per procedure in flight |
 
@@ -162,7 +162,7 @@ HTTP thread, so the two calls are serialised."
 | 5d | `SpoeFieldbusDriver::bus_` | `BusLock` | `libs/comm/spoe_fieldbus_driver.h` | exclusive: the connections, the drive information and the layout. shared: one request | exclusive: `scan`, `configureProcessData`, `stop`. shared: every other request, one request at a time | **yes**. Exclusive for a whole scan or re-map, shared for one request |
 | 5e | `SpoeFieldbusDriver::Drive::sequenceMutex` | one `std::mutex` per drive | `libs/comm/spoe_fieldbus_driver.cc` | the netX's one packet state for file reads, file writes and the parameter list | `readFile`, `writeFile`, `readObjectDictionary`, `activateFirmware`, and `transitionToState` for each target | **yes**, for the whole sequence. A firmware activation holds it across its sleeps |
 | 6 | `MonitoringManager::mutex_` and `cv_` | `std::mutex`, `std::condition_variable` | `libs/node/monitoring_manager.h` | `entries_`, `running_`, `nextEpoch_`, `publish_` | the sampler thread, the `/api/monitorings` handlers, `keepFresh`, `stopKeepingFresh` | **no**. It is dropped for the flush |
-| 7 | `ParameterRefresher::mutex_` and `cv_` | `std::mutex`, `std::condition_variable` | `libs/node/parameter_refresher.h` | `entries_`, `running_` | the refresher thread, and `acquire` or `release` from the sampler path | **no**. It is dropped for the poll |
+| 7 | `ParameterRefresher::mutex_` and `cv_` | `std::mutex`, `std::condition_variable` | `libs/node/parameter_refresher.h` | `entries_`, `drives_`, `workers_` | the refresher workers, and `acquire` or `release` from the sampler path | **no**. It is dropped for the poll |
 | 8 | `ProcedureManager::mutex_` | `std::mutex` | `libs/node/procedure_manager.h` | `runs_` | `start`, `snapshot`, `cancel`, and the destructor | no |
 | 9 | `ProcedureManager::Run::errorMutex_` | `std::mutex` | `libs/node/procedure_manager.h` | one `std::optional<std::string>` | the thread of the run, which writes. Pollers read | no |
 | 10 | `ProgressReporter::mutex_` | `std::mutex` | `libs/node/procedure.h` | the step array | the thread of the run, which writes. Pollers read | no |
@@ -464,8 +464,8 @@ through `SpoeOutputSlot` and `SpoeInputQueue`, which are lock-free.
 
 Both have the identical shape, for the identical reason. **Snapshot under the lock, work with the
 lock released, then commit back under the lock.** `MonitoringManager` names the three steps
-`takeDue`, `flushDetached`, and `commitFlush`. `ParameterRefresher::pollDue` does the same with a
-key list. A flush under the lock lets a control-plane operation that holds the bus lock stall the
+`takeDue`, `flushDetached`, and `commitFlush`. `ParameterRefresher` does the same with one read at
+a time: `takeDue`, `poll`, and the commit at the end of `poll`. A flush under the lock lets a control-plane operation that holds the bus lock stall the
 sampler, and with it every `/api/monitorings` endpoint.
 
 The subtle part is the **epoch check in `commitFlush`**. A release of the lock lets a `remove` and
@@ -475,11 +475,17 @@ prevents that. `MonitoringManager` stamps it from `nextEpoch_` at create time, a
 what makes the release safe. `ParameterRefresher` gets the same property more cheaply: it finds
 the entry again by key after the poll.
 
-Both `start()` implementations assign `thread_` **under the lock**, and the first act of the new
-thread is to take that same mutex. So the new thread waits out the rest of `start()`. An
+Both `start()` implementations create their threads **under the lock**, and the first act of a
+new thread is to take that same mutex. So the new thread waits out the rest of `start()`. An
 assignment outside the lock leaves a window: a concurrent `stop()` sees a thread that is not yet
 joinable and returns. That leaves a joinable `std::thread` for the destructor, which calls
 `std::terminate`.
+
+**`ParameterRefresher` marks a drive busy under its mutex before a worker reads it.** `takeDue`
+skips a busy drive, so two workers never read one drive, and no worker waits for the drive lock
+that another worker holds. `stop()` requests the stop of each worker
+under the mutex, because a worker checks its `stop_token` under the mutex and then waits on `cv_`.
+So a worker either sees the request or is already waiting for the notify that follows it.
 
 ### 8 to 10. The procedure locks
 

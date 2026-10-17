@@ -3856,3 +3856,83 @@ them could work on a drive that restarts.
 
 **Not done, on purpose.** A scan still connects to the drives one after another. Connecting in
 parallel would shorten a scan of many drives. That is a change to the scan, not to the locks.
+
+## Session 2026-10-17 — The parameter refresher reads drives in parallel and leaves each drive a gap (as-built)
+
+Issue #79. It builds on #78, which let the mailbox work of different drives run at the same time.
+
+**One refresher thread could not use that.** `ParameterRefresher` read every SDO object of every
+drive on one thread, one read after another, with no pause. Two things followed.
+
+1. **The refresher kept a drive's mailbox busy.** On a SOMANET Integro an SDO read costs about 5 ms,
+   so two SDO objects at the 10 ms floor kept the mailbox busy almost all the time. With one drive on
+   the bus, the median `getDeviceStates` time rose from 2.4 ms to 5.5 ms. #78 removed the effect on
+   other drives, but not on the drive itself.
+2. **The refresh rate fell as the bus grew.** With one SDO object on each of 30 Integros, a round
+   takes about 150 ms. A drive that does not answer held the one thread for a 700 ms mailbox
+   timeout. That figure is calculated, not measured.
+
+**The fix is a pool of 4 workers and a gate per drive.**
+
+- A worker takes the due object with the earliest time, on a drive that no other worker reads. It
+  marks the drive busy under the refresher's mutex, so two workers never read one drive.
+- After each read, the drive is closed to the refresher until the end of the read plus its duration.
+  So the refresher uses at most half of the control-plane time of a drive, and other callers always
+  find free gaps. This needs no table of drive types: a slow drive gets long gaps, a fast drive
+  short ones. A failed read counts too, because a 700 ms timeout holds the drive lock for 700 ms.
+- An object is scheduled again at the start of its read plus its period, as before. So two objects
+  on an Integro update about every 20 ms instead of every 10 ms. On a Node, where a read costs about
+  0.7 ms, they still update about every 10 ms. These figures are calculated, not measured.
+
+**Why 4 workers, and not a thread per drive.** Over SOEM, each read holds one of `kFrameSlots` (8)
+frame slots until it ends, including the wait for the reply. A thread per drive would put 30 threads
+on 8 slots on a bus of 30 drives, and the HTTP workers and the procedures would wait behind them.
+Four workers leave 4 slots for the rest of the control plane. With 4 workers, 30 Integros take about
+40 ms per round. That figure is calculated, not measured. SPoE has no frame slots, and the pool works
+there with no change.
+
+**Why not more frame slots.** More slots would allow more workers, and that helps only a large bus of
+slow drives. The slots limit how many frames can wait in front of the real-time frame. Most of the
+time that an SDO holds a slot, SOEM only polls the mailbox status with a short read, so the delay is
+probably far below the calculated worst case of about 1 ms. Nobody measured it. #106 holds the
+measurement and the option of a slot per frame instead of a slot per transaction.
+
+**`stop()` uses `std::jthread` and a `stop_token`.** `stop()` requests the stop of each worker under
+the mutex, then moves the workers out and joins them outside it. A worker checks its token under the
+mutex before it waits, so it either sees the request or is already waiting for the notify. The
+`running_` flag is gone: `workers_` is empty while the refresher is stopped.
+
+**`pollDue` stays as the test hook, with a narrower meaning.** It runs one pass on the calling thread
+with the same gate. A read closes its drive past the pass's `now`, so one pass reads at most one
+object per drive. An injected clock was the alternative. It was not worth its code.
+
+**A known limit.** Four drives that do not answer can hold all 4 workers for 700 ms each time their
+backoff ends, and no other drive is refreshed during that time. The backoff limits how often that
+happens, to at most once per 2 s per object. This is accepted.
+
+**What is tested, and what is not.**
+
+- `parameter_refresher_test.cc` adds five tests against a fake driver with a delay per drive:
+  the gate in one pass, the gap after each read, two drives at the same time, a slow drive that
+  does not delay another, and no more than 4 reads in flight. All five fail on the one-thread
+  refresher.
+- `Concurrency.RefresherWorkersAgainstRescanAndTheCycle` runs the workers against two drives while
+  other threads add and drop objects, a rescan replaces the device set, and the cycle runs. It
+  passes under `tools/tsan.sh`.
+- The script in #79 ran on an Integro (product code 1025, firmware v5.6.10), alone on the bus, in
+  OP. `main` and this change ran back to back on an idle host. The refresher's reads were timed
+  from the driver's `trace` log, which has 1 ms resolution. Each monitoring ran for about 2 s.
+
+  | Measure | `main` | This change |
+  | --- | --- | --- |
+  | Refresher busy share of the drive | 85% | 49% |
+  | Gap after each read | 0 ms | 4 ms |
+  | Refresh period of each SDO object | 10 ms | 18 ms |
+  | `getDeviceStates`, median without and with the monitoring | 2.6 and 5.1 ms | 2.7 and 3.9 ms |
+  | `getDeviceStates`, maximum with the monitoring | 20.3 ms | 5.1 ms |
+  | SDO `readParameter`, median without and with the monitoring | 7.5 and 8.9 ms | 7.2 and 7.1 ms |
+  | SDO `readParameter`, maximum with the monitoring | 19.4 ms | 12.1 ms |
+
+  A read took 4 to 5 ms, so the gap matches the read duration within the resolution of the log.
+- The reads of several drives at the same time ran only against the fake driver. That needs a bus
+  with several drives.

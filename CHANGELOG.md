@@ -26,6 +26,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Changed
 
+- **The SDO objects of a monitoring no longer keep a drive's mailbox busy.** After each SDO read of an object that is not PDO-mapped, Motion Master reads nothing more from that drive for as long as the read took. So other calls to the drive, such as an SDO read or `GET /api/devices/state`, no longer wait behind the monitoring. The SDO objects of a slow drive update less often: two objects on a SOMANET Integro update about every 20 ms instead of every 10 ms.
+- **The SDO objects of different drives are read at the same time.** A slow drive, or a drive that does not answer, no longer delays the SDO objects of the other drives in a monitoring or in `keepFresh`.
 - **Over EtherCAT, the mailbox work of different drives runs at the same time.** An SDO, a dictionary read, a file transfer or an ESC register access to one drive no longer waits for the same work on another drive. During a firmware write to one drive, the SDOs and the monitoring of the other drives continue. A scan, a re-map, a state change and SII access still wait for all of this work, and while one of them waits, the work on every drive waits too.
 - **An unknown device or parameter answers 404 on every parameter endpoint.** `GET` and `PUT /api/devices/{slavePosition}/parameters/{index}/{subindex}`, and `POST /api/devices/{slavePosition}/parameters/init` and `…/parameters/read`, answered 500 for a device that is not on the bus. The two single-parameter endpoints also answered 500 for an index and subindex the device does not have. Both now answer 404, as the other device endpoints do. A failed transfer still answers 500.
 

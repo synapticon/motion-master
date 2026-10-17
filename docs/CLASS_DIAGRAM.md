@@ -152,7 +152,7 @@ classDiagram
         +acquire() / release()
         +start() / stop()
         -DeviceManager& deviceManager_
-        -thread thread_
+        -vector~jthread~ workers_
     }
     class DeviceManager {
         +init(unique_ptr~FieldbusDriver~)

@@ -86,11 +86,19 @@ struct BusIoLock {
 /// no slot, because nothing else on the control plane sends a frame while it holds the bus.
 class ControlPlaneLocks {
  public:
-  /// The number of frame slots. SOEM has 16 frame indexes. The RT thread uses one per frame of
-  /// process data in a cycle. A frame carries 1486 bytes, and a SOMANET drive maps about 100, so
-  /// one frame holds about 14 drives. Separate LRD and LWR datagrams, which some devices need,
-  /// double the frames. Eight slots leave the RT thread eight indexes, which is a bus of about 56
-  /// SOMANET drives in the worst case.
+  /// The number of frame slots. SOEM's frame indexes (EC_MAXBUF, set in ports/soem) are shared with
+  /// the RT thread, which uses one per frame of process data in a cycle. The slots cap the
+  /// control plane's share, and the RT thread gets the rest.
+  ///
+  /// The cap is small on purpose. The NIC sends frames in order, so the RT frame can wait behind
+  /// every control-plane frame in flight. A mailbox frame carries the drive's whole mailbox, and a
+  /// full frame takes about 120 µs at 100 Mbit/s. So eight full frames delay the RT frame by about
+  /// 1 ms. This was calculated, not measured.
+  ///
+  /// With 32 indexes, eight slots leave the RT thread 24. A frame carries 1486 bytes, and a
+  /// SOMANET drive maps about 100, so one frame holds about 14 drives. Separate LRD and LWR
+  /// datagrams, which some devices need, double the frames. So 24 indexes serve about 168 SOMANET
+  /// drives in the worst case.
   static constexpr std::ptrdiff_t kFrameSlots = 8;
 
   /// @param positions  The number of drive positions, position 0 included. A position passed to

@@ -522,11 +522,20 @@ vcpkg_replace_string(
    context->ecaterror = TRUE;"
 "   Ec.SubIdx = SubIdx;")
 
+# EC_MAXBUF is the number of frame indexes. The RT thread and the control plane take indexes from
+# one pool. When no index is free, ecx_getindex does not wait or fail. It returns an index that is
+# still in use, and two frames then share one receive buffer. The control plane is capped at
+# ControlPlaneLocks::kFrameSlots frames (libs/comm/control_plane_locks.h), and the RT thread gets
+# the rest. The cap stays small because the NIC sends frames in order, so each control-plane frame
+# in flight can delay the RT frame. The default of 16 leaves the RT thread 8 indexes, which limits
+# the bus size. 32 leaves it 24, and the delay in front of the RT frame stays the same. Each index
+# costs one tx and one rx buffer of one Ethernet frame.
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS
         -DSOEM_BUILD_SAMPLES=OFF
         -DEC_MAXNAME=80
+        -DEC_MAXBUF=32
 )
 
 vcpkg_cmake_install()

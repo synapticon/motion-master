@@ -1,8 +1,15 @@
 #include "comm/control_plane_locks.h"
 
+#include <soem/soem.h>
+
 #include <utility>
 
 namespace mm::comm {
+
+// The RT thread needs the indexes the control plane does not take. A SOEM build with fewer indexes
+// would make the two share one index, and ecx_getindex does not report that.
+static_assert(ControlPlaneLocks::kFrameSlots < EC_MAXBUF,
+              "the frame slots must leave frame indexes for the RT thread");
 
 void BusLock::lock() {
   std::unique_lock<std::mutex> guard(mutex_);

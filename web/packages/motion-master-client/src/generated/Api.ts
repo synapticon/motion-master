@@ -1692,7 +1692,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Sends an FoE read request for `filename` to the device at `slavePosition` and returns the raw file bytes.  FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is responsible for ensuring the device is in a suitable state before calling.  The call blocks until the full file has been received or a per-packet timeout of 700 ms is exceeded. When the device refuses the read, the error names the FoE error code it sent and its meaning, and the device's error text when that adds anything, e.g. `FOEread slave 1 'x.bin' failed (FoE error 0x8001: Not found)`. A device that never answered gives `(no response)`.
+   * @description Sends an FoE read request for `filename` to the device at `slavePosition` and returns the raw file bytes.  FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is responsible for ensuring the device is in a suitable state before calling.  The call blocks until the full file has been received. Over EtherCAT it waits up to 6 s for the device's answer and tries a read that gets no answer up to 3 times, so a device that never answers takes about 18 s to fail. A refusal from the device is not tried again. After a failure without an answer, Motion Master aborts the transfer on the device, so that the next request works. Over SPoE it waits the configured file timeout for each packet. When the device refuses the read, the error names the FoE error code it sent and its meaning, and the device's error text when that adds anything, e.g. `FOEread slave 1 'x.bin' failed (FoE error 0x8001: Not found)`. A device that never answered gives `(no response)`.
    *
    * @name FoeReadFile
    * @summary Read a file from a device via FoE (File over EtherCAT)
@@ -1718,7 +1718,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Sends an FoE write request for `filename` to the device at `slavePosition`, streaming the raw request body as the file contents.  FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is responsible for ensuring the device is in a suitable state before calling.
+   * @description Sends an FoE write request for `filename` to the device at `slavePosition`, streaming the raw request body as the file contents.  FoE is available in Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is responsible for ensuring the device is in a suitable state before calling. Over EtherCAT it waits up to 10 s for the device to acknowledge each packet. A write that fails without an answer is aborted on the device and is not tried again.
    *
    * @name FoeWriteFile
    * @summary Write a file to a device via FoE (File over EtherCAT)
@@ -1750,7 +1750,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Deletes `filename` from the flash of the device at `slavePosition`. **Vendor-specific despite reading like a filesystem operation.** FoE has no delete, so SOMANET firmware acts on a pseudo-file instead: reading the name `fs-remove=<filename>` removes that file. This endpoint exists so no client has to know that, and a device that is not a SOMANET drive is refused rather than probed. **A file that was not there answers 200.** The caller asked for the file to be gone, and it is. Every other FoE failure is a 500 naming the reason. The file is gone from flash immediately. Deleting `config.csv` discards the stored parameter values, so the drive falls back to its defaults on the next power cycle.
+   * @description Deletes `filename` from the flash of the device at `slavePosition`. Motion Master waits up to 10 s for the device to answer, and 30 s for the ESI (`SOMANET_CiA_402.xml.zip`), because the device answers only after it has erased the file. **Vendor-specific despite reading like a filesystem operation.** FoE has no delete, so SOMANET firmware acts on a pseudo-file instead: reading the name `fs-remove=<filename>` removes that file. This endpoint exists so no client has to know that, and a device that is not a SOMANET drive is refused rather than probed. **A file that was not there answers 200.** The caller asked for the file to be gone, and it is. Every other FoE failure is a 500 naming the reason. The file is gone from flash immediately. Deleting `config.csv` discards the stored parameter values, so the drive falls back to its defaults on the next power cycle.
    *
    * @name DeleteDeviceFile
    * @summary Delete a file from a device

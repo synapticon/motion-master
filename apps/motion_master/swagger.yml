@@ -2931,7 +2931,12 @@ paths:
         and returns the raw file bytes.  FoE is available in Boot, Pre-Op, Safe-Op,
         and Op states (device-dependent); the caller is responsible for ensuring the
         device is in a suitable state before calling.  The call blocks until the full
-        file has been received or a per-packet timeout of 700 ms is exceeded.
+        file has been received. Over EtherCAT it waits up to 6 s for the device's answer
+        and tries a read that gets no answer up to 3 times, so a device that never answers
+        takes about 18 s to fail. A refusal from the device is not tried again. After a
+        failure without an answer, Motion Master aborts the transfer on the device, so
+        that the next request works. Over SPoE it waits the configured file timeout for
+        each packet.
 
         When the device refuses the read, the error names the FoE error code it sent
         and its meaning, and the device's error text when that adds anything, e.g.
@@ -2980,6 +2985,9 @@ paths:
         streaming the raw request body as the file contents.  FoE is available in
         Boot, Pre-Op, Safe-Op, and Op states (device-dependent); the caller is
         responsible for ensuring the device is in a suitable state before calling.
+        Over EtherCAT it waits up to 10 s for the device to acknowledge each packet.
+        A write that fails without an answer is aborted on the device and is not
+        tried again.
       parameters:
         - name: slavePosition
           in: path
@@ -3027,7 +3035,10 @@ paths:
       summary: Delete a file from a device
       operationId: deleteDeviceFile
       description: >
-        Deletes `filename` from the flash of the device at `slavePosition`.
+        Deletes `filename` from the flash of the device at `slavePosition`. Motion Master
+        waits up to 10 s for the device to answer, and 30 s for the ESI
+        (`SOMANET_CiA_402.xml.zip`), because the device answers only after it has erased
+        the file.
 
 
         **Vendor-specific despite reading like a filesystem operation.** FoE has no delete, so

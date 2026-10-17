@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.91] - 2026-10-17
+
 ### Added
 
 - **`GET /api/scan` tells whether the bus needs a new scan.** It answers `required`, `devicesOnWire`, `devicesScanned` and `unreachable`. A scan is required when a device no longer answers at the address the last scan gave it, or when the number of devices on the wire differs from the last scan. The count is what shows a device added to the chain without a reset, because every known device still answers then. Over SPoE `devicesOnWire` is `null`. The Console shows a "Scan needed" notice in the sidebar, with the counts and the positions, and links it to the Control page.
@@ -868,7 +870,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.90...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.91...HEAD
+[6.0.0-alpha.91]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.90...v6.0.0-alpha.91
 [6.0.0-alpha.90]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.89...v6.0.0-alpha.90
 [6.0.0-alpha.89]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.88...v6.0.0-alpha.89
 [6.0.0-alpha.88]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.87...v6.0.0-alpha.88

@@ -435,14 +435,16 @@ struct ProcessDataWatchdogConfig {
 /// via @c DeviceManager::init. @c GameLoop never references the driver — it runs @c CyclicTasks
 /// (e.g. @c ProcessDataCyclicTask) that reach the bus only through @c DeviceManager.
 ///
-/// The driver owns @c controlPlaneMutex_, which serialises the control-plane
-/// operations (mailbox/SDO, FoE, ESC register, and state access) amongst
-/// non-RT callers. The real-time PDO path (@c exchangeProcessData) runs
-/// lock-free: SOEM's port layer is internally thread-safe (per-datagram index
-/// allocation plus tx/rx mutexes held only for a single non-blocking poll), and
-/// PDO touches disjoint state (the process-data IOmap) from the control plane
-/// (mailbox pool, slave state). Keeping PDO out of the mutex keeps the RT cycle
-/// unbounded by a slow SDO or object-dictionary enumeration.
+/// A driver serialises its control-plane operations (mailbox/SDO, FoE, ESC register, and state
+/// access) amongst non-RT callers. @c SoemFieldbusDriver uses a @c ControlPlaneLocks: one lock per
+/// drive for the work on that drive, and a bus lock for the work on the whole bus.
+/// @c SpoeFieldbusDriver keeps a request and its reply together with the mutex of each drive's
+/// connection. The real-time PDO path (@c
+/// exchangeProcessData) runs lock-free: SOEM's port layer is internally thread-safe (per-datagram
+/// index allocation plus tx/rx mutexes held only for a single non-blocking poll), and PDO touches
+/// disjoint state (the process-data IOmap) from the control plane (mailbox pool, slave state).
+/// Keeping PDO out of the mutex keeps the RT cycle unbounded by a slow SDO or object-dictionary
+/// enumeration.
 ///
 /// @note Precondition on @c slavePosition/@c position: every slave-indexed method here trusts
 /// its position argument and indexes a fixed-size slave table @b without bounds-checking. Callers
@@ -967,26 +969,6 @@ class FieldbusDriver {
   /// Monitor mode. @c transitionToState then does nothing, and its outcome reads only as "target
   /// not reached". This reason is what a caller shows instead. Answers without bus I/O.
   virtual std::optional<std::string> stateChangeRefusal() const { return std::nullopt; }
-
- protected:
-  /// Serialises control-plane access to the underlying fieldbus context (mailbox
-  /// pool, slave state, manual mailbox sequence counters) amongst non-RT callers.
-  ///
-  /// "Control plane" vs "data plane" is the networking split, and it maps exactly
-  /// onto this driver. The @b data @b plane is the high-rate PDO cycle
-  /// (@c exchangeProcessData, run every tick on the RT thread) that moves process
-  /// data — it runs @b lock-free and does @b not take this mutex. The @b control
-  /// @b plane is everything that configures or commands the bus occasionally and
-  /// off the RT path — SDO/mailbox, FoE, ESC registers, AL-state transitions, and
-  /// pure reads of the cached results (@c processDataLayout, @c busConfig) — all of
-  /// which share the one fieldbus context and are serialised here. So a slow SDO or
-  /// object-dictionary walk never blocks the RT cycle: the two planes touch disjoint
-  /// state (control-plane context vs. the process-data IOmap).
-  ///
-  /// Held only for the duration of a single socket transaction — never across a
-  /// sleep, a blocking wait, or a user callback. @c mutable so the @c const accessors
-  /// (@c slaveInfo, @c slaveCount) can lock.
-  mutable std::mutex controlPlaneMutex_;
 };
 
 }  // namespace mm::comm

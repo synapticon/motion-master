@@ -35,6 +35,7 @@ namespace mm::comm::soem {
 
 SoemFieldbusDriver::SoemFieldbusDriver(SoemFieldbusDriverConfig config)
     : ifname_(std::move(config.ifname)),
+      controlPlane_(EC_MAXSLAVE),
       mailboxStatusFmmu_(config.mailboxStatusFmmu),
       // Sized here rather than in the header so EC_MAXSLAVE — and SOEM's headers with it — stay out
       // of the public interface. Mirrors slavelist's own extent, so a position the rest of the
@@ -106,7 +107,7 @@ void logUnreachable(ecx_contextt* ctx, uint16_t slave, Reachability reachability
 }  // namespace
 
 std::expected<void, std::string> SoemFieldbusDriver::init() {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockBus();
   // SOEM has no auto-detect — an empty interface name would reach ecx_init and
   // fail with a cryptic "No such device". Reject it up front with a clear error.
   if (ifname_.empty()) {
@@ -130,7 +131,7 @@ std::expected<void, std::string> SoemFieldbusDriver::init() {
 }
 
 std::expected<int, std::string> SoemFieldbusDriver::scan() {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockBus();
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -252,8 +253,8 @@ std::string mailboxRefusalSuffix(ecx_contextt* ctx, uint16_t slavePosition) {
 // which for CoE is a negative EC_* sentinel (e.g. EC_TIMEOUT when the slave never answers) rather
 // than a working counter, so a "no response" timeout reads differently from a bare failure. The one
 // case neither describes — wkc == 0 with nothing queued — is handed to mailboxRefusalSuffix, which
-// asks the slave. Never empty for a failed transfer. Called with controlPlaneMutex_ held (it
-// pops the slave's errors, and mailboxRefusalSuffix reads one of its registers).
+// asks the slave. Never empty for a failed transfer. Called with the drive's lock held (it
+// pops the drive's errors, and mailboxRefusalSuffix reads one of its registers).
 //
 // Reached through drainSdoErrors, which is what every failing CoE path calls — popping one entry
 // and leaving the rest would hand them to the next transfer to report as its own.
@@ -309,7 +310,7 @@ std::string sdoErrorSuffix(ecx_contextt* ctx, uint16_t slavePosition, int wkc,
   }
 }
 
-// Removes every error SOEM queued for one slave. Called with controlPlaneMutex_ held.
+// Removes every error SOEM queued for one slave. Called with the drive's lock held.
 void discardSlaveErrors(ecx_contextt* ctx, uint16_t slavePosition) {
   ec_errort discarded{};
   while (ecx_popslaveerror(ctx, slavePosition, &discarded)) {
@@ -320,8 +321,8 @@ void discardSlaveErrors(ecx_contextt* ctx, uint16_t slavePosition) {
 // first.
 //
 // Only the errors of @p slavePosition are popped, because every entry carries the slave that caused
-// it. An entry of another slave belongs to the work on that slave. ecx_popslaveerror is the SOEM
-// port's pop that selects one slave.
+// it. An entry of another slave belongs to the work on that slave, which can run at the same time
+// on another thread. ecx_popslaveerror is the SOEM port's pop that selects one slave.
 //
 // Draining matters because the error list is a fixed-size FIFO ring (EC_MAXELIST) that drops its
 // oldest entry on overflow, and a pop returns the *oldest* entry of the slave: an entry left behind
@@ -329,7 +330,7 @@ void discardSlaveErrors(ecx_contextt* ctx, uint16_t slavePosition) {
 // as that transfer's reason. One failed attempt can push more than one entry (a mailbox error and
 // an SDO abort), and a retry loop multiplies that, so leaving the slave's entries behind
 // misattributes reasons across objects arbitrarily far apart in time. Draining them keeps every
-// reason attached to the transfer that produced it. Called with controlPlaneMutex_ held, like
+// reason attached to the transfer that produced it. Called with the drive's lock held, like
 // sdoErrorSuffix.
 //
 // Every failing CoE path goes through here — readSdo, readSdoComplete, writeSdo and the SDO Info
@@ -352,7 +353,7 @@ std::string drainSdoErrors(ecx_contextt* ctx, uint16_t slavePosition, int wkc,
 }  // namespace
 
 std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockBus();
   if (!ctx_) {
     return std::unexpected("configureProcessData: no driver — call init() first");
   }
@@ -511,7 +512,7 @@ std::expected<void, std::string> SoemFieldbusDriver::blockLrwOnPruIcssSlaves() {
 }
 
 PdoLayout SoemFieldbusDriver::processDataLayout() {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockBusShared();
   PdoLayout layout;
   if (!ctx_) {
     return layout;
@@ -543,7 +544,7 @@ PdoLayout SoemFieldbusDriver::processDataLayout() {
 }
 
 std::vector<SlaveConfig> SoemFieldbusDriver::busConfig() const {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockBusShared();
   std::vector<SlaveConfig> out;
   if (!ctx_) {
     return out;
@@ -610,7 +611,7 @@ std::vector<SlaveConfig> SoemFieldbusDriver::busConfig() const {
 }
 
 // Intentionally lock-free: the RT PDO cycle relies on SOEM's internally
-// thread-safe port layer rather than controlPlaneMutex_, so a slow control-plane
+// thread-safe port layer rather than the control-plane locks, so a slow control-plane
 // transfer can never stall process-data exchange. See FieldbusDriver class doc.
 int SoemFieldbusDriver::exchangeProcessData(std::span<const uint8_t> outputs,
                                             std::span<uint8_t> inputs) {
@@ -634,7 +635,7 @@ int SoemFieldbusDriver::exchangeProcessData(std::span<const uint8_t> outputs,
 void SoemFieldbusDriver::stop() { closeContext(); }
 
 void SoemFieldbusDriver::closeContext() {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockBus();
   // ecx_init opened the raw socket; ecx_close releases it (via ecx_closenic) and takes the NIC
   // out of promiscuous mode. Without it every reset()/re-init cycle leaks the socket fd.
   // Idempotent by construction: ctx_.reset() below is std::unique_ptr::reset — it frees the
@@ -653,7 +654,7 @@ void SoemFieldbusDriver::closeContext() {
 }
 
 SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockBusShared();
   if (!ctx_) {
     return {};
   }
@@ -668,14 +669,14 @@ SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
 }
 
 int SoemFieldbusDriver::slaveCount() const {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockBusShared();
   return ctx_ ? ctx_->slavecount : 0;
 }
 
 uint16_t SoemFieldbusDriver::slaveState(uint16_t position) const {
   // Deliberately lock-free — see slaveStates_ and the "must not block" note on
-  // FieldbusDriver::slaveState. Reading SOEM's slavelist directly here would need
-  // controlPlaneMutex_, which a firmware transfer holds for its whole duration, and this is asked
+  // FieldbusDriver::slaveState. Reading SOEM's slavelist directly here would need the drive's
+  // lock, which a firmware transfer holds for its whole duration, and this is asked
   // per monitoring flush for every device; the value is published by publishSlaveStates() instead.
   //
   // Relaxed is the right ordering and not a shortcut: each entry is a self-contained value with no
@@ -702,14 +703,14 @@ void SoemFieldbusDriver::publishSlaveStates() {
 }
 
 uint16_t SoemFieldbusDriver::mailboxProtocols(uint16_t position) const {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockBusShared();
   // SII-derived mailbox-protocol bits, cached by ecx_config_init — no bus I/O. The same
   // mbx_proto busConfig() reports in MailboxConfig::protocols; 0 when the slave has no mailbox.
   return ctx_ ? ctx_->slavelist[position].mbx_proto : 0;
 }
 
 std::optional<int> SoemFieldbusDriver::readDevicesOnWire() {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockBusIo();
   if (!ctx_) {
     return std::nullopt;
   }
@@ -722,30 +723,40 @@ std::optional<int> SoemFieldbusDriver::readDevicesOnWire() {
 
 std::expected<std::vector<FieldbusDriver::SlaveStateRaw>, std::string>
 SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
-  if (!ctx_) {
-    return std::unexpected("no driver — call init() first");
-  }
-  ecx_readstate(ctx_.get());
-  publishSlaveStates();
-  // ecx_readstate cannot be trusted per slave. Its broadcast reaches a slave without an address,
-  // and its per-slave FPRD leaves the last value in place when the slave does not answer.
+  // Each drive is read under its own lock, because the read writes the drive's entry in the
+  // slavelist and a mailbox transfer to that drive reads it. ecx_readstate would write the entry
+  // of every slave, and so would race with the transfers to every other drive. The context is
+  // checked under each lock, because a stop can close it between two drives.
   std::vector<SlaveStateRaw> result;
   result.reserve(positions.size());
-  std::ranges::transform(positions, std::back_inserter(result), [this](uint16_t pos) {
+  for (const uint16_t pos : positions) {
+    const auto lock = controlPlane_.lockDrive(pos);
+    if (!ctx_) {
+      return std::unexpected("no driver — call init() first");
+    }
     const Reachability reachability = probeReachability(ctx_.get(), pos);
     if (reachability != Reachability::Answering) {
-      return SlaveStateRaw{.reachability = reachability};
+      result.push_back(SlaveStateRaw{.reachability = reachability});
+      continue;
     }
-    return SlaveStateRaw{.alStatus = ctx_->slavelist[pos].state,
-                         .alStatusCode = ctx_->slavelist[pos].ALstatuscode};
-  });
+    // The status code sits two bytes after the status, so one read gets both. A read that fails
+    // right after the probe answered leaves the last value in place.
+    ec_alstatust status{};
+    ec_slavet& slave = ctx_->slavelist[pos];
+    if (ecx_FPRD(&ctx_->port, slave.configadr, ECT_REG_ALSTAT, sizeof(status), &status,
+                 EC_TIMEOUTRET) > 0) {
+      slave.state = etohs(status.alstatus);
+      slave.ALstatuscode = etohs(status.alstatuscode);
+    }
+    slaveStates_[pos].store(slave.state, std::memory_order_relaxed);
+    result.push_back(SlaveStateRaw{.alStatus = slave.state, .alStatusCode = slave.ALstatuscode});
+  }
   return result;
 }
 
 std::expected<std::vector<SlaveDiagnostics>, std::string> SoemFieldbusDriver::readDiagnostics(
     const std::vector<uint16_t>& positions) {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockBusIo();
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -805,7 +816,7 @@ std::expected<std::vector<SlaveDiagnostics>, std::string> SoemFieldbusDriver::re
 
 std::expected<std::vector<DcSyncDiagnostics>, std::string> SoemFieldbusDriver::readDcSync(
     const std::vector<uint16_t>& positions) {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockBusIo();
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -864,7 +875,7 @@ std::expected<std::vector<DcSyncDiagnostics>, std::string> SoemFieldbusDriver::r
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uint16_t slavePosition,
                                                                              uint16_t index,
                                                                              uint8_t subindex) {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockDrive(slavePosition);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -914,7 +925,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdo(uin
 
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComplete(
     uint16_t slavePosition, uint16_t index) {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockDrive(slavePosition);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -958,7 +969,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSdoComp
 std::expected<void, std::string> SoemFieldbusDriver::writeSdo(uint16_t slavePosition,
                                                               uint16_t index, uint8_t subindex,
                                                               std::span<const uint8_t> data) {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockDrive(slavePosition);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -1037,17 +1048,17 @@ struct SdoInfoResult {
 
 // Runs one SDO Info transfer, retrying with a short back-off, and reports what happened.
 //
-// The mutex is taken here rather than inside the caller's callable so that the error-queue drain
-// happens in the same critical section as the call that filled it — popping outside the lock would
-// let a concurrent control-plane transfer claim this transfer's reason as its own. The lock is
-// dropped across the back-off sleeps, so a multi-second enumeration still never blocks another
-// control-plane caller for longer than a single transfer.
+// The drive lock is taken here rather than inside the caller's callable so that the error drain
+// happens in the same critical section as the call that filled it. A pop outside the lock would let
+// the next transfer to this drive claim this transfer's reason as its own. The lock is dropped
+// across the back-off sleeps, so a multi-second enumeration never blocks other work on this drive
+// for longer than a single transfer. Work on other drives never waits for it.
 //
 // @p maxRetries is 0 for a transfer whose *expected* answer is a refusal — see the declared-size
 // probe in readObjectDictionary. Retrying one of those buys nothing and costs a back-off per turn.
 template <typename F>
-SdoInfoResult retrySdoInfo(ecx_contextt* ctx, uint16_t slavePosition, std::mutex& mutex, F&& call,
-                           int maxRetries = kSdoInfoMaxRetries) {
+SdoInfoResult retrySdoInfo(ecx_contextt* ctx, uint16_t slavePosition, ControlPlaneLocks& locks,
+                           F&& call, int maxRetries = kSdoInfoMaxRetries) {
   const auto started = std::chrono::steady_clock::now();
   SdoInfoResult result;
   for (int attempt = 0; attempt <= maxRetries; ++attempt) {
@@ -1055,7 +1066,7 @@ SdoInfoResult retrySdoInfo(ecx_contextt* ctx, uint16_t slavePosition, std::mutex
       std::this_thread::sleep_for(kSdoInfoRetryDelay);
     }
     {
-      const std::lock_guard<std::mutex> lock(mutex);
+      const auto lock = locks.lockDrive(slavePosition);
       // Left over from an earlier transfer, and not this one's to report.
       discardSlaveErrors(ctx, slavePosition);
       result.wkc = call();
@@ -1142,7 +1153,7 @@ struct FoeRefusal {
 // among them. A failed transfer that comes back with a refusal was refused; one without it never
 // got an answer, because the return value alone cannot tell the two apart (EC_TIMEOUT is -5 and
 // -EC_ERR_TYPE_FOE_ERROR is too). Draining the slave's entries keeps one from being blamed on its
-// next transfer, as in drainSdoErrors. Called with controlPlaneMutex_ held.
+// next transfer, as in drainSdoErrors. Called with the drive's lock held.
 std::optional<FoeRefusal> drainFoeErrors(ecx_contextt* ctx, uint16_t slavePosition) {
   std::optional<FoeRefusal> refusal;
   ec_errort err{};
@@ -1187,7 +1198,7 @@ FoeError foeError(int wkc, std::string_view op, uint16_t slave, std::string_view
 }
 
 // Explains a failed ecx_FOEread/ecx_FOEwrite: the slave's own refusal when it sent one, the return
-// value otherwise. Called with controlPlaneMutex_ held.
+// value otherwise. Called with the drive's lock held.
 FoeError foeFailure(ecx_contextt* ctx, int wkc, std::string_view op, uint16_t slave,
                     std::string_view filename) {
   if (const auto refusal = drainFoeErrors(ctx, slave)) {
@@ -1232,13 +1243,12 @@ void drainMailbox(ecx_contextt* ctx, uint16_t slavePosition) {
 
 std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
     uint16_t slavePosition) {
-  // Fine-grained locking: controlPlaneMutex_ is taken per individual SDO Info
-  // transaction (and released during retrySdoInfo's back-off sleeps), so this
-  // multi-second enumeration never blocks another control-plane caller for more
-  // than a single transfer.
+  // Fine-grained locking: the drive's lock is taken per individual SDO Info transaction (and
+  // released during retrySdoInfo's back-off sleeps), so this multi-second enumeration never blocks
+  // other work on this drive for more than a single transfer. Work on other drives never waits.
   //
   // Accepted caveat — this method does NOT hold ctx_ stable for its whole duration. Because
-  // controlPlaneMutex_ is dropped between transactions, a concurrent scan()/reset()/stop() landing
+  // the locks are dropped between transactions, a concurrent scan()/reset()/stop() landing
   // in one of those gaps frees ctx_, and the next transaction then dereferences a dangling context:
   // a use-after-free. Within Motion Master this cannot happen — the callers of this hold a
   // DeviceHandle on the device for the call's entire duration, and the handle owns the device set,
@@ -1248,13 +1258,13 @@ std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
   // same guarantee: do not call scan()/reset()/stop() while a readObjectDictionary() is in flight
   // on another thread. This is not a wart unique to this method — it is the driver's uniform
   // lifetime contract: exchangeProcessData() carries the identical one on the RT path, reading ctx_
-  // lock-free (no controlPlaneMutex_) and so relying on the caller not tearing the context down
+  // lock-free (no control-plane lock) and so relying on the caller not tearing the context down
   // mid-cycle (see closeContext's note on stopExchange ordering). "Do not destroy the context while
   // an operation is in flight" holds for every operation, not just this enumeration. The up-front
   // ctx_ check below is only a pre-init guard, not protection against this race (which is why it is
   // not re-checked inside the loop).
   {
-    std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+    const auto lock = controlPlane_.lockBusShared();
     if (!ctx_) {
       return std::unexpected("no driver — call init() first");
     }
@@ -1280,7 +1290,7 @@ std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
                 counters.probes);
   };
 
-  if (auto list = retrySdoInfo(ctx_.get(), slavePosition, controlPlaneMutex_,
+  if (auto list = retrySdoInfo(ctx_.get(), slavePosition, controlPlane_,
                                [&] { return ecx_readODlist(ctx_.get(), slavePosition, &odList); });
       !list.ok()) {
     // No summary here: nothing was enumerated, and this message already carries the same detail.
@@ -1297,7 +1307,7 @@ std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
   bool probeDeclaredSize = true;
 
   for (uint16_t i = 0; i < odList.Entries; ++i) {
-    auto description = retrySdoInfo(ctx_.get(), slavePosition, controlPlaneMutex_,
+    auto description = retrySdoInfo(ctx_.get(), slavePosition, controlPlane_,
                                     [&] { return ecx_readODdescription(ctx_.get(), i, &odList); });
     counters.add(description);
     if (!description.ok()) {
@@ -1337,7 +1347,7 @@ std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
         break;
       }
       auto entry = retrySdoInfo(
-          ctx_.get(), slavePosition, controlPlaneMutex_,
+          ctx_.get(), slavePosition, controlPlane_,
           [&] { return ecx_readOEsingle(ctx_.get(), i, sub, &odList, &oeList); },
           probing ? 0 : kSdoInfoMaxRetries);
       if (probing) {
@@ -1395,7 +1405,7 @@ std::expected<OdRead, std::string> SoemFieldbusDriver::readObjectDictionary(
 
 std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSii(
     uint16_t slavePosition) {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockBus();
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -1427,7 +1437,7 @@ std::expected<std::vector<uint8_t>, std::string> SoemFieldbusDriver::readSii(
 
 std::expected<void, std::string> SoemFieldbusDriver::writeSii(uint16_t slavePosition,
                                                               std::span<const uint8_t> data) {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockBus();
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -1462,7 +1472,7 @@ std::expected<void, std::string> SoemFieldbusDriver::writeSii(uint16_t slavePosi
 
 std::expected<std::vector<uint8_t>, FoeError> SoemFieldbusDriver::readFile(
     uint16_t slavePosition, const std::string& filename) {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockDrive(slavePosition);
   if (!ctx_) {
     return std::unexpected(
         FoeError{FoeErrorKind::Protocol, Retry::Permanent, "no driver — call init() first"});
@@ -1496,7 +1506,7 @@ std::expected<std::vector<uint8_t>, FoeError> SoemFieldbusDriver::readFile(
 std::expected<void, FoeError> SoemFieldbusDriver::writeFile(uint16_t slavePosition,
                                                             const std::string& filename,
                                                             std::span<const uint8_t> data) {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockDrive(slavePosition);
   if (!ctx_) {
     return std::unexpected(
         FoeError{FoeErrorKind::Protocol, Retry::Permanent, "no driver — call init() first"});
@@ -1520,7 +1530,7 @@ std::expected<void, FoeError> SoemFieldbusDriver::writeFile(uint16_t slavePositi
 std::expected<void, std::string> SoemFieldbusDriver::readRegister(uint16_t slavePosition,
                                                                   uint16_t address,
                                                                   std::span<uint8_t> data) {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockDrive(slavePosition);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -1539,7 +1549,7 @@ std::expected<void, std::string> SoemFieldbusDriver::readRegister(uint16_t slave
 std::expected<void, std::string> SoemFieldbusDriver::writeRegister(uint16_t slavePosition,
                                                                    uint16_t address,
                                                                    std::span<const uint8_t> data) {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockDrive(slavePosition);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -1581,7 +1591,7 @@ mm::comm::ProcessDataWatchdogConfig decodeWatchdog(uint16_t divider, uint16_t ti
 
 std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::processDataWatchdog(
     uint16_t slavePosition) {
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockDrive(slavePosition);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -1614,7 +1624,7 @@ std::expected<ProcessDataWatchdogConfig, std::string> SoemFieldbusDriver::setPro
   if (timeout < std::chrono::nanoseconds::zero()) {
     return std::unexpected("watchdog timeout must not be negative");
   }
-  std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+  const auto lock = controlPlane_.lockDrive(slavePosition);
   if (!ctx_) {
     return std::unexpected("no driver — call init() first");
   }
@@ -1866,7 +1876,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
   // leaving BOOT restarts it, and the resend loop below gives it its address back.
   std::vector<uint16_t> positions;
   {
-    std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+    const auto lock = controlPlane_.lockBus();
     if (!ctx_) {
       spdlog::error("transitionToState: no driver — call init() first");
       return;
@@ -1888,10 +1898,11 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
   }
   const auto targetRaw = static_cast<uint16_t>(targetState);
 
-  // controlPlaneMutex_ is taken only around the discrete socket transactions below and
-  // is never held across the poll sleep or the tick()/shouldAbort() callbacks, so
-  // a multi-second transition does not block other control-plane callers (and the
-  // PDO tick, being lock-free, never contends here).
+  // The bus lock is taken exclusive only around the discrete socket transactions below. These
+  // read and write the AL state of several slaves in the slavelist, and the boot mailbox set, so
+  // they exclude the work on every drive. The lock is never held across the poll sleep or the
+  // tick()/shouldAbort() callbacks, so a multi-second transition does not block other
+  // control-plane callers (and the PDO tick, being lock-free, never contends here).
 
   // A slave sitting in INIT can silently ignore the next state request — staying in INIT with the
   // error bit clear and AL status code 0x0000 — when its PDI latched a stale internal state
@@ -1905,7 +1916,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
   if (targetState != EtherCatState::Init) {
     std::vector<uint16_t> kicked;
     {
-      std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+      const auto lock = controlPlane_.lockBus();
       ecx_readstate(ctx_.get());
       for (uint16_t pos : positions) {
         const uint16_t stateClean = ctx_->slavelist[pos].state & 0x000Fu;
@@ -1929,7 +1940,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
   // Slaves that leave INIT here. Reaching PRE-OP from INIT is what resets the mailbox counter.
   std::set<uint16_t> leavingInit;
   {
-    std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+    const auto lock = controlPlane_.lockBus();
     ecx_readstate(ctx_.get());
     for (uint16_t pos : positions) {
       uint16_t state = ctx_->slavelist[pos].state;
@@ -1998,7 +2009,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
 
     // Locked for the rest of this iteration (state read, evaluation, resend) —
     // released at the loop-body scope exit before the next tick()/sleep.
-    std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+    const auto lock = controlPlane_.lockBus();
     ecx_readstate(ctx_.get());
 
     for (auto it = pending.begin(); it != pending.end();) {
@@ -2088,7 +2099,7 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
   }
 
   if (!aborted) {
-    std::lock_guard<std::mutex> lock(controlPlaneMutex_);
+    const auto lock = controlPlane_.lockBus();
     for (uint16_t pos : pending) {
       // Report both registers: the AL Status (0x0130 — actual state + error bit, so the slave's
       // real position is visible rather than just the requested target) and the AL Status Code

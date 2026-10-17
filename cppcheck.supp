@@ -29,6 +29,7 @@ uninitMemberVarNoCtor:*/web_api.h
 // compile cleanly with the real toolchain (verified with g++ -fsyntax-only).
 syntaxError:*/device_manager_test.cc
 syntaxError:*/soem_error_list_test.cc
+syntaxError:*/control_plane_locks_test.cc
 syntaxError:*/device_test.cc
 syntaxError:*/device_parameter_test.cc
 syntaxError:*/monitoring_test.cc

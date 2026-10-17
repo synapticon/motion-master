@@ -16,6 +16,7 @@
 #include <expected>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stop_token>
@@ -164,6 +165,10 @@ class SpoeFieldbusDriver : public FieldbusDriver {
                                                              const std::string& filename);
 
   SpoeFieldbusDriverConfig config_;
+  // Guards what scan and configureProcessData write against slaveInfo and processDataLayout, which
+  // read it. A request to a drive does not take it: the connection's own mutex keeps a request and
+  // its reply together. mutable so the const accessors can lock.
+  mutable std::mutex controlPlaneMutex_;
   // Sized once in the constructor and never resized, so a position indexes it without a lock.
   std::vector<std::unique_ptr<Drive>> drives_;
   // Written by configureProcessData while no exchange runs, read by processDataLayout.

@@ -7,8 +7,8 @@
 > [CLASS_DIAGRAM.md](CLASS_DIAGRAM.md) shows ownership. [RT_SCHEDULING.md](RT_SCHEDULING.md)
 > covers `SCHED_FIFO` and `mlockall`.
 
-Motion Master holds ten mutexes, two condition variables, and four lock-free protocols. The page
-below is the whole model. The sections after it are the detail behind it: every primitive, what each
+Motion Master holds the mutexes, condition variables, and lock-free protocols that the
+[inventory](#mutex-inventory) lists. The page below is the whole model. The sections after it are the detail behind it: every primitive, what each
 one guards, and the invariants they hold up.
 
 ## The model on one page
@@ -65,15 +65,18 @@ DeviceSet — immutable once published
 | --- | --- | --- |
 | `busOperationMutex_` | one control-plane operation drives the bus at a time | a whole scan or AL transition — seconds |
 | `Device::parametersMutex_` | the parameter map, and a cell's non-atomic fields | never across bus I/O |
-| `FieldbusDriver::controlPlaneMutex_` | one socket transaction | one FoE transfer — seconds |
+| SOEM bus lock, exclusive | one transaction on the whole bus: scan, re-map, AL state, SII | one scan — seconds |
+| SOEM drive lock | one transaction on one drive: SDO, SDO Info, FoE, registers | one FoE transfer — seconds |
+| SOEM frame slot | one control-plane frame on the wire, at most eight at a time | one transaction |
+| `SpoeFieldbusDriver::controlPlaneMutex_` | what a scan and a re-map write | one scan |
 | `currentSetMutex_` | one `shared_ptr` copy | nanoseconds |
 | `processDataMutex_` | the ring storage and the retained images | one `.mmpd` dump |
 | monitoring, refresher, procedure | each subsystem's own registry | never across a `DeviceManager` call |
 
-Lock order is `busOperationMutex_` → `Device::parametersMutex_` →
-`FieldbusDriver::controlPlaneMutex_`. The bottom three rows are leaves: nothing is ever acquired
-while one of them is held. The [inventory](#mutex-inventory) below lists all ten, including the
-per-run procedure locks that this summary folds together. It also lists three primitives that the
+Lock order is `busOperationMutex_` → `Device::parametersMutex_` → the driver's locks. For SOEM those
+are the bus lock, then one drive lock, then a frame slot. The bottom three rows are leaves: nothing
+is ever acquired while one of them is held. The [inventory](#mutex-inventory) below lists every
+mutex, including the per-run procedure locks that this summary folds together. It also lists three primitives that the
 count leaves out, because none of them guards state that two threads share: the log sink, the
 reporter's wait mutex, and the single-instance file lock.
 
@@ -151,7 +154,10 @@ HTTP thread, so the two calls are serialised."
 | 2 | `DeviceManager::currentSetMutex_` | `std::mutex` | `libs/node/device_manager.h` | the `shared_ptr<DeviceSet>` itself, and nothing it points at | `deviceAt`, `deviceSet`, and `publishDeviceSet` | **no**. One pointer copy |
 | 3 | `DeviceManager::processDataMutex_` | `std::shared_mutex` | `libs/node/device_manager.h` | `pd_->ring`'s storage and `pd_->generations` | exclusive: `allocate` and `clear`, in the re-map publish window and in `scan`/`reset`. shared: the recorder accessors, `processImageInfo`, `serializeDump` | **no** |
 | 4 | `Device::parametersMutex_` | `std::mutex`, held through a `unique_ptr` | `libs/node/device.h` | the *structure* of `parameters_`, appends to the cell arena `cells_`, the mutable non-atomic fields of a cell, and `caSupport_`. **Not** the atomic value | every control-plane parameter read or write. **Not** `value<T>()` or `setValue<T>()` | **no**. It is released for every transfer |
-| 5 | `FieldbusDriver::controlPlaneMutex_` | `std::mutex` | `libs/comm/fieldbus_driver.h` | the SOEM context `ctx_` and the whole control plane: SDO, FoE, ESC registers, SII, AL state | every driver method except `exchangeProcessData` and `slaveState` | **yes**, for one transaction. FoE is the exception and holds it for the whole transfer |
+| 5a | `SoemFieldbusDriver::controlPlane_`, the bus lock | `BusLock`, a reader/writer lock that stops new readers while a writer waits | `libs/comm/control_plane_locks.h` | exclusive: the whole SOEM context `ctx_`. shared: what a scan and a re-map wrote | exclusive: `init`, `scan`, `configureProcessData`, `transitionToState`, `readSii`, `writeSii`, `stop`. shared: every other driver method except `exchangeProcessData` and `slaveState` | **yes**, for one transaction. A scan holds it exclusive for the whole scan |
+| 5b | `SoemFieldbusDriver::controlPlane_`, the drive locks | one `std::mutex` per position | `libs/comm/control_plane_locks.h` | one drive's entry in the slavelist, and that drive's mailbox | `readSdo`, `readSdoComplete`, `writeSdo`, each SDO Info transaction, `readFile`, `writeFile`, `readRegister`, `writeRegister`, the watchdog accessors, `readStates` for each target | **yes**, for one transaction. FoE holds it for the whole transfer |
+| 5c | `SoemFieldbusDriver::controlPlane_`, the frame slots | `std::counting_semaphore` of `kFrameSlots` | `libs/comm/control_plane_locks.h` | nothing. It caps the frame indexes that the control plane takes from SOEM's pool | every drive lock, and `readDevicesOnWire`, `readDiagnostics` and `readDcSync` | **yes**, for one transaction |
+| 5d | `SpoeFieldbusDriver::controlPlaneMutex_` | `std::mutex` | `libs/comm/spoe_fieldbus_driver.h` | what `scan` and `configureProcessData` write, against `slaveInfo` and `processDataLayout` | the SPoE driver's control plane | **yes**, for one scan or re-map. A request to a drive takes the connection's mutex (11) instead |
 | 6 | `MonitoringManager::mutex_` and `cv_` | `std::mutex`, `std::condition_variable` | `libs/node/monitoring_manager.h` | `entries_`, `running_`, `nextEpoch_`, `publish_` | the sampler thread, the `/api/monitorings` handlers, `keepFresh`, `stopKeepingFresh` | **no**. It is dropped for the flush |
 | 7 | `ParameterRefresher::mutex_` and `cv_` | `std::mutex`, `std::condition_variable` | `libs/node/parameter_refresher.h` | `entries_`, `running_` | the refresher thread, and `acquire` or `release` from the sampler path | **no**. It is dropped for the poll |
 | 8 | `ProcedureManager::mutex_` | `std::mutex` | `libs/node/procedure_manager.h` | `runs_` | `start`, `snapshot`, `cancel`, and the destructor | no |
@@ -175,16 +181,29 @@ busOperationMutex_
       ↓
 Device::parametersMutex_
       ↓
-FieldbusDriver::controlPlaneMutex_
+SOEM: bus lock (shared or exclusive)          SPoE: SpoeFieldbusDriver::controlPlaneMutex_
+      ↓
+SOEM: one drive lock
+      ↓
+SOEM: one frame slot
 ```
 
 `libs/node/device_manager.h` declares this order. `libs/node/device.h` restates it.
+`libs/comm/control_plane_locks.h` declares the order of the three SOEM locks.
+
+**The three SOEM locks follow three rules.**
+
+1. A drive lock is taken only with the bus lock held shared. Nobody holds two drive locks.
+2. A holder of the bus lock exclusive takes no drive lock and no frame slot. Nothing else on the
+   control plane sends a frame while it holds the bus.
+3. A frame slot is taken last. No holder of a slot waits for another lock, so the slots cannot
+   deadlock.
 
 **Three mutexes are outside the chain, because they are leaves.** `currentSetMutex_`,
 `processDataMutex_` and the SPoE connection's mutex are never held while anything else is
 acquired. Nothing orders against them. The SPoE connection's mutex is taken under
-`controlPlaneMutex_` by a scan or a re-map, and on its own by an SDO or a drive's exchange thread.
-It is the one leaf held across bus I/O: one request and its reply.
+`SpoeFieldbusDriver::controlPlaneMutex_` by a scan or a re-map, and on its own by an SDO or a
+drive's exchange thread. It is the one leaf held across bus I/O: one request and its reply.
 
 **No real-time primitive appears in the chain, by design.** `CycleGuard` is not a mutex, and no
 order relates it to these three. A control-plane operation waits *for* it, through
@@ -209,7 +228,7 @@ body shape rather than two (`libs/node/procedure_manager.h`).
 
 This is a mutual-exclusion token over an **activity**: only one thing drives the bus through a
 multi-step operation at a time. It separates a whole `scan` from the individual socket
-transactions inside it, which `controlPlaneMutex_` serialises on its own.
+transactions inside it, which the driver's locks serialise on their own.
 
 **Holding it is what keeps the published set still.** Only a holder can publish a new `DeviceSet`,
 so an operation that holds it can read `devices` and `driver` from the current set with no further
@@ -294,9 +313,10 @@ transfers takes the mutex, decides what to transfer, **releases it**, transfers,
 again to commit. The methods are `readParameter`, `writeParameter`, `readObjectComplete`,
 `readAllParameters`, and `initializeParameters`.
 
-That is not a micro-optimisation. A mailbox transfer queues behind `controlPlaneMutex_`, and an
-FoE file transfer holds that lock for its whole duration of several seconds. So a lock held across
-"one mailbox round-trip" is in fact held for as long as any unrelated bus traffic takes. Take a
+That is not a micro-optimisation. A mailbox transfer queues behind the drive's lock and behind a
+scan that holds the bus lock. An FoE file transfer holds the drive's lock for its whole duration of
+several seconds. So a lock held across "one mailbox round-trip" is in fact held for as long as any
+other traffic to the same drive, or any operation on the whole bus, takes. Take a
 background parameter refresh and a user on the FoE page, which is the ordinary configuration and
 not a rare one. A lock across the transfer stalls every cached read of the device.
 
@@ -329,23 +349,58 @@ contract splits by caller. A control-plane caller must hold `parametersMutex_` f
 for every access to a non-atomic field. A cyclic task runs inside the cycle the loop entered and
 touches only the cell.
 
-### 5. `FieldbusDriver::controlPlaneMutex_` — one socket transaction
+### 5. The driver's control-plane locks — one transaction on one drive, or on the whole bus
 
-*Type:* `std::mutex`, declared `mutable` so that a `const` accessor can lock it.
+*Type:* `ControlPlaneLocks` in `libs/comm/control_plane_locks.h`, held by `SoemFieldbusDriver` as
+`controlPlane_`. It is `mutable` so that a `const` accessor can lock it. `SpoeFieldbusDriver` has a
+plain `std::mutex` of its own, described at the end of this section.
 
-It serialises the entire control plane: SDO, FoE, ESC registers, SII, and AL state. **The PDO path
-deliberately does not take it.** `SoemFieldbusDriver::exchangeProcessData` runs lock-free, for two
-reasons. The port layer of SOEM is thread-safe on its own. PDO touches state that is disjoint from
-the control plane: the IOmap. That single decision is the reason that a slow SDO never stalls the 1
-ms cycle.
+**The mailbox work of different drives runs at the same time.** Each drive has its own mailbox sync
+managers, and SOEM keeps the mailbox counter per slave in `slavelist[].mbx_cnt`. So an SDO to drive
+1 does not wait for an FoE transfer to drive 2. `ControlPlaneLocks` has three parts:
 
-A caller holds it for one transaction, and never across a sleep, a wait that blocks, or a user
+- **The bus lock** (`BusLock`). Work on one drive takes it shared. Work on the whole bus takes it
+  exclusive: `init`, `scan`, `configureProcessData`, `transitionToState`, `readSii`, `writeSii`
+  and `stop`. A waiting writer stops new readers, so a scan waits only for the holds that already
+  started. `std::shared_mutex` on glibc lets a new reader in while a writer waits. With 32 HTTP
+  workers, a refresher and procedures, the shared holds can overlap without a gap, and a scan would
+  then wait for as long as they last.
+- **One drive lock per position.** SDO, SDO Info, FoE, ESC register access and the watchdog
+  accessors take it, with the bus lock held shared. `readStates` takes it once for each target,
+  because the read writes that drive's entry in the slavelist.
+- **The frame slots.** SOEM's frame indexes (`EC_MAXBUF`, set in `ports/soem`) are shared with the
+  real-time thread. When none is free, `ecx_getindex` returns one that is still in use, and two
+  frames then share one receive buffer. The slots cap the control plane at `kFrameSlots` (8) frames
+  at a time, and the real-time thread gets the rest. The cap is small because the NIC sends frames in
+  order, so each control-plane frame in flight can delay the real-time frame.
+
+`lockBusShared()` is for reads of what a scan or a re-map wrote, such as `busConfig` and
+`slaveInfo`. They send no frame and take no slot. `lockBusIo()` is for reads that send frames to
+several drives and change nothing in the context: `readDevicesOnWire`, `readDiagnostics` and
+`readDcSync`. They take the bus lock shared and a slot.
+
+**SII stays exclusive.** SOEM caches SII reads in one buffer for the whole context (`esibuf`), so two
+SII reads to different drives would share it.
+
+**The per-drive paths touch only per-slave state.** An audit of SOEM found that SDO, SDO Info and
+FoE read and write only the drive's own slavelist entry (`mbx_cnt`, `state`, `ALstatuscode`) and
+three structures that have their own mutex: the port, the mailbox pool, and the error list. The
+error list has its mutex from a patch in `ports/soem`, and each path pops only its own drive's
+errors. SOEM has no static state on these paths. The cyclic mailbox handler is never enabled.
+
+**The PDO path deliberately takes none of these locks.** `SoemFieldbusDriver::exchangeProcessData`
+runs lock-free, for two reasons. The port layer of SOEM is thread-safe on its own. PDO touches state
+that is disjoint from the control plane: the IOmap. That single decision is the reason that a slow
+SDO never stalls the 1 ms cycle. The frame slots are the one place where the control plane makes room
+for the real-time thread.
+
+A caller holds a lock for one transaction, and never across a sleep, a wait that blocks, or a user
 callback. Two operations of several seconds show the discipline:
 
-- `readObjectDictionary` takes it per SDO-Info transaction. It releases the lock across the
-  back-off sleeps of `retrySdoInfo`.
-- `transitionToState` takes it around each discrete socket transaction. It never holds the lock
-  across the poll sleep, or across the `tick()` and `shouldAbort()` callbacks.
+- `readObjectDictionary` takes the drive lock per SDO-Info transaction. It releases the lock
+  across the back-off sleeps of `retrySdoInfo`.
+- `transitionToState` takes the bus lock exclusive around each discrete socket transaction. It
+  never holds the lock across the poll sleep, or across the `tick()` and `shouldAbort()` callbacks.
 
 **The accepted caveat is uniform, and not specific to those two methods.** A drop of the lock
 between transactions means that `ctx_` is not stable for the duration of the operation. A `stop`
@@ -356,9 +411,19 @@ whose set owns the driver, so the driver object outlives the operation even acro
 crash. **An embedder that drives `SoemFieldbusDriver` directly must keep the driver alive the same
 way.**
 
-**FoE is the one long hold.** `readFile` and `writeFile` hold the lock for the entire transfer.
-That is the reason that the [AL-state mirror](#the-al-state-mirror) exists. Without the mirror,
-every reader that asks for the state of device 3 waits out a firmware write of 12 seconds.
+**FoE is the one long hold on a drive.** `readFile` and `writeFile` hold the drive's lock for the
+entire transfer. Work on other drives does not wait for it. A scan does: it waits for the bus lock,
+and so for the transfer to end. That is also the reason that the
+[AL-state mirror](#the-al-state-mirror) exists. Without the mirror, every reader that asks for the
+state of device 3 waits out a firmware write of 12 seconds.
+
+**`readStates` refreshes only its targets.** After `transitionToState`, the cached AL status of a
+drive that was not a target keeps its last value. That value can be older than the status of the
+targets.
+
+**`SpoeFieldbusDriver::controlPlaneMutex_`** guards what `scan` and `configureProcessData` write
+against `slaveInfo` and `processDataLayout`, which read it. A request to a drive does not take it.
+The connection's own mutex (11) keeps a request and its reply together.
 
 ### 11. The SPoE connection's mutex — one request at a time on one drive
 
@@ -368,7 +433,7 @@ how they do. It is held for one request and its reply, which is at most the requ
 
 Two kinds of thread take it. The control plane takes it for every SDO, state read and parameter
 list packet, and that drive's exchange thread takes it for every process-data request. The exchange
-thread takes no other lock, and it never takes `controlPlaneMutex_`, so a slow SDO delays one
+thread takes no other lock, and it never takes `SpoeFieldbusDriver::controlPlaneMutex_`, so a slow SDO delays one
 process-data exchange and never the real-time loop. The real-time loop reaches the exchange thread
 through `SpoeOutputSlot` and `SpoeInputQueue`, which are lock-free.
 
@@ -558,7 +623,8 @@ AL status.
 
 The mirror exists so that `slaveState()` can honour the **must-not-block** contract on
 `FieldbusDriver::slaveState`. The real value lives in the slavelist of SOEM, reachable only under
-`controlPlaneMutex_`. A firmware transfer holds that lock for its whole duration. Every monitoring
+the drive's lock or the bus lock. A firmware transfer holds the drive's lock for its whole
+duration. `readStates` stores into the mirror under the drive's lock, one target at a time. Every monitoring
 flush asks for the state of every device once.
 
 Relaxed ordering is correct here, and not a shortcut. Each entry is self-contained, with no
@@ -650,8 +716,13 @@ What is still review-only, and it is most of it:
 
 - the four scenarios in that file are a handful of schedules, not a proof. A race these
   interleavings never produce is not caught;
-- nothing exercises the real driver's `controlPlaneMutex_`, `busOperationMutex_` under contention,
-  or the WebSocket path;
+- `libs/comm/tests/control_plane_locks_test.cc` tests `ControlPlaneLocks` on its own: two drives
+  at the same time, the bus lock against every drive, a waiting writer, and the frame slots. Nothing
+  exercises the SOEM driver's locks against a bus, because that needs a NIC. Two drives on one bus
+  at the same time are checked on the bench only;
+- `concurrency_test.cc` uses a fake driver, so it does not exercise the driver's locks;
+- SOEM is not built with ThreadSanitizer instrumentation, so TSan does not see a race inside it;
+- nothing exercises `busOperationMutex_` under contention, or the WebSocket path;
 - the rest of the suite is single-threaded, so a locking mistake outside those scenarios does not
   fail it.
 
@@ -685,7 +756,7 @@ Each item below is known and deliberate. None is a defect.
   replaced it. The memory is transient rather than retained, and the alternative is a rescan
   that waits minutes for a procedure to finish.
 - **`SoemFieldbusDriver::exchangeProcessData` reads `ctx_` lock-free**, while `closeContext` writes
-  it under `controlPlaneMutex_`. This is correct only because `stopExchange()` orders the two
+  it with the bus lock held exclusive. This is correct only because `stopExchange()` orders the two
   upstream. The dependency is easy to miss, so this list names it. The alternative is a lock on the
   real-time path, which is worse.
 - **A cyclic task can drive hardware that a rescan renumbered.** After an insertion, `findDevice(4)`

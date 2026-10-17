@@ -3791,3 +3791,68 @@ the bus lock shared for their whole length.
 - SOEM is not built with ThreadSanitizer instrumentation, so TSan does not see a race inside it.
 - `libs/node/tests/concurrency_test.cc` uses a fake driver. Widening it would not exercise these
   locks, so it was not widened.
+
+## Session 2026-10-17 — SPoE orders its sequences per drive, and a scan against every request (as-built)
+
+Issue #78, the SPoE part. The issue asked for one design for both drivers, or a reason why not. SPoE
+gets a different design, because it has neither of the two things that shaped the SOEM one.
+
+**Requests to different SPoE drives already ran at the same time.** Each drive is its own TCP
+connection, and a request takes only that connection's mutex. The driver-wide `controlPlaneMutex_`
+was taken by `scan`, `configureProcessData`, `slaveInfo` and `processDataLayout`, and by no request.
+SPoE has no shared context like SOEM's `ecx_contextt`, and no pool of frame indexes. A port of
+`ControlPlaneLocks` would add nothing, and its frame slots would cap SPoE at eight drives for no
+reason.
+
+**Two gaps were left, and neither was about drives waiting for each other.**
+
+1. **The netX keeps one packet state for three kinds of sequence.** In `AppSockIf_MessageHandler.c`
+   (`somanet_software` at `v5.7.0-alpha.0-103`), `FILE_READ`, `FILE_WRITE` and `PARAM_FULL_DESC`
+   all use the static `fg_packet_state`. A first file-write packet resets it. A file read and a
+   full description set it from the request on every packet. So on one drive, two file transfers
+   break each other, and so do a file transfer and a dictionary read. MM could start both at once,
+   for example a firmware installation and a file read from the Console. `SDO_READ`, `SDO_WRITE` and
+   `STATE_READ` do not touch that state. The SoC side was not read.
+2. **A request could run in the middle of a scan.** `connectAndIdentify` clears a drive's state and
+   then reads it again. A state change sent in between found no state known and skipped the drive.
+
+**The fix is two locks.**
+
+- **`Drive::sequenceMutex`**, one per drive. It is held for a whole file read, file write,
+  dictionary read and firmware activation. `transitionToState` takes it for each target, because a
+  file write reads the drive's state on every packet. An SDO, a state read and locate do not take
+  it, so a monitoring's SDOs still run between the packets of a transfer.
+- **`bus_`**, a `BusLock`, which replaces `controlPlaneMutex_`. `scan`, `configureProcessData` and
+  `stop` hold it exclusive. Every other request holds it shared for that one request, never for a
+  whole sequence. So a scan waits for at most the requests in flight, and a transfer that a scan
+  interrupts fails on its next packet.
+
+The order is the sequence mutex, then `bus_`, then the connection's mutex. A scan takes no sequence
+mutex, so it cannot wait for a sequence while that sequence waits for the bus lock.
+
+**This avoids a trap that the SOEM design has.** `BusLock` stops new readers while a writer waits.
+If a long sequence held the bus lock shared, a waiting scan would hold back every new request to
+every drive until the sequence ended. SPoE takes the bus lock per request, so that cannot happen
+there. Over SOEM, an FoE transfer holds the bus lock shared for the whole transfer, so a scan that
+waits for it does hold back the SDOs to every other drive. The same holds for a re-map, an AL state
+change of any drive and SII access. This is accepted, and `docs/LOCKING.md` lists it under the
+accepted trade-offs with the three fixes that were not taken. It is never worse than one lock for
+the whole bus. Revisit it when someone reports SDOs that stall while firmware installs on another
+drive.
+
+**A firmware activation holds the sequence mutex across its sleeps.** That is up to its timeout,
+which the firmware installation sets to 120 s. Only the sequences of that drive wait, and none of
+them could work on a drive that restarts.
+
+**What is tested, and what is not.**
+
+- `AStateChangeWaitsForARunningScan` and `AFileWriteWaitsForAFirmwareActivation` fail without the
+  fix and pass with it.
+- `TwoFileWritesToOneDriveRunOneAfterTheOther` passes without the fix on Linux. A `std::mutex` there
+  lets the thread that releases it take it again before a waiting thread wakes up. So the first
+  write keeps the connection, and the second one does not get in between its packets. The test
+  guards against a scheduler that does let it in. It cannot show the fix on this one.
+- Nothing ran against a drive.
+
+**Not done, on purpose.** A scan still connects to the drives one after another. Connecting in
+parallel would shorten a scan of many drives. That is a change to the scan, not to the locks.

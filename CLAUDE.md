@@ -362,8 +362,11 @@ SOEM driver locks:   bus lock (shared or exclusive) → one drive lock → one f
   re-map, AL state, SII, stop. Nobody holds two drive locks, and an exclusive holder takes no
   drive lock. **The frame slots cap the control plane at `kFrameSlots` frames in flight**,
   because SOEM's frame indexes (`EC_MAXBUF`) are shared with the RT thread and `ecx_getindex`
-  hands out an index still in use when none is free. `SpoeFieldbusDriver` keeps its own
-  `controlPlaneMutex_` for what a scan writes. A request takes the connection's mutex.
+  hands out an index still in use when none is free. `SpoeFieldbusDriver` has no frame pool and no
+  shared context, so it takes a `BusLock` shared for each request and exclusive for a scan, a
+  re-map and stop. It also has a `sequenceMutex` per drive, held for a whole file transfer,
+  parameter list, firmware activation or state change, because the netX keeps one packet state
+  for all of them.
 
 Three leaf locks sit outside that order and are never held while anything else is acquired:
 `DeviceManager::currentSetMutex_`, held only long enough to copy a `shared_ptr`;

@@ -210,7 +210,7 @@ to thread 1 (`libs/comm/spoe_process_data.h`):
 
 The exchange thread shares its drive's `SpoeConnection` with the control plane. The connection's
 own mutex makes their requests take turns, one request at a time, which is also all the drive
-accepts. The exchange thread never takes `SpoeFieldbusDriver::controlPlaneMutex_`.
+accepts. The exchange thread never takes the driver's bus lock or a sequence mutex.
 
 ## Control plane against the PDO path
 
@@ -292,7 +292,7 @@ order.
 | `DeviceParameter::bits` | `libs/node/device_parameter.h` | *The* home of every scalar object's value. Lock-free through `std::atomic_ref` |
 | `ProcessData::image` and `inCycle` | `libs/node/process_data.h` | The cycle gate: how a control-plane mutation waits out the real-time thread without a shared lock |
 | `ControlPlaneLocks` | `libs/comm/control_plane_locks.h` | The SOEM driver's control-plane access: a bus lock, one lock per drive, and a cap on the frames in flight. One transaction at a time on each drive |
-| `SpoeFieldbusDriver::controlPlaneMutex_` | `libs/comm/spoe_fieldbus_driver.h` | What an SPoE scan and re-map write, against the reads of it |
+| `SpoeFieldbusDriver::bus_` and `Drive::sequenceMutex` | `libs/comm/spoe_fieldbus_driver.{h,cc}` | The SPoE driver's control-plane access: a bus lock that a scan holds exclusive and a request holds shared, and one mutex per drive for a sequence of packets |
 | `DeviceManager::busOperationMutex_` | `libs/node/device_manager.h` | A token over an *activity*: one control-plane operation drives the bus at a time |
 | `DeviceManager::currentSetMutex_` | `libs/node/device_manager.h` | The published `shared_ptr<DeviceSet>` itself, held for one pointer copy. Device lifetime is the refcount's job |
 | `DeviceManager::processDataMutex_` | `libs/node/device_manager.h` | The recorder ring's storage and the retained image generations, against `allocate` and `clear` |

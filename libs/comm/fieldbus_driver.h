@@ -29,6 +29,15 @@ namespace mm::comm {
 /// realistic configuration.
 inline constexpr std::size_t kMaxProcessImageBytes = 32768;
 
+/// @brief How long a file read waits for the slave's answer, unless the caller asks for longer.
+///
+/// A SOMANET bootloader can take seconds to answer a read, and it sends nothing until it answers.
+/// A read given up too early fails on every attempt, because each attempt starts the read again.
+/// 6 s is the timeout known to work on such drives in the field: Motion Master v5 waits the same
+/// 6 s, and it reads files from SOMANET bootloaders reliably. The wait is spent only when the slave
+/// does not answer.
+inline constexpr std::chrono::milliseconds kFoeReadTimeout{6000};
+
 /// @brief EtherCAT Application Layer state values.
 ///
 /// Numeric values match the EtherCAT standard AL control/status register
@@ -797,12 +806,16 @@ class FieldbusDriver {
   ///
   /// @param slavePosition  1-based slave position on the bus.
   /// @param filename       FoE filename as recognised by the slave firmware.
+  /// @param timeout        How long to wait for the slave's answer. Usually @c kFoeReadTimeout. A
+  ///                       read that makes the slave do slow work before it answers needs longer,
+  ///                       such as a SOMANET file removal, which answers after the erase. A
+  ///                       transport with a longer timeout of its own keeps that one.
   /// @return File bytes on success, or a @c FoeError. This is the one driver operation whose error
   ///         is structured rather than a plain string, because callers branch on it — see
   ///         @c comm/foe_error.h. It still streams and carries @c .message, so a caller that only
   ///         forwards the failure reads unchanged.
-  virtual std::expected<std::vector<uint8_t>, FoeError> readFile(uint16_t slavePosition,
-                                                                 const std::string& filename) = 0;
+  virtual std::expected<std::vector<uint8_t>, FoeError> readFile(
+      uint16_t slavePosition, const std::string& filename, std::chrono::milliseconds timeout) = 0;
 
   /// @brief Writes a file to the slave via File over EtherCAT (FoE).
   ///

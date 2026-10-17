@@ -19,6 +19,7 @@ add_executable(
   sii_test.cc
   soem_error_list_test.cc
   soem_fieldbus_driver_test.cc
+  soem_mailbox_test.cc
   spoe_connection_test.cc
   spoe_fieldbus_driver_test.cc
   spoe_process_data_test.cc

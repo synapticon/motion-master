@@ -491,7 +491,7 @@ TEST(SpoeFieldbusDriver, WritesAndReadsAFileInChunks) {
   }
   ASSERT_TRUE(driver.writeFile(1, "config.csv", content).has_value());
   EXPECT_EQ(server.file("config.csv"), content);
-  const auto read = driver.readFile(1, "config.csv");
+  const auto read = driver.readFile(1, "config.csv", mm::comm::kFoeReadTimeout);
   ASSERT_TRUE(read.has_value()) << read.error().message;
   EXPECT_EQ(*read, content);
 }
@@ -503,7 +503,7 @@ TEST(SpoeFieldbusDriver, AnEmptyFileStillSendsItsLastPacket) {
   ASSERT_TRUE(driver.writeFile(1, "empty.txt", {}).has_value());
   EXPECT_EQ(server.file("empty.txt"), std::vector<uint8_t>{});
   // The file list shows it exists, so an empty read is the file and not a missing one.
-  const auto read = driver.readFile(1, "empty.txt");
+  const auto read = driver.readFile(1, "empty.txt", mm::comm::kFoeReadTimeout);
   ASSERT_TRUE(read.has_value()) << read.error().message;
   EXPECT_TRUE(read->empty());
 }
@@ -513,7 +513,7 @@ TEST(SpoeFieldbusDriver, AMissingFileIsNotFound) {
   FakeSpoeServer server;
   SpoeFieldbusDriver driver(configFor(server));
   ASSERT_TRUE(driver.scan().has_value());
-  const auto read = driver.readFile(1, "missing.txt");
+  const auto read = driver.readFile(1, "missing.txt", mm::comm::kFoeReadTimeout);
   ASSERT_FALSE(read.has_value());
   EXPECT_EQ(read.error().kind, mm::comm::FoeErrorKind::FileNotFound);
 }
@@ -549,7 +549,7 @@ TEST(SpoeFieldbusDriver, WaitsForAFileReplyTheDriveHolds) {
   SpoeFieldbusDriver driver(configFor(server));
   ASSERT_TRUE(driver.scan().has_value());
   server.setReplyDelay(milliseconds{500});
-  const auto read = driver.readFile(1, "config.csv");
+  const auto read = driver.readFile(1, "config.csv", mm::comm::kFoeReadTimeout);
   ASSERT_TRUE(read.has_value()) << read.error().message;
   EXPECT_EQ(*read, (std::vector<uint8_t>{1, 2, 3}));
 }

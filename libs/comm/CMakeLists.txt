@@ -12,6 +12,7 @@ add_library(
   sdo_abort_codes.cc
   sii.cc
   soem_fieldbus_driver.cc
+  soem_mailbox.cc
   spoe_connection.cc
   spoe_fieldbus_driver.cc
   spoe_frame.cc

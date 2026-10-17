@@ -321,7 +321,7 @@ class OsCommandFakeDriver : public FieldbusDriver {
   std::vector<std::pair<std::string, std::vector<uint8_t>>> fileWrites;
 
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
-      uint16_t, const std::string& name) override {
+      uint16_t, const std::string& name, std::chrono::milliseconds) override {
     fileReads.push_back(name);
     auto it = files.find(name);
     if (it == files.end()) {
@@ -2360,7 +2360,7 @@ class FirmwareFakeDriver : public FieldbusDriver {
     return {};
   }
   std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
-      uint16_t, const std::string& name) override {
+      uint16_t, const std::string& name, std::chrono::milliseconds) override {
     constexpr std::string_view kRemove = "fs-remove=";
     if (name.starts_with(kRemove)) {
       removed.push_back(name.substr(kRemove.size()));
@@ -2551,7 +2551,7 @@ TEST(FirmwareInstallationBody, StaysInBootWhenAsked) {
 
 TEST(FirmwareInstallationBody, RetriesATransientFoeFailure) {
   FirmwareBus bus;
-  bus.driver->transientFailures["app_firmware.bin"] = 3;
+  bus.driver->transientFailures["app_firmware.bin"] = 2;
   ProgressReporter reporter(mm::node::firmwareInstallationSteps());
   std::stop_source source;
 
@@ -2559,6 +2559,20 @@ TEST(FirmwareInstallationBody, RetriesATransientFoeFailure) {
       runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), installRequest());
   ASSERT_TRUE(result) << result.error();
   EXPECT_TRUE(bus.driver->written.contains("app_firmware.bin"));
+}
+
+// Three attempts per file, and a transient failure on every one of them ends the installation.
+TEST(FirmwareInstallationBody, GivesUpAfterThreeTransientFoeFailures) {
+  FirmwareBus bus;
+  bus.driver->transientFailures["app_firmware.bin"] = 3;
+  ProgressReporter reporter(mm::node::firmwareInstallationSteps());
+  std::stop_source source;
+
+  auto result =
+      runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), installRequest());
+  ASSERT_FALSE(result);
+  EXPECT_NE(result.error().find("gave up after 3 attempts"), std::string::npos) << result.error();
+  EXPECT_FALSE(bus.driver->written.contains("app_firmware.bin"));
 }
 
 // A permanent failure must not be retried into and must not leave the device in the bootloader.

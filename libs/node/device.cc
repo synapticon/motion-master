@@ -123,8 +123,8 @@ std::expected<void, std::string> Device::writeSdo(uint16_t index, uint8_t subind
 }
 
 std::expected<std::vector<uint8_t>, mm::comm::FoeError> Device::readFile(
-    const std::string& filename) const {
-  return driver_.readFile(slavePosition_, filename);
+    const std::string& filename, std::chrono::milliseconds timeout) const {
+  return driver_.readFile(slavePosition_, filename, timeout);
 }
 
 std::expected<void, mm::comm::FoeError> Device::writeFile(const std::string& filename,

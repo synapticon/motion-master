@@ -67,8 +67,8 @@ class CountingFakeDriver : public FieldbusDriver {
       const std::vector<uint16_t>& positions) override {
     return std::vector<SlaveStateRaw>(positions.size(), SlaveStateRaw{});
   }
-  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
-                                                                   const std::string&) override {
+  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
+      uint16_t, const std::string&, std::chrono::milliseconds) override {
     return std::vector<uint8_t>{};
   }
   std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string&,

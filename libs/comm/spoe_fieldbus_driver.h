@@ -120,8 +120,9 @@ class SpoeFieldbusDriver : public FieldbusDriver {
                                             std::span<const uint8_t> data) override;
   std::expected<OdRead, std::string> readObjectDictionary(uint16_t slavePosition) override;
 
-  std::expected<std::vector<uint8_t>, FoeError> readFile(uint16_t slavePosition,
-                                                         const std::string& filename) override;
+  std::expected<std::vector<uint8_t>, FoeError> readFile(
+      uint16_t slavePosition, const std::string& filename,
+      std::chrono::milliseconds timeout) override;
   std::expected<void, FoeError> writeFile(uint16_t slavePosition, const std::string& filename,
                                           std::span<const uint8_t> data) override;
 
@@ -162,9 +163,11 @@ class SpoeFieldbusDriver : public FieldbusDriver {
                                                                uint8_t subindex);
   void connectAndIdentify(Drive& drive);
   std::expected<Frame, FoeError> filePacket(Drive& drive, MessageType type, uint8_t packetState,
-                                            std::span<const uint8_t> data);
+                                            std::span<const uint8_t> data,
+                                            std::chrono::milliseconds timeout);
   std::expected<std::vector<uint8_t>, FoeError> readFileFrom(Drive& drive,
-                                                             const std::string& filename);
+                                                             const std::string& filename,
+                                                             std::chrono::milliseconds timeout);
 
   SpoeFieldbusDriverConfig config_;
   // Held exclusive by scan, configureProcessData and stop, which rebuild the connections, the drive

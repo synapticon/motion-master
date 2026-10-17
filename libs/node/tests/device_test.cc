@@ -174,8 +174,8 @@ class SdoFakeDriver : public FieldbusDriver {
     return OdRead{.entries = ods, .missingEntries = odMissingEntries};
   }
 
-  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(uint16_t,
-                                                                   const std::string&) override {
+  std::expected<std::vector<uint8_t>, mm::comm::FoeError> readFile(
+      uint16_t, const std::string&, std::chrono::milliseconds) override {
     return std::vector<uint8_t>{};
   }
 

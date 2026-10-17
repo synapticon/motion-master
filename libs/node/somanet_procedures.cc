@@ -522,8 +522,9 @@ constexpr auto kActivationTimeout = std::chrono::seconds(120);
 
 /// How many times a transient FoE failure is re-issued before giving up, and the pause between
 /// attempts. Only kinds that @c FoeError classifies as transient are retried; a missing file or an
-/// undersized buffer will fail identically however many times it is asked.
-constexpr int kFoeAttempts = 5;
+/// undersized buffer will fail identically however many times it is asked. Motion Master v5 uses
+/// the same 3 attempts and the same pause.
+constexpr int kFoeAttempts = 3;
 constexpr auto kFoeRetryDelay = std::chrono::milliseconds(100);
 
 /// Sleeps, but notices a cancellation. std::this_thread::sleep_for cannot be interrupted, and
@@ -626,10 +627,9 @@ std::expected<void, std::string> enterBoot(DeviceManager& deviceManager, uint16_
       !r) {
     return std::unexpected(std::format("could not reach BOOT: {}", r.error()));
   }
-  // A freshly entered bootloader takes a moment before it services file operations. Issuing the
-  // first FoE request too early fails *and* desynchronises the mailbox, so this is a wait rather
-  // than something to retry into. The driver's mailbox drain recovers from that state now, but
-  // waiting first is what avoids paying for it.
+  // A freshly entered bootloader takes a moment before it services file operations. A first FoE
+  // request sent too early waits out its timeout and is aborted, so this waits first. Motion
+  // Master v5 waits the same 2 s.
   if (!sleepUnlessStopped(warmUp, stop)) {
     return std::unexpected(cancelled("while the bootloader started"));
   }

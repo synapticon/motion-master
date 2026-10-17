@@ -280,22 +280,23 @@ vcpkg_replace_string(
 # never got an answer.
 #
 # The error text has no field in ec_errort, so it goes into a new context field, FOEerrortext,
-# which every Error packet overwrites. It is only meaningful next to the error-list entry that the
-# same packet pushed. Text past EC_MAXFOEERRORTEXT - 1 bytes is cut, and the result is always
-# NUL-terminated.
+# which holds one text per slave. Each Error packet overwrites the text of the slave that sent it.
+# One text per slave keeps the text of one slave from overwriting the text of another. The text is
+# only meaningful next to the error-list entry that the same packet pushed. Text past
+# EC_MAXFOEERRORTEXT - 1 bytes is cut, and the result is always NUL-terminated.
 vcpkg_replace_string(
     "${SOURCE_PATH}/include/soem/ec_main.h"
 "   int (*FOEhook)(uint16 slave, int packetnumber, int datasize);"
 "   int (*FOEhook)(uint16 slave, int packetnumber, int datasize);
-   /** Text of the last FoE Error packet a slave sent, NUL-terminated, empty when it carried none */
-   char FOEerrortext[EC_MAXFOEERRORTEXT];")
+   /** Per slave, the text of the last FoE Error packet it sent, NUL-terminated, empty when it carried none */
+   char FOEerrortext[EC_MAXSLAVE][EC_MAXFOEERRORTEXT];")
 
 vcpkg_replace_string(
     "${SOURCE_PATH}/include/soem/ec_main.h"
 "typedef struct ecx_context ecx_contextt;"
 "typedef struct ecx_context ecx_contextt;
 
-/** Size of ecx_contextt::FOEerrortext, the terminating NUL included */
+/** Size of one ecx_contextt::FOEerrortext entry, the terminating NUL included */
 #define EC_MAXFOEERRORTEXT 128")
 
 vcpkg_replace_string(
@@ -312,7 +313,6 @@ static void ecx_FOEerror(ecx_contextt *context, uint16 slave, const ec_FOEt *aFO
    Ec.Slave = slave;
    Ec.Etype = EC_ERR_TYPE_FOE_ERROR;
    Ec.AbortCode = (int32)etohl(aFOEp->ErrorCode);
-   context->ecaterror = TRUE;
    ecx_pusherror(context, &Ec);
 
    textlength = etohs(aFOEp->MbxHeader.length);
@@ -321,8 +321,8 @@ static void ecx_FOEerror(ecx_contextt *context, uint16 slave, const ec_FOEt *aFO
    {
       textlength = EC_MAXFOEERRORTEXT - 1;
    }
-   memcpy(context->FOEerrortext, aFOEp->ErrorText, textlength);
-   context->FOEerrortext[textlength] = '\\0';
+   memcpy(context->FOEerrortext[slave], aFOEp->ErrorText, textlength);
+   context->FOEerrortext[slave][textlength] = '\\0';
 }
 
 int ecx_FOEdefinehook(ecx_contextt *context, void *hook)")
@@ -351,11 +351,191 @@ vcpkg_replace_string(
                   ecx_FOEerror(context, slave, aFOEp);
                   if (aFOEp->ErrorCode == 0x8001)")
 
+# The error list is not safe to use from two threads, and a pop cannot select a slave.
+#
+# ecx_poperror always returns the oldest entry, whichever slave caused it. An entry can stay on the
+# list after the work that pushed it, for example an SDO abort during a scan or an emergency during
+# a transfer that succeeded. A transfer to slave 2 that fails could then pop the entry of slave 1
+# and report it as its own reason. ecx_popslaveerror pops the oldest entry of one slave and leaves
+# the entries of every other slave in place. Each ec_errort carries the slave that caused it.
+#
+# The error list is also the one structure that every CoE and FoE transfer writes and that has no
+# lock. ecx_pusherror and ecx_poperror change elist.head and elist.tail without one. Two threads
+# that push at the same time can write the same slot, and the list then loses an entry or counts
+# one twice. Each slave has its own mailbox and its own mailbox counter, and the mailbox pool has
+# its own mutex, so the error list is what stops the mailbox work of two slaves from running on two
+# threads.
+#
+# The patch adds elistmutex to the context. ecx_init and ecx_init_redundant create it, and
+# ecx_close destroys it. ecx_pusherror, ecx_poperror, ecx_iserror and ecx_popslaveerror take it.
+# ecaterror changes only inside ecx_pusherror and the two pops, so the patch removes the writes to
+# it that ecx_packeterror, ecx_SDOerror and ecx_SDOinfoerror make before they push. ecx_SoEerror
+# keeps its write, because Motion Master uses no SoE.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/include/soem/ec_main.h"
+"   ec_mbxpoolt mbxpool;"
+"   ec_mbxpoolt mbxpool;
+   /** internal, guards elist and ecaterror */
+   osal_mutext *elistmutex;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/include/soem/ec_main.h"
+"boolean ecx_poperror(ecx_contextt *context, ec_errort *Ec);"
+"boolean ecx_poperror(ecx_contextt *context, ec_errort *Ec);
+boolean ecx_popslaveerror(ecx_contextt *context, uint16 slave, ec_errort *Ec);")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"   ecx_initmbxpool(context);"
+"   ecx_initmbxpool(context);
+   context->elistmutex = (osal_mutext *)osal_mutex_create();")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"   osal_mutex_destroy(context->mbxpool.mbxmutex);"
+"   osal_mutex_destroy(context->mbxpool.mbxmutex);
+   osal_mutex_destroy(context->elistmutex);")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"void ecx_pusherror(ecx_contextt *context, const ec_errort *Ec)
+{
+   context->elist.Error[context->elist.head] = *Ec;"
+"void ecx_pusherror(ecx_contextt *context, const ec_errort *Ec)
+{
+   osal_mutex_lock(context->elistmutex);
+   context->elist.Error[context->elist.head] = *Ec;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"   if (context->elist.tail > EC_MAXELIST)
+   {
+      context->elist.tail = 0;
+   }
+   context->ecaterror = TRUE;
+}"
+"   if (context->elist.tail > EC_MAXELIST)
+   {
+      context->elist.tail = 0;
+   }
+   context->ecaterror = TRUE;
+   osal_mutex_unlock(context->elistmutex);
+}")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"boolean ecx_poperror(ecx_contextt *context, ec_errort *Ec)
+{
+   boolean notEmpty = (context->elist.head != context->elist.tail);
+"
+"boolean ecx_poperror(ecx_contextt *context, ec_errort *Ec)
+{
+   boolean notEmpty;
+
+   osal_mutex_lock(context->elistmutex);
+   notEmpty = (context->elist.head != context->elist.tail);
+")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"   else
+   {
+      context->ecaterror = FALSE;
+   }
+   return notEmpty;
+}"
+"   else
+   {
+      context->ecaterror = FALSE;
+   }
+   osal_mutex_unlock(context->elistmutex);
+   return notEmpty;
+}
+
+/** Pops the oldest error of one slave from the list, and keeps the errors of every other slave.
+ *
+ * @param[in] context        context struct
+ * @param[in] slave          slave whose error to pop
+ * @param[out] Ec Struct describing the error. Unchanged when the slave has no error on the list.
+ * @return TRUE if an error was popped.
+ */
+boolean ecx_popslaveerror(ecx_contextt *context, uint16 slave, ec_errort *Ec)
+{
+   const int16 size = EC_MAXELIST + 1;
+   boolean found = FALSE;
+   int16 slot;
+   int16 next;
+
+   osal_mutex_lock(context->elistmutex);
+   for (slot = context->elist.tail; slot != context->elist.head; slot = (int16)((slot + 1) % size))
+   {
+      if (context->elist.Error[slot].Slave == slave)
+      {
+         found = TRUE;
+         break;
+      }
+   }
+   if (found)
+   {
+      *Ec = context->elist.Error[slot];
+      /* close the gap: every later entry moves one slot towards the tail, so the order stays */
+      for (next = (int16)((slot + 1) % size); next != context->elist.head; next = (int16)((next + 1) % size))
+      {
+         context->elist.Error[slot] = context->elist.Error[next];
+         slot = next;
+      }
+      context->elist.Error[slot].Signal = FALSE;
+      context->elist.head = slot;
+   }
+   context->ecaterror = (context->elist.head != context->elist.tail);
+   osal_mutex_unlock(context->elistmutex);
+   return found;
+}")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"boolean ecx_iserror(ecx_contextt *context)
+{
+   return (context->elist.head != context->elist.tail);
+}"
+"boolean ecx_iserror(ecx_contextt *context)
+{
+   boolean notEmpty;
+
+   osal_mutex_lock(context->elistmutex);
+   notEmpty = (context->elist.head != context->elist.tail);
+   osal_mutex_unlock(context->elistmutex);
+   return notEmpty;
+}")
+
+# Two matches in ec_coe.c (ecx_SDOerror and ecx_SDOinfoerror) and one in ec_main.c
+# (ecx_packeterror). Each function pushes right after this line, and ecx_pusherror sets ecaterror.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"   Ec.SubIdx = SubIdx;
+   context->ecaterror = TRUE;"
+"   Ec.SubIdx = SubIdx;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"   Ec.SubIdx = SubIdx;
+   context->ecaterror = TRUE;"
+"   Ec.SubIdx = SubIdx;")
+
+# EC_MAXBUF is the number of frame indexes. The RT thread and the control plane take indexes from
+# one pool. When no index is free, ecx_getindex does not wait or fail. It returns an index that is
+# still in use, and two frames then share one receive buffer. The control plane is capped at
+# ControlPlaneLocks::kFrameSlots frames (libs/comm/control_plane_locks.h), and the RT thread gets
+# the rest. The cap stays small because the NIC sends frames in order, so each control-plane frame
+# in flight can delay the RT frame. The default of 16 leaves the RT thread 8 indexes, which limits
+# the bus size. 32 leaves it 24, and the delay in front of the RT frame stays the same. Each index
+# costs one tx and one rx buffer of one Ethernet frame.
 vcpkg_cmake_configure(
     SOURCE_PATH "${SOURCE_PATH}"
     OPTIONS
         -DSOEM_BUILD_SAMPLES=OFF
         -DEC_MAXNAME=80
+        -DEC_MAXBUF=32
 )
 
 vcpkg_cmake_install()

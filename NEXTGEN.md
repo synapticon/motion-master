@@ -3691,3 +3691,168 @@ Later:
   driver-wide, so a scan or a re-map reads them one after another. A per-connection lock would let
   them run in parallel. It changes the lock inventory in `docs/LOCKING.md`, so it needs its own
   review.
+
+## Session 2026-10-17 — Mailbox work on different drives runs at the same time (as-built)
+
+Issue #78. This reopens part of the lock inventory settled in Sessions 2026-08-08, 2026-08-09 and
+2026-08-19. Only the driver's level changes. `busOperationMutex_` and `parametersMutex_` keep their
+roles and their order.
+
+**One lock for the whole bus made every drive wait for every other drive.** `SoemFieldbusDriver`
+held one `controlPlaneMutex_` for SDO, FoE, ESC registers, SII and AL state. An FoE transfer holds
+it for the whole transfer, which is several seconds, so no SDO to any other drive ran during that
+time. An SDO on an Integro costs about 5 ms when it reaches the application, so a monitoring that
+refreshes SDO objects on an Integro kept the lock busy. With one drive on the bus, a monitoring of
+two SDO objects raised the median `getDeviceStates` time from 2.4 ms to 5.5 ms. It raised the
+median SDO `readParameter` time from 7.1 ms to 10.0 ms. The effect on other drives was not
+measured.
+
+**The drives do not need to share a lock.** Each drive has its own mailbox sync managers, and SOEM
+keeps the mailbox counter per slave in `slavelist[].mbx_cnt`. An audit of SOEM found that SDO,
+SDO Info and FoE touch only the drive's own slavelist entry (`mbx_cnt`, `state`, `ALstatuscode`)
+and three structures that have their own mutex: the port, the mailbox pool and the error list. SOEM
+has no static state on these paths, and the cyclic mailbox handler is never enabled.
+
+**The error list needed a patch first, and that patch is a fix on its own.** `ecx_pusherror` wrote
+`context->elist` with no lock, and `ecx_poperror` returns the oldest entry of any slave. SOEM's
+error list is a log of the whole bus for a master with one thread. It is not the result of one
+call. So an entry that stayed on the list after a scan, or after an emergency during a transfer
+that succeeded, became the reason of a later failure on another drive. `ports/soem` adds a mutex on
+the list and `ecx_popslaveerror`, which pops the entries of one slave. Each SDO, SDO Info and FoE
+path discards its drive's entries before it starts, and pops only its drive's entries after it
+fails. The FoE error text is kept per slave for the same reason. That shipped as its own commit,
+still under the single lock.
+
+**The new locks are `ControlPlaneLocks`, in `libs/comm/control_plane_locks.{h,cc}`.**
+
+```text
+busOperationMutex_ → Device::parametersMutex_ → bus lock → one drive lock → one frame slot
+```
+
+- **A bus lock.** Work on one drive takes it shared. Work on the whole bus takes it exclusive:
+  `init`, `scan`, `configureProcessData`, `transitionToState`, `readSii`, `writeSii` and `stop`.
+- **One lock per drive position.** SDO, SDO Info, FoE, ESC registers and the watchdog accessors
+  take it with the bus lock shared.
+- **A fixed number of frame slots,** taken after every other lock.
+
+Nobody holds two drive locks, and an exclusive holder takes no drive lock and no slot. A holder of a
+slot waits for no other lock, so the slots cannot deadlock.
+
+**The bus lock is not `std::shared_mutex`.** On glibc, `std::shared_mutex` lets a new reader in
+while a writer waits. The shared holders come from 32 HTTP workers, the refresher and the
+procedures, and their holds can overlap with no gap between them. A scan could then wait for as
+long as the overlap lasts. `BusLock` stops new readers while a writer waits, so a scan waits only
+for the holds that already started. It is a mutex and two condition variables.
+
+**The frame slots exist because SOEM's frame indexes are a pool shared with the real-time
+thread.** `ecx_getindex` searches for a free index. When it finds none, it does not wait and does
+not fail. It returns an index that is still in use, and two frames then share one receive buffer.
+With one lock, the control plane had at most one frame on the wire. With a lock per drive, it could
+have one per drive and take every index. The slots cap it at `kFrameSlots` (8).
+
+The cap is small on purpose. The NIC sends frames in order, so the real-time frame can wait behind
+every control-plane frame in flight. `ecx_mbxsend` writes the drive's whole mailbox, not only the
+SDO payload. A full frame takes about 120 µs at 100 Mbit/s, so eight full frames delay the
+real-time frame by about 1 ms. That figure is calculated, not measured. A larger cap buys more
+parallel drives only on a large bus, and it costs latency on every bus.
+
+**Reads of what a scan wrote take the bus lock shared and no slot.** `processDataLayout`,
+`busConfig`, `slaveInfo`, `slaveCount` and `mailboxProtocols` send no frame. Reads that send frames
+to several drives and change nothing in the context take the bus lock shared and a slot:
+`readDevicesOnWire`, `readDiagnostics` and `readDcSync`.
+
+**SII stays exclusive.** SOEM caches SII reads in one buffer for the whole context (`esibuf`), so two
+SII reads to different drives would share it.
+
+**`readStates` reads each target under that drive's lock.** `ecx_readstate` writes the slavelist
+entry of every slave, so it would race with the mailbox work on every other drive. `readStates` now
+reads `ALSTAT` and the status code of each target with one `FPRD` and stores them in that entry and
+in the AL-state mirror. The consequence: after a `transitionToState`, the cached status of a drive
+that was not a target keeps its last value, which can be older than the status of the targets.
+Nothing found so far depends on it. It was not investigated further.
+
+**`parametersMutex_` still waits for the driver.** The bound from Session 2026-08-08, "true per
+transaction, false end to end", remains. The wait is now bounded by the work on the same drive and
+by an operation on the whole bus, and no longer by the traffic to other drives.
+
+**SPoE does not change in this step.** `controlPlaneMutex_` moved from the `FieldbusDriver` base
+into `SpoeFieldbusDriver`. That driver uses it for what a scan and a re-map write, and a request
+already takes the connection's own mutex. A lock per drive for SPoE is a separate step, with open
+questions: firmware activation sleeps and reconnects, and enumeration and file transfers would hold
+the bus lock shared for their whole length.
+
+**What is tested, and what is not.**
+
+- `libs/comm/tests/control_plane_locks_test.cc` tests the locks on their own: two drives at the same
+  time, one holder per drive, the bus lock against every drive, a waiting writer against new
+  readers, and the frame slots.
+- No test runs concurrent SDOs against a real bus, because that needs a NIC. It needs a run on a
+  bench with two drives.
+- SOEM is not built with ThreadSanitizer instrumentation, so TSan does not see a race inside it.
+- `libs/node/tests/concurrency_test.cc` uses a fake driver. Widening it would not exercise these
+  locks, so it was not widened.
+
+## Session 2026-10-17 — SPoE orders its sequences per drive, and a scan against every request (as-built)
+
+Issue #78, the SPoE part. The issue asked for one design for both drivers, or a reason why not. SPoE
+gets a different design, because it has neither of the two things that shaped the SOEM one.
+
+**Requests to different SPoE drives already ran at the same time.** Each drive is its own TCP
+connection, and a request takes only that connection's mutex. The driver-wide `controlPlaneMutex_`
+was taken by `scan`, `configureProcessData`, `slaveInfo` and `processDataLayout`, and by no request.
+SPoE has no shared context like SOEM's `ecx_contextt`, and no pool of frame indexes. A port of
+`ControlPlaneLocks` would add nothing, and its frame slots would cap SPoE at eight drives for no
+reason.
+
+**Two gaps were left, and neither was about drives waiting for each other.**
+
+1. **The netX keeps one packet state for three kinds of sequence.** In `AppSockIf_MessageHandler.c`
+   (`somanet_software` at `v5.7.0-alpha.0-103`), `FILE_READ`, `FILE_WRITE` and `PARAM_FULL_DESC`
+   all use the static `fg_packet_state`. A first file-write packet resets it. A file read and a
+   full description set it from the request on every packet. So on one drive, two file transfers
+   break each other, and so do a file transfer and a dictionary read. MM could start both at once,
+   for example a firmware installation and a file read from the Console. `SDO_READ`, `SDO_WRITE` and
+   `STATE_READ` do not touch that state. The SoC side was not read.
+2. **A request could run in the middle of a scan.** `connectAndIdentify` clears a drive's state and
+   then reads it again. A state change sent in between found no state known and skipped the drive.
+
+**The fix is two locks.**
+
+- **`Drive::sequenceMutex`**, one per drive. It is held for a whole file read, file write,
+  dictionary read and firmware activation. `transitionToState` takes it for each target, because a
+  file write reads the drive's state on every packet. An SDO, a state read and locate do not take
+  it, so a monitoring's SDOs still run between the packets of a transfer.
+- **`bus_`**, a `BusLock`, which replaces `controlPlaneMutex_`. `scan`, `configureProcessData` and
+  `stop` hold it exclusive. Every other request holds it shared for that one request, never for a
+  whole sequence. So a scan waits for at most the requests in flight, and a transfer that a scan
+  interrupts fails on its next packet.
+
+The order is the sequence mutex, then `bus_`, then the connection's mutex. A scan takes no sequence
+mutex, so it cannot wait for a sequence while that sequence waits for the bus lock.
+
+**This avoids a trap that the SOEM design has.** `BusLock` stops new readers while a writer waits.
+If a long sequence held the bus lock shared, a waiting scan would hold back every new request to
+every drive until the sequence ended. SPoE takes the bus lock per request, so that cannot happen
+there. Over SOEM, an FoE transfer holds the bus lock shared for the whole transfer, so a scan that
+waits for it does hold back the SDOs to every other drive. The same holds for a re-map, an AL state
+change of any drive and SII access. This is accepted, and `docs/LOCKING.md` lists it under the
+accepted trade-offs with the three fixes that were not taken. It is never worse than one lock for
+the whole bus. Revisit it when someone reports SDOs that stall while firmware installs on another
+drive.
+
+**A firmware activation holds the sequence mutex across its sleeps.** That is up to its timeout,
+which the firmware installation sets to 120 s. Only the sequences of that drive wait, and none of
+them could work on a drive that restarts.
+
+**What is tested, and what is not.**
+
+- `AStateChangeWaitsForARunningScan` and `AFileWriteWaitsForAFirmwareActivation` fail without the
+  fix and pass with it.
+- `TwoFileWritesToOneDriveRunOneAfterTheOther` passes without the fix on Linux. A `std::mutex` there
+  lets the thread that releases it take it again before a waiting thread wakes up. So the first
+  write keeps the connection, and the second one does not get in between its packets. The test
+  guards against a scheduler that does let it in. It cannot show the fix on this one.
+- Nothing ran against a drive.
+
+**Not done, on purpose.** A scan still connects to the drives one after another. Connecting in
+parallel would shorten a scan of many drives. That is a change to the scan, not to the locks.

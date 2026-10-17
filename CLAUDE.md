@@ -342,10 +342,11 @@ the old set dies when its last holder drops it. A procedure that was running kee
 against its own device, and its next bus transaction fails against hardware that has moved.
 That replaced a design in which a long borrow and a rescan excluded each other.
 
-Three locks, one order:
+Three levels, one order:
 
 ```text
-busOperationMutex_ → Device::parametersMutex_ → controlPlaneMutex_
+busOperationMutex_ → Device::parametersMutex_ → driver locks
+SOEM driver locks:   bus lock (shared or exclusive) → one drive lock → one frame slot
 ```
 
 - **`busOperationMutex_`** (plain) is a token over an *activity*: one control-plane
@@ -353,9 +354,19 @@ busOperationMutex_ → Device::parametersMutex_ → controlPlaneMutex_
   is what keeps the published set from changing under an operation.
 - **`Device::parametersMutex_`** guards `parameters_` against the off-RT monitoring
   threads. **Never hold it across bus I/O** — snapshot, transfer, then re-find.
-- **`FieldbusDriver::controlPlaneMutex_`** serialises mailbox, SDO, FoE, ESC register, and
-  state access. Hold it for one socket transaction only, never across a sleep, a blocking
-  wait, or a user callback.
+- **The driver locks** serialise mailbox, SDO, FoE, ESC register, and state access. Hold one
+  for one socket transaction only, never across a sleep, a blocking wait, or a user callback.
+  `SoemFieldbusDriver` holds a `ControlPlaneLocks` (`libs/comm/control_plane_locks.h`). Work on
+  one drive takes that drive's lock with the bus lock shared, so **the mailbox work of different
+  drives runs at the same time**. Work on the whole bus takes the bus lock exclusive: init, scan,
+  re-map, AL state, SII, stop. Nobody holds two drive locks, and an exclusive holder takes no
+  drive lock. **The frame slots cap the control plane at `kFrameSlots` frames in flight**,
+  because SOEM's frame indexes (`EC_MAXBUF`) are shared with the RT thread and `ecx_getindex`
+  hands out an index still in use when none is free. `SpoeFieldbusDriver` has no frame pool and no
+  shared context, so it takes a `BusLock` shared for each request and exclusive for a scan, a
+  re-map and stop. It also has a `sequenceMutex` per drive, held for a whole file transfer,
+  parameter list, firmware activation or state change, because the netX keeps one packet state
+  for all of them.
 
 Three leaf locks sit outside that order and are never held while anything else is acquired:
 `DeviceManager::currentSetMutex_`, held only long enough to copy a `shared_ptr`;

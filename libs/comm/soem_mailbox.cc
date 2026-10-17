@@ -78,9 +78,11 @@ void abortFoeTransfer(ecx_contextt* ctx, uint16_t slavePosition) {
     }
   }
 
+  // The errors the abort produced describe its answer, which is of no use to the caller. Only this
+  // slave's entries are popped, because other drives run mailbox work at the same time and read
+  // their own entries from the same list.
   ec_errort err{};
-  while (ecx_poperror(ctx, &err)) {
-    // The errors the abort produced describe its answer, which is of no use to the caller.
+  while (ecx_popslaveerror(ctx, slavePosition, &err)) {
   }
   drainMailbox(ctx, slavePosition);
 }

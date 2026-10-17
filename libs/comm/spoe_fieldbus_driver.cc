@@ -10,6 +10,7 @@
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <shared_mutex>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -139,9 +140,16 @@ std::string sdoStatusName(uint16_t status) {
 struct SpoeFieldbusDriver::Drive {
   std::string host;
   SpoeConnection connection;
+  // Held for a whole file read, file write, parameter list or firmware activation, and for a state
+  // change. The netX keeps one packet state for file reads, file writes and the parameter list
+  // (`fg_packet_state` in `AppSockIf_MessageHandler.c`), so two of these sequences on one drive
+  // break each other. A state change waits for a running file write, which reads the state on every
+  // packet. An SDO, a state read and locate do not take it, because they touch no packet state and
+  // run between the packets of a sequence.
+  std::mutex sequenceMutex;
   // The last known state code, or 0 when none is known. Read lock-free by slaveState.
   std::atomic<uint16_t> state{0};
-  // Written by scan and read by slaveInfo, both under controlPlaneMutex_.
+  // Written by scan with bus_ held exclusive, and read by slaveInfo with it held shared.
   SlaveInfo info;
   // The protocol version from the server information, or 0 when none is known.
   std::atomic<uint16_t> protocolVersion{0};
@@ -283,7 +291,7 @@ void SpoeFieldbusDriver::connectAndIdentify(Drive& drive) {
 }
 
 std::expected<int, std::string> SpoeFieldbusDriver::scan() {
-  const std::scoped_lock lock(controlPlaneMutex_);
+  const std::unique_lock lock(bus_);
   // A scan rebuilds every connection, so no exchange may run across it.
   stopExchanges();
   layout_ = PdoLayout{};
@@ -294,7 +302,7 @@ std::expected<int, std::string> SpoeFieldbusDriver::scan() {
 }
 
 SlaveInfo SpoeFieldbusDriver::slaveInfo(uint16_t position) const {
-  const std::scoped_lock lock(controlPlaneMutex_);
+  const std::shared_lock lock(bus_);
   const Drive* found = driveAt(position);
   return found != nullptr ? found->info : SlaveInfo{};
 }
@@ -359,7 +367,7 @@ std::expected<uint32_t, std::string> SpoeFieldbusDriver::assignedBits(Drive& dri
 }
 
 std::expected<void, std::string> SpoeFieldbusDriver::configureProcessData() {
-  const std::scoped_lock lock(controlPlaneMutex_);
+  const std::unique_lock lock(bus_);
   stopExchanges();
   PdoLayout layout;
   uint16_t position = 0;
@@ -480,7 +488,7 @@ void SpoeFieldbusDriver::runExchange(Drive& drive, const std::stop_token& stopTo
 }
 
 PdoLayout SpoeFieldbusDriver::processDataLayout() {
-  const std::scoped_lock lock(controlPlaneMutex_);
+  const std::shared_lock lock(bus_);
   return layout_;
 }
 
@@ -511,7 +519,10 @@ int SpoeFieldbusDriver::exchangeProcessData(std::span<const uint8_t> outputs,
   return workingCounter;
 }
 
-void SpoeFieldbusDriver::stop() { releaseDrives(); }
+void SpoeFieldbusDriver::stop() {
+  const std::unique_lock lock(bus_);
+  releaseDrives();
+}
 
 void SpoeFieldbusDriver::releaseDrives() {
   stopExchanges();
@@ -537,6 +548,7 @@ SpoeFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
     }
     // SPoE has no error indicator and no AL status code. A drive that does not answer reads as
     // "no state known", and the others are still read. There is no station address to lose.
+    const std::shared_lock lock(bus_);
     const auto reply = request(*found, MessageType::kStateRead, {});
     const bool answered = reply && !reply->data.empty();
     found->state.store(answered ? reply->data[0] : 0);
@@ -570,6 +582,7 @@ std::expected<std::vector<uint8_t>, std::string> SpoeFieldbusDriver::readSdo(uin
   if (found == nullptr) {
     return std::unexpected(std::format("no SPoE device at position {}", slavePosition));
   }
+  const std::shared_lock lock(bus_);
   return readSdoFrom(*found, index, subindex);
 }
 
@@ -591,6 +604,7 @@ std::expected<void, std::string> SpoeFieldbusDriver::writeSdo(uint16_t slavePosi
   payload.push_back(static_cast<uint8_t>(data.size()));
   payload.push_back(static_cast<uint8_t>(data.size() >> 8));
   payload.insert(payload.end(), data.begin(), data.end());
+  const std::shared_lock lock(bus_);
   const auto reply = request(*found, MessageType::kSdoWrite, payload);
   if (!reply) {
     return std::unexpected(reply.error());
@@ -610,8 +624,15 @@ std::expected<OdRead, std::string> SpoeFieldbusDriver::readObjectDictionary(
     return std::unexpected(std::format("no SPoE device at position {}", slavePosition));
   }
   Drive& target = *found;
+  const std::scoped_lock sequence(target.sequenceMutex);
+  // The bus lock is taken for each request, so a scan does not wait for the whole list.
+  const auto requestShared = [this, &target](MessageType type, std::span<const uint8_t> data,
+                                             uint16_t status = 0) {
+    const std::shared_lock lock(bus_);
+    return request(target, type, data, status);
+  };
 
-  const auto list = request(target, MessageType::kParamList, {});
+  const auto list = requestShared(MessageType::kParamList, {});
   if (!list) {
     return std::unexpected(list.error());
   }
@@ -626,10 +647,10 @@ std::expected<OdRead, std::string> SpoeFieldbusDriver::readObjectDictionary(
   // list leaves is filled below, one description at a time.
   std::map<std::pair<uint16_t, uint8_t>, ParameterEntry> entriesByAddress;
   int lostPackets = 0;
-  if (const auto first = request(target, MessageType::kParamFullDesc, {}, kPacketFirst);
+  if (const auto first = requestShared(MessageType::kParamFullDesc, {}, kPacketFirst);
       first && (first->status & 0xFF) == kReplyAck) {
     for (int packet = 0; packet < kMaxParameterListPackets; ++packet) {
-      const auto reply = request(target, MessageType::kParamFullDesc, {}, kPacketMiddle);
+      const auto reply = requestShared(MessageType::kParamFullDesc, {}, kPacketMiddle);
       if (!reply) {
         spdlog::warn("SPoE {}: parameter list stopped: {}", target.host, reply.error());
         break;
@@ -654,7 +675,7 @@ std::expected<OdRead, std::string> SpoeFieldbusDriver::readObjectDictionary(
   int filled = 0;
   const auto describe = [&](MessageType type, uint16_t index,
                             uint8_t subindex) -> std::optional<ParameterEntry> {
-    const auto reply = request(target, type, address(index, subindex));
+    const auto reply = requestShared(type, address(index, subindex));
     if (!reply) {
       ++missing;
       return std::nullopt;
@@ -761,6 +782,7 @@ std::expected<Frame, FoeError> SpoeFieldbusDriver::filePacket(Drive& drive, Mess
                                                               uint8_t packetState,
                                                               std::span<const uint8_t> data,
                                                               std::chrono::milliseconds timeout) {
+  const std::shared_lock lock(bus_);
   auto reply = drive.connection.request(type, packetState, data, timeout);
   if (!reply) {
     if (reply.error().kind == ConnectionError::Kind::kClosed) {
@@ -810,6 +832,7 @@ std::expected<std::vector<uint8_t>, FoeError> SpoeFieldbusDriver::readFile(
                  .retry = Retry::Permanent,
                  .message = std::format("no SPoE device at position {}", slavePosition)});
   }
+  const std::scoped_lock sequence(found->sequenceMutex);
   auto content = readFileFrom(*found, filename, timeout);
   if (!content || !content->empty() || filename == "fs-getlist") {
     return content;
@@ -846,6 +869,7 @@ std::expected<void, FoeError> SpoeFieldbusDriver::writeFile(uint16_t slavePositi
                  .message = std::format("no SPoE device at position {}", slavePosition)});
   }
   Drive& drive = *found;
+  const std::scoped_lock sequence(drive.sequenceMutex);
   const std::vector<uint8_t> name(filename.begin(), filename.end());
   const auto first =
       filePacket(drive, MessageType::kFileWrite, kPacketFirst, name, config_.fileTimeout);
@@ -913,6 +937,8 @@ void SpoeFieldbusDriver::transitionToState(const std::vector<uint16_t>& position
     if (found == nullptr) {
       continue;
     }
+    const std::scoped_lock sequence(found->sequenceMutex);
+    const std::shared_lock lock(bus_);
     // State 0 means the last state read got no reply. A request to a silent drive waits out the
     // whole timeout, and the next state read tries the drive again.
     if (found->state.load() == 0) {
@@ -964,6 +990,7 @@ std::expected<void, std::string> SpoeFieldbusDriver::locate(uint16_t slavePositi
   }
   // The status echoes the LED state, 1 for blinking and 0 for stopped, so any answer is success.
   const std::vector<uint8_t> command{static_cast<uint8_t>(on ? 1 : 0)};
+  const std::shared_lock lock(bus_);
   if (auto reply = request(*found, MessageType::kDeviceLocate, command); !reply) {
     return std::unexpected(reply.error());
   }
@@ -977,16 +1004,24 @@ std::expected<FieldbusDriver::FirmwareActivation, std::string> SpoeFieldbusDrive
     return std::unexpected(std::format("no SPoE device at position {}", slavePosition));
   }
   Drive& drive = *found;
+  // The sequence mutex is held across the sleeps below, because no other sequence can run on a
+  // drive that restarts. The bus lock is taken for each step only, so a scan waits for one step at
+  // most.
+  const std::scoped_lock sequence(drive.sequenceMutex);
+  const auto requestShared = [this, &drive](MessageType type) {
+    const std::shared_lock lock(bus_);
+    return request(drive, type, {});
+  };
   const auto deadline = std::chrono::steady_clock::now() + timeout;
   // The firmware answers, then resets the netX into its update mode, which loads the COM firmware
   // from flash and restarts the drive. The restart also starts the SoC firmware written in BOOT.
-  if (auto reply = request(drive, MessageType::kFirmwareUpdate, {}); !reply) {
+  if (auto reply = requestShared(MessageType::kFirmwareUpdate); !reply) {
     return std::unexpected(reply.error());
   }
   // The reset follows the answer by `ulTimeToReset`, 1000 ms. A connection made before it would
   // reach the old firmware and look like a finished restart, so first wait for the drive to stop
   // answering.
-  while (request(drive, MessageType::kServerInfo, {})) {
+  while (requestShared(MessageType::kServerInfo)) {
     if (std::chrono::steady_clock::now() >= deadline) {
       return std::unexpected(std::format(
           "SPoE {}: the drive kept answering and did not restart for the firmware update",
@@ -994,10 +1029,14 @@ std::expected<FieldbusDriver::FirmwareActivation, std::string> SpoeFieldbusDrive
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
   }
-  drive.connection.close();
-  drive.state.store(0);
+  {
+    const std::shared_lock lock(bus_);
+    drive.connection.close();
+    drive.state.store(0);
+  }
   while (std::chrono::steady_clock::now() < deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    const std::shared_lock lock(bus_);
     if (!drive.connection.connect(drive.host, config_.port, config_.connectTimeout)) {
       continue;
     }

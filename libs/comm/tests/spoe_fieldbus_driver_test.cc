@@ -6,6 +6,7 @@
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <expected>
 #include <string>
 #include <thread>
 #include <utility>
@@ -551,6 +552,69 @@ TEST(SpoeFieldbusDriver, WaitsForAFileReplyTheDriveHolds) {
   const auto read = driver.readFile(1, "config.csv", mm::comm::kFoeReadTimeout);
   ASSERT_TRUE(read.has_value()) << read.error().message;
   EXPECT_EQ(*read, (std::vector<uint8_t>{1, 2, 3}));
+}
+
+TEST(SpoeFieldbusDriver, TwoFileWritesToOneDriveRunOneAfterTheOther) {
+  // The drive keeps one packet state for its file transfers, so the packets of two writes must not
+  // mix. On Linux this passes without the sequence mutex too: the first writer takes the
+  // connection's mutex again before the second one wakes up. It catches a scheduler that lets the
+  // second writer in.
+  FakeSpoeServer server;
+  SpoeFieldbusDriver driver(configFor(server));
+  ASSERT_TRUE(driver.scan().has_value());
+  // With a reply delay, the second write starts while the first one waits for a reply.
+  server.setReplyDelay(milliseconds{2});
+  const std::vector<uint8_t> first(10000, 0x11);
+  const std::vector<uint8_t> second(10000, 0x22);
+  std::expected<void, mm::comm::FoeError> firstWritten;
+  std::expected<void, mm::comm::FoeError> secondWritten;
+  {
+    std::jthread a([&] { firstWritten = driver.writeFile(1, "first.bin", first); });
+    std::jthread b([&] { secondWritten = driver.writeFile(1, "second.bin", second); });
+  }
+  ASSERT_TRUE(firstWritten.has_value()) << firstWritten.error().message;
+  ASSERT_TRUE(secondWritten.has_value()) << secondWritten.error().message;
+  EXPECT_EQ(server.file("first.bin"), first);
+  EXPECT_EQ(server.file("second.bin"), second);
+}
+
+TEST(SpoeFieldbusDriver, AFileWriteWaitsForAFirmwareActivation) {
+  // The activation sleeps between its requests while the drive restarts. A file transfer to the
+  // same drive must not run in those gaps.
+  FakeSpoeServer server;
+  server.setRestartTiming(milliseconds{300}, milliseconds{500});
+  server.setState(mm::comm::testing::kSpoeStateBoot);
+  SpoeFieldbusDriver driver(configFor(server));
+  ASSERT_TRUE(driver.scan().has_value());
+  std::chrono::steady_clock::time_point activated;
+  std::jthread activation([&] {
+    (void)driver.activateFirmware(1, std::chrono::seconds(10));
+    activated = std::chrono::steady_clock::now();
+  });
+  std::this_thread::sleep_for(milliseconds{100});
+  const auto written = driver.writeFile(1, "config.csv", std::vector<uint8_t>(10, 1));
+  const auto writeDone = std::chrono::steady_clock::now();
+  activation.join();
+  ASSERT_TRUE(written.has_value()) << written.error().message;
+  EXPECT_GE(writeDone, activated);
+}
+
+TEST(SpoeFieldbusDriver, AStateChangeWaitsForARunningScan) {
+  // A scan clears the state it knows of a drive before it reads it again. A state change in the
+  // middle of the scan would find no state known and skip the drive.
+  FakeSpoeServer server;
+  setIdentity(server);
+  SpoeFieldbusDriver driver(configFor(server));
+  ASSERT_TRUE(driver.scan().has_value());
+  // The scan sends seven requests, so with this delay it takes about 350 ms. The state is read by
+  // the second request.
+  server.setReplyDelay(milliseconds{50});
+  std::jthread rescan([&] { (void)driver.scan(); });
+  std::this_thread::sleep_for(milliseconds{20});
+  driver.transitionToState({1}, std::nullopt, EtherCatState::Init, std::chrono::seconds(1),
+                           milliseconds{100}, nullptr, nullptr);
+  rescan.join();
+  EXPECT_EQ(server.state(), mm::comm::testing::kSpoeStateInit);
 }
 
 TEST(SpoeFieldbusDriver, LocateStartsAndStopsTheLeds) {

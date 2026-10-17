@@ -1024,7 +1024,7 @@ class DeviceManager {
 
   // busOperationMutex_ — "one control-plane operation drives the bus at a time". It guards no
   // member: it is a mutual-exclusion token over an *activity*, which is what distinguishes it from
-  // the driver's controlPlaneMutex_ (that one serialises a single socket transaction; this one
+  // the driver's control-plane locks (those serialise a single socket transaction; this one
   // serialises a whole multi-transaction operation). Held for their entire duration by
   // init/scan/reset/configureProcessData/transitionToState/writeDevicePdoMapping, the only
   // operations that publish a device set, re-map the process image, drive AL state, or rewrite a

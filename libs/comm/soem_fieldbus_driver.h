@@ -9,6 +9,7 @@
 #include <string>
 #include <vector>
 
+#include "comm/control_plane_locks.h"
 #include "comm/fieldbus_driver.h"
 
 struct ecx_context;
@@ -202,7 +203,7 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// and on TI PRU-ICSS ESCs a register-space FMMU inside an LRW kills every cyclic frame. Clears
   /// the FMMU's active bit both in the cached slavelist and on the ESC, reversing SOEM's WKC
   /// bookkeeping for input-less slaves so @c processDataLayout's expected WKC stays consistent.
-  /// A no-op when @c mailboxStatusFmmu_ is set. Caller must hold @c controlPlaneMutex_.
+  /// A no-op when @c mailboxStatusFmmu_ is set. Caller must hold the bus lock exclusive.
   std::expected<void, std::string> deactivateMailboxStatusFmmus();
 
   /// @brief Marks every TI PRU-ICSS slave to use split LRD/LWR process data instead of combined
@@ -219,16 +220,17 @@ class SoemFieldbusDriver : public FieldbusDriver {
   /// working-counter accounting for LWR (output WKC counts ×2), so @c processDataLayout's
   /// @c expectedWkc = outputsWKC*2 + inputsWKC stays correct. Targeted to type 0x90 only — every
   /// other ESC keeps combined LRW, so there is no behaviour change for existing setups. Must be
-  /// called before @c ecx_config_map_group, under @c controlPlaneMutex_.
+  /// called before @c ecx_config_map_group, with the bus lock held exclusive.
   std::expected<void, std::string> blockLrwOnPruIcssSlaves();
 
   /// @brief Closes the SOEM NIC (ecx_close) and releases the master context, if open.
   ///
   /// Non-virtual so the destructor can call it without a virtual dispatch; @c stop() forwards
-  /// here. Idempotent — a second call is a no-op once @c ctx_ is null. Takes @c controlPlaneMutex_.
+  /// here. Idempotent — a second call is a no-op once @c ctx_ is null. Takes the bus lock
+  /// exclusive.
   void closeContext();
 
-  /// Refreshes @c slaveStates_ from the context's slavelist. Call with @c controlPlaneMutex_ held,
+  /// Refreshes @c slaveStates_ from the context's slavelist. Call with the bus lock held exclusive,
   /// at the end of every locked scope that ran a SOEM call able to change a cached AL status
   /// (@c ecx_config_init, @c ecx_readstate, @c ecx_writestate) or assigned one directly.
   ///
@@ -238,6 +240,9 @@ class SoemFieldbusDriver : public FieldbusDriver {
   void publishSlaveStates();
 
   std::string ifname_;
+  // One lock for the bus and one per position. Sized to slavelist in the constructor, so every
+  // position the driver accepts has a lock.
+  mutable ControlPlaneLocks controlPlane_;
   // Keep SOEM 2.0's mailbox-status FMMU active (see the constructor). Default false: the FMMU is
   // deactivated after every map by deactivateMailboxStatusFmmus().
   bool mailboxStatusFmmu_ = false;
@@ -254,9 +259,10 @@ class SoemFieldbusDriver : public FieldbusDriver {
   // Lock-free mirror of every slave's cached AL status, indexed by position exactly as SOEM's
   // slavelist is (index 0 being the master). This exists so slaveState() can honour the
   // "must not block" contract on FieldbusDriver::slaveState: the value it serves lives in SOEM's
-  // slavelist, which is only safe to touch under controlPlaneMutex_, and that lock is held across
-  // whole FoE transfers. Rather than make every reader wait on a flash write to learn an AL state,
-  // the writers publish here at the end of each locked scope and readers take it without a lock.
+  // slavelist, which is only safe to touch under the drive's lock, and an FoE transfer holds that
+  // lock for the whole transfer. Rather than make every reader wait on a flash write to learn an AL
+  // state, the writers publish here at the end of each locked scope and readers take it without a
+  // lock.
   //
   // Allocated once in the constructor at SOEM's compile-time maximum and never reallocated, so a
   // reader may index it for the driver's whole lifetime with nothing to synchronise against — the
@@ -270,7 +276,7 @@ class SoemFieldbusDriver : public FieldbusDriver {
   // correct PRE-OP mailbox SMs for every slave during scan(), so a fresh-scan
   // INIT→PRE-OP needs no reprogramming; only a slave returning from BOOT (e.g.
   // after a firmware download) carries stale BOOT SMs that must be reset.
-  // Guarded by controlPlaneMutex_. Cleared by scan() (which re-runs ecx_config_init).
+  // Guarded by the bus lock held exclusive. Cleared by scan() (which re-runs ecx_config_init).
   std::set<uint16_t> bootMailboxSlaves_;
 };
 

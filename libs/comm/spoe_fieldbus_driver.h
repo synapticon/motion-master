@@ -22,6 +22,7 @@
 #include <string>
 #include <vector>
 
+#include "comm/control_plane_locks.h"
 #include "comm/fieldbus_driver.h"
 #include "comm/spoe_frame.h"
 
@@ -154,20 +155,27 @@ class SpoeFieldbusDriver : public FieldbusDriver {
   void stopExchanges();
   void runExchange(Drive& drive, const std::stop_token& stopToken);
   std::expected<uint32_t, std::string> assignedBits(Drive& drive, uint16_t assignIndex);
+  // request, readSdoFrom and connectAndIdentify take no lock. The caller holds bus_, shared or
+  // exclusive. filePacket takes bus_ shared itself, for one packet.
   std::expected<Frame, std::string> request(Drive& drive, MessageType type,
                                             std::span<const uint8_t> data, uint16_t status = 0);
   std::expected<std::vector<uint8_t>, std::string> readSdoFrom(Drive& drive, uint16_t index,
                                                                uint8_t subindex);
   void connectAndIdentify(Drive& drive);
-  static std::expected<Frame, FoeError> filePacket(Drive& drive, MessageType type,
-                                                   uint8_t packetState,
-                                                   std::span<const uint8_t> data,
-                                                   std::chrono::milliseconds timeout);
+  std::expected<Frame, FoeError> filePacket(Drive& drive, MessageType type, uint8_t packetState,
+                                            std::span<const uint8_t> data,
+                                            std::chrono::milliseconds timeout);
   std::expected<std::vector<uint8_t>, FoeError> readFileFrom(Drive& drive,
                                                              const std::string& filename,
                                                              std::chrono::milliseconds timeout);
 
   SpoeFieldbusDriverConfig config_;
+  // Held exclusive by scan, configureProcessData and stop, which rebuild the connections, the drive
+  // information and the layout. Every other request holds it shared for that one request, so a scan
+  // waits for the requests in flight and never for a whole transfer. A transfer that a scan
+  // interrupts fails on its next packet. The order is a drive's sequenceMutex, then this lock, then
+  // the connection's mutex. mutable so the const accessors can lock.
+  mutable BusLock bus_;
   // Sized once in the constructor and never resized, so a position indexes it without a lock.
   std::vector<std::unique_ptr<Drive>> drives_;
   // Written by configureProcessData while no exchange runs, read by processDataLayout.

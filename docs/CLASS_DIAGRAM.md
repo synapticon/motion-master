@@ -152,7 +152,7 @@ classDiagram
         +acquire() / release()
         +start() / stop()
         -DeviceManager& deviceManager_
-        -thread thread_
+        -vector~jthread~ workers_
     }
     class DeviceManager {
         +init(unique_ptr~FieldbusDriver~)
@@ -223,10 +223,10 @@ classDiagram
         +readSdo()* / writeSdo()*
         +exchangeProcessData()* «lock-free»
         +transitionToState()*
-        #mutex controlPlaneMutex_
     }
     class SoemFieldbusDriver {
         -string ifname_
+        -ControlPlaneLocks controlPlane_
         -unique_ptr~ecx_context~ ctx_
     }
     class DeviceParameter {
@@ -485,8 +485,9 @@ unit-testable domain logic in `example_logic.{h,cc}` (`summarizeDevices`), thin
 request-parse/format glue in `example_routes.cc`. It is the server-side analogue of the
 `web/apps/example` PWA. A plug-in is ordinary C++ holding `DeviceManager&`, so it **may** spawn its
 own background `std::jthread` for off-RT work (a long-running procedure, a poller), exactly as
-`MonitoringManager` does — bound by the same rules as any non-RT thread: serialise all bus access
-through `FieldbusDriver::controlPlaneMutex_` and never touch the RT path.
+`MonitoringManager` does — bound by the same rules as any non-RT thread: reach the bus only
+through `DeviceManager` and the driver's methods, which take the driver's control-plane locks, and
+never touch the RT path.
 
 ### Cyclic tasks, Tier 3 (`mm::core::CyclicTask`)
 

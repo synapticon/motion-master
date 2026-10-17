@@ -37,8 +37,8 @@ threading model:
 A C++ route plug-in (`mm::api`, see [CLASS_DIAGRAM.md](CLASS_DIAGRAM.md)) is ordinary code that
 holds a `DeviceManager&`. It may start its own off-real-time `std::jthread` for long work, exactly
 as `MonitoringManager` does. Such a thread obeys the same two rules as every non-real-time thread.
-Serialise all bus access through `FieldbusDriver::controlPlaneMutex_`. Never touch the real-time
-path.
+Reach the bus only through `DeviceManager` and the driver's methods, which take the driver's
+control-plane locks. Never touch the real-time path.
 
 **A user `CyclicTask` adds no thread. It runs *inside* thread 1.** That is the whole point of the
 Tier-3 extension surface (`libs/example/example_cyclic_task.cc`). The real-time loop calls a
@@ -69,8 +69,8 @@ flowchart TB
     subgraph SAMP["Thread 4 — Monitoring sampler"]
         MS[MonitoringManager.run]
     end
-    subgraph REF["Thread 5 — Parameter refresher"]
-        PR[ParameterRefresher.run]
+    subgraph REF["Thread 5 — Parameter refresher workers"]
+        PR[ParameterRefresher.work]
     end
     subgraph NB["Thread 6 — Notification bus"]
         BH[NotificationBus.run]
@@ -87,7 +87,7 @@ flowchart TB
     EPD -->|append one record<br/>per cycle, wait-free| RING[(ProcessDataRing<br/>recorder)]
     MS -->|read every cycle<br/>via read cursor| RING
     HTTP -.->|point read head-1| RING
-    HTTP -->|SDO / FoE / state / registers| SM{{FieldbusDriver::controlPlaneMutex_}}
+    HTTP -->|SDO / FoE / state / registers| SM{{driver control-plane locks<br/>bus lock + drive lock}}
     PR -->|SDO poll| SM
     SM --> DRV[FieldbusDriver / SOEM]
     EPD -->|PDO LRW, no lock| DRV
@@ -108,7 +108,7 @@ flowchart TB
 | 2 | **HTTP server** | `std::thread`, `http_server.cc` | uWebSockets HTTPS event loop on **port 61447**. **Dispatch only** — every route handler runs on the 32-thread worker pool | Normal |
 | 3 | **WebSocket server** | `std::thread`, `ws_server.cc` | A separate uWebSockets WSS event loop on **port 62281**. Monitoring batches and notifications go out, subscriptions come in | Normal |
 | 4 | **Monitoring sampler** | `std::thread`, `monitoring_manager.cc` | Ships every recorded cycle since each monitoring's read cursor to the `setPublish` callback | Normal. `cv_.wait_until(nearest deadline)` |
-| 5 | **Parameter refresher** | `std::thread`, `parameter_refresher.cc` | Polls objects that are **not** in the PDO image over SDO, into their parameter cells | Normal. A 10 ms period floor. A failing object backs off exponentially, to a 2000 ms ceiling |
+| 5 | **Parameter refresher** | 4 `std::jthread` workers, `parameter_refresher.cc` | Polls objects that are **not** in the PDO image over SDO, into their parameter cells. The workers read different drives at the same time | Normal. A 10 ms period floor. After each read, the drive is closed to the refresher for as long as the read took. A failing object backs off exponentially, to a 2000 ms ceiling |
 | 6 | **Notification bus** | `std::jthread`, `notification_bus.cc` | Reads each source's version counter on that source's own interval, then renders and publishes the ones that moved. Today one source: bus health, every second | Normal. `wait_until(earliest due source)` with a `stop_token`, so `stop()` does not wait the interval out |
 | 7 | **State follower** | `std::jthread`, `main.cc` | While the driver refuses state changes, as SPoE does in Monitor mode, calls `DeviceManager::followObservedStates()` so the process image follows the states another master sets. Otherwise it does nothing | Normal. Every 500 ms, with a `stop_token` |
 
@@ -138,8 +138,14 @@ SDO-only parameters come from the refresher's cells.
 
 **Thread 5 — the refresher.** It decouples slow mailbox access from high-frequency sampling. It is
 also the Tier-3 door: `MonitoringManager::keepFresh` is what lets a cyclic task read an SDO-only
-object with `value<T>()`. The thread takes `FieldbusDriver::controlPlaneMutex_` for each SDO, and
-it releases its own lock for the duration of the poll.
+object with `value<T>()`. Each worker takes the drive's control-plane lock for each SDO, and it
+releases the refresher's own lock for the duration of the read.
+
+Four workers read different drives at the same time, and no two workers read one drive. So a slow
+drive, or a drive that does not answer, delays only its own objects. After each read, the refresher
+reads nothing more from that drive for as long as the read took. That limits the refresher to half
+of the control-plane time of a drive, so the other callers always find free gaps. The pool stays
+below the SOEM driver's `kFrameSlots`, because each read holds a frame slot until it ends.
 
 **Thread 6 — the notification bus.** The real-time thread cannot call a WebSocket server: a publish
 allocates, uWebSockets is only safely callable from its own loop, and both can block. But the
@@ -210,7 +216,7 @@ to thread 1 (`libs/comm/spoe_process_data.h`):
 
 The exchange thread shares its drive's `SpoeConnection` with the control plane. The connection's
 own mutex makes their requests take turns, one request at a time, which is also all the drive
-accepts. The exchange thread never takes `controlPlaneMutex_`.
+accepts. The exchange thread never takes the driver's bus lock or a sequence mutex.
 
 ## Control plane against the PDO path
 
@@ -225,7 +231,7 @@ order, the drain protocol, the invariants — is in [LOCKING.md](LOCKING.md). Th
 | Input decode | 1 | None. Each `ProcessImageEntry` carries the owning `DeviceParameter*`, resolved at publish time. So the decode is a walk over contiguous entries, with **no lookup on the real-time path** |
 | Reach a `Device` from a cycle | 1 | `DeviceManager::CycleGuard`, taken by `GameLoop` around the whole task list. One atomic increment and one atomic load. It never blocks. A falsy guard means no image is published, and no task runs that cycle |
 | Recorder ring | 1 writes. 2 and 4 read | Wait-free append. A reader re-checks a per-slot sequence number after it copies. A cursor lapped by more than a whole ring is detected and resynced |
-| SDO, FoE, registers, AL state | 2 and 5 | `FieldbusDriver::controlPlaneMutex_`, held for a single socket transaction. Never across a sleep, a blocking wait or a user callback |
+| SDO, FoE, registers, AL state | 2 and 5 | The driver's control-plane locks, held for a single socket transaction. Over SOEM, work on one drive takes that drive's lock and the bus lock shared, so the mailbox work of different drives runs at the same time. A scan, a re-map and an AL transition take the bus lock exclusive. Never across a sleep, a blocking wait or a user callback |
 | Bus health counts | 1 writes. 2 and 6 read | Relaxed atomics in `ProcessData`. The reader reaches them through `processImageInfo()`, which takes `processDataMutex_` **shared**, because it also walks the retained image generations |
 | Auto-tuning request | an HTTP worker | None in this process. The call is a blocking HTTP request to the child, and it holds no lock while it waits |
 
@@ -235,7 +241,7 @@ order, the drain protocol, the invariants — is in [LOCKING.md](LOCKING.md). Th
 handle is a `shared_ptr` to the published `DeviceSet`, not a lock, so it keeps the device
 constructed while nothing waits for it. A concurrent `scan` publishes a new set, and the procedure
 finishes against the retired one. That retired set lives until its last handle releases it. The
-procedure still takes `controlPlaneMutex_` for one SDO transaction at a time, so the real-time
+procedure still takes the drive's lock for one SDO transaction at a time, so the real-time
 loop is untouched. It does **not** hold `busOperationMutex_`, so an AL transition can interleave
 with it.
 
@@ -291,7 +297,8 @@ order.
 | `ProcessDataRing` | `libs/node/process_data_ring.h` | Lossless per-cycle history of the raw IOmap. One real-time writer, many lock-free readers |
 | `DeviceParameter::bits` | `libs/node/device_parameter.h` | *The* home of every scalar object's value. Lock-free through `std::atomic_ref` |
 | `ProcessData::image` and `inCycle` | `libs/node/process_data.h` | The cycle gate: how a control-plane mutation waits out the real-time thread without a shared lock |
-| `FieldbusDriver::controlPlaneMutex_` | `libs/comm/fieldbus_driver.h` | Control-plane socket access, one transaction at a time |
+| `ControlPlaneLocks` | `libs/comm/control_plane_locks.h` | The SOEM driver's control-plane access: a bus lock, one lock per drive, and a cap on the frames in flight. One transaction at a time on each drive |
+| `SpoeFieldbusDriver::bus_` and `Drive::sequenceMutex` | `libs/comm/spoe_fieldbus_driver.{h,cc}` | The SPoE driver's control-plane access: a bus lock that a scan holds exclusive and a request holds shared, and one mutex per drive for a sequence of packets |
 | `DeviceManager::busOperationMutex_` | `libs/node/device_manager.h` | A token over an *activity*: one control-plane operation drives the bus at a time |
 | `DeviceManager::currentSetMutex_` | `libs/node/device_manager.h` | The published `shared_ptr<DeviceSet>` itself, held for one pointer copy. Device lifetime is the refcount's job |
 | `DeviceManager::processDataMutex_` | `libs/node/device_manager.h` | The recorder ring's storage and the retained image generations, against `allocate` and `clear` |

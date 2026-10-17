@@ -15,7 +15,7 @@ using mm::comm::soem::SoemFieldbusDriverConfig;
 // What these cover, and what they deliberately cannot.
 //
 // slaveState() answers from a lock-free mirror rather than from SOEM's slavelist, so that a reader
-// does not wait on controlPlaneMutex_ — which a firmware transfer holds for the whole multi-second
+// does not wait on the drive's lock — which a firmware transfer holds for the whole multi-second
 // FoE write, and which the monitoring sampler would otherwise queue behind on every flush. The half
 // of that mechanism reachable without a NIC is the one tested here: the mirror is allocated and
 // zeroed by the constructor, indexing it is bounded, and tearing the context down republishes

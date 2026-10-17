@@ -1133,9 +1133,9 @@ std::expected<std::vector<DeviceStateInfo>, std::string> DeviceManager::transiti
   if (!raw) {
     return std::unexpected(raw.error());
   }
-  // readStates() refreshed the driver's cached AL status for every slave, so
+  // readStates() refreshed the driver's cached AL status of every target that answered, so
   // Device::mailboxActive() / exchangesProcessData() now read through to the fresh state — no
-  // per-device copy to sync.
+  // per-device copy to sync. The cached status of a device that was not a target is unchanged.
   std::vector<DeviceStateInfo> result;
   result.reserve(targets.size());
   for (std::size_t i = 0; i < targets.size(); ++i) {
@@ -1396,7 +1396,7 @@ DeviceManager::setProcessDataWatchdog(uint16_t slavePosition, std::chrono::nanos
 std::expected<void, std::string> DeviceManager::initializeDeviceParameters(uint16_t slavePosition,
                                                                            bool readValues) {
   // The snapshot is what makes this safe to run for minutes: readObjectDictionary enumerates the
-  // whole dictionary and releases the driver's controlPlaneMutex_ between SDO-Info transactions, so
+  // whole dictionary and releases the driver's locks between SDO-Info transactions, so
   // the device and the driver must stay constructed across all of it. A concurrent scan publishes a
   // new set and this enumeration finishes against the retired one, whose next transaction fails.
   // Nothing waits: not the RT loop, not a rescan, not another reader.

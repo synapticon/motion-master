@@ -1520,7 +1520,7 @@ export interface ObjectDataTypeInfo {
 }
 
 /**
- * The value of one object dictionary entry, encoded by its `dataType` (ETG.1020). BOOLEAN, INTEGER8 to INTEGER64 and UNSIGNED8 to UNSIGNED32 are a JSON integer that fits `int64`. UNSIGNED64 is a JSON integer that fits `uint64`, and a value above 9223372036854775807 matches only that alternative. REAL32 and REAL64 are a JSON number, which the server writes as a double, so a REAL32 shows its exact binary value. VISIBLE STRING and UNICODE STRING are a string. OCTET STRING and DOMAIN are an array of byte values. Every integer is also a valid number, so use `dataType` to choose the alternative, the way the server does. On a write, the server converts the value to the declared type of the parameter.
+ * The value of one object dictionary entry, encoded by its `dataType` (ETG.1020). BOOLEAN (0x0001), INTEGER8 (0x0002), INTEGER16 (0x0003), INTEGER32 (0x0004), INTEGER64 (0x0015), UNSIGNED8 (0x0005), UNSIGNED16 (0x0006), UNSIGNED32 (0x0007), BYTE (0x001E), WORD (0x001F) and DWORD (0x0020) are a JSON integer that fits `int64`. UNSIGNED64 (0x001B) is a JSON integer that fits `uint64`, and a value above 9223372036854775807 matches only that alternative. REAL32 (0x0008) and REAL64 (0x0011) are a JSON number, which the server writes as a double, so a REAL32 shows its exact binary value. VISIBLE STRING (0x0009) and UNICODE STRING (0x000B) are a string. Every other data type, OCTET STRING and DOMAIN included, is an array of byte values. Every integer is also a valid number, so use `dataType` to choose the alternative, the way the server does. On a write, the server converts the value to the declared type of the parameter.
  * @example 12345
  */
 export type ParameterValue = number | string | number[];

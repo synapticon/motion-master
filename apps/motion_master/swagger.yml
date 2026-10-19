@@ -1564,17 +1564,10 @@ paths:
               properties:
                 value:
                   description: >-
-                    The value to set, converted to the parameter's declared type. A
-                    number for integer/real objects, a string for string objects, or
-                    an array of bytes for octet/domain objects.
-                  oneOf:
-                    - type: number
-                    - type: string
-                    - type: array
-                      items:
-                        type: integer
-                        minimum: 0
-                        maximum: 255
+                    The value to set. The server converts it to the declared type
+                    of the parameter. `ParameterValue` says which JSON type each
+                    `dataType` uses.
+                  $ref: "#/components/schemas/ParameterValue"
                   example: 100
       responses:
         "200":
@@ -1819,6 +1812,7 @@ paths:
               properties:
                 timeoutMs:
                   type: number
+                  format: double
                   minimum: 0
                   description: Desired watchdog timeout in milliseconds; 0 disables the watchdog
                   example: 200
@@ -4767,10 +4761,12 @@ components:
           example: 1000
         targetHz:
           type: number
+          format: double
           description: Target cycle rate (1e6 / periodUs), in hertz
           example: 1000.0
         achievedHz:
           type: number
+          format: double
           description: >-
             Cumulative average rate since the loop started (executedCycles /
             uptime), in hertz; 0 before the loop starts. Below targetHz means
@@ -4940,6 +4936,7 @@ components:
           example: 100000000
         timeoutMs:
           type: number
+          format: double
           description: The same timeout in milliseconds (convenience for display/editing).
           example: 100
         divider:
@@ -5256,7 +5253,7 @@ components:
             ten thousand rows, so the names travel once beside them rather than on every row.
           items:
             type: array
-            items: { type: number }
+            items: { type: number, format: double }
           example: [[4661, 4661, 0], [4662, 4662, 0]]
     BrakeState:
       type: object
@@ -6400,6 +6397,36 @@ components:
           type: integer
           description: Declared bit width of one element; 0 for variable-length types
           example: 32
+    ParameterValue:
+      description: >-
+        The value of one object dictionary entry, encoded by its `dataType`
+        (ETG.1020). BOOLEAN (0x0001), INTEGER8 (0x0002), INTEGER16 (0x0003),
+        INTEGER32 (0x0004), INTEGER64 (0x0015), UNSIGNED8 (0x0005), UNSIGNED16
+        (0x0006), UNSIGNED32 (0x0007), BYTE (0x001E), WORD (0x001F) and DWORD
+        (0x0020) are a JSON integer that fits `int64`. UNSIGNED64 (0x001B) is a
+        JSON integer that fits `uint64`, and a value above 9223372036854775807
+        matches only that alternative. REAL32 (0x0008) and REAL64 (0x0011) are
+        a JSON number, which the server writes as a double, so a REAL32 shows
+        its exact binary value. VISIBLE STRING (0x0009) and UNICODE STRING
+        (0x000B) are a string. Every other data type, OCTET STRING and DOMAIN
+        included, is an array of byte values. Every integer is also a valid
+        number, so use `dataType` to choose the alternative, the way the server
+        does. On a write, the server converts the value to the declared type of
+        the parameter.
+      anyOf:
+        - type: integer
+          format: int64
+        - type: integer
+          format: uint64
+        - type: number
+          format: double
+        - type: string
+        - type: array
+          items:
+            type: integer
+            minimum: 0
+            maximum: 255
+      example: 12345
     DeviceParameter:
       type: object
       required: [index, subindex, name, objectCode, dataType, dataTypeName, bitLength, access, origin, value, syncState]
@@ -6452,14 +6479,9 @@ components:
             Last-known value, decoded according to `dataType`.  Initialised to
             a type-appropriate zero (0 for numbers, "" for strings, [] for raw
             bytes) before the first read.  After a successful SDO upload,
-            holds the decoded value; the JSON encoding follows the variant
-            alternative — number, string, or array of byte values.
-          oneOf:
-            - type: number
-            - type: string
-            - type: array
-              items:
-                type: integer
+            holds the decoded value. `ParameterValue` says which JSON type
+            each `dataType` uses.
+          $ref: "#/components/schemas/ParameterValue"
           example: 12345
         unit:
           type: integer
@@ -6473,32 +6495,17 @@ components:
           description: >-
             Slave-reported default value, decoded with the same logic as
             `value`.  Absent when the slave does not report a default.
-          oneOf:
-            - type: number
-            - type: string
-            - type: array
-              items:
-                type: integer
+          $ref: "#/components/schemas/ParameterValue"
         minValue:
           description: >-
             Slave-reported minimum value, decoded with the same logic as
             `value`.  Absent when the slave does not report a minimum.
-          oneOf:
-            - type: number
-            - type: string
-            - type: array
-              items:
-                type: integer
+          $ref: "#/components/schemas/ParameterValue"
         maxValue:
           description: >-
             Slave-reported maximum value, decoded with the same logic as
             `value`.  Absent when the slave does not report a maximum.
-          oneOf:
-            - type: number
-            - type: string
-            - type: array
-              items:
-                type: integer
+          $ref: "#/components/schemas/ParameterValue"
         syncState:
           type: string
           enum: [unknown, synced, pending, stale]
@@ -6898,10 +6905,12 @@ components:
           type: array
           items:
             type: number
+            format: double
         denominator:
           type: array
           items:
             type: number
+            format: double
       example:
         numerator: [1.0]
         denominator: [0.000150, 0.000206]
@@ -6911,10 +6920,13 @@ components:
       properties:
         kp:
           type: number
+          format: double
         ki:
           type: number
+          format: double
         kd:
           type: number
+          format: double
     Gains:
       type: object
       description: >
@@ -6935,6 +6947,7 @@ components:
         type: array
         items:
           type: number
+          format: double
           nullable: true
       example:
         Frequency_Hz: [0.5, 1.0]
@@ -6948,49 +6961,66 @@ components:
           type: integer
         vel_lp_fc:
           type: number
+          format: double
         pos_lp_type:
           type: integer
         pos_lp_fc:
           type: number
+          format: double
         notch_en:
           type: integer
         notch_fw:
           type: number
+          format: double
         notch_fc:
           type: number
+          format: double
         notch_dp:
           type: number
+          format: double
         vel_ff_gain:
           type: number
+          format: double
         vel_ff_fc:
           type: number
+          format: double
         L:
           type: number
+          format: double
           description: Winding inductance.
         R:
           type: number
+          format: double
           description: Winding resistance.
         vdc:
           type: number
+          format: double
           description: DC link voltage.
         current_ratio:
           type: number
+          format: double
         tc_kp:
           type: number
+          format: double
         tc_ki:
           type: number
+          format: double
         switch_F:
           type: integer
         tc_st:
           type: number
+          format: double
         tc_damping:
           type: number
+          format: double
         software_version:
           type: string
         rated_torque:
           type: number
+          format: double
         max_vel_noise:
           type: number
+          format: double
     AutoTuningRunRequest:
       description: >
         The `data` schema depends on the value of `run`. Each variant pairs one `run` value
@@ -7021,9 +7051,11 @@ components:
               $ref: "#/components/schemas/PlantModel"
             zeta:
               type: number
+              format: double
               description: Damping ratio.
             demanded_bw:
               type: number
+              format: double
               description: Demanded bandwidth in Hz.
     AutoTunePositionController:
       type: object
@@ -7043,11 +7075,14 @@ components:
               example: PI-P
             zeta:
               type: number
+              format: double
             demanded_st:
               type: number
+              format: double
               description: Demanded settling time in seconds.
             highFrictionGain:
               type: number
+              format: double
               description: Optional. Absent means the standard tuning rule.
     FullAutoTuneVelocityController:
       type: object
@@ -7111,14 +7146,19 @@ components:
           properties:
             sigma_v:
               type: number
+              format: double
             sigma_p:
               type: number
+              format: double
             resVel:
               type: number
+              format: double
             resPos:
               type: number
+              format: double
             gearRatio:
               type: number
+              format: double
     ComputePositionControllerGains:
       type: object
       required: [run, data]
@@ -7132,14 +7172,19 @@ components:
           properties:
             pk:
               type: number
+              format: double
             pt:
               type: number
+              format: double
             omega:
               type: number
+              format: double
             alpha:
               type: number
+              format: double
             zeta:
               type: number
+              format: double
             controller_type:
               type: string
               example: PI-P
@@ -7168,9 +7213,11 @@ components:
               description: Path to that CSV instead of its contents.
             f0:
               type: number
+              format: double
               description: Chirp start frequency in Hz.
             f1:
               type: number
+              format: double
               description: Chirp end frequency in Hz.
     GeneratePlantBode:
       type: object
@@ -7207,6 +7254,7 @@ components:
           $ref: "#/components/schemas/Gains"
         duration:
           type: number
+          format: double
     FullVelocityResult:
       type: object
       properties:
@@ -7214,28 +7262,38 @@ components:
           $ref: "#/components/schemas/Gains"
         demanded_bw:
           type: number
+          format: double
         demanded_zeta:
           type: number
+          format: double
         state:
           type: object
           description: Stability margins and closed-loop metrics.
           properties:
             gm:
               type: number
+              format: double
             pm:
               type: number
+              format: double
             msens:
               type: number
+              format: double
             act_bw:
               type: number
+              format: double
             vel_cl:
               type: number
+              format: double
             noise_resp:
               type: number
+              format: double
             max_KS:
               type: number
+              format: double
         duration:
           type: number
+          format: double
     FullPositionResult:
       type: object
       properties:
@@ -7243,40 +7301,56 @@ components:
           $ref: "#/components/schemas/Gains"
         demanded_st:
           type: number
+          format: double
         demanded_zeta:
           type: number
+          format: double
         highFrictionGain:
           type: number
+          format: double
         state:
           type: object
           description: Stability margins and closed-loop metrics, position and velocity loop.
           properties:
             gm_p:
               type: number
+              format: double
             pm_p:
               type: number
+              format: double
             msens_p:
               type: number
+              format: double
             gm_v:
               type: number
+              format: double
             pm_v:
               type: number
+              format: double
             msens_v:
               type: number
+              format: double
             noise_resp:
               type: number
+              format: double
             max_KS:
               type: number
+              format: double
             bw_p:
               type: number
+              format: double
             bw_v:
               type: number
+              format: double
             act_st:
               type: number
+              format: double
             pos_cl:
               type: number
+              format: double
         duration:
           type: number
+          format: double
     NotchResult:
       type: object
       properties:
@@ -7284,26 +7358,33 @@ components:
           type: boolean
         notch_fc:
           type: number
+          format: double
           nullable: true
         notch_fw:
           type: number
+          format: double
           nullable: true
         notch_dp:
           type: number
+          format: double
           nullable: true
         duration:
           type: number
+          format: double
     FeedbackFiltersResult:
       type: object
       properties:
         fcv:
           type: number
+          format: double
           description: Velocity feedback filter cut-off in Hz.
         fcp:
           type: number
+          format: double
           description: Position feedback filter cut-off in Hz.
         duration:
           type: number
+          format: double
     IdentifyPlantModelResult:
       type: object
       properties:
@@ -7311,14 +7392,17 @@ components:
           type: array
           items:
             type: number
+            format: double
         denominators:
           type: array
           items:
             type: number
+            format: double
         bode:
           $ref: "#/components/schemas/Bode"
         duration:
           type: number
+          format: double
     BodeResult:
       type: object
       properties:
@@ -7326,6 +7410,7 @@ components:
           $ref: "#/components/schemas/Bode"
         duration:
           type: number
+          format: double
   headers:
     WireTime:
       description: >

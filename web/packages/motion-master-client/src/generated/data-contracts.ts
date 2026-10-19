@@ -124,11 +124,13 @@ export interface GameLoopHealth {
   periodUs: number;
   /**
    * Target cycle rate (1e6 / periodUs), in hertz
+   * @format double
    * @example 1000
    */
   targetHz: number;
   /**
    * Cumulative average rate since the loop started (executedCycles / uptime), in hertz; 0 before the loop starts. Below targetHz means the host cannot sustain the configured period.
+   * @format double
    * @example 999.56
    */
   achievedHz: number;
@@ -282,6 +284,7 @@ export interface ProcessDataWatchdog {
   timeoutNs: number;
   /**
    * The same timeout in milliseconds (convenience for display/editing).
+   * @format double
    * @example 100
    */
   timeoutMs: number;
@@ -1516,6 +1519,12 @@ export interface ObjectDataTypeInfo {
   bitSize: number;
 }
 
+/**
+ * The value of one object dictionary entry, encoded by its `dataType` (ETG.1020). BOOLEAN (0x0001), INTEGER8 (0x0002), INTEGER16 (0x0003), INTEGER32 (0x0004), INTEGER64 (0x0015), UNSIGNED8 (0x0005), UNSIGNED16 (0x0006), UNSIGNED32 (0x0007), BYTE (0x001E), WORD (0x001F) and DWORD (0x0020) are a JSON integer that fits `int64`. UNSIGNED64 (0x001B) is a JSON integer that fits `uint64`, and a value above 9223372036854775807 matches only that alternative. REAL32 (0x0008) and REAL64 (0x0011) are a JSON number, which the server writes as a double, so a REAL32 shows its exact binary value. VISIBLE STRING (0x0009) and UNICODE STRING (0x000B) are a string. Every other data type, OCTET STRING and DOMAIN included, is an array of byte values. Every integer is also a valid number, so use `dataType` to choose the alternative, the way the server does. On a write, the server converts the value to the declared type of the parameter.
+ * @example 12345
+ */
+export type ParameterValue = number | string | number[];
+
 export interface DeviceParameter {
   /**
    * CoE object index
@@ -1563,21 +1572,21 @@ export interface DeviceParameter {
    */
   origin: "objectDictionary" | "sii";
   /**
-   * Last-known value, decoded according to `dataType`.  Initialised to a type-appropriate zero (0 for numbers, "" for strings, [] for raw bytes) before the first read.  After a successful SDO upload, holds the decoded value; the JSON encoding follows the variant alternative — number, string, or array of byte values.
+   * Last-known value, decoded according to `dataType`.  Initialised to a type-appropriate zero (0 for numbers, "" for strings, [] for raw bytes) before the first read.  After a successful SDO upload, holds the decoded value. `ParameterValue` says which JSON type each `dataType` uses.
    * @example 12345
    */
-  value: number | string | number[];
+  value: ParameterValue;
   /**
    * ETG.1004 unit code reported by the slave for this entry.  Absent when the slave does not populate the Unit field of the SDO Info response.  The 32-bit code decomposes into prefix, base SI unit, and exponent per ETG.1004.
    * @example 0
    */
   unit?: number;
   /** Slave-reported default value, decoded with the same logic as `value`.  Absent when the slave does not report a default. */
-  defaultValue?: number | string | number[];
+  defaultValue?: ParameterValue;
   /** Slave-reported minimum value, decoded with the same logic as `value`.  Absent when the slave does not report a minimum. */
-  minValue?: number | string | number[];
+  minValue?: ParameterValue;
   /** Slave-reported maximum value, decoded with the same logic as `value`.  Absent when the slave does not report a maximum. */
-  maxValue?: number | string | number[];
+  maxValue?: ParameterValue;
   /**
    * Freshness of `value` relative to the device. `synced` — matches the device (last successful read or write); `pending` — set locally while offline or after a failed write, not yet confirmed on the device; `stale` — came from an earlier read or write, and the latest read of the object failed; `unknown` — never read, `value` is the type-appropriate default. A failed read turns `synced` into `stale` and keeps the value. It leaves `unknown` and `pending` unchanged. The next successful read sets `synced` again.
    * @example "synced"
@@ -1896,8 +1905,11 @@ export interface PlantModel {
 
 /** One controller's gains. */
 export interface Pid {
+  /** @format double */
   kp?: number;
+  /** @format double */
   ki?: number;
+  /** @format double */
   kd?: number;
 }
 
@@ -1918,29 +1930,52 @@ export type Bode = Record<string, (number | null)[]>;
 /** Drive configuration, as read from the drive. */
 export interface DriveConfig {
   vel_lp_type?: number;
+  /** @format double */
   vel_lp_fc?: number;
   pos_lp_type?: number;
+  /** @format double */
   pos_lp_fc?: number;
   notch_en?: number;
+  /** @format double */
   notch_fw?: number;
+  /** @format double */
   notch_fc?: number;
+  /** @format double */
   notch_dp?: number;
+  /** @format double */
   vel_ff_gain?: number;
+  /** @format double */
   vel_ff_fc?: number;
-  /** Winding inductance. */
+  /**
+   * Winding inductance.
+   * @format double
+   */
   L?: number;
-  /** Winding resistance. */
+  /**
+   * Winding resistance.
+   * @format double
+   */
   R?: number;
-  /** DC link voltage. */
+  /**
+   * DC link voltage.
+   * @format double
+   */
   vdc?: number;
+  /** @format double */
   current_ratio?: number;
+  /** @format double */
   tc_kp?: number;
+  /** @format double */
   tc_ki?: number;
   switch_F?: number;
+  /** @format double */
   tc_st?: number;
+  /** @format double */
   tc_damping?: number;
   software_version?: string;
+  /** @format double */
   rated_torque?: number;
+  /** @format double */
   max_vel_noise?: number;
 }
 
@@ -1961,9 +1996,15 @@ export interface AutoTuneVelocityController {
   data: {
     /** Transfer function coefficients, highest order first. */
     plant_model: PlantModel;
-    /** Damping ratio. */
+    /**
+     * Damping ratio.
+     * @format double
+     */
     zeta: number;
-    /** Demanded bandwidth in Hz. */
+    /**
+     * Demanded bandwidth in Hz.
+     * @format double
+     */
     demanded_bw: number;
   };
 }
@@ -1975,10 +2016,17 @@ export interface AutoTunePositionController {
     plant_model: PlantModel;
     /** @example "PI-P" */
     controller_type: string;
+    /** @format double */
     zeta: number;
-    /** Demanded settling time in seconds. */
+    /**
+     * Demanded settling time in seconds.
+     * @format double
+     */
     demanded_st: number;
-    /** Optional. Absent means the standard tuning rule. */
+    /**
+     * Optional. Absent means the standard tuning rule.
+     * @format double
+     */
     highFrictionGain?: number;
   };
 }
@@ -2017,10 +2065,15 @@ export interface AutoTuneNotch {
 export interface AutoTuneFeedbackFilters {
   run: "auto_tune_feedback_filters";
   data: {
+    /** @format double */
     sigma_v: number;
+    /** @format double */
     sigma_p: number;
+    /** @format double */
     resVel: number;
+    /** @format double */
     resPos: number;
+    /** @format double */
     gearRatio: number;
   };
 }
@@ -2028,10 +2081,15 @@ export interface AutoTuneFeedbackFilters {
 export interface ComputePositionControllerGains {
   run: "compute_position_controller_gains";
   data: {
+    /** @format double */
     pk: number;
+    /** @format double */
     pt: number;
+    /** @format double */
     omega: number;
+    /** @format double */
     alpha: number;
+    /** @format double */
     zeta: number;
     /** @example "PI-P" */
     controller_type: string;
@@ -2046,9 +2104,15 @@ export interface IdentifyPlantModel {
     csv?: string;
     /** Path to that CSV instead of its contents. */
     filepath?: string;
-    /** Chirp start frequency in Hz. */
+    /**
+     * Chirp start frequency in Hz.
+     * @format double
+     */
     f0: number;
-    /** Chirp end frequency in Hz. */
+    /**
+     * Chirp end frequency in Hz.
+     * @format double
+     */
     f1: number;
   };
 }
@@ -2076,64 +2140,102 @@ export type AutoTuningRunResponse =
 export interface GainsResult {
   /** Controller gains. A function that tunes only the velocity loop leaves the position gains at zero. */
   gains?: Gains;
+  /** @format double */
   duration?: number;
 }
 
 export interface FullVelocityResult {
   /** Controller gains. A function that tunes only the velocity loop leaves the position gains at zero. */
   gains?: Gains;
+  /** @format double */
   demanded_bw?: number;
+  /** @format double */
   demanded_zeta?: number;
   /** Stability margins and closed-loop metrics. */
   state?: {
+    /** @format double */
     gm?: number;
+    /** @format double */
     pm?: number;
+    /** @format double */
     msens?: number;
+    /** @format double */
     act_bw?: number;
+    /** @format double */
     vel_cl?: number;
+    /** @format double */
     noise_resp?: number;
+    /** @format double */
     max_KS?: number;
   };
+  /** @format double */
   duration?: number;
 }
 
 export interface FullPositionResult {
   /** Controller gains. A function that tunes only the velocity loop leaves the position gains at zero. */
   gains?: Gains;
+  /** @format double */
   demanded_st?: number;
+  /** @format double */
   demanded_zeta?: number;
+  /** @format double */
   highFrictionGain?: number;
   /** Stability margins and closed-loop metrics, position and velocity loop. */
   state?: {
+    /** @format double */
     gm_p?: number;
+    /** @format double */
     pm_p?: number;
+    /** @format double */
     msens_p?: number;
+    /** @format double */
     gm_v?: number;
+    /** @format double */
     pm_v?: number;
+    /** @format double */
     msens_v?: number;
+    /** @format double */
     noise_resp?: number;
+    /** @format double */
     max_KS?: number;
+    /** @format double */
     bw_p?: number;
+    /** @format double */
     bw_v?: number;
+    /** @format double */
     act_st?: number;
+    /** @format double */
     pos_cl?: number;
   };
+  /** @format double */
   duration?: number;
 }
 
 export interface NotchResult {
   notch_en?: boolean;
+  /** @format double */
   notch_fc?: number | null;
+  /** @format double */
   notch_fw?: number | null;
+  /** @format double */
   notch_dp?: number | null;
+  /** @format double */
   duration?: number;
 }
 
 export interface FeedbackFiltersResult {
-  /** Velocity feedback filter cut-off in Hz. */
+  /**
+   * Velocity feedback filter cut-off in Hz.
+   * @format double
+   */
   fcv?: number;
-  /** Position feedback filter cut-off in Hz. */
+  /**
+   * Position feedback filter cut-off in Hz.
+   * @format double
+   */
   fcp?: number;
+  /** @format double */
   duration?: number;
 }
 
@@ -2142,11 +2244,13 @@ export interface IdentifyPlantModelResult {
   denominators?: number[];
   /** Bode diagram data, keyed by column name, every array the same length. This comes back in the response body instead of a written CSV, which is why no auto-tuning call needs a shared filesystem. A non-finite value is null. */
   bode?: Bode;
+  /** @format double */
   duration?: number;
 }
 
 export interface BodeResult {
   /** Bode diagram data, keyed by column name, every array the same length. This comes back in the response body instead of a written CSV, which is why no auto-tuning call needs a shared filesystem. A non-finite value is null. */
   bode?: Bode;
+  /** @format double */
   duration?: number;
 }

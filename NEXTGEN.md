@@ -4015,7 +4015,15 @@ is a workaround for drives in the field.
   read short, and the next read worked.
 - With the fix at the default timeouts, 10 rounds ran with every read answered and no warning in
   the log.
+- **The bootloader has the same flaw.** `hil/mailbox_duplicate --boot` wrote an FoE read of
+  `.hardware_description` twice with counter 1 to the Circulo in BOOT. The first copy was answered,
+  and the second left SM0 status at 0x48 with no answer until INIT. The bootloader links
+  `lib_ethercat` from somanet_ethercat, so the firmware fix is needed there too (noted on
+  somanet_software#5811). A firmware installation runs in BOOT and sends many FoE packets, so it
+  was exposed in the same way.
+- With the fix and both timeouts at 200 µs, 50 FoE reads of `.hardware_description` in BOOT all
+  worked. 8 writes got no frame back, and none locked the mailbox. No run without the fix was made
+  in BOOT.
 - `ctest` passes. The SOEM patch has no unit test, because it needs a network adapter.
-- Not tested: an Integro, whose netX stack handles the mailbox and is not in somanet_software; the
-  bootloader's copy of the EtherCAT layer in somanet_ethercat; a device of another vendor; a bus of
-  30 drives.
+- Not tested: an Integro, whose netX stack handles the mailbox and is not in somanet_software; a
+  device of another vendor; a bus of 30 drives.

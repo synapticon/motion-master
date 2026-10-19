@@ -13,6 +13,12 @@
 //   5. Read 0x1000:00. It fails, because the mailbox is full.
 //   6. Put the drive into INIT and then PRE-OP, and read 0x1000:00 again. It works.
 //
+// With --boot, the same test runs against the bootloader, which has its own copy of the EtherCAT
+// layer. The drive goes into BOOT, and the request is an FoE read of a file. The bootloader does
+// not answer a second read while the first one is open, so the result tells three cases apart: the
+// duplicate locks the mailbox, the bootloader discards it, or the bootloader handles it as a new
+// request. The program then aborts the read, and puts the drive into INIT and PRE-OP.
+//
 // The drive is left in PRE-OP.
 
 #include <soem/soem.h>
@@ -42,15 +48,22 @@ constexpr uint8_t kMailboxFull = 0x08;
 struct Options {
   std::string ifname;
   uint16_t slave = 1;
+  bool boot = false;
+  std::string file = ".hardware_description";
 };
 
 void printUsage() {
-  std::cerr << "usage: mailbox_duplicate --ifname <interface> [--slave <position>]\n";
+  std::cerr << "usage: mailbox_duplicate --ifname <interface> [--slave <position>] [--boot] "
+               "[--file <name>]\n";
 }
 
 bool parseOptions(int argc, char** argv, Options& options) {
   for (int i = 1; i < argc; ++i) {
     const std::string_view arg = argv[i];
+    if (arg == "--boot") {
+      options.boot = true;
+      continue;
+    }
     if (i + 1 >= argc) {
       return false;
     }
@@ -58,6 +71,8 @@ bool parseOptions(int argc, char** argv, Options& options) {
       options.ifname = argv[++i];
     } else if (arg == "--slave") {
       options.slave = static_cast<uint16_t>(std::stoi(argv[++i]));
+    } else if (arg == "--file") {
+      options.file = argv[++i];
     } else {
       return false;
     }
@@ -90,6 +105,21 @@ MailboxBuffer makeUploadRequest(uint8_t counter) {
   request->command = ECT_SDO_UP_REQ;
   request->index = htoes(0x1000);
   request->subIndex = 0x00;
+  return buffer;
+}
+
+// Builds an FoE READ request of a file that carries the given mailbox counter.
+MailboxBuffer makeFoeReadRequest(uint8_t counter, std::string_view file) {
+  MailboxBuffer buffer{};
+  // FoE header: opcode, reserved byte, 32-bit password. The file name follows it.
+  const auto length = static_cast<uint16_t>(6 + file.size());
+  buffer[0] = static_cast<uint8_t>(length & 0xFF);
+  buffer[1] = static_cast<uint8_t>(length >> 8);
+  buffer[5] = static_cast<uint8_t>(ECT_MBXT_FOE + MBX_HDR_SET_CNT(counter));
+  buffer[6] = ECT_FOE_READ;
+  for (size_t i = 0; i < file.size(); ++i) {
+    buffer[12 + i] = static_cast<uint8_t>(file[i]);
+  }
   return buffer;
 }
 
@@ -151,6 +181,81 @@ bool resetCounter(ecx_contextt* ctx, uint16_t slave) {
   return writeOnce(ctx, slave, request) > 0 && receive(ctx, slave, EC_TIMEOUTRXM) > 0;
 }
 
+// Returns the working counter of one mailbox answer and the errors SOEM queued for it.
+int receiveAndDescribe(ecx_contextt* ctx, uint16_t slave, int timeoutUs, std::string& errors) {
+  const int wkc = receive(ctx, slave, timeoutUs);
+  ec_errort err{};
+  while (ecx_poperror(ctx, &err)) {
+    if (err.Etype == EC_ERR_TYPE_MBX_ERROR) {
+      errors += std::format(" mailbox error 0x{:04X}", err.ErrorCode);
+    } else if (err.Etype == EC_ERR_TYPE_FOE_ERROR) {
+      errors += std::format(" FoE error 0x{:08X}", err.AbortCode);
+    } else {
+      errors += std::format(" error type {}", static_cast<int>(err.Etype));
+    }
+  }
+  return wkc;
+}
+
+int runBoot(ecx_contextt* ctx, uint16_t slave, const std::string& file) {
+  if (!requestState(ctx, slave, EtherCatState::Init)) {
+    std::cerr << "the slave did not reach INIT\n";
+    return EXIT_FAILURE;
+  }
+  mm::comm::soem::updateMailboxSyncManagers(ctx, slave, EtherCatState::Boot);
+  if (!requestState(ctx, slave, EtherCatState::Boot)) {
+    std::cerr << "the slave did not reach BOOT\n";
+    return EXIT_FAILURE;
+  }
+  std::cout << std::format("slave {} is in BOOT\n", slave);
+  std::this_thread::sleep_for(std::chrono::seconds(2));
+  mm::comm::soem::drainMailbox(ctx, slave);
+
+  const uint8_t counter = ec_nextmbxcnt(ctx->slavelist[slave].mbx_cnt);
+  ctx->slavelist[slave].mbx_cnt = counter;
+  MailboxBuffer request = makeFoeReadRequest(counter, file);
+
+  std::string errors;
+  const int firstWrite = writeOnce(ctx, slave, request);
+  const int firstAnswer = receiveAndDescribe(ctx, slave, 6'000'000, errors);
+  std::cout << std::format("1. FoE read of {} with counter {}: write wkc {}, answer wkc {}{}\n",
+                           file, counter, firstWrite, firstAnswer, errors);
+  if (firstWrite <= 0 || firstAnswer <= 0) {
+    std::cout << "   FAIL: the bootloader did not answer the first copy, so the test cannot run\n";
+    return EXIT_FAILURE;
+  }
+
+  errors.clear();
+  const int secondWrite = writeOnce(ctx, slave, request);
+  const int secondAnswer = receiveAndDescribe(ctx, slave, 1'000'000, errors);
+  const int status = sm0Status(ctx, slave);
+  std::cout << std::format(
+      "2. wrote the same request again: write wkc {}, answer wkc {}{}, SM0 status 0x{:02X}\n",
+      secondWrite, secondAnswer, errors, status);
+  if (sm0Full(status)) {
+    std::cout << "   LOCKED: the bootloader did not take the second copy out of its mailbox\n";
+  } else if (secondAnswer > 0 || !errors.empty()) {
+    std::cout << "   HANDLED: the bootloader took the second copy and answered it\n";
+  } else {
+    std::cout << "   DISCARDED: the bootloader took the second copy and did not answer it\n";
+  }
+
+  if (!sm0Full(status)) {
+    mm::comm::soem::abortFoeTransfer(ctx, slave);
+  }
+  ec_errort err{};
+  while (ecx_poperror(ctx, &err)) {
+  }
+  const bool init = requestState(ctx, slave, EtherCatState::Init);
+  mm::comm::soem::updateMailboxSyncManagers(ctx, slave, EtherCatState::PreOp);
+  const bool preOp = init && requestState(ctx, slave, EtherCatState::PreOp);
+  const bool counterReset = preOp && resetCounter(ctx, slave);
+  std::cout << "3. INIT, then PRE-OP, then read 0x1000:00";
+  const int read = counterReset ? readDeviceType(ctx, slave) : 0;
+  std::cout << std::format(": INIT {}, PRE-OP {}, wkc {}\n", init, preOp, read);
+  return read > 0 ? EXIT_SUCCESS : EXIT_FAILURE;
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -166,6 +271,9 @@ int main(int argc, char** argv) {
     std::cerr << "ecx_init failed on " << options.ifname << "\n";
     return EXIT_FAILURE;
   }
+  // Without this, ecx_config_init asks every slave for PRE-OP, and in --boot mode a bootloader that
+  // gets PRE-OP starts the application.
+  ctx->manualstatechange = 1;
   const int found = ecx_config_init(ctx.get());
   if (found < options.slave) {
     std::cerr << std::format("found {} slave(s), slave {} is not on the bus\n", found,
@@ -174,6 +282,12 @@ int main(int argc, char** argv) {
     return EXIT_FAILURE;
   }
   const uint16_t slave = options.slave;
+
+  if (options.boot) {
+    const int result = runBoot(ctx.get(), slave, options.file);
+    ecx_close(ctx.get());
+    return result;
+  }
 
   if (!requestState(ctx.get(), slave, EtherCatState::Init) ||
       !requestState(ctx.get(), slave, EtherCatState::PreOp)) {

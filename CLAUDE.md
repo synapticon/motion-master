@@ -830,6 +830,7 @@ answer", not "no such object".** See `NEXTGEN.md`, Session 2026-07-20.
 repeated counter and ignores the request, but it returns before it reads the request, so SM0 stays
 full. Every later SDO and FoE request then fails with "the slave's receive mailbox is full", and only
 INIT followed by PRE-OP frees it (`ethercat_service.xc:352`, synapticon/somanet_software#5811).
+The bootloader does the same in BOOT.
 ETG.1000.4 allows a master to repeat a write, and upstream SOEM repeats one when its frame comes back
 later than `EC_TIMEOUTRET` (2 ms). So a slow host or a lost frame was enough to lock a drive.
 
@@ -1055,11 +1056,13 @@ sudo ./build/x64-linux-debug/hil/foe_abort/foe_abort --ifname <interface> [--sla
 ### mailbox_duplicate
 
 Shows on a SOMANET drive that one mailbox request written twice with the same counter locks the
-receive mailbox, and that INIT followed by PRE-OP frees it. It leaves the drive in PRE-OP. It needs
-raw socket access, and no other master may use the adapter.
+receive mailbox, and that INIT followed by PRE-OP frees it. The request is an SDO upload in PRE-OP.
+With `--boot` it is an FoE read in BOOT, which tests the bootloader. It leaves the drive in PRE-OP.
+It needs raw socket access, and no other master may use the adapter.
 
 ```bash
-sudo ./build/x64-linux-debug/hil/mailbox_duplicate/mailbox_duplicate --ifname <interface> [--slave 1]
+sudo ./build/x64-linux-debug/hil/mailbox_duplicate/mailbox_duplicate --ifname <interface> [--slave 1] \
+  [--boot] [--file .hardware_description]
 ```
 
 ### api

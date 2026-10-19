@@ -30,6 +30,17 @@ namespace mm::comm::soem {
 /// Call with the driver's control-plane mutex held.
 void drainMailbox(ecx_contextt* ctx, uint16_t slavePosition);
 
+/// @brief Logs the mailbox writes to a slave that got no frame back, and resets their count.
+///
+/// The SOEM port writes each mailbox message to a SOMANET slave once and counts the writes without
+/// a frame in @c mbxwriteunknowns. Such a write is not repeated, because the slave may have
+/// received it, and the caller waits for the answer. A count above 0 in a support log shows that
+/// frames come back late or not at all. The count is per slave and only grows, so this logs each
+/// write once.
+///
+/// Call with the driver's lock for the slave held.
+void reportUnknownMailboxWrites(ecx_contextt* ctx, uint16_t slavePosition);
+
 /// @brief Builds an FoE ERROR request, which aborts a slave's FoE transfer.
 ///
 /// The request is a complete mailbox message: the 6-byte mailbox header, the FoE opcode ERROR, a

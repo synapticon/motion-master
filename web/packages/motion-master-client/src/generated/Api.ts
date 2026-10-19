@@ -38,6 +38,7 @@ import {
   OperationModes,
   OutputStageResult,
   ParameterCacheEntry,
+  ParameterValue,
   PdoMapping,
   PdoMappingRequest,
   ProcedureListing,
@@ -1003,10 +1004,10 @@ export class Api<
     subindex: number,
     data: {
       /**
-       * The value to set, converted to the parameter's declared type. A number for integer/real objects, a string for string objects, or an array of bytes for octet/domain objects.
+       * The value to set. The server converts it to the declared type of the parameter. `ParameterValue` says which JSON type each `dataType` uses.
        * @example 100
        */
-      value: number | string | number[];
+      value: ParameterValue;
     },
     params: RequestParams = {},
   ) =>
@@ -1158,6 +1159,7 @@ export class Api<
     data: {
       /**
        * Desired watchdog timeout in milliseconds; 0 disables the watchdog
+       * @format double
        * @min 0
        * @example 200
        */

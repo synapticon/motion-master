@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Changed
+
+- **The OpenAPI spec gives every number a format.** A parameter value (`value`, `defaultValue`, `minValue` and `maxValue` of a parameter, and `value` in a parameter write) is now the schema `ParameterValue`. It lists an `int64` integer, a `uint64` integer for UNSIGNED64, a `double` number, a string and an array of bytes, and says which `dataType` uses which. Every other `number` field has `format: double`. A generator such as oapi-codegen produced `float32` for an unformatted `number`, which cannot hold every 32-bit integer. It now produces `int64`, `uint64` and `float64`. The JSON that the server sends does not change. (#103)
+
 ### Fixed
 
 - **A SOMANET drive no longer stops answering with "the slave's receive mailbox is full".** When the reply to a mailbox write came back late, the EtherCAT library sent the write again. If the drive had received the first copy, it received the same request twice. SOMANET firmware ignores a repeated request without taking it out of the receive mailbox, so the drive refused every later SDO and FoE request until it went to INIT. The bootloader does the same in BOOT, for example during a firmware installation. Motion Master now writes each mailbox request to a Synapticon or Sensodrive device once. When no reply comes back for a write, it waits for the drive's answer and does not send the write again, and the next request uses mailbox counter 0, which the firmware never ignores. The server log shows a warning for each such write. Devices of other vendors keep the standard behaviour. (#100)

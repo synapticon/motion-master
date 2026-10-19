@@ -3936,3 +3936,99 @@ happens, to at most once per 2 s per object. This is accepted.
   A read took 4 to 5 ms, so the gap matches the read duration within the resolution of the log.
 - The reads of several drives at the same time ran only against the fake driver. That needs a bus
   with several drives.
+
+## Session 2026-10-19 — A SOMANET drive gets each mailbox request once (as-built)
+
+Issue #100. A field report on a bus of 30 drives: one full parameter read left 7 drives answering
+every SDO and FoE request with "the slave's receive mailbox is full". INIT followed by PRE-OP always
+freed a drive. The same drives never showed it under another master.
+
+**The firmware locks SM0 when it gets one request twice.** `ecat_process_packet()` in
+`sc_somanet_ip/module_ethercat/libsrc/ethercat_service.xc` (somanet_software 5a2cb2a8b) reads the
+6-byte header first. When the counter is not 0 and equals the last accepted counter, it returns
+`DL_ERROR_IGNORE` (lines 352-354). That return comes before the read of the last byte of the
+SyncManager (lines 374-378), and only that read makes the ESC clear the mailbox-full bit. So SM0
+stays full, the main loop finds the same header on every pass and ignores it again, and no error
+reply is sent (line 1672). A transition to INIT deactivates SM0, which discards the message, and
+INIT to PRE-OP sets the last counter to 0 (line 819). The early return came in with 038ea8229 in
+2017 to pass an ETG conformance test check. The `DL_MBXERR_NOMOREMEMORY` return at lines 345-347
+has the same flaw. Reported as synapticon/somanet_software#5811 with the one-line fix.
+
+**The master is allowed to send the request twice.** ETG.1000.4 Table 29, field `Cnt`: "The Master
+shall change (should increment) the Cnt value. The slave shall check this for detection of a write
+repeat service." Upstream SOEM 2.0 repeats a write in two places. `ecx_srconfirm` sends a datagram
+again when no frame comes back within `EC_TIMEOUTRET` (2 ms), for as long as the caller's timeout
+allows, and `ecx_mbxsend` passes `EC_TIMEOUTRET3`. `ecx_mbxsend` also writes again after a write
+that came back with a working counter of 0 or less. When the first write did reach the slave, the
+slave holds a second copy with the same counter. A late frame from a busy host, or two frames that
+share one frame index, is enough. The firmware is the party that breaks the spec. The master change
+is a workaround for drives in the field.
+
+**Measured on a Circulo, alone on the bench.**
+
+- `hil/mailbox_duplicate` writes one SDO upload twice with the same counter. SM0 status stays
+  0x48, no reply comes, the next write gets a working counter of 0, and INIT then PRE-OP frees it.
+- With SOEM built at `EC_TIMEOUTRET` 200 µs, the server locked the drive after four SDO reads of
+  the first enumeration. Every later read failed with the reporter's message.
+- At the default 2 ms on an idle host, 10,000 round trips had 3 over 0.5 ms, 1 over 1 ms, none
+  over 2 ms, and no repeat. So the bench almost never triggers it, and the reporter's host or bus
+  made late frames much more common. Why is not known.
+
+**The decisions.**
+
+- **Send once, only to SOMANET devices.** `ports/soem` adds `ecx_FPWRonce`, which sends its
+  datagram once and waits for that one frame. `ecx_mbxsend` uses it when the slave has
+  `mbxwriteonce` set, and `scan()` sets that flag for `isSomanetDevice`. A device that follows the
+  spec discards a repeat, and the repeat recovers a write that was lost on the wire, so the other
+  vendors keep upstream SOEM.
+- **No frame means the outcome is unknown, and the caller waits for the answer.** The usual cause is
+  a late frame, and then the drive answers. A write that was really lost costs the 700 ms mailbox
+  timeout instead of a repeat. That is the whole price of the change.
+- **After an unknown outcome, the next request uses counter 0.** The firmware never ignores
+  counter 0 and stores it as the last counter. Without this, seven unknown outcomes in a row could
+  bring the counter back to the value the drive accepted last. The counter reset of Session
+  2026-10-02 already sends counter 0 to the same vendors.
+- **A refused write gives its counter back.** A working counter of 0 means the ESC did not take the
+  write, so the drive did not see that counter. Each SOEM caller takes a counter before it sends,
+  so without the give-back a run of refused writes would bring the counter back to the value the
+  drive accepted last.
+- **`mbxwriteunknowns` counts the writes without a frame,** and the driver logs a warning at the
+  start of the next transfer to that slave. A support log then shows that frames come back late.
+
+**Rejected.**
+
+- **Raise `EC_TIMEOUTRET`.** The RT loop passes it to `ecx_receive_processdata`, so a lost process
+  data frame would stall the loop for that long. A raise also does not help when two frames share
+  one frame index, because that looks like no frame at any timeout.
+- **Patch only the explicit repeat in `ecx_mbxsend`.** The repeat in `ecx_srconfirm` is the one
+  that a late frame triggers.
+- **Send once to every vendor.** It removes the recovery of a lost write from devices that do not
+  need the workaround.
+- **Free a locked drive with INIT and PRE-OP.** That is an AL state change nobody asked for, and it
+  drops the drive out of OP.
+
+**What is tested, and what is not.**
+
+- With the fix and both `EC_TIMEOUTRET` and `EC_TIMEOUTTXM` at 200 µs, 10 rounds of a full
+  parameter read (5,640 single reads) ran without a lock. 302 writes had an unknown outcome, and
+  the drive answered each. 4 reads failed once because the 200 µs budget also cut the SM0 status
+  read short, and the next read worked.
+- With the fix at the default timeouts, 10 rounds ran with every read answered and no warning in
+  the log.
+- **The bootloader has the same flaw.** `hil/mailbox_duplicate --boot` wrote an FoE read of
+  `.hardware_description` twice with counter 1 to the Circulo in BOOT. The first copy was answered,
+  and the second left SM0 status at 0x48 with no answer until INIT. The bootloader links
+  `lib_ethercat` from somanet_ethercat, so the firmware fix is needed there too (noted on
+  somanet_software#5811). A firmware installation runs in BOOT and sends many FoE packets, so it
+  was exposed in the same way.
+- With the fix and both timeouts at 200 µs, 50 FoE reads of `.hardware_description` in BOOT all
+  worked. 8 writes got no frame back, and none locked the mailbox. No run without the fix was made
+  in BOOT.
+- `ctest` passes. The SOEM patch has no unit test, because it needs a network adapter.
+- **The Integro does not have the flaw.** `hil/mailbox_duplicate` on an Integro (product 0x401,
+  revision 0x11000003) in PRE-OP: the ESC accepted the second copy, the netX stack took it out of
+  SM0 without an answer, and the next read worked. That is the behaviour ETG.1000.4 asks for. The
+  patch still writes to it once, because it checks the vendor and nothing on the bus tells the
+  two stacks apart. On an Integro that costs the 700 ms mailbox timeout for a write that is lost on
+  the wire, and nothing else.
+- Not tested: the Integro in BOOT; a device of another vendor; a bus of 30 drives.

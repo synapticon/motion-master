@@ -149,6 +149,12 @@ std::expected<int, std::string> SoemFieldbusDriver::scan() {
   // non-positive value means no slaves answered. Negative values are SOEM transport codes
   // (EC_NOFRAME = -1, etc.); 0 is a returned frame that no slave incremented.
   int found = ecx_config_init(ctx_.get());
+  // SOMANET firmware locks its receive mailbox when it gets one message twice, so the SOEM port
+  // writes each mailbox message to these slaves once (ports/soem/portfile.cmake). ecx_config_init
+  // clears the slave list, so each scan sets the flag again.
+  for (int slave = 1; slave <= ctx_->slavecount; ++slave) {
+    ctx_->slavelist[slave].mbxwriteonce = isSomanetDevice(ctx_->slavelist[slave].eep_man);
+  }
   // Before the branches below, so every outcome publishes: a scan that found nothing must clear the
   // states of the slaves that are no longer there, not leave the previous scan's values readable.
   publishSlaveStates();
@@ -311,8 +317,11 @@ std::string sdoErrorSuffix(ecx_contextt* ctx, uint16_t slavePosition, int wkc,
   }
 }
 
-// Removes every error SOEM queued for one slave. Called with the drive's lock held.
+// Removes every error SOEM queued for one slave. Called with the drive's lock held. Every CoE
+// transfer starts here, so this is also where the mailbox writes of the slave that got no frame
+// back are logged.
 void discardSlaveErrors(ecx_contextt* ctx, uint16_t slavePosition) {
+  mm::comm::soem::reportUnknownMailboxWrites(ctx, slavePosition);
   ec_errort discarded{};
   while (ecx_popslaveerror(ctx, slavePosition, &discarded)) {
   }

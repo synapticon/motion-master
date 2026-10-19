@@ -522,6 +522,155 @@ vcpkg_replace_string(
    context->ecaterror = TRUE;"
 "   Ec.SubIdx = SubIdx;")
 
+# A SOMANET device must never get one mailbox request twice (synapticon/somanet_software#5811).
+#
+# SOMANET firmware detects a repeated mailbox counter and ignores the message. It returns before it
+# reads the message, so the ESC never clears the mailbox-full bit of SM0. The firmware then finds
+# the same message on every pass of its main loop and ignores it again. Every later mailbox write is
+# refused, and only INIT followed by PRE-OP frees the mailbox. ETG.1000.4 Table 29 allows a master
+# to repeat a write with the same counter, and upstream SOEM does: ecx_FPWR sends the datagram again
+# when no frame comes back within EC_TIMEOUTRET, and ecx_mbxsend writes again after a failed write.
+# When the first write did reach the slave, the slave gets a second copy with the same counter.
+#
+# The patch adds ecx_FPWRonce, which sends its datagram once and waits for that one frame. When the
+# driver sets mbxwriteonce for a slave, ecx_mbxsend writes to that slave only through it, and acts on
+# what came back:
+#   - A working counter of 1: the message is in SM0. Its counter is the last one the slave can have
+#     seen.
+#   - A working counter of 0: the ESC refused the write because SM0 was full, so the slave did not
+#     get the message. The write is repeated once after SM0 is empty again. When that also fails,
+#     mbx_cnt goes back to the last counter the slave can have seen. Without that, every refused
+#     write would use up a counter, and a run of refused writes would bring the counter back to the
+#     value the slave accepted last.
+#   - No frame: it is not known whether the slave got the message, so it is not sent again. The
+#     call returns 1, and the caller waits for the answer. A late frame is the usual cause, and in
+#     that case the slave answers. The next message goes out with counter 0, which the firmware
+#     never ignores, so it cannot match a counter that the slave accepted or did not accept.
+# mbxwriteunknowns counts the writes without a frame, for the driver to report.
+#
+# Every other slave keeps the upstream behaviour, because a slave that follows ETG.1000.4 discards
+# a repeated message and the repeat recovers a write that was lost on the wire.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/include/soem/ec_main.h"
+"   /** Counter value of mailbox link layer protocol 1..7 */
+   uint8 mbx_cnt;"
+"   /** Counter value of mailbox link layer protocol 1..7 */
+   uint8 mbx_cnt;
+   /** write each mailbox message once, never repeat it */
+   boolean mbxwriteonce;
+   /** counter of the last mailbox message the slave can have received */
+   uint8 mbxlastcnt;
+   /** the last mailbox write got no frame back */
+   boolean mbxcntunknown;
+   /** mailbox writes that got no frame back */
+   uint32 mbxwriteunknowns;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/include/soem/ec_base.h"
+"int ecx_FPWR(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout);"
+"int ecx_FPWR(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout);
+int ecx_FPWRonce(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout);")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_base.c"
+"   idx = ecx_getindex(port);
+   ecx_setupdatagram(port, &(port->txbuf[idx]), EC_CMD_FPWR, idx, ADP, ADO, length, data);
+   wkc = ecx_srconfirm(port, idx, timeout);
+   ecx_setbufstat(port, idx, EC_BUF_EMPTY);
+
+   return wkc;
+}"
+"   idx = ecx_getindex(port);
+   ecx_setupdatagram(port, &(port->txbuf[idx]), EC_CMD_FPWR, idx, ADP, ADO, length, data);
+   wkc = ecx_srconfirm(port, idx, timeout);
+   ecx_setbufstat(port, idx, EC_BUF_EMPTY);
+
+   return wkc;
+}
+
+/** FPWR primitive that sends its datagram once. Blocking.
+ *
+ * ecx_FPWR sends the datagram again when no frame comes back within EC_TIMEOUTRET. This one
+ * sends it once and waits up to timeout for that frame.
+ *
+ * @return Workcounter, or EC_NOFRAME when no frame came back
+ */
+int ecx_FPWRonce(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout)
+{
+   int wkc;
+   uint8 idx;
+
+   idx = ecx_getindex(port);
+   ecx_setupdatagram(port, &(port->txbuf[idx]), EC_CMD_FPWR, idx, ADP, ADO, length, data);
+   ecx_outframe_red(port, idx);
+   wkc = ecx_waitinframe(port, idx, timeout);
+   ecx_setbufstat(port, idx, EC_BUF_EMPTY);
+
+   return wkc;
+}")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"/** Write IN mailbox to slave.
+ * Mailbox is fetched from pool by caller, ownership is transferred and dropped back to pool automatically."
+"/* Writes a mailbox message to a slave that has mbxwriteonce set. The comment in the Motion Master
+ * SOEM port explains the rules.
+ */
+static int ecx_mbxsendonce(ecx_contextt *context, uint16 slave, ec_mbxbuft *mbx, int timeout)
+{
+   ec_slavet *slaveitem = &(context->slavelist[slave]);
+   ec_mbxheadert *mbxh = (ec_mbxheadert *)mbx;
+   uint8 cnt;
+   int wkc = 0;
+   int attempt;
+
+   if (slaveitem->mbxcntunknown)
+   {
+      mbxh->mbxtype = (uint8)(mbxh->mbxtype & 0x8F); /* counter 0 */
+      slaveitem->mbx_cnt = 0;
+   }
+   cnt = (uint8)((mbxh->mbxtype >> 4) & 0x07);
+   for (attempt = 0; (attempt < 2) && (wkc == 0); attempt++)
+   {
+      if (!ecx_mbxempty(context, slave, timeout))
+      {
+         break;
+      }
+      wkc = ecx_FPWRonce(&context->port, slaveitem->configadr, slaveitem->mbx_wo, slaveitem->mbx_l, mbx, timeout);
+   }
+   if (wkc > 0)
+   {
+      slaveitem->mbxlastcnt = cnt;
+      slaveitem->mbxcntunknown = FALSE;
+      return wkc;
+   }
+   if (wkc == 0)
+   {
+      slaveitem->mbx_cnt = slaveitem->mbxlastcnt;
+      return 0;
+   }
+   slaveitem->mbxlastcnt = cnt;
+   slaveitem->mbxcntunknown = TRUE;
+   slaveitem->mbxwriteunknowns++;
+   return 1;
+}
+
+/** Write IN mailbox to slave.
+ * Mailbox is fetched from pool by caller, ownership is transferred and dropped back to pool automatically.")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"   else if ((mbxl > 0) && (mbxl <= EC_MAXMBX) && (slavelist->state >= EC_STATE_PRE_OP))
+   {
+      mbxwo = context->slavelist[slave].mbx_wo;"
+"   else if (slavelist->mbxwriteonce && (mbxl > 0) && (mbxl <= EC_MAXMBX) && (slavelist->state >= EC_STATE_PRE_OP))
+   {
+      wkc = ecx_mbxsendonce(context, slave, mbx, timeout);
+   }
+   else if ((mbxl > 0) && (mbxl <= EC_MAXMBX) && (slavelist->state >= EC_STATE_PRE_OP))
+   {
+      mbxwo = context->slavelist[slave].mbx_wo;")
+
 # EC_MAXBUF is the number of frame indexes. The RT thread and the control plane take indexes from
 # one pool. When no index is free, ecx_getindex does not wait or fail. It returns an index that is
 # still in use, and two frames then share one receive buffer. The control plane is capped at

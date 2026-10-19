@@ -824,6 +824,24 @@ removal on the drive.
 **Practical upshot: probing unknown subindices is expensive, and a bare failure means "no
 answer", not "no such object".** See `NEXTGEN.md`, Session 2026-07-20.
 
+#### A SOMANET Drive Gets Each Mailbox Request Once
+
+**The XMOS EtherCAT stack of a SOMANET drive locks its receive mailbox when it gets one mailbox
+request twice.** It sees the repeated counter and ignores the request, but it returns before it
+reads the request, so SM0 stays full. Every later SDO and FoE request then fails with "the slave's
+receive mailbox is full", and only INIT followed by PRE-OP frees it (`ethercat_service.xc:352`, synapticon/somanet_software#5811).
+The bootloader does the same in BOOT. The netX stack of an Integro discards a repeat correctly.
+ETG.1000.4 allows a master to repeat a write, and upstream SOEM repeats one when its frame comes back
+later than `EC_TIMEOUTRET` (2 ms). So a slow host or a lost frame was enough to lock a drive.
+
+`ports/soem` therefore writes each mailbox request to a Synapticon or Sensodrive device once
+(`mbxwriteonce`, set by `scan()`). No frame back means the outcome is unknown: the request is not
+sent again, the caller waits for the answer, and the next request uses counter 0, which the
+firmware never ignores. A refused write gives its counter back. Other vendors keep upstream SOEM.
+**Do not raise `EC_TIMEOUTRET` to hide this.** The RT receive waits for it, and a raise does not
+help when two frames share one frame index. `hil/mailbox_duplicate` shows the lock on a drive. See
+`NEXTGEN.md`, Session 2026-10-19.
+
 ### ESI Parsing (`libs/etg`)
 
 `mm::etg` parses a vendor's EtherCAT Slave Information XML and flattens one device into a flat
@@ -1033,6 +1051,19 @@ the drive in INIT. It needs raw socket access, and no other master may use the a
 ```bash
 sudo ./build/x64-linux-debug/hil/foe_abort/foe_abort --ifname <interface> [--slave 1] \
   [--file .hardware_description]
+```
+
+### mailbox_duplicate
+
+Writes one mailbox request twice with the same counter and reports whether the drive locks its
+receive mailbox (LOCKED), answers the copy (HANDLED), or discards it (DISCARDED). A Circulo locks,
+and INIT followed by PRE-OP frees it. An Integro discards the copy. The request is an SDO upload in PRE-OP.
+With `--boot` it is an FoE read in BOOT, which tests the bootloader. It leaves the drive in PRE-OP.
+It needs raw socket access, and no other master may use the adapter.
+
+```bash
+sudo ./build/x64-linux-debug/hil/mailbox_duplicate/mailbox_duplicate --ifname <interface> [--slave 1] \
+  [--boot] [--file .hardware_description]
 ```
 
 ### api

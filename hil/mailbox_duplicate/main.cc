@@ -1,5 +1,6 @@
-// Shows on a real drive that a SOMANET drive stops taking mailbox requests after it receives one
-// request twice with the same mailbox counter, and that INIT followed by PRE-OP frees it.
+// Shows on a real drive what the drive does with a mailbox request that it receives twice with the
+// same mailbox counter. A SOMANET drive with the XMOS EtherCAT stack stops taking mailbox requests,
+// and INIT followed by PRE-OP frees it. An Integro discards the second copy.
 //
 // The program talks to the drive through SOEM directly, not through SoemFieldbusDriver, because it
 // has to write one request twice on purpose. The driver never does that.
@@ -8,10 +9,13 @@
 //   1. Put the drive into PRE-OP and read 0x1000:00. This shows that the drive answers.
 //   2. Write an SDO upload request of 0x1000:00 into the receive mailbox and read the answer.
 //   3. Write the same request again, with the same counter.
-//   4. Read the SyncManager 0 status. The mailbox-full bit stays set, because the drive does not
-//      take the request out of the mailbox.
-//   5. Read 0x1000:00. It fails, because the mailbox is full.
+//   4. Read the SyncManager 0 status, and wait for an answer. The result is one of three:
+//      LOCKED, when the mailbox-full bit stays set; HANDLED, when the drive answers the second
+//      copy; DISCARDED, when the drive takes the second copy and does not answer it.
+//   5. Read 0x1000:00. It fails when the mailbox is locked, and works otherwise.
 //   6. Put the drive into INIT and then PRE-OP, and read 0x1000:00 again. It works.
+//
+// The program ends with LOCKED or NOT LOCKED, or with FAIL when a step does not match.
 //
 // With --boot, the same test runs against the bootloader, which has its own copy of the EtherCAT
 // layer. The drive goes into BOOT, and the request is an FoE read of a file. The bootloader does
@@ -295,7 +299,9 @@ int main(int argc, char** argv) {
     ecx_close(ctx.get());
     return EXIT_FAILURE;
   }
-  std::cout << std::format("slave {} ({}) is in PRE-OP\n", slave, ctx->slavelist[slave].name);
+  const ec_slavet& device = ctx->slavelist[slave];
+  std::cout << std::format("slave {} ({}, product 0x{:08X}, revision 0x{:08X}) is in PRE-OP\n",
+                           slave, device.name, device.eep_id, device.eep_rev);
   if (!resetCounter(ctx.get(), slave)) {
     std::cout << "FAIL: the slave did not answer a request with counter 0\n";
     ecx_close(ctx.get());
@@ -336,21 +342,25 @@ int main(int argc, char** argv) {
   const int secondAnswer = receive(ctx.get(), slave, 100'000);
   std::cout << std::format("4. after 500 ms: SM0 status 0x{:02X}, answer wkc {}\n", status,
                            secondAnswer);
-  if (sm0Full(status)) {
-    std::cout << "   the slave has not taken the second copy out of its receive mailbox\n";
+  const bool locked = sm0Full(status);
+  if (locked) {
+    std::cout << "   LOCKED: the slave did not take the second copy out of its mailbox\n";
+  } else if (secondAnswer > 0) {
+    std::cout << "   HANDLED: the slave took the second copy and answered it\n";
   } else {
-    std::cout << "   FAIL: expected the mailbox-full bit to stay set\n";
-    passed = false;
+    std::cout << "   DISCARDED: the slave took the second copy and did not answer it\n";
   }
 
   std::cout << "5. read 0x1000:00";
-  const int stuck = readDeviceType(ctx.get(), slave);
-  const int stuckStatus = sm0Status(ctx.get(), slave);
-  std::cout << std::format(": wkc {}, SM0 status 0x{:02X}\n", stuck, stuckStatus);
-  if (stuck <= 0 && sm0Full(stuckStatus)) {
+  const int next = readDeviceType(ctx.get(), slave);
+  const int nextStatus = sm0Status(ctx.get(), slave);
+  std::cout << std::format(": wkc {}, SM0 status 0x{:02X}\n", next, nextStatus);
+  if (locked && next <= 0 && sm0Full(nextStatus)) {
     std::cout << "   the slave refuses every new request\n";
+  } else if (!locked && next > 0) {
+    std::cout << "   the slave answers the next request\n";
   } else {
-    std::cout << "   FAIL: expected the read to fail on a full mailbox\n";
+    std::cout << "   FAIL: the read does not match the result of step 4\n";
     passed = false;
   }
 
@@ -362,13 +372,17 @@ int main(int argc, char** argv) {
   std::cout << std::format(": wkc {}, SM0 status 0x{:02X}\n", recovered,
                            sm0Status(ctx.get(), slave));
   if (recovered > 0) {
-    std::cout << "   INIT freed the mailbox\n";
+    std::cout << "   the slave answers after INIT\n";
   } else {
     std::cout << "   FAIL: expected the read to work after INIT\n";
     passed = false;
   }
 
   ecx_close(ctx.get());
-  std::cout << (passed ? "PASS\n" : "FAIL\n");
+  if (passed) {
+    std::cout << (locked ? "LOCKED\n" : "NOT LOCKED\n");
+  } else {
+    std::cout << "FAIL\n";
+  }
   return passed ? EXIT_SUCCESS : EXIT_FAILURE;
 }

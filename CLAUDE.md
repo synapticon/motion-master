@@ -826,11 +826,11 @@ answer", not "no such object".** See `NEXTGEN.md`, Session 2026-07-20.
 
 #### A SOMANET Drive Gets Each Mailbox Request Once
 
-**SOMANET firmware locks its receive mailbox when it gets one mailbox request twice.** It sees the
-repeated counter and ignores the request, but it returns before it reads the request, so SM0 stays
-full. Every later SDO and FoE request then fails with "the slave's receive mailbox is full", and only
-INIT followed by PRE-OP frees it (`ethercat_service.xc:352`, synapticon/somanet_software#5811).
-The bootloader does the same in BOOT.
+**The XMOS EtherCAT stack of a SOMANET drive locks its receive mailbox when it gets one mailbox
+request twice.** It sees the repeated counter and ignores the request, but it returns before it
+reads the request, so SM0 stays full. Every later SDO and FoE request then fails with "the slave's
+receive mailbox is full", and only INIT followed by PRE-OP frees it (`ethercat_service.xc:352`, synapticon/somanet_software#5811).
+The bootloader does the same in BOOT. The netX stack of an Integro discards a repeat correctly.
 ETG.1000.4 allows a master to repeat a write, and upstream SOEM repeats one when its frame comes back
 later than `EC_TIMEOUTRET` (2 ms). So a slow host or a lost frame was enough to lock a drive.
 
@@ -1055,8 +1055,9 @@ sudo ./build/x64-linux-debug/hil/foe_abort/foe_abort --ifname <interface> [--sla
 
 ### mailbox_duplicate
 
-Shows on a SOMANET drive that one mailbox request written twice with the same counter locks the
-receive mailbox, and that INIT followed by PRE-OP frees it. The request is an SDO upload in PRE-OP.
+Writes one mailbox request twice with the same counter and reports whether the drive locks its
+receive mailbox (LOCKED), answers the copy (HANDLED), or discards it (DISCARDED). A Circulo locks,
+and INIT followed by PRE-OP frees it. An Integro discards the copy. The request is an SDO upload in PRE-OP.
 With `--boot` it is an FoE read in BOOT, which tests the bootloader. It leaves the drive in PRE-OP.
 It needs raw socket access, and no other master may use the adapter.
 

@@ -4025,5 +4025,10 @@ is a workaround for drives in the field.
   worked. 8 writes got no frame back, and none locked the mailbox. No run without the fix was made
   in BOOT.
 - `ctest` passes. The SOEM patch has no unit test, because it needs a network adapter.
-- Not tested: an Integro, whose netX stack handles the mailbox and is not in somanet_software; a
-  device of another vendor; a bus of 30 drives.
+- **The Integro does not have the flaw.** `hil/mailbox_duplicate` on an Integro (product 0x401,
+  revision 0x11000003) in PRE-OP: the ESC accepted the second copy, the netX stack took it out of
+  SM0 without an answer, and the next read worked. That is the behaviour ETG.1000.4 asks for. The
+  patch still writes to it once, because it checks the vendor and nothing on the bus tells the
+  two stacks apart. On an Integro that costs the 700 ms mailbox timeout for a write that is lost on
+  the wire, and nothing else.
+- Not tested: the Integro in BOOT; a device of another vendor; a bus of 30 drives.

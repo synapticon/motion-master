@@ -475,6 +475,9 @@ class Device {
   /// - Otherwise, when @c mailboxActive(), uploads via SDO, decodes, stores and returns it.
   /// - Otherwise (no mailbox) returns the cached value without touching the bus.
   ///
+  /// A failed upload or decode keeps the cached value and marks a @c Synced parameter
+  /// @c SyncState::Stale, so the parameter list does not report the old value as fresh.
+  ///
   /// The parameter must already exist in the map (populated by @c initializeParameters).
   ///
   /// @param index     CoE object index.
@@ -776,8 +779,16 @@ class Device {
   /// Complete Access upload (support probed once, per-object fallback); everything else — and any
   /// object that is not CA-decodable or whose CA read fails — is read one subindex at a time. Runs
   /// off the lock and mutates @p defs in place; the caller publishes the built map under
-  /// @c parametersMutex_. Per-entry failures are logged and leave the type default.
+  /// @c parametersMutex_. A per-entry failure is logged and marks the entry @c SyncState::Stale,
+  /// which @c publishParameters turns into @c Stale on a cell that has a value and @c Unknown on a
+  /// new one.
   void readParameterValues(std::vector<DeviceParameter>& defs, bool useCompleteAccess);
+
+  /// @brief Marks a parameter after a failed read (see @c DeviceParameter::markReadFailed).
+  ///
+  /// Takes @c parametersMutex_. Does nothing when the object is gone or its data type is no longer
+  /// @p declaredType, because the map was replaced during the read.
+  void markReadFailed(uint16_t index, uint8_t subindex, uint16_t declaredType);
 
   /// @brief Reports what a read of a subindex above its object's stated count did, and returns
   ///        whether the rest of that object is still worth asking for.

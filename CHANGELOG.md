@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.92] - 2026-10-19
+
 ### Changed
 
 - **The OpenAPI spec gives every number a format.** A parameter value (`value`, `defaultValue`, `minValue` and `maxValue` of a parameter, and `value` in a parameter write) is now the schema `ParameterValue`. It lists an `int64` integer, a `uint64` integer for UNSIGNED64, a `double` number, a string and an array of bytes, and says which `dataType` uses which. Every other `number` field has `format: double`. A generator such as oapi-codegen produced `float32` for an unformatted `number`, which cannot hold every 32-bit integer. It now produces `int64`, `uint64` and `float64`. The JSON that the server sends does not change. (#103)
@@ -879,7 +881,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.91...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.92...HEAD
+[6.0.0-alpha.92]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.91...v6.0.0-alpha.92
 [6.0.0-alpha.91]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.90...v6.0.0-alpha.91
 [6.0.0-alpha.90]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.89...v6.0.0-alpha.90
 [6.0.0-alpha.89]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.88...v6.0.0-alpha.89

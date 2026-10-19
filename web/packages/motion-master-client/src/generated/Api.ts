@@ -881,7 +881,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Enumerates the entire CoE object dictionary of the device at `slavePosition` via the SDO Info service ("Get Object List" → "Get Object Description" → "Get Entry Description") and rebuilds its parameter map. The device must be in PRE-OP, SAFE-OP, or OP (mailbox communication active).  On a fully populated drive the call can take several seconds. When `readValues=true` each entry is additionally read via SDO upload and the decoded value is stored on the parameter; entries that fail to read keep their type-appropriate default and the call still succeeds.
+   * @description Enumerates the entire CoE object dictionary of the device at `slavePosition` via the SDO Info service ("Get Object List" → "Get Object Description" → "Get Entry Description") and rebuilds its parameter map. The device must be in PRE-OP, SAFE-OP, or OP (mailbox communication active).  On a fully populated drive the call can take several seconds. When `readValues=true` each entry is additionally read via SDO upload and the decoded value is stored on the parameter. An entry that fails to read keeps the value of an earlier read with `syncState` `stale`, or the type-appropriate default with `syncState` `unknown`, and the call still succeeds. Check `syncState` to find the entries that were not read.
    *
    * @name InitializeDeviceParameters
    * @summary Initialise the parameter list for a device by enumerating its object dictionary
@@ -915,7 +915,7 @@ export class Api<
       ...params,
     });
   /**
-   * @description Re-reads the value of every readable parameter already loaded for the device at `slavePosition`, leaving the parameter list itself intact (it does not re-enumerate the object dictionary — use `POST …/parameters/init` for that).  Each value is read PDO-aware: from the live process image when the device is exchanging and the object is PDO-mapped, otherwise via an SDO upload over the mailbox.  Write-only objects are skipped.  Best-effort: an entry that fails to read keeps its cached value and the call still succeeds.  Returns the refreshed list, ordered by `(index, subindex)`.
+   * @description Re-reads the value of every readable parameter already loaded for the device at `slavePosition`, leaving the parameter list itself intact (it does not re-enumerate the object dictionary — use `POST …/parameters/init` for that).  Each value is read PDO-aware: from the live process image when the device is exchanging and the object is PDO-mapped, otherwise via an SDO upload over the mailbox.  Write-only objects are skipped.  Best-effort: an entry that fails to read keeps its cached value, a `synced` entry becomes `stale`, and the call still succeeds.  Returns the refreshed list, ordered by `(index, subindex)`.
    *
    * @name ReadAllDeviceParameters
    * @summary Refresh the cached value of every parameter without re-enumerating the dictionary

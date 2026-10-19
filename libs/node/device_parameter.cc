@@ -264,6 +264,8 @@ std::string_view syncStateName(SyncState state) {
       return "synced";
     case SyncState::Pending:
       return "pending";
+    case SyncState::Stale:
+      return "stale";
   }
   return "unknown";
 }

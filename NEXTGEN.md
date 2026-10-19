@@ -4032,3 +4032,41 @@ is a workaround for drives in the field.
   two stacks apart. On an Integro that costs the 700 ms mailbox timeout for a write that is lost on
   the wire, and nothing else.
 - Not tested: the Integro in BOOT; a device of another vendor; a bus of 30 drives.
+
+## Session 2026-10-19 — A failed read marks a value stale (as-built)
+
+Issue #101. While the drives of #100 refused every mailbox request,
+`POST …/parameters/init?readValues=true` answered 200 and listed 858 of 859 parameters as `synced`
+with the values of the previous enumeration. A client could not tell those from fresh values.
+
+**Why it said `synced`.** The enumeration builds a pass-local vector in which every entry starts as
+`unknown`, and a successful read sets `synced`. A failed read left the entry `unknown`.
+`publishParameters` then copies a value and its state into the existing cell only when the state is
+not `unknown`, which is how a pass without values keeps the values of the cells it re-uses. So a
+failed read looked like a read that was never asked for, and the cell kept its old value and its old
+`synced`. `Device::readParameter` had the same gap: it returned the error and left the cell `synced`,
+so the parameter list, `POST …/parameters/read` and the refresher reported a stale value as fresh.
+
+**The rule, in one place.** `DeviceParameter::markReadFailed` turns `synced` into a new state,
+`stale`, and keeps the value. `Device::readParameter` calls it after a failed upload or decode, which
+covers single reads, `parameters/read` and the refresher. The enumeration marks a failed entry
+`stale` in its pass-local vector, and `publishParameters` calls `markReadFailed` on a re-used cell
+and publishes a new cell as `unknown`.
+
+**Rejected.**
+
+- **Reset the value to the type default and report `unknown`.** That matches the old meaning of
+  `unknown`, but an RT task or the output image may read the cell, and a zero there would reach the
+  drive.
+- **Answer the call with an error when a read fails.** Some objects refuse a read on every device,
+  such as a write-only object that the enumeration still asks for, so a partial failure is normal.
+  The state of each parameter is what a client checks.
+- **Mark `pending` stale.** A local write that the device has not confirmed is still waiting, and
+  `pending` says more than `stale` does.
+
+An entry that the enumeration skips on purpose, a reserved subindex above the stated count once the
+device refused one such read, is not a failed read and is not marked.
+
+**Tested:** `device_test.cc` covers a single read, `parameters/read`, an enumeration after a good one,
+a new entry, a pass without values, and that `unknown` and `pending` do not change. Not tested on a
+drive, because a drive that refuses every read needs the lock that #100 removed.

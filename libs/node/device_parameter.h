@@ -107,6 +107,7 @@ enum class SyncState : uint8_t {
   Unknown,  ///< Never read; @c value is the type-appropriate default.
   Synced,   ///< @c value matches the device (last successful read or write).
   Pending,  ///< @c value was set locally while offline / after a failed write.
+  Stale,    ///< @c value came from an earlier read or write; the latest read of the object failed.
 };
 
 /// @brief Returns the lowercase string form of @p state (@c "unknown" etc.).
@@ -280,6 +281,19 @@ struct DeviceParameter {
   /// bytes an SDO upload or the process image already produced and puts them where
   /// @c isScalarDataType says they belong. @c setValue is the typed counterpart.
   void setRawValue(std::span<const uint8_t> bytes);
+
+  /// @brief Records that a read of this object failed. Keeps the value.
+  ///
+  /// A @c Synced value becomes @c Stale, so a client can tell it from a value that was just read.
+  /// The value stays, because an RT task or the output image may read this cell, and a zero there
+  /// would reach the drive. @c Unknown stays @c Unknown, because it has no value to call stale.
+  /// @c Pending stays @c Pending, because a local write that the device has not confirmed is still
+  /// waiting.
+  void markReadFailed() {
+    if (syncState == SyncState::Synced) {
+      syncState = SyncState::Stale;
+    }
+  }
 
   /// @brief Returns the value as the requested type @p T.
   ///

@@ -318,13 +318,20 @@ void Device::publishParameters(std::unordered_map<uint32_t, DeviceParameter>&& b
         cell->defaultValue = std::move(definition.defaultValue);
         cell->minValue = std::move(definition.minValue);
         cell->maxValue = std::move(definition.maxValue);
-        if (definition.syncState != SyncState::Unknown) {
+        // A read that failed in this enumeration keeps the cell's value and marks it.
+        if (definition.syncState == SyncState::Stale) {
+          cell->markReadFailed();
+        } else if (definition.syncState != SyncState::Unknown) {
           cell->storeBits(definition.loadBits());
           cell->rawValue = std::move(definition.rawValue);
           cell->syncState = definition.syncState;
         }
         next.emplace(key, cell);
         continue;
+      }
+      // A new cell has no earlier value, so a failed read leaves it Unknown with the default value.
+      if (definition.syncState == SyncState::Stale) {
+        definition.syncState = SyncState::Unknown;
       }
       // A new object, or one whose declared type changed under a firmware update. A changed type
       // must not be written into the old cell: the RT decode reads dataType and bitLength without a
@@ -529,15 +536,19 @@ void Device::readParameterValues(std::vector<DeviceParameter>& defs, bool useCom
   // for objects whose layout is not Complete-Access-decodable, and as the fallback when a CA read
   // or decode fails.
   auto readOne = [&](DeviceParameter& p) {
+    // Stale in this pass-local vector means "the read failed". publishParameters turns it into the
+    // right state for the published cell.
     auto bytes = readSdo(p.index, p.subindex);
     if (!bytes) {
       spdlog::warn("Device {}: SDO upload 0x{:04X}:{:02X} failed: {}", slavePosition_, p.index,
                    p.subindex, bytes.error());
+      p.syncState = SyncState::Stale;
       return;
     }
     if (auto decoded = decodeSdoBytes(p.dataType, *bytes); !decoded) {
       spdlog::warn("Device {}: decode 0x{:04X}:{:02X} failed: {}", slavePosition_, p.index,
                    p.subindex, decoded.error());
+      p.syncState = SyncState::Stale;
       return;
     }
     p.setRawValue(*bytes);
@@ -1083,6 +1094,16 @@ const DeviceParameter* Device::findParameter(uint16_t index, uint8_t subindex) c
   return it != parameters_.end() ? it->second : nullptr;
 }
 
+void Device::markReadFailed(uint16_t index, uint8_t subindex, uint16_t declaredType) {
+  // Re-found under the lock for the same reason readParameter's phase 3 re-finds: the map may
+  // have been replaced during the read. A changed type means a different object, so it is left
+  // alone.
+  const std::lock_guard<std::mutex> lock(*parametersMutex_);
+  if (DeviceParameter* p = findParameter(index, subindex); p && p->dataType == declaredType) {
+    p->markReadFailed();
+  }
+}
+
 std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t index,
                                                                        uint8_t subindex) {
   // Phase 1 — under the lock: resolve, serve locally if we can, else capture the decode type. Both
@@ -1104,6 +1125,7 @@ std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t 
       if (auto bytes = processData_->readPdo(slavePosition_, index, subindex)) {
         auto decoded = decodeSdoBytes(p->dataType, *bytes);
         if (!decoded) {
+          p->markReadFailed();
           return std::unexpected(decoded.error());
         }
         p->setRawValue(*bytes);
@@ -1123,10 +1145,12 @@ std::expected<DeviceParameterValue, std::string> Device::readParameter(uint16_t 
   // which is what a background parameter refresh plus a user reading a file actually produces.
   auto bytes = readSdo(index, subindex);
   if (!bytes) {
+    markReadFailed(index, subindex, declaredType);
     return std::unexpected(bytes.error());
   }
   auto decoded = decodeSdoBytes(declaredType, *bytes);
   if (!decoded) {
+    markReadFailed(index, subindex, declaredType);
     return std::unexpected(decoded.error());
   }
 

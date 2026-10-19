@@ -488,6 +488,116 @@ TEST(DeviceReadAllParameters, SucceedsDespiteAPerEntryReadFailure) {
   EXPECT_EQ(a->syncState, SyncState::Synced);
 }
 
+// A failed read must not leave an earlier value reported as fresh (#101).
+TEST(DeviceReadParameter, FailedReadMarksAnEarlierValueStaleAndKeepsIt) {
+  SdoFakeDriver driver;
+  Device device = deviceWithU32Param(driver);
+  driver.state = kPreOp;
+  driver.programRead(0x6065, 0x00, u32le(16));
+  ASSERT_TRUE(device.readParameter(0x6065, 0x00).has_value());
+
+  driver.reads.erase(SdoFakeDriver::key(0x6065, 0x00));
+  EXPECT_FALSE(device.readParameter(0x6065, 0x00).has_value());
+  auto p = device.parameter(0x6065, 0x00);
+  ASSERT_TRUE(p.has_value());
+  EXPECT_EQ(p->currentValue(), DeviceParameterValue{uint32_t{16}});
+  EXPECT_EQ(p->syncState, SyncState::Stale);
+
+  driver.programRead(0x6065, 0x00, u32le(17));
+  ASSERT_TRUE(device.readParameter(0x6065, 0x00).has_value());
+  p = device.parameter(0x6065, 0x00);
+  ASSERT_TRUE(p.has_value());
+  EXPECT_EQ(p->currentValue(), DeviceParameterValue{uint32_t{17}});
+  EXPECT_EQ(p->syncState, SyncState::Synced);
+}
+
+TEST(DeviceReadParameter, FailedReadLeavesUnknownAndPendingAlone) {
+  SdoFakeDriver driver;
+  driver.programOd(0x6065, 0x00, kU32);
+  driver.programOd(0x6066, 0x00, kU32);
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+  // Written offline, so Pending until the device confirms it.
+  ASSERT_TRUE(device.writeParameter(0x6066, 0x00, DeviceParameterValue{uint32_t{55}}).has_value());
+  driver.state = kPreOp;
+
+  EXPECT_FALSE(device.readParameter(0x6065, 0x00).has_value());
+  EXPECT_FALSE(device.readParameter(0x6066, 0x00).has_value());
+
+  EXPECT_EQ(device.parameter(0x6065, 0x00)->syncState, SyncState::Unknown);
+  EXPECT_EQ(device.parameter(0x6066, 0x00)->syncState, SyncState::Pending);
+  EXPECT_EQ(device.parameter(0x6066, 0x00)->currentValue(), DeviceParameterValue{uint32_t{55}});
+}
+
+TEST(DeviceReadAllParameters, FailedReadMarksAnEarlierValueStale) {
+  SdoFakeDriver driver;
+  Device device = deviceWithU32Param(driver);
+  driver.state = kPreOp;
+  driver.programRead(0x6065, 0x00, u32le(16));
+  ASSERT_TRUE(device.readAllParameters().has_value());
+
+  driver.reads.clear();
+  ASSERT_TRUE(device.readAllParameters().has_value());
+
+  const auto p = device.parameter(0x6065, 0x00);
+  ASSERT_TRUE(p.has_value());
+  EXPECT_EQ(p->currentValue(), DeviceParameterValue{uint32_t{16}});
+  EXPECT_EQ(p->syncState, SyncState::Stale);
+}
+
+// The case in #101: an enumeration with values whose reads all fail must not report the values of
+// the previous enumeration as synced.
+TEST(DeviceInitializeParameters, FailedValueReadMarksAnEarlierValueStale) {
+  SdoFakeDriver driver;
+  driver.programOd(0x6065, 0x00, kU32);
+  driver.programOd(0x6066, 0x00, kU32);
+  Device device(1, driver);
+  driver.state = kPreOp;
+  driver.programRead(0x6065, 0x00, u32le(16));
+  driver.programRead(0x6066, 0x00, u32le(32));
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/true).has_value());
+
+  driver.reads.erase(SdoFakeDriver::key(0x6066, 0x00));
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/true).has_value());
+
+  const auto ok = device.parameter(0x6065, 0x00);
+  const auto failed = device.parameter(0x6066, 0x00);
+  ASSERT_TRUE(ok.has_value());
+  ASSERT_TRUE(failed.has_value());
+  EXPECT_EQ(ok->syncState, SyncState::Synced);
+  EXPECT_EQ(failed->currentValue(), DeviceParameterValue{uint32_t{32}});
+  EXPECT_EQ(failed->syncState, SyncState::Stale);
+}
+
+TEST(DeviceInitializeParameters, FailedValueReadLeavesANewEntryUnknown) {
+  SdoFakeDriver driver;
+  driver.programOd(0x6065, 0x00, kU32);
+  Device device(1, driver);
+  driver.state = kPreOp;
+
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/true).has_value());
+
+  const auto p = device.parameter(0x6065, 0x00);
+  ASSERT_TRUE(p.has_value());
+  EXPECT_EQ(p->currentValue(), DeviceParameterValue{uint32_t{0}});
+  EXPECT_EQ(p->syncState, SyncState::Unknown);
+}
+
+// A pass without values reads nothing, so it must not mark anything stale.
+TEST(DeviceInitializeParameters, PassWithoutValuesKeepsSynced) {
+  SdoFakeDriver driver;
+  driver.programOd(0x6065, 0x00, kU32);
+  Device device(1, driver);
+  driver.state = kPreOp;
+  driver.programRead(0x6065, 0x00, u32le(16));
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/true).has_value());
+
+  driver.reads.clear();
+  ASSERT_TRUE(device.initializeParameters(/*readValues=*/false).has_value());
+
+  EXPECT_EQ(device.parameter(0x6065, 0x00)->syncState, SyncState::Synced);
+}
+
 TEST(DeviceReadAllParameters, ErrorsWhenNoParametersLoaded) {
   SdoFakeDriver driver;
   Device device(1, driver);

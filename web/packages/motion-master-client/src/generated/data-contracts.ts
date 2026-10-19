@@ -1579,10 +1579,10 @@ export interface DeviceParameter {
   /** Slave-reported maximum value, decoded with the same logic as `value`.  Absent when the slave does not report a maximum. */
   maxValue?: number | string | number[];
   /**
-   * Freshness of `value` relative to the device. `synced` — matches the device (last successful read or write); `pending` — set locally while offline or after a failed write, not yet confirmed on the device; `unknown` — never read, `value` is the type-appropriate default.
+   * Freshness of `value` relative to the device. `synced` — matches the device (last successful read or write); `pending` — set locally while offline or after a failed write, not yet confirmed on the device; `stale` — came from an earlier read or write, and the latest read of the object failed; `unknown` — never read, `value` is the type-appropriate default. A failed read turns `synced` into `stale` and keeps the value. It leaves `unknown` and `pending` unchanged. The next successful read sets `synced` again.
    * @example "synced"
    */
-  syncState: "unknown" | "synced" | "pending";
+  syncState: "unknown" | "synced" | "pending" | "stale";
 }
 
 /** Parsed SII (EEPROM) image of a slave — the fixed header plus the decoded category section.  String-index fields are 1-based references into `category.strings`. */

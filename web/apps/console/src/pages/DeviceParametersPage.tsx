@@ -171,6 +171,16 @@ function SyncBadge({ state }: { state: DeviceParameter['syncState'] }) {
       </span>
     )
   }
+  if (state === 'stale') {
+    return (
+      <span
+        title="Stale — value from an earlier read or write; the latest read of this object failed"
+        className="inline-block px-1.5 py-0.5 rounded-sm text-[10px] uppercase tracking-wide font-display cursor-help bg-status-bad/15 text-status-bad"
+      >
+        Stale
+      </span>
+    )
+  }
   return (
     <span
       title="Unknown — never read; value is the type-appropriate default"

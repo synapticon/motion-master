@@ -35,8 +35,9 @@ void drainMailbox(ecx_contextt* ctx, uint16_t slavePosition);
 /// The SOEM port writes each mailbox message to a SOMANET slave once and counts the writes without
 /// a frame in @c mbxwriteunknowns. Such a write is not repeated, because the slave may have
 /// received it, and the caller waits for the answer. A count above 0 in a support log shows that
-/// frames come back late or not at all. The count is per slave and only grows, so this logs each
-/// write once.
+/// frames come back late or not at all. The port also counts in @c mbxwriterecovers the requests
+/// it sent with counter 0 after a write that got neither a frame nor an answer. The counts are per
+/// slave and only grow, so this logs each write once.
 ///
 /// Call with the driver's lock for the slave held.
 void reportUnknownMailboxWrites(ecx_contextt* ctx, uint16_t slavePosition);

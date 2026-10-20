@@ -64,6 +64,7 @@ argument. `windows-env.ps1` is the exception: it is PowerShell, and it takes swi
 | `tidy.sh` | clang-tidy, bug-finding checks only |
 | `shellcheck.sh` | shellcheck every tracked shell script |
 | `check.sh` | format + cppcheck + lint + cmake-lint + shellcheck |
+| `flaky-bus.sh` | Run the mailbox workload of `NEXTGEN.md` Session 2026-10-20 with a `netem` rule on the bus adapter. `NETEM="delay 150ms reorder 98% 0%"` makes 2 % of the frames late, `NETEM="loss 1%"` loses 1 %. Needs passwordless `sudo tc` |
 | `clean.sh` | Remove `build/<preset>` |
 | `package.sh` | Build .deb and .rpm. Needs cert.pem/key.pem in the build dir |
 
@@ -835,12 +836,29 @@ ETG.1000.4 allows a master to repeat a write, and upstream SOEM repeats one when
 later than `EC_TIMEOUTRET` (2 ms). So a slow host or a lost frame was enough to lock a drive.
 
 `ports/soem` therefore writes each mailbox request to a Synapticon or Sensodrive device once
-(`mbxwriteonce`, set by `scan()`). No frame back means the outcome is unknown: the request is not
-sent again, the caller waits for the answer, and the next request uses counter 0, which the
-firmware never ignores. A refused write gives its counter back. Other vendors keep upstream SOEM.
-**Do not raise `EC_TIMEOUTRET` to hide this.** The RT receive waits for it, and a raise does not
-help when two frames share one frame index. `hil/mailbox_duplicate` shows the lock on a drive. See
-`NEXTGEN.md`, Session 2026-10-19.
+(`mbxwriteonce`, set by `scan()`). A refused write gives its counter back. Other vendors keep
+upstream SOEM. **Do not raise `EC_TIMEOUTRET` to hide this.** The RT receive waits for it, and a
+raise does not help when two frames share one frame index. `hil/mailbox_duplicate` shows the lock
+on a drive. See `NEXTGEN.md`, Session 2026-10-19.
+
+**The netX stack of an Integro takes a request only when its counter is the one after the last
+counter it accepted.** It drops every other request without an answer, so one skipped counter costs
+up to six requests at the mailbox timeout. Counter 0 is the one value both stacks accept anywhere:
+the XMOS stack stores it as the last counter, and the netX stack does not count it. INIT clears
+what both remember. `hil/mailbox_counter0` measures this on a drive. See `NEXTGEN.md`, Session
+2026-10-20, and synapticon/somanet_software#5817.
+
+**A late frame is not a lost frame, and the port treats the two apart.** A write with no frame back
+reads the SyncManager status: a message in SM0 or an answer in SM1 proves delivery, and so does the
+answer that `ecx_mbxreceive` reads for it. When nothing proves it, the next request goes out with
+counter 0 and the one after it reuses the uncertain counter. That never repeats a counter the XMOS
+stack can hold, and never leaves a gap the netX stack would drop. A mailbox write and a mailbox
+read each go out once and wait `EC_TIMEOUTLATE`, 100 ms, for their own frame; a read with no frame
+and SM1 still full goes out again. Register datagrams keep `EC_TIMEOUTRET` and are sent again. A
+SOMANET device never gets a Repeat Request, because the Integro answers it with the message before
+the last one. Every returned frame must match the sent datagram header, not only its 8-bit index,
+because a late frame on a reused index was taken for the newer datagram's answer. The warnings
+"got no frame back" and "went out with mailbox counter 0" in a support log count these cases.
 
 ### ESI Parsing (`libs/etg`)
 
@@ -1064,6 +1082,23 @@ It needs raw socket access, and no other master may use the adapter.
 ```bash
 sudo ./build/x64-linux-debug/hil/mailbox_duplicate/mailbox_duplicate --ifname <interface> [--slave 1] \
   [--boot] [--file .hardware_description]
+```
+
+### mailbox_counter0
+
+Shows what a drive does with mailbox counters that are out of the usual order. Every request is an
+SDO upload of 0x1000:00 in PRE-OP, and the tally per pattern says how many were answered, dropped
+(taken from SM0, never answered) or stuck (left in SM0). The patterns: `after` sends the next
+counter, 0, then 1, which is the sequence Motion Master 6.0.0-alpha.92 sent after a write with no
+frame back; `double` sends 0 twice; `first` sends 0 as the first request after INIT and PRE-OP;
+`init` repeats two counters after INIT and PRE-OP; `skip` leaves one counter out. A Circulo answers
+every pattern. An Integro drops every counter that is not the one after the last accepted, and
+`skip` shows that in one round. It leaves the drive in PRE-OP. It needs raw socket access, and no
+other master may use the adapter.
+
+```bash
+sudo ./build/x64-linux-debug/hil/mailbox_counter0/mailbox_counter0 --ifname <interface> [--slave 1] \
+  [--rounds 50] [--pattern after|double|first|init|skip|all]
 ```
 
 ### api

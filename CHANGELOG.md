@@ -19,6 +19,13 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **SDO and FoE requests to an Integro no longer fail after a mailbox write got no frame back.** 6.0.0-alpha.92 sent the next request with mailbox counter 0 and the one after it with counter 1. The EtherCAT stack of an Integro takes a request only when its counter is the one after the last counter it accepted, and drops every other request without an answer, so up to six requests in a row failed at the 700 ms mailbox timeout. Motion Master now reads the mailbox status after such a write, and waits for the drive's answer, before it decides anything. Only when neither shows that the drive has the write does the next request go out with counter 0, and the one after it reuses the counter of the uncertain write. Both SOMANET stacks accept that. On a PC without a real-time kernel, where 2 % of the frames came back 25 ms late, 20 rounds of a full parameter read and a file read on an Integro ran without one failed request. (#113)
+- **A late frame no longer corrupts a scan or a transfer.** The EtherCAT library matched a returning frame to its request by an 8-bit index alone. A frame that came back after its index was reused was taken for the answer to the newer request. A scan under late frames read the wrong registers and lost the station address of a device. Every returned frame must now match the request it answers. (#113)
+- **A file read over FoE no longer returns a short or wrong file as a success, and an SDO read no longer gets the reply to another object.** When the frame of a mailbox read came back late, the library asked the drive to repeat its last message. An Integro repeats the message before the last one. A file read then failed with "buffer too small", and the next read of the file returned its tail with status 200. A mailbox read now waits up to 100 ms for its own frame, reads again while the drive still holds the message, and never asks a SOMANET device for a repeat. (#113)
+- **The server no longer crashes when a drive sends a mailbox error or an emergency during a transfer.** The EtherCAT library dropped its buffer after such a message and read the next one into a null pointer. The crash came under late frames, and it can come from an emergency that arrives before an SDO reply. (#113)
+
 ## [6.0.0-alpha.92] - 2026-10-19
 
 ### Changed

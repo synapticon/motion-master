@@ -26,15 +26,21 @@ void drainMailbox(ecx_contextt* ctx, uint16_t slavePosition) {
 
 void reportUnknownMailboxWrites(ecx_contextt* ctx, uint16_t slavePosition) {
   uint32& unknowns = ctx->slavelist[slavePosition].mbxwriteunknowns;
-  if (unknowns == 0) {
-    return;
+  if (unknowns != 0) {
+    spdlog::warn(
+        "Slave {}: {} mailbox write(s) got no frame back within the timeout. They were not sent "
+        "again, because the slave may have received them",
+        slavePosition, unknowns);
+    unknowns = 0;
   }
-  spdlog::warn(
-      "Slave {}: {} mailbox write(s) got no frame back within the timeout. They were not sent "
-      "again, "
-      "because the slave may have received them",
-      slavePosition, unknowns);
-  unknowns = 0;
+  uint32& recovers = ctx->slavelist[slavePosition].mbxwriterecovers;
+  if (recovers != 0) {
+    spdlog::warn(
+        "Slave {}: {} request(s) went out with mailbox counter 0, because the write before them "
+        "got no frame back and no answer",
+        slavePosition, recovers);
+    recovers = 0;
+  }
 }
 
 std::vector<uint8_t> makeFoeAbortRequest(uint8_t counter) {

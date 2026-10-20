@@ -542,11 +542,26 @@ vcpkg_replace_string(
 #     mbx_cnt goes back to the last counter the slave can have seen. Without that, every refused
 #     write would use up a counter, and a run of refused writes would bring the counter back to the
 #     value the slave accepted last.
-#   - No frame: it is not known whether the slave got the message, so it is not sent again. The
-#     call returns 1, and the caller waits for the answer. A late frame is the usual cause, and in
-#     that case the slave answers. The next message goes out with counter 0, which the firmware
-#     never ignores, so it cannot match a counter that the slave accepted or did not accept.
-# mbxwriteunknowns counts the writes without a frame, for the driver to report.
+#   - No frame within EC_TIMEOUTLATE: it is not known whether the slave got the message, so it is
+#     not sent again. The call returns 1, and the caller waits for the answer. A late frame is the
+#     usual cause, and in that case the slave answers. The SyncManager status is read first: a message in SM0 or an
+#     answer in SM1 shows that the slave has the message, and nothing more is needed. Otherwise the
+#     write is recorded as unknown, and an answer that ecx_mbxreceive reads for it settles it.
+#   - After a write that stayed unknown, the next request goes out with counter 0, and the request
+#     after that takes the unknown counter again. The two SOMANET stacks need this. The XMOS stack
+#     of a Circulo ignores a request whose counter equals the last one it accepted, and that is
+#     either the unknown counter or the one before it. It accepts counter 0 and stores it, so after
+#     the counter-0 request it accepts the unknown counter. The netX stack of an Integro accepts a
+#     request only when its counter is the one after the last counter it accepted, and drops every
+#     request until the sequence comes round, up to six. It accepts counter 0 without storing it.
+#     When the unknown write was lost, the unknown counter is the one it expects. When the slave
+#     had the write and did not answer, it drops the one request and takes the next. A counter-0
+#     request whose own outcome is unknown is followed by another counter-0 request, because both
+#     stacks accept a repeated counter 0. Counter 0 is the one value the two stacks agree on, which
+#     is why no other sequence does without a per-stack rule. Measured on both with
+#     hil/mailbox_counter0 and hil/mailbox_duplicate.
+# mbxwriteunknowns counts the writes without a frame, and mbxwriterecovers the requests sent with
+# counter 0, for the driver to report.
 #
 # Every other slave keeps the upstream behaviour, because a slave that follows ETG.1000.4 discards
 # a repeated message and the repeat recovers a write that was lost on the wire.
@@ -558,18 +573,23 @@ vcpkg_replace_string(
    uint8 mbx_cnt;
    /** write each mailbox message once, never repeat it */
    boolean mbxwriteonce;
-   /** counter of the last mailbox message the slave can have received */
-   uint8 mbxlastcnt;
-   /** the last mailbox write got no frame back */
-   boolean mbxcntunknown;
+   /** the last counted write got no frame back, and nothing shows that the slave has it */
+   boolean mbxunknown;
+   /** counter of that write */
+   uint8 mbxunknowncnt;
+   /** that write is the one in flight, so an answer proves that the slave has it */
+   boolean mbxunknownpending;
    /** mailbox writes that got no frame back */
-   uint32 mbxwriteunknowns;")
+   uint32 mbxwriteunknowns;
+   /** requests sent with counter 0 after a write with an unknown outcome */
+   uint32 mbxwriterecovers;")
 
 vcpkg_replace_string(
     "${SOURCE_PATH}/include/soem/ec_base.h"
 "int ecx_FPWR(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout);"
 "int ecx_FPWR(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout);
-int ecx_FPWRonce(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout);")
+int ecx_FPWRonce(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout);
+int ecx_FPRDonce(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout);")
 
 vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_base.c"
@@ -607,51 +627,117 @@ int ecx_FPWRonce(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *d
    ecx_setbufstat(port, idx, EC_BUF_EMPTY);
 
    return wkc;
+}
+
+/** FPRD primitive that sends its datagram once. Blocking.
+ *
+ * ecx_FPRD sends the datagram again when no frame comes back within EC_TIMEOUTRET. This one
+ * sends it once and waits up to timeout for that frame.
+ *
+ * @return Workcounter, or EC_NOFRAME when no frame came back
+ */
+int ecx_FPRDonce(ecx_portt *port, uint16 ADP, uint16 ADO, uint16 length, void *data, int timeout)
+{
+   int wkc;
+   uint8 idx;
+
+   idx = ecx_getindex(port);
+   ecx_setupdatagram(port, &(port->txbuf[idx]), EC_CMD_FPRD, idx, ADP, ADO, length, data);
+   ecx_outframe_red(port, idx);
+   wkc = ecx_waitinframe(port, idx, timeout);
+   if (wkc > 0)
+   {
+      memcpy(data, &(port->rxbuf[idx][EC_HEADERSIZE]), length);
+   }
+   ecx_setbufstat(port, idx, EC_BUF_EMPTY);
+
+   return wkc;
 }")
 
 vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_main.c"
 "/** Write IN mailbox to slave.
  * Mailbox is fetched from pool by caller, ownership is transferred and dropped back to pool automatically."
-"/* Writes a mailbox message to a slave that has mbxwriteonce set. The comment in the Motion Master
+"/* How long a frame may be late, in us. A mailbox write and a mailbox read each go out once and
+ * wait this long for their own frame, because a datagram sent again reaches a slave that already
+ * has the first one. A register datagram keeps EC_TIMEOUTRET, because it is safe to send again. */
+#define EC_TIMEOUTLATE 100000
+
+/* Writes a mailbox message to a slave that has mbxwriteonce set. The comment in the Motion Master
  * SOEM port explains the rules.
  */
 static int ecx_mbxsendonce(ecx_contextt *context, uint16 slave, ec_mbxbuft *mbx, int timeout)
 {
    ec_slavet *slaveitem = &(context->slavelist[slave]);
    ec_mbxheadert *mbxh = (ec_mbxheadert *)mbx;
-   uint8 cnt;
+   uint8 cnt = (uint8)((mbxh->mbxtype >> 4) & 0x07);
+   boolean recover = FALSE;
+   uint8 sm[16];
    int wkc = 0;
    int attempt;
 
-   if (slaveitem->mbxcntunknown)
+   /* A new transfer starts, so an answer from now on does not prove the earlier write. */
+   slaveitem->mbxunknownpending = FALSE;
+   if (slaveitem->mbxunknown && (cnt != 0))
    {
-      mbxh->mbxtype = (uint8)(mbxh->mbxtype & 0x8F); /* counter 0 */
-      slaveitem->mbx_cnt = 0;
+      /* Counter 0 instead of the counter the caller took, and the next request takes the unknown
+       * counter: mbx_cnt goes back to the counter before it. */
+      mbxh->mbxtype = (uint8)(mbxh->mbxtype & 0x8F);
+      cnt = 0;
+      recover = TRUE;
+      slaveitem->mbx_cnt = (uint8)((slaveitem->mbxunknowncnt == 1) ? 7 : (slaveitem->mbxunknowncnt - 1));
+      slaveitem->mbxwriterecovers++;
    }
-   cnt = (uint8)((mbxh->mbxtype >> 4) & 0x07);
    for (attempt = 0; (attempt < 2) && (wkc == 0); attempt++)
    {
       if (!ecx_mbxempty(context, slave, timeout))
       {
          break;
       }
-      wkc = ecx_FPWRonce(&context->port, slaveitem->configadr, slaveitem->mbx_wo, slaveitem->mbx_l, mbx, timeout);
+      wkc = ecx_FPWRonce(&context->port, slaveitem->configadr, slaveitem->mbx_wo, slaveitem->mbx_l, mbx, EC_TIMEOUTLATE);
    }
    if (wkc > 0)
    {
-      slaveitem->mbxlastcnt = cnt;
-      slaveitem->mbxcntunknown = FALSE;
+      if (recover)
+      {
+         slaveitem->mbxunknown = FALSE;
+      }
       return wkc;
    }
    if (wkc == 0)
    {
-      slaveitem->mbx_cnt = slaveitem->mbxlastcnt;
+      if (recover)
+      {
+         /* SM0 holds a message, and that is the unknown write. The slave has it, so the next
+          * request takes the counter after it. */
+         slaveitem->mbxunknown = FALSE;
+         slaveitem->mbx_cnt = slaveitem->mbxunknowncnt;
+      }
+      else if (cnt != 0)
+      {
+         /* The ESC refused the write, so the slave did not see this counter. The caller took it
+          * with ec_nextmbxcnt, and giving it back means the counter before it. */
+         slaveitem->mbx_cnt = (uint8)((cnt == 1) ? 7 : (cnt - 1));
+      }
       return 0;
    }
-   slaveitem->mbxlastcnt = cnt;
-   slaveitem->mbxcntunknown = TRUE;
    slaveitem->mbxwriteunknowns++;
+   if (recover || (cnt == 0))
+   {
+      /* A counter-0 write with an unknown outcome. In recovery, mbxunknown stays set and the next
+       * request goes out with counter 0 again. Outside it, there is nothing to track. */
+      return 1;
+   }
+   /* The status byte of SM0 is at offset 5 of the 16 bytes from ECT_REG_SM0, and that of SM1 at
+    * offset 13. Bit 3 is set while the mailbox holds a message. */
+   if ((ecx_FPRD(&context->port, slaveitem->configadr, ECT_REG_SM0, sizeof(sm), sm, EC_TIMEOUTRET3) > 0) &&
+       (((sm[5] & 0x08) != 0) || ((sm[13] & 0x08) != 0)))
+   {
+      return 1;
+   }
+   slaveitem->mbxunknown = TRUE;
+   slaveitem->mbxunknowncnt = cnt;
+   slaveitem->mbxunknownpending = TRUE;
    return 1;
 }
 
@@ -670,6 +756,163 @@ vcpkg_replace_string(
    else if ((mbxl > 0) && (mbxl <= EC_MAXMBX) && (slavelist->state >= EC_STATE_PRE_OP))
    {
       mbxwo = context->slavelist[slave].mbx_wo;")
+
+# ecx_mbxreceive reads the mailbox into a buffer it takes from the pool once, before its loop. When
+# a pass reads a mailbox error or an emergency, it drops that buffer and sets the pointer to NULL,
+# and the next pass reads the mailbox into the NULL pointer. The read copies its data only when
+# the working counter is 1, so the crash comes when the slave has written a new message by then: a
+# reply after an emergency, or under late frames. The patch takes a buffer at the top of every
+# pass that has none, and leaves the loop when the pool is empty.
+#
+# The emergency check reads through `mbx`, the caller's pointer to its result pointer, instead of
+# `mbxin`, the message. So an emergency is never recognised in this path and reaches the caller as
+# the reply, which fails the transfer. The patch reads the message.
+#
+# A message read in this loop is the slave's answer to the request in flight, because every CoE
+# and FoE transfer empties the mailbox before it writes. When that request is a write whose
+# outcome was unknown (mbxunknownpending, see ecx_mbxsendonce), the answer settles it.
+#
+# The mailbox read is sent once, and its frame is awaited for up to EC_TIMEOUTLATE, the same wait
+# as a mailbox write gets in ecx_mbxsendonce. Upstream
+# sends it through ecx_FPRD, which gives up after EC_TIMEOUTRET and sends the read again. The
+# first read empties the mailbox when it reaches the slave, so the second one reads nothing, and
+# upstream then takes the message for lost and toggles the Repeat Request bit. On a host that
+# delivers frames late, that happens on a read whose frame is merely late: the message is in that
+# frame, and it is dropped when it comes. An Integro answers the repeat request with the message
+# before the one that was read, so SOEM then reads an SDO reply for the wrong object or an FoE
+# packet with the wrong number. The FoE read fails, and the Integro keeps its file position, so the
+# next read of the file serves its tail with no error (issue #113). With the read sent once, a late
+# frame is awaited and used. No frame within EC_TIMEOUTLATE and SM1 still full means the read did
+# not reach the slave, and the read is sent again. An empty SM1 means the message is gone, and only
+# a repeat request can bring it back, as upstream does. A slave with mbxwriteonce set gets no
+# repeat request at all: the Integro answers it with the wrong message, and the XMOS stack of a
+# Circulo was not tested. The read fails instead, and the caller reports it.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"         mbxro = slavelist->mbx_ro;
+         mbxin = ecx_getmbx(context);
+         mbxh = (ec_mbxheadert *)mbxin;
+         do
+         {
+            wkc = ecx_FPRD(&context->port, configadr, mbxro, mbxl, mbxin, EC_TIMEOUTRET); /* get mailbox */"
+"         boolean gotmsg = FALSE;
+         mbxro = slavelist->mbx_ro;
+         mbxin = NULL;
+         do
+         {
+            /* a buffer is needed on the first pass and after a pass that dropped a message */
+            if (mbxin == NULL)
+            {
+               mbxin = ecx_getmbx(context);
+               if (mbxin == NULL)
+               {
+                  wkc = 0;
+                  break;
+               }
+               mbxh = (ec_mbxheadert *)mbxin;
+            }
+            wkc = ecx_FPRDonce(&context->port, configadr, mbxro, mbxl, mbxin, EC_TIMEOUTLATE); /* get mailbox */
+            if (wkc > 0)
+            {
+               gotmsg = TRUE;
+            }
+            else if ((wkc == EC_NOFRAME) && (ecx_readmbxstatus(context, slave, &SMstat) > 0) && ((SMstat & 0x08) != 0))
+            {
+               continue; /* the read did not reach the slave: read again */
+            }")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"            else if ((wkc > 0) && ((mbxh->mbxtype & 0x0f) == ECT_MBXT_COE)) /* CoE response? */
+            {
+               EMp = (ec_emcyt *)mbx;"
+"            else if ((wkc > 0) && ((mbxh->mbxtype & 0x0f) == ECT_MBXT_COE)) /* CoE response? */
+            {
+               EMp = (ec_emcyt *)mbxin;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"            else /* read mailbox lost */
+            {
+               do /* read extended mailbox status */"
+"            else if (slavelist->mbxwriteonce) /* read mailbox lost, and a repeat request would bring the wrong message */
+            {
+               break;
+            }
+            else /* read mailbox lost */
+            {
+               do /* read extended mailbox status */")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"         } while ((wkc <= 0) && (osal_timer_is_expired(&timer) == FALSE)); /* if WKC<=0 repeat */
+         if (mbxin) ecx_dropmbx(context, mbxin);"
+"         } while ((wkc <= 0) && (osal_timer_is_expired(&timer) == FALSE)); /* if WKC<=0 repeat */
+         if (mbxin) ecx_dropmbx(context, mbxin);
+         if (gotmsg && slavelist->mbxunknownpending)
+         {
+            slavelist->mbxunknown = FALSE;
+            slavelist->mbxunknownpending = FALSE;
+         }")
+
+# SOEM matches a returning frame to its datagram by the 8-bit index alone. An index goes back into
+# use as soon as its datagram is answered or given up on, and EC_MAXBUF datagrams later at the
+# latest. A frame that comes back after that carries the index of a newer datagram, and SOEM takes
+# it as that datagram's answer: a working counter and data that belong to another request. On a
+# host that delivers frames late, a scan read the wrong registers and lost the station address of
+# a slave, and a mailbox read took an old frame for a message.
+#
+# The patch compares the header of the first datagram of a received frame with the header of the
+# datagram sent under that index: the command, the offset, the length, and the position for the
+# commands whose position the slaves leave alone. The auto increment and broadcast commands have
+# their position counted up by every slave the frame passes. A frame that does not match is
+# dropped, and the caller keeps waiting. The three platform drivers share this code.
+foreach(nicdrv "oshw/linux/nicdrv.c" "oshw/win32/nicdrv.c" "oshw/macosx/nicdrv.c")
+  vcpkg_replace_string(
+      "${SOURCE_PATH}/${nicdrv}"
+"int ecx_inframe(ecx_portt *port, uint8 idx, int stacknumber)
+{"
+"/* True when the first datagram of the frame in tempbuf is the one sent under idx. */
+static boolean ecx_datagrammatches(ec_stackT *stack, uint8 idx)
+{
+   const ec_comt *tx = (const ec_comt *)&((*stack->txbuf)[idx][ETH_HEADERSIZE]);
+   const ec_comt *rx = (const ec_comt *)&((*stack->tempbuf)[ETH_HEADERSIZE]);
+
+   if ((tx->command != rx->command) || (tx->ADO != rx->ADO) ||
+       ((tx->dlength & htoes(0x07ff)) != (rx->dlength & htoes(0x07ff))))
+   {
+      return FALSE;
+   }
+   switch (tx->command)
+   {
+      case EC_CMD_APRD:
+      case EC_CMD_APWR:
+      case EC_CMD_APRW:
+      case EC_CMD_ARMW:
+      case EC_CMD_BRD:
+      case EC_CMD_BWR:
+      case EC_CMD_BRW:
+         return TRUE;
+      default:
+         return (tx->ADP == rx->ADP);
+   }
+}
+
+int ecx_inframe(ecx_portt *port, uint8 idx, int stacknumber)
+{")
+  vcpkg_replace_string(
+      "${SOURCE_PATH}/${nicdrv}"
+"            if (idxf == idx)
+            {"
+"            if ((idxf == idx) && ecx_datagrammatches(stack, idx))
+            {")
+  vcpkg_replace_string(
+      "${SOURCE_PATH}/${nicdrv}"
+"               if (idxf < EC_MAXBUF && (*stack->rxbufstat)[idxf] == EC_BUF_TX)
+               {"
+"               if (idxf < EC_MAXBUF && (*stack->rxbufstat)[idxf] == EC_BUF_TX && ecx_datagrammatches(stack, idxf))
+               {")
+endforeach()
 
 # EC_MAXBUF is the number of frame indexes. The RT thread and the control plane take indexes from
 # one pool. When no index is free, ecx_getindex does not wait or fail. It returns an index that is

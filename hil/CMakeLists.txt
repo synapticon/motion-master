@@ -1,3 +1,4 @@
 add_subdirectory(jitter_bench)
 add_subdirectory(foe_abort)
 add_subdirectory(mailbox_duplicate)
+add_subdirectory(mailbox_counter0)

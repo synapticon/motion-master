@@ -64,6 +64,7 @@ argument. `windows-env.ps1` is the exception: it is PowerShell, and it takes swi
 | `tidy.sh` | clang-tidy, bug-finding checks only |
 | `shellcheck.sh` | shellcheck every tracked shell script |
 | `check.sh` | format + cppcheck + lint + cmake-lint + shellcheck |
+| `flaky-bus.sh` | Run the mailbox workload of `NEXTGEN.md` Session 2026-10-20 with a `netem` rule on the bus adapter. `NETEM="delay 150ms reorder 98% 0%"` makes 2 % of the frames late, `NETEM="loss 1%"` loses 1 %. Needs passwordless `sudo tc` |
 | `clean.sh` | Remove `build/<preset>` |
 | `package.sh` | Build .deb and .rpm. Needs cert.pem/key.pem in the build dir |
 
@@ -851,8 +852,9 @@ what both remember. `hil/mailbox_counter0` measures this on a drive. See `NEXTGE
 reads the SyncManager status: a message in SM0 or an answer in SM1 proves delivery, and so does the
 answer that `ecx_mbxreceive` reads for it. When nothing proves it, the next request goes out with
 counter 0 and the one after it reuses the uncertain counter. That never repeats a counter the XMOS
-stack can hold, and never leaves a gap the netX stack would drop. A mailbox read goes out once and
-waits up to 100 ms for its own frame; with no frame and SM1 still full, it goes out again. A
+stack can hold, and never leaves a gap the netX stack would drop. A mailbox write and a mailbox
+read each go out once and wait `EC_TIMEOUTLATE`, 100 ms, for their own frame; a read with no frame
+and SM1 still full goes out again. Register datagrams keep `EC_TIMEOUTRET` and are sent again. A
 SOMANET device never gets a Repeat Request, because the Integro answers it with the message before
 the last one. Every returned frame must match the sent datagram header, not only its 8-bit index,
 because a late frame on a reused index was taken for the newer datagram's answer. The warnings

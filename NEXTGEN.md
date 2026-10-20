@@ -4125,11 +4125,19 @@ during the test rounds, because a late frame during a scan corrupts the scan.
   may hold, and the netX stack must never see a gap. Counter 0 is the one value both accept
   anywhere, which is why no sequence without it works for both. On the netX, a write that was
   delivered and silently refused costs one more dropped request. That is the whole cost.
-- **A mailbox read goes out once, and waits.** `ecx_FPRDonce` waits up to `EC_TIMEOUTMBXRD`,
+- **A mailbox read goes out once, and waits.** `ecx_FPRDonce` waits up to `EC_TIMEOUTLATE`,
   100 ms, for its own frame. No frame and SM1 still full means the read did not reach the slave, and
   it goes out again. A read sent again after one that reached the slave reads an empty mailbox,
   which is what made upstream ask for a repeat. 100 ms is a guess at what a slow host does; the
-  reporter's host delayed frames past the 20 ms the write path waits.
+  reporter's host delayed frames past the 20 ms that `EC_TIMEOUTTXM` gives.
+- **One constant says how late a frame may be.** `EC_TIMEOUTLATE` is the wait of `ecx_FPWRonce`
+  and `ecx_FPRDonce` alike, because both exist for the same reason: a mailbox datagram sent again
+  reaches a slave that already has the first one. The write path first waited `EC_TIMEOUTTXM`,
+  20 ms, which is the caller's wait for the whole write; a frame between 20 ms and 100 ms late was
+  then an unknown write, resolved by the status read and logged. One wait for both means one
+  number to tune when a host turns out slower, and an unknown write means a frame later than the
+  read path tolerates too. Register datagrams keep `EC_TIMEOUTRET`, because they are safe to send
+  again.
 - **No Repeat Request for a SOMANET device.** The Integro answers it with the wrong message, and
   the XMOS stack was not tested. The read fails instead, and the caller reports it. A device of
   another vendor keeps the upstream path.
@@ -4156,6 +4164,52 @@ during the test rounds, because a late frame during a scan corrupts the scan.
   which discards a repeat. On the XMOS stack a slow answer is the same as a lost write, and the
   repeat locks the mailbox.
 - **A per-stack rule.** Nothing on the bus tells the two stacks apart, and Jasper is a third one.
+
+**How to test a flaky bus.** The bench PC does not produce late frames on its own, so `netem`,
+the Linux kernel's network emulator, makes them on the bus adapter. Two recipes, each a different
+fault:
+
+- **Late frames:** `sudo tc qdisc add dev <adapter> root netem delay 150ms reorder 98% 0%`. The
+  `reorder` share goes out at once, the rest takes the delay. 2 % late by 150 ms, past
+  `EC_TIMEOUTLATE`, exercises the unknown-write path, the status read, the answer that settles it,
+  and the counter-0 recovery. 25 ms, which is what the first runs used, now exercises nothing: a
+  frame that late is simply awaited. A uniform delay without `reorder` is wrong: at 17 ms every
+  state write failed, because SOEM waits 6 ms for one.
+- **Lost frames:** `sudo tc qdisc add dev <adapter> root netem loss 1%`. `netem` drops outgoing
+  frames only, and an EtherCAT frame comes back through the same cable, so a lost frame is one the
+  slave never saw. A frame lost on the way back cannot be made this way.
+
+Rules that cost a run each to learn:
+
+- **Off during init, scan and the PRE-OP transition, on during the rounds only.** The harness
+  removes the rule, does the three, adds the rule, runs the rounds, and removes it again.
+- **`tc` needs root on every switch.** A line in `/etc/sudoers.d/` for `/usr/sbin/tc` alone lets
+  the harness switch it. The same for `/usr/sbin/tcpdump` when a capture is wanted; stop a capture
+  with `pkill -INT tcpdump` from a root shell, because `pkill` is not in that list.
+- **The server log rotates at 10 MB.** A harness that counts lines from a start offset reads an
+  empty file after a rotation. Check that the count of refusals is not zero before trusting zeros.
+- **A late frame during a scan corrupted the scan** before the frame-header check. The rule above
+  stays, because a scan under a uniform delay still fails on the state writes.
+
+The harness is `tools/flaky-bus.sh`: `POST /api/reset`, `POST /api/init`, `POST /api/scan`,
+`POST /api/devices/state` to PRE-OP, then N rounds of `POST /api/devices/1/parameters/read` and
+`GET /api/devices/1/files/config.csv`, with the file compared to the first round's bytes, and a
+count of the warnings and failures in the server log between the first and the last round. The
+numbers to watch: writes without a frame back, requests sent with counter 0, mailbox timeouts, FoE
+failures, and whether every file is the same bytes.
+
+What each recipe should show on this build:
+
+| Recipe | Circulo | Integro |
+| --- | --- | --- |
+| 2 % late by 25 ms | 0 unknown writes, 0 failures | 0 unknown writes, 0 failures beyond the 0x1600:08 silence |
+| 2 % late by 150 ms | about 70 unknown writes per 10 rounds, all settled; about 40 reads fail with "no frame returned"; every file correct | not run |
+| 1 % lost | about 30 lost writes per 10 rounds, one timeout each, no lock, every file correct | one timeout per lost write; FoE wedges the drive (#5817) |
+
+The "no frame returned" failures at 150 ms are the cost past the design point: a read datagram later
+than `EC_TIMEOUTLATE` still arrives, and takes the next transfer's answer out of the mailbox, or
+finds it already taken. The transfer fails, and nothing wrong is accepted. A host that late needs
+a larger `EC_TIMEOUTLATE`, and the number to tune is that one.
 
 **What is tested, and what is not.** The harness is 10 rounds of
 `POST /api/devices/1/parameters/read` and `GET /api/devices/1/files/config.csv`, netem on during

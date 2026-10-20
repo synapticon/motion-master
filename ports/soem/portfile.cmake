@@ -542,9 +542,9 @@ vcpkg_replace_string(
 #     mbx_cnt goes back to the last counter the slave can have seen. Without that, every refused
 #     write would use up a counter, and a run of refused writes would bring the counter back to the
 #     value the slave accepted last.
-#   - No frame: it is not known whether the slave got the message, so it is not sent again. The
-#     call returns 1, and the caller waits for the answer. A late frame is the usual cause, and in
-#     that case the slave answers. The SyncManager status is read first: a message in SM0 or an
+#   - No frame within EC_TIMEOUTLATE: it is not known whether the slave got the message, so it is
+#     not sent again. The call returns 1, and the caller waits for the answer. A late frame is the
+#     usual cause, and in that case the slave answers. The SyncManager status is read first: a message in SM0 or an
 #     answer in SM1 shows that the slave has the message, and nothing more is needed. Otherwise the
 #     write is recorded as unknown, and an answer that ecx_mbxreceive reads for it settles it.
 #   - After a write that stayed unknown, the next request goes out with counter 0, and the request
@@ -658,8 +658,10 @@ vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_main.c"
 "/** Write IN mailbox to slave.
  * Mailbox is fetched from pool by caller, ownership is transferred and dropped back to pool automatically."
-"/* How long ecx_mbxreceive waits for the frame of a mailbox read, in us. */
-#define EC_TIMEOUTMBXRD 100000
+"/* How long a frame may be late, in us. A mailbox write and a mailbox read each go out once and
+ * wait this long for their own frame, because a datagram sent again reaches a slave that already
+ * has the first one. A register datagram keeps EC_TIMEOUTRET, because it is safe to send again. */
+#define EC_TIMEOUTLATE 100000
 
 /* Writes a mailbox message to a slave that has mbxwriteonce set. The comment in the Motion Master
  * SOEM port explains the rules.
@@ -692,7 +694,7 @@ static int ecx_mbxsendonce(ecx_contextt *context, uint16 slave, ec_mbxbuft *mbx,
       {
          break;
       }
-      wkc = ecx_FPWRonce(&context->port, slaveitem->configadr, slaveitem->mbx_wo, slaveitem->mbx_l, mbx, timeout);
+      wkc = ecx_FPWRonce(&context->port, slaveitem->configadr, slaveitem->mbx_wo, slaveitem->mbx_l, mbx, EC_TIMEOUTLATE);
    }
    if (wkc > 0)
    {
@@ -770,7 +772,8 @@ vcpkg_replace_string(
 # and FoE transfer empties the mailbox before it writes. When that request is a write whose
 # outcome was unknown (mbxunknownpending, see ecx_mbxsendonce), the answer settles it.
 #
-# The mailbox read is sent once, and its frame is awaited for up to EC_TIMEOUTMBXRD. Upstream
+# The mailbox read is sent once, and its frame is awaited for up to EC_TIMEOUTLATE, the same wait
+# as a mailbox write gets in ecx_mbxsendonce. Upstream
 # sends it through ecx_FPRD, which gives up after EC_TIMEOUTRET and sends the read again. The
 # first read empties the mailbox when it reaches the slave, so the second one reads nothing, and
 # upstream then takes the message for lost and toggles the Repeat Request bit. On a host that
@@ -779,7 +782,7 @@ vcpkg_replace_string(
 # before the one that was read, so SOEM then reads an SDO reply for the wrong object or an FoE
 # packet with the wrong number. The FoE read fails, and the Integro keeps its file position, so the
 # next read of the file serves its tail with no error (issue #113). With the read sent once, a late
-# frame is awaited and used. No frame within EC_TIMEOUTMBXRD and SM1 still full means the read did
+# frame is awaited and used. No frame within EC_TIMEOUTLATE and SM1 still full means the read did
 # not reach the slave, and the read is sent again. An empty SM1 means the message is gone, and only
 # a repeat request can bring it back, as upstream does. A slave with mbxwriteonce set gets no
 # repeat request at all: the Integro answers it with the wrong message, and the XMOS stack of a
@@ -808,7 +811,7 @@ vcpkg_replace_string(
                }
                mbxh = (ec_mbxheadert *)mbxin;
             }
-            wkc = ecx_FPRDonce(&context->port, configadr, mbxro, mbxl, mbxin, EC_TIMEOUTMBXRD); /* get mailbox */
+            wkc = ecx_FPRDonce(&context->port, configadr, mbxro, mbxl, mbxin, EC_TIMEOUTLATE); /* get mailbox */
             if (wkc > 0)
             {
                gotmsg = TRUE;

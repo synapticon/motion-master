@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.93] - 2026-10-20
+
 ### Fixed
 
 - **SDO and FoE requests to an Integro no longer fail after a mailbox write got no frame back.** 6.0.0-alpha.92 sent the next request with mailbox counter 0 and the one after it with counter 1. The EtherCAT stack of an Integro takes a request only when its counter is the one after the last counter it accepted, and drops every other request without an answer, so up to six requests in a row failed at the 700 ms mailbox timeout. Motion Master now reads the mailbox status after such a write, and waits for the drive's answer, before it decides anything. Only when neither shows that the drive has the write does the next request go out with counter 0, and the one after it reuses the counter of the uncertain write. Both SOMANET stacks accept that. On a PC without a real-time kernel, where 2 % of the frames came back 25 ms late, 20 rounds of a full parameter read and a file read on an Integro ran without one failed request. (#113)
@@ -888,7 +890,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.92...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.93...HEAD
+[6.0.0-alpha.93]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.92...v6.0.0-alpha.93
 [6.0.0-alpha.92]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.91...v6.0.0-alpha.92
 [6.0.0-alpha.91]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.90...v6.0.0-alpha.91
 [6.0.0-alpha.90]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.89...v6.0.0-alpha.90

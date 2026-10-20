@@ -4070,3 +4070,108 @@ device refused one such read, is not a failed read and is not marked.
 **Tested:** `device_test.cc` covers a single read, `parameters/read`, an enumeration after a good one,
 a new entry, a pass without values, and that `unknown` and `pending` do not change. Not tested on a
 drive, because a drive that refuses every read needs the lock that #100 removed.
+
+## Session 2026-10-20 — A late frame is not a lost frame (as-built)
+
+Issue #113. With 6.0.0-alpha.92, SDO and FoE requests to an Integro failed on a desk PC without a
+real-time kernel. The log showed a mailbox write with no frame back, then a request that failed
+704 ms later. alpha.91 served the same requests on the same PC without one failure.
+
+**How the netX stack of an Integro treats the mailbox counter.** Measured with the new
+`hil/mailbox_counter0`, product 0x401, firmware v5.6.11, in PRE-OP:
+
+- It takes a request only when its counter is the one after the last counter it accepted. Pattern
+  `skip`, 14 rounds, every round the same: `c` answered, `c+2` dropped, `c+1` answered, `c+3`
+  dropped, `c+2` answered, `c+3` answered, `c+4` answered. A dropped request is taken out of SM0 and
+  never answered, so the master waits the 700 ms mailbox timeout for it.
+- Counter 0 is always answered, as the first request after PRE-OP, twice in a row, and in the
+  middle of a sequence. It does not change what the drive remembers.
+- INIT followed by PRE-OP clears what it remembers.
+- ETG.1000.4 Table 29 says the slave shall not check the sequence. The XMOS stack of a Circulo does
+  not: it answers every pattern, and locks only on a repeated counter (Session 2026-10-19).
+
+A first reading of the data as "remembers the last two counters" was wrong, and the `skip` pattern
+was written to tell the two apart. The sequence check is why alpha.92 failed: after a write with no
+frame back it sent counter 0, then counter 1, and the Integro dropped every request until the
+counter came round to the one it expected. 15 such writes gave 73 timeouts in one round.
+
+**Three more defects came out of reproducing it.** The reproduction is `tc qdisc ... netem delay
+25ms reorder 98% 0%` on the bus adapter, which delays 2 % of the frames by 25 ms, in place only
+during the test rounds, because a late frame during a scan corrupts the scan.
+
+- SOEM 2.0 `ecx_mbxreceive` drops its buffer after a mailbox error or an emergency, and reads the
+  next message into the NULL pointer. The server segfaulted in the second round. The same function
+  reads the emergency through the caller's pointer instead of the message, so an emergency was never
+  recognised there and reached the caller as the reply.
+- SOEM matches a returning frame to its datagram by the 8-bit index alone. A frame that comes back
+  after its index was reused is taken for the newer datagram's answer. A scan under late frames
+  read the wrong registers and lost the station address of the drive.
+- SOEM waits 2 ms for the frame of a mailbox read, then takes the message for lost and toggles the
+  Repeat Request bit. The capture shows the Integro answering with the message before the last one:
+  FoE packet 2 again, when the late read had taken packet 3. SOEM then fails the read on the packet
+  number, and the Integro keeps its file position, so the next read serves the rest of the file as a
+  file. The 4084 bytes in the report are the file minus three packets. After several such reads
+  the drive served wrong bytes for every file, and its file list was one name of NUL bytes, until a
+  power cycle. The same for SDO: a repeated reply for the previous object fails the current read.
+
+**The decisions.**
+
+- **Certainty first, counter 0 second.** After a write with no frame back, the port reads the
+  status of SM0 and SM1 with one FPRD: a message in SM0 or an answer in SM1 proves delivery. If
+  not, the answer that `ecx_mbxreceive` reads for that transfer proves it (`mbxunknownpending`). If
+  there is no answer either, the next request goes out with counter 0, and the one after it reuses
+  the uncertain counter. A counter-0 write whose own outcome is unknown is followed by another
+  counter-0 write. The two stacks have opposite needs: the XMOS stack must never see a counter it
+  may hold, and the netX stack must never see a gap. Counter 0 is the one value both accept
+  anywhere, which is why no sequence without it works for both. On the netX, a write that was
+  delivered and silently refused costs one more dropped request. That is the whole cost.
+- **A mailbox read goes out once, and waits.** `ecx_FPRDonce` waits up to `EC_TIMEOUTMBXRD`,
+  100 ms, for its own frame. No frame and SM1 still full means the read did not reach the slave, and
+  it goes out again. A read sent again after one that reached the slave reads an empty mailbox,
+  which is what made upstream ask for a repeat. 100 ms is a guess at what a slow host does; the
+  reporter's host delayed frames past the 20 ms the write path waits.
+- **No Repeat Request for a SOMANET device.** The Integro answers it with the wrong message, and
+  the XMOS stack was not tested. The read fails instead, and the caller reports it. A device of
+  another vendor keeps the upstream path.
+- **A returned frame must match the sent datagram header**: command, offset, length, and the
+  position for every command the slaves do not count up. The check is in the three platform
+  drivers, which share the code.
+- **`ecx_mbxreceive` takes a fresh buffer after it dropped one**, and reads the emergency from the
+  message.
+- **No master-side workaround for the Integro's FoE state after a lost ACK.** The drive waits for
+  the ACK, ignores a new READ and an FoE ERROR, and later serves wrong files until a power cycle.
+  Three options were weighed: an ACK sent again with counter 0, a check of the bytes received
+  against the size in the file list, and a recovery by an AL state change. The last is rejected,
+  because nothing restarts a drive on the master's own decision. The other two wait for the
+  firmware answer. Reported as synapticon/somanet_software#5817 with the captures.
+
+**Rejected.**
+
+- **Continue the counter sequence after an unknown write, without counter 0.** Safe on both stacks
+  when the write was delivered, which a late frame means. A write that was truly lost leaves a gap
+  of one, and the netX drops six requests for it.
+- **A 7-bit mask of the counters the slave may hold, and the next counter outside it.** Built, then
+  removed: skipping a counter is exactly what the netX punishes.
+- **Send a lost write again with the same counter after a grace period.** Correct on the netX,
+  which discards a repeat. On the XMOS stack a slow answer is the same as a lost write, and the
+  repeat locks the mailbox.
+- **A per-stack rule.** Nothing on the bus tells the two stacks apart, and Jasper is a third one.
+
+**What is tested, and what is not.** The harness is 10 rounds of
+`POST /api/devices/1/parameters/read` and `GET /api/devices/1/files/config.csv`, netem on during
+the rounds only, on the bench PC without a real-time kernel:
+
+| Drive | Frames | Late writes | Mailbox timeouts | File reads |
+| --- | --- | --- | --- | --- |
+| Integro, alpha.92 | 2 % late by 25 ms | 15 | 73 in round 1, then segfault | 1 failed, then crash |
+| Integro | none | 0 | 1, the 0x1600:08 silence | 10 of 10 correct |
+| Integro | 2 % late by 25 ms | 129 | 1, the same | 10 of 10 correct |
+| Integro, 20 rounds | 2 % late by 25 ms | 227 | 0 | 20 of 20 correct |
+| Integro | 1 % lost | 68 | 117, one per lost frame, no runs | 3 failed, drive wedged |
+| Circulo | none | 0 | 0 | 10 of 10 correct |
+| Circulo | 2 % late by 25 ms | 59 | 0 | 10 of 10 correct |
+| Circulo | 1 % lost | 31 | 60, one per lost frame, no lock | 10 of 10 correct |
+
+`hil/mailbox_duplicate` still locks the Circulo and INIT frees it. `ctest` passes. Not tested: a
+firmware installation under late frames, the Integro in BOOT, a device of another vendor, the
+Windows and macOS builds, and a Jasper, which has no device on the bench.

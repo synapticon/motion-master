@@ -4229,3 +4229,67 @@ the rounds only, on the bench PC without a real-time kernel:
 `hil/mailbox_duplicate` still locks the Circulo and INIT frees it. `ctest` passes. Not tested: a
 firmware installation under late frames, the Integro in BOOT, a device of another vendor, the
 Windows and macOS builds, and a Jasper, which has no device on the bench.
+
+## Session 2026-10-20 — Proposal: a SOEM fork with patch files (not started)
+
+Not started, and no date. Written down so the decision is ready when the port next breaks.
+
+**The problem.** `ports/soem/portfile.cmake` changes upstream SOEM with about twenty
+`vcpkg_replace_string` calls. Each one matches an exact run of upstream text and replaces it. The
+reason for each change lives in a comment above it, and the change itself is readable only as the
+pair of strings. Three things follow:
+
+- A SOEM version bump that touches any matched text makes that replacement a no-op. vcpkg prints a
+  warning that nobody reads in CI. The build still passes, and the behaviour the patch gave is gone
+  until a drive shows it.
+- A reviewer of a pull request sees two CMake strings, not a diff of C. The frame-header check
+  (Session 2026-10-20) went into three drivers through one `foreach`, and the only proof it landed
+  in all three was a `grep` on the build tree.
+- Seven of the changes fix upstream bugs that every SOEM user has: the `FOE_BUSY` resend, the
+  double drop of a mailbox buffer, the lost FoE error code, the SDO reply identity, the NULL buffer
+  in `ecx_mbxreceive`, the emergency read through the wrong pointer, and the frame-header check.
+  None can go upstream as a CMake string.
+
+**The options.**
+
+1. **Keep the replacements.** No work. The three problems stay.
+2. **Patch files in `ports/soem/patches/`,** applied by `vcpkg_from_github(... PATCHES ...)`. Each
+   patch is a unified diff with a message. A bump that no longer applies fails the build loudly,
+   which is the point. The patches are written by hand or by `git format-patch` from a scratch
+   clone, and that clone is thrown away.
+3. **A fork, `synapticon/SOEM`,** with a branch of one commit per fix on top of the pinned upstream
+   commit. The port pulls the fork at a pinned SHA with `vcpkg_from_github`, and carries no patches.
+   The diff lives in the fork's history.
+4. **A fork, and patch files generated from it.** The fork is where a fix is written, rebased on a
+   new upstream, and sent upstream as a pull request. `git format-patch upstream..main` in the fork
+   produces the files that `ports/soem/patches/` carries, and the port stays pinned to upstream.
+
+**Recommendation: option 4.** It is the only one that gives all three: a loud failure on a bump, a
+reviewable diff in this repository, and a place to prepare upstream pull requests. Option 3 alone
+hides the diff in another repository and ties the build to it. Option 2 alone has no home for the
+rebase work, and a patch file edited by hand drifts from anything git can rebase. The cost of 4 is
+one more repository to keep, and a regeneration step after every change to a fix: edit in the fork,
+commit, `format-patch`, copy, build. A script in `tools/` does the last three.
+
+**What moves where.** The comment above each replacement becomes the commit message of that fix in
+the fork, and the patch file carries it in its header. The port comment keeps one line per patch:
+what it does and which session explains it. The two build knobs stay in the port as they are:
+`EC_MAXNAME` 80 and `EC_MAXBUF` 32 are CMake cache values, not source changes. The macOS files in
+`ports/soem/files/` stay too, because they add files rather than change them.
+
+**Upstream candidates, in the order a maintainer would take them.** Each is self-contained and
+vendor-neutral. The mailbox counter rules, the write-once and read-once paths, and the no-repeat
+rule are not candidates: they exist for two SOMANET stacks and keep a vendor flag.
+
+1. `ecx_mbxreceive` reads into a NULL buffer after it drops a mailbox error or an emergency.
+2. `ecx_mbxreceive` reads the emergency through `mbx`, the caller's pointer, instead of `mbxin`.
+3. The SDO Info reads drop a mailbox buffer twice.
+4. The `FOE_BUSY` branch of `ecx_FOEwrite` sends through a freed pointer and returns success for a
+   transfer that wrote nothing.
+5. An FoE Error packet keeps neither its code nor its text.
+6. `ecx_SDOread`, `ecx_readODdescription` and `ecx_readOEsingle` accept a reply for another
+   subindex.
+7. A returned frame is matched to its datagram by the 8-bit index alone.
+
+**Not part of this.** A move to a newer SOEM. The pinned commit stays until a bump has a reason,
+and the fork makes that bump a rebase instead of twenty string matches.

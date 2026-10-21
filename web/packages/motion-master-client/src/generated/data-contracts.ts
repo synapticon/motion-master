@@ -48,10 +48,20 @@ export interface Cia402Status {
    */
   modeName: string;
   /**
-   * The setpoint currently commanded for the active mode — target position 0x607A (PP/CSP), velocity 0x60FF (PV/CSV), or torque 0x6071 (PT/CST), widened to INTEGER32. 0 only when the active mode has no linear setpoint (NoMode / Homing / vl / ip).
+   * Target position (0x607A), INTEGER32, in the drive's own position units. The drive acts on it in the position modes (PP, CSP) only, but it is reported in every mode. Read from the process image while the device exchanges, else over SDO. `null` when the drive has no such object or the read failed.
    * @example 100000
    */
-  target: number;
+  targetPosition: number | null;
+  /**
+   * Target velocity (0x60FF), INTEGER32, in the drive's own velocity units. The drive acts on it in the velocity modes (PV, CSV) only, but it is reported in every mode. Read from the process image while the device exchanges, else over SDO. `null` when the drive has no such object or the read failed.
+   * @example 250000
+   */
+  targetVelocity: number | null;
+  /**
+   * Target torque (0x6071), INTEGER16 widened to INTEGER32, in per mille of rated torque. The drive acts on it in the torque modes (PT, CST) only, but it is reported in every mode. Read from the process image while the device exchanges, else over SDO. `null` when the drive has no such object or the read failed.
+   * @example -100
+   */
+  targetTorque: number | null;
   /**
    * Position actual value (0x6064), INTEGER32, in the drive's own position units. Read from the process image while the device exchanges, else over SDO. `null` when the drive has no such object or the read failed.
    * @example 99874

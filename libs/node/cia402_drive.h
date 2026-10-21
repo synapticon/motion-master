@@ -21,13 +21,14 @@ struct Cia402Status {
   uint16_t statusword = 0;                         ///< Raw statusword (0x6041).
   uint16_t controlword = 0;                        ///< Last-commanded controlword (0x6040).
   cia402::OperationMode modeOfOperationDisplay{};  ///< Active operation mode (0x6061).
-  /// The setpoint object for the active mode — target position 0x607A (PP/CSP), velocity 0x60FF
-  /// (PV/CSV), or torque 0x6071 (PT/CST), widened to int32. 0 only when the active mode has no
-  /// linear setpoint (NoMode / Homing). Lets a UI seed its target input from the drive.
-  int32_t target = 0;
-  /// Actual position (0x6064), velocity (0x606C) and torque (0x6077, INTEGER16 widened to int32).
+  /// The three targets and the three actual values, one pair per quantity: position 0x607A and
+  /// 0x6064, velocity 0x60FF and 0x606C, torque 0x6071 and 0x6077 (INTEGER16 widened to int32).
+  /// Every one is read, whatever the active mode; a reader picks the pair of the mode it is in.
   /// Each comes from the process image while the device exchanges, else over SDO. @c nullopt means
   /// the drive has no such object, or the read failed.
+  std::optional<int32_t> targetPosition;
+  std::optional<int32_t> targetVelocity;
+  std::optional<int32_t> targetTorque;
   std::optional<int32_t> actualPosition;
   std::optional<int32_t> actualVelocity;
   std::optional<int32_t> actualTorque;

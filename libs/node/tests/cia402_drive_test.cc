@@ -800,7 +800,6 @@ TEST(Cia402Drive, ReadStatusReportsAllFields) {
       u16le(statuswordFor(State::kOperationEnabled));
   driver.store[Cia402FakeDriver::key(Object::kControlword, 0)] = u16le(0x000F);
   driver.store[Cia402FakeDriver::key(Object::kModeOfOperationDisplay, 0)] = {9};  // CSV
-  // CSV reads its setpoint from target velocity (0x60FF, INTEGER32) into status.target.
   driver.store[Cia402FakeDriver::key(Object::kTargetVelocity, 0)] = i32le(250000);
   driver.store[Cia402FakeDriver::key(Object::kPositionActualValue, 0)] = i32le(-123456);
   driver.store[Cia402FakeDriver::key(Object::kVelocityActualValue, 0)] = i32le(249000);
@@ -812,7 +811,9 @@ TEST(Cia402Drive, ReadStatusReportsAllFields) {
   EXPECT_EQ(status->statusword, statuswordFor(State::kOperationEnabled));
   EXPECT_EQ(status->controlword, 0x000F);
   EXPECT_EQ(status->modeOfOperationDisplay, OperationMode::kCyclicSyncVelocity);
-  EXPECT_EQ(status->target, 250000);
+  EXPECT_EQ(status->targetPosition, 0);
+  EXPECT_EQ(status->targetVelocity, 250000);
+  EXPECT_EQ(status->targetTorque, 0);
   EXPECT_EQ(status->actualPosition, -123456);
   EXPECT_EQ(status->actualVelocity, 249000);
   EXPECT_EQ(status->actualTorque, -150);
@@ -836,32 +837,27 @@ TEST(Cia402Drive, ReadStatusLeavesAMissingActualValueEmpty) {
   EXPECT_EQ(j.at("actualPosition").get<int32_t>(), 0);
 }
 
-TEST(Cia402Drive, ReadStatusTargetTracksActiveModeQuantity) {
+TEST(Cia402Drive, ReadStatusReadsEveryTargetWhateverTheMode) {
   Cia402FakeDriver driver;
   Device device = makeCia402Device(driver);
   driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] =
       u16le(statuswordFor(State::kOperationEnabled));
   driver.store[Cia402FakeDriver::key(Object::kControlword, 0)] = u16le(0x000F);
-  // Setpoints for all three quantities are present; readStatus must pick the one the active mode
-  // acts on (profile modes read their setpoint too — only NoMode/Homing report 0).
+  // All three targets are reported in every mode, so a client never has to ask the server which
+  // one the mode acts on. Target torque is INTEGER16 and is widened with its sign.
   driver.store[Cia402FakeDriver::key(Object::kTargetPosition, 0)] = i32le(111);
   driver.store[Cia402FakeDriver::key(Object::kTargetVelocity, 0)] = i32le(222);
   driver.store[Cia402FakeDriver::key(Object::kTargetTorque, 0)] = u16le(static_cast<uint16_t>(-33));
   Cia402Drive drive(device);
 
-  auto targetInMode = [&](uint8_t mode) {
+  for (const uint8_t mode : {0, 1, 6, 8, 9, 10}) {
     driver.store[Cia402FakeDriver::key(Object::kModeOfOperationDisplay, 0)] = {mode};
     auto s = drive.readStatus();
-    return s.has_value() ? s->target : 0;
-  };
-  EXPECT_EQ(targetInMode(1), 111);   // Profile Position → target position
-  EXPECT_EQ(targetInMode(8), 111);   // CSP → target position
-  EXPECT_EQ(targetInMode(3), 222);   // Profile Velocity → target velocity
-  EXPECT_EQ(targetInMode(9), 222);   // CSV → target velocity
-  EXPECT_EQ(targetInMode(4), -33);   // Profile Torque → target torque (INT16, sign-extended)
-  EXPECT_EQ(targetInMode(10), -33);  // CST → target torque
-  EXPECT_EQ(targetInMode(0), 0);     // NoMode → no linear setpoint
-  EXPECT_EQ(targetInMode(6), 0);     // Homing → no linear setpoint
+    ASSERT_TRUE(s.has_value()) << s.error();
+    EXPECT_EQ(s->targetPosition, 111) << "mode " << static_cast<int>(mode);
+    EXPECT_EQ(s->targetVelocity, 222) << "mode " << static_cast<int>(mode);
+    EXPECT_EQ(s->targetTorque, -33) << "mode " << static_cast<int>(mode);
+  }
 }
 
 TEST(Cia402Drive, ProfileObjectRoundTrip) {
@@ -1038,7 +1034,7 @@ TEST(Cia402Status, JsonEmitsNamesAndNumbers) {
   s.statusword = 0x1237;
   s.controlword = 0x000F;
   s.modeOfOperationDisplay = OperationMode::kCyclicSyncVelocity;
-  s.target = 100000;
+  s.targetVelocity = 100000;
   s.actualPosition = 99874;
   s.actualVelocity = 249000;
   const nlohmann::json j = s;
@@ -1047,7 +1043,9 @@ TEST(Cia402Status, JsonEmitsNamesAndNumbers) {
   EXPECT_EQ(j.at("controlword"), 0x000F);
   EXPECT_EQ(j.at("modeOfOperation"), 9);
   EXPECT_EQ(j.at("modeName"), "CyclicSyncVelocity");
-  EXPECT_EQ(j.at("target"), 100000);
+  EXPECT_TRUE(j.at("targetPosition").is_null());
+  EXPECT_EQ(j.at("targetVelocity"), 100000);
+  EXPECT_TRUE(j.at("targetTorque").is_null());
   EXPECT_EQ(j.at("actualPosition"), 99874);
   EXPECT_EQ(j.at("actualVelocity"), 249000);
   EXPECT_TRUE(j.at("actualTorque").is_null());

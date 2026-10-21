@@ -151,13 +151,19 @@ export default function DeviceMotionPage() {
   // command the setpoint for the mode the drive is actually in.
   const targetKind = targetKindForMode(activeMode)
   // Seed the target input from the drive's current setpoint once (0x607A/0x60FF/0x6071 for the
-  // active mode, surfaced as status.target), then it is the user's to edit — the same seed-once
+  // active mode; the status carries all three), then it is the user's to edit — the same seed-once
   // pattern as selectedMode above. Not live-tracked: an input that rewrites itself as you type
   // would be hostile.
   const [targetValue, setTargetValue] = useState<string | null>(null)
   useEffect(() => {
-    if (targetValue === null && status) setTargetValue(String(status.target))
-  }, [status, targetValue])
+    if (targetValue !== null || !status || !targetKind) return
+    const seed = {
+      position: status.targetPosition,
+      velocity: status.targetVelocity,
+      torque: status.targetTorque,
+    }[targetKind]
+    setTargetValue(seed === null ? '' : String(seed))
+  }, [status, targetValue, targetKind])
   const targetMutation = useMutation({
     mutationFn: ({ target, value }: { target: Quantity; value: number }) =>
       api.setCia402Target(slavePosition, { target, value }),

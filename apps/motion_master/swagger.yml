@@ -4643,8 +4643,9 @@ components:
       type: object
       description: A CiA402 drive's control snapshot — its state machine, control words, and mode.
       required:
-        [state, statusword, controlword, modeOfOperation, modeName, target, actualPosition,
-         actualVelocity, actualTorque, errorDescription]
+        [state, statusword, controlword, modeOfOperation, modeName, targetPosition,
+         targetVelocity, targetTorque, actualPosition, actualVelocity, actualTorque,
+         errorDescription]
       properties:
         state:
           type: string
@@ -4669,13 +4670,33 @@ components:
           type: string
           description: Human-readable name of the active operation mode.
           example: CyclicSyncVelocity
-        target:
+        targetPosition:
           type: integer
+          nullable: true
           description: >-
-            The setpoint currently commanded for the active mode — target position 0x607A (PP/CSP),
-            velocity 0x60FF (PV/CSV), or torque 0x6071 (PT/CST), widened to INTEGER32. 0 only when
-            the active mode has no linear setpoint (NoMode / Homing / vl / ip).
+            Target position (0x607A), INTEGER32, in the drive's own position units. The drive acts
+            on it in the position modes (PP, CSP) only, but it is reported in every mode. Read from
+            the process image while the device exchanges, else over SDO. `null` when the drive has
+            no such object or the read failed.
           example: 100000
+        targetVelocity:
+          type: integer
+          nullable: true
+          description: >-
+            Target velocity (0x60FF), INTEGER32, in the drive's own velocity units. The drive acts
+            on it in the velocity modes (PV, CSV) only, but it is reported in every mode. Read from
+            the process image while the device exchanges, else over SDO. `null` when the drive has
+            no such object or the read failed.
+          example: 250000
+        targetTorque:
+          type: integer
+          nullable: true
+          description: >-
+            Target torque (0x6071), INTEGER16 widened to INTEGER32, in per mille of rated torque.
+            The drive acts on it in the torque modes (PT, CST) only, but it is reported in every
+            mode. Read from the process image while the device exchanges, else over SDO. `null`
+            when the drive has no such object or the read failed.
+          example: -100
         actualPosition:
           type: integer
           nullable: true

@@ -19,6 +19,13 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **A motion row in the device bar.** On every device page, a CiA 402 drive in CST, CSV or CSP gets a second row under the status row: the actual position, velocity and torque, and a control for the target of the active mode. In CST and CSV a throttle sends the target while it is dragged and sends 0 when it is let go, and an input with Set sends one exact value. In CSP a slider runs one revolution of the position encoder either side of the actual position, with a Recentre button, and an input with Go sends one exact position. Every write is a step the drive takes at once; smoothed motion is a later change. (#88)
+- **`GET /api/devices/{slavePosition}/cia402` reports the three targets and the three actual values.** `targetPosition`, `targetVelocity`, `targetTorque`, `actualPosition`, `actualVelocity` and `actualTorque`, each `null` when the drive has no such object. The former `target` field, which held the target of the active mode, is gone. (#88)
+- **`POST /api/devices/{slavePosition}/cia402/target/actual` sets a target to its actual value.** A drive enabled in CSP with a stale target position steps to it at once, and that step can pull the supply down. This route makes the two equal, for a named kind or for the active mode. Motion Master never does it on its own. The Here button in the device bar calls it. (#88)
+- **`GET /api/devices/{slavePosition}/encoders` reports a SOMANET drive's encoders.** Both encoder records and the encoder each controller uses, which is how a client learns what one revolution is in position counts. (#88)
+
 ## [6.0.0-alpha.95] - 2026-10-21
 
 ### Added

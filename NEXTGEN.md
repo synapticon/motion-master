@@ -4358,5 +4358,4 @@ transition loop costs one 100 ms poll. None was seen to fail in 60 rounds under 
 fix: 24 rounds of the real procedure through the HTTP API, two packages in turn, with netem on
 during each install. A clean run of the fix proves nothing about this class of defect, and a CI
 that does not induce late frames does not test it. The HIL tests for the Belgrade office get a
-netem leg for that reason. The loop script is `install-loop.sh` of this session, kept outside the
-repository for now.
+netem leg for that reason. The loop is `tools/install-loop.sh`, beside `flaky-bus.sh`.

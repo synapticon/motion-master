@@ -412,13 +412,7 @@ export default function DeviceMotionRow({ context }: DeviceMotionRowProps) {
             <input
               type="range"
               aria-label={control.label}
-              className={
-                // A green handle when a drag reaches the drive (the thumb is styled in index.css),
-                // a grey one when it would not.
-                sliderLive
-                  ? 'throttle-live h-1 w-[480px] cursor-pointer appearance-none bg-grey-200'
-                  : 'h-1 w-[480px] cursor-not-allowed appearance-none bg-grey-200 accent-grey-400 opacity-50'
-              }
+              className="throttle h-1 w-[480px] cursor-pointer appearance-none bg-grey-200 disabled:cursor-not-allowed"
               min={min}
               max={max}
               step={1}

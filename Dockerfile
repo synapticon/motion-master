@@ -6,6 +6,10 @@
 # Build:
 #   docker build -t motion-master .
 #
+# The build runs for the architecture of the Docker host, amd64 or arm64, because the vcpkg build
+# under emulation takes hours. docker-publish.yml builds each architecture on a native runner and
+# joins the two images into one manifest at synapticon/motion-master:<version>.
+#
 # The server binds to 127.0.0.1 (loopback) by design, so --network host is
 # required — Docker's port-forwarding routes through eth0, not loopback, and
 # would never reach the server.
@@ -74,6 +78,10 @@
 #   from the rolling `auto-tuning` release, and Motion Master starts it as a child process. The
 #   file is mandatory here: a build that cannot reach that release fails.
 #
+# iC-MU calibration:
+#   iC-Haus builds the MU_3SL library for x86_64 only (see cmake/mu_3sl.cmake). The arm64 image
+#   has no copy of it, and the iC-MU calibration is not available there.
+#
 # Running with --privileged also works but grants far more than necessary.
 
 # ── Stage 1: build ─────────────────────────────────────────────────────────
@@ -88,10 +96,22 @@ RUN apt-get update -q && apt-get install -y --no-install-recommends \
         make perl \
     && rm -rf /var/lib/apt/lists/*
 
+# BuildKit sets TARGETARCH to the architecture the image is built for. The CMake installer, the
+# CMake preset and the vcpkg triplet follow from it. Later steps read them from /target.env, because
+# a RUN step cannot set an environment variable for the steps after it.
+ARG TARGETARCH
+RUN case "${TARGETARCH}" in \
+      amd64) cmake_arch=x86_64; preset=x64-linux-release; triplet=x64-linux ;; \
+      arm64) cmake_arch=aarch64; preset=arm64-linux-release; triplet=arm64-linux ;; \
+      *) echo "no build for TARGETARCH '${TARGETARCH}'" >&2; exit 1 ;; \
+    esac \
+    && printf 'CMAKE_ARCH=%s\nPRESET=%s\nTRIPLET=%s\n' "$cmake_arch" "$preset" "$triplet" > /target.env
+
 # Ubuntu 24.04 ships CMake 3.x; the project requires 4.0+.
 ARG CMAKE_VERSION=4.0.0
-RUN curl -fsSL \
-        "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-x86_64.sh" \
+RUN . /target.env \
+    && curl -fsSL \
+        "https://github.com/Kitware/CMake/releases/download/v${CMAKE_VERSION}/cmake-${CMAKE_VERSION}-linux-${CMAKE_ARCH}.sh" \
         -o /tmp/cmake-install.sh \
     && bash /tmp/cmake-install.sh --skip-license --prefix=/usr/local \
     && rm /tmp/cmake-install.sh
@@ -118,21 +138,38 @@ RUN base=https://github.com/synapticon/motion-master/releases/download/tls-cert;
 # this file is mandatory: an image without it would answer the auto-tuning endpoints with an
 # error, and nobody can add the file to a running container. The script exits with status 0 even
 # when the download fails, because a package install must survive that. The test is what turns a
-# failed download into a failed build. The script picks the asset from uname, and this image is
-# x86_64 only.
+# failed download into a failed build. The script picks the asset from uname, which names the
+# architecture this stage runs for.
 RUN ./install-auto-tuning.sh /src \
     && test -x /src/auto-tuning
 
+# A local build can cap its parallelism, so the machine stays usable while it runs:
+#   docker build --build-arg CMAKE_BUILD_PARALLEL_LEVEL=8 --build-arg VCPKG_MAX_CONCURRENCY=8 .
+# cmake --build and vcpkg read these as environment variables. Unset, each uses every core.
+ARG CMAKE_BUILD_PARALLEL_LEVEL
+ARG VCPKG_MAX_CONCURRENCY
+
 # vcpkg binary cache is reused across image rebuilds when building with BuildKit.
 RUN --mount=type=cache,target=/root/.cache/vcpkg/archives \
-    cmake --preset x64-linux-release \
-    && cmake --build --preset x64-linux-release
+    . /target.env \
+    && cmake --preset "${PRESET}" \
+    && cmake --build --preset "${PRESET}"
 
 # Collect any vcpkg shared libraries needed at runtime (empty when all deps
 # are header-only or statically linked).
-RUN mkdir -p /runtime-libs \
-    && find vcpkg_installed/x64-linux/lib/ -name "*.so*" \( -type f -o -type l \) \
+RUN . /target.env \
+    && mkdir -p /runtime-libs \
+    && find "build/${PRESET}/vcpkg_installed/${TRIPLET}/lib/" -name "*.so*" \( -type f -o -type l \) \
          -exec cp -P {} /runtime-libs/ \; 2>/dev/null || true
+
+# Everything the runtime stage ships, in one directory, so that stage names no preset and no
+# architecture. The MU_3SL library is there on x86_64 only, because iC-Haus builds it for no other
+# Linux architecture. The binary loads it from its own directory through an $ORIGIN run path.
+RUN . /target.env \
+    && bin="build/${PRESET}/apps/motion_master" \
+    && mkdir -p /dist \
+    && cp "${bin}/motion-master" auto-tuning cert.pem key.pem /dist/ \
+    && if [ -f "${bin}/libMU_3SL_interface.so.3" ]; then cp "${bin}/libMU_3SL_interface.so.3" /dist/; fi
 
 # ── Stage 2: runtime ───────────────────────────────────────────────────────
 FROM ubuntu:24.04 AS runtime
@@ -148,12 +185,9 @@ COPY --from=build /runtime-libs/ /usr/local/lib/
 RUN ldconfig
 
 WORKDIR /opt/motion-master
-COPY --from=build /src/build/x64-linux-release/apps/motion_master/motion-master .
-# The binary loads MU_3SL from its own directory through an $ORIGIN run path.
-COPY --from=build /src/build/x64-linux-release/apps/motion_master/libMU_3SL_interface.so.3 .
-COPY --from=build /src/auto-tuning ./
-# Bake the cert/key fetched in the build stage (empty if that build ran offline).
-COPY --from=build /src/cert.pem /src/key.pem ./
+# The binary, the auto-tuning executable, the MU_3SL library where it exists, and the cert/key
+# fetched in the build stage (empty if that build ran offline).
+COPY --from=build /dist/ ./
 
 # 61447 = HTTP API, 62281 = WebSocket (separate loop/port so a slow HTTP request can't
 # stall the monitoring/control stream).

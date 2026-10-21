@@ -18,7 +18,7 @@ Design documents (the Mermaid diagrams render natively on GitHub):
 
 ## Installation
 
-Release packages are on the [Releases](../../releases) page: a tarball, a `.deb` and an `.rpm` for Linux x86-64 and aarch64, a zip for Windows x64, and a tarball for macOS on Apple Silicon. There is a container image as well.
+Release packages are on the [Releases](../../releases) page: a tarball, a `.deb` and an `.rpm` for Linux x86-64 and aarch64, a zip for Windows x64, and a tarball for macOS on Apple Silicon. Selected versions are on Docker Hub as well, as `synapticon/motion-master`, for amd64 and arm64.
 
 [Installing Motion Master](docs/INSTALLATION.md) covers each of those paths. Read it for the steps on your platform, for the [auto-tuning](docs/INSTALLATION.md#auto-tuning) executable that every install path downloads, and for the [capabilities](docs/INSTALLATION.md#linux-capabilities) the binary needs on Linux.
 

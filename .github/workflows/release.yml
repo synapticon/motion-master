@@ -337,6 +337,18 @@ jobs:
           esac
           pnpm --filter @synapticon/motion-master-client publish --no-git-checks --tag "$tag"
 
+  # ── Publish the container image to Docker Hub ──────────────────────────────
+  # The image is built on request today: docker-publish.yml, started by hand for the versions that
+  # get one, because the pre-release versions follow each other fast. To build it with every
+  # release, uncomment this job. The secrets are the organisation's DOCKERHUB_USERNAME and
+  # DOCKERHUB_TOKEN, which `inherit` passes on.
+  #
+  # docker-image:
+  #   uses: ./.github/workflows/docker-publish.yml
+  #   with:
+  #     version: ${{ github.ref_name }}
+  #   secrets: inherit
+
   # ── Publish the GitHub Release with all platform artifacts ─────────────────
   release:
     needs: [linux-x64, linux-arm64, windows, macos]

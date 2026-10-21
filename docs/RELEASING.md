@@ -42,7 +42,13 @@ git tag v6.1.0
 git push && git push --tags
 ```
 
-The `v*` tag builds the platform binaries **and** publishes `@synapticon/motion-master-client@<version>` to npm (prereleases under the `next` dist-tag). Two drift nets back the sync: `version_test.cc` fails if its hard-coded string falls out of step, and the `api-client-drift` CI job fails if the committed API client is stale against `swagger.yml`.
+The `v*` tag builds the platform binaries **and** publishes `@synapticon/motion-master-client@<version>` to npm (prereleases under the `next` dist-tag). The container image is a separate step, run by hand for the versions that get one. The tag must exist first:
+
+```bash
+gh workflow run docker-publish.yml -f version=6.1.0
+```
+
+That publishes `synapticon/motion-master:6.1.0` to Docker Hub for `linux/amd64` and `linux/arm64`. The version is the only image tag. There is no `latest` for this software. See [Publishing to Docker Hub](DEVELOPMENT.md#publishing-to-docker-hub). Two drift nets back the sync: `version_test.cc` fails if its hard-coded string falls out of step, and the `api-client-drift` CI job fails if the committed API client is stale against `swagger.yml`.
 
 ## CI
 
@@ -57,7 +63,8 @@ The `v*` tag builds the platform binaries **and** publishes `@synapticon/motion-
 | `cert-renewal.yml` | 1st of every month | Renew Let's Encrypt cert via acme-dns; publish it to the rolling `tls-cert` release |
 | `deploy-pages.yml` | push to `main`, `v*` tag | Publish `motion-master.synapticon.com` — landing page, `/docs` Doxygen, the `swagger.yml` spec, and each PWA under `/apps/<name>/`. Docs and landing track `main`; the **apps are pinned to the latest `v*` tag** so the hosted console always matches a released binary |
 | `jitter.yml` | manual dispatch | Run `jitter_bench` on a `PREEMPT_RT` CI machine (duration / period / workload as inputs) |
-| `release.yml` | `v*` tag push | Build all platforms, bundle cert + key from the rolling `tls-cert` release, publish GitHub Release with `.tar.gz`, `.deb`, `.rpm` (Linux x64 and aarch64), `.zip` (Windows), and `.tar.gz` (macOS arm64); then code-sign the Windows exe on a self-hosted runner and replace the zip asset |
+| `release.yml` | `v*` tag push | Build all platforms, bundle cert + key from the rolling `tls-cert` release, publish GitHub Release with `.tar.gz`, `.deb`, `.rpm` (Linux x64 and aarch64), `.zip` (Windows), and `.tar.gz` (macOS arm64); then code-sign the Windows exe on a self-hosted runner and replace the zip asset. A commented job calls `docker-publish.yml` |
+| `docker-publish.yml` | manual, or called from `release.yml` | Build the container image for one released version on native `amd64` and `arm64` runners, start each image and read its version, and publish both under `synapticon/motion-master:<version>` on Docker Hub |
 | `release-stats.yml` | every day at 04:00 UTC | Count the downloads of every release asset and publish `STATS.md` to the rolling `stats` release |
 
 The vcpkg cache key is OS + `vcpkg.json` hash, extended with the architecture where two legs share an OS (`build-linux-arm64.yml`) and with the build container where the toolchain differs too (the release workflow's Debian 13 aarch64 leg). The first run after a dependency change rebuilds from source; subsequent runs restore from cache.

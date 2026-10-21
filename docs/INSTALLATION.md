@@ -132,7 +132,7 @@ Two macOS specifics, both covered by the bundled `SETUP.md`:
 
 ## Docker
 
-Motion Master also runs as a container image. Building the image and publishing it to a registry is covered under [Development → Docker image](DEVELOPMENT.md#docker-image); this section covers running an image you built locally or pulled from a registry.
+Motion Master also runs as a container image. Selected versions are published as `synapticon/motion-master` on Docker Hub for `linux/amd64` and `linux/arm64`. See [Run from a registry](#run-from-a-registry) for the pull command. Building the image yourself is covered under [Development → Docker image](DEVELOPMENT.md#docker-image). This section covers running an image, built locally or pulled.
 
 `--network host` is required on all `docker run` commands — the server binds to `127.0.0.1` and Docker's port forwarding never reaches the loopback interface.
 
@@ -210,7 +210,17 @@ docker run --rm --network host \
 
 ### Run from a registry
 
-Pull and run a published image, mounting `cert.pem`/`key.pem` from the current directory. Source paths **must be absolute** — a relative `-v cert.pem:...` is interpreted as a *named volume*, not your local file, and the container silently falls back to a self-signed cert. Use `$(pwd)/` to force an absolute path:
+Selected versions are published as `synapticon/motion-master` on Docker Hub for `linux/amd64` and `linux/arm64`. One tag covers both, and Docker picks the image for the host. The tag is the bare version, with no `v`:
+
+```bash
+docker pull synapticon/motion-master:<version>
+```
+
+Name the version in every command, for example `6.0.0-alpha.95`. Not every release has an image. The [tags page](https://hub.docker.com/r/synapticon/motion-master/tags) on Docker Hub lists the versions that have one. There is no `latest` tag for this software, so `docker pull synapticon/motion-master` with no tag does not give you this software.
+
+The arm64 image has no MU_3SL library, because iC-Haus builds that library for x86_64 only. The iC-MU calibration is not available in that image.
+
+Run the published image with the same flags as a local build. The command below mounts `cert.pem`/`key.pem` from the current directory. Source paths **must be absolute** — a relative `-v cert.pem:...` is interpreted as a *named volume*, not your local file, and the container silently falls back to a self-signed cert. Use `$(pwd)/` to force an absolute path:
 
 ```bash
 docker run --rm --network host \
@@ -218,7 +228,7 @@ docker run --rm --network host \
   --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 \
   -v "$(pwd)/cert.pem:/opt/motion-master/cert.pem:ro" \
   -v "$(pwd)/key.pem:/opt/motion-master/key.pem:ro" \
-  markosankovic/motion-master:latest
+  synapticon/motion-master:<version>
 ```
 
 `docker run` pulls the image automatically if it isn't present locally. Drop the two `-v` flags to let the container self-heal its cert instead (fetches a fresh Let's Encrypt cert at startup; see **Updating an expired cert** above).

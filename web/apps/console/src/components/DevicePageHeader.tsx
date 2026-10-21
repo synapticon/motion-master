@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import type { ReactNode } from 'react'
-import DeviceStatusBar from './DeviceStatusBar'
+import DeviceBar from './DeviceBar'
 import { useConnection } from '../contexts/ConnectionContext'
 
 interface DevicePageHeaderProps {
@@ -28,7 +28,7 @@ export default function DevicePageHeader({
 
   const device = devicesQuery.data?.data.find(d => d.slavePosition === slavePosition)
 
-  // The tall block scrolls away; DeviceStatusBar below it stays pinned, carrying the device's
+  // The tall block scrolls away; DeviceBar below it stays pinned, carrying the device's
   // identity and live state. Rendered here rather than per page so every device route gets it —
   // and cannot forget it — for the price of nothing at each call site.
   return (
@@ -64,7 +64,7 @@ export default function DevicePageHeader({
       <h1 className="font-display text-4xl font-light">{title}</h1>
       {description && <p className="text-sm text-grey-600 mt-2">{description}</p>}
     </div>
-    <DeviceStatusBar slavePosition={slavePosition} />
+    <DeviceBar slavePosition={slavePosition} />
     </>
   )
 }

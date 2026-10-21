@@ -204,6 +204,14 @@ export default function DeviceStatusBar({ slavePosition }: DeviceStatusBarProps)
                 >
                   {status.state}
                 </span>
+                {status.errorDescription && (
+                  <span
+                    className="font-mono text-xs text-syn-red"
+                    title="Error description — the drive's own short description of its last fault (0x203F:01)."
+                  >
+                    {status.errorDescription}
+                  </span>
+                )}
                 <div className="flex items-baseline gap-1.5">
                   <span className={labelCls}>Mode</span>
                   <span className="text-xs" title={activeMode?.label}>

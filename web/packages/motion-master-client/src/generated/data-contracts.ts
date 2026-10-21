@@ -52,6 +52,11 @@ export interface Cia402Status {
    * @example 100000
    */
   target: number;
+  /**
+   * The drive's own short description of its last fault, read from the vendor object that holds one. A SOMANET drive keeps it in 0x203F:01 and reports an empty string while there is no fault. `null` when the drive has no such object or the read failed.
+   * @example "CyclicHb"
+   */
+  errorDescription: string | null;
 }
 
 /** Every operation mode a device has, with what its "Supported drive modes" field (0x6502) says about each. */

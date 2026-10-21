@@ -1343,7 +1343,7 @@ TEST(RunOffsetDetectionProcedure, AFaultMidSequenceStopsAndQuotesTheDriveErrorRe
   // answer every later command with — that code names a precondition, so it would point
   // at the operation mode or the brake instead of at the fault.
   EXPECT_NE(result.error().find("Fault"), std::string::npos) << result.error();
-  EXPECT_NE(result.error().find("OVERCURR"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("CyclicHb"), std::string::npos) << result.error();
 
   const auto steps = reporter.steps();
   EXPECT_EQ(stepById(steps, "open-phase-detection")->status, ProgressStatus::kSucceeded);

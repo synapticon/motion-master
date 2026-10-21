@@ -1006,8 +1006,8 @@ TEST(Cia402Drive, StructSetterAbortsOnFirstFailure) {
 }
 
 TEST(Cia402Status, JsonEmitsNamesAndNumbers) {
-  const mm::node::Cia402Status s{State::kOperationEnabled, 0x1237, 0x000F,
-                                 OperationMode::kCyclicSyncVelocity, 100000};
+  const mm::node::Cia402Status s{State::kOperationEnabled,           0x1237, 0x000F,
+                                 OperationMode::kCyclicSyncVelocity, 100000, std::nullopt};
   const nlohmann::json j = s;
   EXPECT_EQ(j.at("state"), "OperationEnabled");
   EXPECT_EQ(j.at("statusword"), 0x1237);
@@ -1015,6 +1015,16 @@ TEST(Cia402Status, JsonEmitsNamesAndNumbers) {
   EXPECT_EQ(j.at("modeOfOperation"), 9);
   EXPECT_EQ(j.at("modeName"), "CyclicSyncVelocity");
   EXPECT_EQ(j.at("target"), 100000);
+  EXPECT_TRUE(j.at("errorDescription").is_null());
+}
+
+TEST(Cia402Status, JsonEmitsErrorDescriptionWhenPresent) {
+  mm::node::Cia402Status s{State::kFault, 0x0218, 0x0000, OperationMode::kNoMode, 0, std::nullopt};
+  s.errorDescription = "CyclicHb";
+  const nlohmann::json j = s;
+  EXPECT_EQ(j.at("errorDescription"), "CyclicHb");
+  s.errorDescription = "";
+  EXPECT_EQ(nlohmann::json(s).at("errorDescription"), "");
 }
 
 TEST(Cia402ParseCommand, KnownAndUnknownTokens) {

@@ -6,9 +6,25 @@
 #include <type_traits>
 #include <utility>
 
+#include "node/somanet_drive.h"
+
 namespace mm::node {
 
 namespace {
+
+// Fills the status's errorDescription from the vendor object that holds one. Only SOMANET has
+// such an object today (0x203F:01), and CiA402 names none, so the join of the two views lives
+// here rather than in Cia402Drive. Best-effort: a device without the object, or a failed read,
+// leaves the field empty, because the status already read is worth more than the description.
+void attachErrorDescription(Device& device, Cia402Status& status) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return;
+  }
+  if (auto report = drive->errorReport()) {
+    status.errorDescription = std::move(*report);
+  }
+}
 
 // The two steps every function here repeats: take a handle on the device, then bind a validated
 // CiA402 view to it. What is left at each call site is the operation itself. The handle keeps the
@@ -24,7 +40,15 @@ auto withDrive(DeviceManager& deviceManager, uint16_t slavePosition, Fn&& fn)
   if (!drive) {
     return std::unexpected(drive.error());
   }
-  return std::forward<Fn>(fn)(*drive);
+  auto result = std::forward<Fn>(fn)(*drive);
+  // Every function that answers with a status answers with the same one, so the description is
+  // attached once here rather than in each of them.
+  if constexpr (std::is_same_v<decltype(result), std::expected<Cia402Status, std::string>>) {
+    if (result) {
+      attachErrorDescription(*device, *result);
+    }
+  }
+  return result;
 }
 
 }  // namespace

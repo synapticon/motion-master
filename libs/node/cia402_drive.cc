@@ -19,6 +19,7 @@ void to_json(nlohmann::json& j, const Cia402Status& s) {
       {"modeName", cia402::toString(s.modeOfOperationDisplay)},
       // 0 only when the active mode has no linear setpoint (NoMode / Homing).
       {"target", s.target},
+      {"errorDescription", s.errorDescription ? nlohmann::json(*s.errorDescription) : nullptr},
   };
 }
 
@@ -221,7 +222,7 @@ std::expected<Cia402Status, std::string> Cia402Drive::readStatus() const {
     case cia402::OperationMode::kInterpolatedPosition:
       break;
   }
-  return Cia402Status{cia402::decodeState(*sw), *sw, *cw, *mode, target};
+  return Cia402Status{cia402::decodeState(*sw), *sw, *cw, *mode, target, std::nullopt};
 }
 
 std::expected<void, std::string> Cia402Drive::applyCommand(uint16_t command) {

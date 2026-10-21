@@ -4642,7 +4642,7 @@ components:
     Cia402Status:
       type: object
       description: A CiA402 drive's control snapshot — its state machine, control words, and mode.
-      required: [state, statusword, controlword, modeOfOperation, modeName, target]
+      required: [state, statusword, controlword, modeOfOperation, modeName, target, errorDescription]
       properties:
         state:
           type: string
@@ -4674,6 +4674,14 @@ components:
             velocity 0x60FF (PV/CSV), or torque 0x6071 (PT/CST), widened to INTEGER32. 0 only when
             the active mode has no linear setpoint (NoMode / Homing / vl / ip).
           example: 100000
+        errorDescription:
+          type: string
+          nullable: true
+          description: >-
+            The drive's own short description of its last fault, read from the vendor object that
+            holds one. A SOMANET drive keeps it in 0x203F:01 and reports an empty string while
+            there is no fault. `null` when the drive has no such object or the read failed.
+          example: CyclicHb
     OperationModes:
       type: object
       description: >-

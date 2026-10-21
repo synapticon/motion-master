@@ -96,6 +96,22 @@ enum class Cia402TargetKind { kPosition, kVelocity, kTorque };
 /// @return The kind, or @c std::nullopt if the token is unrecognised.
 std::optional<Cia402TargetKind> parseCia402TargetKind(std::string_view token);
 
+/// @brief The token @c parseCia402TargetKind reads, for a JSON answer.
+std::string_view toString(Cia402TargetKind kind);
+
+/// @brief The target kind an operation mode acts on: position for PP/CSP, velocity for PV/CSV,
+///        torque for PT/CST and CST with commutation angle. @c nullopt for a mode with no linear
+///        target: no mode, homing, vl (0x6042) and interpolated position (0x60C1).
+std::optional<Cia402TargetKind> targetKindForMode(cia402::OperationMode mode);
+
+/// @brief What @c setCia402TargetToActual wrote: the kind it resolved and the value it copied.
+struct TargetFromActual {
+  Cia402TargetKind kind{};
+  int32_t value = 0;
+};
+
+void to_json(nlohmann::json& j, const TargetFromActual& t);
+
 /// @brief Borrowed view of a CiA402 drive — the device control state machine, operation modes,
 ///        and the standard cyclic setpoints, expressed over a @c Device's parameter access.
 ///
@@ -282,6 +298,17 @@ class Cia402Drive : public ProfileDevice {
 
   /// @brief Writes target torque (0x6071, INTEGER16, per-mille of rated) — CST / PT.
   std::expected<void, std::string> setTargetTorque(int16_t perMille);
+
+  /// @brief Copies the actual value of @p kind into its target: 0x6064 into 0x607A, 0x606C into
+  ///        0x60FF, or 0x6077 into 0x6071.
+  ///
+  /// The firmware holds the actual position only until the first setpoint reaches it. In CSP the
+  /// master sends 0x607A every cycle, so a drive enabled with a stale target position steps to it
+  /// at once, and that step can pull the supply down. This is the explicit way to make the two
+  /// equal before an enable; nothing in this library does it on its own.
+  ///
+  /// @return The value copied, widened to int32 for torque.
+  std::expected<int32_t, std::string> setTargetToActual(Cia402TargetKind kind);
 
   /// @brief Reads actual position (0x6064, INTEGER32).
   std::expected<int32_t, std::string> positionActualValue() const;

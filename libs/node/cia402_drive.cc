@@ -56,6 +56,43 @@ std::optional<Cia402TargetKind> parseCia402TargetKind(std::string_view token) {
   return std::nullopt;
 }
 
+std::string_view toString(Cia402TargetKind kind) {
+  switch (kind) {
+    case Cia402TargetKind::kPosition:
+      return "position";
+    case Cia402TargetKind::kVelocity:
+      return "velocity";
+    case Cia402TargetKind::kTorque:
+      return "torque";
+  }
+  return "unknown";
+}
+
+std::optional<Cia402TargetKind> targetKindForMode(cia402::OperationMode mode) {
+  switch (mode) {
+    case cia402::OperationMode::kCyclicSyncPosition:
+    case cia402::OperationMode::kProfilePosition:
+      return Cia402TargetKind::kPosition;
+    case cia402::OperationMode::kCyclicSyncVelocity:
+    case cia402::OperationMode::kProfileVelocity:
+      return Cia402TargetKind::kVelocity;
+    case cia402::OperationMode::kCyclicSyncTorque:
+    case cia402::OperationMode::kProfileTorque:
+    case cia402::OperationMode::kCyclicSyncTorqueCommutationAngle:
+      return Cia402TargetKind::kTorque;
+    case cia402::OperationMode::kNoMode:
+    case cia402::OperationMode::kHoming:
+    case cia402::OperationMode::kVelocity:
+    case cia402::OperationMode::kInterpolatedPosition:
+      break;
+  }
+  return std::nullopt;
+}
+
+void to_json(nlohmann::json& j, const TargetFromActual& t) {
+  j = nlohmann::json{{"kind", toString(t.kind)}, {"value", t.value}};
+}
+
 namespace {
 
 using cia402::Command;
@@ -416,6 +453,42 @@ std::expected<void, std::string> Cia402Drive::enable(std::chrono::milliseconds t
   // drive, and a quick stop is somebody's decision that preparing for a measurement must not undo.
   // A drive sitting in QuickStopActive therefore fails here rather than being forced out of it.
   return transitionToState(cia402::State::kOperationEnabled, timeout, false);
+}
+
+std::expected<int32_t, std::string> Cia402Drive::setTargetToActual(Cia402TargetKind kind) {
+  switch (kind) {
+    case Cia402TargetKind::kPosition: {
+      auto actual = positionActualValue();
+      if (!actual) {
+        return std::unexpected(actual.error());
+      }
+      if (auto r = setTargetPosition(*actual); !r) {
+        return std::unexpected(r.error());
+      }
+      return *actual;
+    }
+    case Cia402TargetKind::kVelocity: {
+      auto actual = velocityActualValue();
+      if (!actual) {
+        return std::unexpected(actual.error());
+      }
+      if (auto r = setTargetVelocity(*actual); !r) {
+        return std::unexpected(r.error());
+      }
+      return *actual;
+    }
+    case Cia402TargetKind::kTorque: {
+      auto actual = torqueActualValue();
+      if (!actual) {
+        return std::unexpected(actual.error());
+      }
+      if (auto r = setTargetTorque(*actual); !r) {
+        return std::unexpected(r.error());
+      }
+      return *actual;
+    }
+  }
+  return std::unexpected("invalid target kind");
 }
 
 std::expected<int32_t, std::string> Cia402Drive::targetPosition() const {

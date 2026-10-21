@@ -1260,6 +1260,29 @@ void HttpServer::run() {
         return mm::api::statusOnly("204 No Content");
       });
 
+  router.post("/api/devices/:slavePosition/cia402/target/actual",
+              [this](const mm::api::Request& req) -> mm::api::Response {
+                auto position = req.parameterAs<uint16_t>("slavePosition");
+                if (!position) {
+                  return mm::api::badRequest("slavePosition must be a number");
+                }
+                std::optional<mm::node::Cia402TargetKind> kind;
+                if (const auto token = req.query("kind"); token && !token->empty()) {
+                  kind = mm::node::parseCia402TargetKind(*token);
+                  if (!kind) {
+                    return mm::api::badRequest("invalid kind: use position, velocity, or torque");
+                  }
+                }
+                if (!deviceManager_.hasDevice(*position)) {
+                  return mm::api::notFound("no device at that bus position");
+                }
+                auto r = mm::node::setCia402TargetToActual(deviceManager_, *position, kind);
+                if (!r) {
+                  return mm::api::error("409 Conflict", r.error());
+                }
+                return mm::api::json(nlohmann::json(*r));
+              });
+
   // GET reports the brake, POST release/engage command it. Two verbs rather than one
   // PUT {released}: they are not symmetric operations — a release waits out the drive's pull time
   // because the firmware blocks motion until it expires, an engage waits only a short settle — and

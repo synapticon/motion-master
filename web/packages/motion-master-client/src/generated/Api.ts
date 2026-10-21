@@ -1384,6 +1384,45 @@ export class Api<
       ...params,
     });
   /**
+   * @description Copies the actual value into the target of one kind: position actual value (0x6064) into target position (0x607A), velocity actual value (0x606C) into target velocity (0x60FF), or torque actual value (0x6077) into target torque (0x6071). Without `kind` the pair is the one the active operation mode (0x6061) acts on. A drive holds its actual position only until the first setpoint reaches it. In CSP the master sends 0x607A every cycle, so a drive enabled with a stale target position steps to it at once, and that step can pull the supply down. Call this before you enable a drive in CSP. Motion Master never does it on its own: an enable writes the controlword and nothing else.
+   *
+   * @name SetCia402TargetToActual
+   * @summary Set a CiA402 target to its actual value
+   * @request POST:/api/devices/{slavePosition}/cia402/target/actual
+   */
+  setCia402TargetToActual = (
+    slavePosition: number,
+    query?: {
+      /**
+       * Which pair to copy. Omit it to copy the pair of the active operation mode.
+       * @example "position"
+       */
+      kind?: "position" | "velocity" | "torque";
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      {
+        /**
+         * The pair that was copied.
+         * @example "position"
+         */
+        kind: "position" | "velocity" | "torque";
+        /**
+         * The value written, in the object's own units. Torque is per mille of rated, widened from INTEGER16.
+         * @example 123456
+         */
+        value: number;
+      },
+      void
+    >({
+      path: `/api/devices/${slavePosition}/cia402/target/actual`,
+      method: "POST",
+      query: query,
+      format: "json",
+      ...params,
+    });
+  /**
    * @description Returns every procedure available on the device, each with its descriptor and the state of its current or last run. One request is enough to render a whole per-device procedures view: the descriptor carries the title, description and caveats to display, and the snapshot says whether anything is running or how the last run went. The list is per device, not global — a procedure is offered only where it applies, so a third-party slave reports an empty list rather than controls that could only ever fail. A procedure that has never run reports an idle snapshot (`status` `idle`, `runCount` 0, every step `idle`), so every entry has the same shape.
    *
    * @name ListProcedures

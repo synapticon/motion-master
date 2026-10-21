@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <expected>
+#include <format>
 #include <string>
 #include <type_traits>
 #include <utility>
@@ -129,6 +130,31 @@ std::expected<void, std::string> setCia402Target(DeviceManager& deviceManager,
                          return drive.setTargetTorque(static_cast<int16_t>(setpoint));
                      }
                      return std::unexpected("invalid target kind");
+                   });
+}
+
+std::expected<TargetFromActual, std::string> setCia402TargetToActual(
+    DeviceManager& deviceManager, uint16_t slavePosition, std::optional<Cia402TargetKind> kind) {
+  return withDrive(deviceManager, slavePosition,
+                   [kind](Cia402Drive& drive) -> std::expected<TargetFromActual, std::string> {
+                     auto resolved = kind;
+                     if (!resolved) {
+                       auto mode = drive.operationMode();
+                       if (!mode) {
+                         return std::unexpected(mode.error());
+                       }
+                       resolved = targetKindForMode(*mode);
+                       if (!resolved) {
+                         return std::unexpected(std::format(
+                             "the active mode {} ({}) has no linear target; name the kind",
+                             cia402::toString(*mode), static_cast<int>(*mode)));
+                       }
+                     }
+                     auto value = drive.setTargetToActual(*resolved);
+                     if (!value) {
+                       return std::unexpected(value.error());
+                     }
+                     return TargetFromActual{*resolved, *value};
                    });
 }
 

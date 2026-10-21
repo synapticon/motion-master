@@ -2245,6 +2245,65 @@ paths:
           description: No device at that slavePosition
         "409":
           description: The device is not a CiA402 drive, or the write failed
+  /api/devices/{slavePosition}/cia402/target/actual:
+    post:
+      summary: Set a CiA402 target to its actual value
+      description: >
+        Copies the actual value into the target of one kind: position actual value (0x6064) into
+        target position (0x607A), velocity actual value (0x606C) into target velocity (0x60FF), or
+        torque actual value (0x6077) into target torque (0x6071). Without `kind` the pair is the one
+        the active operation mode (0x6061) acts on.
+
+
+        A drive holds its actual position only until the first setpoint reaches it. In CSP the
+        master sends 0x607A every cycle, so a drive enabled with a stale target position steps to it
+        at once, and that step can pull the supply down. Call this before you enable a drive in CSP.
+        Motion Master never does it on its own: an enable writes the controlword and nothing else.
+      operationId: setCia402TargetToActual
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: kind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [position, velocity, torque]
+          description: >-
+            Which pair to copy. Omit it to copy the pair of the active operation mode.
+          example: position
+      responses:
+        "200":
+          description: The target was written
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [kind, value]
+                properties:
+                  kind:
+                    type: string
+                    enum: [position, velocity, torque]
+                    description: The pair that was copied.
+                    example: position
+                  value:
+                    type: integer
+                    description: >-
+                      The value written, in the object's own units. Torque is per mille of rated,
+                      widened from INTEGER16.
+                    example: 123456
+        "400":
+          description: slavePosition is invalid, or `kind` is not one of the three
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: >-
+            The device is not a CiA402 drive, the active mode has no linear target and no `kind`
+            was given, or a transfer failed
   /api/devices/{slavePosition}/procedures:
     get:
       summary: List the procedures a device supports

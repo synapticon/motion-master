@@ -860,6 +860,64 @@ TEST(Cia402Drive, ReadStatusReadsEveryTargetWhateverTheMode) {
   }
 }
 
+TEST(Cia402Drive, TargetKindForModeNamesTheObjectEachModeActsOn) {
+  using mm::node::Cia402TargetKind;
+  using mm::node::targetKindForMode;
+  EXPECT_EQ(targetKindForMode(OperationMode::kProfilePosition), Cia402TargetKind::kPosition);
+  EXPECT_EQ(targetKindForMode(OperationMode::kCyclicSyncPosition), Cia402TargetKind::kPosition);
+  EXPECT_EQ(targetKindForMode(OperationMode::kProfileVelocity), Cia402TargetKind::kVelocity);
+  EXPECT_EQ(targetKindForMode(OperationMode::kCyclicSyncVelocity), Cia402TargetKind::kVelocity);
+  EXPECT_EQ(targetKindForMode(OperationMode::kProfileTorque), Cia402TargetKind::kTorque);
+  EXPECT_EQ(targetKindForMode(OperationMode::kCyclicSyncTorque), Cia402TargetKind::kTorque);
+  EXPECT_EQ(targetKindForMode(OperationMode::kCyclicSyncTorqueCommutationAngle),
+            Cia402TargetKind::kTorque);
+  EXPECT_FALSE(targetKindForMode(OperationMode::kNoMode).has_value());
+  EXPECT_FALSE(targetKindForMode(OperationMode::kHoming).has_value());
+  EXPECT_FALSE(targetKindForMode(OperationMode::kVelocity).has_value());
+  EXPECT_FALSE(targetKindForMode(OperationMode::kInterpolatedPosition).has_value());
+}
+
+TEST(Cia402Drive, SetTargetToActualCopiesTheActualIntoTheTarget) {
+  Cia402FakeDriver driver;
+  driver.programObject(Object::kTorqueActualValue, 0, ObjectDataType::INTEGER16,
+                       u16le(static_cast<uint16_t>(static_cast<int16_t>(-77))));
+  Device device = makeCia402Device(driver);
+  driver.store[Cia402FakeDriver::key(Object::kPositionActualValue, 0)] = i32le(-4242);
+  Cia402Drive drive(device);
+
+  auto position = drive.setTargetToActual(mm::node::Cia402TargetKind::kPosition);
+  ASSERT_TRUE(position.has_value()) << position.error();
+  EXPECT_EQ(*position, -4242);
+  ASSERT_FALSE(driver.writes.empty());
+  EXPECT_EQ(driver.writes.back().index, static_cast<uint16_t>(Object::kTargetPosition));
+  EXPECT_EQ(driver.writes.back().data, i32le(-4242));
+
+  // Torque is INTEGER16 on both sides; the value is reported widened with its sign.
+  auto torque = drive.setTargetToActual(mm::node::Cia402TargetKind::kTorque);
+  ASSERT_TRUE(torque.has_value()) << torque.error();
+  EXPECT_EQ(*torque, -77);
+  EXPECT_EQ(driver.writes.back().index, static_cast<uint16_t>(Object::kTargetTorque));
+  EXPECT_EQ(driver.writes.back().data, u16le(static_cast<uint16_t>(static_cast<int16_t>(-77))));
+}
+
+TEST(Cia402Drive, SetTargetToActualFailsWithoutTheActualObject) {
+  Cia402FakeDriver driver;
+  Device device = makeCia402Device(driver);  // the fixture programs no torque actual (0x6077)
+  Cia402Drive drive(device);
+  const auto writesBefore = driver.writes.size();
+
+  auto r = drive.setTargetToActual(mm::node::Cia402TargetKind::kTorque);
+  EXPECT_FALSE(r.has_value());
+  EXPECT_EQ(driver.writes.size(), writesBefore);  // nothing was written on a failed read
+}
+
+TEST(TargetFromActual, JsonNamesTheKindAndTheValue) {
+  const nlohmann::json j =
+      mm::node::TargetFromActual{mm::node::Cia402TargetKind::kVelocity, 123456};
+  EXPECT_EQ(j.at("kind"), "velocity");
+  EXPECT_EQ(j.at("value"), 123456);
+}
+
 TEST(Cia402Drive, ProfileObjectRoundTrip) {
   // Representative rw profile objects of each width: the setter writes the exact wire bytes and
   // the (live) getter reads them back.

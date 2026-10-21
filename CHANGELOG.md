@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.95] - 2026-10-21
+
 ### Added
 
 - **A container image on Docker Hub.** Selected versions are published as `synapticon/motion-master:<version>` for `linux/amd64` and `linux/arm64` under one tag. Name the version to run it. There is no `latest` tag for this software, and not every release has an image. The arm64 image has no MU_3SL library, because iC-Haus builds it for x86_64 only, so the iC-MU calibration is not available in that image. (#111)
@@ -901,7 +903,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.94...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.95...HEAD
+[6.0.0-alpha.95]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.94...v6.0.0-alpha.95
 [6.0.0-alpha.94]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.93...v6.0.0-alpha.94
 [6.0.0-alpha.93]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.92...v6.0.0-alpha.93
 [6.0.0-alpha.92]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.91...v6.0.0-alpha.92

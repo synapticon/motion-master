@@ -18,7 +18,7 @@ Design documents (the Mermaid diagrams render natively on GitHub):
 
 ## Installation
 
-Release packages are on the [Releases](../../releases) page: a tarball, a `.deb` and an `.rpm` for Linux x86-64 and aarch64, a zip for Windows x64, and a tarball for macOS on Apple Silicon. Selected versions are on Docker Hub as well, as `synapticon/motion-master`, for amd64 and arm64.
+Release packages are on the [Releases](../../releases) page: a tarball, a `.deb` and an `.rpm` for Linux x86-64 and aarch64, a zip for Windows x64, and a tarball for macOS on Apple Silicon. Selected versions are on Docker Hub as well, as `synapticon/motion-master`, for amd64 and arm64. See [Docker](#docker) under Usage for the run command.
 
 [Installing Motion Master](docs/INSTALLATION.md) covers each of those paths. Read it for the steps on your platform, for the [auto-tuning](docs/INSTALLATION.md#auto-tuning) executable that every install path downloads, and for the [capabilities](docs/INSTALLATION.md#linux-capabilities) the binary needs on Linux.
 
@@ -59,6 +59,37 @@ Use the `local.motion-master.synapticon.com` name rather than `localhost` — it
 To skip that step on every start, put a `fieldbus` block in a [config file](#configuration) and the driver initialises at startup instead.
 
 The server also serves its own OpenAPI spec at `GET /api/swagger.yml` — the contract for everything above, and what the [reference clients](#clients) read at startup so they never hold a hardcoded URL. The same spec is rendered as browsable API Docs inside the console.
+
+### Docker
+
+Selected versions are on [Docker Hub](https://hub.docker.com/r/synapticon/motion-master/tags) as `synapticon/motion-master`, for `linux/amd64` and `linux/arm64`. One tag covers both architectures, and Docker picks the image for the host. The tag is the bare version, with no `v`. There is no `latest` tag, so name the version in every command. The example below runs `6.0.0-alpha.95`:
+
+```bash
+docker run --rm --network host \
+  --cap-add NET_RAW --cap-add NET_ADMIN \
+  --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 \
+  synapticon/motion-master:6.0.0-alpha.95
+```
+
+`docker run` pulls the image when it is not present. The server then serves the same two ports as a package install, and the console at `https://motion-master.synapticon.com/apps/console/` reaches it the same way. The image holds the TLS certificate and the auto-tuning executable, so there is no setup step. An older image renews an expired certificate at start.
+
+Three flags in that command have no equivalent on a package install:
+
+- `--network host` is required. The server binds to `127.0.0.1`, and the port forwarding of Docker never reaches the loopback interface.
+- The four `--cap-add` flags grant what `setcap` grants on a package install, because a container ignores file capabilities. Without `NET_RAW` and `NET_ADMIN`, `POST /api/init` fails for the SOEM driver. Without `SYS_NICE` and `IPC_LOCK`, the game loop runs without real-time priority and logs a warning.
+- `--ulimit memlock=-1` is required with `IPC_LOCK`. Without it the kernel rejects `mlockall()`, even when the capability is present.
+
+To apply a [config file](#configuration), for example to initialise the fieldbus at start, mount the file and name it in `MM_CONFIG`. Do not pass `--config` after the image name. The entrypoint passes that flag itself, and the binary refuses a second one.
+
+```bash
+docker run --rm --network host \
+  --cap-add NET_RAW --cap-add NET_ADMIN \
+  --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 \
+  -v "$(pwd)/motion-master.jsonc:/config.jsonc:ro" -e MM_CONFIG=/config.jsonc \
+  synapticon/motion-master:6.0.0-alpha.95
+```
+
+Give `-v` an absolute source path. Docker reads a relative path as the name of a volume, and the container then sees an empty directory instead of your file. The parameter cache, the log file and the `.mmpd` dumps live under `/root/.cache/motion-master` in the container. Mount a host directory there to keep them across runs. [Installation → Docker](docs/INSTALLATION.md#docker) covers the certificate discovery order, and how to replace the certificate on an older image.
 
 ### Prerequisites
 

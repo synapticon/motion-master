@@ -186,14 +186,14 @@ See [Linux capabilities](#linux-capabilities) for what each one actually does an
 
 `--ulimit memlock=-1` is also required alongside `CAP_IPC_LOCK` — without it the kernel rejects `mlockall()` even when the capability is present.
 
-To auto-initialise the fieldbus in a container, mount a JSONC config with a `fieldbus` block (`{ "driver": "soem", "adapter": "eth0" }`) and pass `--config` — there are no `--driver`/`--adapter` flags. Omit it to defer initialisation to `POST /api/init` at runtime.
+To auto-initialise the fieldbus in a container, mount a JSONC config with a `fieldbus` block (`{ "driver": "soem", "adapter": "eth0" }`) and name it in the `MM_CONFIG` environment variable. There are no `--driver`/`--adapter` flags. Do not pass `--config` after the image name: the entrypoint passes that flag itself, and the binary refuses a second one. Omit the config to defer initialisation to `POST /api/init` at runtime.
 
 ```bash
 # EtherCAT only (no RT requirement on the host kernel)
 docker run --rm --network host \
   --cap-add NET_ADMIN --cap-add NET_RAW \
-  -v "$(pwd)/motion-master.jsonc:/config.jsonc:ro" \
-  motion-master --config /config.jsonc
+  -v "$(pwd)/motion-master.jsonc:/config.jsonc:ro" -e MM_CONFIG=/config.jsonc \
+  motion-master
 
 # RT scheduling only (PREEMPT_RT host kernel required)
 docker run --rm --network host \
@@ -204,8 +204,8 @@ docker run --rm --network host \
 docker run --rm --network host \
   --cap-add NET_ADMIN --cap-add NET_RAW \
   --cap-add SYS_NICE --cap-add IPC_LOCK --ulimit memlock=-1 \
-  -v "$(pwd)/motion-master.jsonc:/config.jsonc:ro" \
-  motion-master --config /config.jsonc
+  -v "$(pwd)/motion-master.jsonc:/config.jsonc:ro" -e MM_CONFIG=/config.jsonc \
+  motion-master
 ```
 
 ### Run from a registry

@@ -850,7 +850,8 @@ TEST(Cia402Drive, ReadStatusReadsEveryTargetWhateverTheMode) {
   driver.store[Cia402FakeDriver::key(Object::kTargetTorque, 0)] = u16le(static_cast<uint16_t>(-33));
   Cia402Drive drive(device);
 
-  for (const uint8_t mode : {0, 1, 6, 8, 9, 10}) {
+  for (const uint8_t mode :
+       {uint8_t{0}, uint8_t{1}, uint8_t{6}, uint8_t{8}, uint8_t{9}, uint8_t{10}}) {
     driver.store[Cia402FakeDriver::key(Object::kModeOfOperationDisplay, 0)] = {mode};
     auto s = drive.readStatus();
     ASSERT_TRUE(s.has_value()) << s.error();

@@ -4642,7 +4642,9 @@ components:
     Cia402Status:
       type: object
       description: A CiA402 drive's control snapshot — its state machine, control words, and mode.
-      required: [state, statusword, controlword, modeOfOperation, modeName, target, errorDescription]
+      required:
+        [state, statusword, controlword, modeOfOperation, modeName, target, actualPosition,
+         actualVelocity, actualTorque, errorDescription]
       properties:
         state:
           type: string
@@ -4674,6 +4676,30 @@ components:
             velocity 0x60FF (PV/CSV), or torque 0x6071 (PT/CST), widened to INTEGER32. 0 only when
             the active mode has no linear setpoint (NoMode / Homing / vl / ip).
           example: 100000
+        actualPosition:
+          type: integer
+          nullable: true
+          description: >-
+            Position actual value (0x6064), INTEGER32, in the drive's own position units. Read
+            from the process image while the device exchanges, else over SDO. `null` when the
+            drive has no such object or the read failed.
+          example: 99874
+        actualVelocity:
+          type: integer
+          nullable: true
+          description: >-
+            Velocity actual value (0x606C), INTEGER32, in the drive's own velocity units. Read
+            from the process image while the device exchanges, else over SDO. `null` when the
+            drive has no such object or the read failed.
+          example: 249000
+        actualTorque:
+          type: integer
+          nullable: true
+          description: >-
+            Torque actual value (0x6077), INTEGER16 widened to INTEGER32, in per mille of rated
+            torque. Read from the process image while the device exchanges, else over SDO. `null`
+            when the drive has no such object or the read failed.
+          example: -150
         errorDescription:
           type: string
           nullable: true

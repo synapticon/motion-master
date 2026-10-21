@@ -19,6 +19,9 @@ void to_json(nlohmann::json& j, const Cia402Status& s) {
       {"modeName", cia402::toString(s.modeOfOperationDisplay)},
       // 0 only when the active mode has no linear setpoint (NoMode / Homing).
       {"target", s.target},
+      {"actualPosition", s.actualPosition ? nlohmann::json(*s.actualPosition) : nullptr},
+      {"actualVelocity", s.actualVelocity ? nlohmann::json(*s.actualVelocity) : nullptr},
+      {"actualTorque", s.actualTorque ? nlohmann::json(*s.actualTorque) : nullptr},
       {"errorDescription", s.errorDescription ? nlohmann::json(*s.errorDescription) : nullptr},
   };
 }
@@ -222,7 +225,24 @@ std::expected<Cia402Status, std::string> Cia402Drive::readStatus() const {
     case cia402::OperationMode::kInterpolatedPosition:
       break;
   }
-  return Cia402Status{cia402::decodeState(*sw), *sw, *cw, *mode, target, std::nullopt};
+  // The actual values are optional on purpose: a drive without one of the objects, or a read that
+  // fails, must not fail the whole status, which the state machine controls depend on.
+  auto optional = [](auto&& r) -> std::optional<int32_t> {
+    if (r) {
+      return static_cast<int32_t>(*r);
+    }
+    return std::nullopt;
+  };
+  Cia402Status status;
+  status.state = cia402::decodeState(*sw);
+  status.statusword = *sw;
+  status.controlword = *cw;
+  status.modeOfOperationDisplay = *mode;
+  status.target = target;
+  status.actualPosition = optional(positionActualValue());
+  status.actualVelocity = optional(velocityActualValue());
+  status.actualTorque = optional(torqueActualValue());
+  return status;
 }
 
 std::expected<void, std::string> Cia402Drive::applyCommand(uint16_t command) {

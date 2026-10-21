@@ -791,6 +791,10 @@ TEST(Cia402Drive, SetTargetTorqueAcceptsNegative) {
 
 TEST(Cia402Drive, ReadStatusReportsAllFields) {
   Cia402FakeDriver driver;
+  // Torque actual (0x6077) is INTEGER16; the status widens it to int32 with its sign. Programmed
+  // before the device enumerates, so the object is in its dictionary.
+  driver.programObject(Object::kTorqueActualValue, 0, ObjectDataType::INTEGER16,
+                       u16le(static_cast<uint16_t>(static_cast<int16_t>(-150))));
   Device device = makeCia402Device(driver);
   driver.store[Cia402FakeDriver::key(Object::kStatusword, 0)] =
       u16le(statuswordFor(State::kOperationEnabled));
@@ -798,6 +802,8 @@ TEST(Cia402Drive, ReadStatusReportsAllFields) {
   driver.store[Cia402FakeDriver::key(Object::kModeOfOperationDisplay, 0)] = {9};  // CSV
   // CSV reads its setpoint from target velocity (0x60FF, INTEGER32) into status.target.
   driver.store[Cia402FakeDriver::key(Object::kTargetVelocity, 0)] = i32le(250000);
+  driver.store[Cia402FakeDriver::key(Object::kPositionActualValue, 0)] = i32le(-123456);
+  driver.store[Cia402FakeDriver::key(Object::kVelocityActualValue, 0)] = i32le(249000);
   Cia402Drive drive(device);
 
   auto status = drive.readStatus();
@@ -807,6 +813,27 @@ TEST(Cia402Drive, ReadStatusReportsAllFields) {
   EXPECT_EQ(status->controlword, 0x000F);
   EXPECT_EQ(status->modeOfOperationDisplay, OperationMode::kCyclicSyncVelocity);
   EXPECT_EQ(status->target, 250000);
+  EXPECT_EQ(status->actualPosition, -123456);
+  EXPECT_EQ(status->actualVelocity, 249000);
+  EXPECT_EQ(status->actualTorque, -150);
+}
+
+TEST(Cia402Drive, ReadStatusLeavesAMissingActualValueEmpty) {
+  Cia402FakeDriver driver;
+  // The fixture programs no torque actual value (0x6077), so a drive without the object is the
+  // default. The status still succeeds, with that one value empty.
+  Device device = makeCia402Device(driver);
+  Cia402Drive drive(device);
+
+  auto status = drive.readStatus();
+  ASSERT_TRUE(status.has_value()) << status.error();
+  EXPECT_TRUE(status->actualPosition.has_value());
+  EXPECT_TRUE(status->actualVelocity.has_value());
+  EXPECT_FALSE(status->actualTorque.has_value());
+
+  nlohmann::json j = *status;
+  EXPECT_TRUE(j.at("actualTorque").is_null());
+  EXPECT_EQ(j.at("actualPosition").get<int32_t>(), 0);
 }
 
 TEST(Cia402Drive, ReadStatusTargetTracksActiveModeQuantity) {
@@ -1006,8 +1033,14 @@ TEST(Cia402Drive, StructSetterAbortsOnFirstFailure) {
 }
 
 TEST(Cia402Status, JsonEmitsNamesAndNumbers) {
-  const mm::node::Cia402Status s{State::kOperationEnabled,           0x1237, 0x000F,
-                                 OperationMode::kCyclicSyncVelocity, 100000, std::nullopt};
+  mm::node::Cia402Status s;
+  s.state = State::kOperationEnabled;
+  s.statusword = 0x1237;
+  s.controlword = 0x000F;
+  s.modeOfOperationDisplay = OperationMode::kCyclicSyncVelocity;
+  s.target = 100000;
+  s.actualPosition = 99874;
+  s.actualVelocity = 249000;
   const nlohmann::json j = s;
   EXPECT_EQ(j.at("state"), "OperationEnabled");
   EXPECT_EQ(j.at("statusword"), 0x1237);
@@ -1015,11 +1048,16 @@ TEST(Cia402Status, JsonEmitsNamesAndNumbers) {
   EXPECT_EQ(j.at("modeOfOperation"), 9);
   EXPECT_EQ(j.at("modeName"), "CyclicSyncVelocity");
   EXPECT_EQ(j.at("target"), 100000);
+  EXPECT_EQ(j.at("actualPosition"), 99874);
+  EXPECT_EQ(j.at("actualVelocity"), 249000);
+  EXPECT_TRUE(j.at("actualTorque").is_null());
   EXPECT_TRUE(j.at("errorDescription").is_null());
 }
 
 TEST(Cia402Status, JsonEmitsErrorDescriptionWhenPresent) {
-  mm::node::Cia402Status s{State::kFault, 0x0218, 0x0000, OperationMode::kNoMode, 0, std::nullopt};
+  mm::node::Cia402Status s;
+  s.state = State::kFault;
+  s.statusword = 0x0218;
   s.errorDescription = "CyclicHb";
   const nlohmann::json j = s;
   EXPECT_EQ(j.at("errorDescription"), "CyclicHb");

@@ -53,6 +53,21 @@ export interface Cia402Status {
    */
   target: number;
   /**
+   * Position actual value (0x6064), INTEGER32, in the drive's own position units. Read from the process image while the device exchanges, else over SDO. `null` when the drive has no such object or the read failed.
+   * @example 99874
+   */
+  actualPosition: number | null;
+  /**
+   * Velocity actual value (0x606C), INTEGER32, in the drive's own velocity units. Read from the process image while the device exchanges, else over SDO. `null` when the drive has no such object or the read failed.
+   * @example 249000
+   */
+  actualVelocity: number | null;
+  /**
+   * Torque actual value (0x6077), INTEGER16 widened to INTEGER32, in per mille of rated torque. Read from the process image while the device exchanges, else over SDO. `null` when the drive has no such object or the read failed.
+   * @example -150
+   */
+  actualTorque: number | null;
+  /**
    * The drive's own short description of its last fault, read from the vendor object that holds one. A SOMANET drive keeps it in 0x203F:01 and reports an empty string while there is no fault. `null` when the drive has no such object or the read failed.
    * @example "CyclicHb"
    */

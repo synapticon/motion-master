@@ -25,6 +25,12 @@ struct Cia402Status {
   /// (PV/CSV), or torque 0x6071 (PT/CST), widened to int32. 0 only when the active mode has no
   /// linear setpoint (NoMode / Homing). Lets a UI seed its target input from the drive.
   int32_t target = 0;
+  /// Actual position (0x6064), velocity (0x606C) and torque (0x6077, INTEGER16 widened to int32).
+  /// Each comes from the process image while the device exchanges, else over SDO. @c nullopt means
+  /// the drive has no such object, or the read failed.
+  std::optional<int32_t> actualPosition;
+  std::optional<int32_t> actualVelocity;
+  std::optional<int32_t> actualTorque;
   /// The drive's own description of its last fault, when the drive has an object for one. SOMANET
   /// keeps a short text in 0x203F:01, empty while there is no fault. @c nullopt means the drive
   /// has no such object, or the read failed; an empty string means the drive reports no fault.

@@ -17,6 +17,13 @@ export const barBtn =
   'cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
 export const barBtnPrimary = `${barBtn} bg-syn-red text-white hover:bg-ocean`
 export const barBtnOutline = `${barBtn} border border-syn-red text-syn-red hover:bg-syn-red hover:text-white`
+// An icon-only button: the same height, square, for a secondary action whose tooltip and aria-label
+// carry the words.
+export const barBtnIcon =
+  'inline-flex shrink-0 items-center justify-center h-[30px] w-[30px] border cursor-pointer ' +
+  'transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+export const barBtnIconOutline = `${barBtnIcon} border-syn-red text-syn-red hover:bg-syn-red hover:text-white`
+export const barBtnIconPrimary = `${barBtnIcon} border-syn-red bg-syn-red text-white hover:bg-ocean hover:border-ocean`
 
 // Selects share the buttons' explicit height for the reason in barBtn — a control pair that
 // derives its height from content does not agree with one that does not.

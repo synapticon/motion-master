@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **A container image on Docker Hub.** Selected versions are published as `synapticon/motion-master:<version>` for `linux/amd64` and `linux/arm64` under one tag. Name the version to run it. There is no `latest` tag for this software, and not every release has an image. The arm64 image has no MU_3SL library, because iC-Haus builds it for x86_64 only, so the iC-MU calibration is not available in that image. (#111)
+
 ## [6.0.0-alpha.94] - 2026-10-21
 
 ### Fixed

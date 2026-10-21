@@ -138,7 +138,7 @@ Note that the hosted apps are pinned to the latest `v*` tag rather than to `main
 
 ## Docker image
 
-Build the runtime image from a source checkout:
+Build the runtime image from a source checkout. The build runs for the architecture of the Docker host, amd64 or arm64:
 
 ```bash
 git submodule update --init --recursive
@@ -149,27 +149,22 @@ The build fetches the current `cert.pem`/`key.pem` from the rolling `tls-cert` r
 
 ### Publishing to Docker Hub
 
-`tools/docker-build.sh` builds the image from the current `VERSION` and tags it with the **bare** version (Docker convention — no `v` prefix) plus a rolling tag: `latest` for a stable release, or `next` for a prerelease (a `-` in the version, e.g. `6.0.0-alpha.34`). It defaults to the `markosankovic/motion-master` repository; override with an argument or the `IMAGE` env var.
+`docker-publish.yml` publishes the image for one released version. It is started by hand, because the pre-release versions follow each other fast and not every one needs an image. `release.yml` holds a commented job that calls it for every release. Two jobs build the image: one on an `ubuntu-24.04` runner for `linux/amd64`, and one on an `ubuntu-24.04-arm` runner for `linux/arm64`. Each architecture builds on a native runner because a vcpkg build under emulation takes hours. Each job pushes its image by digest, starts it, and reads `GET /api/version` from it. A third job joins the two digests into one manifest with `docker buildx imagetools create` and tags it `synapticon/motion-master:<version>`, the bare version with no `v`.
+
+Start it from the Actions page, or from a shell. The tag `v<version>` must exist, because the workflow checks that tag out:
 
 ```bash
-# 1. Authenticate — use a Docker Hub access token, not your password.
-#    Create one at Docker Hub → Account Settings → Personal access tokens.
-echo "$DOCKERHUB_TOKEN" | docker login -u markosankovic --password-stdin
-#    (or interactively, pasting the token at the password prompt)
-docker login -u markosankovic
-
-# 2. Build + tag from the current VERSION (version tag + latest/next).
-./tools/docker-build.sh
-#    …or publish under a different repository:
-IMAGE=myuser/motion-master ./tools/docker-build.sh
-
-# 3. Push both tags — the script prints these exact commands for the built version.
-#    The repo is auto-created (public) on first push.
-docker push markosankovic/motion-master:6.0.0-alpha.34
-docker push markosankovic/motion-master:next
+gh workflow run docker-publish.yml -f version=6.0.0-alpha.95
 ```
 
-Prereleases move `next`, not `latest`, so a plain `docker pull markosankovic/motion-master` (which resolves `latest`) always lands on the newest **stable** image.
+The version is the only tag. `latest` on `synapticon/motion-master` is not this software, and machines still pull it, so the workflow never moves it. The jobs read the organisation secrets `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN`.
+
+`tools/docker-build.sh` builds the same image for the architecture of your Docker host and tags it with the current `VERSION`. It defaults to the `synapticon/motion-master` repository. Override that with an argument or the `IMAGE` env var. A push needs `docker login` with a Docker Hub access token, and the script prints the push command.
+
+```bash
+./tools/docker-build.sh
+IMAGE=myuser/motion-master ./tools/docker-build.sh
+```
 
 ## Extending the API (C++ routes)
 
@@ -217,7 +212,7 @@ The shell scripts target Linux and macOS, and all of them default to the `x64-li
 | `./tools/release-stats.sh` | Write `STATS.md`: the download count of every release asset, read from the GitHub API (needs `gh` and `jq`) |
 | `./tools/bump-version.sh <version>` | Bump the project semver everywhere (see [Versioning](RELEASING.md#versioning)) |
 | `./tools/package.sh [preset]` | Build `.deb` and `.rpm` packages (requires `cert.pem`/`key.pem` in the build dir) |
-| `./tools/docker-build.sh [image]` | Build + tag the Docker image from the current `VERSION` (version tag + `latest`/`next`) |
+| `./tools/docker-build.sh [image]` | Build the Docker image for the host architecture and tag it with the current `VERSION` |
 
 ### Code Quality Tools
 

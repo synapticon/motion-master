@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.96] - 2026-10-21
+
 ### Added
 
 - **A motion row in the device bar.** On every device page, a CiA 402 drive in CST, CSV or CSP gets a second row under the status row: the actual position, velocity and torque, and a control for the target of the active mode. In CST and CSV a throttle sends the target while it is dragged and sends 0 when it is let go, and an input with Set sends one exact value. In CSP a slider runs one revolution of the position encoder either side of the actual position, with a Recentre button, and an input with Go sends one exact position. Every write is a step the drive takes at once; smoothed motion is a later change. (#88)
@@ -910,7 +912,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.95...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.96...HEAD
+[6.0.0-alpha.96]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.95...v6.0.0-alpha.96
 [6.0.0-alpha.95]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.94...v6.0.0-alpha.95
 [6.0.0-alpha.94]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.93...v6.0.0-alpha.94
 [6.0.0-alpha.93]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.92...v6.0.0-alpha.93

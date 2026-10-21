@@ -4349,10 +4349,15 @@ rule the fixed build failed the FoE write of the application three times and lef
 0x0014, the row #113 recorded for 1 % loss. A fresh install from INIT repaired it without a power
 cycle, every time. The rest of that case is in the firmware issue synapticon/somanet_software#5817.
 
-**Still at one `EC_TIMEOUTRET`:** the ESC diagnostics, the watchdog, the SII reads, the EEPROM
-reads inside `updateMailboxSyncManagers`, and the `ecx_readstate` polls of the transition loop. A
-late frame fails one read of the first four, and none of them ends a procedure. A late frame in the
-transition loop costs one 100 ms poll. None was seen to fail in 60 rounds under the 25 ms rule.
+**Still at one `EC_TIMEOUTRET`:** the ESC diagnostics, the watchdog route, the SII read, the raw
+register routes, the wire count, and the `ecx_readstate` polls of the transition loop. A late frame
+fails one request of the first five, and none of them gates a state change. A late frame in the
+transition loop costs one 100 ms poll. The EEPROM reads inside `updateMailboxSyncManagers` need no
+change, and the reason is in SOEM's source, not in the count: every datagram of
+`ecx_readeepromFP`, `ecx_readeeprom1` and `ecx_readeeprom2` is sent again while its return is 0,
+up to `EC_DEFAULTRETRIES` (3) times, and the busy poll repeats its read until `EC_TIMEOUTEEP`
+(20 ms) expires. So a late frame costs those reads one 2 ms attempt, which is what the probe and
+the sync manager writes lacked. None of the six failed in 60 rounds under the 25 ms rule.
 
 **Method.** The reproduction ran the reporter's version on the reporter's conditions before any
 fix: 24 rounds of the real procedure through the HTTP API, two packages in turn, with netem on

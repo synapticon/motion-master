@@ -4293,3 +4293,70 @@ rule are not candidates: they exist for two SOMANET stacks and keep a vendor fla
 
 **Not part of this.** A move to a newer SOEM. The pinned commit stays until a bump has a reason,
 and the fork makes that bump a rebase instead of twenty string matches.
+
+## Session 2026-10-21 — An Integro install fails on a late frame, not on its restart (as-built)
+
+Issue #115: on one desk PC, 4 of 25 Integro installs ended failed at the BOOT exit with the
+firmware written, "could not reach INIT: the device reported BOOT rather than INIT". The report
+read the boot code and found a restart the master did not expect: an INIT request in BOOT after a
+com binary makes the SoC ask the netX for a reset 500 ms away, and only then report INIT
+(`AppECS_Functions_Boot.c`, `Boot_Handle_ESM_AL_Control_Changed_Ind`). The master gave the step to
+INIT 10 s and recovered a lost station address only on the step to PRE-OP. The proposed fix was to
+treat both steps alike. That is built, and it is not what failed.
+
+**The restart is real, and Session 2026-08-07 put it on the wrong step.** On the bench Integro,
+every install took the same path: INIT reached about 100 ms after the com binary was written, then
+the netX reset landed during the step to PRE-OP, where the driver already re-addressed the device.
+The netX is off the bus for 6 s when the same build is written again and 17 to 19 s when the build
+changes. The step to PRE-OP restarts the SoC only, and the boot code says the netX does not reset
+there. So the address loss that the 2026-08-07 session attributed to the step to PRE-OP was this
+reset, 500 ms late. A Circulo or Node has no com binary and no netX, so only the step to PRE-OP
+restarts it. The two processors leave BOOT differently, and no comment may describe one restart.
+
+**A clean bus did not reproduce it.** 24 of 24 installs passed on alpha.93 and 10 of 10 on
+alpha.91, the version of the report, with two packages written in turn. The reporter's PC is the
+one of #113: Ubuntu without the real-time patch, a Realtek r8169 NIC, and frames that often come
+back later than the 2 ms the master waits for them.
+
+**Late frames reproduced it, three times over, and each time it was a different datagram.** The
+rule was netem on the bus adapter, 2 % of the frames delayed. With 150 ms, alpha.91 segfaulted in
+`ecx_mbxreceive` 3 s into the first FoE write, the crash #114 fixed, and the drive was left with
+half an application and AL status 0x0014. With 25 ms on alpha.93 plus the proposed fix, round 2
+failed in 19 s with "the device reported UNKNOWN rather than INIT", 2 ms after the driver logged
+"reached state 0x01". The device had reached INIT. `probeReachability` sent one frame and waited
+one `EC_TIMEOUTRET`, the answer came 25 ms later, the device read as absent, and `leaveBoot` gave
+up at once. 19 s is the install without any timeout waited out, which is what the report's 23 s
+was. With the probe fixed, 2 of 12 failed with AL status 0x0016 and 0x0015, Invalid mailbox
+configuration: a sync manager write got no frame in 2 ms, and with netem's reorder the delayed
+write left the host after the state request, so the slave judged its mailbox before the write
+arrived. The report saw 0x0016 once and could not explain it. With the sync manager writes fixed
+too, 24 of 24 passed under the same rule.
+
+**The change: a register datagram that a state change depends on waits for a late frame.**
+`kLateFrameTimeoutUs` in `soem_mailbox.h` is 100 ms, the `EC_TIMEOUTLATE` that #114 gave a
+mailbox transfer. It applies to the two reads of `probeReachability`, the two of
+`restoreStationAddress`, the status read of `readStates`, and the four sync manager writes of
+`updateMailboxSyncManagers`. SOEM's `ecx_srconfirm` sends the datagram again every
+`EC_TIMEOUTRET` until the total expires, and a late answer to an earlier copy is accepted because
+it carries the same header, which is the check #114 added. A register datagram is safe to send
+again. A device that is really absent now costs 100 ms per datagram, which only the control plane
+pays. The step to INIT also gets the address recovery and the 30 s of the step to PRE-OP, as the
+report proposed. That never triggered in 60 rounds, and stays as the cover for a master that reads
+INIT later than 500 ms after it asked.
+
+**Frames later than 100 ms are lost frames, and that is a different problem.** Under the 150 ms
+rule the fixed build failed the FoE write of the application three times and left the drive at
+0x0014, the row #113 recorded for 1 % loss. A fresh install from INIT repaired it without a power
+cycle, every time. The rest of that case is in the firmware issue synapticon/somanet_software#5817.
+
+**Still at one `EC_TIMEOUTRET`:** the ESC diagnostics, the watchdog, the SII reads, the EEPROM
+reads inside `updateMailboxSyncManagers`, and the `ecx_readstate` polls of the transition loop. A
+late frame fails one read of the first four, and none of them ends a procedure. A late frame in the
+transition loop costs one 100 ms poll. None was seen to fail in 60 rounds under the 25 ms rule.
+
+**Method.** The reproduction ran the reporter's version on the reporter's conditions before any
+fix: 24 rounds of the real procedure through the HTTP API, two packages in turn, with netem on
+during each install. A clean run of the fix proves nothing about this class of defect, and a CI
+that does not induce late frames does not test it. The HIL tests for the Belgrade office get a
+netem leg for that reason. The loop script is `install-loop.sh` of this session, kept outside the
+repository for now.

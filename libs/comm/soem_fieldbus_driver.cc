@@ -77,12 +77,12 @@ int foeProgressHook(uint16 slave, int packetnumber, int datasize) {
 Reachability probeReachability(ecx_contextt* ctx, uint16_t slave) {
   uint16_t probe = 0;
   if (ecx_FPRD(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_ALSTAT, sizeof(probe), &probe,
-               EC_TIMEOUTRET) > 0) {
+               kLateFrameTimeoutUs) > 0) {
     return Reachability::Answering;
   }
   // Auto-increment address: 0 for slave 1, -1 for slave 2, and so on (ec_config.c's ADPh).
   if (ecx_APRD(&ctx->port, static_cast<uint16_t>(1 - slave), ECT_REG_ALSTAT, sizeof(probe), &probe,
-               EC_TIMEOUTRET) > 0) {
+               kLateFrameTimeoutUs) > 0) {
     return Reachability::AddressLost;
   }
   return Reachability::NotAnswering;
@@ -754,7 +754,7 @@ SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
     ec_alstatust status{};
     ec_slavet& slave = ctx_->slavelist[pos];
     if (ecx_FPRD(&ctx_->port, slave.configadr, ECT_REG_ALSTAT, sizeof(status), &status,
-                 EC_TIMEOUTRET) > 0) {
+                 kLateFrameTimeoutUs) > 0) {
       slave.state = etohs(status.alstatus);
       slave.ALstatuscode = etohs(status.alstatuscode);
     }
@@ -1718,14 +1718,15 @@ enum class AddressState {
 AddressState restoreStationAddress(ecx_contextt* ctx, uint16_t slave) {
   const uint16_t configadr = ctx->slavelist[slave].configadr;
   uint16_t probe = 0;
-  if (ecx_FPRD(&ctx->port, configadr, ECT_REG_ALSTAT, sizeof(probe), &probe, EC_TIMEOUTRET) > 0) {
+  if (ecx_FPRD(&ctx->port, configadr, ECT_REG_ALSTAT, sizeof(probe), &probe, kLateFrameTimeoutUs) >
+      0) {
     return AddressState::Answering;
   }
   // Auto-increment address: 0 for slave 1, -1 for slave 2, and so on (ec_config.c's ADPh).
   const uint16_t autoIncrement = static_cast<uint16_t>(1 - slave);
   ecx_APWRw(&ctx->port, autoIncrement, ECT_REG_STADR, htoes(configadr), EC_TIMEOUTRET3);
-  const bool reachable =
-      ecx_FPRD(&ctx->port, configadr, ECT_REG_ALSTAT, sizeof(probe), &probe, EC_TIMEOUTRET) > 0;
+  const bool reachable = ecx_FPRD(&ctx->port, configadr, ECT_REG_ALSTAT, sizeof(probe), &probe,
+                                  kLateFrameTimeoutUs) > 0;
   spdlog::info(
       "Device {}: it had reset and lost its station address; re-assigned 0x{:04X} at its "
       "wire position — {}",
@@ -1795,8 +1796,17 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
                                            std::function<void()> tick,
                                            std::function<bool()> shouldAbort) {
   // A slave that lost its station address cannot receive the request, so commanding it only waits
-  // out the timeout. The exception is a slave this driver sent to BOOT and now wants in PRE-OP:
-  // leaving BOOT restarts it, and the resend loop below gives it its address back.
+  // out the timeout. The exception is a slave this driver sent to BOOT and now asks to leave it,
+  // because either step out of BOOT can restart the device, and the resend loop below gives it its
+  // address back. The step to PRE-OP makes the bootloader hand over to the application by a
+  // restart. The step to INIT restarts the netX of an Integro that got a new com binary: its boot
+  // code asks the netX for a reset 500 ms away and only then reports INIT, so the device can be
+  // gone before the master reads INIT (somanet_software, AppECS_Functions_Boot.c,
+  // Boot_Handle_ESM_AL_Control_Changed_Ind).
+  const bool leavesBoot = targetState == EtherCatState::Init || targetState == EtherCatState::PreOp;
+  const auto mayRestart = [this, leavesBoot](uint16_t pos) {
+    return leavesBoot && bootMailboxSlaves_.contains(pos);
+  };
   std::vector<uint16_t> positions;
   {
     const auto lock = controlPlane_.lockBus();
@@ -1806,10 +1816,8 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
     }
     for (const uint16_t pos : requested) {
       const Reachability reachability = probeReachability(ctx_.get(), pos);
-      const bool recoverable =
-          targetState == EtherCatState::PreOp && bootMailboxSlaves_.contains(pos);
       if (reachability == Reachability::Answering ||
-          (reachability == Reachability::AddressLost && recoverable)) {
+          (reachability == Reachability::AddressLost && mayRestart(pos))) {
         positions.push_back(pos);
       } else {
         logUnreachable(ctx_.get(), pos, reachability);
@@ -1988,11 +1996,11 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
     if (std::chrono::steady_clock::now() - lastResend > resendInterval) {
       for (uint16_t pos : pending) {
         uint16_t state = ctx_->slavelist[pos].state;
-        // Leaving BOOT for PRE-OP makes the bootloader hand over to the newly written application
-        // by restarting the device, and the restart clears both the station address the master
-        // assigned and the mailbox sync managers it programmed. So for a slave we drove into BOOT,
-        // check the address on every resend and reprogram the sync managers if it turns out to have
-        // restarted.
+        // A restart on the way out of BOOT clears both the station address the master assigned
+        // and the mailbox sync managers it programmed. So for a slave we drove into BOOT, check
+        // the address on every resend of either step out, and reprogram the sync managers if it
+        // turns out to have restarted. A slave asked for INIT gets its address back and nothing
+        // else: it stays in the boot set, so the step to PRE-OP programs its sync managers.
         //
         // Keyed on whether the slave answers, never on its cached AL status: the cache holds
         // whatever the master last wrote into it when the slave stops answering — the very target
@@ -2001,8 +2009,8 @@ void SoemFieldbusDriver::transitionToState(const std::vector<uint16_t>& requeste
         // probes instead, and reports Answering when nothing needed doing, so this costs one
         // register read per resend and reprograms only a slave that genuinely restarted (doing it
         // otherwise seizes EEPROM from the slave's own PDI).
-        if (targetState == EtherCatState::PreOp && bootMailboxSlaves_.contains(pos) &&
-            restoreStationAddress(ctx_.get(), pos) == AddressState::Reassigned) {
+        if (mayRestart(pos) && restoreStationAddress(ctx_.get(), pos) == AddressState::Reassigned &&
+            targetState == EtherCatState::PreOp) {
           spdlog::info("Device {}: reprogramming mailbox sync managers after its restart", pos);
           updateMailboxSyncManagers(ctx_.get(), pos, EtherCatState::PreOp);
         }

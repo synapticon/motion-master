@@ -69,6 +69,21 @@ std::vector<uint8_t> makeFoeAbortRequest(uint8_t counter);
 /// Call with the driver's control-plane mutex held.
 void abortFoeTransfer(ecx_contextt* ctx, uint16_t slavePosition);
 
+/// @brief How long a register read or write that a state change depends on waits for its frame,
+///        in microseconds.
+///
+/// A frame later than EC_TIMEOUTRET is not a lost frame. On a desk PC with a Realtek NIC and no
+/// real-time kernel, a frame often comes back later than that (#113). With 2 % of the frames
+/// delayed by 25 ms, one such frame on a datagram that waited one EC_TIMEOUTRET did two things to
+/// an Integro firmware installation (#115): a read of the AL status made a device that had just
+/// reached INIT read as absent, and a sync manager write that left the host after the state
+/// request made the slave refuse PRE-OP with AL status 0x0016. A register datagram is safe to send
+/// again, so SOEM sends it again every EC_TIMEOUTRET until this expires, and a late answer to an
+/// earlier copy is accepted because it carries the same datagram header. The figure is
+/// EC_TIMEOUTLATE of ports/soem, the wait a mailbox transfer gives a late frame. A device that is
+/// really absent costs this much per datagram, which only the control plane pays.
+constexpr int kLateFrameTimeoutUs = 100'000;
+
 /// @brief Programs the mailbox sync managers of a slave for @p targetState.
 ///
 /// BOOT uses the bootstrap mailbox from the SII, which is larger than the standard one, and

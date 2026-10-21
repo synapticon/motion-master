@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.94] - 2026-10-21
+
 ### Fixed
 
 - **A firmware installation on an Integro no longer fails at the BOOT exit when a frame comes back late.** On a PC without a real-time kernel, a frame often comes back later than the 2 ms the master waited for it. After the firmware was written, one late answer to the read that checks the device made a device that had just reached INIT look absent, and the installation ended with "the device reported UNKNOWN rather than INIT". A late sync manager write made the drive refuse PRE-OP with AL status 0x0016. The register reads and writes that a state change depends on now wait up to 100 ms for their own frame, the same wait a mailbox transfer gets. With 2 % of the frames 25 ms late, 24 installs in a row on an Integro passed. (#115)
@@ -895,7 +897,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.93...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.94...HEAD
+[6.0.0-alpha.94]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.93...v6.0.0-alpha.94
 [6.0.0-alpha.93]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.92...v6.0.0-alpha.93
 [6.0.0-alpha.92]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.91...v6.0.0-alpha.92
 [6.0.0-alpha.91]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.90...v6.0.0-alpha.91

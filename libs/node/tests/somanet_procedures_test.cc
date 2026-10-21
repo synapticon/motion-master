@@ -2320,6 +2320,7 @@ class FirmwareFakeDriver : public FieldbusDriver {
   std::vector<std::string> removed;  ///< Targets of the fs-remove= pseudo-file.
   std::vector<uint8_t> siiWritten;   ///< Last EEPROM image written.
   std::vector<uint16_t> commanded;   ///< Every AL state commanded, in order.
+  std::vector<std::chrono::steady_clock::duration> timeouts;  ///< The timeout of each command.
 
   /// Programmed failures, keyed by the name as sent over FoE.
   std::map<std::string, int> transientFailures;  ///< Fails this many times, then succeeds.
@@ -2338,11 +2339,12 @@ class FirmwareFakeDriver : public FieldbusDriver {
     return std::vector<SlaveStateRaw>(positions.size(), SlaveStateRaw{alStatus_, 0});
   }
   void transitionToState(const std::vector<uint16_t>&, std::optional<EtherCatState>,
-                         EtherCatState target, std::chrono::steady_clock::duration,
+                         EtherCatState target, std::chrono::steady_clock::duration timeout,
                          std::chrono::steady_clock::duration, std::function<void()>,
                          std::function<bool()>) override {
     alStatus_ = static_cast<uint16_t>(target);
     commanded.push_back(alStatus_);
+    timeouts.push_back(timeout);
   }
 
   std::expected<void, mm::comm::FoeError> writeFile(uint16_t, const std::string& name,
@@ -2533,6 +2535,26 @@ TEST(FirmwareInstallationBody, WritesThePackageAndReturnsToPreOp) {
   for (const auto& step : reporter.steps()) {
     EXPECT_EQ(step.status, ProgressStatus::kSucceeded) << step.id;
   }
+}
+
+TEST(FirmwareInstallationBody, WaitsForARestartOnBothStepsOutOfBoot) {
+  FirmwareBus bus;
+  ProgressReporter reporter(mm::node::firmwareInstallationSteps());
+  std::stop_source source;
+
+  auto result =
+      runFirmwareInstallationProcedure(bus.dm, 1, reporter, source.get_token(), installRequest());
+  ASSERT_TRUE(result) << result.error();
+
+  // INIT and BOOT on the way in, INIT and PRE-OP on the way out. The two steps in are ordinary
+  // mailbox round trips. The two steps out each cover a restart: an Integro that got a com binary
+  // restarts its netX at the step to INIT, and every SOMANET drive restarts at the step to PRE-OP.
+  // After that reset the netX is off the bus for 6 to 19 s, measured on an ACTILINK-S.
+  ASSERT_EQ(bus.driver->timeouts.size(), 4u);
+  EXPECT_EQ(bus.driver->timeouts[0], bus.driver->timeouts[1]);
+  EXPECT_EQ(bus.driver->timeouts[2], bus.driver->timeouts[3]);
+  EXPECT_GT(bus.driver->timeouts[2], bus.driver->timeouts[0]);
+  EXPECT_GE(bus.driver->timeouts[2], std::chrono::seconds(30));
 }
 
 TEST(FirmwareInstallationBody, StaysInBootWhenAsked) {

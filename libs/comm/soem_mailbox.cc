@@ -126,9 +126,9 @@ void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState 
                  ctx->slavelist[slave].mbx_ro, ctx->slavelist[slave].mbx_rl);
 
     int wkc0 = ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM0, sizeof(ec_smt),
-                        &ctx->slavelist[slave].SM[0], EC_TIMEOUTRET);
+                        &ctx->slavelist[slave].SM[0], kLateFrameTimeoutUs);
     int wkc1 = ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM1, sizeof(ec_smt),
-                        &ctx->slavelist[slave].SM[1], EC_TIMEOUTRET);
+                        &ctx->slavelist[slave].SM[1], kLateFrameTimeoutUs);
     if (wkc0 != 1 || wkc1 != 1) {
       // A failed SM write leaves stale/invalid mailbox config in the ESC; the slave then
       // refuses the state change — often silently (AL status 0x0000) rather than with a
@@ -170,9 +170,9 @@ void updateMailboxSyncManagers(ecx_contextt* ctx, uint16_t slave, EtherCatState 
                  ctx->slavelist[slave].mbx_ro, ctx->slavelist[slave].mbx_rl);
 
     int wkc0 = ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM0, sizeof(ec_smt),
-                        &ctx->slavelist[slave].SM[0], EC_TIMEOUTRET);
+                        &ctx->slavelist[slave].SM[0], kLateFrameTimeoutUs);
     int wkc1 = ecx_FPWR(&ctx->port, ctx->slavelist[slave].configadr, ECT_REG_SM1, sizeof(ec_smt),
-                        &ctx->slavelist[slave].SM[1], EC_TIMEOUTRET);
+                        &ctx->slavelist[slave].SM[1], kLateFrameTimeoutUs);
     if (wkc0 != 1 || wkc1 != 1) {
       // A failed SM write leaves stale/invalid mailbox config in the ESC; the slave then
       // refuses the state change — often silently (AL status 0x0000) rather than with a

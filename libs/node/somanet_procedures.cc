@@ -509,10 +509,14 @@ constexpr std::string_view kComFirmwareFoeName = "com_firmware.bin";
 /// Ceiling on an ordinary AL transition, which is a mailbox round trip and a slave acknowledgement.
 constexpr auto kStateTimeout = std::chrono::seconds(10);
 
-/// Ceiling on the transition out of BOOT. Far longer than an ordinary one because it is not an
-/// ordinary one: the SOMANET bootloader hands over to the application by **restarting the device**,
-/// so this has to cover a reboot, plus the drive's own internal timeout for deciding no valid
-/// application started (after which it answers AL status 0x0014 rather than nothing).
+/// Ceiling on each of the two transitions out of BOOT. Far longer than an ordinary one because
+/// neither is an ordinary one. The step to PRE-OP makes the SOMANET bootloader hand over to the
+/// application by **restarting the device**, so it has to cover a reboot, plus the drive's own
+/// internal timeout for deciding no valid application started (after which it answers AL status
+/// 0x0014 rather than nothing). The step to INIT restarts the netX of an Integro that got a new
+/// com binary: its boot code asks the netX for a reset 500 ms away and only then reports INIT, so
+/// the master can miss INIT and must wait for the netX to come back (somanet_software,
+/// AppECS_Functions_Boot.c, Boot_Handle_ESM_AL_Control_Changed_Ind).
 constexpr auto kBootExitTimeout = std::chrono::seconds(30);
 
 /// Ceiling on a firmware activation that restarts the device, as SPoE does: the restart loads the
@@ -639,20 +643,22 @@ std::expected<void, std::string> enterBoot(DeviceManager& deviceManager, uint16_
 /// Leaves BOOT for @p finalState, one legal AL step at a time.
 ///
 /// The state machine only pairs BOOT with INIT and only climbs one step at a time, so the walk is
-/// fixed: INIT, then PRE-OP, then SAFE-OP, then OP, stopping wherever it was asked to.
+/// fixed: INIT, then PRE-OP, then SAFE-OP, then OP, stopping wherever it was asked to. The first
+/// two steps each get the long timeout, because either can restart the device.
 std::expected<void, std::string> leaveBoot(DeviceManager& deviceManager, uint16_t devicePosition,
                                            EtherCatState finalState) {
   if (finalState == EtherCatState::Boot) {
     return {};
   }
-  if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::Init, kStateTimeout);
+  // Long: on an Integro that got a com binary, this transition restarts the netX.
+  if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::Init, kBootExitTimeout);
       !r) {
     return std::unexpected(std::format("could not reach INIT: {}", r.error()));
   }
   if (finalState == EtherCatState::Init) {
     return {};
   }
-  // The long one: this transition restarts the device into the firmware just written.
+  // Long: this transition restarts the device into the firmware just written.
   if (auto r = transitionTo(deviceManager, devicePosition, EtherCatState::PreOp, kBootExitTimeout);
       !r) {
     return std::unexpected(std::format("could not reach PRE-OP: {}", r.error()));

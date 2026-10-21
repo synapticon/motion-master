@@ -301,17 +301,6 @@ export default function DeviceMotionRow({ context }: DeviceMotionRowProps) {
       .catch((e: unknown) => setHereError(apiErrorMessage(e)))
       .finally(() => setHerePending(false))
   }
-  // The case Here exists for, called out while it is still avoidable: CSP, not enabled, and a
-  // target position that is not the actual one. Shown for a drive in OP, where the note is a step
-  // away from mattering, and not elsewhere, where the row already says why nothing can be sent.
-  const staleTarget =
-    quantity === 'position' &&
-    canCommand &&
-    status?.state !== 'OperationEnabled' &&
-    status?.targetPosition !== null &&
-    status?.actualPosition !== null &&
-    status?.targetPosition !== status?.actualPosition
-
   // Bounds. CST and CSV: ± the limit object, when it was read and is not 0. CSP: the software
   // position limit when both ends were read and differ, else the whole INTEGER32 range.
   const numeric = (v: unknown): number | null => (typeof v === 'number' ? v : null)
@@ -495,7 +484,7 @@ export default function DeviceMotionRow({ context }: DeviceMotionRowProps) {
             </button>
             <button
               type="button"
-              className={staleTarget ? barBtnPrimary : barBtnOutline}
+              className={barBtnOutline}
               disabled={!canCommand || herePending}
               onClick={here}
               title={
@@ -529,14 +518,6 @@ export default function DeviceMotionRow({ context }: DeviceMotionRowProps) {
             title={inputError ?? sendError ?? hereError ?? undefined}
           >
             {inputError ?? sendError ?? hereError}
-          </span>
-        )}
-        {staleTarget && (
-          <span
-            className="rounded-sm bg-status-warn px-2.5 py-0.5 text-xs text-grey-900"
-            title="The target position (0x607A) is not the actual position (0x6064). Enabling now makes the drive step to the target at once. Press Here first."
-          >
-            Target differs from actual — press Here before enabling
           </span>
         )}
       </div>

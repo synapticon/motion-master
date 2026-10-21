@@ -2,3 +2,47 @@
    the shared package so every app under web/apps stays visually consistent. Console-only
    style overrides, if ever needed, go below this import. */
 @import "@synapticon/ui/theme.css";
+
+/* The throttle in the device bar. The thumb is drawn here, because with `appearance-none` on the
+   input Chrome keeps its own thumb and its own hover and focus colours. Grey at rest, pink under
+   the pointer, light grey while disabled, each change faded. */
+.throttle::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 10px;
+  height: 18px;
+  border-radius: 2px;
+  background: var(--color-grey-600);
+  cursor: pointer;
+  transition: background-color 300ms ease;
+}
+
+.throttle::-moz-range-thumb {
+  width: 10px;
+  height: 18px;
+  border: 0;
+  border-radius: 2px;
+  background: var(--color-grey-600);
+  cursor: pointer;
+  transition: background-color 300ms ease;
+}
+
+.throttle:hover::-webkit-slider-thumb {
+  background: var(--color-syn-red);
+}
+
+.throttle:hover::-moz-range-thumb {
+  background: var(--color-syn-red);
+}
+
+.throttle:disabled::-webkit-slider-thumb,
+.throttle:disabled:hover::-webkit-slider-thumb {
+  background: var(--color-grey-300);
+  cursor: not-allowed;
+}
+
+.throttle:disabled::-moz-range-thumb,
+.throttle:disabled:hover::-moz-range-thumb {
+  background: var(--color-grey-300);
+  cursor: not-allowed;
+}

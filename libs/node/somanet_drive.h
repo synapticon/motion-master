@@ -33,8 +33,67 @@ enum Object : uint16_t {
   kMotorSpecificSettings = 0x2003,   ///< RECORD — motor configuration; :05 is the phase order.
   kBrakeOptions = 0x2004,            ///< RECORD — brake voltages, timing, release strategy, status.
   kCommutationOffsetDetection = 0x2009,  ///< RECORD — how commutation offset (5) is measured.
+  kTorqueController = 0x2010,            ///< RECORD — :0C names the encoder commutation uses.
+  kVelocityController = 0x2011,          ///< RECORD — :05 names the encoder velocity control uses.
+  kPositionController = 0x2012,          ///< RECORD — :09 names the encoder position control uses.
   kErrorReport = 0x203F,                 ///< RECORD — :01 describes the drive's most recent fault.
+  kEncoder1Configuration = 0x2110,       ///< RECORD — the encoder the firmware calls encoder 1.
+  kEncoder2Configuration = 0x2112,       ///< RECORD — the encoder the firmware calls encoder 2.
 };
+
+/// @brief The sub-entry of each controller record that names its encoder. The enum value @b is the
+///        subindex, and the three differ because each record grew on its own.
+enum ControllerEncoderSource : uint8_t {
+  kTorqueControllerEncoderSource = 12,   ///< UNSIGNED8 — 0x2010:0C; see EncoderOrdinal, 0 for none.
+  kVelocityControllerEncoderSource = 5,  ///< UNSIGNED8 — 0x2011:05.
+  kPositionControllerEncoderSource = 9,  ///< UNSIGNED8 — 0x2012:09.
+};
+
+/// @brief Sub-entries of 0x2110 and 0x2112 (encoder configuration). The enum value @b is the
+///        subindex, the same in both records.
+enum EncoderConfigurationEntry : uint8_t {
+  kEncoderSensorPort = 1,       ///< UNSIGNED8 — 0 for none, else the port the encoder is wired to.
+  kEncoderType = 2,             ///< UNSIGNED8 — see EncoderType.
+  kEncoderResolution = 3,       ///< UNSIGNED32 — counts per revolution.
+  kEncoderPolarity = 5,         ///< UNSIGNED8 — 0 normal, 1 inverted.
+  kEncoderMultiturnBits = 10,   ///< UNSIGNED8 — bits of the turn counter in the frame.
+  kEncoderSingleturnBits = 12,  ///< UNSIGNED8 — bits of the position within a turn in the frame.
+};
+
+/// @brief The kind of encoder a configuration record describes (0x2110:02, 0x2112:02).
+enum class EncoderType : uint8_t {
+  kNone = 0,
+  kHallSensor = 1,
+  kIncremental = 2,
+  kNikonAFormat = 3,
+  kBiss = 4,
+  kInternal = 5,
+  kSsi = 7,
+  kSinCosModule = 9,
+};
+
+/// @brief Human-readable name of an encoder type (for JSON). Never @c nullptr.
+constexpr std::string_view toString(EncoderType type) {
+  switch (type) {
+    case EncoderType::kNone:
+      return "none";
+    case EncoderType::kHallSensor:
+      return "hallSensor";
+    case EncoderType::kIncremental:
+      return "incremental";
+    case EncoderType::kNikonAFormat:
+      return "nikonAFormat";
+    case EncoderType::kBiss:
+      return "biss";
+    case EncoderType::kInternal:
+      return "internal";
+    case EncoderType::kSsi:
+      return "ssi";
+    case EncoderType::kSinCosModule:
+      return "sinCosModule";
+  }
+  return "unknown";
+}
 
 /// @brief Sub-entries of 0x203F (error report). The enum value @b is the subindex.
 enum ErrorReportEntry : uint8_t {
@@ -1219,6 +1278,33 @@ struct BrakeState {
 };
 void to_json(nlohmann::json& j, const BrakeState& state);
 
+/// @brief One of a drive's two encoder configuration records, 0x2110 or 0x2112, as the drive
+/// reports
+///        it. A record whose type is @c kNone is still listed, because the ordinal is what the
+///        controller records refer to.
+struct EncoderConfiguration {
+  somanet::EncoderOrdinal encoder{somanet::EncoderOrdinal::kEncoder1};
+  uint8_t sensorPort = 0;                                  ///< :01, 0 for none.
+  somanet::EncoderType type{somanet::EncoderType::kNone};  ///< :02.
+  uint32_t resolution = 0;                                 ///< :03, counts per revolution.
+  bool inverted = false;                                   ///< :05.
+  uint8_t multiturnBits = 0;                               ///< :0A.
+  uint8_t singleturnBits = 0;                              ///< :0C.
+};
+
+/// @brief Both encoder records and which of them each controller uses. One read answers every
+///        "which encoder does X" question: a position in 0x6064 is in counts of the position
+///        encoder, so its revolution is that encoder's resolution.
+struct Encoders {
+  std::vector<EncoderConfiguration> encoders;
+  std::optional<somanet::EncoderOrdinal> position;     ///< 0x2012:09; empty for "no encoder".
+  std::optional<somanet::EncoderOrdinal> velocity;     ///< 0x2011:05.
+  std::optional<somanet::EncoderOrdinal> commutation;  ///< 0x2010:0C.
+};
+
+void to_json(nlohmann::json& j, const EncoderConfiguration& encoder);
+void to_json(nlohmann::json& j, const Encoders& encoders);
+
 /// @brief What one encoder register access did — the result of both a read and a write, since the
 ///        drive answers a write by echoing back the register's value.
 ///
@@ -1666,6 +1752,9 @@ class SomanetDrive : public Cia402Drive {
 
   /// @brief Reads the whole brake configuration and its current state in one call.
   std::expected<BrakeState, std::string> brakeState() const;
+
+  /// @brief Reads both encoder configuration records and the encoder each controller uses.
+  std::expected<Encoders, std::string> encoders() const;
 
   /// @brief Reads the brake state (0x2004:07).
   std::expected<somanet::BrakeStatus, std::string> brakeStatus() const;

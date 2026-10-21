@@ -366,6 +366,35 @@ void programBrakeObjects(OsCommandFakeDriver& driver, somanet::BrakeReleaseStrat
                        {static_cast<uint8_t>(status)});
 }
 
+// Programs the two encoder records and the three controller sources. Encoder 1 is a BiSS encoder
+// on port 1 with 2^18 counts, encoder 2 is unconfigured. Position and velocity control use encoder
+// 1; commutation names no encoder, so the "no encoder" value is covered too.
+void programEncoderObjects(OsCommandFakeDriver& driver) {
+  auto record = [&](uint16_t index, uint8_t port, uint8_t type, uint32_t resolution,
+                    uint8_t polarity, uint8_t multiturn, uint8_t singleturn) {
+    driver.programObject(index, somanet::kEncoderSensorPort, ObjectDataType::UNSIGNED8, {port});
+    driver.programObject(index, somanet::kEncoderType, ObjectDataType::UNSIGNED8, {type});
+    driver.programObject(
+        index, somanet::kEncoderResolution, ObjectDataType::UNSIGNED32,
+        {static_cast<uint8_t>(resolution & 0xFF), static_cast<uint8_t>((resolution >> 8) & 0xFF),
+         static_cast<uint8_t>((resolution >> 16) & 0xFF),
+         static_cast<uint8_t>((resolution >> 24) & 0xFF)});
+    driver.programObject(index, somanet::kEncoderPolarity, ObjectDataType::UNSIGNED8, {polarity});
+    driver.programObject(index, somanet::kEncoderMultiturnBits, ObjectDataType::UNSIGNED8,
+                         {multiturn});
+    driver.programObject(index, somanet::kEncoderSingleturnBits, ObjectDataType::UNSIGNED8,
+                         {singleturn});
+  };
+  record(somanet::kEncoder1Configuration, 1, 4, 262144, 1, 0, 18);
+  record(somanet::kEncoder2Configuration, 0, 0, 0, 0, 0, 0);
+  driver.programObject(somanet::kPositionController, somanet::kPositionControllerEncoderSource,
+                       ObjectDataType::UNSIGNED8, {1});
+  driver.programObject(somanet::kVelocityController, somanet::kVelocityControllerEncoderSource,
+                       ObjectDataType::UNSIGNED8, {1});
+  driver.programObject(somanet::kTorqueController, somanet::kTorqueControllerEncoderSource,
+                       ObjectDataType::UNSIGNED8, {0});
+}
+
 // A device whose brake is programmed as given. Brake tests use a zero settle so they never really
 // wait; the pull time is still read and added, so it is kept small.
 Device makeBrakeDevice(OsCommandFakeDriver& driver, somanet::BrakeReleaseStrategy strategy,
@@ -844,6 +873,57 @@ TEST(OsCommandErrorName, NamesGeneralCodesOnly) {
 // --- Brake (0x2004) ---------------------------------------------------------------------------
 
 constexpr auto kNoSettle = std::chrono::milliseconds(0);
+
+TEST(SomanetDrive, EncodersReportsBothRecordsAndTheControllerSources) {
+  OsCommandFakeDriver driver;
+  driver.programObject(Object::kControlword, 0, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(Object::kStatusword, 0, ObjectDataType::UNSIGNED16, {0, 0});
+  driver.programObject(Object::kModeOfOperation, 0, ObjectDataType::INTEGER8, {0});
+  programEncoderObjects(driver);
+  Device device(1, driver);
+  ASSERT_TRUE(device.initializeParameters().has_value());
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+
+  auto encoders = drive->encoders();
+  ASSERT_TRUE(encoders.has_value()) << encoders.error();
+  ASSERT_EQ(encoders->encoders.size(), 2u);
+  const auto& first = encoders->encoders[0];
+  EXPECT_EQ(first.encoder, somanet::EncoderOrdinal::kEncoder1);
+  EXPECT_EQ(first.sensorPort, 1);
+  EXPECT_EQ(first.type, somanet::EncoderType::kBiss);
+  EXPECT_EQ(first.resolution, 262144u);
+  EXPECT_TRUE(first.inverted);
+  EXPECT_EQ(first.multiturnBits, 0);
+  EXPECT_EQ(first.singleturnBits, 18);
+  const auto& second = encoders->encoders[1];
+  EXPECT_EQ(second.encoder, somanet::EncoderOrdinal::kEncoder2);
+  EXPECT_EQ(second.type, somanet::EncoderType::kNone);
+  EXPECT_EQ(second.resolution, 0u);
+  EXPECT_EQ(encoders->position, somanet::EncoderOrdinal::kEncoder1);
+  EXPECT_EQ(encoders->velocity, somanet::EncoderOrdinal::kEncoder1);
+  EXPECT_FALSE(encoders->commutation.has_value());
+
+  const nlohmann::json j = *encoders;
+  EXPECT_EQ(j.at("encoders").size(), 2u);
+  EXPECT_EQ(j.at("encoders")[0].at("encoder"), 1);
+  EXPECT_EQ(j.at("encoders")[0].at("type"), "biss");
+  EXPECT_EQ(j.at("encoders")[0].at("resolution"), 262144);
+  EXPECT_EQ(j.at("encoders")[1].at("type"), "none");
+  EXPECT_EQ(j.at("position"), 1);
+  EXPECT_TRUE(j.at("commutation").is_null());
+}
+
+TEST(SomanetDrive, EncodersFailsWhenARecordIsMissing) {
+  // A drive without the encoder records, such as one with an older dictionary, fails the whole
+  // read rather than answering with zeros a client would take for a resolution.
+  OsCommandFakeDriver driver;
+  Device device = makeBrakeDevice(driver, somanet::BrakeReleaseStrategy::kClutch,
+                                  somanet::BrakeStatus::kEngaged);
+  auto drive = createSomanetDrive(device);
+  ASSERT_TRUE(drive.has_value()) << drive.error();
+  EXPECT_FALSE(drive->encoders().has_value());
+}
 
 TEST(BrakeState, ReportsTheConfigurationAndDerivedFlags) {
   OsCommandFakeDriver driver;

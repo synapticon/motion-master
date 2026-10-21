@@ -48,10 +48,35 @@ export interface Cia402Status {
    */
   modeName: string;
   /**
-   * The setpoint currently commanded for the active mode — target position 0x607A (PP/CSP), velocity 0x60FF (PV/CSV), or torque 0x6071 (PT/CST), widened to INTEGER32. 0 only when the active mode has no linear setpoint (NoMode / Homing / vl / ip).
+   * Target position (0x607A), INTEGER32, in the drive's own position units. The drive acts on it in the position modes (PP, CSP) only, but it is reported in every mode. Read from the process image while the device exchanges, else over SDO. `null` when the drive has no such object or the read failed.
    * @example 100000
    */
-  target: number;
+  targetPosition: number | null;
+  /**
+   * Target velocity (0x60FF), INTEGER32, in the drive's own velocity units. The drive acts on it in the velocity modes (PV, CSV) only, but it is reported in every mode. Read from the process image while the device exchanges, else over SDO. `null` when the drive has no such object or the read failed.
+   * @example 250000
+   */
+  targetVelocity: number | null;
+  /**
+   * Target torque (0x6071), INTEGER16 widened to INTEGER32, in per mille of rated torque. The drive acts on it in the torque modes (PT, CST) only, but it is reported in every mode. Read from the process image while the device exchanges, else over SDO. `null` when the drive has no such object or the read failed.
+   * @example -100
+   */
+  targetTorque: number | null;
+  /**
+   * Position actual value (0x6064), INTEGER32, in the drive's own position units. Read from the process image while the device exchanges, else over SDO. `null` when the drive has no such object or the read failed.
+   * @example 99874
+   */
+  actualPosition: number | null;
+  /**
+   * Velocity actual value (0x606C), INTEGER32, in the drive's own velocity units. Read from the process image while the device exchanges, else over SDO. `null` when the drive has no such object or the read failed.
+   * @example 249000
+   */
+  actualVelocity: number | null;
+  /**
+   * Torque actual value (0x6077), INTEGER16 widened to INTEGER32, in per mille of rated torque. Read from the process image while the device exchanges, else over SDO. `null` when the drive has no such object or the read failed.
+   * @example -150
+   */
+  actualTorque: number | null;
   /**
    * The drive's own short description of its last fault, read from the vendor object that holds one. A SOMANET drive keeps it in 0x203F:01 and reports an empty string while there is no fault. `null` when the drive has no such object or the read failed.
    * @example "CyclicHb"
@@ -549,6 +574,74 @@ export interface HrdRecording {
    * @example [[4661,4661,0],[4662,4662,0]]
    */
   samples: number[][];
+}
+
+/** One encoder configuration record, 0x2110 for encoder 1 or 0x2112 for encoder 2. */
+export interface EncoderConfiguration {
+  /**
+   * The ordinal the controller fields refer to; 1 is 0x2110, 2 is 0x2112.
+   * @example 1
+   */
+  encoder: 1 | 2;
+  /**
+   * The port the encoder is wired to (:01), 0 for none.
+   * @example 1
+   */
+  sensorPort: number;
+  /**
+   * The kind of encoder (:02). `unknown` for a value this version does not name.
+   * @example "biss"
+   */
+  type:
+    | "none"
+    | "hallSensor"
+    | "incremental"
+    | "nikonAFormat"
+    | "biss"
+    | "internal"
+    | "ssi"
+    | "sinCosModule"
+    | "unknown";
+  /**
+   * Counts per revolution (:03). One revolution of this encoder in position counts.
+   * @example 262144
+   */
+  resolution: number;
+  /**
+   * Whether the counting direction is inverted (:05).
+   * @example false
+   */
+  inverted: boolean;
+  /**
+   * Bits of the turn counter in the encoder's frame (:0A).
+   * @example 0
+   */
+  multiturnBits: number;
+  /**
+   * Bits of the position within one turn in the encoder's frame (:0C).
+   * @example 18
+   */
+  singleturnBits: number;
+}
+
+/** Both encoder records of a SOMANET drive and which of them each controller uses. The three controller fields hold an ordinal of the `encoders` list, or `null` when the controller names no encoder. */
+export interface Encoders {
+  encoders: EncoderConfiguration[];
+  /**
+   * The encoder position control uses (0x2012:09).
+   * @example 1
+   */
+  position: 1 | 2 | null;
+  /**
+   * The encoder velocity control uses (0x2011:05).
+   * @example 1
+   */
+  velocity: 1 | 2 | null;
+  /**
+   * The encoder commutation uses (0x2010:0C).
+   * @example 1
+   */
+  commutation: 1 | 2 | null;
 }
 
 /** A drive's brake configuration and current state — the parts of object 0x2004 that decide what commanding the brake will actually do. Returned by every brake endpoint, so the outcome of a release or engage arrives in the same shape as a plain read. */

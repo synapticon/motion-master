@@ -36,6 +36,12 @@ std::expected<BrakeState, std::string> brakeState(DeviceManager& deviceManager,
                           [](SomanetDrive& drive) { return drive.brakeState(); });
 }
 
+std::expected<Encoders, std::string> encoders(DeviceManager& deviceManager,
+                                              uint16_t slavePosition) {
+  return withSomanetDrive(deviceManager, slavePosition,
+                          [](SomanetDrive& drive) { return drive.encoders(); });
+}
+
 std::expected<BrakeState, std::string> releaseBrake(DeviceManager& deviceManager,
                                                     uint16_t slavePosition,
                                                     std::chrono::milliseconds settle) {

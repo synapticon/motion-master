@@ -2245,6 +2245,65 @@ paths:
           description: No device at that slavePosition
         "409":
           description: The device is not a CiA402 drive, or the write failed
+  /api/devices/{slavePosition}/cia402/target/actual:
+    post:
+      summary: Set a CiA402 target to its actual value
+      description: >
+        Copies the actual value into the target of one kind: position actual value (0x6064) into
+        target position (0x607A), velocity actual value (0x606C) into target velocity (0x60FF), or
+        torque actual value (0x6077) into target torque (0x6071). Without `kind` the pair is the one
+        the active operation mode (0x6061) acts on.
+
+
+        A drive holds its actual position only until the first setpoint reaches it. In CSP the
+        master sends 0x607A every cycle, so a drive enabled with a stale target position steps to it
+        at once, and that step can pull the supply down. Call this before you enable a drive in CSP.
+        Motion Master never does it on its own: an enable writes the controlword and nothing else.
+      operationId: setCia402TargetToActual
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+        - name: kind
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [position, velocity, torque]
+          description: >-
+            Which pair to copy. Omit it to copy the pair of the active operation mode.
+          example: position
+      responses:
+        "200":
+          description: The target was written
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [kind, value]
+                properties:
+                  kind:
+                    type: string
+                    enum: [position, velocity, torque]
+                    description: The pair that was copied.
+                    example: position
+                  value:
+                    type: integer
+                    description: >-
+                      The value written, in the object's own units. Torque is per mille of rated,
+                      widened from INTEGER16.
+                    example: 123456
+        "400":
+          description: slavePosition is invalid, or `kind` is not one of the three
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: >-
+            The device is not a CiA402 drive, the active mode has no linear target and no `kind`
+            was given, or a transfer failed
   /api/devices/{slavePosition}/procedures:
     get:
       summary: List the procedures a device supports
@@ -2405,6 +2464,42 @@ paths:
         "404":
           description: >
             No device at that slavePosition, no procedure by that name, or nothing running for it
+  /api/devices/{slavePosition}/encoders:
+    get:
+      summary: Read a SOMANET drive's encoders and which controller uses which
+      description: >
+        Reports both encoder configuration records, 0x2110 (encoder 1) and 0x2112 (encoder 2), and
+        the encoder each controller uses: position control from 0x2012:09, velocity control from
+        0x2011:05, commutation from 0x2010:0C. A record whose type is `none` is still listed,
+        because the controller fields refer to the ordinal.
+
+
+        Read this to learn what one revolution is in position counts. A position in 0x6064 or
+        0x607A is in counts of the position encoder, unscaled by the gear ratio (0x6091), so one
+        revolution of that encoder is its `resolution`. The feed constant (0x6092) is not applied
+        here.
+      operationId: getEncoders
+      parameters:
+        - name: slavePosition
+          in: path
+          required: true
+          schema: { type: integer, minimum: 1 }
+          description: 1-based position of the device on the fieldbus
+          example: 1
+      responses:
+        "200":
+          description: The encoder records and the controller sources
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Encoders" }
+        "400":
+          description: slavePosition is invalid
+        "404":
+          description: No device at that slavePosition
+        "409":
+          description: >-
+            The device is not a SOMANET drive, one of the records is missing from its dictionary,
+            or a read failed
   /api/devices/{slavePosition}/brake:
     get:
       summary: Read a drive's brake configuration and state
@@ -4642,7 +4737,10 @@ components:
     Cia402Status:
       type: object
       description: A CiA402 drive's control snapshot — its state machine, control words, and mode.
-      required: [state, statusword, controlword, modeOfOperation, modeName, target, errorDescription]
+      required:
+        [state, statusword, controlword, modeOfOperation, modeName, targetPosition,
+         targetVelocity, targetTorque, actualPosition, actualVelocity, actualTorque,
+         errorDescription]
       properties:
         state:
           type: string
@@ -4667,13 +4765,57 @@ components:
           type: string
           description: Human-readable name of the active operation mode.
           example: CyclicSyncVelocity
-        target:
+        targetPosition:
           type: integer
+          nullable: true
           description: >-
-            The setpoint currently commanded for the active mode — target position 0x607A (PP/CSP),
-            velocity 0x60FF (PV/CSV), or torque 0x6071 (PT/CST), widened to INTEGER32. 0 only when
-            the active mode has no linear setpoint (NoMode / Homing / vl / ip).
+            Target position (0x607A), INTEGER32, in the drive's own position units. The drive acts
+            on it in the position modes (PP, CSP) only, but it is reported in every mode. Read from
+            the process image while the device exchanges, else over SDO. `null` when the drive has
+            no such object or the read failed.
           example: 100000
+        targetVelocity:
+          type: integer
+          nullable: true
+          description: >-
+            Target velocity (0x60FF), INTEGER32, in the drive's own velocity units. The drive acts
+            on it in the velocity modes (PV, CSV) only, but it is reported in every mode. Read from
+            the process image while the device exchanges, else over SDO. `null` when the drive has
+            no such object or the read failed.
+          example: 250000
+        targetTorque:
+          type: integer
+          nullable: true
+          description: >-
+            Target torque (0x6071), INTEGER16 widened to INTEGER32, in per mille of rated torque.
+            The drive acts on it in the torque modes (PT, CST) only, but it is reported in every
+            mode. Read from the process image while the device exchanges, else over SDO. `null`
+            when the drive has no such object or the read failed.
+          example: -100
+        actualPosition:
+          type: integer
+          nullable: true
+          description: >-
+            Position actual value (0x6064), INTEGER32, in the drive's own position units. Read
+            from the process image while the device exchanges, else over SDO. `null` when the
+            drive has no such object or the read failed.
+          example: 99874
+        actualVelocity:
+          type: integer
+          nullable: true
+          description: >-
+            Velocity actual value (0x606C), INTEGER32, in the drive's own velocity units. Read
+            from the process image while the device exchanges, else over SDO. `null` when the
+            drive has no such object or the read failed.
+          example: 249000
+        actualTorque:
+          type: integer
+          nullable: true
+          description: >-
+            Torque actual value (0x6077), INTEGER16 widened to INTEGER32, in per mille of rated
+            torque. Read from the process image while the device exchanges, else over SDO. `null`
+            when the drive has no such object or the read failed.
+          example: -150
         errorDescription:
           type: string
           nullable: true
@@ -5263,6 +5405,70 @@ components:
             type: array
             items: { type: number, format: double }
           example: [[4661, 4661, 0], [4662, 4662, 0]]
+    EncoderConfiguration:
+      type: object
+      description: One encoder configuration record, 0x2110 for encoder 1 or 0x2112 for encoder 2.
+      required: [encoder, sensorPort, type, resolution, inverted, multiturnBits, singleturnBits]
+      properties:
+        encoder:
+          type: integer
+          enum: [1, 2]
+          description: The ordinal the controller fields refer to; 1 is 0x2110, 2 is 0x2112.
+          example: 1
+        sensorPort:
+          type: integer
+          description: The port the encoder is wired to (:01), 0 for none.
+          example: 1
+        type:
+          type: string
+          enum: [none, hallSensor, incremental, nikonAFormat, biss, internal, ssi, sinCosModule, unknown]
+          description: The kind of encoder (:02). `unknown` for a value this version does not name.
+          example: biss
+        resolution:
+          type: integer
+          description: Counts per revolution (:03). One revolution of this encoder in position counts.
+          example: 262144
+        inverted:
+          type: boolean
+          description: Whether the counting direction is inverted (:05).
+          example: false
+        multiturnBits:
+          type: integer
+          description: Bits of the turn counter in the encoder's frame (:0A).
+          example: 0
+        singleturnBits:
+          type: integer
+          description: Bits of the position within one turn in the encoder's frame (:0C).
+          example: 18
+    Encoders:
+      type: object
+      description: >
+        Both encoder records of a SOMANET drive and which of them each controller uses. The three
+        controller fields hold an ordinal of the `encoders` list, or `null` when the controller
+        names no encoder.
+      required: [encoders, position, velocity, commutation]
+      properties:
+        encoders:
+          type: array
+          items: { $ref: "#/components/schemas/EncoderConfiguration" }
+        position:
+          type: integer
+          nullable: true
+          enum: [1, 2, null]
+          description: The encoder position control uses (0x2012:09).
+          example: 1
+        velocity:
+          type: integer
+          nullable: true
+          enum: [1, 2, null]
+          description: The encoder velocity control uses (0x2011:05).
+          example: 1
+        commutation:
+          type: integer
+          nullable: true
+          enum: [1, 2, null]
+          description: The encoder commutation uses (0x2010:0C).
+          example: 1
     BrakeState:
       type: object
       description: >

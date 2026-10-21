@@ -818,6 +818,101 @@ std::expected<void, std::string> SomanetDrive::setBrakeStatus(somanet::BrakeStat
                                      static_cast<uint8_t>(status));
 }
 
+void to_json(nlohmann::json& j, const EncoderConfiguration& encoder) {
+  j = nlohmann::json{
+      {"encoder", static_cast<int>(encoder.encoder)},
+      {"sensorPort", encoder.sensorPort},
+      {"type", somanet::toString(encoder.type)},
+      {"resolution", encoder.resolution},
+      {"inverted", encoder.inverted},
+      {"multiturnBits", encoder.multiturnBits},
+      {"singleturnBits", encoder.singleturnBits},
+  };
+}
+
+void to_json(nlohmann::json& j, const Encoders& encoders) {
+  auto ordinal = [](std::optional<somanet::EncoderOrdinal> e) {
+    return e ? nlohmann::json(static_cast<int>(*e)) : nlohmann::json(nullptr);
+  };
+  j = nlohmann::json{
+      {"encoders", encoders.encoders},
+      {"position", ordinal(encoders.position)},
+      {"velocity", ordinal(encoders.velocity)},
+      {"commutation", ordinal(encoders.commutation)},
+  };
+}
+
+std::expected<Encoders, std::string> SomanetDrive::encoders() const {
+  Encoders result;
+  for (const auto& [ordinal, index] :
+       {std::pair{somanet::EncoderOrdinal::kEncoder1, somanet::kEncoder1Configuration},
+        std::pair{somanet::EncoderOrdinal::kEncoder2, somanet::kEncoder2Configuration}}) {
+    EncoderConfiguration encoder;
+    encoder.encoder = ordinal;
+    auto port = device_.readValue<uint8_t>(index, somanet::kEncoderSensorPort);
+    if (!port) {
+      return std::unexpected(port.error());
+    }
+    encoder.sensorPort = *port;
+    auto type = device_.readValue<uint8_t>(index, somanet::kEncoderType);
+    if (!type) {
+      return std::unexpected(type.error());
+    }
+    encoder.type = static_cast<somanet::EncoderType>(*type);
+    auto resolution = device_.readValue<uint32_t>(index, somanet::kEncoderResolution);
+    if (!resolution) {
+      return std::unexpected(resolution.error());
+    }
+    encoder.resolution = *resolution;
+    auto polarity = device_.readValue<uint8_t>(index, somanet::kEncoderPolarity);
+    if (!polarity) {
+      return std::unexpected(polarity.error());
+    }
+    encoder.inverted = *polarity != 0;
+    auto multiturn = device_.readValue<uint8_t>(index, somanet::kEncoderMultiturnBits);
+    if (!multiturn) {
+      return std::unexpected(multiturn.error());
+    }
+    encoder.multiturnBits = *multiturn;
+    auto singleturn = device_.readValue<uint8_t>(index, somanet::kEncoderSingleturnBits);
+    if (!singleturn) {
+      return std::unexpected(singleturn.error());
+    }
+    encoder.singleturnBits = *singleturn;
+    result.encoders.push_back(encoder);
+  }
+
+  // A controller's source is 1 or 2, or 0 for no encoder. Anything else is a value this view does
+  // not know, reported as no encoder rather than as an ordinal that names nothing.
+  auto source = [this](uint16_t index, uint8_t subindex)
+      -> std::expected<std::optional<somanet::EncoderOrdinal>, std::string> {
+    auto value = device_.readValue<uint8_t>(index, subindex);
+    if (!value) {
+      return std::unexpected(value.error());
+    }
+    if (*value == 1 || *value == 2) {
+      return static_cast<somanet::EncoderOrdinal>(*value);
+    }
+    return std::nullopt;
+  };
+  auto position = source(somanet::kPositionController, somanet::kPositionControllerEncoderSource);
+  if (!position) {
+    return std::unexpected(position.error());
+  }
+  result.position = *position;
+  auto velocity = source(somanet::kVelocityController, somanet::kVelocityControllerEncoderSource);
+  if (!velocity) {
+    return std::unexpected(velocity.error());
+  }
+  result.velocity = *velocity;
+  auto commutation = source(somanet::kTorqueController, somanet::kTorqueControllerEncoderSource);
+  if (!commutation) {
+    return std::unexpected(commutation.error());
+  }
+  result.commutation = *commutation;
+  return result;
+}
+
 std::expected<BrakeState, std::string> SomanetDrive::brakeState() const {
   BrakeState state;
 

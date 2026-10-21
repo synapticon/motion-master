@@ -1,0 +1,644 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { apiErrorMessage, type Cia402Status } from '@synapticon/motion-master-client'
+import type { DeviceBarContext } from './DeviceBar'
+import { LocateFixed, RefreshCw } from 'lucide-react'
+import { barBtnIconOutline, barBtnIconPrimary, barBtnOutline, barBtnPrimary, labelCls } from './deviceBarStyles'
+import { useConnection } from '../contexts/ConnectionContext'
+import { cia402StatusKey } from '../hooks/useCia402Status'
+
+// The three cyclic synchronous modes (0x6061), the only modes this row shows for. A profile mode
+// has a profile run (#37); homing and the vendor modes have no linear target to drag.
+const CSP = 8
+const CSV = 9
+const CST = 10
+
+type Quantity = 'position' | 'velocity' | 'torque'
+
+// What the row controls in one mode: which target it writes, which status field it follows, and
+// what its slider is. CST and CSV share one shape, a throttle centred on 0 and bounded by a single
+// limit object, which springs back to 0 on release. CSP has a position slider: one revolution of
+// the position encoder either side of a centre taken from the actual position, and the handle
+// stays where it is released.
+type SliderKind = 'throttle' | 'position'
+
+interface ModeControl {
+  quantity: Quantity
+  label: string
+  target: (s: Cia402Status) => number | null
+  slider: SliderKind
+}
+
+const MODE_CONTROL: Record<number, ModeControl> = {
+  [CST]: {
+    quantity: 'torque',
+    label: 'Target torque (0x6071)',
+    target: (s) => s.targetTorque,
+    slider: 'throttle',
+  },
+  [CSV]: {
+    quantity: 'velocity',
+    label: 'Target velocity (0x60FF)',
+    target: (s) => s.targetVelocity,
+    slider: 'throttle',
+  },
+  [CSP]: {
+    quantity: 'position',
+    label: 'Target position (0x607A)',
+    target: (s) => s.targetPosition,
+    slider: 'position',
+  },
+}
+
+// The limit object of each mode. CST and CSV have one, which bounds the slider at ± its value.
+// CSP has the two subindices of the software position limit.
+const LIMIT_OBJECTS: Record<Quantity, { index: number; subindex: number; name: string }[]> = {
+  torque: [{ index: 0x6072, subindex: 0, name: 'Max torque (0x6072)' }],
+  velocity: [{ index: 0x6080, subindex: 0, name: 'Max motor speed (0x6080)' }],
+  position: [
+    { index: 0x607d, subindex: 1, name: 'Software position limit, min (0x607D:01)' },
+    { index: 0x607d, subindex: 2, name: 'Software position limit, max (0x607D:02)' },
+  ],
+}
+
+const INT32_MIN = -2147483648
+const INT32_MAX = 2147483647
+
+const limitKey = (slavePosition: number, index: number, subindex: number) => [
+  'motionLimit',
+  slavePosition,
+  index,
+  subindex,
+]
+
+// One limit object, read once and kept until Sync limits asks again. The value is read live, PDO
+// when exchanging else SDO, so it is the drive's current word on the matter at the time of the
+// read. A failed read, a missing object and a non-numeric value all leave the limit unknown.
+function useLimit(slavePosition: number, index: number, subindex: number, enabled: boolean) {
+  const { api } = useConnection()
+  return useQuery({
+    queryKey: limitKey(slavePosition, index, subindex),
+    queryFn: () => api.readParameter(slavePosition, index, subindex).then((r) => r.data.value),
+    enabled,
+    staleTime: Infinity,
+    retry: false,
+  })
+}
+
+interface DeviceMotionRowProps {
+  context: DeviceBarContext
+}
+
+/**
+ * The second row of DeviceBar: the three actual values and a control for the target of the active
+ * cyclic synchronous mode, so an axis can be moved by hand from any device page.
+ *
+ * Every send is one raw write of the target object, which the drive follows at once in a cyclic
+ * synchronous mode. The slider is a throttle: it sends while it is dragged and springs back to 0
+ * on release, which is sent too, so letting go stops the command. Set and Go each send one
+ * value, and the drive's own limits shape the step. #54 adds a smoothed target; the row switches
+ * to it then.
+ *
+ * Writes go out one at a time through a latest-wins slot, the same rule the server's mailbox
+ * follows: a newer value replaces one that has not left yet, nothing queues, and a release's 0 is
+ * sent after the write in flight, so no drag value can land after it.
+ */
+export default function DeviceMotionRow({ context }: DeviceMotionRowProps) {
+  const { slavePosition, isCia402, mailboxActive, status, canCommand, whyDisabled } = context
+  const { api } = useConnection()
+  const queryClient = useQueryClient()
+
+  const control = status ? MODE_CONTROL[status.modeOfOperation] : undefined
+  const show = isCia402 && status !== undefined && control !== undefined
+  const quantity = control?.quantity ?? 'position'
+  const limitObjects = LIMIT_OBJECTS[quantity]
+
+  // Every mode's limit hook is called every render, because hooks cannot be conditional. Only the
+  // active mode's queries are enabled; the other two sit idle at no cost.
+  const torqueLimit = useLimit(slavePosition, 0x6072, 0, show && mailboxActive && quantity === 'torque')
+  const velocityLimit = useLimit(
+    slavePosition,
+    0x6080,
+    0,
+    show && mailboxActive && quantity === 'velocity',
+  )
+  const positionMin = useLimit(
+    slavePosition,
+    0x607d,
+    1,
+    show && mailboxActive && quantity === 'position',
+  )
+  const positionMax = useLimit(
+    slavePosition,
+    0x607d,
+    2,
+    show && mailboxActive && quantity === 'position',
+  )
+
+  // The position slider needs one revolution in counts: the resolution of the encoder position
+  // control uses, which only a SOMANET drive reports. Under the limit key, so Sync limits reads it
+  // again too. A drive that cannot answer, or whose encoder reads 0, gets no position slider.
+  const encodersQuery = useQuery({
+    queryKey: [...limitKey(slavePosition, 0, 0).slice(0, 2), 'encoders'],
+    queryFn: () => api.getEncoders(slavePosition).then((r) => r.data),
+    enabled: show && mailboxActive && quantity === 'position',
+    staleTime: Infinity,
+    retry: false,
+  })
+  const revolution = (() => {
+    const e = encodersQuery.data
+    if (!e || e.position === null) {
+      return null
+    }
+    const encoder = e.encoders.find((c) => c.encoder === e.position)
+    return encoder && encoder.resolution > 0 ? encoder.resolution : null
+  })()
+
+  const syncLimits = () =>
+    queryClient.refetchQueries({ queryKey: ['motionLimit', slavePosition] })
+  const limitsPending =
+    torqueLimit.isFetching ||
+    velocityLimit.isFetching ||
+    positionMin.isFetching ||
+    positionMax.isFetching ||
+    encodersQuery.isFetching
+
+  const drivesTarget = status ? control?.target(status) ?? null : null
+
+  // The input follows the drive's target until it has focus or holds an edit that was not sent.
+  const [inputText, setInputText] = useState('')
+  const [inputFocused, setInputFocused] = useState(false)
+  const [inputEdited, setInputEdited] = useState(false)
+  const [inputError, setInputError] = useState<string | null>(null)
+  useEffect(() => {
+    if (!inputFocused && !inputEdited) {
+      setInputText(drivesTarget === null ? '' : String(drivesTarget))
+    }
+  }, [drivesTarget, inputFocused, inputEdited])
+
+  // The one send slot. `intended` is the newest value not yet sent, or null; `inFlight` says a
+  // request is out. `pump` sends the intended value when the line is free and runs again when the
+  // answer comes back, so the drive gets a new value as fast as it answers and never a stale one. A send from a button patches the status
+  // snapshot with its value on success, because the write answers with nothing and the input
+  // would otherwise fall back to the old target for up to one poll.
+  const intended = useRef<{ value: number; patch: boolean } | null>(null)
+  const inFlight = useRef(false)
+  // `drag` is the handle while it is held or until its last value is confirmed; null means the
+  // handle follows its rest value: 0 for the throttle, the snapshot's target for position.
+  const [drag, setDrag] = useState<number | null>(null)
+  const dragging = useRef(false)
+  const [sendError, setSendError] = useState<string | null>(null)
+
+  const pump = useCallback(() => {
+    if (inFlight.current || intended.current === null) {
+      return
+    }
+    const { value, patch } = intended.current
+    intended.current = null
+    inFlight.current = true
+    api
+      .setCia402Target(slavePosition, { target: quantity, value })
+      .then(() => {
+        setSendError(null)
+        if (patch) {
+          queryClient.setQueryData(
+            cia402StatusKey(slavePosition),
+            (old: Cia402Status | undefined) => {
+              if (!old) {
+                return old
+              }
+              const field: Record<Quantity, keyof Cia402Status> = {
+                position: 'targetPosition',
+                velocity: 'targetVelocity',
+                torque: 'targetTorque',
+              }
+              return { ...old, [field[quantity]]: value }
+            },
+          )
+          void queryClient.invalidateQueries({ queryKey: cia402StatusKey(slavePosition) })
+          setInputEdited(false)
+          setInputError(null)
+          // A released position slider keeps showing the hand's value until the snapshot holds
+          // it, which this patch just made true, so the handle can follow the snapshot again.
+          if (!dragging.current) {
+            setDrag(null)
+          }
+        }
+      })
+      .catch((e: unknown) => setSendError(apiErrorMessage(e)))
+      .finally(() => {
+        inFlight.current = false
+        pump()
+      })
+  }, [api, slavePosition, quantity, queryClient])
+
+  // A button's value: sent once, and the input follows it afterwards.
+  const send = (value: number) => {
+    intended.current = { value, patch: true }
+    pump()
+  }
+
+  const dragTo = (value: number) => {
+    dragging.current = true
+    setDrag(value)
+    intended.current = { value, patch: false }
+    pump()
+  }
+  // Letting go of the throttle sends 0 and the handle springs back. Letting go of the position
+  // slider sends the hand's last value once more, patched into the snapshot, and the handle stays.
+  const sliderKind = control?.slider ?? 'throttle'
+  const dragRef = useRef(drag)
+  dragRef.current = drag
+  const release = useCallback(() => {
+    if (!dragging.current) {
+      return
+    }
+    dragging.current = false
+    if (sliderKind === 'throttle') {
+      setDrag(null)
+      intended.current = { value: 0, patch: true }
+    } else if (dragRef.current !== null) {
+      intended.current = { value: dragRef.current, patch: true }
+    }
+    pump()
+  }, [pump, sliderKind])
+
+  // Letting go must stop the command whatever took the pointer away: a cancelled pointer, the
+  // window losing focus, the tab being hidden, or this row going away mid-drag. A browser that
+  // dies keeps nothing running here, but the drive keeps the last target it was sent.
+  useEffect(() => {
+    const onHidden = () => {
+      if (document.visibilityState === 'hidden') {
+        release()
+      }
+    }
+    window.addEventListener('blur', release)
+    document.addEventListener('visibilitychange', onHidden)
+    return () => {
+      window.removeEventListener('blur', release)
+      document.removeEventListener('visibilitychange', onHidden)
+      release()
+    }
+  }, [release])
+
+  // A target reaches the drive only in OP and only while the drive is enabled; in any other CiA402
+  // state the drive ignores the object until it is enabled, and then follows it in one step.
+  const enabled = canCommand && status?.state === 'OperationEnabled'
+  const whyNot = !canCommand
+    ? whyDisabled
+    : `the drive is in ${status?.state ?? 'an unknown state'}, not Operation Enabled`
+
+  // Here copies the actual value into the target on the server, for the kind of the active mode.
+  // It is the explicit step before an enable in CSP: the drive holds its actual position only until
+  // the first setpoint reaches it, and in CSP that is 0x607A as it stands. It needs OP, so the write
+  // reaches the drive, and nothing more: its whole point is to run before Operation Enabled.
+  const [hereError, setHereError] = useState<string | null>(null)
+  const [herePending, setHerePending] = useState(false)
+  const here = () => {
+    setHerePending(true)
+    api
+      .setCia402TargetToActual(slavePosition, { kind: quantity })
+      .then((r) => {
+        setHereError(null)
+        queryClient.setQueryData(cia402StatusKey(slavePosition), (old: Cia402Status | undefined) => {
+          if (!old) {
+            return old
+          }
+          const field: Record<Quantity, keyof Cia402Status> = {
+            position: 'targetPosition',
+            velocity: 'targetVelocity',
+            torque: 'targetTorque',
+          }
+          return { ...old, [field[quantity]]: r.data.value }
+        })
+        void queryClient.invalidateQueries({ queryKey: cia402StatusKey(slavePosition) })
+        setInputEdited(false)
+        setInputError(null)
+      })
+      .catch((e: unknown) => setHereError(apiErrorMessage(e)))
+      .finally(() => setHerePending(false))
+  }
+  // The centre of the position slider: the actual position when the row first shows for a device,
+  // and again whenever Recentre is pressed. The slider then runs one revolution either side.
+  const [centre, setCentre] = useState<number | null>(null)
+  useEffect(() => {
+    setCentre(null)
+  }, [slavePosition])
+  useEffect(() => {
+    if (centre === null && quantity === 'position' && status?.actualPosition != null) {
+      setCentre(status.actualPosition)
+    }
+  }, [centre, quantity, status?.actualPosition])
+  const recentre = () => {
+    if (status?.actualPosition != null) {
+      setCentre(status.actualPosition)
+    }
+  }
+
+  // Bounds. CST and CSV: ± the limit object, when it was read and is not 0. CSP: the software
+  // position limit when both ends were read and differ, else the whole INTEGER32 range.
+  const numeric = (v: unknown): number | null => (typeof v === 'number' ? v : null)
+  let min = INT32_MIN
+  let max = INT32_MAX
+  let sliderDisabledReason: string | null = null
+  let boundsNote: string
+  if (quantity === 'torque' || quantity === 'velocity') {
+    const q = quantity === 'torque' ? torqueLimit : velocityLimit
+    const obj = limitObjects[0]
+    const limit = numeric(q.data)
+    if (q.isError) {
+      sliderDisabledReason = `${obj.name} could not be read: ${apiErrorMessage(q.error)}`
+    } else if (q.isPending) {
+      sliderDisabledReason = `${obj.name} is being read`
+    } else if (limit === null) {
+      sliderDisabledReason = `${obj.name} is not a number on this drive`
+    } else if (limit === 0) {
+      sliderDisabledReason = `${obj.name} reads 0, so there is no range to slide over`
+    } else {
+      min = -Math.abs(limit)
+      max = Math.abs(limit)
+    }
+    boundsNote =
+      sliderDisabledReason === null
+        ? `Bounded by ± ${obj.name}: ${min} to ${max}.`
+        : `Unbounded, because ${sliderDisabledReason}.`
+  } else {
+    const lo = numeric(positionMin.data)
+    const hi = numeric(positionMax.data)
+    if (lo !== null && hi !== null && lo !== hi) {
+      min = Math.min(lo, hi)
+      max = Math.max(lo, hi)
+      boundsNote = `Bounded by the software position limit (0x607D): ${min} to ${max}.`
+    } else {
+      boundsNote = `Bounded by the INTEGER32 range, because the software position limit (0x607D) is ${
+        lo === null || hi === null ? 'not readable on this drive' : 'not set'
+      }.`
+    }
+  }
+
+  // The slider's own range. The throttle shares the input's bounds. The position slider is one
+  // revolution either side of the centre, and has nothing to say when the revolution is unknown.
+  let sliderMin = min
+  let sliderMax = max
+  if (quantity === 'position') {
+    if (encodersQuery.isError) {
+      sliderDisabledReason = `the drive does not report its encoders: ${apiErrorMessage(encodersQuery.error)}`
+    } else if (encodersQuery.isPending) {
+      sliderDisabledReason = 'the encoders are being read'
+    } else if (revolution === null) {
+      sliderDisabledReason = 'the position encoder reports no resolution'
+    } else if (centre === null) {
+      sliderDisabledReason = 'the drive reports no actual position to centre on'
+    } else {
+      sliderMin = centre - revolution
+      sliderMax = centre + revolution
+    }
+  }
+  // A target the input, a script or another client put outside the slider's range makes the
+  // slider lie: its handle would sit at an end while the drive is elsewhere. It waits for a
+  // Recentre. The target is a commanded value, not an encoder reading, so this does not flicker.
+  const targetOutOfRange =
+    quantity === 'position' &&
+    sliderDisabledReason === null &&
+    drag === null &&
+    drivesTarget !== null &&
+    (drivesTarget < sliderMin || drivesTarget > sliderMax)
+  if (targetOutOfRange) {
+    sliderDisabledReason = `the target position ${drivesTarget} is outside the slider's range ${sliderMin} to ${sliderMax}; press Recentre`
+  }
+
+  const parseInput = (): number | null => {
+    const text = inputText.trim()
+    if (text === '' || !/^-?\d+$/.test(text)) {
+      setInputError('enter a whole number')
+      return null
+    }
+    const value = Number(text)
+    if (value < min || value > max) {
+      setInputError(`${value} is outside ${min} to ${max}`)
+      return null
+    }
+    setInputError(null)
+    return value
+  }
+
+  const sendInput = () => {
+    const value = parseInput()
+    if (value !== null) {
+      send(value)
+    }
+  }
+
+  if (!show) {
+    return null
+  }
+
+  const handle = drag ?? (sliderKind === 'position' ? (drivesTarget ?? centre ?? 0) : 0)
+  const sliderLive = enabled && sliderDisabledReason === null
+  const disabledTitle = (name: string) => `${name} — unavailable: ${whyNot}.`
+
+  const actual = (label: string, value: number | null) => (
+    <div className="flex items-baseline gap-1.5">
+      <span className={labelCls}>{label}</span>
+      <span className="inline-block w-[12ch] font-mono text-xs tabular-nums">
+        {value === null ? '—' : value}
+      </span>
+    </div>
+  )
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-grey-200 px-4 py-2 sm:px-8">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <span className={labelCls}>Motion</span>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-l border-grey-200 pl-4">
+          {actual('Position (0x6064)', status.actualPosition)}
+          {actual('Velocity (0x606C)', status.actualVelocity)}
+          {actual('Torque (0x6077)', status.actualTorque)}
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <span className={labelCls}>{control.label}</span>
+
+        {sliderKind === 'throttle' ? (
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-[10px] tabular-nums text-grey-500">{min}</span>
+            <input
+              type="range"
+              aria-label={control.label}
+              className="throttle h-1 w-[480px] cursor-pointer appearance-none bg-grey-200 disabled:cursor-not-allowed"
+              min={min}
+              max={max}
+              step={1}
+              value={handle}
+              disabled={!sliderLive}
+              onChange={(e) => dragTo(Number(e.target.value))}
+              onPointerUp={release}
+              onPointerCancel={release}
+              onLostPointerCapture={release}
+              onKeyUp={release}
+              onBlur={release}
+              title={
+                !enabled
+                  ? disabledTitle('Throttle')
+                  : sliderDisabledReason !== null
+                    ? `Throttle — unavailable: ${sliderDisabledReason}. The input and Set still work.`
+                    : `Throttle — hold and drag to command a ${quantity} target; the value is sent while you drag, one write at a time as fast as the drive answers. Letting go sends 0 and the handle springs back. ${boundsNote}`
+              }
+            />
+            <span className="font-mono text-[10px] tabular-nums text-grey-500">{max}</span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-2">
+            <span
+              className="font-mono text-[10px] tabular-nums text-grey-500"
+              title={`One revolution of the position encoder below the centre: target position ${sliderMin}.`}
+            >
+              −360°
+            </span>
+            <input
+              type="range"
+              aria-label={control.label}
+              className="throttle h-1 w-[480px] cursor-pointer appearance-none bg-grey-200 disabled:cursor-not-allowed"
+              min={sliderMin}
+              max={sliderMax}
+              step={1}
+              value={handle}
+              disabled={!sliderLive}
+              onChange={(e) => dragTo(Number(e.target.value))}
+              onPointerUp={release}
+              onPointerCancel={release}
+              onLostPointerCapture={release}
+              onKeyUp={release}
+              onBlur={release}
+              title={
+                !enabled
+                  ? disabledTitle('Position slider')
+                  : sliderDisabledReason !== null
+                    ? `Position slider — unavailable: ${sliderDisabledReason}. The input and Go still work.`
+                    : `Position slider — drag to command a position target; the value is sent while you drag, one write at a time as fast as the drive answers, and the handle stays where you let go. The range is one revolution of the position encoder (${revolution} counts) either side of the centre, ${centre}. Recentre moves the centre to the actual position.`
+              }
+            />
+            <span
+              className="font-mono text-[10px] tabular-nums text-grey-500"
+              title={`One revolution of the position encoder above the centre: target position ${sliderMax}.`}
+            >
+              +360°
+            </span>
+          </div>
+        )}
+
+        <input
+          type="number"
+          aria-label={`${control.label} value`}
+          className="h-[30px] w-32 border border-grey-300 px-2 font-mono text-xs disabled:cursor-not-allowed disabled:opacity-50"
+          min={min}
+          max={max}
+          step={1}
+          value={drag !== null && !inputFocused ? String(drag) : inputText}
+          disabled={!enabled}
+          onFocus={() => setInputFocused(true)}
+          onBlur={() => setInputFocused(false)}
+          onChange={(e) => {
+            setInputText(e.target.value)
+            setInputEdited(true)
+            setInputError(null)
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              sendInput()
+            }
+          }}
+          title={
+            enabled
+              ? `${control.label} — the value to send with ${sliderKind === 'throttle' ? 'Set' : 'Go'}, in the object's raw units. It follows the drive's target until you edit it. ${boundsNote}`
+              : disabledTitle(control.label)
+          }
+        />
+
+        {sliderKind === 'throttle' ? (
+          <button
+            type="button"
+            className={barBtnOutline}
+            disabled={!enabled}
+            onClick={sendInput}
+            title={
+              enabled
+                ? `Set — send the value in the input as the ${quantity} target, once. The drive steps to it, within its own limits, and holds it until the next send.`
+                : disabledTitle('Set')
+            }
+          >
+            Set
+          </button>
+        ) : (
+          <>
+            <button
+              type="button"
+              className={barBtnPrimary}
+              disabled={!enabled}
+              onClick={sendInput}
+              title={
+                enabled
+                  ? 'Go — send the typed position as the target, once. The drive steps to it as fast as its limits allow; there is no profile. Check the distance before pressing.'
+                  : disabledTitle('Go')
+              }
+            >
+              Go
+            </button>
+            <button
+              type="button"
+              className={barBtnOutline}
+              disabled={!canCommand || herePending}
+              onClick={here}
+              title={
+                canCommand
+                  ? 'Here — set the target position (0x607A) to the actual position (0x6064), on the server, once. Do this before you enable the drive in CSP: a drive enabled with a stale target steps to it at once, and that step can pull the supply down. While enabled it holds the axis where it is.'
+                  : `Here — unavailable: ${whyDisabled}.`
+              }
+            >
+              Here
+            </button>
+            <button
+              type="button"
+              aria-label="Recentre"
+              className={targetOutOfRange ? barBtnIconPrimary : barBtnIconOutline}
+              disabled={status.actualPosition === null}
+              onClick={recentre}
+              title={
+                status.actualPosition === null
+                  ? 'Recentre — unavailable: the drive reports no actual position (0x6064).'
+                  : `Recentre — put the slider's centre at the actual position (0x6064), so it runs one revolution either side of where the axis is now. Nothing is sent.${targetOutOfRange ? ' The target is outside the slider’s range, so the slider waits for this.' : ''}`
+              }
+            >
+              <LocateFixed size={16} aria-hidden="true" />
+            </button>
+          </>
+        )}
+
+        <button
+          type="button"
+          aria-label="Sync limits"
+          className={barBtnIconOutline}
+          disabled={!mailboxActive || limitsPending}
+          onClick={() => void syncLimits()}
+          title={
+            mailboxActive
+              ? `Sync limits — read ${limitObjects.map((o) => o.name).join(' and ')}${quantity === 'position' ? ' and the encoder configuration' : ''} from the drive again. They are read once when the row first shows and after a change to the objects only on this button.`
+              : 'Sync limits — unavailable: the device has no mailbox in this EtherCAT state.'
+          }
+        >
+          <RefreshCw size={16} aria-hidden="true" className={limitsPending ? 'animate-spin' : ''} />
+        </button>
+
+        {(inputError ?? sendError ?? hereError) && (
+          <span
+            className="max-w-[28ch] truncate text-xs text-status-bad"
+            title={inputError ?? sendError ?? hereError ?? undefined}
+          >
+            {inputError ?? sendError ?? hereError}
+          </span>
+        )}
+      </div>
+    </div>
+  )
+}

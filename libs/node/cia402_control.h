@@ -3,6 +3,7 @@
 #include <chrono>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <string>
 
 #include "node/cia402.h"
@@ -137,5 +138,17 @@ std::expected<Cia402Status, std::string> transitionToCia402State(
 std::expected<void, std::string> setCia402Target(DeviceManager& deviceManager,
                                                  uint16_t slavePosition, Cia402TargetKind kind,
                                                  int32_t setpoint);
+
+/// @brief Copies the actual value into the target of @p kind, or of the active operation mode
+///        when @p kind is empty — see @c Cia402Drive::setTargetToActual for why a caller wants
+///        that before an enable in CSP.
+///
+/// @param deviceManager  Owner of the device set; lends locked access for the call.
+/// @param slavePosition  1-based bus position of the target device.
+/// @param kind           Which pair to copy, or empty to take the one the active mode acts on.
+/// @return The kind resolved and the value written, or an error string if the device is unknown,
+///         not a CiA402 drive, the active mode has no linear target, or a transfer fails.
+std::expected<TargetFromActual, std::string> setCia402TargetToActual(
+    DeviceManager& deviceManager, uint16_t slavePosition, std::optional<Cia402TargetKind> kind);
 
 }  // namespace mm::node

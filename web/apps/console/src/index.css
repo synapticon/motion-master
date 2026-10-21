@@ -2,3 +2,25 @@
    the shared package so every app under web/apps stays visually consistent. Console-only
    style overrides, if ever needed, go below this import. */
 @import "@synapticon/ui/theme.css";
+
+/* The throttle in the device bar. While a drag would reach the drive, the handle is green, so a
+   live throttle is told from a dead one before anything is touched. The thumb is drawn here
+   because `appearance-none` leaves the native one unstyled in WebKit. */
+.throttle-live::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  background: var(--color-green-600);
+  cursor: pointer;
+}
+
+.throttle-live::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--color-green-600);
+  cursor: pointer;
+}

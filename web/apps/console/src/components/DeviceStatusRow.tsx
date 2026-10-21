@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { apiErrorMessage, formatHex, type Cia402Status } from '@synapticon/motion-master-client'
 import type { DeviceBarContext } from './DeviceBar'
+import { barBtnOutline, barBtnPrimary, barSelect, labelCls } from './deviceBarStyles'
 import SlavePositionBadge from './SlavePositionBadge'
 import { useConnection } from '../contexts/ConnectionContext'
 import { cia402StatusKey } from '../hooks/useCia402Status'
@@ -21,24 +22,6 @@ const STATE_BADGE: Record<Cia402Status['state'], string> = {
   Fault: 'bg-syn-red text-white',
 }
 
-const labelCls = 'text-[10px] uppercase tracking-wide text-grey-500 font-display'
-
-// The two buttons share one **explicit** height and are inline-flex centred, the same rule every
-// control pair in this app follows. Left to derive their height from padding they do not agree:
-// only the outline variant carries a border, so the pair rendered a few pixels apart — the shared
-// btnPrimary/btnOutline are safe side by side only where nothing else varies.
-//
-// 30px, not the 38px used for form controls: this is always-on chrome above every device page, so
-// its height is permanently spent, and a button here sits beside a badge rather than an input.
-// A two-word label ("Set mode", "Quick stop", "Reset fault") would break across two lines inside a
-// 30px box the moment the flex row squeezed it, so the label stays on one line and the box keeps
-// its content width — the bar wraps whole controls onto a second row instead.
-const barBtn =
-  'inline-flex shrink-0 items-center justify-center whitespace-nowrap h-[30px] px-4 text-xs ' +
-  'cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
-const barBtnPrimary = `${barBtn} bg-syn-red text-white hover:bg-ocean`
-const barBtnOutline = `${barBtn} border border-syn-red text-syn-red hover:bg-syn-red hover:text-white`
-
 // The CiA402 states a master may ask a drive to reach, ordered as the state machine climbs. The
 // other three — Not Ready To Switch On, Fault Reaction Active and Fault — are entered by the drive
 // itself and cannot be requested, so they are not offered.
@@ -50,12 +33,6 @@ const CIA402_TARGETS = [
   { value: 'QuickStopActive', label: 'Quick Stop Active' },
 ] as const
 type Cia402TargetState = (typeof CIA402_TARGETS)[number]['value']
-
-// Selects share the buttons' explicit height for the reason in barBtn — a control pair that
-// derives its height from content does not agree with one that does not.
-const barSelect =
-  'h-[30px] border border-grey-300 bg-white px-2 text-xs disabled:opacity-50 ' +
-  'disabled:cursor-not-allowed'
 
 interface DeviceStatusRowProps {
   context: DeviceBarContext

@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import type { Cia402Status } from '@synapticon/motion-master-client'
+import DeviceMotionRow from './DeviceMotionRow'
 import DeviceStatusRow from './DeviceStatusRow'
 import { useConnection } from '../contexts/ConnectionContext'
 import { useCia402Status } from '../hooks/useCia402Status'
@@ -46,8 +47,9 @@ interface DeviceBarProps {
  * commands worth having within reach at all times rather than only on the Motion page.
  *
  * The bar is rows. DeviceStatusRow is the first: identity, CiA402 state, mode, the two words, and
- * the mode, state, quick stop and fault reset controls. The bar owns the queries every row reads
- * and passes one DeviceBarContext down, so a second row costs no second poll.
+ * the mode, state, quick stop and fault reset controls. DeviceMotionRow is the second, shown only
+ * in a cyclic synchronous mode: the actual values and the target. The bar owns the queries every
+ * row reads and passes one DeviceBarContext down, so the second row costs no second poll.
  */
 export default function DeviceBar({ slavePosition }: DeviceBarProps) {
   const { api } = useConnection()
@@ -102,6 +104,7 @@ export default function DeviceBar({ slavePosition }: DeviceBarProps) {
   return (
     <div className="sticky top-0 z-20 border-b border-grey-200 bg-white">
       <DeviceStatusRow context={context} />
+      <DeviceMotionRow context={context} />
     </div>
   )
 }

@@ -49,6 +49,10 @@ std::expected<BrakeState, std::string> brakeState(DeviceManager& deviceManager,
 /// @param slavePosition  1-based bus position of the target device.
 /// @param settle         Extra wait on top of the drive's pull time.
 /// @return The brake state read back afterwards, or why the attempt failed.
+/// @brief Reads both encoder configuration records and which encoder each controller uses.
+///        See @c SomanetDrive::encoders.
+std::expected<Encoders, std::string> encoders(DeviceManager& deviceManager, uint16_t slavePosition);
+
 std::expected<BrakeState, std::string> releaseBrake(DeviceManager& deviceManager,
                                                     uint16_t slavePosition,
                                                     std::chrono::milliseconds settle);

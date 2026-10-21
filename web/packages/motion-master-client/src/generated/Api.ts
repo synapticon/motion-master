@@ -22,6 +22,7 @@ import {
   DeviceDiagnostics,
   DeviceFile,
   DeviceParameter,
+  Encoders,
   EscRegister,
   EsiParseResult,
   FirmwareCompatibility,
@@ -1490,6 +1491,20 @@ export class Api<
     this.request<void, void>({
       path: `/api/devices/${slavePosition}/procedures/${procedureName}`,
       method: "DELETE",
+      ...params,
+    });
+  /**
+   * @description Reports both encoder configuration records, 0x2110 (encoder 1) and 0x2112 (encoder 2), and the encoder each controller uses: position control from 0x2012:09, velocity control from 0x2011:05, commutation from 0x2010:0C. A record whose type is `none` is still listed, because the controller fields refer to the ordinal. Read this to learn what one revolution is in position counts. A position in 0x6064 or 0x607A is in counts of the position encoder, unscaled by the gear ratio (0x6091), so one revolution of that encoder is its `resolution`. The feed constant (0x6092) is not applied here.
+   *
+   * @name GetEncoders
+   * @summary Read a SOMANET drive's encoders and which controller uses which
+   * @request GET:/api/devices/{slavePosition}/encoders
+   */
+  getEncoders = (slavePosition: number, params: RequestParams = {}) =>
+    this.request<Encoders, void>({
+      path: `/api/devices/${slavePosition}/encoders`,
+      method: "GET",
+      format: "json",
       ...params,
     });
   /**

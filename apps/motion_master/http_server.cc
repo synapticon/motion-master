@@ -1304,6 +1304,24 @@ void HttpServer::run() {
                return mm::api::json(nlohmann::json(*state));
              });
 
+  // Which encoder each controller uses, and what each is. A position in 0x6064 is in counts of
+  // the position encoder, so this is how a client learns what one revolution is.
+  router.get("/api/devices/:slavePosition/encoders",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               if (!deviceManager_.hasDevice(*position)) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               auto encoders = mm::node::encoders(deviceManager_, *position);
+               if (!encoders) {
+                 return mm::api::error("409 Conflict", encoders.error());
+               }
+               return mm::api::json(nlohmann::json(*encoders));
+             });
+
   router.post("/api/devices/:slavePosition/brake/release",
               [brakeCommand](const mm::api::Request& req) { return brakeCommand(req, true); });
   router.post("/api/devices/:slavePosition/brake/engage",

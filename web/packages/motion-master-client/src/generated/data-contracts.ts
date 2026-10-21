@@ -576,6 +576,74 @@ export interface HrdRecording {
   samples: number[][];
 }
 
+/** One encoder configuration record, 0x2110 for encoder 1 or 0x2112 for encoder 2. */
+export interface EncoderConfiguration {
+  /**
+   * The ordinal the controller fields refer to; 1 is 0x2110, 2 is 0x2112.
+   * @example 1
+   */
+  encoder: 1 | 2;
+  /**
+   * The port the encoder is wired to (:01), 0 for none.
+   * @example 1
+   */
+  sensorPort: number;
+  /**
+   * The kind of encoder (:02). `unknown` for a value this version does not name.
+   * @example "biss"
+   */
+  type:
+    | "none"
+    | "hallSensor"
+    | "incremental"
+    | "nikonAFormat"
+    | "biss"
+    | "internal"
+    | "ssi"
+    | "sinCosModule"
+    | "unknown";
+  /**
+   * Counts per revolution (:03). One revolution of this encoder in position counts.
+   * @example 262144
+   */
+  resolution: number;
+  /**
+   * Whether the counting direction is inverted (:05).
+   * @example false
+   */
+  inverted: boolean;
+  /**
+   * Bits of the turn counter in the encoder's frame (:0A).
+   * @example 0
+   */
+  multiturnBits: number;
+  /**
+   * Bits of the position within one turn in the encoder's frame (:0C).
+   * @example 18
+   */
+  singleturnBits: number;
+}
+
+/** Both encoder records of a SOMANET drive and which of them each controller uses. The three controller fields hold an ordinal of the `encoders` list, or `null` when the controller names no encoder. */
+export interface Encoders {
+  encoders: EncoderConfiguration[];
+  /**
+   * The encoder position control uses (0x2012:09).
+   * @example 1
+   */
+  position: 1 | 2 | null;
+  /**
+   * The encoder velocity control uses (0x2011:05).
+   * @example 1
+   */
+  velocity: 1 | 2 | null;
+  /**
+   * The encoder commutation uses (0x2010:0C).
+   * @example 1
+   */
+  commutation: 1 | 2 | null;
+}
+
 /** A drive's brake configuration and current state — the parts of object 0x2004 that decide what commanding the brake will actually do. Returned by every brake endpoint, so the outcome of a release or engage arrives in the same shape as a plain read. */
 export interface BrakeState {
   /**

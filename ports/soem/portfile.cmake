@@ -904,6 +904,12 @@ vcpkg_replace_string(
 # commands whose position the slaves leave alone. The auto increment and broadcast commands have
 # their position counted up by every slave the frame passes. A frame that does not match is
 # dropped, and the caller keeps waiting. The three platform drivers share this code.
+#
+# The check cannot tell two cyclic frames apart, because every cyclic frame carries the same
+# header. For those, only the index does the work: with EC_MAXBUF indexes and at most the frame
+# slots of the control plane plus the cyclic frames in flight, a cyclic frame must come back about
+# twenty cycles late to carry the index of a newer one. A control-plane datagram differs from its
+# neighbours in command, offset or position, which is what the check is for.
 foreach(nicdrv "oshw/linux/nicdrv.c" "oshw/win32/nicdrv.c" "oshw/macosx/nicdrv.c")
   vcpkg_replace_string(
       "${SOURCE_PATH}/${nicdrv}"

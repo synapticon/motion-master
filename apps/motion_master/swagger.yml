@@ -102,11 +102,14 @@ info:
     ```json
     {"type": "monitoring", "topic": "left-leg", "data": [[1735821000123456, 39000, 41], ...]}
     {"type": "notification", "data": {"event": "short-working-counter", "shortWkcCycles": 3}}
+    {"type": "notification", "data": {"event": "late-frame", "bandUs": 20000, "latestReturnUs": 23410, "returned": 812, "over2Ms": 3, "over20Ms": 1, "over100Ms": 0, "lost": 0, "mailbox": []}}
     ```
 
     Notifications are state changes the server raises on its own — today, cycles the
-    bus did not fully answer. Tell them apart by `data.event`, which is kebab-case;
-    every other key in `data` is camelCase, and times are epoch microseconds.
+    bus did not fully answer, and the first control-plane frame that came back later
+    than 20 ms and later than 100 ms (the counts of `GET /api/frames`, plus the band
+    crossed). Tell them apart by `data.event`, which is kebab-case; every other key in
+    `data` is camelCase, and times are epoch microseconds.
 
     `data` is an array of cycle rows; each row is `[timestampUs, v0, v1, ...]` where
     `timestampUs` is epoch microseconds and the values are positionally ordered by
@@ -3695,6 +3698,81 @@ paths:
                     type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
+  /api/frames:
+    get:
+      summary: Report how late the control-plane frames come back on this host
+      operationId: getFrames
+      description: >
+        A read of counters the fieldbus driver keeps while it works; no bus I/O. The driver stamps
+        every control-plane datagram (mailbox and register reads and writes) when it first goes
+        out, and measures each frame that comes back for it, also a frame that comes back after the
+        caller stopped waiting for it. The cyclic process-data frame of the RT loop is not measured; a late
+        one shows on `GET /api/process-image` as a short working counter.
+
+        The bands are the three waits the driver uses, 2 ms, 20 ms and 100 ms, and they are
+        cumulative: a frame later than 100 ms counts in all three. The time is the round trip as
+        the master sees it, from just before the send call to just after the receive call returned
+        the frame. It says how late a frame was, not where the delay was. A frame that comes back after its
+        caller stopped waiting sits in the socket until the next receive call by any thread, so its time is
+        an upper bound; in OP the RT loop receives every cycle, in PRE-OP the next control-plane
+        request does.
+
+        `mailbox` lists, per SOMANET device, the mailbox writes whose frame did not come back in
+        time and the requests the driver sent with counter 0 to recover from them, since the bus
+        came up or `POST /api/frames/reset`.
+
+        The server also logs a warning, and publishes a `late-frame` notification, the first time
+        the latest return passes 20 ms and the first time it passes 100 ms.
+      responses:
+        "200":
+          description: The frame counts since the bus came up or the last reset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FrameStats"
+        "409":
+          description: >
+            No driver is initialised, or the fieldbus transport sends no EtherCAT frames. SPoE
+            answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+  /api/frames/reset:
+    post:
+      summary: Set every count of the frame report to zero
+      operationId: resetFrames
+      description: >
+        Sets every count of `GET /api/frames` to zero, so one test run can be measured on its
+        own. The bands of the `late-frame` notification start again from zero too.
+      responses:
+        "200":
+          description: The counts are zero
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ok]
+                properties:
+                  ok:
+                    type: boolean
+                    example: true
+        "409":
+          description: >
+            No driver is initialised, or the fieldbus transport sends no EtherCAT frames. SPoE
+            answers this way.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
   /api/devices/state:
     get:
       summary: Read current AL state for devices
@@ -6506,6 +6584,59 @@ components:
             the reference clock. Meaningful only while exchanging in SAFE-OP/OP; converges toward
             zero as the drift-compensation loop settles
           example: 0
+    FrameStats:
+      type: object
+      description: How late the control-plane frames come back on this host. See `GET /api/frames`.
+      required: [returned, over2Ms, over20Ms, over100Ms, lost, latestReturnUs, mailbox]
+      properties:
+        returned:
+          type: integer
+          description: Frames that came back and were measured
+          example: 12345
+        over2Ms:
+          type: integer
+          description: Frames that came back later than 2 ms
+          example: 40
+        over20Ms:
+          type: integer
+          description: Frames that came back later than 20 ms
+          example: 3
+        over100Ms:
+          type: integer
+          description: Frames that came back later than 100 ms
+          example: 1
+        lost:
+          type: integer
+          description: >
+            Datagrams whose frame did not come back within 500 ms, or before their index had to
+            be used again because all 32 frame indexes were in use. The driver has 32 indexes,
+            one per frame on the wire at a time; an index whose frame has not come back is kept
+            out of use for 500 ms so that a late frame is still measured
+          example: 0
+        latestReturnUs:
+          type: integer
+          format: int64
+          description: The latest return since the bus came up or the last reset, in microseconds
+          example: 152340
+        mailbox:
+          type: array
+          description: Per SOMANET device, in bus order
+          items:
+            type: object
+            required: [slavePosition, writesWithoutFrame, counter0Requests]
+            properties:
+              slavePosition:
+                type: integer
+                description: 1-based position on the fieldbus
+                example: 1
+              writesWithoutFrame:
+                type: integer
+                description: Mailbox writes whose frame did not come back in time
+                example: 2
+              counter0Requests:
+                type: integer
+                description: Requests sent with mailbox counter 0 after such a write
+                example: 1
     AlStatusCode:
       type: object
       required: [code, name, description, terminal]

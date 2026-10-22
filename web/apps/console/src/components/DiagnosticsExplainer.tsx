@@ -105,6 +105,32 @@ export default function DiagnosticsExplainer() {
       </p>
 
       <p>
+        <strong>Frames</strong> is about the PC, not about a device. Every request Motion Master
+        sends to a device goes out as one EtherCAT frame and comes back as the same frame, in well
+        under a millisecond on a good host. The driver stamps every mailbox and register datagram
+        when it goes out and times the frame when it comes back, also a frame that comes back after
+        the driver stopped waiting for it. The counts are since the bus came up or the last Reset.
+        This is the number that tells a slow PC from a bad cable: a bad cable shows in the port
+        counters above, a slow PC shows here and nowhere else.
+      </p>
+      <ul className="list-disc pl-5 space-y-1">
+        <li><strong>Measured</strong> — frames that came back and were timed.</li>
+        <li><strong>Later than 2 ms, 20 ms, 100 ms</strong> — how many frames came back later than each of the three waits the driver uses. The bands are cumulative: a frame later than 100 ms counts in all three. A register read or write waits 2 ms, then goes out again. A mailbox transfer as a whole waits 20 ms. A mailbox write or read waits 100 ms for its one frame; when the frame is later than that, the driver counts the write as one with no frame back and recovers it with mailbox counter 0, which is the <em>Writes without a frame back</em> and <em>Requests sent with counter 0</em> table below the tiles.</li>
+        <li><strong>Never came back</strong> — no frame within 500 ms. The driver has 32 frame indexes, one per frame on the wire at a time. An index whose frame has not come back is kept out of use for 500 ms so that a late frame is still timed; a frame later than that counts here, and so does one whose index had to be used again because all 32 were in use.</li>
+        <li><strong>Latest</strong> — the latest return since the counts were zero. It is exact while a thread was waiting for the frame. A frame nobody was waiting for sits in the socket until the next receive by any thread, so for such a frame the time is an upper bound.</li>
+      </ul>
+      <p>
+        The time is the round trip as Motion Master sees it, from just before the send call to just
+        after the receive call returned the frame. It says how late a frame was, not where the delay
+        was: the NIC, the kernel, the wire and the device are all in it. The cyclic process-data
+        frame is not in these counts; a late one shows on the Process Image page as a short working
+        counter. The server also writes one warning to its log, and publishes a{' '}
+        <code>late-frame</code> notification, the first time the latest return passes 20 ms and
+        the first time it passes 100 ms. <strong>Reset</strong> sets every count to zero so that one
+        test run can be measured on its own.
+      </p>
+
+      <p>
         Note this whole page is EtherCAT-ESC-specific. A transport with no ESC (e.g. SPoE) has no such
         registers, so it reports no diagnostics here.
       </p>

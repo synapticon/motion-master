@@ -78,6 +78,7 @@ echo "round,package,status,seconds,fw_before,fw_after,state_after,error" > "$out
 log "== $label: $rounds rounds on device $position, packages $pkg_a / $pkg_b${netem:+, netem: $netem}"
 log "device before: fw=$(fw) state=$(state)"
 
+post /api/frames/reset > /dev/null
 for ((i = 1; i <= rounds; i++)); do
   pkg=$pkg_a
   if ((i % 2 == 0)); then pkg=$pkg_b; fi
@@ -121,3 +122,4 @@ for ((i = 1; i <= rounds; i++)); do
   fi
 done
 log "== $label: $(grep -c ',succeeded,' "$out/results.csv") succeeded of $(($(wc -l < "$out/results.csv") - 1)) runs"
+log "== $label: frames of this host during the runs (GET /api/frames): $(curl -sk "$base/api/frames")"

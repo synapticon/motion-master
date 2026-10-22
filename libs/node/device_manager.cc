@@ -1359,6 +1359,22 @@ std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> DeviceManager::de
   return result;
 }
 
+std::expected<mm::comm::FrameStats, std::string> DeviceManager::frameStats() const {
+  const std::shared_ptr<DeviceSet> set = deviceSet();
+  if (!set->driver) {
+    return std::unexpected("no driver — call init() first");
+  }
+  return set->driver->frameStats();
+}
+
+std::expected<void, std::string> DeviceManager::resetFrameStats() {
+  const std::shared_ptr<DeviceSet> set = deviceSet();
+  if (!set->driver) {
+    return std::unexpected("no driver — call init() first");
+  }
+  return set->driver->resetFrameStats();
+}
+
 std::expected<std::vector<DcSyncInfo>, std::string> DeviceManager::dcSync(
     const std::vector<uint16_t>& positions) {
   const std::shared_ptr<DeviceSet> set = deviceSet();

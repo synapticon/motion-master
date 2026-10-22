@@ -28,6 +28,7 @@ import {
   FirmwareCompatibility,
   FirmwarePackageName,
   FoeErrorCode,
+  FrameStats,
   GameLoopHealth,
   HardwareDescription,
   HrdRecording,
@@ -2102,6 +2103,47 @@ export class Api<
       path: `/api/dc-sync`,
       method: "GET",
       query: query,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description A read of counters the fieldbus driver keeps while it works; no bus I/O. The driver stamps every control-plane datagram (mailbox and register reads and writes) when it first goes out, and measures each frame that comes back for it, also a frame that comes back after the caller stopped waiting for it. The cyclic process-data frame of the RT loop is not measured; a late one shows on `GET /api/process-image` as a short working counter. The bands are the three waits the driver uses, 2 ms, 20 ms and 100 ms, and they are cumulative: a frame later than 100 ms counts in all three. The time is the round trip as the master sees it, from just before the send call to just after the receive call returned the frame. It says how late a frame was, not where the delay was. A frame that comes back after its caller stopped waiting sits in the socket until the next receive call by any thread, so its time is an upper bound; in OP the RT loop receives every cycle, in PRE-OP the next control-plane request does. `mailbox` lists, per SOMANET device, the mailbox writes whose frame did not come back in time and the requests the driver sent with counter 0 to recover from them, since the bus came up or `POST /api/frames/reset`. The server also logs a warning, and publishes a `late-frame` notification, the first time the latest return passes 20 ms and the first time it passes 100 ms.
+   *
+   * @name GetFrames
+   * @summary Report how late the control-plane frames come back on this host
+   * @request GET:/api/frames
+   */
+  getFrames = (params: RequestParams = {}) =>
+    this.request<
+      FrameStats,
+      {
+        error: string;
+      }
+    >({
+      path: `/api/frames`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Sets every count of `GET /api/frames` to zero, so one test run can be measured on its own. The bands of the `late-frame` notification start again from zero too.
+   *
+   * @name ResetFrames
+   * @summary Set every count of the frame report to zero
+   * @request POST:/api/frames/reset
+   */
+  resetFrames = (params: RequestParams = {}) =>
+    this.request<
+      {
+        /** @example true */
+        ok: boolean;
+      },
+      {
+        error: string;
+      }
+    >({
+      path: `/api/frames/reset`,
+      method: "POST",
       format: "json",
       ...params,
     });

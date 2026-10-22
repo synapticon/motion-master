@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **`GET /api/frames` reports how late the EtherCAT frames of the host come back.** Motion Master stamps every mailbox and register datagram when it goes out and times the frame that comes back for it, also a frame that comes back after it stopped waiting. The report counts the frames later than 2 ms, 20 ms and 100 ms, the three waits the driver uses, the frames that never came back, and the latest return, with the mailbox recoveries per SOMANET device. `POST /api/frames/reset` starts the counts again. The server logs a warning and publishes a `late-frame` notification the first time the latest return passes 20 ms and 100 ms. The Console shows the report on the Fieldbus Diagnostics page, and the three loops in `tools/` print it. The cyclic process-data frame is not measured; a late one shows as a short working counter. (#123)
+
 ## [6.0.0-alpha.97] - 2026-10-22
 
 ### Fixed

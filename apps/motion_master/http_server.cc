@@ -706,6 +706,30 @@ void HttpServer::run() {
     return mm::api::timed([this, &positions] { return deviceManager_.dcSync(*positions); });
   });
 
+  // How late the control-plane frames come back on this host. A read of counters the transport
+  // keeps, so no wire time to report. 409 over SPoE through the ESC refusal: no ESC means no
+  // EtherCAT frames either.
+  router.get("/api/frames", [this](const mm::api::Request&) -> mm::api::Response {
+    if (auto refused = escUnavailable(deviceManager_); refused) {
+      return *refused;
+    }
+    auto stats = deviceManager_.frameStats();
+    if (!stats) {
+      return mm::api::error("409 Conflict", stats.error());
+    }
+    return mm::api::json(nlohmann::json(*stats));
+  });
+
+  router.post("/api/frames/reset", [this](const mm::api::Request&) -> mm::api::Response {
+    if (auto refused = escUnavailable(deviceManager_); refused) {
+      return *refused;
+    }
+    if (auto r = deviceManager_.resetFrameStats(); !r) {
+      return mm::api::error("409 Conflict", r.error());
+    }
+    return mm::api::json(nlohmann::json{{"ok", true}});
+  });
+
   router.get("/api/devices", [this](const mm::api::Request&) {
     return mm::api::json(nlohmann::json(deviceManager_));
   });

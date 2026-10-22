@@ -7,6 +7,7 @@
 #include <expected>
 #include <functional>
 #include <mutex>
+#include <nlohmann/json_fwd.hpp>
 #include <optional>
 #include <span>
 #include <string>
@@ -420,6 +421,44 @@ struct DcSyncDiagnostics {
           ///< negative = behind; zero on the reference clock itself.
 };
 
+/// @brief The mailbox writes of one slave that got no frame back, and the requests the driver
+/// sent with counter 0 to recover, since the bus came up or the counts were reset.
+struct MailboxFrameCounts {
+  uint16_t slavePosition = 0;       ///< 1-based bus position.
+  uint32_t writesWithoutFrame = 0;  ///< Mailbox writes whose frame did not come back in time.
+  uint32_t counter0Requests = 0;    ///< Requests sent with mailbox counter 0 after such a write.
+};
+
+/// @brief How late the control-plane frames of this host come back.
+///
+/// The transport stamps every control-plane datagram when it first goes out and measures each
+/// frame that comes back for it, also a frame that comes back after the caller stopped waiting for
+/// it. The cyclic frame of the RT loop is not measured; a late one shows as a short working
+/// counter. The bands are the three waits the transport uses, and they are cumulative: a frame
+/// later than 100 ms counts in all three. Produced by @c FieldbusDriver::frameStats.
+///
+/// The time is the round trip as the master sees it: from just before the send call to just after
+/// the receive call returned the frame, on the monotonic clock the transport's waits run on. It
+/// says how late a frame was, not where the delay was. A frame that comes back after its caller
+/// stopped waiting sits in the socket until the next receive call by any thread, so its time is an
+/// upper bound; in OP the RT loop receives every cycle, in PRE-OP the next control-plane request
+/// does. Such a frame was later than the wait of its caller, whatever the stamp says.
+struct FrameStats {
+  uint32_t returned = 0;   ///< Frames that came back and were measured.
+  uint32_t over2Ms = 0;    ///< Frames that came back later than 2 ms.
+  uint32_t over20Ms = 0;   ///< Frames that came back later than 20 ms.
+  uint32_t over100Ms = 0;  ///< Frames that came back later than 100 ms.
+  uint32_t lost = 0;       ///< Datagrams whose frame did not come back within 500 ms, or
+                           ///< before their index had to be used again because all 32 were in
+                           ///< use.
+  int64_t latestReturnUs =
+      0;  ///< The latest return since the bus came up or the last reset, in microseconds.
+  std::vector<MailboxFrameCounts> mailbox;  ///< Per SOMANET device, in bus order.
+};
+
+/// @brief Serialises a FrameStats to JSON, camelCase keys.
+void to_json(nlohmann::json& j, const FrameStats& s);
+
 /// @brief Process-data (sync-manager) watchdog configuration of one slave.
 ///
 /// Decoded from the watchdog divider (0x0400) and process-data watchdog time (0x0420) ESC
@@ -669,6 +708,22 @@ class FieldbusDriver {
   virtual std::expected<std::vector<DcSyncDiagnostics>, std::string> readDcSync(
       const std::vector<uint16_t>& /*positions*/) {
     return std::unexpected("distributed-clock diagnostics not supported by this transport");
+  }
+
+  /// @brief Reports how late the control-plane frames come back on this host.
+  ///
+  /// A read of counters the transport keeps while it works; no bus I/O. See @c FrameStats for
+  /// what is measured and what is not.
+  ///
+  /// Optional capability: the default returns an error for a transport that sends no EtherCAT
+  /// frames (SPoE); the SOEM driver overrides it.
+  virtual std::expected<FrameStats, std::string> frameStats() {
+    return std::unexpected("frame statistics not supported by this transport");
+  }
+
+  /// @brief Sets every count of @c frameStats to zero, so one test run can be measured alone.
+  virtual std::expected<void, std::string> resetFrameStats() {
+    return std::unexpected("frame statistics not supported by this transport");
   }
 
   /// @brief Reads an object dictionary entry via CoE SDO upload.

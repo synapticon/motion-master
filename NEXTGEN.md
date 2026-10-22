@@ -4440,3 +4440,79 @@ master.
 Without the rule, 3 rounds: no attempt tried again, 1.1 s per round. `ctest` passes. Not tested: a
 Circulo, two drives, the Complete Access readers, the Windows and macOS builds. SPoE has no SOEM
 and is not touched.
+
+## Session 2026-10-22 — How late do the frames of a host come back (as-built)
+
+Issue #123. Every mailbox wait in the port is a number somebody picked. `EC_TIMEOUTLATE`, 100 ms,
+is a guess at what a slow host does, and the reporter of #113, #115 and #119 runs past it on most
+runs. Nothing said by how much, because a frame that comes back after the wait ended was dropped
+without a trace. This session makes the port record it.
+
+**What is measured.** `ecx_outframe` stamps a datagram with the monotonic clock when it first
+goes out. A datagram sent again keeps the stamp of its first copy, so a late answer to the first
+copy is timed from the first send. `ecx_inframe` times every frame it receives against the stamp
+of its index, before it decides to keep or drop the frame, so a frame the caller stopped waiting for is
+timed too. The counts live in `ec_framestatst` on `ecx_portt`: frames measured, later than 2 ms,
+later than 20 ms, later than 100 ms, lost, and the latest return. The bands are the three waits
+the port uses and they are cumulative. `GET /api/frames` reports them with the per-device totals
+of mailbox writes without a frame and requests sent with counter 0, `POST /api/frames/reset`
+zeroes them, `lateFrameSource` in the app logs and publishes `late-frame` the first time the
+latest passes 20 ms and 100 ms, the Console shows them on Fieldbus Diagnostics, and the three
+loops in `tools/` reset at the start and print at the end.
+
+**The RT frame is not in it.** A frame whose first datagram is a logical read or write is the
+cyclic frame, and `ecx_framesent` skips it with one byte compare. A late cyclic frame already
+shows as a short working counter and a skipped cycle. The RT thread pays that compare per frame,
+a byte compare per index candidate in `ecx_getindex`, and one clock read when it is the thread
+that happens to receive a control-plane frame, which it already copies. A minute in OP with a
+control-plane poll every 100 ms: 10051 frames measured, latest 0.31 ms, skipped cycles and short
+working counter unchanged.
+
+**The first run read most late frames as lost, and that was the measurement's own fault.** 30
+rounds of the AL walk under `delay 150ms reorder 98% 0%`: 70835 frames measured, 76 later than
+2 ms, 1361 lost. 2 % of 70835 is 1417, so the late frames were there, but as lost. The control
+plane cycles its 32 indexes in about 16 ms at that traffic, so a frame 150 ms late found its
+index given to a newer datagram, and the header check of Session 2026-10-20 dropped it as it
+should. The stamp was gone with the index.
+
+**The decision: an index that awaits a frame is not given out again for `EC_FRAMEGRACE`, 500 ms,
+unless every index is in use.** `ecx_getindex` skips such an index, and reads the clock only when
+it meets one, so a thread whose own indexes are never pending pays a byte compare. When every
+index is in use or waiting, a second pass takes an index that waits before one in use, which is
+the rule upstream has, so nothing blocks. Lost now means no frame within 500 ms, or a forced
+reuse. The same 30 rounds after the change: 74216 frames measured, 1517 later than 2 ms, 1486
+later than 20 ms, 1485 later than 100 ms, 3 lost, latest 222 ms. 1485 of 74216 is 2.0 %.
+
+**What the number means, and what it does not.** The time is user space to user space, from just
+before `send` to just after `recv` returned the frame, on the clock the waits run on, so it is the
+number a wait is compared against. It does not say where the delay was: NIC queue, kernel, wire
+or ESC are all in it. A frame nobody waits for sits in the socket until the next receive call by
+any thread. In OP that is the RT loop within a cycle; in PRE-OP it is the next control-plane
+request, so the time of such a frame is an upper bound, and it was later than the wait of its caller
+whatever the stamp says. The latest the port can see is about 500 ms, the grace; a frame
+later than that is lost, and no wait that long is a candidate. A host that shows many lost and
+few in the 100 ms band has frames later than 500 ms or none, and the grace is one define to raise
+for a second run.
+
+**Rejected.**
+
+- **A per-state split, or the RT path.** The wait is the same in every AL state, most mailbox
+  traffic in the field runs in OP, and OP is where a mailbox frame queues behind the cyclic one,
+  so a PRE-OP-only number would be the optimistic one. The RT frame has its own counters.
+- **A clock read on every `ecx_getindex`.** The grace needs the time only when the candidate
+  index is pending, which is never the RT thread's own.
+- **Kernel receive timestamps.** They would localise the delay and are Linux-only and intrusive.
+  The user-space number is the one the waits use.
+
+**Numbers on the bench, Integro, SOEM.**
+
+| Run | Frames | > 2 ms | > 20 ms | > 100 ms | Lost | Latest |
+| --- | --- | --- | --- | --- | --- | --- |
+| 3 AL rounds, no rule | 4502 | 0 | 0 | 0 | 0 | 0.43 ms |
+| 30 AL rounds, 2 % 150 ms late, before the grace | 70835 | 76 | 27 | 13 | 1361 | 273 ms |
+| 30 AL rounds, 2 % 150 ms late, with the grace | 74216 | 1517 | 1486 | 1485 | 3 | 222 ms |
+| 60 s in OP, a poll every 100 ms, no rule | 10051 | 0 | 0 | 0 | 0 | 0.31 ms |
+
+The log carried the two warnings, at 64.1 ms and at 173.3 ms. `ctest` passes. Not tested: a
+Circulo, two drives, the Windows and macOS builds, which carry the same patch through the
+`foreach`. SPoE answers 409 and is not touched.

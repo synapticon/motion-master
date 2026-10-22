@@ -1006,6 +1006,223 @@ vcpkg_replace_string(
                      &(context->SMcommtype[Thread_n]), EC_TIMEOUTRXM);
    if (wkc <= 0) context->slavelist[Slave].pdomapreadfails++;")
 
+# The port records how late the control-plane frames come back (issue #123).
+#
+# A mailbox write or read waits EC_TIMEOUTLATE for its frame, and a register datagram is sent
+# again after EC_TIMEOUTRET. How late a frame really comes back on a host is not known, because a
+# frame that comes back after the wait ended is dropped without a trace. The port stamps every
+# control-plane datagram when it first goes out, and when a frame comes back for that index it
+# records the time since the stamp, before it decides whether to keep or drop the frame. A
+# datagram sent again keeps its first stamp, so the time is measured from the first copy.
+#
+# An index whose frame has not come back is not handed out again for EC_FRAMEGRACE, 500 ms,
+# unless no other index is free. Without that, the control plane cycles its indexes in a few
+# milliseconds and a frame later than that finds its index in use by a newer datagram: it is
+# dropped by the header check, and its time is never known. With it, a frame up to 500 ms late is
+# measured, and a stamp still pending when the index is handed out again means the frame did not
+# come back within 500 ms, or every index was in use. That is the lost count. ecx_getindex reads
+# the clock only when it meets a pending index, so the RT thread, whose own indexes are never
+# pending, pays a byte compare per candidate.
+#
+# The cyclic frame of the RT thread is not measured: its first datagram is a logical read or
+# write, and a late one already shows as a short working counter. The RT thread pays one byte
+# compare per frame it sends, and one clock read when it is the thread that happens to receive a
+# control-plane frame, which it already copies today.
+#
+# The bands are the three waits the port uses, 2 ms, 20 ms and 100 ms, and they are cumulative:
+# a frame later than 100 ms counts in all three. The counts of returned frames and the bands are
+# written under rx_mutex, the lost count under getindex_mutex, and nothing is written from two
+# threads. A reader outside the port takes them without a lock.
+foreach(nicdrvh "oshw/linux/nicdrv.h" "oshw/win32/nicdrv.h" "oshw/macosx/nicdrv.h")
+  vcpkg_replace_string(
+      "${SOURCE_PATH}/${nicdrvh}"
+"/** pointer structure to buffers, vars and mutexes for port instantiation */"
+"/** How late the control-plane frames come back. Bands are cumulative. */
+typedef struct
+{
+   /** frames that came back and were measured */
+   uint32 returned;
+   /** frames that came back later than 2 ms */
+   uint32 over2ms;
+   /** frames that came back later than 20 ms */
+   uint32 over20ms;
+   /** frames that came back later than 100 ms */
+   uint32 over100ms;
+   /** datagrams whose frame did not come back within EC_FRAMEGRACE, or before their index had to be used again */
+   uint32 lost;
+   /** the latest return since the counts were zero, in us */
+   int64_t latestus;
+} ec_framestatst;
+
+/** pointer structure to buffers, vars and mutexes for port instantiation */")
+  vcpkg_replace_string(
+      "${SOURCE_PATH}/${nicdrvh}"
+"   uint8 lastidx;"
+"   uint8 lastidx;
+   /** when the datagram under each index first went out, monotonic, in us */
+   int64_t txtimeus[EC_MAXBUF];
+   /** the datagram under each index went out and no frame has come back for it */
+   boolean txpending[EC_MAXBUF];
+   /** how late the control-plane frames come back */
+   ec_framestatst framestats;")
+endforeach()
+
+foreach(nicdrv "oshw/linux/nicdrv.c" "oshw/win32/nicdrv.c" "oshw/macosx/nicdrv.c")
+  vcpkg_replace_string(
+      "${SOURCE_PATH}/${nicdrv}"
+"uint8 ecx_getindex(ecx_portt *port)
+{"
+"/* How long an index whose frame has not come back is kept out of use, in us, so that a frame
+ * that late is still measured against its own stamp. */
+#define EC_FRAMEGRACE 500000
+
+/* Microseconds of the monotonic clock. */
+static int64_t ecx_monotonicus(void)
+{
+   ec_timet t;
+   osal_get_monotonic_time(&t);
+   return ((int64_t)t.tv_sec * 1000000) + (t.tv_nsec / 1000);
+}
+
+/* True while the index is in use, or its frame is still awaited within EC_FRAMEGRACE. */
+static boolean ecx_indexbusy(ecx_portt *port, uint8 idx)
+{
+   if (port->rxbufstat[idx] != EC_BUF_EMPTY)
+   {
+      return TRUE;
+   }
+   return port->txpending[idx] && ((ecx_monotonicus() - port->txtimeus[idx]) < EC_FRAMEGRACE);
+}
+
+/* Stamps the datagram under idx when it first goes out. A frame whose first datagram is a
+ * logical read or write is the cyclic frame of the RT thread and is not measured. A datagram
+ * sent again keeps the stamp of its first copy. */
+static void ecx_framesent(ecx_portt *port, uint8 idx, boolean resend)
+{
+   const ec_comt *dg = (const ec_comt *)&(port->txbuf[idx][ETH_HEADERSIZE]);
+   if (resend)
+   {
+      return;
+   }
+   if ((dg->command == EC_CMD_LRD) || (dg->command == EC_CMD_LWR) || (dg->command == EC_CMD_LRW))
+   {
+      port->txpending[idx] = FALSE;
+      return;
+   }
+   port->txtimeus[idx] = ecx_monotonicus();
+   port->txpending[idx] = TRUE;
+}
+
+/* Records how late the frame that came back under idxf was, against the stamp of its datagram.
+ * Called under rx_mutex, before the frame is kept or dropped, so a frame the caller stopped waiting for
+ * is measured too. */
+static void ecx_framereturned(ecx_portt *port, uint8 idxf)
+{
+   int64_t lateus;
+   if ((idxf >= EC_MAXBUF) || !port->txpending[idxf])
+   {
+      return;
+   }
+   port->txpending[idxf] = FALSE;
+   lateus = ecx_monotonicus() - port->txtimeus[idxf];
+   port->framestats.returned++;
+   if (lateus > port->framestats.latestus)
+   {
+      port->framestats.latestus = lateus;
+   }
+   if (lateus > 2000)
+   {
+      port->framestats.over2ms++;
+   }
+   if (lateus > 20000)
+   {
+      port->framestats.over20ms++;
+   }
+   if (lateus > 100000)
+   {
+      port->framestats.over100ms++;
+   }
+}
+
+uint8 ecx_getindex(ecx_portt *port)
+{")
+  vcpkg_replace_string(
+      "${SOURCE_PATH}/${nicdrv}"
+"   while ((port->rxbufstat[idx] != EC_BUF_EMPTY) && (cnt < EC_MAXBUF))"
+"   while (ecx_indexbusy(port, idx) && (cnt < EC_MAXBUF))")
+  vcpkg_replace_string(
+      "${SOURCE_PATH}/${nicdrv}"
+"   port->rxbufstat[idx] = EC_BUF_ALLOC;
+   if (port->redstate != ECT_RED_NONE)"
+"   /* every index is in use or awaits a late frame: an index that awaits a frame is given out
+    * before one in use, which is the rule upstream SOEM has */
+   if (cnt >= EC_MAXBUF)
+   {
+      cnt = 0;
+      while ((port->rxbufstat[idx] != EC_BUF_EMPTY) && (cnt < EC_MAXBUF))
+      {
+         idx++;
+         cnt++;
+         if (idx >= EC_MAXBUF)
+         {
+            idx = 0;
+         }
+      }
+   }
+   /* the frame of the datagram that had this index before did not come back within
+    * EC_FRAMEGRACE, or every index was in use */
+   if (port->txpending[idx])
+   {
+      port->txpending[idx] = FALSE;
+      port->framestats.lost++;
+   }
+   port->rxbufstat[idx] = EC_BUF_ALLOC;
+   if (port->redstate != ECT_RED_NONE)")
+  vcpkg_replace_string(
+      "${SOURCE_PATH}/${nicdrv}"
+"   lp = (*stack->txbuflength)[idx];
+   (*stack->rxbufstat)[idx] = EC_BUF_TX;"
+"   lp = (*stack->txbuflength)[idx];
+   if (!stacknumber)
+   {
+      ecx_framesent(port, idx, (*stack->rxbufstat)[idx] == EC_BUF_TX);
+   }
+   (*stack->rxbufstat)[idx] = EC_BUF_TX;")
+  vcpkg_replace_string(
+      "${SOURCE_PATH}/${nicdrv}"
+"            idxf = ecp->index;"
+"            idxf = ecp->index;
+            if (!stacknumber)
+            {
+               ecx_framereturned(port, idxf);
+            }")
+endforeach()
+
+# Running totals of the mailbox writes without a frame and the requests sent with counter 0, for
+# the frames report. The driver clears mbxwriteunknowns and mbxwriterecovers when it logs them.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/include/soem/ec_main.h"
+"   /** requests sent with counter 0 after a write with an unknown outcome */
+   uint32 mbxwriterecovers;"
+"   /** requests sent with counter 0 after a write with an unknown outcome */
+   uint32 mbxwriterecovers;
+   /** mailbox writes that got no frame back, since the context was set up */
+   uint32 mbxwriteunknownstotal;
+   /** requests sent with counter 0, since the context was set up */
+   uint32 mbxwriterecoverstotal;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"      slaveitem->mbxwriterecovers++;"
+"      slaveitem->mbxwriterecovers++;
+      slaveitem->mbxwriterecoverstotal++;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"   slaveitem->mbxwriteunknowns++;"
+"   slaveitem->mbxwriteunknowns++;
+   slaveitem->mbxwriteunknownstotal++;")
+
 # EC_MAXBUF is the number of frame indexes. The RT thread and the control plane take indexes from
 # one pool. When no index is free, ecx_getindex does not wait or fail. It returns an index that is
 # still in use, and two frames then share one receive buffer. The control plane is capped at

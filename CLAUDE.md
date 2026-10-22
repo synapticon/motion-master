@@ -737,7 +737,22 @@ from `ParameterRefresher`'s cache, one value per flush.
 
 **Bus-level:** AL state control, static configuration (SM/FMMU/DC/mailbox/addresses), process
 image and WKC health, `.mmpd` recorder dump, live ESC diagnostics (error counters, link
-state, watchdog), DC sync deviation (0x092C).
+state, watchdog), DC sync deviation (0x092C), and how late the control-plane frames of the host
+come back (`GET /api/frames`).
+
+**The port measures every control-plane frame, and the RT frame is not in it.** `ports/soem`
+stamps a datagram when it first goes out and times the frame that comes back for it, also one
+the caller stopped waiting for, in `ec_framestatst` on the port. The bands are the three waits the port
+uses, 2 ms, 20 ms and 100 ms, cumulative. A frame whose first datagram is a logical command is
+the RT frame and is skipped; its lateness is a short working counter on `GET /api/process-image`.
+An index whose frame has not come back is kept out of use for `EC_FRAMEGRACE`, 500 ms, unless
+all 32 indexes (`EC_MAXBUF`) are in use, so a frame up to 500 ms late is measured against its own
+stamp; later than that it counts as lost.
+The time is user space to user space on the monotonic clock, so it says how late a frame was, not where the delay was. A
+frame nobody waits for is timed when the next receive call by any thread finds it, so its time is
+an upper bound. `lateFrameSource` in the app logs and publishes `late-frame` the first time the
+latest return passes 20 ms and 100 ms. The number this produces on a customer host is what sets
+`EC_TIMEOUTLATE`; do not change that wait without it. See `NEXTGEN.md`, Session 2026-10-22.
 
 **Per-device:** FoE, CoE object dictionary and SDO, PDO mapping read and write
 (`GET`/`PUT /api/devices/:slavePosition/pdo-mapping`; the write reconfigures 0x1C12/0x1C13

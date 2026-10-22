@@ -1504,6 +1504,59 @@ export interface DcSyncStatus {
   systemTimeDifference: number;
 }
 
+/** How late the control-plane frames come back on this host. See `GET /api/frames`. */
+export interface FrameStats {
+  /**
+   * Frames that came back and were measured
+   * @example 12345
+   */
+  returned: number;
+  /**
+   * Frames that came back later than 2 ms
+   * @example 40
+   */
+  over2Ms: number;
+  /**
+   * Frames that came back later than 20 ms
+   * @example 3
+   */
+  over20Ms: number;
+  /**
+   * Frames that came back later than 100 ms
+   * @example 1
+   */
+  over100Ms: number;
+  /**
+   * Datagrams whose frame did not come back within 500 ms, or before their index had to be used again because all 32 frame indexes were in use. The driver has 32 indexes, one per frame on the wire at a time; an index whose frame has not come back is kept out of use for 500 ms so that a late frame is still measured
+   * @example 0
+   */
+  lost: number;
+  /**
+   * The latest return since the bus came up or the last reset, in microseconds
+   * @format int64
+   * @example 152340
+   */
+  latestReturnUs: number;
+  /** Per SOMANET device, in bus order */
+  mailbox: {
+    /**
+     * 1-based position on the fieldbus
+     * @example 1
+     */
+    slavePosition: number;
+    /**
+     * Mailbox writes whose frame did not come back in time
+     * @example 2
+     */
+    writesWithoutFrame: number;
+    /**
+     * Requests sent with mailbox counter 0 after such a write
+     * @example 1
+     */
+    counter0Requests: number;
+  }[];
+}
+
 export interface AlStatusCode {
   /**
    * AL Status Code value (ETG.1000.6 §6.4.1)

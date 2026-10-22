@@ -785,6 +785,51 @@ SoemFieldbusDriver::readStates(const std::vector<uint16_t>& positions) {
   return result;
 }
 
+std::expected<FrameStats, std::string> SoemFieldbusDriver::frameStats() {
+  // The port writes the counts from the thread that sent or received a frame, under its own
+  // mutexes, and this reads them without one. A count read a moment early is the cost, and a
+  // torn read is not possible on the platforms this runs on. The shared bus lock keeps ctx_ alive.
+  const auto lock = controlPlane_.lockBusShared();
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
+  const ec_framestatst& f = ctx_->port.framestats;
+  FrameStats stats;
+  stats.returned = f.returned;
+  stats.over2Ms = f.over2ms;
+  stats.over20Ms = f.over20ms;
+  stats.over100Ms = f.over100ms;
+  stats.lost = f.lost;
+  stats.latestReturnUs = f.latestus;
+  for (int i = 1; i <= ctx_->slavecount; ++i) {
+    const auto& s = ctx_->slavelist[i];
+    if (!s.mbxwriteonce) {
+      continue;  // only a SOMANET device has the write-once rule and its recovery
+    }
+    stats.mailbox.push_back(MailboxFrameCounts{
+        .slavePosition = static_cast<uint16_t>(i),
+        .writesWithoutFrame = s.mbxwriteunknownstotal,
+        .counter0Requests = s.mbxwriterecoverstotal,
+    });
+  }
+  return stats;
+}
+
+std::expected<void, std::string> SoemFieldbusDriver::resetFrameStats() {
+  // Exclusive, so no control-plane frame is in flight while the counts go to zero. The RT thread
+  // may still receive a late control-plane frame and count it, which is one count at most.
+  const auto lock = controlPlane_.lockBus();
+  if (!ctx_) {
+    return std::unexpected("no driver — call init() first");
+  }
+  ctx_->port.framestats = ec_framestatst{};
+  for (int i = 1; i <= ctx_->slavecount; ++i) {
+    ctx_->slavelist[i].mbxwriteunknownstotal = 0;
+    ctx_->slavelist[i].mbxwriterecoverstotal = 0;
+  }
+  return {};
+}
+
 std::expected<std::vector<SlaveDiagnostics>, std::string> SoemFieldbusDriver::readDiagnostics(
     const std::vector<uint16_t>& positions) {
   const auto lock = controlPlane_.lockBusIo();

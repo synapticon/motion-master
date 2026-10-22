@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import type { DeviceDiagnostics, PortDiagnostics } from '@synapticon/motion-master-client'
+import type { DeviceDiagnostics, FrameStats, PortDiagnostics } from '@synapticon/motion-master-client'
 import PageHeader from '../components/PageHeader'
 import DiagnosticsExplainer from '../components/DiagnosticsExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
@@ -316,6 +316,134 @@ function DeviceCard({ device }: { device: DeviceDiagnostics }) {
   )
 }
 
+// How late the control-plane frames come back on the host Motion Master runs on. One report for
+// the whole bus, not per device: the number is about the PC's network stack, not about a slave.
+// It is what tells a slow PC from a bad cable, which the per-device counters below cannot. Its
+// own query on the page's 2 s cadence, and a reset so one test run can be measured alone.
+function FramesSection() {
+  const { api } = useConnection()
+  const queryClient = useQueryClient()
+
+  const query = useQuery({
+    queryKey: ['frames'],
+    queryFn: () => api.getFrames().then(r => r.data),
+    refetchInterval: 2000,
+  })
+
+  const reset = useMutation({
+    mutationFn: () => api.resetFrames().then(r => r.data),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['frames'] }),
+  })
+
+  const f: FrameStats | undefined = query.data
+  const band = (n: number) => (n > 0 ? 'text-status-bad font-bold' : 'text-grey-400')
+  const latestMs = f ? (f.latestReturnUs / 1000).toFixed(1) : ''
+
+  return (
+    <section className="border border-grey-200 bg-white">
+      <div className="px-4 py-3 border-b border-grey-200 flex items-center justify-between gap-3">
+        <div>
+          <h3 className="font-display uppercase text-sm">Frames</h3>
+          <p className="text-xs text-grey-600 mt-0.5">
+            How late the control-plane frames of this PC come back, since the bus came up or the
+            last reset.
+          </p>
+        </div>
+        <button
+          onClick={() => reset.mutate()}
+          disabled={reset.isPending || !f}
+          className={btnOutline}
+          title="Sets every count to zero, so one test run can be measured on its own"
+        >
+          {reset.isPending ? 'Resetting…' : 'Reset'}
+        </button>
+      </div>
+      <div className="p-4 space-y-4">
+        <p className="text-xs text-grey-600 leading-relaxed">
+          Every mailbox and register datagram is stamped when it goes out and timed when its frame
+          comes back, also a frame that comes back after Motion Master stopped waiting for it. The bands are
+          the three waits the driver uses, and they are cumulative: a frame later than 100 ms counts
+          in all three. The cyclic process-data frame is not in here; a late one shows on the
+          Process Image page as a short working counter. A count in the 100 ms band means a request
+          waited the full mailbox timeout and was recovered, which is the sign of a slow PC.
+        </p>
+        {query.isError ? (
+          <p className="text-xs text-grey-500">
+            Not available: no bus is up, or the transport sends no EtherCAT frames (SPoE).
+          </p>
+        ) : !f ? (
+          <p className="text-xs text-grey-600">Loading…</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4 border border-grey-200 p-3 bg-grey-50">
+              <Stat label="Measured" value={String(f.returned)} hint="Frames that came back" />
+              <Stat
+                label="Later than 2 ms"
+                value={String(f.over2Ms)}
+                cls={band(f.over2Ms)}
+                hint="A register read or write waits 2 ms for its frame, then sends it again"
+              />
+              <Stat
+                label="Later than 20 ms"
+                value={String(f.over20Ms)}
+                cls={band(f.over20Ms)}
+                hint="A mailbox transfer as a whole waits 20 ms"
+              />
+              <Stat
+                label="Later than 100 ms"
+                value={String(f.over100Ms)}
+                cls={band(f.over100Ms)}
+                hint="A mailbox write or read waits 100 ms for its frame. When the frame is later, the driver counts the write as one with no frame back and recovers with counter 0"
+              />
+              <Stat
+                label="Never came back"
+                value={String(f.lost)}
+                cls={band(f.lost)}
+                hint="No frame within 500 ms, or all 32 frame indexes were in use. An index whose frame has not come back is kept out of use for 500 ms"
+              />
+              <Stat
+                label="Latest"
+                value={`${latestMs} ms`}
+                cls={f.latestReturnUs > 100000 ? 'text-status-bad font-bold' : f.latestReturnUs > 20000 ? 'text-status-warn' : 'text-grey-800'}
+                hint="The latest return since the bus came up or the last reset. For a frame nobody was waiting for, an upper bound"
+              />
+            </div>
+            {f.mailbox.length > 0 && (
+              <div className="space-y-2">
+                <p className="eyebrow">Mailbox recoveries per device</p>
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="text-left text-grey-500">
+                      <th className="px-4 py-1 font-normal">Position</th>
+                      <th className="px-4 py-1 font-normal">Writes without a frame back</th>
+                      <th className="px-4 py-1 font-normal">Requests sent with counter 0</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {f.mailbox.map(m => (
+                      <tr key={m.slavePosition} className="border-t border-grey-100">
+                        <td className="px-4 py-1">
+                          <SlavePositionBadge position={m.slavePosition} />
+                        </td>
+                        <td className="px-4 py-1">
+                          <Counter value={m.writesWithoutFrame} />
+                        </td>
+                        <td className="px-4 py-1">
+                          <Counter value={m.counter0Requests} />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+    </section>
+  )
+}
+
 export default function FieldbusDiagnosticsPage() {
   const { api } = useConnection()
   const { timing, measure } = useWireTiming()
@@ -375,6 +503,8 @@ export default function FieldbusDiagnosticsPage() {
             {query.isFetching ? 'Loading…' : 'Refresh'}
           </button>
         </div>
+
+        <FramesSection />
 
         {query.isError && (
           <p className="text-xs text-status-bad font-mono">

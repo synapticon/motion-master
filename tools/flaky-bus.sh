@@ -65,6 +65,7 @@ post /api/devices/state '{"state":2,"timeoutMs":15000}' | head -c 300
 echo
 sleep 1
 
+post /api/frames/reset > /dev/null
 netem_on
 echo "== $label: netem: $(tc qdisc show dev "$adapter" | head -1)"
 start_line=$(wc -l < "$log")
@@ -101,3 +102,7 @@ printf 'packet error:                  %s\n' "$(count 'packet/timeout error')"
 printf 'SDO abort:                     %s\n' "$(count 'SDO abort')"
 printf 'FoE failures:                  %s\n' "$(grep -ci 'FOE.*failed' "$out/server.log")"
 printf 'warnings / errors:             %s / %s\n' "$(count '\[warning\]')" "$(count '\[error\]')"
+
+echo "== $label: frames of this host during the rounds (GET /api/frames)"
+curl -sk "$base/api/frames"
+echo

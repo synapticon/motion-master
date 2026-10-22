@@ -60,6 +60,7 @@ echo
 post /api/devices/state '{"state":2,"timeoutMs":15000}' | head -c 300
 echo
 
+post /api/frames/reset > /dev/null
 start_line=$(wc -l < "$log")
 echo "== $label: $rounds rounds, netem '$netem' (log from line $start_line)"
 fails=0
@@ -103,3 +104,7 @@ printf 'requests sent with counter 0:  %s\n' \
 printf 'no response (mailbox timeout): %s\n' "$(count 'no response')"
 printf 'no frame returned:             %s\n' "$(count 'no frame returned')"
 printf 'warnings / errors:             %s / %s\n' "$(count '\[warning\]')" "$(count '\[error\]')"
+
+echo "== $label: frames of this host during the rounds (GET /api/frames)"
+curl -sk "$base/api/frames"
+echo

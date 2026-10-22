@@ -714,6 +714,17 @@ class DeviceManager {
   std::expected<std::vector<DcSyncInfo>, std::string> dcSync(
       const std::vector<uint16_t>& positions);
 
+  /// @brief Reports how late the control-plane frames come back on this host.
+  ///
+  /// Forwards to @c FieldbusDriver::frameStats. No bus I/O.
+  ///
+  /// @return The counts, or an error string if no driver is initialised or the transport sends
+  ///         no EtherCAT frames.
+  std::expected<mm::comm::FrameStats, std::string> frameStats() const;
+
+  /// @brief Sets every count of @c frameStats to zero.
+  std::expected<void, std::string> resetFrameStats();
+
   /// @brief Reads the process-data (sync-manager) watchdog configuration of one device.
   ///
   /// Forwards to @c FieldbusDriver::processDataWatchdog after resolving the device. Returns the

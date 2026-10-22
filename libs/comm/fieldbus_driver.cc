@@ -1,5 +1,8 @@
 #include "comm/fieldbus_driver.h"
 
+#include <nlohmann/json.hpp>
+#include <utility>
+
 #include "core/util.h"
 
 namespace mm::comm {
@@ -67,6 +70,18 @@ std::optional<FmmuConfig> decodeFmmu(uint8_t index, std::span<const uint8_t> byt
   config.type = bytes[11];
   config.active = bytes[12];
   return config;
+}
+
+void to_json(nlohmann::json& j, const FrameStats& s) {
+  nlohmann::json mailbox = nlohmann::json::array();
+  for (const auto& m : s.mailbox) {
+    mailbox.push_back({{"slavePosition", m.slavePosition},
+                       {"writesWithoutFrame", m.writesWithoutFrame},
+                       {"counter0Requests", m.counter0Requests}});
+  }
+  j = {{"returned", s.returned},       {"over2Ms", s.over2Ms}, {"over20Ms", s.over20Ms},
+       {"over100Ms", s.over100Ms},     {"lost", s.lost},       {"latestReturnUs", s.latestReturnUs},
+       {"mailbox", std::move(mailbox)}};
 }
 
 }  // namespace mm::comm

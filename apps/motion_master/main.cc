@@ -31,6 +31,7 @@
 #include "example/example_routes.h"
 #include "game_loop.h"
 #include "http_server.h"
+#include "late_frame_source.h"
 #include "logging.h"
 #include "net/http_client.h"
 #include "node/device_manager.h"
@@ -444,6 +445,7 @@ int main(int argc, char** argv) {
     wsServer.publish(std::move(topic), std::move(json));
   });
   notificationBus.addSource(mm::busHealthSource(deviceManager));
+  notificationBus.addSource(mm::lateFrameSource(deviceManager));
   notificationBus.start();
 
   // A driver that refuses state changes leaves them to another master, as SPoE does in Monitor

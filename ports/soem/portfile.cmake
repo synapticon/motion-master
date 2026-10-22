@@ -774,7 +774,10 @@ vcpkg_replace_string(
 #
 # A message read in this loop is the slave's answer to the request in flight, because every CoE
 # and FoE transfer empties the mailbox before it writes. When that request is a write whose
-# outcome was unknown (mbxunknownpending, see ecx_mbxsendonce), the answer settles it.
+# outcome was unknown (mbxunknownpending, see ecx_mbxsendonce), the answer settles it. A mailbox
+# error reply is such an answer. An emergency is not: it is the slave's own event, and it can come
+# while a lost write waits, so it settles nothing. Without that rule a lost write followed by an
+# emergency continued the counter sequence, and a netX dropped the requests of the gap.
 #
 # The mailbox read is sent once, and its frame is awaited for up to EC_TIMEOUTLATE, the same wait
 # as a mailbox write gets in ecx_mbxsendonce. Upstream
@@ -816,11 +819,7 @@ vcpkg_replace_string(
                mbxh = (ec_mbxheadert *)mbxin;
             }
             wkc = ecx_FPRDonce(&context->port, configadr, mbxro, mbxl, mbxin, EC_TIMEOUTLATE); /* get mailbox */
-            if (wkc > 0)
-            {
-               gotmsg = TRUE;
-            }
-            else if ((wkc == EC_NOFRAME) && (ecx_readmbxstatus(context, slave, &SMstat) > 0) && ((SMstat & 0x08) != 0))
+            if ((wkc == EC_NOFRAME) && (ecx_readmbxstatus(context, slave, &SMstat) > 0) && ((SMstat & 0x08) != 0))
             {
                continue; /* the read did not reach the slave: read again */
             }")
@@ -833,6 +832,40 @@ vcpkg_replace_string(
 "            else if ((wkc > 0) && ((mbxh->mbxtype & 0x0f) == ECT_MBXT_COE)) /* CoE response? */
             {
                EMp = (ec_emcyt *)mbxin;")
+
+# The answer branches record that the slave answered. The mailbox error branch and the three that
+# hand the message to the caller are answers. The emergency branch is left out on purpose.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"               MBXEp = (ec_mbxerrort *)mbxin;
+               ecx_mbxerror(context, slave, etohs(MBXEp->Detail));"
+"               MBXEp = (ec_mbxerrort *)mbxin;
+               gotmsg = TRUE;
+               ecx_mbxerror(context, slave, etohs(MBXEp->Detail));")
+
+# Two matches: the CoE reply and the EoE reply.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"                  *mbx = mbxin;
+                  mbxin = NULL;"
+"                  gotmsg = TRUE;
+                  *mbx = mbxin;
+                  mbxin = NULL;")
+
+# Every other mailbox type.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_main.c"
+"            else if (wkc > 0)
+            {
+               *mbx = mbxin;
+               mbxin = NULL;
+            }"
+"            else if (wkc > 0)
+            {
+               gotmsg = TRUE;
+               *mbx = mbxin;
+               mbxin = NULL;
+            }")
 
 vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_main.c"

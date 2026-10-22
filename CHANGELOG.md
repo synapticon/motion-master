@@ -22,6 +22,7 @@ the HTTP/WebSocket API may break between any two alphas.
 ### Fixed
 
 - **After a mailbox write that got no frame back, the check of the drive's mailbox now waits for a late frame too.** That check reads the SyncManager status to learn whether the drive has the request. It waited 6 ms, so on a PC that returns frames late it failed like the write before it, the request was marked unknown, and an Integro dropped the one request after the recovery. The check now waits up to 100 ms, the same as the write. (#127)
+- **An emergency from a drive no longer counts as the answer to a mailbox write that got no frame back.** When such a write was in fact lost and the drive sent an emergency while the master waited, the master took the emergency as proof that the drive had the request, and the next request continued the counter sequence. An Integro then dropped the requests of the gap, up to six, at the 700 ms mailbox timeout each. Only a reply to the request now settles it. (#127)
 
 ## [6.0.0-alpha.98] - 2026-10-22
 

@@ -4508,3 +4508,95 @@ macOS back ends through pcap, a Circulo, two drives.
 - **Kernel receive timestamps from the NIC** (`SO_TIMESTAMPING`). They would move the stamp from
   the softirq to the NIC on hardware that has it, and tell a late receive from a late softirq.
   Not now; the pcap and the summary do not change when it comes.
+
+## Session 2026-10-22 — The mailbox rules hold up on review, and four small gaps remain (review)
+
+**The question.** Sessions 2026-10-19, 2026-10-20, 2026-10-21 and 2026-10-22 changed how the SOEM
+port treats a mailbox request to a SOMANET device: send it once, wait 100 ms for its frame, never
+send it again, and recover with counter 0. Is that the right approach, against the two alternatives
+a reader asks about first? One is to send the request again, as upstream SOEM does. The other is to
+raise `EC_TIMEOUTRET` for every datagram, as the previous master did. This is the part of the master
+that must work best, so everything was read again from the start: the four sessions, issues #100,
+#113, #115, #119 and #124, pull requests #109, #114, #116 and #122, `ports/soem/portfile.cmake`, the
+patched SOEM source in the vcpkg build tree, `soem_fieldbus_driver.cc`, `soem_mailbox.cc`, and
+`ethercat_service.xc` in somanet_software. Nothing was run on hardware for this review.
+
+**The verdict: the approach is right, and its core stays.** Three reasons.
+
+- **The two costs are not symmetric.** A request sent again locks the XMOS stack, and only INIT
+  then PRE-OP frees it, which takes the drive out of OP. That locked 7 of 30 drives in #100. A
+  request not sent again costs one failed transfer at the 700 ms mailbox timeout when the frame was
+  truly lost, and nothing when the frame was late. A late frame is the common case on a desk PC. A
+  lost frame on a wired segment is rare.
+- **The firmware is the party at fault, and the fix is filed.** `ecat_process_packet` returns at
+  line 353 before the read at lines 374-378 that makes the ESC clear the mailbox-full bit.
+  synapticon/somanet_software#5811 names the one-line fix. The master's rule is a workaround for the
+  drives in the field, and the `mbxwriteonce` flag keeps every other vendor on upstream SOEM.
+- **The counter-0 recovery is sound on both stacks.** Lines 352 and 356 of the firmware show the
+  XMOS side: counter 0 passes the check and is stored as the last counter. The netX side comes from
+  `hil/mailbox_counter0`. Every branch of `ecx_mbxsendonce` and the settle in `ecx_mbxreceive` were
+  walked against both stacks: a lost recovery write, a late answer to a recovery write, a refused
+  recovery write, and a write that the SyncManager status proved delivered. No path repeats a
+  counter the XMOS stack can hold, and no path leaves a gap the netX stack drops. The one cost is
+  the one Session 2026-10-20 names: a netX that had the write and did not answer drops one request.
+
+**The question has a false split in it.** The change did both things, each where it belongs. A
+mailbox datagram to a SOMANET device goes out once and waits `EC_TIMEOUTLATE`, 100 ms. A register
+datagram and the cyclic frame keep `EC_TIMEOUTRET`, 2 ms, and SOEM sends them again, because a
+repeat of those is harmless. The previous master set `EC_TIMEOUTRET` to 100 ms for every datagram.
+That hid the lock by chance, because a frame later than 100 ms still made it send the request again.
+It also made a lost cyclic frame stall the loop for 100 ms. The split is better than the global raise
+on both counts.
+
+**The failure direction is safe.** A frame later than 100 ms fails the transfer, and the caller
+reports it. Nothing wrong is accepted: the header check of Session 2026-10-20 drops a frame on a
+reused index, and the reply check in `ecx_SDOread` refuses a reply for another object or subindex.
+
+**Four gaps, none urgent.** They go on one branch, under one issue.
+
+1. **The SyncManager status read after an unknown write waits `EC_TIMEOUTRET3`, 6 ms.** It is the
+   one register read in `ecx_mbxsendonce` that decides between a settled write and a recovery, and on
+   the host that makes unknown writes it can fail like any other 2 ms datagram. When it fails, a
+   delivered write is marked unknown, and a netX pays one dropped request for it. Session 2026-10-21
+   made the rule: a register datagram that a decision depends on waits for a late frame. Apply it to
+   this read.
+2. **An emergency counts as proof of delivery.** `ecx_mbxreceive` sets `gotmsg` for every message it
+   reads, and the emergency branch drops its message and reads on. An emergency is the drive's own
+   event, not an answer to the request. A lost write followed by an emergency in the same window
+   clears `mbxunknown`, so the next request continues the sequence, and a netX sees a gap. A mailbox
+   error reply is an answer, and it still proves delivery. Set `gotmsg` in every branch but the
+   emergency branch.
+3. **The counter reset is sent once.** `resetMailboxCounter` sends one SDO upload with counter 0 on
+   every INIT to PRE-OP, and logs a warning when it gets no answer. On firmware older than v5.6.0 the
+   stored counter survives INIT, so a lost reset leaves about one chance in seven that the next
+   request repeats it and locks the drive. Both stacks accept counter 0 twice in a row, so a second
+   attempt is safe. Send the reset once more when the first got no answer.
+4. **An SDO upload that gets no answer is not asked again.** `SoemFieldbusDriver::readSdo` makes one
+   transfer. The previous master's 100 ms repeat recovered a lost write, and this master reports the
+   failure instead. The counter-0 recovery makes a fresh transfer safe on both stacks, and an upload
+   changes nothing on the drive, so one more attempt after a no-answer failure costs nothing but the
+   second 700 ms. A download stays at one attempt: a write to 0x1023:01 starts an OS command, and a
+   second copy would start it again.
+
+**What stays open.**
+
+- **`EC_TIMEOUTLATE` is a guess**, and Session 2026-10-22 says so. The capture program of #123 is
+  what gives the number. Do not change it before a capture from the reporter's host says how late
+  the frames are.
+- **#124 is worth its branch, and the stronger reason is not in the issue.** A master that writes
+  once cannot send a lost FoE acknowledgement again, and the Integro then waits for it until a power
+  cycle (synapticon/somanet_software#5817). A write sent again on the netX, keyed on the ESC type,
+  is the one master-side change that covers that. The late-frame cost alone would not justify a
+  third behaviour.
+- **The evidence is one drive per type on one bench.** No run with two drives, no bus of 30, no
+  Jasper, no device of another vendor, no Windows or macOS build under `netem`, and no CI leg. The
+  run with `EC_TIMEOUTRET` forced to 200 µs stands in for the bus of 30, and it is a stand-in.
+- **The port is about twenty string replacements.** A SOEM bump that touches any matched text turns
+  that replacement into a no-op, and vcpkg prints a warning nobody reads. For the code that must work
+  best, that is the maintenance risk. The proposal of Session 2026-10-20 covers it. The loud failure
+  on a bump, patch files applied by `vcpkg_from_github`, is the part to do first.
+- **The header check cannot tell two cyclic frames apart.** Their headers are the same, so only the
+  frame index tells them apart. With 32 indexes, and at most the eight frame slots plus the cyclic
+  frames in flight, a cyclic frame must come back about 20 cycles late to be taken for a newer one.
+  That is not a practical risk. It belongs in the port comment, so a reader does not expect more from
+  the check than it gives.

@@ -17,6 +17,7 @@ import {
   AutoTuningRunResponse,
   AutoTuningStatus,
   BrakeState,
+  CaptureSummary,
   Cia402Status,
   DcSyncStatus,
   DeviceDiagnostics,
@@ -2102,6 +2103,77 @@ export class Api<
       path: `/api/dc-sync`,
       method: "GET",
       query: query,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Runs the capture program `motion-master-capture`, which ships beside the server binary, on the adapter the bus is on, waits for it to exit, and answers the summary. The program records every EtherCAT frame that leaves or enters the adapter with a kernel timestamp and writes them as a pcap file under `captures/` in the user cache, so the file is listed, downloaded and deleted through the `/api/user-cache` routes and opens in Wireshark. The summary matches each frame the master sent to the frame that came back for it, by the index and the header of its first datagram, and reports per kind of frame how late the returns were. The cyclic process-data frame is one kind; mailbox and register datagrams, the control plane, are the other. The bands are the three waits the driver uses, 2 ms, 20 ms and 100 ms, and they are cumulative: a frame later than 100 ms counts in all three. A frame sent again with the same index and header while its first copy had no answer counts once, as `resent`, and its return is timed from the first copy. The time is the kernel's, taken at the boundary to the NIC driver on both sides: when the frame is handed to the driver, and when the driver hands its return back. So the number covers the NIC, the wire and the device, and not the host's own queues and scheduling between that boundary and Motion Master. A capture that shows late frames puts the delay on the wire or in the device. A clean capture beside the server's own warnings, "mailbox write(s) got no frame back", puts it inside the host. Read the two together. One capture at a time. The capture adds no frame to the bus and runs on a thread of its own, so the bus is not touched. The program needs `CAP_NET_RAW`, which the packages grant it at install.
+   *
+   * @name RunCapture
+   * @summary Record the EtherCAT frames of the bus adapter for a number of seconds
+   * @request POST:/api/captures
+   */
+  runCapture = (
+    data?: {
+      /**
+       * How long to record. A capture is a measurement a person starts.
+       * @min 1
+       * @max 120
+       * @default 30
+       */
+      seconds?: number;
+      /**
+       * The adapter to record, when no bus is up. Defaults to the adapter of the bus.
+       * @example "enp0s13f0u1u2"
+       */
+      adapter?: string;
+    },
+    params: RequestParams = {},
+  ) =>
+    this.request<
+      {
+        /**
+         * The pcap file, relative to the user-cache root
+         * @example "captures/capture-20261022-143005-enp0s13f0u1u2.pcap"
+         */
+        path: string;
+        /** @example "enp0s13f0u1u2" */
+        adapter: string;
+        /** @example 30 */
+        seconds: number;
+        /** How late the frames of a capture came back. See `POST /api/captures`. */
+        summary: CaptureSummary;
+      },
+      void | {
+        error: string;
+      }
+    >({
+      path: `/api/captures`,
+      method: "POST",
+      body: data,
+      type: ContentType.Json,
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Reads `captures/{name}` from the user cache and answers the summary that `POST /api/captures` answers, over any Ethernet pcap: a file the server recorded, or one from `tcpdump` on another host that a user put into `captures/` with `PUT /api/user-cache/captures/{name}`. Microsecond and nanosecond timestamps and both byte orders are read.
+   *
+   * @name GetCaptureSummary
+   * @summary Summarise a pcap file in the user cache
+   * @request GET:/api/captures/{name}
+   */
+  getCaptureSummary = (name: string, params: RequestParams = {}) =>
+    this.request<
+      {
+        /** @example "captures/capture-20261022-143005-enp0s13f0u1u2.pcap" */
+        path: string;
+        /** How late the frames of a capture came back. See `POST /api/captures`. */
+        summary: CaptureSummary;
+      },
+      void
+    >({
+      path: `/api/captures/${name}`,
+      method: "GET",
       format: "json",
       ...params,
     });

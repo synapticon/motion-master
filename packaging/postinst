@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip /opt/motion-master/motion-master
+# The capture program opens a raw socket on the bus adapter and needs nothing else.
+setcap cap_net_raw=eip /opt/motion-master/motion-master-capture
 
 # Download auto-tuning. The package does not carry that file, and install-auto-tuning.sh explains
 # why. The script exits with status 0 even when the download fails, so an install on a machine

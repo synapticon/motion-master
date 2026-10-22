@@ -65,7 +65,7 @@ argument. `windows-env.ps1` is the exception: it is PowerShell, and it takes swi
 | `shellcheck.sh` | shellcheck every tracked shell script |
 | `check.sh` | format + cppcheck + lint + cmake-lint + shellcheck |
 | `flaky-bus.sh` | Run the mailbox workload of `NEXTGEN.md` Session 2026-10-20 with a `netem` rule on the bus adapter. `NETEM="delay 150ms reorder 98% 0%"` makes 2 % of the frames late, `NETEM="loss 1%"` loses 1 %. Needs passwordless `sudo tc` |
-| `install-loop.sh` | Run the firmware-installation procedure again and again on one device, two packages in turn, with an optional `netem` rule during each install, and record every run. The loop of `NEXTGEN.md` Session 2026-10-21. Needs passwordless `sudo tc` |
+| `install-loop.sh` | Run the firmware-installation procedure again and again on one device, two packages in turn, with an optional `netem` rule during each install, and record every run. The loop of `NEXTGEN.md` Session 2026-10-21. Needs passwordless `sudo tc` | `CAPTURE=<seconds>` records the adapter with `motion-master-capture` beside the runs, as do `flaky-bus.sh` and `al-state-loop.sh`
 | `al-state-loop.sh` | Walk one drive INIT, PRE-OP, SAFE-OP, OP, INIT again and again against a running server, with an optional `netem` rule during the rounds, and count the short maps and the map attempts in the server log. The loop of `NEXTGEN.md` Session 2026-10-22. Needs passwordless `sudo tc` |
 | `clean.sh` | Remove `build/<preset>` |
 | `package.sh` | Build .deb and .rpm. Needs cert.pem/key.pem in the build dir |
@@ -164,9 +164,11 @@ capabilities make `POST /api/init` fail for a SOEM driver.
 motion-master/
   apps/
     motion_master/     ← main executable; swagger.yml (the OpenAPI spec) lives here
+    capture/           ← motion-master-capture: records EtherCAT frames to a pcap, one shot
     playground/        ← scratch binary
   libs/
-    core/              ← version, CyclicTimer, CyclicTask/CycleContext, RT setup, utils
+    core/              ← version, CyclicTimer, CyclicTask/CycleContext, RT setup, child processes
+    capture/           ← mm::capture: EtherCAT frame parser, pcap, the late-frame summary. Offline
     etg/               ← mm::etg: ESI and ENI XML, both directions. Offline
     comm/              ← fieldbus interfaces; soem.cc, spoe.cc, igh.cc
     node/              ← Device, DeviceManager, CiA402, profiles, RT tasks. No HTTP
@@ -737,7 +739,28 @@ from `ParameterRefresher`'s cache, one value per flush.
 
 **Bus-level:** AL state control, static configuration (SM/FMMU/DC/mailbox/addresses), process
 image and WKC health, `.mmpd` recorder dump, live ESC diagnostics (error counters, link
-state, watchdog), DC sync deviation (0x092C).
+state, watchdog), DC sync deviation (0x092C), and a capture of the frames on the adapter
+(`POST /api/captures`).
+
+**How late the frames of a host come back is measured with a capture, never inside SOEM.**
+`motion-master-capture` (`apps/capture/`) is a one-shot program beside the server binary. It
+records every EtherCAT frame on an adapter with the kernel's timestamp, writes a pcap, and prints
+a summary: per kind of frame, cyclic and control plane, how many returns were later than 2 ms,
+20 ms and 100 ms, the three waits of the port, cumulative. `libs/capture` holds the parser, the
+pcap code and the summary as pure functions, so the same summary runs over a `tcpdump` file from
+a customer PC through `GET /api/captures/{name}` once the file is in `captures/` of the user
+cache. A frame from the master and the same frame on its way back are told apart by the locally
+administered bit of the source MAC, which every ESC sets on a frame it processed. The match of a
+return to its send is the port's rule: index, command, offset, length, and the position for every
+command the slaves do not count up. The route runs the program through `mm::core::spawnChild`
+and `waitChild`, one capture at a time, on the adapter the bus is on. **A packet tap sits at the
+driver boundary on both sides**, so a capture covers the NIC, the wire and the device, and not the
+host's queues and scheduling between that boundary and SOEM. `netem` is such a queue: under
+`delay 150ms` the server logs writes with no frame back while the capture beside it reads 0.6 ms.
+So the capture and the server's warnings are read together: late frames in the capture put the
+delay on the wire or in the device, a clean capture beside the warnings puts it inside the host.
+`EC_TIMEOUTLATE` is set from those two together and from nothing else. See `NEXTGEN.md`, Session
+2026-10-22.
 
 **Per-device:** FoE, CoE object dictionary and SDO, PDO mapping read and write
 (`GET`/`PUT /api/devices/:slavePosition/pdo-mapping`; the write reconfigures 0x1C12/0x1C13

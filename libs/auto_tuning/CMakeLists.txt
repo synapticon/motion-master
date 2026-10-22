@@ -4,13 +4,7 @@
 # application, so this has to sit below both.
 find_package(nlohmann_json CONFIG REQUIRED)
 
-if(WIN32)
-  set(AUTO_TUNING_PLATFORM_SRC process_windows.cc)
-else()
-  set(AUTO_TUNING_PLATFORM_SRC process_posix.cc)
-endif()
-
-add_library(auto_tuning STATIC process.cc client.cc ${AUTO_TUNING_PLATFORM_SRC})
+add_library(auto_tuning STATIC process.cc client.cc)
 add_library(mm::auto_tuning ALIAS auto_tuning)
 
 target_include_directories(auto_tuning PUBLIC ${CMAKE_SOURCE_DIR}/libs)

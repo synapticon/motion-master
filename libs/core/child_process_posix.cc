@@ -7,11 +7,12 @@
 #include <algorithm>
 #include <chrono>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
 
-#include "auto_tuning/process_platform.h"
+#include "core/child_process.h"
 #include "core/platform.h"
 
 // The child needs this process's environment: the auto-tuning executable unpacks itself into a
@@ -20,7 +21,7 @@
 // macOS does not expose it to a library at all. The symbol is in libc on both.
 extern "C" char** environ;  // NOLINT(readability-redundant-declaration)
 
-namespace mm::auto_tuning::detail {
+namespace mm::core {
 
 namespace {
 
@@ -111,6 +112,33 @@ bool childAlive(const Child& child) {
   return !reaped(child.pid);
 }
 
+std::optional<int> waitChild(const Child& child, std::chrono::milliseconds timeout) {
+  if (child.pid == 0) {
+    return std::nullopt;
+  }
+  const auto pid = static_cast<pid_t>(child.pid);
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  for (;;) {
+    int status = 0;
+    const pid_t result = waitpid(pid, &status, WNOHANG);
+    if (result == pid) {
+      if (WIFEXITED(status)) {
+        return WEXITSTATUS(status);
+      }
+      // Ended by a signal. Reported the way a shell does, 128 plus the signal, so a caller that
+      // prints the code sees something it can look up.
+      return WIFSIGNALED(status) ? 128 + WTERMSIG(status) : -1;
+    }
+    if (result == -1) {
+      return std::nullopt;  // not a child of this process, or reaped already
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      return std::nullopt;
+    }
+    std::this_thread::sleep_for(kReapPollInterval);
+  }
+}
+
 bool terminateChild(const Child& child, std::chrono::milliseconds grace) {
   if (child.pid == 0) {
     return false;
@@ -139,4 +167,4 @@ bool terminateChild(const Child& child, std::chrono::milliseconds grace) {
   return true;
 }
 
-}  // namespace mm::auto_tuning::detail
+}  // namespace mm::core

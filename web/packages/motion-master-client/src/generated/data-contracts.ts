@@ -1504,6 +1504,86 @@ export interface DcSyncStatus {
   systemTimeDifference: number;
 }
 
+/** The counts for one kind of frame. The bands are cumulative. */
+export interface CaptureKindSummary {
+  /**
+   * Frames the master sent. A frame sent again counts once.
+   * @example 60021
+   */
+  sent: number;
+  /**
+   * Frames sent again with the same index and header while the first copy had no answer yet. A register datagram goes out again every 2 ms, so a late one shows here too.
+   * @example 12
+   */
+  resent: number;
+  /**
+   * Sent frames that came back
+   * @example 60018
+   */
+  returned: number;
+  /**
+   * Sent frames with no return before the capture ended
+   * @example 3
+   */
+  lost: number;
+  /**
+   * Returns later than 2 ms after the first send
+   * @example 1210
+   */
+  over2Ms: number;
+  /**
+   * Returns later than 20 ms. Counted in over2Ms as well.
+   * @example 1198
+   */
+  over20Ms: number;
+  /**
+   * Returns later than 100 ms. Counted in the two above as well.
+   * @example 1195
+   */
+  over100Ms: number;
+  /**
+   * The latest return, in microseconds after its first send
+   * @format int64
+   * @example 221748
+   */
+  latestUs: number;
+}
+
+/** How late the frames of a capture came back. See `POST /api/captures`. */
+export interface CaptureSummary {
+  /**
+   * Every record in the capture
+   * @example 120050
+   */
+  frames: number;
+  /**
+   * Records that are not an EtherCAT command frame
+   * @example 0
+   */
+  notEtherCat: number;
+  /**
+   * Frames from the slaves with no send to match, such as the second answer to a frame sent twice
+   * @example 8
+   */
+  unmatchedReturns: number;
+  /**
+   * Timestamp of the first record, epoch microseconds
+   * @format int64
+   * @example 1761143405000123
+   */
+  firstUs: number;
+  /**
+   * Timestamp of the last record, epoch microseconds
+   * @format int64
+   * @example 1761143435000456
+   */
+  lastUs: number;
+  /** The counts for one kind of frame. The bands are cumulative. */
+  control: CaptureKindSummary;
+  /** The counts for one kind of frame. The bands are cumulative. */
+  cyclic: CaptureKindSummary;
+}
+
 export interface AlStatusCode {
   /**
    * AL Status Code value (ETG.1000.6 §6.4.1)

@@ -4,15 +4,17 @@
 #include <cstdint>
 #include <expected>
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
 /// @file
-/// @brief The three platform-specific steps of running a child process.
+/// @brief The platform-specific steps of running a child process.
 ///
-/// Internal to @c mm::auto_tuning. Implemented once per platform (@c process_posix.cc,
-/// @c process_windows.cc) so @c process.cc holds the part that is the same everywhere: the health
-/// wait, the version, and the error messages.
+/// Implemented once per platform (@c child_process_posix.cc, @c child_process_windows.cc) so a
+/// caller holds only the part that is the same everywhere. @c mm::auto_tuning::Process runs a
+/// service on top of this and waits for its health answer; the capture route runs a one-shot
+/// program on top of it and waits for its exit.
 ///
 /// A started child is identified by integers, which is what lets @c process.h name no platform
 /// type. On POSIX only the process id is used, and it doubles as the process group id. On Windows
@@ -25,7 +27,7 @@
 /// the wedged case needs. So the child is started in its own process group (POSIX) or job object
 /// (Windows), and both signals go to that rather than to the one process.
 
-namespace mm::auto_tuning::detail {
+namespace mm::core {
 
 /// @brief A started child, as the platform identifies it.
 struct Child {
@@ -65,4 +67,13 @@ bool childAlive(const Child& child);
 ///         it is the case where a leftover process could hold the port against the next start.
 bool terminateChild(const Child& child, std::chrono::milliseconds grace);
 
-}  // namespace mm::auto_tuning::detail
+/// @brief Waits up to @p timeout for @p child to exit, and reaps it.
+///
+/// For a one-shot program. The child is gone once this returns a value: on POSIX it is reaped and
+/// its process id may be reissued, on Windows its handles are closed. A child still running at the
+/// timeout is left running, and the caller decides whether to @c terminateChild it.
+///
+/// @return The child's exit code, or @c nullopt when it did not exit within @p timeout.
+std::optional<int> waitChild(const Child& child, std::chrono::milliseconds timeout);
+
+}  // namespace mm::core

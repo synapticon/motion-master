@@ -20,6 +20,7 @@
 #include "auto_tuning/process.h"
 #include "auto_tuning_setup.h"
 #include "bus_health_source.h"
+#include "capture_runner.h"
 #include "cert_updater.h"
 #include "comm/base.h"
 #include "comm/soem_fieldbus_driver.h"
@@ -381,6 +382,11 @@ int main(int argc, char** argv) {
                 options.cycleTimeUs = static_cast<uint32_t>(gameLoop.health().periodUs);
                 return options;
               },
+          .runCapture = [&userCache](const std::string& adapter, int seconds)
+              -> std::expected<std::filesystem::path, std::string> {
+            return mm::runCapture(mm::core::exeDir() / mm::captureBinaryName(), adapter, seconds,
+                                  userCache.root() / "captures");
+          },
           .corsOrigin = opts.config.server.corsOrigin,
       },
       deviceManager, monitoringManager, procedureManager, userCache};

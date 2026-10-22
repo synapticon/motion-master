@@ -21,7 +21,7 @@ case "$PRESET" in
     *) echo "Not a Linux packaging preset: $PRESET" >&2; exit 1 ;;
 esac
 
-for f in motion-master cert.pem key.pem $MU_3SL; do
+for f in motion-master motion-master-capture cert.pem key.pem $MU_3SL; do
     [[ -f "$BUILD_DIR/$f" ]] || { echo "Missing: $BUILD_DIR/$f" >&2; exit 1; }
 done
 
@@ -35,6 +35,7 @@ mkdir -p "$deb_root/DEBIAN" \
          "$deb_root/usr/local/bin"
 
 cp "$BUILD_DIR/motion-master" "$deb_root/opt/motion-master/motion-master"
+cp "$BUILD_DIR/motion-master-capture" "$deb_root/opt/motion-master/motion-master-capture"
 cp "$BUILD_DIR/cert.pem"      "$deb_root/opt/motion-master/cert.pem"
 cp "$BUILD_DIR/key.pem"       "$deb_root/opt/motion-master/key.pem"
 cp "$REPO_DIR/setup.sh"       "$deb_root/opt/motion-master/setup.sh"
@@ -42,6 +43,7 @@ cp "$REPO_DIR/install-auto-tuning.sh" "$deb_root/opt/motion-master/install-auto-
 cp "$REPO_DIR/apps/motion_master/motion-master.example.jsonc" \
    "$deb_root/opt/motion-master/motion-master.example.jsonc"
 chmod 755 "$deb_root/opt/motion-master/motion-master" \
+          "$deb_root/opt/motion-master/motion-master-capture" \
           "$deb_root/opt/motion-master/setup.sh" \
           "$deb_root/opt/motion-master/install-auto-tuning.sh"
 chmod 644 "$deb_root/opt/motion-master/cert.pem" \
@@ -82,6 +84,7 @@ RPM_RELEASE="${VERSION#*-}"
 mkdir -p "$rpm_root"/{BUILD,RPMS,SOURCES,SPECS,SRPMS}
 
 cp "$BUILD_DIR/motion-master" "$rpm_root/SOURCES/"
+cp "$BUILD_DIR/motion-master-capture" "$rpm_root/SOURCES/"
 cp "$BUILD_DIR/cert.pem"      "$rpm_root/SOURCES/"
 cp "$BUILD_DIR/key.pem"       "$rpm_root/SOURCES/"
 cp "$REPO_DIR/setup.sh"       "$rpm_root/SOURCES/"
@@ -115,6 +118,7 @@ Motion control software for SOMANET servo drives by Synapticon GmbH.
 %install
 install -d %{buildroot}/opt/motion-master %{buildroot}/usr/local/bin
 install -m 755 %{_sourcedir}/motion-master %{buildroot}/opt/motion-master/
+install -m 755 %{_sourcedir}/motion-master-capture %{buildroot}/opt/motion-master/
 install -m 644 %{_sourcedir}/cert.pem      %{buildroot}/opt/motion-master/
 install -m 644 %{_sourcedir}/key.pem       %{buildroot}/opt/motion-master/
 install -m 755 %{_sourcedir}/setup.sh      %{buildroot}/opt/motion-master/
@@ -139,6 +143,7 @@ fi
 %files
 %defattr(-,root,root,-)
 /opt/motion-master/motion-master
+/opt/motion-master/motion-master-capture
 %config(noreplace) /opt/motion-master/cert.pem
 %config(noreplace) /opt/motion-master/key.pem
 /opt/motion-master/setup.sh

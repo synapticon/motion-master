@@ -60,6 +60,16 @@ echo
 post /api/devices/state '{"state":2,"timeoutMs":15000}' | head -c 300
 echo
 
+
+# CAPTURE=<seconds> records the bus adapter with motion-master-capture while the rounds run, into
+# $out/capture.pcap, and prints its summary at the end. The program needs CAP_NET_RAW.
+capture_bin="${MM_CAPTURE_BIN:-$repo/build/x64-linux-debug/apps/motion_master/motion-master-capture}"
+capture_pid=""
+if [[ -n "${CAPTURE:-}" ]]; then
+  "$capture_bin" --ifname "$adapter" --seconds "$CAPTURE" --out "$out/capture.pcap" \
+    > "$out/capture-summary.json" 2> "$out/capture.log" &
+  capture_pid=$!
+fi
 start_line=$(wc -l < "$log")
 echo "== $label: $rounds rounds, netem '$netem' (log from line $start_line)"
 fails=0
@@ -103,3 +113,10 @@ printf 'requests sent with counter 0:  %s\n' \
 printf 'no response (mailbox timeout): %s\n' "$(count 'no response')"
 printf 'no frame returned:             %s\n' "$(count 'no frame returned')"
 printf 'warnings / errors:             %s / %s\n' "$(count '\[warning\]')" "$(count '\[error\]')"
+
+if [[ -n "$capture_pid" ]]; then
+  echo "== $label: waiting for the capture to finish"
+  wait "$capture_pid" || echo "capture failed: $(tail -1 "$out/capture.log")"
+  echo "== $label: capture summary ($out/capture.pcap)"
+  cat "$out/capture-summary.json"
+fi

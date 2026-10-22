@@ -6,10 +6,13 @@ configure_file(version.h.in "${CMAKE_CURRENT_BINARY_DIR}/version.h")
 
 if(WIN32)
   set(CYCLIC_TIMER_SRC cyclic_timer_windows.cc)
+  set(CHILD_PROCESS_SRC child_process_windows.cc)
 elseif(APPLE)
   set(CYCLIC_TIMER_SRC cyclic_timer_macos.cc)
+  set(CHILD_PROCESS_SRC child_process_posix.cc)
 else()
   set(CYCLIC_TIMER_SRC cyclic_timer_linux.cc)
+  set(CHILD_PROCESS_SRC child_process_posix.cc)
 endif()
 
 add_library(
@@ -20,7 +23,8 @@ add_library(
   platform.cc
   realtime.cc
   user_cache.cc
-  ${CYCLIC_TIMER_SRC})
+  ${CYCLIC_TIMER_SRC}
+  ${CHILD_PROCESS_SRC})
 add_library(mm::core ALIAS core)
 
 target_include_directories(core PUBLIC ${CMAKE_SOURCE_DIR}/libs ${CMAKE_CURRENT_BINARY_DIR}/..)

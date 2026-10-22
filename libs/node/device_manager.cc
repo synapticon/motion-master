@@ -1359,6 +1359,11 @@ std::expected<std::vector<DeviceDiagnosticsInfo>, std::string> DeviceManager::de
   return result;
 }
 
+std::string DeviceManager::adapter() const {
+  const std::shared_ptr<DeviceSet> set = deviceSet();
+  return set->driver ? set->driver->adapter() : std::string{};
+}
+
 std::expected<std::vector<DcSyncInfo>, std::string> DeviceManager::dcSync(
     const std::vector<uint16_t>& positions) {
   const std::shared_ptr<DeviceSet> set = deviceSet();

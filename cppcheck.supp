@@ -56,6 +56,10 @@ syntaxError:*/sii_test.cc
 syntaxError:*/base_test.cc
 syntaxError:*/eni_collector_test.cc
 syntaxError:*/foe_error_test.cc
+syntaxError:*/ethercat_frame_test.cc
+syntaxError:*/pcap_test.cc
+syntaxError:*/summary_test.cc
+syntaxError:*/child_process_test.cc
 syntaxError:*/eni_reader_test.cc
 syntaxError:*/eni_request_test.cc
 syntaxError:*/eni_test.cc

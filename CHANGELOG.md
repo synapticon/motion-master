@@ -19,6 +19,8 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+## [6.0.0-alpha.99] - 2026-10-22
+
 ### Changed
 
 - **A mailbox write to an Integro that gets no frame back is sent again, as the EtherCAT standard allows.** The netX of an Integro discards a repeated request, so a lost write costs it nothing any more, where the write-once rule left it a gap of one and up to six dropped requests. A Circulo keeps the write-once rule, because its EtherCAT stack locks its mailbox on a repeat. Motion Master tells the two apart by the ESC type in register 0x0000, read at the scan. `GET /api/devices` reports `escType` and `mailboxWriteOnce` for each device, so a support log says which rule a device is under. (#124)
@@ -935,7 +937,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.98...HEAD
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.99...HEAD
+[6.0.0-alpha.99]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.98...v6.0.0-alpha.99
 [6.0.0-alpha.98]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.97...v6.0.0-alpha.98
 [6.0.0-alpha.97]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.96...v6.0.0-alpha.97
 [6.0.0-alpha.96]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.95...v6.0.0-alpha.96

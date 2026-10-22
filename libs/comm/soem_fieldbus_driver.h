@@ -281,6 +281,9 @@ class SoemFieldbusDriver : public FieldbusDriver {
   // after a firmware download) carries stale BOOT SMs that must be reset.
   // Guarded by the bus lock held exclusive. Cleared by scan() (which re-runs ecx_config_init).
   std::set<uint16_t> bootMailboxSlaves_;
+  // The low byte of ESC register 0x0000 of each slave, 1-based like the slave list, read by scan()
+  // and empty where the read failed. Guarded by the bus lock like the slave list.
+  std::vector<std::optional<uint8_t>> escTypes_;
 };
 
 }  // namespace mm::comm::soem

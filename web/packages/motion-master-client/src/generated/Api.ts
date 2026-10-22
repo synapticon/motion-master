@@ -424,6 +424,17 @@ export class Api<
          */
         parametersUnavailable: boolean;
         /**
+         * The low byte of ESC register 0x0000, which names the slave controller family: 0x85 is a netX (Integro), 0xC0 the controller of a Circulo, 0x90 a TI PRU-ICSS (Jasper). Null when the register could not be read at the scan, and over SPoE.
+         * @format int32
+         * @example 192
+         */
+        escType?: number | null;
+        /**
+         * Whether Motion Master writes each mailbox request to this device once and never sends it again. True for a Synapticon or Sensodrive device whose ESC type is not 0x85, because its EtherCAT stack locks its receive mailbox when it gets one request twice. False for a netX, which discards a repeat, and for every other vendor, where a write with no frame back is sent again.
+         * @example true
+         */
+        mailboxWriteOnce?: boolean;
+        /**
          * Whether the device has an EtherCAT Slave Controller: SII, ESC registers, distributed clocks and the ESC diagnostics. False over SPoE, where those endpoints answer 409.
          * @example true
          */
@@ -2399,6 +2410,17 @@ export class Api<
          * @example false
          */
         parametersUnavailable: boolean;
+        /**
+         * The low byte of ESC register 0x0000, which names the slave controller family: 0x85 is a netX (Integro), 0xC0 the controller of a Circulo, 0x90 a TI PRU-ICSS (Jasper). Null when the register could not be read at the scan, and over SPoE.
+         * @format int32
+         * @example 192
+         */
+        escType?: number | null;
+        /**
+         * Whether Motion Master writes each mailbox request to this device once and never sends it again. True for a Synapticon or Sensodrive device whose ESC type is not 0x85, because its EtherCAT stack locks its receive mailbox when it gets one request twice. False for a netX, which discards a repeat, and for every other vendor, where a write with no frame back is sent again.
+         * @example true
+         */
+        mailboxWriteOnce?: boolean;
         /**
          * Whether the device has an EtherCAT Slave Controller: SII, ESC registers, distributed clocks and the ESC diagnostics. False over SPoE, where those endpoints answer 409.
          * @example true

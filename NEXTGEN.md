@@ -4763,3 +4763,61 @@ shows the order the frames left the host, not the delay the port saw.
 **Not tested.** An Integro under 1 % loss with this change, which is where the netX cost shows. The
 Integro rows of the session above were measured with the reuse. Two drives, and the Windows and
 macOS builds.
+
+## Session 2026-10-22 — A netX gets its writes sent again, keyed on the ESC type (as-built)
+
+Issue #124. The session above made the port continue with the next counter after a write with no
+frame back, which cannot lock the XMOS stack but leaves the netX stack a gap when a write is truly
+lost. This session removes that cost where it falls.
+
+**The gap cost, measured.** Bench Integro, product 0x401, firmware v5.6.11, `tools/flaky-bus.sh`
+under 1 % loss, 10 rounds, on the build of `main` after #134:
+
+| Build | Lost writes | Reads failed | Mailbox timeouts | Read sweep per round |
+| --- | --- | --- | --- | --- |
+| counter reuse, the morning | 57 | 1 | 1 | 6 to 10 s |
+| never reuse, `main` | 64 | 189 | 371 | 18 to 59 s |
+| this change | 0 | 1 | 1 | 2.4 to 4.7 s |
+
+Each lost write cost the netX the six requests after it, as Session 2026-10-20 said it would. So
+"never reuse" alone is right for a Circulo and wrong for an Integro, and the two need different
+rules.
+
+**The decision: the rule is keyed on the ESC type.** `scan()` reads the low byte of ESC register
+0x0000 of every slave, with the wait for a late frame, and sets `mbxwriteonce` for a Synapticon or
+Sensodrive device whose type is not 0x85. A netX, 0x85, keeps upstream SOEM: `ecx_mbxsend` sends a
+write again every `EC_TIMEOUTRET` and once more after the mailbox empties, the netX discards every
+repeat the way ETG.1000.4 asks, so a lost write never leaves a gap and a late one costs nothing. A
+slave whose register does not read is written once, the safe side. The values: 0x85 netX, Integro;
+0xC0 the controller of a Circulo; 0x90 TI PRU-ICSS, Jasper, written once until measured with
+`hil/mailbox_duplicate`. The SII does not tell the stacks apart, which is why Session 2026-10-20
+had no per-stack rule; the register does, and `blockLrwOnPruIcssSlaves` already keyed on it.
+`GET /api/devices` reports `escType` and `mailboxWriteOnce`, so a support log says which rule a
+device is under.
+
+**The Repeat Request rule needed its own flag.** The port kept a SOMANET device from getting a
+Repeat Request through `mbxwriteonce`. With that flag off, the Integro got Repeat Requests again,
+answered them with the message before the last one (#113), and 13 reads in 10 rounds at 150 ms got
+a reply for another object. `mbxnorepeat`, set for every SOMANET device, carries the rule now.
+
+**Measured on the Integro, this change**, 10 rounds each:
+
+| Frames | Late writes | Reads asked once more | Reads failed | Files correct |
+| --- | --- | --- | --- | --- |
+| none | 0 | 1 | 1, the 0x1600:08 silence | 10 of 10 |
+| 1 % lost | 0 | 1 | the same 1 | 10 of 10 |
+| 2 % late by 150 ms | 0 | 26 | 10 | 8 of 10 |
+
+At 150 ms the 10 failed reads are 4 writes the port did not send because SM0 stayed full for 20 ms,
+4 replies for another object that came within a millisecond, and 2 with no answer. The first two
+are #130, and 150 ms is past the 100 ms design point. The two wrong files are the Integro's state
+after a failed read, #129 and synapticon/somanet_software#5817, and the drive served the file again
+from round 6 without a power cycle.
+
+**Not tested.** A Circulo with this build. Its rule did not change: `mbxwriteonce` and
+`mbxnorepeat` are both set for it, as the one flag was before. A Jasper, which has no device on
+the bench. The Windows and macOS builds.
+
+**Open.** A read that got a reply for another object is not asked again, because `uploadSdo` asks
+again on no answer only. A fresh transfer would serve it. Decide with #130, which owns the stale
+reply.

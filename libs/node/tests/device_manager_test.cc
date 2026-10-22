@@ -94,7 +94,9 @@ class FakeDriver : public FieldbusDriver {
             .vendorId = vendorId,
             .productCode = productCode,
             .revisionNumber = 0,
-            .serialNumber = 0};
+            .serialNumber = 0,
+            .escType = std::nullopt,
+            .mailboxWriteOnce = false};
   }
   std::expected<void, std::string> configureProcessData() override { return {}; }
   mm::comm::PdoLayout processDataLayout() override { return {}; }

@@ -403,6 +403,35 @@ TEST(DeviceManagerTransport, ReportsAMissingEscAndTheDroppedFrames) {
   EXPECT_FALSE(nlohmann::json(*device)["supportsEsc"].get<bool>());
 }
 
+TEST(DeviceManagerTransport, ReportsTheEscTypeAndTheMailboxWriteRule) {
+  // A netX, which the driver writes to the way upstream SOEM does.
+  auto bus = mm::node::testing::makeCia402Bus();
+  bus->escType = 0x85;
+  bus->mailboxWriteOnce = false;
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  const auto device = dm.deviceAt(1);
+  ASSERT_TRUE(device);
+  const nlohmann::json j(*device);
+  EXPECT_EQ(j["escType"].get<int>(), 0x85);
+  EXPECT_FALSE(j["mailboxWriteOnce"].get<bool>());
+}
+
+TEST(DeviceManagerTransport, ReportsAnUnreadEscTypeAsNullAndTheSafeRule) {
+  auto bus = mm::node::testing::makeCia402Bus();
+  bus->escType = std::nullopt;
+  bus->mailboxWriteOnce = true;
+  DeviceManager dm;
+  ASSERT_TRUE(dm.init(std::move(bus)).has_value());
+  ASSERT_TRUE(dm.scan().has_value());
+  const auto device = dm.deviceAt(1);
+  ASSERT_TRUE(device);
+  const nlohmann::json j(*device);
+  EXPECT_TRUE(j["escType"].is_null());
+  EXPECT_TRUE(j["mailboxWriteOnce"].get<bool>());
+}
+
 TEST(ProcessImageBits, ByteAlignedRoundTrip) {
   std::vector<uint8_t> image(6, 0);
   const std::vector<uint8_t> value = {0x44, 0x33, 0x22, 0x11};  // 32-bit @ bit offset 16

@@ -200,6 +200,14 @@ class Device {
   ///        @c FieldbusDriver::supportsLocate at construction. No bus I/O.
   bool supportsLocate() const;
 
+  /// @brief The low byte of ESC register 0x0000, the slave controller family, or empty when the
+  ///        driver could not read it. Copied from @c SlaveInfo at construction. No bus I/O.
+  std::optional<uint8_t> escType() const;
+
+  /// @brief Whether the driver writes each mailbox request to this device once. Copied from
+  ///        @c SlaveInfo at construction. No bus I/O.
+  bool mailboxWriteOnce() const;
+
   /// @brief Starts or stops blinking this device's LEDs. Delegates to @c FieldbusDriver::locate.
   std::expected<void, std::string> locate(bool on) const;
 
@@ -883,6 +891,8 @@ class Device {
   // Transport capabilities, copied at construction for the reason given above.
   bool supportsEsc_ = true;
   bool supportsLocate_ = false;
+  std::optional<uint8_t> escType_;
+  bool mailboxWriteOnce_ = false;
   // Guards parameters_ (and caSupport_) against the off-RT monitoring threads (the refresher
   // refreshes cached values, the sampler reads them) racing the control-plane thread.
   //

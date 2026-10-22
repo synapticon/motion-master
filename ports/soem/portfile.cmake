@@ -544,9 +544,10 @@ vcpkg_replace_string(
 #     value the slave accepted last.
 #   - No frame within EC_TIMEOUTLATE: it is not known whether the slave got the message, so it is
 #     not sent again. The call returns 1, and the caller waits for the answer. A late frame is the
-#     usual cause, and in that case the slave answers. The SyncManager status is read first: a message in SM0 or an
-#     answer in SM1 shows that the slave has the message, and nothing more is needed. Otherwise the
-#     write is recorded as unknown, and an answer that ecx_mbxreceive reads for it settles it.
+#     usual cause, and in that case the slave answers. The SyncManager status is read first, with
+#     the same wait for a late frame: a message in SM0 or an answer in SM1 shows that the slave has
+#     the message, and nothing more is needed. Otherwise the write is recorded as unknown, and an
+#     answer that ecx_mbxreceive reads for it settles it.
 #   - After a write that stayed unknown, the next request goes out with counter 0, and the request
 #     after that takes the unknown counter again. The two SOMANET stacks need this. The XMOS stack
 #     of a Circulo ignores a request whose counter equals the last one it accepted, and that is
@@ -729,8 +730,11 @@ static int ecx_mbxsendonce(ecx_contextt *context, uint16 slave, ec_mbxbuft *mbx,
       return 1;
    }
    /* The status byte of SM0 is at offset 5 of the 16 bytes from ECT_REG_SM0, and that of SM1 at
-    * offset 13. Bit 3 is set while the mailbox holds a message. */
-   if ((ecx_FPRD(&context->port, slaveitem->configadr, ECT_REG_SM0, sizeof(sm), sm, EC_TIMEOUTRET3) > 0) &&
+    * offset 13. Bit 3 is set while the mailbox holds a message. The read waits EC_TIMEOUTLATE,
+    * because it decides between a settled write and a recovery, and on the host that makes an
+    * unknown write it comes back as late as any other datagram. A register read is safe to send
+    * again, so ecx_FPRD sends it again every EC_TIMEOUTRET until then. */
+   if ((ecx_FPRD(&context->port, slaveitem->configadr, ECT_REG_SM0, sizeof(sm), sm, EC_TIMEOUTLATE) > 0) &&
        (((sm[5] & 0x08) != 0) || ((sm[13] & 0x08) != 0)))
    {
       return 1;

@@ -4692,3 +4692,74 @@ Two things happened on the Circulo at 150 ms that this branch does not cause and
   task left busy by the abort's erase. Issue #131, with the firmware issue beside it.
 
 **Not tested.** Two drives, and the Windows and macOS builds.
+
+## Session 2026-10-22 — A write the port gave up on can still arrive, so its counter is never used again (as-built)
+
+Issue #132. Two of the Circulo runs of the session above locked the drive's receive mailbox, the
+lock of #100 that the write-once rule of Session 2026-10-19 exists to prevent. The second lock ran
+under a capture, and the capture names the cause.
+
+**The four frames.** `out/flaky-bus/132c-late150-cap/capture.pcap`, round 4 of 30, 2 % of the frames
+150 ms late:
+
+| Wire time | Direction | Frame |
+| --- | --- | --- |
+| 8.1358 | drive to master | DATA packet 5, the last packet of `config.csv` |
+| 8.2627 | master to drive | SDO 0x1000:00 with counter 0, the recovery |
+| 8.2859 | master to drive | FoE ACK of packet 5 with counter 2, 150 ms after the port sent it |
+| 8.4137 | master to drive | SDO 0x1001:00 with counter 2, the reused counter |
+
+The last ACK of a file read gets no answer by design, so it can never prove itself delivered. Its
+frame sat in the host for 150 ms, longer than `EC_TIMEOUTLATE`. The port called the write lost, sent
+counter 0, and reused counter 2. The old ACK then landed between those two, and the XMOS stack saw
+counter 2 twice in a row. The log of the first lock has the same four steps. The sequence of
+Session 2026-10-20 rested on an assumption nobody wrote down: that a write with no frame back after
+`EC_TIMEOUTLATE` is gone. A write that is late, not lost, breaks it, and the port cannot tell the two
+apart.
+
+**The decision: continue with the next counter, and never use the counter of an unknown write
+again.** The XMOS stack locks only on two requests in a row with the same counter, so a counter that
+is never used again cannot lock it, whenever the late write lands. Counter 0 stays for the
+INIT to PRE-OP reset only. The SyncManager status read after an unknown write and the settle in
+`ecx_mbxreceive` existed only to decide whether to reuse the counter, and go with it. The port is
+153 lines shorter.
+
+**The cost falls on the netX stack.** A write that was truly lost leaves it a gap of one, and it
+drops the requests after it until the sequence comes round, up to six at the 700 ms mailbox
+timeout. A late write costs it nothing. That is the trade Session 2026-10-20 refused, with the two
+costs now known: a lost frame on a wired segment is rare and costs the netX a few seconds, a late
+frame is common and locked a Circulo. #124, a write sent again on a netX keyed on the ESC type,
+removes the cost, because a netX then never has an unknown write.
+
+**Rejected.** A write's returned frame matched on its data, built and reverted on the same branch.
+It guards against a late refusal frame taken for a newer write's return, which the captures never
+showed: 10521 writes, no refusal, no duplicate. The hypothesis came before the capture, and the
+capture disproved it.
+
+**Measured on the bench Circulo**, product 0x301, firmware v5.6.11, `tools/flaky-bus.sh`, 2 % of the
+frames 150 ms late, with a capture:
+
+| Build | Rounds | Late writes | Reads asked once more | Reads failed | Lock | Counters sent twice |
+| --- | --- | --- | --- | --- | --- | --- |
+| reuse, no capture | 10 | not counted | | | round 6 | not captured |
+| reuse | 30 | 17 before the lock | | | round 4 | 1 |
+| never reuse | 30 | 235 | 86, 84 recovered | 2 | none | 0 of 10521 |
+
+The two failed reads of the fixed run: one reply for another object, refused by the identity check
+in `ecx_SDOread`, and one write the port never sent because SM0 did not empty within 20 ms, the
+case of #130.
+
+**A second firmware fault came out of the same run.** In round 11 the master's read of data packet
+3 came back late, the port aborted, and the retry was served in full. From then on every file read
+of the drive returned its first packet as zeros, 1012 bytes of `config.csv` and all 535 bytes of
+`.hardware_description`, through INIT and PRE-OP. `hil/foe_read_abort` on branch 131 compares the
+bytes of a read with its baseline for that reason. It belongs to #131 with the busy state, and both
+are the firmware's.
+
+**The tool that found it.** A tshark line over the capture lists every mailbox write in wire order
+and flags a counter sent twice in a row; it is in issue #132. The capture sits below netem, so it
+shows the order the frames left the host, not the delay the port saw.
+
+**Not tested.** An Integro under 1 % loss with this change, which is where the netX cost shows. The
+Integro rows of the session above were measured with the reuse. Two drives, and the Windows and
+macOS builds.

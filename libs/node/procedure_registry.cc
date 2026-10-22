@@ -19,7 +19,7 @@ namespace {
 
 // Every entry the server knows. Built once per registry, never mutated: a caller may hold a
 // pointer into the result.
-std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&) {
+std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig& config) {
   std::vector<ProcedureRegistryEntry> entries;
 
   // Authored in the order the table is sorted into below — alphabetically by name, which is the
@@ -692,6 +692,59 @@ std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&
         return [](const ProcedureContext& ctx, ProgressReporter& reporter, std::stop_token stop) {
           Device& device = ctx.device;
           return runPhaseResistanceMeasurementProcedure(device, reporter, std::move(stop));
+        };
+      },
+  });
+
+  ProcedureDescriptor plantIdentification;
+  plantIdentification.name = std::string(kPlantIdentificationProcedure);
+  plantIdentification.title = "Plant identification";
+  plantIdentification.description =
+      "Identifies the plant model of the drive: the transfer function from torque to velocity of "
+      "the motor and its load, which auto-tuning computes controller gains from. The drive is "
+      "enabled in cyclic synchronous torque mode with a zero target, so the chirp alone excites "
+      "it: a torque sweep from a start to a target frequency over a chosen time, logarithmic with "
+      "an amplitude that rises from half the target, or linear at a constant amplitude. The drive "
+      "records its own velocity and torque while the chirp runs. The recording is sent to the "
+      "auto-tuning program, which fits the model, and the model is written to plant_model.csv on "
+      "the drive, where controller and notch filter auto-tuning read it. The result carries the "
+      "model, its inertia and friction, the chirp, and the Bode data of the model.";
+  plantIdentification.caveats = {
+      "The chirp turns the motor in both directions for its whole duration. The shaft must be "
+      "free, and whatever it drives must be safe to move. A joint that may only move in a small "
+      "range is not safe to identify this way.",
+      "The amplitude is a torque command in per-mille of rated torque, and neither this server "
+      "nor the drive checks it. A recording in which the motor barely moved is refused "
+      "afterwards, so choose it for the machine.",
+      "A brake the drive controls is released by the drive when it enables and engaged again when "
+      "it leaves Operation Enabled. A manual brake is released by this procedure after the enable "
+      "and engaged again before the drive leaves Operation Enabled, so the first cycles of the "
+      "chirp may run against it while it releases.",
+      "The drive is left in Switched On with the operation mode it had, on every way out. Cancel "
+      "stops the recording on the drive and restores the same way.",
+      "Needs the auto-tuning program. Without it the run records and then fails at the fit, "
+      "and GET /api/auto-tuning says why.",
+      "Writes plant_model.csv without storing anything else. The controller gains do not change; "
+      "run controller auto-tuning for that.",
+  };
+  plantIdentification.parameters = plantIdentificationParameters();
+  plantIdentification.movesMotor = true;
+  plantIdentification.requiresEnabled = false;
+  plantIdentification.steps = plantIdentificationSteps();
+
+  entries.push_back(ProcedureRegistryEntry{
+      .descriptor = std::move(plantIdentification),
+      .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
+      .makeBody = [fit = config.fitPlantModel](
+                      const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
+        auto request = parsePlantIdentificationRequest(body);
+        if (!request) {
+          return std::unexpected(request.error());
+        }
+        return [request = *request, fit](const ProcedureContext& ctx, ProgressReporter& reporter,
+                                         std::stop_token stop) {
+          Device& device = ctx.device;
+          return runPlantIdentificationProcedure(device, reporter, std::move(stop), request, fit);
         };
       },
   });

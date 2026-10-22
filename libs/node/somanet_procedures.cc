@@ -20,6 +20,7 @@
 #include <system_error>
 #include <thread>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "comm/al_status_codes.h"
@@ -206,9 +207,9 @@ std::expected<bool, std::string> readBool(const nlohmann::json& body, const char
   return it->get<bool>();
 }
 
-// Puts back everything a diagnostics-mode procedure changed, on every path out of the body — an
-// early return, a failure, a cancellation — because a procedure that leaves the brake released and
-// the drive in diagnostics mode leaves the machine in a worse state than it found it.
+// Puts back everything a procedure changed on the drive, on every path out of the body — an early
+// return, a failure, a cancellation — because a procedure that leaves the brake released and the
+// drive in a mode it chose leaves the machine in a worse state than it found it.
 //
 // Inert until told what to restore, so a body that failed before changing anything restores nothing
 // and does not claim a restore it never performed. Each restore is armed *before* the change it
@@ -216,22 +217,22 @@ std::expected<bool, std::string> readBool(const nlohmann::json& body, const char
 //
 // It reports through kRestoreStep rather than only logging, because a restore that itself fails is
 // precisely what a user needs to see.
-class DiagnosticsRestorer {
+class DriveRestorer {
  public:
   // @param procedure  Names the procedure in the log line a failed restore emits.
-  DiagnosticsRestorer(SomanetDrive& drive, ProgressReporter& reporter, std::string_view procedure)
+  DriveRestorer(SomanetDrive& drive, ProgressReporter& reporter, std::string_view procedure)
       : drive_(drive), reporter_(reporter), procedure_(procedure) {}
 
-  DiagnosticsRestorer(const DiagnosticsRestorer&) = delete;
-  DiagnosticsRestorer& operator=(const DiagnosticsRestorer&) = delete;
+  DriveRestorer(const DriveRestorer&) = delete;
+  DriveRestorer& operator=(const DriveRestorer&) = delete;
 
   // A destructor is implicitly noexcept, so this is a statement about the standard library rather
   // than about this code: the restore path builds strings and can therefore raise bad_alloc. There
   // is no better answer inside a destructor whose whole job is to put the drive back — swallowing
   // it would hide a failed restore.
   // NOLINTNEXTLINE(bugprone-exception-escape)
-  ~DiagnosticsRestorer() {
-    if (!mode_ && !brake_) {
+  ~DriveRestorer() {
+    if (!mode_ && !brake_ && !disarmChirp_) {
       return;
     }
     reporter_.start(kRestoreStep);
@@ -239,10 +240,21 @@ class DiagnosticsRestorer {
     const auto note = [&failures](const std::string& what) {
       failures += failures.empty() ? what : "; " + what;
     };
-    // Brake first, then the state, then the mode — and each position is load-bearing.
+    // The chirp first, so the drive holds no armed chirp for the rest of the restore or for a
+    // later recording. Without a stop token: a cancelled run is the case this exists for, and its
+    // token is already set.
+    if (disarmChirp_) {
+      if (auto r = drive_.setSystemIdentificationParameter(
+              somanet::SystemIdentificationParameter::kStartProcedure,
+              static_cast<uint32_t>(somanet::SystemIdentificationStart::kNone));
+          !r) {
+        note(std::format("failed to disarm the chirp: {}", r.error()));
+      }
+    }
+    // Brake, then the state, then the mode — and each position is load-bearing.
     //
-    // The brake has to go back first because it is only the master's to command while the drive is
-    // still enabled and in diagnostics mode, so undoing either of those first would strand it.
+    // The brake has to go back before the state because it is only the master's to command while
+    // the drive is still enabled, so undoing that first would strand it.
     //
     // The mode goes back **after** the drive is disabled, never before: the mode being restored is
     // whatever the drive was in before the procedure, which is very often a motion mode, and its
@@ -259,8 +271,13 @@ class DiagnosticsRestorer {
       }
     }
     if (mode_) {
-      if (auto r = drive_.disable(); !r) {
-        note(std::format("failed to return the drive to Switch On Disabled: {}", r.error()));
+      if (resting_ == cia402::State::kSwitchOnDisabled) {
+        if (auto r = drive_.disable(); !r) {
+          note(std::format("failed to return the drive to Switch On Disabled: {}", r.error()));
+        }
+      } else if (auto r = drive_.transitionToState(resting_); !r) {
+        note(std::format("failed to return the drive to {}: {}", cia402::toString(resting_),
+                         r.error()));
       }
       if (auto r = drive_.setOperationModeValue(*mode_); !r) {
         note(std::format("failed to restore operation mode {}: {}", *mode_, r.error()));
@@ -275,19 +292,28 @@ class DiagnosticsRestorer {
     }
   }
 
-  // Arms the restore of operation mode @p mode — and with it the return to Switch On Disabled,
-  // since the only reason a procedure changes the mode is to enable the drive in it.
-  void restoreMode(int8_t mode) { mode_ = mode; }
+  // Arms the restore of operation mode @p mode — and with it the return to @p resting, since the
+  // only reason a procedure changes the mode is to enable the drive in it. The diagnostics
+  // procedures rest in Switch On Disabled; plant identification rests in Switched On.
+  void restoreMode(int8_t mode, cia402::State resting = cia402::State::kSwitchOnDisabled) {
+    mode_ = mode;
+    resting_ = resting;
+  }
 
   // Arms the restore of brake status @p status.
   void restoreBrake(somanet::BrakeStatus status) { brake_ = status; }
+
+  // Arms the disarm of the chirp.
+  void disarmChirp() { disarmChirp_ = true; }
 
  private:
   SomanetDrive& drive_;
   ProgressReporter& reporter_;
   std::string_view procedure_;
   std::optional<int8_t> mode_;
+  cia402::State resting_{cia402::State::kSwitchOnDisabled};
   std::optional<somanet::BrakeStatus> brake_;
+  bool disarmChirp_ = false;
 };
 
 // The preparation every diagnostics-mode OS command needs: SOMANET's diagnostics operation mode and
@@ -299,7 +325,7 @@ class DiagnosticsRestorer {
 // enable still has its mode change unwound.
 std::expected<void, std::string> prepareForDiagnostics(SomanetDrive& drive,
                                                        ProgressReporter& reporter,
-                                                       DiagnosticsRestorer& restorer) {
+                                                       DriveRestorer& restorer) {
   reporter.start(kPrepareStep);
 
   auto savedMode = drive.operationModeValue();
@@ -333,7 +359,7 @@ std::expected<void, std::string> prepareForDiagnostics(SomanetDrive& drive,
 // Reports on kReleaseBrakeStep.
 std::expected<void, std::string> releaseBrakeForDiagnostics(SomanetDrive& drive,
                                                             ProgressReporter& reporter,
-                                                            DiagnosticsRestorer& restorer) {
+                                                            DriveRestorer& restorer) {
   reporter.start(kReleaseBrakeStep);
 
   auto savedBrake = drive.brakeStatus();
@@ -452,7 +478,7 @@ std::expected<void, std::string> runMeasurementProcedure(Device& device, Progres
     return std::unexpected(drive.error());
   }
 
-  DiagnosticsRestorer restorer(*drive, reporter, spec.procedure);
+  DriveRestorer restorer(*drive, reporter, spec.procedure);
 
   if (auto r = prepareForDiagnostics(*drive, reporter, restorer); !r) {
     return std::unexpected(r.error());
@@ -1200,7 +1226,7 @@ std::expected<void, std::string> runOpenPhaseDetectionProcedure(Device& device,
   }
 
   // Inert until the preparation arms it, and armed change by change from there.
-  DiagnosticsRestorer restorer(*drive, reporter, kOpenPhaseDetectionProcedure);
+  DriveRestorer restorer(*drive, reporter, kOpenPhaseDetectionProcedure);
 
   if (auto r = prepareForDiagnostics(*drive, reporter, restorer); !r) {
     return std::unexpected(r.error());
@@ -1299,7 +1325,7 @@ std::expected<void, std::string> runOffsetDetectionProcedure(Device& device,
     return std::unexpected(method.error());
   }
 
-  DiagnosticsRestorer restorer(*drive, reporter, kOffsetDetectionProcedure);
+  DriveRestorer restorer(*drive, reporter, kOffsetDetectionProcedure);
 
   if (auto r = prepareForDiagnostics(*drive, reporter, restorer); !r) {
     return std::unexpected(r.error());
@@ -1493,6 +1519,46 @@ std::expected<uint32_t, std::string> readBoundedUint32(const nlohmann::json& bod
         std::format("'{}' must be {}-{}, got {}", field, minValue, maxValue, raw));
   }
   return static_cast<uint32_t>(raw);
+}
+
+// Writes the chirp's settings: a disarm, then the five values. The disarm is what makes an arm
+// that follows a rising edge, which is the only thing the firmware acts on.
+//
+// @param what  How to name the run in a cancellation message.
+std::expected<void, std::string> writeChirpSettings(SomanetDrive& drive,
+                                                    const SystemIdentificationRequest& request,
+                                                    const OsCommandConfig& config,
+                                                    std::string_view what) {
+  using Parameter = somanet::SystemIdentificationParameter;
+  const std::array<std::pair<Parameter, uint32_t>, 6> settings{{
+      {Parameter::kStartProcedure,
+       static_cast<uint32_t>(somanet::SystemIdentificationStart::kNone)},
+      {Parameter::kStartFrequency, request.startFrequencyMilliHz},
+      {Parameter::kTargetFrequency, request.targetFrequencyMilliHz},
+      {Parameter::kTargetAmplitude, request.targetAmplitudePermil},
+      {Parameter::kTransitionTime, request.transitionTimeMs},
+      {Parameter::kSignalType, static_cast<uint32_t>(request.signalType)},
+  }};
+  for (const auto& [parameter, value] : settings) {
+    if (config.stop.stop_requested()) {
+      return std::unexpected(
+          std::format("{} was cancelled after {}", what, somanet::toString(parameter)));
+    }
+    if (auto r = drive.setSystemIdentificationParameter(parameter, value, config); !r) {
+      return std::unexpected(r.error());
+    }
+  }
+  return {};
+}
+
+// The chirp settings as a step records them. Nothing reads them back from the drive, so the step's
+// record is the only account of what it holds.
+nlohmann::json chirpSettingsJson(const SystemIdentificationRequest& request) {
+  return nlohmann::json{{"startFrequencyMilliHz", request.startFrequencyMilliHz},
+                        {"targetFrequencyMilliHz", request.targetFrequencyMilliHz},
+                        {"targetAmplitudePermil", request.targetAmplitudePermil},
+                        {"transitionTimeMs", request.transitionTimeMs},
+                        {"signalType", somanet::toString(request.signalType)}};
 }
 
 }  // namespace
@@ -2094,43 +2160,17 @@ std::expected<void, std::string> runSystemIdentificationProcedure(
                                .pollInterval = kEncoderRegisterPollInterval,
                                .stop = std::move(stop)};
 
-  using Parameter = somanet::SystemIdentificationParameter;
-  // Disarm first, then the five settings. The disarm is what makes the arm below a rising edge,
-  // which is the only thing the firmware acts on.
-  const std::array<std::pair<Parameter, uint32_t>, 6> settings{{
-      {Parameter::kStartProcedure,
-       static_cast<uint32_t>(somanet::SystemIdentificationStart::kNone)},
-      {Parameter::kStartFrequency, request.startFrequencyMilliHz},
-      {Parameter::kTargetFrequency, request.targetFrequencyMilliHz},
-      {Parameter::kTargetAmplitude, request.targetAmplitudePermil},
-      {Parameter::kTransitionTime, request.transitionTimeMs},
-      {Parameter::kSignalType, static_cast<uint32_t>(request.signalType)},
-  }};
-
   reporter.start(kSystemIdConfigureStep);
-  for (const auto& [parameter, value] : settings) {
-    if (config.stop.stop_requested()) {
-      const auto reason =
-          std::format("system identification was cancelled after {}", somanet::toString(parameter));
-      reporter.fail(kSystemIdConfigureStep, reason);
-      return std::unexpected(reason);
-    }
-    if (auto r = drive->setSystemIdentificationParameter(parameter, value, config); !r) {
-      reporter.fail(kSystemIdConfigureStep, r.error());
-      return std::unexpected(r.error());
-    }
+  if (auto r = writeChirpSettings(*drive, request, config, "system identification"); !r) {
+    reporter.fail(kSystemIdConfigureStep, r.error());
+    return std::unexpected(r.error());
   }
-  // Nothing reads these back, so the step's record is the only account of what the drive holds.
-  reporter.succeed(kSystemIdConfigureStep,
-                   nlohmann::json{{"startFrequencyMilliHz", request.startFrequencyMilliHz},
-                                  {"targetFrequencyMilliHz", request.targetFrequencyMilliHz},
-                                  {"targetAmplitudePermil", request.targetAmplitudePermil},
-                                  {"transitionTimeMs", request.transitionTimeMs},
-                                  {"signalType", somanet::toString(request.signalType)}});
+  reporter.succeed(kSystemIdConfigureStep, chirpSettingsJson(request));
 
   reporter.start(kSystemIdArmStep);
   if (auto r = drive->setSystemIdentificationParameter(
-          Parameter::kStartProcedure, static_cast<uint32_t>(request.start), config);
+          somanet::SystemIdentificationParameter::kStartProcedure,
+          static_cast<uint32_t>(request.start), config);
       !r) {
     reporter.fail(kSystemIdArmStep, r.error());
     return std::unexpected(r.error());
@@ -2710,6 +2750,300 @@ std::expected<void, std::string> runFirmwareInstallationProcedure(
   }
 
   return finish();
+}
+
+std::expected<PlantIdentificationRequest, std::string> parsePlantIdentificationRequest(
+    const nlohmann::json& body) {
+  auto chirp = parseSystemIdentificationRequest(body);
+  if (!chirp) {
+    return std::unexpected(chirp.error());
+  }
+  auto duration =
+      plantIdentificationStreamDuration(std::chrono::milliseconds(chirp->transitionTimeMs));
+  if (!duration) {
+    return std::unexpected(std::format("'transitionTimeMs': {}", duration.error()));
+  }
+  PlantIdentificationRequest request;
+  request.chirp = *chirp;
+  request.chirp.start = somanet::SystemIdentificationStart::kAfterHrdStreamStart;
+  request.streamDuration = *duration;
+  return request;
+}
+
+std::vector<ProcedureParameter> plantIdentificationParameters() {
+  // The chirp's own parameters, under the same names, so a client that knows one procedure knows
+  // the other. Two differences: the run arms the chirp itself, so there is no start to choose, and
+  // the chirp must fit in the recording with its padding, so the time has a lower ceiling.
+  std::vector<ProcedureParameter> parameters;
+  const auto limit =
+      somanet::maxHrdStreamDuration(somanet::HrdData::kSystemIdentificationData) - kChirpPaddingMs;
+  for (auto& parameter : systemIdentificationParameters()) {
+    if (parameter.name == "start") {
+      continue;
+    }
+    if (parameter.name == "transitionTimeMs") {
+      parameter.maxValue = limit.count();
+      parameter.description = std::format(
+          "How long the sweep takes, in milliseconds. The recording adds {} ms around it, and the "
+          "drive records at most {} ms, so the sweep may take up to {} ms.",
+          kChirpPaddingMs.count(), (limit + kChirpPaddingMs).count(), limit.count());
+    }
+    parameters.push_back(std::move(parameter));
+  }
+  return parameters;
+}
+
+std::vector<ProgressStep> plantIdentificationSteps() {
+  return stepsFrom({kPrepareStep, kReleaseBrakeStep, kPlantIdChirpStep, kPlantIdRecordStep,
+                    kRestoreStep, kPlantIdFitStep, kPlantIdStoreStep});
+}
+
+namespace {
+
+constexpr std::string_view kPlantIdWhat = "plant identification";
+
+// Wait after a manual brake is commanded released, on top of its pull time. The same margin
+// SomanetDrive::releaseBrake adds for a brake the firmware controls.
+constexpr auto kBrakeSettle = std::chrono::milliseconds(50);
+
+// The excitation and the recording, with the drive restored on the way out. Split from the fit and
+// the store so the restorer's scope ends here: the drive is back in Switched On before the program
+// computes, however long that takes.
+//
+// @return The converted recording, with a warning about its amplitude when there is one.
+std::expected<std::pair<PlantMeasurement, std::optional<std::string>>, std::string>
+excitePlantAndRecord(SomanetDrive& drive, ProgressReporter& reporter, const std::stop_token& stop,
+                     const PlantIdentificationRequest& request, uint32_t ratedTorqueMilliNm) {
+  DriveRestorer restorer(drive, reporter, kPlantIdentificationProcedure);
+  const auto cancelled = [](std::string_view when) {
+    return std::unexpected(std::format("{} was cancelled {}", kPlantIdWhat, when));
+  };
+
+  // ── prepare ──
+  reporter.start(kPrepareStep);
+  const auto failPrepare = [&reporter](std::string reason) {
+    reporter.fail(kPrepareStep, reason);
+    return std::unexpected(std::move(reason));
+  };
+  // The recording is configured before the drive is enabled: configuring deletes the files of the
+  // previous recording, which can take seconds, and the drive has no reason to be enabled for that.
+  if (auto r = drive.configureHrdStream(
+          somanet::HrdData::kSystemIdentificationData, request.streamDuration,
+          {.timeout = kHrdConfigureTimeout, .pollInterval = kHrdPollInterval, .stop = stop});
+      !r) {
+    return failPrepare(std::format("could not configure the recording: {}", r.error()));
+  }
+  auto savedMode = drive.operationModeValue();
+  if (!savedMode) {
+    return failPrepare(savedMode.error());
+  }
+  auto state = drive.state();
+  if (!state) {
+    return failPrepare(state.error());
+  }
+  // The mode changes under no running controller: an enabled drive is brought down to Switched On
+  // first, and goes back up once CST and the zero target are in place.
+  if (*state == cia402::State::kOperationEnabled) {
+    if (auto r = drive.transitionToState(cia402::State::kSwitchedOn); !r) {
+      return failPrepare(
+          std::format("the drive did not leave Operation Enabled for Switched On: {}", r.error()));
+    }
+  }
+  if (auto r = drive.setOperationMode(cia402::OperationMode::kCyclicSyncTorque); !r) {
+    return failPrepare(r.error());
+  }
+  restorer.restoreMode(*savedMode, cia402::State::kSwitchedOn);
+  if (auto r = drive.setTargetTorque(0); !r) {
+    return failPrepare(std::format("could not write a zero target torque: {}", r.error()));
+  }
+  if (auto r = drive.enable(); !r) {
+    return failPrepare(std::format(
+        "the drive did not reach Operation Enabled, which the chirp requires: {}", r.error()));
+  }
+  reporter.succeed(kPrepareStep,
+                   nlohmann::json{{"ratedTorqueMilliNm", ratedTorqueMilliNm},
+                                  {"streamDurationMs", request.streamDuration.count()},
+                                  {"operationModeFound", *savedMode}});
+  if (stop.stop_requested()) {
+    return cancelled("before the brake");
+  }
+
+  // ── release-brake ──
+  reporter.start(kReleaseBrakeStep);
+  auto brake = drive.brakeState();
+  if (!brake) {
+    reporter.fail(kReleaseBrakeStep, brake.error());
+    return std::unexpected(brake.error());
+  }
+  if (brake->status == somanet::BrakeStatus::kNotConfigured) {
+    reporter.succeed(kReleaseBrakeStep, nlohmann::json{{"brake", "none"}, {"state", *brake}});
+  } else if (brake->softwareControllable()) {
+    // Strategy 1 or 2: the drive released it when it enabled in CST, and engages it again when it
+    // leaves Operation Enabled. Nothing to write, and nothing to restore.
+    reporter.succeed(kReleaseBrakeStep,
+                     nlohmann::json{{"brake", "released by the drive"}, {"state", *brake}});
+  } else {
+    // Strategy 0: the brake is a voltage the firmware does not manage, so the release and the
+    // wait for the pull time are both this procedure's. Armed before the write, so a write that
+    // lands and then fails to read back is still undone.
+    restorer.restoreBrake(brake->status);
+    if (auto r = drive.setBrakeStatus(somanet::BrakeStatus::kDisengaged); !r) {
+      reporter.fail(kReleaseBrakeStep, r.error());
+      return std::unexpected(r.error());
+    }
+    if (!sleepUnlessStopped(brake->pullTime + kBrakeSettle, stop)) {
+      return cancelled("while the brake released");
+    }
+    auto released = drive.brakeState();
+    if (!released) {
+      reporter.fail(kReleaseBrakeStep, released.error());
+      return std::unexpected(released.error());
+    }
+    reporter.succeed(kReleaseBrakeStep,
+                     nlohmann::json{{"brake", "released manually"}, {"state", *released}});
+  }
+  if (stop.stop_requested()) {
+    return cancelled("before the chirp was configured");
+  }
+
+  // ── chirp ──
+  reporter.start(kPlantIdChirpStep);
+  const OsCommandConfig osConfig{.timeout = kEncoderRegisterTimeout,
+                                 .pollInterval = kEncoderRegisterPollInterval,
+                                 .stop = stop};
+  if (auto r = writeChirpSettings(drive, request.chirp, osConfig, kPlantIdWhat); !r) {
+    reporter.fail(kPlantIdChirpStep, r.error());
+    return std::unexpected(r.error());
+  }
+  // Armed before the arm is written, so an arm that lands and then fails to be acknowledged is
+  // still disarmed on the way out.
+  restorer.disarmChirp();
+  if (auto r = drive.setSystemIdentificationParameter(
+          somanet::SystemIdentificationParameter::kStartProcedure,
+          static_cast<uint32_t>(request.chirp.start), osConfig);
+      !r) {
+    reporter.fail(kPlantIdChirpStep, r.error());
+    return std::unexpected(r.error());
+  }
+  reporter.succeed(kPlantIdChirpStep, chirpSettingsJson(request.chirp));
+  if (stop.stop_requested()) {
+    return cancelled("before the recording");
+  }
+
+  // ── record ──
+  reporter.start(kPlantIdRecordStep);
+  const auto failRecord = [&reporter](std::string reason) {
+    reporter.fail(kPlantIdRecordStep, reason);
+    return std::unexpected(std::move(reason));
+  };
+  if (auto r = drive.startHrdStream({.timeout = request.streamDuration + kHrdRecordMargin,
+                                     .pollInterval = kHrdPollInterval,
+                                     .stop = stop});
+      !r) {
+    return failRecord(std::format("the recording did not complete: {}", r.error()));
+  }
+  if (stop.stop_requested()) {
+    return cancelled("during the recording");
+  }
+  // A drive that left Operation Enabled during the chirp — a fault, a quick stop — recorded
+  // something other than the plant's response to it, and the state names the cause.
+  if (auto ready = confirmStillEnabled(drive); !ready) {
+    return failRecord(ready.error());
+  }
+  auto recording = drive.readHrdRecording(somanet::HrdData::kSystemIdentificationData);
+  if (!recording) {
+    return failRecord(std::format("could not read the recording back: {}", recording.error()));
+  }
+  const auto& samples = std::get<std::vector<HrdSystemIdentificationSample>>(recording->samples);
+  auto measurement = convertPlantMeasurement(samples, ratedTorqueMilliNm);
+  auto amplitudes = checkPlantMeasurementAmplitudes(measurement, ratedTorqueMilliNm);
+  if (!amplitudes) {
+    return failRecord(amplitudes.error());
+  }
+  reporter.succeed(
+      kPlantIdRecordStep,
+      nlohmann::json{{"samples", samples.size()},
+                     {"files", recording->files.size()},
+                     {"warning", *amplitudes ? nlohmann::json(**amplitudes) : nlohmann::json()}});
+  return std::pair{std::move(measurement), std::move(*amplitudes)};
+}
+
+}  // namespace
+
+std::expected<void, std::string> runPlantIdentificationProcedure(
+    Device& device, ProgressReporter& reporter, std::stop_token stop,
+    const PlantIdentificationRequest& request, const PlantModelFitFn& fitPlantModel) {
+  auto drive = createSomanetDrive(device);
+  if (!drive) {
+    return std::unexpected(drive.error());
+  }
+  // Read before anything moves: it scales every torque sample, and a zero would make every
+  // amplitude check pass on nothing.
+  reporter.start(kPrepareStep);
+  auto ratedTorque = drive->motorRatedTorque();
+  if (!ratedTorque) {
+    reporter.fail(kPrepareStep, ratedTorque.error());
+    return std::unexpected(ratedTorque.error());
+  }
+  if (*ratedTorque == 0) {
+    const std::string reason =
+        "the motor rated torque (0x6076) is 0, so the recorded torque cannot be converted; "
+        "configure the motor first";
+    reporter.fail(kPrepareStep, reason);
+    return std::unexpected(reason);
+  }
+
+  auto recorded = excitePlantAndRecord(*drive, reporter, stop, request, *ratedTorque);
+  if (!recorded) {
+    return std::unexpected(recorded.error());
+  }
+  const auto& [measurement, warning] = *recorded;
+
+  // ── fit ──
+  reporter.start(kPlantIdFitStep);
+  const auto failFit = [&reporter](std::string reason) {
+    reporter.fail(kPlantIdFitStep, reason);
+    return std::unexpected(std::move(reason));
+  };
+  if (!fitPlantModel) {
+    return failFit("the plant model fit is not configured on this server");
+  }
+  const double startHz = request.chirp.startFrequencyMilliHz / 1000.0;
+  const double endHz = request.chirp.targetFrequencyMilliHz / 1000.0;
+  auto fit = fitPlantModel(measurement, startHz, endHz);
+  if (!fit) {
+    return failFit(fit.error());
+  }
+  if (!isStablePlantModel(fit->denominator)) {
+    return failFit(std::format(
+        "the identified model is unstable: its denominator {} has a negative coefficient; raise "
+        "the amplitude or widen the sweep and run it again",
+        nlohmann::json(fit->denominator).dump()));
+  }
+  PlantModel model;
+  model.numerator = std::move(fit->numerator);
+  model.denominator = std::move(fit->denominator);
+  model.chirp = PlantModelChirp{.startFrequencyHz = startHz,
+                                .endFrequencyHz = endHz,
+                                .amplitudePermil = request.chirp.targetAmplitudePermil,
+                                .durationMs = request.chirp.transitionTimeMs,
+                                .signalType = request.chirp.signalType};
+  nlohmann::json fitted = model;
+  fitted["bode"] = std::move(fit->bode);
+  fitted["warning"] = warning ? nlohmann::json(*warning) : nlohmann::json();
+  reporter.succeed(kPlantIdFitStep, std::move(fitted));
+
+  // ── store ──
+  reporter.start(kPlantIdStoreStep);
+  const std::string csv = plantModelCsv(model);
+  const std::span<const uint8_t> bytes{reinterpret_cast<const uint8_t*>(csv.data()), csv.size()};
+  if (auto r = device.writeFile(std::string(kPlantModelFile), bytes); !r) {
+    reporter.fail(kPlantIdStoreStep, r.error().message);
+    return std::unexpected(r.error().message);
+  }
+  reporter.succeed(kPlantIdStoreStep,
+                   nlohmann::json{{"file", kPlantModelFile}, {"bytes", csv.size()}});
+  return {};
 }
 
 }  // namespace mm::node

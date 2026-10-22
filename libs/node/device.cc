@@ -39,6 +39,8 @@ Device::Device(uint16_t slavePosition, mm::comm::FieldbusDriver& driver, Process
   productCode_ = info.productCode;
   revisionNumber_ = info.revisionNumber;
   serialNumber_ = info.serialNumber;
+  escType_ = info.escType;
+  mailboxWriteOnce_ = info.mailboxWriteOnce;
   // Snapshotted here with the rest of the immutable SII identity, and for a sharper reason than
   // symmetry: FieldbusDriver::mailboxProtocols takes the driver's control-plane mutex even though
   // the value it returns is a cached EEPROM field, so asking for it mid-operation blocks for as
@@ -68,6 +70,8 @@ uint32_t Device::vendorId() const { return vendorId_; }
 uint32_t Device::productCode() const { return productCode_; }
 uint32_t Device::revisionNumber() const { return revisionNumber_; }
 uint32_t Device::serialNumber() const { return serialNumber_; }
+std::optional<uint8_t> Device::escType() const { return escType_; }
+bool Device::mailboxWriteOnce() const { return mailboxWriteOnce_; }
 
 bool Device::isCia402() const {
   // Same offline-safe discriminator as createCia402Drive: a CiA402 drive exposes both the
@@ -1447,6 +1451,8 @@ void to_json(nlohmann::json& j, const Device& d) {
       {"isSomanet", isSomanetDevice(d.vendorId())},
       {"supportsEsc", d.supportsEsc()},
       {"supportsLocate", d.supportsLocate()},
+      {"escType", d.escType() ? nlohmann::json(*d.escType()) : nlohmann::json(nullptr)},
+      {"mailboxWriteOnce", d.mailboxWriteOnce()},
       {"parametersUnavailable", d.parametersUnavailable()},
   };
 }

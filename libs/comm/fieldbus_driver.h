@@ -162,6 +162,13 @@ struct SlaveInfo {
   uint32_t productCode = 0;     ///< Product code (EEprom ID field).
   uint32_t revisionNumber = 0;  ///< Revision number.
   uint32_t serialNumber = 0;    ///< Serial number.
+  /// The low byte of ESC register 0x0000, which names the slave controller family. Empty when the
+  /// register could not be read at the scan, and on a transport without an ESC.
+  std::optional<uint8_t> escType;
+  /// Whether the driver writes each mailbox request to this slave once and never sends it again.
+  /// The rule is the SOEM driver's; it is reported so a support log says which rule a device is
+  /// under. False on a transport without a mailbox counter.
+  bool mailboxWriteOnce = false;
 };
 
 /// @brief Schema of a single object dictionary entry uploaded from a slave.

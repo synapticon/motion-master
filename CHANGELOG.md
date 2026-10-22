@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Changed
+
+- **A mailbox write to an Integro that gets no frame back is sent again, as the EtherCAT standard allows.** The netX of an Integro discards a repeated request, so a lost write costs it nothing any more, where the write-once rule left it a gap of one and up to six dropped requests. A Circulo keeps the write-once rule, because its EtherCAT stack locks its mailbox on a repeat. Motion Master tells the two apart by the ESC type in register 0x0000, read at the scan. `GET /api/devices` reports `escType` and `mailboxWriteOnce` for each device, so a support log says which rule a device is under. (#124)
+
 ### Fixed
 
 - **A SOMANET drive no longer locks its mailbox when a mailbox write leaves the PC late.** When a write got no frame back within 100 ms, Motion Master took it for lost, sent the next request with mailbox counter 0 and the one after it with the counter of the lost write. A write held in the PC for longer than that still reached the drive, between those two requests, and a Circulo then saw one counter twice in a row and refused every later request until INIT. Motion Master now never uses the counter of such a write again, and sends no counter 0 to get it back. An Integro pays for that when a write is truly lost on the wire: it drops the requests after the gap, up to six, at the 700 ms mailbox timeout each. A write that is merely late costs it nothing. (#132)

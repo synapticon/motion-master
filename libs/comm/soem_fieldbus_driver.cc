@@ -131,6 +131,13 @@ std::expected<void, std::string> SoemFieldbusDriver::init() {
   return {};
 }
 
+namespace {
+
+// The low byte of ESC register 0x0000 of a Hilscher netX, the slave controller of an Integro.
+constexpr uint8_t kNetxEscType = 0x85;
+
+}  // namespace
+
 std::expected<int, std::string> SoemFieldbusDriver::scan() {
   const auto lock = controlPlane_.lockBus();
   if (!ctx_) {
@@ -149,11 +156,33 @@ std::expected<int, std::string> SoemFieldbusDriver::scan() {
   // non-positive value means no slaves answered. Negative values are SOEM transport codes
   // (EC_NOFRAME = -1, etc.); 0 is a returned frame that no slave incremented.
   int found = ecx_config_init(ctx_.get());
-  // SOMANET firmware locks its receive mailbox when it gets one message twice, so the SOEM port
-  // writes each mailbox message to these slaves once (ports/soem/portfile.cmake). ecx_config_init
-  // clears the slave list, so each scan sets the flag again.
+  // The XMOS EtherCAT stack of a SOMANET device locks its receive mailbox when it gets one message
+  // twice, so the SOEM port writes each mailbox message to such a slave once
+  // (ports/soem/portfile.cmake). The netX stack of an Integro discards a repeated message the way
+  // ETG.1000.4 asks, so it keeps the upstream path, where a write with no frame back is sent again
+  // and a lost write never leaves the counter sequence a gap. Nothing in the SII tells the two
+  // stacks apart; the low byte of ESC register 0x0000 does: 0x85 is a netX, 0xC0 the controller of
+  // a Circulo, 0x90 a TI PRU-ICSS. A slave whose register does not read is written once, which is
+  // the safe side. ecx_config_init clears the slave list, so each scan sets the flag again. The
+  // read waits for a late frame, because the rule a slave is under for the whole session depends
+  // on it.
+  escTypes_.assign(static_cast<size_t>(ctx_->slavecount) + 1, std::nullopt);
   for (int slave = 1; slave <= ctx_->slavecount; ++slave) {
-    ctx_->slavelist[slave].mbxwriteonce = isSomanetDevice(ctx_->slavelist[slave].eep_man);
+    ec_slavet& s = ctx_->slavelist[slave];
+    uint16_t escType = 0;
+    if (ecx_FPRD(&ctx_->port, s.configadr, ECT_REG_TYPE, sizeof(escType), &escType,
+                 kLateFrameTimeoutUs) == 1) {
+      escTypes_[slave] = static_cast<uint8_t>(escType & 0x00ffu);
+    } else {
+      spdlog::warn("Slave {}: the ESC type register did not read; mailbox writes go out once",
+                   slave);
+    }
+    const bool somanet = isSomanetDevice(s.eep_man);
+    s.mbxwriteonce = somanet && escTypes_[slave] != kNetxEscType;
+    if (somanet) {
+      spdlog::info("Slave {}: ESC type 0x{:02X}, mailbox writes {}", slave,
+                   escTypes_[slave].value_or(0), s.mbxwriteonce ? "go out once" : "are sent again");
+    }
   }
   // Before the branches below, so every outcome publishes: a scan that found nothing must clear the
   // states of the slaves that are no longer there, not leave the previous scan's values readable.
@@ -696,6 +725,8 @@ SlaveInfo SoemFieldbusDriver::slaveInfo(uint16_t position) const {
       .productCode = s.eep_id,
       .revisionNumber = s.eep_rev,
       .serialNumber = s.eep_ser,
+      .escType = position < escTypes_.size() ? escTypes_[position] : std::nullopt,
+      .mailboxWriteOnce = s.mbxwriteonce != 0,
   };
 }
 

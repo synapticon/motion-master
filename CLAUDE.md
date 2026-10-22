@@ -870,8 +870,12 @@ ETG.1000.4 allows a master to repeat a write, and upstream SOEM repeats one when
 later than `EC_TIMEOUTRET` (2 ms). So a slow host or a lost frame was enough to lock a drive.
 
 `ports/soem` therefore writes each mailbox request to a Synapticon or Sensodrive device once
-(`mbxwriteonce`, set by `scan()`). A refused write gives its counter back. Other vendors keep
-upstream SOEM. **Do not raise `EC_TIMEOUTRET` to hide this.** The RT receive waits for it, and a
+(`mbxwriteonce`, set by `scan()`), **unless its ESC type is 0x85, a netX**, whose stack discards a
+repeat and keeps upstream SOEM, so a lost write to an Integro is sent again and leaves no gap. The
+low byte of ESC register 0x0000 is the key: 0x85 netX (Integro), 0xC0 the controller of a Circulo,
+0x90 TI PRU-ICSS (Jasper, written once until measured). A slave whose register does not read is
+written once. `GET /api/devices` reports `escType` and `mailboxWriteOnce` for each device. A
+refused write gives its counter back. Other vendors keep upstream SOEM. **Do not raise `EC_TIMEOUTRET` to hide this.** The RT receive waits for it, and a
 raise does not help when two frames share one frame index. `hil/mailbox_duplicate` shows the lock
 on a drive. See `NEXTGEN.md`, Session 2026-10-19.
 

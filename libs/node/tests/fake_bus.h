@@ -142,8 +142,13 @@ class FakeBus : public FieldbusDriver {
   // --- unused stubs ---------------------------------------------------------
   std::expected<void, std::string> init() override { return {}; }
   SlaveInfo slaveInfo(uint16_t) const override {
-    return SlaveInfo{.name = deviceName, .vendorId = vendorId};
+    return SlaveInfo{.name = deviceName,
+                     .vendorId = vendorId,
+                     .escType = escType,
+                     .mailboxWriteOnce = mailboxWriteOnce};
   }
+  std::optional<uint8_t> escType;
+  bool mailboxWriteOnce = false;
   void stop() override {}
   std::expected<std::vector<SlaveStateRaw>, std::string> readStates(
       const std::vector<uint16_t>& p) override {

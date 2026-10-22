@@ -383,6 +383,7 @@ jobs:
   # happen there — it cannot run on the GitHub-hosted windows leg above. This
   # job runs in the SAME workflow run (needs: release), so the release with the
   # unsigned zip already exists; we download that zip, sign motion-master.exe
+  # and motion-master-capture.exe
   # with signtool, re-zip, and replace the asset on the release with --clobber.
   # Keeping it in this run is also what avoids needing a PAT: a job in the same
   # run only updates a release asset with the built-in GITHUB_TOKEN, it does not
@@ -420,13 +421,14 @@ jobs:
           $zip = Get-ChildItem -Filter "motion-master-*-windows-x64.zip" | Select-Object -First 1
           Expand-Archive -Path $zip.FullName -DestinationPath "signed" -Force
 
-      - name: Sign motion-master.exe
+      - name: Sign motion-master.exe and motion-master-capture.exe
         shell: pwsh
         run: |
           # /a auto-selects the best signing cert from the token's store;
           # /tr + /td + /fd add an RFC-3161 SHA-256 timestamp so the signature
-          # stays valid after the cert expires.
-          signtool sign /tr http://timestamp.sectigo.com /td sha256 /fd sha256 /a "signed\motion-master.exe"
+          # stays valid after the cert expires. Both executables carry the same signature, so
+          # Windows trusts the capture program the way it trusts the server.
+          signtool sign /tr http://timestamp.sectigo.com /td sha256 /fd sha256 /a "signed\motion-master.exe" "signed\motion-master-capture.exe"
 
       - name: Re-pack the signed zip
         shell: pwsh

@@ -19,6 +19,10 @@
 
 namespace mm::node {
 
+// Defined in plant_identification.h, which includes this header for the recording's sample type.
+// A caller of readPlantModel includes that header; this one only names the type.
+struct PlantModel;
+
 /// @brief Pure SOMANET (Synapticon manufacturer-specific) vocabulary — object indices, sub-entry
 ///        numbers and enumerations, with no dependency on @c Device.
 ///
@@ -2007,6 +2011,17 @@ class SomanetDrive : public Cia402Drive {
   ///
   /// @return The parsed file, nothing if the device has none, or why an existing one made no sense.
   std::expected<std::optional<IntegroVariant>, std::string> readIntegroVariant() const;
+
+  /// @brief Reads and parses the drive's @c plant_model.csv (FoE), which plant identification
+  ///        writes.
+  ///
+  /// An empty optional means the drive has no model: the file is not there. A drive that was never
+  /// identified has none, which is a state rather than a failure. Every other FoE failure is an
+  /// error, because the bus is at fault and not the file. A file that is read but does not parse
+  /// is an error too.
+  ///
+  /// @return The model, nothing if the drive has none, or why it could not be read.
+  std::expected<std::optional<PlantModel>, std::string> readPlantModel() const;
 
   /// @brief Reads both files and assembles the descriptors this drive accepts firmware under.
   ///

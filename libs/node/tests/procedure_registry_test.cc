@@ -1,4 +1,4 @@
-#include "node/procedure_catalogue.h"
+#include "node/procedure_registry.h"
 
 #include <gtest/gtest.h>
 
@@ -28,22 +28,19 @@ using mm::comm::FieldbusDriver;
 using mm::comm::OdEntry;
 using mm::comm::OdRead;
 using mm::comm::SlaveInfo;
-using mm::node::cancelProcedure;
 using mm::node::DeviceManager;
 using mm::node::kSynapticonVendorId;
-using mm::node::listProcedures;
 using mm::node::ParameterType;
-using mm::node::procedureCatalogue;
 using mm::node::ProcedureError;
 using mm::node::ProcedureManager;
-using mm::node::procedureSnapshot;
+using mm::node::ProcedureRegistry;
+using mm::node::ProcedureRegistryConfig;
 using mm::node::ProcedureStatus;
-using mm::node::startProcedure;
 
 constexpr std::string_view kOsCommand = "os-command";
 
 /// Driver double reporting a fixed slave count and a configurable vendor ID, which is all the
-/// catalogue consults: applicability is decided from identity known at scan time, and no test here
+/// registry consults: applicability is decided from identity known at scan time, and no test here
 /// runs a body to completion against the bus.
 class VendorFakeDriver : public FieldbusDriver {
  public:
@@ -104,12 +101,22 @@ class VendorFakeDriver : public FieldbusDriver {
 /// A scanned device set. DeviceManager is neither copyable nor movable, so tests hold one in place.
 struct Bus {
   DeviceManager dm;
+  ProcedureManager manager{dm};
+  // No outside callback is set: no test here runs a body that calls one.
+  ProcedureRegistry registry{dm, manager, ProcedureRegistryConfig{}};
 
   explicit Bus(uint32_t vendorId = kSynapticonVendorId, int slaves = 2) {
     EXPECT_TRUE(dm.init(std::make_unique<VendorFakeDriver>(slaves, vendorId)).has_value());
     EXPECT_TRUE(dm.scan().has_value());
   }
 };
+
+// The entries alone, for the tests that read the table and run nothing. A registry borrows its
+// collaborators even then, so one scanned bus stands behind it.
+const std::vector<mm::node::ProcedureRegistryEntry>& registryEntries() {
+  static Bus bus;
+  return bus.registry.entries();
+}
 
 // A well-formed raw OS command request. Command 13 (skipped-cycles counter) is the harmless one: it
 // reads a counter and never touches the motor.
@@ -136,11 +143,11 @@ void awaitCompletion(const ProcedureManager& manager, uint16_t position, std::st
   ADD_FAILURE() << "procedure '" << name << "' never finished";
 }
 
-TEST(ProcedureCatalogue, DescribesEveryProcedureItHolds) {
+TEST(ProcedureRegistry, DescribesEveryProcedureItHolds) {
   // The descriptor is what a client renders a control from, so an entry missing its text would show
   // up as a blank card rather than a compile error. Every entry must carry the lot.
-  ASSERT_FALSE(procedureCatalogue().empty());
-  for (const auto& entry : procedureCatalogue()) {
+  ASSERT_FALSE(registryEntries().empty());
+  for (const auto& entry : registryEntries()) {
     EXPECT_FALSE(entry.descriptor.name.empty());
     EXPECT_FALSE(entry.descriptor.title.empty());
     EXPECT_FALSE(entry.descriptor.description.empty());
@@ -150,11 +157,11 @@ TEST(ProcedureCatalogue, DescribesEveryProcedureItHolds) {
   }
 }
 
-TEST(ProcedureCatalogue, DescribesEveryParameterWellEnoughToRenderAField) {
+TEST(ProcedureRegistry, DescribesEveryParameterWellEnoughToRenderAField) {
   // A client builds its form from these, so a parameter missing the field its type needs renders as
   // a control with nothing to offer — a select with no options, a byte field of unknown length —
   // rather than as anything that would fail a build.
-  for (const auto& entry : procedureCatalogue()) {
+  for (const auto& entry : registryEntries()) {
     for (const auto& parameter : entry.descriptor.parameters) {
       const std::string where = entry.descriptor.name + "." + parameter.name;
       EXPECT_FALSE(parameter.name.empty()) << entry.descriptor.name;
@@ -184,9 +191,9 @@ TEST(ProcedureCatalogue, DescribesEveryParameterWellEnoughToRenderAField) {
   }
 }
 
-TEST(ProcedureCatalogue, ParameterNamesAreUniqueWithinAProcedure) {
+TEST(ProcedureRegistry, ParameterNamesAreUniqueWithinAProcedure) {
   // They are the keys of one request object, so a duplicate would make one of them unreachable.
-  for (const auto& entry : procedureCatalogue()) {
+  for (const auto& entry : registryEntries()) {
     std::vector<std::string> names;
     names.reserve(entry.descriptor.parameters.size());
     for (const auto& parameter : entry.descriptor.parameters) {
@@ -197,33 +204,32 @@ TEST(ProcedureCatalogue, ParameterNamesAreUniqueWithinAProcedure) {
   }
 }
 
-TEST(ProcedureCatalogue, NamesAreUnique) {
+TEST(ProcedureRegistry, NamesAreUnique) {
   // Names address the resource and key the retained snapshot, so a duplicate would make one entry
   // unreachable and let two procedures overwrite each other's results.
   std::vector<std::string> names;
-  for (const auto& entry : procedureCatalogue()) {
+  for (const auto& entry : registryEntries()) {
     names.push_back(entry.descriptor.name);
   }
   std::ranges::sort(names);
   EXPECT_EQ(std::ranges::unique(names).begin(), names.end());
 }
 
-TEST(ProcedureCatalogue, IsOrderedByName) {
+TEST(ProcedureRegistry, IsOrderedByName) {
   // The table's order is what clients render: applicableEntries preserves it, so the list endpoint
-  // and the Console's sidebar are ordered by the catalogue being ordered and nothing else. Pinned
-  // here because the sort is one line at the end of buildCatalogue, and dropping it would leave a
+  // and the Console's sidebar are ordered by the registry being ordered and nothing else. Pinned
+  // here because the sort is one line at the end of buildRegistry, and dropping it would leave a
   // list in authoring order — which every other test would still pass.
-  const auto& entries = procedureCatalogue();
+  const auto& entries = registryEntries();
   EXPECT_TRUE(std::ranges::is_sorted(entries, {}, [](const auto& entry) {
     return std::string_view(entry.descriptor.name);
-  })) << "the catalogue must be sorted by descriptor.name";
+  })) << "the registry must be sorted by descriptor.name";
 }
 
 TEST(ListProcedures, ReportsAnIdleSnapshotForAProcedureNeverRun) {
   Bus bus;
-  ProcedureManager manager(bus.dm);
 
-  auto listings = listProcedures(bus.dm, manager, 1);
+  auto listings = bus.registry.list(1);
   ASSERT_TRUE(listings) << listings.error();
   ASSERT_FALSE(listings->empty());
 
@@ -243,9 +249,8 @@ TEST(ListProcedures, OffersNothingOnAnotherVendorsDevice) {
   // Applicability is per device: a vendor's procedures must not be offered on a third-party slave,
   // where they could only ever fail.
   Bus bus(0x0000'0002);
-  ProcedureManager manager(bus.dm);
 
-  auto listings = listProcedures(bus.dm, manager, 1);
+  auto listings = bus.registry.list(1);
   ASSERT_TRUE(listings) << listings.error();
   EXPECT_TRUE(listings->empty());
 }
@@ -255,8 +260,7 @@ TEST(ListProcedures, OffersASensodriveDeviceWhatASynapticonDeviceGets) {
   // same procedures.
   auto names = [](uint32_t vendorId) {
     Bus bus(vendorId);
-    ProcedureManager manager(bus.dm);
-    auto listings = listProcedures(bus.dm, manager, 1);
+    auto listings = bus.registry.list(1);
     EXPECT_TRUE(listings) << listings.error();
     std::vector<std::string> result;
     for (const auto& listing : listings.value_or(std::vector<mm::node::ProcedureListing>{})) {
@@ -272,18 +276,16 @@ TEST(ListProcedures, OffersASensodriveDeviceWhatASynapticonDeviceGets) {
 
 TEST(ListProcedures, RejectsAnUnknownDevice) {
   Bus bus;
-  ProcedureManager manager(bus.dm);
 
-  auto listings = listProcedures(bus.dm, manager, 99);
+  auto listings = bus.registry.list(99);
   ASSERT_FALSE(listings.has_value());
   EXPECT_EQ(listings.error().kind, ProcedureError::Kind::kUnknownDevice);
 }
 
 TEST(ProcedureSnapshot, ReportsIdleBeforeTheFirstRun) {
   Bus bus;
-  ProcedureManager manager(bus.dm);
 
-  auto snapshot = procedureSnapshot(bus.dm, manager, 1, kOsCommand);
+  auto snapshot = bus.registry.snapshot(1, kOsCommand);
   ASSERT_TRUE(snapshot) << snapshot.error();
   EXPECT_EQ(snapshot->status, ProcedureStatus::kIdle);
   EXPECT_EQ(snapshot->runCount, 0u);
@@ -291,89 +293,80 @@ TEST(ProcedureSnapshot, ReportsIdleBeforeTheFirstRun) {
 
 TEST(ProcedureSnapshot, RejectsAnUnknownProcedureName) {
   Bus bus;
-  ProcedureManager manager(bus.dm);
 
-  auto snapshot = procedureSnapshot(bus.dm, manager, 1, "no-such-procedure");
+  auto snapshot = bus.registry.snapshot(1, "no-such-procedure");
   ASSERT_FALSE(snapshot.has_value());
   EXPECT_EQ(snapshot.error().kind, ProcedureError::Kind::kUnknownProcedure);
 }
 
 TEST(ProcedureSnapshot, RejectsAProcedureTheDeviceDoesNotSupport) {
-  // A name the catalogue holds but this device does not have is the same answer as a name that does
+  // A name the registry holds but this device does not have is the same answer as a name that does
   // not exist: nothing is addressable there.
   Bus bus(0x0000'0002);
-  ProcedureManager manager(bus.dm);
 
-  auto snapshot = procedureSnapshot(bus.dm, manager, 1, kOsCommand);
+  auto snapshot = bus.registry.snapshot(1, kOsCommand);
   ASSERT_FALSE(snapshot.has_value());
   EXPECT_EQ(snapshot.error().kind, ProcedureError::Kind::kUnknownProcedure);
 }
 
 TEST(StartProcedure, ReturnsTheInitialSnapshotWithABumpedRunCount) {
   Bus bus;
-  ProcedureManager manager(bus.dm);
 
-  auto snapshot = startProcedure(bus.dm, manager, 1, kOsCommand, osCommandRequest());
+  auto snapshot = bus.registry.start(1, kOsCommand, osCommandRequest());
   ASSERT_TRUE(snapshot) << snapshot.error();
   EXPECT_EQ(snapshot->runCount, 1u);
   EXPECT_TRUE(snapshot->startedAt.has_value());
-  awaitCompletion(manager, 1, kOsCommand);
+  awaitCompletion(bus.manager, 1, kOsCommand);
 }
 
 TEST(StartProcedure, RejectsAnInvalidRequestBeforeAnythingRuns) {
   Bus bus;
-  ProcedureManager manager(bus.dm);
 
   // Validation belongs to the entry, and its failure is a bad request rather than a bad address —
   // the distinction the handler turns into 400 instead of 404.
-  auto snapshot = startProcedure(bus.dm, manager, 1, kOsCommand, nlohmann::json::object());
+  auto snapshot = bus.registry.start(1, kOsCommand, nlohmann::json::object());
   ASSERT_FALSE(snapshot.has_value());
   EXPECT_EQ(snapshot.error().kind, ProcedureError::Kind::kInvalidRequest);
   // Nothing was started, so no run is retained and runCount stays where it was.
-  EXPECT_FALSE(manager.snapshot(1, kOsCommand).has_value());
+  EXPECT_FALSE(bus.manager.snapshot(1, kOsCommand).has_value());
 }
 
 TEST(StartProcedure, RejectsAnUnknownProcedureName) {
   Bus bus;
-  ProcedureManager manager(bus.dm);
 
-  auto snapshot = startProcedure(bus.dm, manager, 1, "no-such-procedure", nlohmann::json::object());
+  auto snapshot = bus.registry.start(1, "no-such-procedure", nlohmann::json::object());
   ASSERT_FALSE(snapshot.has_value());
   EXPECT_EQ(snapshot.error().kind, ProcedureError::Kind::kUnknownProcedure);
 }
 
 TEST(StartProcedure, RejectsAnUnknownDevice) {
   Bus bus;
-  ProcedureManager manager(bus.dm);
 
-  auto snapshot = startProcedure(bus.dm, manager, 99, kOsCommand, osCommandRequest());
+  auto snapshot = bus.registry.start(99, kOsCommand, osCommandRequest());
   ASSERT_FALSE(snapshot.has_value());
   EXPECT_EQ(snapshot.error().kind, ProcedureError::Kind::kUnknownDevice);
 }
 
 TEST(CancelProcedure, RejectsWhenNothingIsRunning) {
   Bus bus;
-  ProcedureManager manager(bus.dm);
 
-  auto cancelled = cancelProcedure(bus.dm, manager, 1, kOsCommand);
+  auto cancelled = bus.registry.cancel(1, kOsCommand);
   ASSERT_FALSE(cancelled.has_value());
   EXPECT_EQ(cancelled.error().kind, ProcedureError::Kind::kUnknownProcedure);
 }
 
 TEST(CancelProcedure, RejectsAnUnknownProcedureName) {
   Bus bus;
-  ProcedureManager manager(bus.dm);
 
-  auto cancelled = cancelProcedure(bus.dm, manager, 1, "no-such-procedure");
+  auto cancelled = bus.registry.cancel(1, "no-such-procedure");
   ASSERT_FALSE(cancelled.has_value());
   EXPECT_EQ(cancelled.error().kind, ProcedureError::Kind::kUnknownProcedure);
 }
 
 TEST(ProcedureListingJson, CarriesTheDescriptorAndSnapshotSeparately) {
   Bus bus;
-  ProcedureManager manager(bus.dm);
 
-  auto listings = listProcedures(bus.dm, manager, 1);
+  auto listings = bus.registry.list(1);
   ASSERT_TRUE(listings) << listings.error();
   ASSERT_FALSE(listings->empty());
 

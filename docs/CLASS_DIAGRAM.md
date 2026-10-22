@@ -56,7 +56,7 @@ classDiagram
         -Config config_
         -DeviceManager& deviceManager_
         -MonitoringManager& monitoringManager_
-        -ProcedureManager& procedureManager_
+        -ProcedureRegistry& procedureRegistry_
         -UserCache& userCache_
         -vector~RegisterRoutesFn~ routeModules_
         -thread thread_ «port 61447»
@@ -141,6 +141,18 @@ classDiagram
         -DeviceManager& deviceManager_
         -ParameterRefresher refresher_
         -thread thread_
+    }
+    class ProcedureRegistry {
+        +entries() : vector~ProcedureRegistryEntry~
+        +list(pos) / snapshot(pos, name)
+        +start(pos, name, request) / cancel(pos, name)
+        -DeviceManager& deviceManager_
+        -ProcedureManager& procedureManager_
+        -vector~ProcedureRegistryEntry~ entries_
+    }
+    class ProcedureRegistryConfig {
+        <<struct — callbacks from outside mm::node>>
+        +PlantModelFitFn fitPlantModel
     }
     class ProcedureManager {
         +start(body) «off-RT jthread»
@@ -300,7 +312,7 @@ classDiagram
     CycleGuard ..> ProcessData : raises inCycle
     HttpServer ..> DeviceManager : ref
     HttpServer ..> MonitoringManager : ref
-    HttpServer ..> ProcedureManager : ref
+    HttpServer ..> ProcedureRegistry : ref
     HttpServer *-- "1" UserCache : ref (owned by main)
     HttpServer *-- "1" HttpServerConfig : owns (by value)
     HttpServerConfig ..> GameLoop : health + period, through a callback
@@ -319,6 +331,10 @@ classDiagram
     MonitoringManager ..> WebSocketServer : publish cb (setPublish)
     MonitoringManager *-- ParameterRefresher
     ParameterRefresher ..> DeviceManager : ref
+    ProcedureRegistry ..> DeviceManager : ref
+    ProcedureRegistry ..> ProcedureManager : ref
+    ProcedureRegistry ..> ProcedureRegistryConfig : built from (by value)
+    ProcedureRegistryConfig ..> AutoTuningClient : fitPlantModel, through a callback
     ProcedureManager ..> DeviceManager : ref
     DeviceManager o-- "1..*" DeviceSet : publishes one, retires the rest
     DeviceSet *-- "1" FieldbusDriver : owns (shared_ptr)
@@ -367,6 +383,7 @@ classDiagram
 | `MonitoringManager` | `refresher_` | `ParameterRefresher` | **Yes** | `libs/node/monitoring_manager.h` |
 | `MonitoringManager` | `deviceManager_` | `DeviceManager&` | No | `libs/node/monitoring_manager.h` |
 | `ParameterRefresher` | `deviceManager_` | `DeviceManager&` | No | `libs/node/parameter_refresher.h` |
+| `ProcedureRegistry` | `entries_` | `vector<ProcedureRegistryEntry>` | **Yes** — built once from `ProcedureRegistryConfig`, never changed | `libs/node/procedure_registry.h` |
 | `ProcedureManager` | `runs_` | `map<key, shared_ptr<Run>>` (each owns a `std::jthread`) | **Yes** | `libs/node/procedure_manager.h` |
 | `DeviceManager` | `currentSet_` | `shared_ptr<DeviceSet>` | **Yes** — the live generation, and its only owner. `init` and `scan` publish a new one | `libs/node/device_manager.h` |
 | `DeviceSet` | `driver` | `shared_ptr<FieldbusDriver>` | **Yes** — the set owns the driver, so a retired set keeps a live driver object | `libs/node/device_manager.h` |
@@ -440,6 +457,12 @@ class names.
   rather than a release shipping it, so a machine may not have it. `enabled: false` in the
   configuration also turns it off. Motion Master then runs normally, and only the auto-tuning
   endpoints fail.
+
+Two things reach the `Client`. The `/api/auto-tuning/run` route forwards a request body to it
+through a callback in `HttpServer::Config`. A procedure that needs a computation reaches it through
+a callback in `ProcedureRegistryConfig`, which `main.cc` binds to the client, or to a refusal that
+names the missing program when none runs. `libs/node` names the callback type and never the client,
+so the registry has no dependency on `libs/auto_tuning`.
 
 `Process::start()` must run **before the main thread turns real-time**. See
 [THREADS.md](THREADS.md) for that rule and for the rest of the lifecycle.

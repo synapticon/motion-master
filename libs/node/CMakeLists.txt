@@ -20,7 +20,7 @@ add_library(
   parameter_refresher.cc
   pdo_mapping.cc
   procedure.cc
-  procedure_catalogue.cc
+  procedure_registry.cc
   procedure_manager.cc
   profile_device.cc
   profile_procedures.cc
@@ -28,6 +28,7 @@ add_library(
   process_data_ring.cc
   process_image.cc
   somanet_control.cc
+  plant_identification.cc
   somanet_drive.cc
   somanet_procedures.cc)
 add_library(mm::node ALIAS node)

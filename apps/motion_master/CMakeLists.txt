@@ -17,6 +17,7 @@ add_executable(
   config.cc
   logging.cc
   auto_tuning_setup.cc
+  plant_model_fit.cc
   http_server.cc
   ws_server.cc
   game_loop.cc

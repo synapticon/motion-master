@@ -9,7 +9,9 @@ add_executable(
   config_test.cc
   cert_info_test.cc
   game_loop_test.cc
+  plant_model_fit_test.cc
   ../monitoring_api.cc
+  ../plant_model_fit.cc
   ../config.cc
   ../cert_info.cc
   ../game_loop.cc)
@@ -19,8 +21,8 @@ target_include_directories(mm_app_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 
 # mm::node brings the libs include path and nlohmann_json (used by monitoring_api). cert_info parses
 # PEM/X.509 via OpenSSL, the same library the server links for TLS.
-target_link_libraries(mm_app_tests PRIVATE mm::node spdlog::spdlog OpenSSL::Crypto GTest::gtest
-                                           GTest::gtest_main)
+target_link_libraries(mm_app_tests PRIVATE mm::node mm::auto_tuning spdlog::spdlog OpenSSL::Crypto
+                                           GTest::gtest GTest::gtest_main)
 
 # GCC 12–14 emit false-positive -Warray-bounds / -Wstringop-overflow inside libstdc++
 # <bits/stl_algobase.h> when test code is inlined at -O3 (release builds). Suppress for GCC on these

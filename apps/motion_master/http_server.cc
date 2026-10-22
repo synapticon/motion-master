@@ -48,8 +48,8 @@
 #include "node/monitoring_manager.h"
 #include "node/operation_modes.h"
 #include "node/pdo_mapping.h"
-#include "node/procedure_catalogue.h"
 #include "node/procedure_manager.h"
+#include "node/procedure_registry.h"
 #include "node/somanet_control.h"
 #include "swagger_spec.h"
 
@@ -402,11 +402,12 @@ std::string userCacheRelPath(std::string_view url) {
 
 HttpServer::HttpServer(Config config, mm::node::DeviceManager& deviceManager,
                        mm::node::MonitoringManager& monitoringManager,
-                       mm::node::ProcedureManager& procedureManager, mm::core::UserCache& userCache)
+                       mm::node::ProcedureRegistry& procedureRegistry,
+                       mm::core::UserCache& userCache)
     : config_(std::move(config)),
       deviceManager_(deviceManager),
       monitoringManager_(monitoringManager),
-      procedureManager_(procedureManager),
+      procedureRegistry_(procedureRegistry),
       userCache_(userCache) {}
 
 HttpServer::~HttpServer() {
@@ -528,8 +529,7 @@ void HttpServer::run() {
                if (!position) {
                  return mm::api::badRequest("slavePosition must be a number");
                }
-               auto listings =
-                   mm::node::listProcedures(deviceManager_, procedureManager_, *position);
+               auto listings = procedureRegistry_.list(*position);
                if (!listings) {
                  return mm::api::error(std::string(procedureErrorStatus(listings.error().kind)),
                                        listings.error().message);
@@ -1445,7 +1445,7 @@ void HttpServer::run() {
 
   // One resource per (device, procedure), addressed by name, with three verbs — POST starts a run,
   // GET returns the snapshot, DELETE cancels. These four handlers serve *every* procedure: the
-  // catalogue resolves the name, decides whether the device has it, validates the request and
+  // registry resolves the name, decides whether the device has it, validates the request and
   // supplies the body, so adding a procedure is a row in that table and touches nothing here.
   //
   // Progress is polled, never pushed — each snapshot is accumulating state in which finished steps
@@ -1466,8 +1466,7 @@ void HttpServer::run() {
                     return mm::api::badRequest("invalid JSON body");
                   }
                 }
-                auto snapshot = mm::node::startProcedure(deviceManager_, procedureManager_,
-                                                         *position, req.parameter("name"), body);
+                auto snapshot = procedureRegistry_.start(*position, req.parameter("name"), body);
                 if (!snapshot) {
                   return mm::api::error(std::string(procedureErrorStatus(snapshot.error().kind)),
                                         snapshot.error().message);
@@ -1486,8 +1485,7 @@ void HttpServer::run() {
                }
                // Never having run is not an absence: this reports the all-idle snapshot built from
                // the procedure's step template, so a client renders one shape and polls one loop.
-               auto snapshot = mm::node::procedureSnapshot(deviceManager_, procedureManager_,
-                                                           *position, req.parameter("name"));
+               auto snapshot = procedureRegistry_.snapshot(*position, req.parameter("name"));
                if (!snapshot) {
                  return mm::api::error(std::string(procedureErrorStatus(snapshot.error().kind)),
                                        snapshot.error().message);
@@ -1502,8 +1500,7 @@ void HttpServer::run() {
                  return mm::api::badRequest("slavePosition must be a number");
                }
                // Cancels the run, not the record: the snapshot stays, reporting how far it got.
-               auto cancelled = mm::node::cancelProcedure(deviceManager_, procedureManager_,
-                                                          *position, req.parameter("name"));
+               auto cancelled = procedureRegistry_.cancel(*position, req.parameter("name"));
                if (!cancelled) {
                  return mm::api::error(std::string(procedureErrorStatus(cancelled.error().kind)),
                                        cancelled.error().message);
@@ -1672,6 +1669,29 @@ void HttpServer::run() {
                      return nlohmann::json(*description);
                    },
                    "409 Conflict");
+             });
+
+  // A 404 for a drive that carries no plant_model.csv: never identified is a state, and the message
+  // names the procedure that produces the file.
+  router.get("/api/devices/:slavePosition/plant-model",
+             [this](const mm::api::Request& req) -> mm::api::Response {
+               auto position = req.parameterAs<uint16_t>("slavePosition");
+               if (!position) {
+                 return mm::api::badRequest("slavePosition must be a number");
+               }
+               if (!deviceManager_.hasDevice(*position)) {
+                 return mm::api::notFound("no device at that bus position");
+               }
+               auto model = mm::node::readPlantModel(deviceManager_, *position);
+               if (!model) {
+                 return mm::api::error("409 Conflict", model.error());
+               }
+               if (!model->has_value()) {
+                 return mm::api::notFound(
+                     "this device carries no plant_model.csv; run the plant-identification "
+                     "procedure to identify one");
+               }
+               return mm::api::json(nlohmann::json(**model));
              });
 
   // A 404 for a device that carries no .variant, because that is what the resource is: absent. Only

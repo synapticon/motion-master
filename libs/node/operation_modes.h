@@ -15,7 +15,7 @@ namespace mm::node {
 /// @file
 /// @brief What operation modes a drive has, and which of them it says it supports.
 ///
-/// Sits outward of @c Device and names both profiles, the way @c procedure_catalogue does: the
+/// Sits outward of @c Device and names both profiles, the way @c procedure_registry does: the
 /// standard half is CiA402 vocabulary read against the drive's own capability field, the
 /// manufacturer half is the vendor's, and joining them is neither one's business. Nothing in
 /// @c cia402.h or @c somanet_drive.h knows this file exists.

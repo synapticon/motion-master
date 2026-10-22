@@ -32,6 +32,7 @@ import {
   GameLoopHealth,
   HardwareDescription,
   HrdRecording,
+  IdentifiedPlantModel,
   IntegroVariant,
   IntegroVariantOption,
   MailboxErrorCode,
@@ -1730,6 +1731,20 @@ export class Api<
   ) =>
     this.request<IntegroVariant, void>({
       path: `/api/devices/${slavePosition}/variant`,
+      method: "GET",
+      format: "json",
+      ...params,
+    });
+  /**
+   * @description Reads and decodes the drive's `plant_model.csv` over FoE: the transfer function from torque in Nm to velocity in rad/s that the `plant-identification` procedure fitted, and the chirp it was identified with. Controller and notch filter auto-tuning compute from this model. **A 404 is the answer for a drive that was never identified.** The file is written by the procedure and by nothing else, so its absence is a state rather than a problem. The Bode data is not in the file; it is in the result of the run that produced the model.
+   *
+   * @name GetDevicePlantModel
+   * @summary Read the plant model stored on a drive
+   * @request GET:/api/devices/{slavePosition}/plant-model
+   */
+  getDevicePlantModel = (slavePosition: number, params: RequestParams = {}) =>
+    this.request<IdentifiedPlantModel, void>({
+      path: `/api/devices/${slavePosition}/plant-model`,
       method: "GET",
       format: "json",
       ...params,

@@ -17,6 +17,7 @@
 #include "node/device_manager.h"
 #include "node/firmware_package.h"
 #include "node/kuebler_registers.h"
+#include "node/plant_identification.h"
 #include "node/procedure.h"
 #include "node/procedure_manager.h"
 #include "node/somanet_drive.h"
@@ -539,7 +540,7 @@ std::vector<ProgressStep> triggerErrorSteps();
 
 /// @brief Provokes a firmware error in a control service as a procedure body.
 ///
-/// **The only deliberately destructive procedure in the catalogue.** It exists because the firmware
+/// **The only deliberately destructive procedure in the registry.** It exists because the firmware
 /// has the command, and because the behaviour around a stopped control service — what the master
 /// sees, what the bus does, what the other devices do — cannot be tested without being able to stop
 /// one on purpose. It is a test instrument, not a commissioning step.
@@ -628,6 +629,97 @@ std::vector<ProgressStep> systemIdentificationSteps();
 std::expected<void, std::string> runSystemIdentificationProcedure(
     Device& device, ProgressReporter& reporter, std::stop_token stop,
     const SystemIdentificationRequest& request);
+
+/// @brief Procedure name for plant identification, as it appears in its URL and its snapshot key.
+inline constexpr std::string_view kPlantIdentificationProcedure = "plant-identification";
+
+/// @brief The step that configures the chirp and arms it to start with the recording.
+inline constexpr std::string_view kPlantIdChirpStep = "chirp";
+
+/// @brief The step that records the response and reads it back. Occupies the chirp's duration
+///        plus its padding.
+inline constexpr std::string_view kPlantIdRecordStep = "record";
+
+/// @brief The step that sends the measurement to the auto-tuning program and checks the model.
+inline constexpr std::string_view kPlantIdFitStep = "fit";
+
+/// @brief The step that writes the model to the drive.
+inline constexpr std::string_view kPlantIdStoreStep = "store";
+
+/// @brief One plant identification run, as a client describes it.
+struct PlantIdentificationRequest {
+  /// The chirp. Its @c start is always @c kAfterHrdStreamStart, because the recording is what
+  /// triggers it.
+  SystemIdentificationRequest chirp;
+
+  /// How long the recording runs: the chirp plus @c kChirpPaddingMs. Computed by the parse from
+  /// the transition time, and already checked against what the drive records.
+  std::chrono::milliseconds streamDuration{};
+};
+
+/// @brief Parses and validates a client's plant identification request body.
+///
+/// Takes the four chirp numbers and the signal type of @c parseSystemIdentificationRequest, under
+/// the same names and the same firmware bounds, and one more bound on top: the chirp plus its
+/// padding must fit in what the drive records for system identification data, which
+/// @c plantIdentificationStreamDuration checks. A @c start field is not read; the run arms the
+/// chirp itself.
+///
+/// @param body  Parsed request JSON.
+/// @return The validated request, or a message naming what is wrong with it.
+std::expected<PlantIdentificationRequest, std::string> parsePlantIdentificationRequest(
+    const nlohmann::json& body);
+
+/// @brief What plant identification accepts, as its descriptor advertises it.
+std::vector<ProcedureParameter> plantIdentificationParameters();
+
+/// @brief The plant identification procedure's step template.
+std::vector<ProgressStep> plantIdentificationSteps();
+
+/// @brief Identifies the plant model of a drive as a procedure body.
+///
+/// Excites the drive with the chirp, records its response, fits a model to it, and writes the
+/// model to @c kPlantModelFile on the drive:
+///
+/// 1. **prepare** — reads the rated torque, configures the recording, which deletes the files of
+///    the previous one, brings an enabled drive to Switched On, saves the operation mode, sets
+///    CST, writes a zero target torque, and enables the drive. In CST with a zero target the
+///    chirp alone excites the plant.
+/// 2. **release-brake** — a brake the drive controls (release strategy 1 or 2) is released by the
+///    drive when it enables, so the step reports that and writes nothing. A manual brake
+///    (strategy 0) is released here, after the enable, and the wait for its pull time is this
+///    procedure's. A drive with no brake configured skips the write.
+/// 3. **chirp** — writes the chirp settings, disarmed first, then arms the chirp to start with
+///    the recording.
+/// 4. **record** — starts the recording, which triggers the chirp and runs for its whole duration,
+///    then reads the files back and converts them. A recording the chirp did not excite, or one
+///    in which the motor did not move, fails here, and a small motion is a warning in the step's
+///    value.
+/// 5. **restore** — on every way out, after the recording and before the fit: disarms the chirp,
+///    engages again a brake this run released, brings the drive to Switched On, and puts the
+///    operation mode back. Before the fit rather than after it, so the drive is not left enabled
+///    while the program computes.
+/// 6. **fit** — sends the measurement to the auto-tuning program through @p fitPlantModel. A model
+///    with a negative denominator coefficient fails here, because it is unstable.
+/// 7. **store** — writes the model and the chirp settings to the drive, and records the text it
+///    wrote.
+///
+/// Cancelling during the recording aborts it on the drive, and the restore runs as on any other
+/// way out.
+///
+/// Needs the bus exchanging process data: the CiA402 state machine only advances while the
+/// statusword is updating.
+///
+/// @param device        Device to run against, borrowed by the manager for this call.
+/// @param reporter      Where step progress is recorded.
+/// @param stop          Cancellation token; checked between steps and passed into every command.
+/// @param request       The chirp and the recording duration.
+/// @param fitPlantModel The fit, supplied by the composition root. An empty function fails the
+///                      fit step with a message that says the fit is not configured.
+/// @return Void once the model is on the drive, otherwise why not.
+std::expected<void, std::string> runPlantIdentificationProcedure(
+    Device& device, ProgressReporter& reporter, std::stop_token stop,
+    const PlantIdentificationRequest& request, const PlantModelFitFn& fitPlantModel);
 
 /// @brief Procedure name for ignoring a BiSS encoder's status bits, as it appears in its URL and
 ///        its snapshot key.

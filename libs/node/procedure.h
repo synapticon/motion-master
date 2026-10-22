@@ -138,7 +138,7 @@ void to_json(nlohmann::json& j, const ProcedureSnapshot& snapshot);
 ///        every step idle from @p steps.
 ///
 /// @c ProcedureManager cannot produce this — it is only told a step template when a run starts — so
-/// it is the job of whoever holds the template (the catalogue). With it, "never run" and "ran" have
+/// it is the job of whoever holds the template (the registry). With it, "never run" and "ran" have
 /// the same shape on the wire and a client renders one component with no empty-state branch, which
 /// is the whole point of the accumulating-snapshot model.
 ProcedureSnapshot idleSnapshot(std::vector<ProgressStep> steps);
@@ -284,12 +284,12 @@ ProcedureParameter stringArrayParameter(std::string name, std::string title,
 ProcedureParameter fileParameter(std::string name, std::string title, std::string description,
                                  nlohmann::json defaultValue);
 
-/// @brief What a procedure *is*, independent of any run — the half of the catalogue a client needs
+/// @brief What a procedure *is*, independent of any run — the half of the registry a client needs
 ///        to render a control for it.
 ///
 /// The text lives here, on the server, rather than in each client: the house rule that every action
 /// control carries a description *and its caveats* means it has to exist somewhere, and duplicating
-/// it per client is how it goes stale. A client renders whatever the catalogue reports, so it stays
+/// it per client is how it goes stale. A client renders whatever the registry reports, so it stays
 /// in step with the server's procedure set without hard-coding an entry per procedure.
 ///
 /// What it deliberately does *not* carry is presentation. Formatting a step's value is the client's

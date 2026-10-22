@@ -2829,4 +2829,369 @@ TEST(DeviceLocateOverSpoe, ACancelledRunStopsTheLeds) {
   EXPECT_FALSE(server.locating());
 }
 
+// --- Plant identification procedure --------------------------------------------------------------
+
+using mm::node::kPlantIdentificationProcedure;
+using mm::node::parsePlantIdentificationRequest;
+using mm::node::plantIdentificationParameters;
+using mm::node::PlantIdentificationRequest;
+using mm::node::plantIdentificationSteps;
+using mm::node::PlantMeasurement;
+using mm::node::PlantModelFit;
+using mm::node::PlantModelFitFn;
+using mm::node::runPlantIdentificationProcedure;
+
+constexpr uint32_t kRatedTorqueMilliNm = 2000;
+
+// The drive as a plant identification finds it: a rated torque to scale the recording by, a target
+// torque to zero, and a recording on its files. The chirp settings and the HRD commands answer
+// through the scripted OS command replies like every other command.
+void programPlant(OsCommandFakeDriver& driver) {
+  driver.programObject(Object::kMotorRatedTorque, 0, ObjectDataType::UNSIGNED32,
+                       {static_cast<uint8_t>(kRatedTorqueMilliNm & 0xFF),
+                        static_cast<uint8_t>(kRatedTorqueMilliNm >> 8), 0, 0});
+  driver.programObject(Object::kTargetTorque, 0, ObjectDataType::INTEGER16, {0x10, 0x00});
+}
+
+// A system identification recording: one 6-byte sample per millisecond, velocity in rpm as Q15 and
+// torque in per mille, both alternating in sign so that the means of the absolute values are what
+// the amplitude checks see.
+void recordPlant(OsCommandFakeDriver& driver, int count, double rpm, int16_t torquePermil) {
+  std::vector<uint8_t> bytes;
+  for (int i = 0; i < count; ++i) {
+    const double sign = (i % 2 == 0) ? 1.0 : -1.0;
+    const auto velocity = static_cast<int32_t>(sign * rpm * 32768.0);
+    const auto torque = static_cast<int16_t>(sign * torquePermil);
+    const auto v = static_cast<uint32_t>(velocity);
+    const auto t = static_cast<uint16_t>(torque);
+    bytes.insert(bytes.end(), {static_cast<uint8_t>(v & 0xFF), static_cast<uint8_t>(v >> 8),
+                               static_cast<uint8_t>(v >> 16), static_cast<uint8_t>(v >> 24),
+                               static_cast<uint8_t>(t & 0xFF), static_cast<uint8_t>(t >> 8)});
+  }
+  const std::string listing = std::format("hr_data0.bin, size: {}\n", bytes.size());
+  driver.files["fs-getlist"] = std::vector<uint8_t>(listing.begin(), listing.end());
+  driver.files["hr_data0.bin"] = std::move(bytes);
+}
+
+// A fit that records what it was asked and answers a fixed stable model.
+struct RecordingFit {
+  std::optional<PlantMeasurement> measurement;
+  double startHz = 0.0;
+  double endHz = 0.0;
+  std::vector<double> denominator{0.01, 0.5};
+  std::optional<std::string> refusal;
+
+  PlantModelFitFn fn() {
+    return [this](const PlantMeasurement& m, double f0,
+                  double f1) -> std::expected<PlantModelFit, std::string> {
+      measurement = m;
+      startHz = f0;
+      endHz = f1;
+      if (refusal) {
+        return std::unexpected(*refusal);
+      }
+      return PlantModelFit{.numerator = {1.0},
+                           .denominator = denominator,
+                           .bode = nlohmann::json{{"Frequency_Hz", {1.0, 2.0}}}};
+    };
+  }
+};
+
+PlantIdentificationRequest plantRequest() {
+  auto request = parsePlantIdentificationRequest(validChirp());
+  EXPECT_TRUE(request.has_value()) << request.error();
+  return *request;
+}
+
+TEST(PlantIdentificationSteps, DeclaresTheRestoreBeforeTheFit) {
+  // The drive is put back before the program computes, so the step order says so.
+  auto steps = plantIdentificationSteps();
+  ASSERT_EQ(steps.size(), 7u);
+  EXPECT_EQ(steps[0].id, "prepare");
+  EXPECT_EQ(steps[1].id, "release-brake");
+  EXPECT_EQ(steps[2].id, "chirp");
+  EXPECT_EQ(steps[3].id, "record");
+  EXPECT_EQ(steps[4].id, "restore");
+  EXPECT_EQ(steps[5].id, "fit");
+  EXPECT_EQ(steps[6].id, "store");
+}
+
+TEST(ParsePlantIdentificationRequest, ArmsTheChirpAfterTheRecordingStartsAndPadsTheDuration) {
+  auto request = parsePlantIdentificationRequest(validChirp());
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->chirp.start, somanet::SystemIdentificationStart::kAfterHrdStreamStart);
+  EXPECT_EQ(request->chirp.transitionTimeMs, 5000u);
+  EXPECT_EQ(request->streamDuration, std::chrono::milliseconds(5200));
+}
+
+TEST(ParsePlantIdentificationRequest, RefusesAChirpThatDoesNotFitTheRecording) {
+  // 5900 ms is a legal chirp for the firmware and does not fit in the 6000 ms the drive records
+  // once the padding is added. Refused here, before anything moves.
+  auto body = validChirp();
+  body["transitionTimeMs"] = 5900;
+  auto request = parsePlantIdentificationRequest(body);
+  ASSERT_FALSE(request.has_value());
+  EXPECT_NE(request.error().find("5800"), std::string::npos) << request.error();
+}
+
+TEST(ParsePlantIdentificationRequest, IgnoresAStartField) {
+  // The run arms the chirp itself. A client that copied a system identification body must not be
+  // able to leave the chirp unarmed, or to start it immediately.
+  auto body = validChirp();
+  body["start"] = "none";
+  auto request = parsePlantIdentificationRequest(body);
+  ASSERT_TRUE(request.has_value()) << request.error();
+  EXPECT_EQ(request->chirp.start, somanet::SystemIdentificationStart::kAfterHrdStreamStart);
+}
+
+TEST(PlantIdentificationParameters, AreTheChirpsWithoutAStartAndWithALowerTimeCeiling) {
+  const auto parameters = plantIdentificationParameters();
+  std::vector<std::string> names;
+  for (const auto& parameter : parameters) {
+    names.push_back(parameter.name);
+    EXPECT_NE(parameter.name, "start");
+    if (parameter.name == "transitionTimeMs") {
+      EXPECT_EQ(parameter.maxValue, 5800);
+    }
+  }
+  EXPECT_EQ(names,
+            (std::vector<std::string>{"startFrequencyMilliHz", "targetFrequencyMilliHz",
+                                      "targetAmplitudePermil", "transitionTimeMs", "signalType"}));
+}
+
+TEST(RunPlantIdentificationProcedure, ExcitesRecordsFitsStoresAndRestores) {
+  OsCommandFakeDriver driver;
+  programPlant(driver);
+  Device device = makeDevice(driver);
+  recordPlant(driver, 100, 60.0, 500);
+  RecordingFit fit;
+  ProgressReporter reporter(plantIdentificationSteps());
+
+  auto result = runPlantIdentificationProcedure(device, reporter, std::stop_token{}, plantRequest(),
+                                                fit.fn());
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  const auto steps = reporter.steps();
+  for (auto id : {"prepare", "release-brake", "chirp", "record", "restore", "fit", "store"}) {
+    const auto step = stepById(steps, id);
+    ASSERT_TRUE(step.has_value()) << id;
+    EXPECT_EQ(step->status, ProgressStatus::kSucceeded) << id;
+  }
+
+  // The fit got the recording in its units: 500 per mille of 2 Nm is 1 Nm, 60 rpm is 2π rad/s,
+  // and the sweep in Hz.
+  ASSERT_TRUE(fit.measurement.has_value());
+  ASSERT_EQ(fit.measurement->torquesNm.size(), 100u);
+  EXPECT_DOUBLE_EQ(fit.measurement->torquesNm[0], 1.0);
+  EXPECT_DOUBLE_EQ(fit.measurement->torquesNm[1], -1.0);
+  EXPECT_NEAR(fit.measurement->velocitiesRadPerSecond[0], 6.2832, 1e-3);
+  EXPECT_DOUBLE_EQ(fit.startHz, 1.0);
+  EXPECT_DOUBLE_EQ(fit.endHz, 100.0);
+
+  // The model, its derived values, the chirp and the Bode data are the fit step's value.
+  const auto fitted = stepById(steps, "fit");
+  EXPECT_EQ(fitted->value.at("denominator"), (std::vector<double>{0.01, 0.5}));
+  EXPECT_DOUBLE_EQ(fitted->value.at("inertia").get<double>(), 0.01);
+  EXPECT_DOUBLE_EQ(fitted->value.at("friction").get<double>(), 0.5);
+  EXPECT_EQ(fitted->value.at("chirp").at("durationMs"), 5000);
+  EXPECT_EQ(fitted->value.at("bode").at("Frequency_Hz"), (std::vector<double>{1.0, 2.0}));
+  EXPECT_TRUE(fitted->value.at("warning").is_null());
+
+  // The file on the drive: numerator, denominator, chirp with the duration in seconds.
+  ASSERT_EQ(driver.fileWrites.size(), 1u);
+  EXPECT_EQ(driver.fileWrites[0].first, "plant_model.csv");
+  const std::string csv(driver.fileWrites[0].second.begin(), driver.fileWrites[0].second.end());
+  EXPECT_EQ(csv, "1\n0.01,0.5\n1,100,50,5,0\n");
+  EXPECT_EQ(stepById(steps, "store")->value.at("content"), csv);
+
+  // CST and a zero target torque before the enable.
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kTargetTorque, 0)),
+            (std::vector<uint8_t>{0, 0}));
+  EXPECT_TRUE(driver.wroteBefore(Object::kModeOfOperation, 0, Object::kControlword, 0));
+  EXPECT_TRUE(driver.wroteBefore(Object::kTargetTorque, 0, Object::kControlword, 0));
+
+  // Restored: the mode it found, the drive in Switched On, and the chirp disarmed last of all the
+  // OS commands. The brake was the drive's to release, so it was never written.
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+            std::vector<uint8_t>{8});
+  EXPECT_EQ(driver.statusword, 0x0023);
+  ASSERT_FALSE(driver.commands.empty());
+  EXPECT_EQ(driver.commands.back()[0], 15);
+  EXPECT_EQ(driver.commands.back()[1], 5);
+  EXPECT_EQ(driver.commands.back()[5], 0);
+  EXPECT_EQ(brakeWrites(driver), 0);
+  EXPECT_EQ(stepById(steps, "release-brake")->value.at("brake"), "released by the drive");
+}
+
+TEST(RunPlantIdentificationProcedure, ReleasesAManualBrakeAfterTheEnableAndEngagesItFirst) {
+  OsCommandFakeDriver driver;
+  programPlant(driver);
+  Device device = makeDevice(driver);
+  recordPlant(driver, 100, 60.0, 500);
+  driver.store[OsCommandFakeDriver::key(somanet::kBrakeOptions, somanet::kBrakeReleaseStrategy)] = {
+      static_cast<uint8_t>(somanet::BrakeReleaseStrategy::kManualOutputVoltage)};
+  RecordingFit fit;
+  ProgressReporter reporter(plantIdentificationSteps());
+
+  auto result = runPlantIdentificationProcedure(device, reporter, std::stop_token{}, plantRequest(),
+                                                fit.fn());
+  ASSERT_TRUE(result.has_value()) << result.error();
+
+  // Released once the drive was enabled, and engaged again before the drive left Operation
+  // Enabled: the last brake write precedes the last controlword write.
+  EXPECT_EQ(driver.brakeStatusWrites,
+            (std::vector<uint8_t>{static_cast<uint8_t>(somanet::BrakeStatus::kDisengaged),
+                                  static_cast<uint8_t>(somanet::BrakeStatus::kEngaged)}));
+  EXPECT_TRUE(
+      driver.wroteBefore(Object::kControlword, 0, somanet::kBrakeOptions, somanet::kBrakeStatus));
+  EXPECT_LT(driver.lastWriteIndex(somanet::kBrakeOptions, somanet::kBrakeStatus),
+            driver.lastWriteIndex(Object::kControlword, 0));
+  EXPECT_EQ(stepById(reporter.steps(), "release-brake")->value.at("brake"), "released manually");
+}
+
+TEST(RunPlantIdentificationProcedure, RestoresTheDriveBeforeAFitThatFails) {
+  OsCommandFakeDriver driver;
+  programPlant(driver);
+  Device device = makeDevice(driver);
+  recordPlant(driver, 100, 60.0, 500);
+  RecordingFit fit;
+  fit.refusal = "the auto-tuning program is not running";
+  ProgressReporter reporter(plantIdentificationSteps());
+
+  auto result = runPlantIdentificationProcedure(device, reporter, std::stop_token{}, plantRequest(),
+                                                fit.fn());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("not running"), std::string::npos) << result.error();
+
+  const auto steps = reporter.steps();
+  EXPECT_EQ(stepById(steps, "restore")->status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(stepById(steps, "fit")->status, ProgressStatus::kFailed);
+  EXPECT_EQ(stepById(steps, "store")->status, ProgressStatus::kIdle);
+  EXPECT_EQ(driver.statusword, 0x0023);
+  EXPECT_TRUE(driver.fileWrites.empty());
+}
+
+TEST(RunPlantIdentificationProcedure, RefusesAnUnstableModelAndWritesNothing) {
+  OsCommandFakeDriver driver;
+  programPlant(driver);
+  Device device = makeDevice(driver);
+  recordPlant(driver, 100, 60.0, 500);
+  RecordingFit fit;
+  fit.denominator = {0.01, -0.5};
+  ProgressReporter reporter(plantIdentificationSteps());
+
+  auto result = runPlantIdentificationProcedure(device, reporter, std::stop_token{}, plantRequest(),
+                                                fit.fn());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("unstable"), std::string::npos) << result.error();
+  EXPECT_EQ(stepById(reporter.steps(), "fit")->status, ProgressStatus::kFailed);
+  EXPECT_TRUE(driver.fileWrites.empty());
+}
+
+TEST(RunPlantIdentificationProcedure, WarnsWhenTheMotionWasSmall) {
+  OsCommandFakeDriver driver;
+  programPlant(driver);
+  Device device = makeDevice(driver);
+  recordPlant(driver, 100, 30.0, 500);  // 30 rpm is 3.1 rad/s: enough to fit, less than ideal
+  RecordingFit fit;
+  ProgressReporter reporter(plantIdentificationSteps());
+
+  auto result = runPlantIdentificationProcedure(device, reporter, std::stop_token{}, plantRequest(),
+                                                fit.fn());
+  ASSERT_TRUE(result.has_value()) << result.error();
+  const auto steps = reporter.steps();
+  EXPECT_FALSE(stepById(steps, "record")->value.at("warning").is_null());
+  EXPECT_FALSE(stepById(steps, "fit")->value.at("warning").is_null());
+}
+
+TEST(RunPlantIdentificationProcedure, RefusesARecordingTheChirpDidNotExcite) {
+  OsCommandFakeDriver driver;
+  programPlant(driver);
+  Device device = makeDevice(driver);
+  recordPlant(driver, 100, 60.0, 0);  // the motor moved, the torque says the chirp never ran
+  RecordingFit fit;
+  ProgressReporter reporter(plantIdentificationSteps());
+
+  auto result = runPlantIdentificationProcedure(device, reporter, std::stop_token{}, plantRequest(),
+                                                fit.fn());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("torque"), std::string::npos) << result.error();
+
+  const auto steps = reporter.steps();
+  EXPECT_EQ(stepById(steps, "record")->status, ProgressStatus::kFailed);
+  EXPECT_EQ(stepById(steps, "restore")->status, ProgressStatus::kSucceeded);
+  EXPECT_EQ(stepById(steps, "fit")->status, ProgressStatus::kIdle);
+  EXPECT_FALSE(fit.measurement.has_value());
+  EXPECT_EQ(driver.statusword, 0x0023);
+}
+
+TEST(RunPlantIdentificationProcedure, AFaultDuringTheChirpFailsTheRecordingAndRestores) {
+  OsCommandFakeDriver driver;
+  programPlant(driver);
+  Device device = makeDevice(driver);
+  recordPlant(driver, 100, 60.0, 500);
+  // The recording's start is the ninth OS command: the HRD configure, the six chirp writes, the
+  // arm, then the start. A fault on it is a fault while the chirp runs.
+  driver.faultAfterCommands = 9;
+  RecordingFit fit;
+  ProgressReporter reporter(plantIdentificationSteps());
+
+  auto result = runPlantIdentificationProcedure(device, reporter, std::stop_token{}, plantRequest(),
+                                                fit.fn());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("left Operation Enabled"), std::string::npos) << result.error();
+  EXPECT_NE(result.error().find("OVERCURR"), std::string::npos) << result.error();
+  EXPECT_EQ(stepById(reporter.steps(), "record")->status, ProgressStatus::kFailed);
+  EXPECT_EQ(stepById(reporter.steps(), "restore")->status, ProgressStatus::kSucceeded);
+}
+
+TEST(RunPlantIdentificationProcedure, RefusesADriveWithNoRatedTorqueBeforeAnythingMoves) {
+  OsCommandFakeDriver driver;
+  driver.programObject(Object::kMotorRatedTorque, 0, ObjectDataType::UNSIGNED32, {0, 0, 0, 0});
+  driver.programObject(Object::kTargetTorque, 0, ObjectDataType::INTEGER16, {0, 0});
+  Device device = makeDevice(driver);
+  RecordingFit fit;
+  ProgressReporter reporter(plantIdentificationSteps());
+
+  auto result = runPlantIdentificationProcedure(device, reporter, std::stop_token{}, plantRequest(),
+                                                fit.fn());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("0x6076"), std::string::npos) << result.error();
+  EXPECT_EQ(stepById(reporter.steps(), "prepare")->status, ProgressStatus::kFailed);
+  EXPECT_EQ(driver.commandWrites, 0);
+  EXPECT_EQ(driver.statusword, 0x0040);
+}
+
+TEST(RunPlantIdentificationProcedure, FailsTheFitWhenNoFitIsConfigured) {
+  OsCommandFakeDriver driver;
+  programPlant(driver);
+  Device device = makeDevice(driver);
+  recordPlant(driver, 100, 60.0, 500);
+  ProgressReporter reporter(plantIdentificationSteps());
+
+  auto result = runPlantIdentificationProcedure(device, reporter, std::stop_token{}, plantRequest(),
+                                                PlantModelFitFn{});
+  ASSERT_FALSE(result.has_value());
+  EXPECT_NE(result.error().find("not configured"), std::string::npos) << result.error();
+  EXPECT_EQ(stepById(reporter.steps(), "restore")->status, ProgressStatus::kSucceeded);
+}
+
+TEST(RunPlantIdentificationProcedure, RestoresAfterCancellation) {
+  OsCommandFakeDriver driver;
+  programPlant(driver);
+  Device device = makeDevice(driver);
+  recordPlant(driver, 100, 60.0, 500);
+  RecordingFit fit;
+  ProgressReporter reporter(plantIdentificationSteps());
+
+  std::stop_source source;
+  source.request_stop();
+  auto result = runPlantIdentificationProcedure(device, reporter, source.get_token(),
+                                                plantRequest(), fit.fn());
+  ASSERT_FALSE(result.has_value());
+  EXPECT_FALSE(fit.measurement.has_value());
+  EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kModeOfOperation, 0)),
+            std::vector<uint8_t>{8});
+}
+
 }  // namespace

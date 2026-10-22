@@ -38,8 +38,10 @@
 #include "node/monitoring_manager.h"
 #include "node/notification_bus.h"
 #include "node/procedure_manager.h"
+#include "node/procedure_registry.h"
 #include "node/process_data_cyclic_task.h"
 #include "options.h"
+#include "plant_model_fit.h"
 #include "ws_server.h"
 
 /// @brief Signal-handler target for SIGINT/SIGTERM; set before run(), cleared after.
@@ -273,6 +275,13 @@ int main(int argc, char** argv) {
   // Runs off-RT procedures and retains their results for polling.
   mm::node::ProcedureManager procedureManager{deviceManager};
 
+  // Every procedure a client can start, and what a body needs from outside the node library. The
+  // plant model fit is the auto-tuning program, reached through the client started above, or a
+  // refusal that names the missing program when none runs.
+  mm::node::ProcedureRegistry procedureRegistry{
+      deviceManager, procedureManager,
+      mm::node::ProcedureRegistryConfig{.fitPlantModel = mm::makePlantModelFit(autoTuningClient)}};
+
   // The user-writable file store behind /api/user-cache, rooted at the shared cache directory
   // resolved above. Like the parameter cache, its location is a process-level setting fixed at
   // startup, not something init() can change. Everything Motion Master writes lands under this
@@ -389,7 +398,7 @@ int main(int argc, char** argv) {
           },
           .corsOrigin = opts.config.server.corsOrigin,
       },
-      deviceManager, monitoringManager, procedureManager, userCache};
+      deviceManager, monitoringManager, procedureRegistry, userCache};
   // Wire the example C++ route plug-in (/api/example/...) before start(): the composition root is
   // the only place that knows the concrete plug-in. Copy libs/example to add your own.
   httpServer.addRoutes(mm::example::registerRoutes);

@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import type { DeviceDiagnostics, PortDiagnostics } from '@synapticon/motion-master-client'
+import type { CaptureSummary, DeviceDiagnostics, PortDiagnostics } from '@synapticon/motion-master-client'
+import FilePickerButton from '../components/FilePickerButton'
+import { encodeUserCachePath, userCacheUrl } from '../utils/userCache'
 import PageHeader from '../components/PageHeader'
 import DiagnosticsExplainer from '../components/DiagnosticsExplainer'
 import SlavePositionBadge from '../components/SlavePositionBadge'
@@ -316,6 +318,180 @@ function DeviceCard({ device }: { device: DeviceDiagnostics }) {
   )
 }
 
+// A capture is about the PC, not about a device: it records every EtherCAT frame on the bus
+// adapter with the kernel's timestamp and says how late each one came back. It tells a slow PC
+// from a bad cable, which the per-device counters below cannot. The server runs the capture
+// program once, on request, and the file lands in the user cache under captures/, where the
+// Storage page lists it and this card links it. A pcap from tcpdump on another PC gets the same
+// summary once it is uploaded there.
+const CAPTURES_FOLDER = 'captures'
+
+function KindRow({ label, k }: { label: string; k: CaptureSummary['control'] }) {
+  const band = (n: number) => (n > 0 ? 'text-status-bad font-bold' : 'text-grey-400')
+  return (
+    <tr className="border-t border-grey-100">
+      <td className="px-3 py-1 text-grey-700">{label}</td>
+      <td className="px-3 py-1 font-mono">{k.sent}</td>
+      <td className="px-3 py-1 font-mono">{k.resent}</td>
+      <td className={`px-3 py-1 font-mono ${band(k.lost)}`}>{k.lost}</td>
+      <td className={`px-3 py-1 font-mono ${band(k.over2Ms)}`}>{k.over2Ms}</td>
+      <td className={`px-3 py-1 font-mono ${band(k.over20Ms)}`}>{k.over20Ms}</td>
+      <td className={`px-3 py-1 font-mono ${band(k.over100Ms)}`}>{k.over100Ms}</td>
+      <td className={`px-3 py-1 font-mono ${k.latestUs > 100000 ? 'text-status-bad font-bold' : k.latestUs > 20000 ? 'text-status-warn' : ''}`}>
+        {(k.latestUs / 1000).toFixed(1)} ms
+      </td>
+    </tr>
+  )
+}
+
+function SummaryTable({ summary }: { summary: CaptureSummary }) {
+  const seconds = ((summary.lastUs - summary.firstUs) / 1e6).toFixed(1)
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-grey-600">
+        {summary.frames} frames over {seconds} s
+        {summary.notEtherCat > 0 && <>, {summary.notEtherCat} not EtherCAT</>}
+        {summary.unmatchedReturns > 0 && <>, {summary.unmatchedReturns} returns with no send to match</>}.
+      </p>
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-left text-grey-500">
+            <th className="px-3 py-1 font-normal">Kind</th>
+            <th className="px-3 py-1 font-normal">Sent</th>
+            <th className="px-3 py-1 font-normal">Resent</th>
+            <th className="px-3 py-1 font-normal">Never came back</th>
+            <th className="px-3 py-1 font-normal">&gt; 2 ms</th>
+            <th className="px-3 py-1 font-normal">&gt; 20 ms</th>
+            <th className="px-3 py-1 font-normal">&gt; 100 ms</th>
+            <th className="px-3 py-1 font-normal">Latest</th>
+          </tr>
+        </thead>
+        <tbody>
+          <KindRow label="Control plane (mailbox and registers)" k={summary.control} />
+          <KindRow label="Cyclic (process data)" k={summary.cyclic} />
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function CaptureSection() {
+  const { api } = useConnection()
+  const [seconds, setSeconds] = useState('30')
+  const [result, setResult] = useState<{ path: string; summary: CaptureSummary } | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  const run = useMutation({
+    mutationFn: (n: number) => api.runCapture({ seconds: n }).then(r => r.data),
+    onMutate: () => {
+      setError(null)
+    },
+    onSuccess: data => setResult({ path: data.path, summary: data.summary }),
+    onError: err => setError(apiError(err)),
+  })
+
+  // A pcap from another PC: into captures/ through the user cache, then the same summary.
+  const upload = useMutation({
+    mutationFn: async (file: File) => {
+      const path = `${CAPTURES_FOLDER}/${file.name}`
+      const res = await fetch(userCacheUrl(api.baseUrl, path), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/octet-stream' },
+        body: file,
+      })
+      if (!res.ok) {
+        const body = await res.json().catch(() => null)
+        throw new Error(body?.error ?? `HTTP ${res.status}`)
+      }
+      const summary = await api.getCaptureSummary(file.name).then(r => r.data)
+      return { path: summary.path, summary: summary.summary }
+    },
+    onMutate: () => {
+      setError(null)
+    },
+    onSuccess: data => setResult(data),
+    onError: err => setError(err instanceof Error ? err.message : apiError(err)),
+  })
+
+  const n = Number(seconds)
+  const canRun = Number.isFinite(n) && n >= 1 && n <= 120 && !run.isPending && !upload.isPending
+  const busy = run.isPending || upload.isPending
+
+  return (
+    <section className="border border-grey-200 bg-white">
+      <div className="px-4 py-3 border-b border-grey-200">
+        <h3 className="font-display uppercase text-sm">Capture</h3>
+        <p className="text-xs text-grey-600 mt-0.5">
+          Record every EtherCAT frame on the bus adapter and see how late each one came back. This
+          is about the PC, not about a device.
+        </p>
+      </div>
+      <div className="p-4 space-y-4">
+        <p className="text-xs text-grey-600 leading-relaxed">
+          Motion Master runs the capture program once, for the seconds you choose, on the adapter
+          the bus is on. The program records with the kernel&apos;s timestamps, adds no frame to
+          the bus, and writes a pcap file under <span className="font-mono">captures/</span> in
+          the user cache, so the Storage page lists it and Wireshark opens it. The summary matches
+          each frame the master sent to the one that came back, per kind: the cyclic process-data
+          frame, and the control plane, which is every mailbox and register request. The bands are
+          the three waits the driver uses, and they are cumulative. The time is taken at the
+          boundary to the NIC driver, so it covers the NIC, the wire and the device, and not the
+          PC&apos;s own queues between that boundary and Motion Master. Late frames here put the
+          delay on the wire or in the device. A clean capture beside &ldquo;got no frame
+          back&rdquo; warnings in the server log puts it inside the PC. A pcap from tcpdump on
+          another PC gets the same summary: pick the file.
+        </p>
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-xs text-grey-600">
+            Seconds
+            <input
+              type="number"
+              min={1}
+              max={120}
+              value={seconds}
+              onChange={e => setSeconds(e.target.value)}
+              className="ml-2 w-20 h-[38px] border border-grey-300 px-2 font-mono text-sm"
+            />
+          </label>
+          <button onClick={() => run.mutate(n)} disabled={!canRun} className={btnOutline}>
+            {run.isPending ? `Recording ${n} s…` : 'Start'}
+          </button>
+          <FilePickerButton
+            onFile={file => upload.mutate(file)}
+            accept=".pcap,application/vnd.tcpdump.pcap,application/octet-stream"
+            disabled={busy}
+            className="h-[38px]"
+            title="Upload a pcap into captures/ in the user cache and summarise it"
+          >
+            {upload.isPending ? 'Summarising…' : 'Summarise a pcap'}
+          </FilePickerButton>
+        </div>
+        {error && <p className="text-xs text-status-bad font-mono">{error}</p>}
+        {busy && !error && (
+          <p className="text-xs text-grey-600">
+            {run.isPending ? 'Recording. The summary appears when the time is up.' : 'Reading the file…'}
+          </p>
+        )}
+        {result && (
+          <div className="space-y-2">
+            <SummaryTable summary={result.summary} />
+            <p className="text-xs text-grey-600">
+              File: <span className="font-mono">{result.path}</span>{' '}
+              <a
+                className="underline"
+                href={userCacheUrl(api.baseUrl, encodeUserCachePath(result.path))}
+                download
+              >
+                Download
+              </a>
+            </p>
+          </div>
+        )}
+      </div>
+    </section>
+  )
+}
+
 export default function FieldbusDiagnosticsPage() {
   const { api } = useConnection()
   const { timing, measure } = useWireTiming()
@@ -375,6 +551,8 @@ export default function FieldbusDiagnosticsPage() {
             {query.isFetching ? 'Loading…' : 'Refresh'}
           </button>
         </div>
+
+        <CaptureSection />
 
         {query.isError && (
           <p className="text-xs text-status-bad font-mono">

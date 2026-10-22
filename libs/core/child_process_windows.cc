@@ -3,12 +3,13 @@
 // clang-format on
 
 #include <chrono>
+#include <optional>
 #include <string>
 #include <vector>
 
-#include "auto_tuning/process_platform.h"
+#include "core/child_process.h"
 
-namespace mm::auto_tuning::detail {
+namespace mm::core {
 
 namespace {
 
@@ -160,6 +161,24 @@ bool childAlive(const Child& child) {
   return WaitForSingleObject(handle, 0) == WAIT_TIMEOUT;
 }
 
+std::optional<int> waitChild(const Child& child, std::chrono::milliseconds timeout) {
+  if (child.handle == 0) {
+    return std::nullopt;
+  }
+  auto handle = reinterpret_cast<HANDLE>(child.handle);
+  auto job = reinterpret_cast<HANDLE>(child.group);
+  if (WaitForSingleObject(handle, static_cast<DWORD>(timeout.count())) != WAIT_OBJECT_0) {
+    return std::nullopt;
+  }
+  DWORD code = 0;
+  const bool haveCode = GetExitCodeProcess(handle, &code) != 0;
+  CloseHandle(handle);
+  if (job != nullptr) {
+    CloseHandle(job);
+  }
+  return haveCode ? std::optional<int>(static_cast<int>(code)) : std::optional<int>(-1);
+}
+
 bool terminateChild(const Child& child, std::chrono::milliseconds grace) {
   if (child.handle == 0) {
     return false;
@@ -187,4 +206,4 @@ bool terminateChild(const Child& child, std::chrono::milliseconds grace) {
   return true;
 }
 
-}  // namespace mm::auto_tuning::detail
+}  // namespace mm::core

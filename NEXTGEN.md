@@ -4440,3 +4440,71 @@ master.
 Without the rule, 3 rounds: no attempt tried again, 1.1 s per round. `ctest` passes. Not tested: a
 Circulo, two drives, the Complete Access readers, the Windows and macOS builds. SPoE has no SOEM
 and is not touched.
+
+## Session 2026-10-22 — A capture says how late the frames of a host come back (as-built)
+
+Issue #123, second take. The first take (PR #125, closed unmerged) measured inside the SOEM port:
+a stamp per datagram, bands per frame, a 500 ms grace on the frame index, a route and a Console
+card. It was closed for three reasons. The port should carry behaviour patches only, so that the
+measurement cannot perturb what it measures. Its time was taken when SOEM's receive call found the
+frame, so a frame nobody waited for carried an upper bound. And support needs a file the customer
+can send. The branch stays as the reference for the matching of a frame to its datagram.
+
+**What is built.** `motion-master-capture` (`apps/capture/`), a one-shot program beside the server
+binary in every package. It records every EtherCAT frame on an adapter for a chosen number of
+seconds, with the kernel's timestamp, writes a pcap, prints a summary, and exits. `libs/capture`
+holds the parts as pure functions: the frame parser, the pcap reader and writer, written by hand
+so the Linux build needs no library, and the summary. The summary matches each frame the master
+sent to the frame that came back for it by the port's rule, the index and the header of the first
+datagram, with the position left out for the commands the slaves count up. The kind is the first
+datagram's command: logical is the cyclic frame, everything else the control plane. Per kind: sent,
+resent, returned, lost, later than 2 ms, 20 ms and 100 ms, cumulative, and the latest. A frame
+sent again with the same key within 500 ms of an unanswered one is a resend and keeps the first
+stamp, which is what the port does. The direction of a frame is the locally administered bit of
+the first source-MAC byte, which every ESC sets on a frame it processed (ESC datasheet, Section I,
+3), so a `tcpdump` file from a customer PC reads the same way.
+
+`POST /api/captures` runs the program through `mm::core::spawnChild` and `waitChild`, which moved
+from `mm::auto_tuning` into core with a wait-for-exit beside them, on the adapter the bus is on,
+one capture at a time, and answers the summary. The file lands in `captures/` of the user cache,
+so the user-cache routes list, download and delete it, and `GET /api/captures/{name}` summarises
+any Ethernet pcap there, which is how a file from another PC gets its summary once it is uploaded.
+The Console has a Capture card on Fieldbus Diagnostics with Start, the summary, Download, and a
+file picker. The three loops in `tools/` take `CAPTURE=<seconds>`.
+
+**The socket that sees both directions.** The first run captured 8671 returns and no sends: a
+packet socket opened for one Ethernet type gets incoming frames alone, the way SOEM opens its own.
+Linux hands a frame this host sends only to a socket opened for every type. So the program opens
+`ETH_P_ALL`, binds it to the adapter, and keeps the EtherCAT frames in user space.
+
+**Where a tap sits, and what that means.** The loop ran with `netem delay 150ms reorder 98% 0%` and
+a 35 s capture beside it. The server logged 20 writes with no frame back and 5 map attempts tried
+again. The capture read 29212 control-plane frames sent and returned, 4 resent, latest 0.63 ms,
+and 2731 cyclic frames, latest 0.50 ms. Nothing late. A packet tap stamps a frame at the boundary
+to the NIC driver on both sides, and `netem` is a queue between that boundary and SOEM. So a
+capture covers the NIC, the wire and the device, and not the host's own queues and scheduling. A
+receive softirq that runs late stamps late, so that part of a slow host is in it; a frame that
+waits in a queue before the driver is not. **The capture and the server's warnings are read
+together**: late frames in the capture put the delay on the wire or in the device, a clean capture
+beside the warnings puts it inside the host. For the reporter's PC that is the question to answer,
+and the pair answers it where either alone would not. It also means `netem` cannot test the
+capture's bands; the unit tests do that on synthetic frames, and the bench file pins the parser and
+the matcher against real ones.
+
+**Numbers.** Route, 3 s, a parameter read running, no rule: 8615 control-plane frames sent, 8614
+returned, 1 in flight at the end, latest 0.56 ms. The fixture `integro-bench.pcap`, two seconds
+around the first cyclic frame of the loop: 2097 control-plane and 218 cyclic frames, every one
+returned, latest 0.46 ms and 0.17 ms, 375 kB. `ctest` passes, 1257 tests. The capture program
+costs the bus nothing: it sends no frame and runs in its own process. Not tested: the Windows and
+macOS back ends through pcap, a Circulo, two drives.
+
+**Rejected.**
+
+- **Measuring inside the port**, the first take. See above.
+- **A capture that runs on its own, or longer than two minutes.** It is a measurement a person
+  starts. `seconds` is bounded at 120 on the route; the program takes up to an hour by hand.
+- **A browser-side parser.** The `.mmpd` parser lives in the client library, and a pcap parser
+  could too, but then two matchers must agree. The server summarises an uploaded file instead.
+- **Kernel receive timestamps from the NIC** (`SO_TIMESTAMPING`). They would move the stamp from
+  the softirq to the NIC on hardware that has it, and tell a late receive from a late softirq.
+  Not now; the pcap and the summary do not change when it comes.

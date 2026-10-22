@@ -944,6 +944,13 @@ class FieldbusDriver {
   /// them, or say why they are missing, without asking first.
   virtual bool supportsEsc() const { return true; }
 
+  /// @brief The network adapter the bus is on, as the OS names it, or empty for a transport that
+  ///        sends no EtherCAT frames (SPoE). No bus I/O.
+  ///
+  /// The capture program records the frames of this adapter, so this is how a capture started
+  /// through the API finds the bus.
+  virtual std::string adapter() const { return {}; }
+
   /// @brief Input frames dropped since the process data was configured, summed over all devices.
   ///
   /// A transport that buffers input frames, as SPoE does, drops the oldest when the RT loop falls

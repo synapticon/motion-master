@@ -78,6 +78,16 @@ echo "round,package,status,seconds,fw_before,fw_after,state_after,error" > "$out
 log "== $label: $rounds rounds on device $position, packages $pkg_a / $pkg_b${netem:+, netem: $netem}"
 log "device before: fw=$(fw) state=$(state)"
 
+
+# CAPTURE=<seconds> records the bus adapter with motion-master-capture while the rounds run, into
+# $out/capture.pcap, and prints its summary at the end. The program needs CAP_NET_RAW.
+capture_bin="${MM_CAPTURE_BIN:-$repo/build/x64-linux-debug/apps/motion_master/motion-master-capture}"
+capture_pid=""
+if [[ -n "${CAPTURE:-}" ]]; then
+  "$capture_bin" --ifname "$adapter" --seconds "$CAPTURE" --out "$out/capture.pcap" \
+    > "$out/capture-summary.json" 2> "$out/capture.log" &
+  capture_pid=$!
+fi
 for ((i = 1; i <= rounds; i++)); do
   pkg=$pkg_a
   if ((i % 2 == 0)); then pkg=$pkg_b; fi
@@ -121,3 +131,10 @@ for ((i = 1; i <= rounds; i++)); do
   fi
 done
 log "== $label: $(grep -c ',succeeded,' "$out/results.csv") succeeded of $(($(wc -l < "$out/results.csv") - 1)) runs"
+
+if [[ -n "$capture_pid" ]]; then
+  echo "== $label: waiting for the capture to finish"
+  wait "$capture_pid" || echo "capture failed: $(tail -1 "$out/capture.log")"
+  echo "== $label: capture summary ($out/capture.pcap)"
+  cat "$out/capture-summary.json"
+fi

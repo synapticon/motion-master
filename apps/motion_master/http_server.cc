@@ -19,6 +19,8 @@
 #include <utility>
 #include <vector>
 
+#include "capture/pcap.h"
+#include "capture/summary.h"
 #include "cert_info.h"
 #include "comm/al_status_codes.h"
 #include "comm/base.h"
@@ -704,6 +706,79 @@ void HttpServer::run() {
       return mm::api::badRequest(positions.error());
     }
     return mm::api::timed([this, &positions] { return deviceManager_.dcSync(*positions); });
+  });
+
+  // ── Captures ─────────────────────────────────────────────────────────────────────────────────
+  // A capture is the capture program run once, by the server, on the adapter the bus is on. The
+  // file lands in the user cache under captures/, so the user-cache routes list, download and
+  // delete it, and the summary is computed here from the file, which is also how a pcap that a
+  // user put into captures/ by hand gets its summary.
+  router.post("/api/captures", [this](const mm::api::Request& req) -> mm::api::Response {
+    if (!config_.runCapture) {
+      return mm::api::statusOnly("501 Not Implemented");
+    }
+    nlohmann::json body = nlohmann::json::object();
+    if (!req.body().empty()) {
+      body = nlohmann::json::parse(req.body(), nullptr, false);
+      if (body.is_discarded() || !body.is_object()) {
+        return mm::api::badRequest("body must be a JSON object");
+      }
+    }
+    constexpr int kMaxSeconds = 120;
+    const int seconds = body.value("seconds", 30);
+    if (seconds < 1 || seconds > kMaxSeconds) {
+      return mm::api::badRequest(
+          std::format("seconds must be between 1 and {}; a capture is a measurement a person "
+                      "starts, not a recorder",
+                      kMaxSeconds));
+    }
+    std::string adapter = body.value("adapter", std::string{});
+    if (adapter.empty()) {
+      adapter = deviceManager_.adapter();
+    }
+    if (adapter.empty()) {
+      return mm::api::error("409 Conflict",
+                            "no adapter to capture on: bring a bus up with POST /api/init, or "
+                            "name one in the body as `adapter`. SPoE sends no EtherCAT frames, "
+                            "so there is nothing to capture over it");
+    }
+    if (captureRunning_.exchange(true)) {
+      return mm::api::error("409 Conflict", "a capture is running; wait for it to finish");
+    }
+    auto file = config_.runCapture(adapter, seconds);
+    captureRunning_.store(false);
+    if (!file) {
+      return mm::api::error("500 Internal Server Error", file.error());
+    }
+    auto records = mm::capture::readPcap(*file);
+    if (!records) {
+      return mm::api::error("500 Internal Server Error", records.error());
+    }
+    std::error_code ec;
+    const auto rel = std::filesystem::relative(*file, userCache_.root(), ec);
+    return mm::api::json(
+        nlohmann::json{{"path", ec ? file->generic_string() : rel.generic_string()},
+                       {"adapter", adapter},
+                       {"seconds", seconds},
+                       {"summary", mm::capture::summarise(*records)}});
+  });
+
+  router.get("/api/captures/*", [this](const mm::api::Request& req) -> mm::api::Response {
+    constexpr std::string_view kPrefix = "/api/captures/";
+    const std::string_view url = req.url();
+    const std::string name =
+        mm::api::percentDecode(url.starts_with(kPrefix) ? url.substr(kPrefix.size()) : url);
+    const std::string relPath = "captures/" + name;
+    auto data = userCache_.read(relPath);
+    if (!data) {
+      return mm::api::error("404 Not Found", data.error());
+    }
+    auto records = mm::capture::parsePcap(*data);
+    if (!records) {
+      return mm::api::badRequest(relPath + " is " + records.error());
+    }
+    return mm::api::json(
+        nlohmann::json{{"path", relPath}, {"summary", mm::capture::summarise(*records)}});
   });
 
   router.get("/api/devices", [this](const mm::api::Request&) {

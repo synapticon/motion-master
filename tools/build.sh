@@ -44,7 +44,12 @@ fi
 "${nice_prefix[@]}" cmake --build --preset "$preset" "${parallel_args[@]}" "${args[@]:1}"
 
 binary="build/${preset}/apps/motion_master/motion-master"
+capture="build/${preset}/apps/motion_master/motion-master-capture"
 if [[ -x "$binary" && "$setcap" -eq 1 ]]; then
     echo "Setting capabilities on $binary (sudo required)..."
     sudo setcap cap_sys_nice,cap_net_admin,cap_net_raw,cap_ipc_lock=eip "$binary"
+    if [[ -x "$capture" ]]; then
+        echo "Setting capabilities on $capture..."
+        sudo setcap cap_net_raw=eip "$capture"
+    fi
 fi

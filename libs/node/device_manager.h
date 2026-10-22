@@ -714,6 +714,10 @@ class DeviceManager {
   std::expected<std::vector<DcSyncInfo>, std::string> dcSync(
       const std::vector<uint16_t>& positions);
 
+  /// @brief The network adapter the bus is on, or empty when no driver is held or the transport
+  ///        sends no EtherCAT frames. Forwards to @c FieldbusDriver::adapter. No bus I/O.
+  std::string adapter() const;
+
   /// @brief Reads the process-data (sync-manager) watchdog configuration of one device.
   ///
   /// Forwards to @c FieldbusDriver::processDataWatchdog after resolving the device. Returns the

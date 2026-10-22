@@ -105,6 +105,37 @@ export default function DiagnosticsExplainer() {
       </p>
 
       <p>
+        <strong>Capture</strong> is about the PC, not about a device. Every request Motion Master
+        sends to a device goes out as one EtherCAT frame and comes back as the same frame, in well
+        under a millisecond on a good host. The capture program records every frame on the bus
+        adapter for the seconds you choose, with the time the kernel gave it, and writes a pcap
+        file under <code>captures/</code> in the user cache. The summary matches each frame the
+        master sent to the one that came back, by the index and the header of its first datagram,
+        and tells a slow PC from a bad cable: a bad cable shows in the port counters above, a slow
+        PC shows here and nowhere else.
+      </p>
+      <ul className="list-disc pl-5 space-y-1">
+        <li><strong>Kind</strong> — the cyclic frame carries the process data once per cycle; the control plane is every mailbox and register request. The two are timed apart because a late cyclic frame shows as a short working counter, and a late control-plane frame runs the driver's recovery.</li>
+        <li><strong>Sent, Resent</strong> — frames the master sent, and frames sent again with the same index and header while the first copy had no answer. A register request goes out again after 2 ms, so a late one shows as a resend as well as in a band. The return is timed from the first copy.</li>
+        <li><strong>Never came back</strong> — sent frames with no return before the capture ended.</li>
+        <li><strong>&gt; 2 ms, &gt; 20 ms, &gt; 100 ms</strong> — returns later than each of the three waits the driver uses. The bands are cumulative: a frame later than 100 ms counts in all three. A register request waits 2 ms, then goes out again. A mailbox transfer as a whole waits 20 ms. A mailbox write or read waits 100 ms for its one frame; when the frame is later, the driver counts the write as one with no frame back and recovers it with mailbox counter 0.</li>
+        <li><strong>Latest</strong> — the latest return of the capture, after its first send.</li>
+      </ul>
+      <p>
+        The time is the kernel&apos;s, taken at the boundary to the NIC driver on both sides: when
+        the frame is handed to the driver, and when the driver hands its return back. So it covers
+        the NIC, the wire and the device, and not the PC&apos;s own queues and scheduling between
+        that boundary and Motion Master. That is what makes the capture and the server log a pair:
+        late frames in the capture put the delay on the wire or in the device, and a clean capture
+        beside &ldquo;mailbox write(s) got no frame back&rdquo; warnings puts it inside the PC. A
+        pcap from{' '}
+        <code>tcpdump</code> on another PC gets the same summary once it is in <code>captures/</code>:
+        pick the file with <strong>Summarise a pcap</strong>, or run{' '}
+        <code>motion-master-capture --ifname &lt;adapter&gt; --seconds 30 --out frames.pcap</code>{' '}
+        on that PC, which ships beside the Motion Master binary and prints the summary itself.
+      </p>
+
+      <p>
         Note this whole page is EtherCAT-ESC-specific. A transport with no ESC (e.g. SPoE) has no such
         registers, so it reports no diagnostics here.
       </p>

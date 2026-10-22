@@ -3695,6 +3695,136 @@ paths:
                     type: string
         "500":
           $ref: "#/components/responses/DriverErrorTimed"
+  /api/captures:
+    post:
+      summary: Record the EtherCAT frames of the bus adapter for a number of seconds
+      operationId: runCapture
+      description: >
+        Runs the capture program `motion-master-capture`, which ships beside the server binary,
+        on the adapter the bus is on, waits for it to exit, and answers the summary. The program
+        records every EtherCAT frame that leaves or enters the adapter with a kernel timestamp and
+        writes them as a pcap file under `captures/` in the user cache, so the file is listed,
+        downloaded and deleted through the `/api/user-cache` routes and opens in Wireshark.
+
+        The summary matches each frame the master sent to the frame that came back for it, by
+        the index and the header of its first datagram, and reports per kind of frame how late the
+        returns were. The cyclic process-data frame is one kind; mailbox and register datagrams,
+        the control plane, are the other. The bands are the three waits the driver uses, 2 ms,
+        20 ms and 100 ms, and they are cumulative: a frame later than 100 ms counts in all three.
+        A frame sent again with the same index and header while its first copy had no answer
+        counts once, as `resent`, and its return is timed from the first copy.
+
+        The time is the kernel's, taken at the boundary to the NIC driver on both sides: when the
+        frame is handed to the driver, and when the driver hands its return back. So the number
+        covers the NIC, the wire and the device, and not the host's own queues and scheduling
+        between that boundary and Motion Master. A capture that shows late frames puts the delay
+        on the wire or in the device. A clean capture beside the server's own warnings, "mailbox
+        write(s) got no frame back", puts it inside the host. Read the two together.
+
+        One capture at a time. The capture adds no frame to the bus and runs on a thread of its
+        own, so the bus is not touched. The program needs `CAP_NET_RAW`, which the packages grant
+        it at install.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                seconds:
+                  type: integer
+                  minimum: 1
+                  maximum: 120
+                  default: 30
+                  description: How long to record. A capture is a measurement a person starts.
+                adapter:
+                  type: string
+                  description: >
+                    The adapter to record, when no bus is up. Defaults to the adapter of the bus.
+                  example: "enp0s13f0u1u2"
+      responses:
+        "200":
+          description: The capture is done and summarised
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path, adapter, seconds, summary]
+                properties:
+                  path:
+                    type: string
+                    description: The pcap file, relative to the user-cache root
+                    example: "captures/capture-20261022-143005-enp0s13f0u1u2.pcap"
+                  adapter:
+                    type: string
+                    example: "enp0s13f0u1u2"
+                  seconds:
+                    type: integer
+                    example: 30
+                  summary:
+                    $ref: "#/components/schemas/CaptureSummary"
+        "400":
+          description: "`seconds` is out of range, or the body is not a JSON object"
+        "409":
+          description: >
+            No adapter to capture on (no bus is up and none was named, or the transport is SPoE),
+            or a capture is already running.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "500":
+          description: The capture program is not installed, could not open the adapter, or failed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [error]
+                properties:
+                  error:
+                    type: string
+        "501":
+          description: The server was built without the capture runner
+  /api/captures/{name}:
+    get:
+      summary: Summarise a pcap file in the user cache
+      operationId: getCaptureSummary
+      description: >
+        Reads `captures/{name}` from the user cache and answers the summary that
+        `POST /api/captures` answers, over any Ethernet pcap: a file the server recorded, or one
+        from `tcpdump` on another host that a user put into `captures/` with
+        `PUT /api/user-cache/captures/{name}`. Microsecond and nanosecond timestamps and both byte
+        orders are read.
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+          description: The file name under `captures/`. The user-cache path rules apply.
+          example: "capture-20261022-143005-enp0s13f0u1u2.pcap"
+      responses:
+        "200":
+          description: The summary of the file
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [path, summary]
+                properties:
+                  path:
+                    type: string
+                    example: "captures/capture-20261022-143005-enp0s13f0u1u2.pcap"
+                  summary:
+                    $ref: "#/components/schemas/CaptureSummary"
+        "400":
+          description: The file is not an Ethernet pcap
+        "404":
+          description: No such file under `captures/`
   /api/devices/state:
     get:
       summary: Read current AL state for devices
@@ -6506,6 +6636,79 @@ components:
             the reference clock. Meaningful only while exchanging in SAFE-OP/OP; converges toward
             zero as the drift-compensation loop settles
           example: 0
+    CaptureKindSummary:
+      type: object
+      description: The counts for one kind of frame. The bands are cumulative.
+      required: [sent, resent, returned, lost, over2Ms, over20Ms, over100Ms, latestUs]
+      properties:
+        sent:
+          type: integer
+          description: Frames the master sent. A frame sent again counts once.
+          example: 60021
+        resent:
+          type: integer
+          description: >
+            Frames sent again with the same index and header while the first copy had no answer
+            yet. A register datagram goes out again every 2 ms, so a late one shows here too.
+          example: 12
+        returned:
+          type: integer
+          description: Sent frames that came back
+          example: 60018
+        lost:
+          type: integer
+          description: Sent frames with no return before the capture ended
+          example: 3
+        over2Ms:
+          type: integer
+          description: Returns later than 2 ms after the first send
+          example: 1210
+        over20Ms:
+          type: integer
+          description: Returns later than 20 ms. Counted in over2Ms as well.
+          example: 1198
+        over100Ms:
+          type: integer
+          description: Returns later than 100 ms. Counted in the two above as well.
+          example: 1195
+        latestUs:
+          type: integer
+          format: int64
+          description: The latest return, in microseconds after its first send
+          example: 221748
+    CaptureSummary:
+      type: object
+      description: How late the frames of a capture came back. See `POST /api/captures`.
+      required: [frames, notEtherCat, unmatchedReturns, firstUs, lastUs, control, cyclic]
+      properties:
+        frames:
+          type: integer
+          description: Every record in the capture
+          example: 120050
+        notEtherCat:
+          type: integer
+          description: Records that are not an EtherCAT command frame
+          example: 0
+        unmatchedReturns:
+          type: integer
+          description: >
+            Frames from the slaves with no send to match, such as the second answer to a frame
+            sent twice
+          example: 8
+        firstUs:
+          type: integer
+          format: int64
+          description: Timestamp of the first record, epoch microseconds
+          example: 1761143405000123
+        lastUs:
+          type: integer
+          format: int64
+          description: Timestamp of the last record, epoch microseconds
+          example: 1761143435000456
+        control:
+          $ref: "#/components/schemas/CaptureKindSummary"
+        cyclic:
+          $ref: "#/components/schemas/CaptureKindSummary"
     AlStatusCode:
       type: object
       required: [code, name, description, terminal]

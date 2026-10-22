@@ -6,6 +6,7 @@
 #include <atomic>
 #include <chrono>
 #include <expected>
+#include <filesystem>
 #include <functional>
 #include <future>
 #include <memory>
@@ -116,6 +117,13 @@ class HttpServer {
   /// @c GetGameLoopHealthFn.
   using EniOptionsFn = std::function<mm::node::EniCollectorOptions()>;
 
+  /// @brief Callback type for `POST /api/captures`.
+  ///
+  /// Runs the capture program on @p adapter for @p seconds and returns the pcap file it wrote,
+  /// under the user cache. Lives in main.cc so the server never names the program or its path.
+  using RunCaptureFn = std::function<std::expected<std::filesystem::path, std::string>(
+      const std::string& adapter, int seconds)>;
+
   /// @brief Server configuration.
   struct Config {
     /// Local address to bind. Loopback serves only this machine; "0.0.0.0" serves the network.
@@ -139,6 +147,7 @@ class HttpServer {
         autoTuningStatus;             ///< Handler for `GET /api/auto-tuning`; the startup snapshot.
     AutoTuningSpecFn autoTuningSpec;  ///< Handler for `GET /api/auto-tuning/swagger.yml`.
     EniOptionsFn eniOptions;  ///< Supplies the non-bus half of `GET /api/eni`; required for it.
+    RunCaptureFn runCapture;  ///< Handler for `POST /api/captures`; runs the capture program.
     /// Value sent in `Access-Control-Allow-Origin`. Defaults to the production PWA origin.
     std::string corsOrigin{"https://motion-master.synapticon.com"};
   };
@@ -204,6 +213,8 @@ class HttpServer {
   /// Read only by the Router, also on that thread. See @c mm::api::Router::stopping_ for why the
   /// drain alone is not enough and why the store has to happen there rather than here.
   std::atomic<bool> stopping_{false};
+  /// One capture at a time: a second raw socket on the adapter would record every frame twice.
+  std::atomic<bool> captureRunning_{false};
   /// Workers for handlers that would otherwise block the event loop.
   ///
   /// uWebSockets runs every handler on the app's single loop thread, so a handler that blocks

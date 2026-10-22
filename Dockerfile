@@ -168,7 +168,7 @@ RUN . /target.env \
 RUN . /target.env \
     && bin="build/${PRESET}/apps/motion_master" \
     && mkdir -p /dist \
-    && cp "${bin}/motion-master" auto-tuning cert.pem key.pem /dist/ \
+    && cp "${bin}/motion-master" "${bin}/motion-master-capture" auto-tuning cert.pem key.pem /dist/ \
     && if [ -f "${bin}/libMU_3SL_interface.so.3" ]; then cp "${bin}/libMU_3SL_interface.so.3" /dist/; fi
 
 # ── Stage 2: runtime ───────────────────────────────────────────────────────

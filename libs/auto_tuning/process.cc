@@ -7,7 +7,7 @@
 #include <utility>
 #include <vector>
 
-#include "auto_tuning/process_platform.h"
+#include "core/child_process.h"
 #include "net/http_client.h"
 
 namespace mm::auto_tuning {
@@ -73,7 +73,7 @@ std::expected<void, std::string> Process::start() {
   // then connects to is stated in one place rather than assumed to match.
   const std::vector<std::string> args{"--http", "--host", "127.0.0.1", "--port",
                                       std::to_string(options_.port)};
-  auto child = detail::spawnChild(options_.binary, args, options_.logFile);
+  auto child = mm::core::spawnChild(options_.binary, args, options_.logFile);
   if (!child) {
     return std::unexpected("cannot start " + options_.binary.string() + ": " + child.error());
   }
@@ -86,7 +86,7 @@ std::expected<void, std::string> Process::start() {
   while (std::chrono::steady_clock::now() < deadline) {
     // A child that died explains itself in its own log, and its exit is the real failure — so stop
     // waiting for a port that will never open and say where to look.
-    if (!detail::childAlive({pid_, handle_, group_})) {
+    if (!mm::core::childAlive({pid_, handle_, group_})) {
       forget();
       std::string message = options_.binary.string() + " exited during startup";
       if (!options_.logFile.empty()) {
@@ -124,7 +124,7 @@ Process::StopOutcome Process::stop() {
   if (exitRequest) {
     const auto deadline = std::chrono::steady_clock::now() + kStopGrace;
     while (std::chrono::steady_clock::now() < deadline) {
-      if (!detail::childAlive({pid_, handle_, group_})) {
+      if (!mm::core::childAlive({pid_, handle_, group_})) {
         forget();
         return StopOutcome::Requested;
       }
@@ -132,7 +132,7 @@ Process::StopOutcome Process::stop() {
     }
   }
 
-  const bool killed = detail::terminateChild({pid_, handle_, group_}, kStopGrace);
+  const bool killed = mm::core::terminateChild({pid_, handle_, group_}, kStopGrace);
   forget();
   return killed ? StopOutcome::Killed : StopOutcome::Signalled;
 }

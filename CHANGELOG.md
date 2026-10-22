@@ -19,6 +19,11 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Added
+
+- **`motion-master-capture` records the EtherCAT frames of an adapter and says how late each one came back.** A one-shot program that ships beside the Motion Master binary in every package. `motion-master-capture --ifname <adapter> --seconds 30 --out frames.pcap` records every frame that leaves or enters the adapter with the kernel's timestamp, writes a pcap file that Wireshark opens, prints a summary, and exits. The summary matches each frame the master sent to the frame that came back for it and counts, per kind of frame, the returns later than 2 ms, 20 ms and 100 ms, which are the three waits the driver uses, the frames that never came back, and the latest return. The cyclic process-data frame and the control plane, every mailbox and register request, are counted apart. The time is the kernel's, taken at the boundary to the NIC driver, so it covers the NIC, the wire and the device, and not the PC's own queues between that boundary and Motion Master: late frames in the capture put the delay on the wire or in the device, and a clean capture beside "got no frame back" warnings in the server log puts it inside the PC. It runs with or without Motion Master on the same adapter, so a customer can run that one line and send two files. (#123)
+- **`POST /api/captures` runs the capture program on the adapter the bus is on** and answers the summary. The pcap file lands under `captures/` in the user cache, where the user-cache routes list, download and delete it. `GET /api/captures/{name}` summarises any Ethernet pcap in `captures/`, also one from `tcpdump` on another PC. The Console's Fieldbus Diagnostics page has a Capture card with a Start button, the summary, a Download link, and a file picker that uploads a pcap and summarises it. The three loops in `tools/` take `CAPTURE=<seconds>` and record beside their rounds. (#123)
+
 ## [6.0.0-alpha.97] - 2026-10-22
 
 ### Fixed

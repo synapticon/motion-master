@@ -329,6 +329,14 @@ jobs:
 
       - name: Publish to npm
         run: |
+          # A tag that is moved and pushed again, after a release run that failed in a build leg,
+          # meets a version this job already published. npm refuses a second publish of one
+          # version, so the step skips it instead of failing the run.
+          version="${GITHUB_REF_NAME#v}"
+          if npm view "@synapticon/motion-master-client@${version}" version >/dev/null 2>&1; then
+            echo "@synapticon/motion-master-client@${version} is already on npm; nothing to publish"
+            exit 0
+          fi
           # Pre-release versions (e.g. 6.0.0-alpha.1) publish under the `next` dist-tag so they
           # never become npm's default `latest`.
           tag="latest"

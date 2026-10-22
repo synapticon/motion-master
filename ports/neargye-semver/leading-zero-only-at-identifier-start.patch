@@ -1,0 +1,15 @@
+--- a/include/semver.hpp
++++ b/include/semver.hpp
+@@ -677,8 +677,11 @@
+         // 1.2.3-1.alpha is valid,
+         // 1.2.3-01b is valid as well, but
+         // 1.2.3-01.alpha is not valid
++        //
++        // Only the first character of an identifier can be a leading zero. A zero inside a
++        // numeric identifier, as in 1.2.3-alpha.100, is a digit like any other.
+ 
+-        if (is_leading_zero(digit)) {
++        if (result.empty() && is_leading_zero(digit)) {
+           return failure(token.lexeme);
+         }
+ 

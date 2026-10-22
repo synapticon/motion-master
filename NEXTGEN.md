@@ -4831,3 +4831,58 @@ the Circulo row of Session 2026-10-20 again, with the lock gone.
 **Open.** A read that got a reply for another object is not asked again, because `uploadSdo` asks
 again on no answer only. A fresh transfer would serve it. Decide with #130, which owns the stale
 reply.
+
+## Session 2026-10-22 — The day in one place: the mailbox rules held, one flaw found, two firmware bugs filed (summary)
+
+The six sessions dated 2026-10-22 above are one day's work. This one is the map.
+
+**The question.** Is the mailbox design right: send each request to a SOMANET device once, wait
+`EC_TIMEOUTLATE` for its frame, never send it again, and never raise `EC_TIMEOUTRET` for every
+datagram? The review session read the four sessions before it, the issues, the pull requests, the
+port and the firmware source. Verdict: right, and it stayed. The firmware locks on a repeated
+request, so not repeating is the only safe side for the XMOS stack, and the split of waits keeps
+the real-time loop at 2 ms.
+
+**Four small gaps, #127, merged as #128.** A status read that waited 6 ms where every other
+datagram a decision depends on waits 100 ms; an emergency counted as the answer to an unknown
+write; a counter reset sent once; an SDO upload not asked again after no answer. One commit each,
+measured on the Integro and the Circulo. Two of the four were removed again the same day by the
+fix below, because the machinery they repaired went away.
+
+**The one real flaw, #132, merged as #134.** The port reused the counter of a write it gave up on,
+through a counter-0 request. A write held in the host for longer than `EC_TIMEOUTLATE` still
+arrives, and the Circulo then saw one counter twice: the last ACK of a file read, which gets no
+answer by design, was the write that did it. A capture showed the four frames. The fix never uses
+the counter of an unknown write again. Thirty rounds under 150 ms late frames, no lock. The first
+hypothesis, a late refusal frame taken for a newer write, was built as a data match on the returned
+frame, disproved by the capture, and reverted.
+
+**The cost of that fix, #124, merged as #135, released as v6.0.0-alpha.99.** Never reusing a
+counter leaves the netX stack a gap when a write is truly lost: six dropped requests each, 189
+failed reads in ten rounds under 1 % loss. The scan now reads the ESC type, and an Integro, 0x85,
+gets upstream SOEM's repeats, because its stack discards a repeat correctly. Its sweep went from
+18 to 59 s per round back to 3 s with no failed read. The no-Repeat-Request rule got its own flag
+on the way, because it had hung off the write-once flag. `GET /api/devices` reports `escType` and
+`mailboxWriteOnce`.
+
+**Two firmware faults of the Circulo, #131 and synapticon/somanet_software#5820.** An interrupted
+file read leaves the drive refusing every read as busy, when the last packet was the one left
+unacknowledged, or serving every file with its first packet as zeros, when a packet in the middle
+was. Both last until a power cycle, both come with or without the master's FoE ERROR, and
+`hil/foe_read_abort` on branch 131 reproduces each in one command. Nothing master-side avoids
+them: the master does not know which packet it never got. #5820 is the only somanet_software issue
+of the day; #5811 and #5817 are older and were cited.
+
+**Also filed.** #129, an Integro serves a short file as a success after a failed read. #130, a write
+the port never sent because SM0 did not empty within 20 ms, and replies for another object that
+arrive within a millisecond; the first reading of #130 as a refused write was wrong, the capture
+held no refusal.
+
+**The method.** `netem` on the bench adapter to make 2 % of the frames 150 ms late or 1 % of them
+lost, and `motion-master-capture` beside the run. Reading the code gave a hypothesis each time; the
+capture gave the answer, twice against the hypothesis. The tshark line that lists mailbox writes in
+wire order and flags a counter sent twice is in #132. The rows of the six sessions are the
+regression bar for the next change to the port.
+
+**What is not done.** A Jasper under any of this. The Windows and macOS builds under netem. A CI
+leg with netem, which the Belgrade bench is for. `#129` and `#130` on the master side.

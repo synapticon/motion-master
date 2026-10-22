@@ -914,6 +914,98 @@ int ecx_inframe(ecx_portt *port, uint8 idx, int stacknumber)
                {")
 endforeach()
 
+# SOEM maps a slave short when a read of its PDO mapping fails.
+#
+# ecx_config_map_group reads 0x1C00, the PDO assignment of each sync manager and every mapping
+# object over the mailbox, through ecx_readPDOmap and ecx_readPDOassign or their Complete Access
+# forms. None of those reads checks its working counter. A read with no answer, or with the answer
+# to an earlier request, leaves its value at zero: an assignment with no PDOs, a PDO with no
+# entries, or an entry of no bits. The map comes out short, the sync manager gets the short length,
+# and the function returns no error. One late frame on the host is enough (issue #119).
+#
+# The patch counts those failures in pdomapreadfails of the slave. Each read of the mapping starts
+# the count at zero, so a Complete Access read that failed and fell back to the plain read does not
+# count against a plain read that succeeded. The driver checks the count after the map and maps
+# again when it is not zero.
+vcpkg_replace_string(
+    "${SOURCE_PATH}/include/soem/ec_main.h"
+"   /** input bits */
+   uint16 Ibits;"
+"   /** input bits */
+   uint16 Ibits;
+   /** SDO reads that failed in the last read of the PDO mapping for the map */
+   uint32 pdomapreadfails;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"   *Isize = 0;
+   *Osize = 0;"
+"   *Isize = 0;
+   *Osize = 0;
+   context->slavelist[Slave].pdomapreadfails = 0;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"   wkc = ecx_SDOread(context, Slave, PDOassign, 0x00, FALSE, &rdl, &rdat, EC_TIMEOUTRXM);
+   rdat = etohs(rdat);"
+"   wkc = ecx_SDOread(context, Slave, PDOassign, 0x00, FALSE, &rdl, &rdat, EC_TIMEOUTRXM);
+   if (wkc <= 0) context->slavelist[Slave].pdomapreadfails++;
+   rdat = etohs(rdat);")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"         wkc = ecx_SDOread(context, Slave, PDOassign, (uint8)idxloop, FALSE, &rdl, &rdat, EC_TIMEOUTRXM);"
+"         wkc = ecx_SDOread(context, Slave, PDOassign, (uint8)idxloop, FALSE, &rdl, &rdat, EC_TIMEOUTRXM);
+         if (wkc <= 0) context->slavelist[Slave].pdomapreadfails++;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"            wkc = ecx_SDOread(context, Slave, idx, 0x00, FALSE, &rdl, &subcnt, EC_TIMEOUTRXM);"
+"            wkc = ecx_SDOread(context, Slave, idx, 0x00, FALSE, &rdl, &subcnt, EC_TIMEOUTRXM);
+            if (wkc <= 0) context->slavelist[Slave].pdomapreadfails++;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"               wkc = ecx_SDOread(context, Slave, idx, (uint8)subidxloop, FALSE, &rdl, &rdat2, EC_TIMEOUTRXM);"
+"               wkc = ecx_SDOread(context, Slave, idx, (uint8)subidxloop, FALSE, &rdl, &rdat2, EC_TIMEOUTRXM);
+               if (wkc <= 0) context->slavelist[Slave].pdomapreadfails++;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"   wkc = ecx_SDOread(context, Slave, PDOassign, 0x00, TRUE, &rdl,
+                     &(context->PDOassign[Thread_n]), EC_TIMEOUTRXM);"
+"   wkc = ecx_SDOread(context, Slave, PDOassign, 0x00, TRUE, &rdl,
+                     &(context->PDOassign[Thread_n]), EC_TIMEOUTRXM);
+   if (wkc <= 0) context->slavelist[Slave].pdomapreadfails++;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"            wkc = ecx_SDOread(context, Slave, idx, 0x00, TRUE, &rdl,
+                              &(context->PDOdesc[Thread_n]), EC_TIMEOUTRXM);"
+"            wkc = ecx_SDOread(context, Slave, idx, 0x00, TRUE, &rdl,
+                              &(context->PDOdesc[Thread_n]), EC_TIMEOUTRXM);
+            if (wkc <= 0) context->slavelist[Slave].pdomapreadfails++;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"   wkc = ecx_SDOread(context, Slave, ECT_SDO_SMCOMMTYPE, 0x00, FALSE, &rdl, &nSM, EC_TIMEOUTRXM);"
+"   wkc = ecx_SDOread(context, Slave, ECT_SDO_SMCOMMTYPE, 0x00, FALSE, &rdl, &nSM, EC_TIMEOUTRXM);
+   if (wkc <= 0) context->slavelist[Slave].pdomapreadfails++;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"         wkc = ecx_SDOread(context, Slave, ECT_SDO_SMCOMMTYPE, iSM + 1, FALSE, &rdl, &tSM, EC_TIMEOUTRXM);"
+"         wkc = ecx_SDOread(context, Slave, ECT_SDO_SMCOMMTYPE, iSM + 1, FALSE, &rdl, &tSM, EC_TIMEOUTRXM);
+         if (wkc <= 0) context->slavelist[Slave].pdomapreadfails++;")
+
+vcpkg_replace_string(
+    "${SOURCE_PATH}/src/ec_coe.c"
+"   wkc = ecx_SDOread(context, Slave, ECT_SDO_SMCOMMTYPE, 0x00, TRUE, &rdl,
+                     &(context->SMcommtype[Thread_n]), EC_TIMEOUTRXM);"
+"   wkc = ecx_SDOread(context, Slave, ECT_SDO_SMCOMMTYPE, 0x00, TRUE, &rdl,
+                     &(context->SMcommtype[Thread_n]), EC_TIMEOUTRXM);
+   if (wkc <= 0) context->slavelist[Slave].pdomapreadfails++;")
+
 # EC_MAXBUF is the number of frame indexes. The RT thread and the control plane take indexes from
 # one pool. When no index is free, ecx_getindex does not wait or fail. It returns an index that is
 # still in use, and two frames then share one receive buffer. The control plane is capped at

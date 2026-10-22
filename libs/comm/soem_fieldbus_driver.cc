@@ -388,6 +388,10 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
     // map so SOEM's guard always short-circuits — defence in depth for the same reason the
     // outputs/inputs pointers above are reset rather than trusted across re-maps.
     ctx_->slavelist[i].PO2SOconfig = nullptr;
+    // The port counts the SDO reads of a slave's PDO mapping that fail during the map, and starts
+    // the count when it reads that slave. A slave the map does not read keeps its count, so start
+    // every count here.
+    ctx_->slavelist[i].pdomapreadfails = 0;
     // Reset each slave's FMMU bookkeeping before the map. ecx_config_create_{output,input}_mappings
     // and the mailbox-status mapper all begin at `FMMUunused` and append, relying on
     // ecx_config_init having memset the slavelist (FMMUunused=0, FMMU[] cleared) — which a re-map
@@ -420,6 +424,17 @@ std::expected<void, std::string> SoemFieldbusDriver::configureProcessData() {
     return std::unexpected(std::move(r.error()));
   }
   const int usedSize = ecx_config_map_group(ctx_.get(), map_, 0);
+  // SOEM takes a read of the PDO mapping that failed for a mapping of nothing, and maps the slave
+  // short with no error. The port counts those reads. A short map must not be published: the
+  // caller maps again.
+  for (int i = 1; i <= ctx_->slavecount; ++i) {
+    if (const uint32_t fails = ctx_->slavelist[i].pdomapreadfails; fails > 0) {
+      return std::unexpected(
+          std::format("slave {}: {} read(s) of its PDO mapping got no usable answer, so the map "
+                      "is short",
+                      i, fails));
+    }
+  }
   if (usedSize <= 0) {
     return std::unexpected("ecx_config_map_group mapped no process data");
   }
@@ -534,6 +549,10 @@ PdoLayout SoemFieldbusDriver::processDataLayout() {
   layout.slaves.reserve(static_cast<size_t>(ctx_->slavecount));
   for (int i = 1; i <= ctx_->slavecount; ++i) {
     const auto& s = ctx_->slavelist[i];
+    // SOEM sets Obits and Ibits on every map, but Obytes and Ibytes only when the bit count is
+    // 8 or more. After a map that found nothing for a direction, those two keep the bytes of the
+    // map before, so the window comes from the bit counts, with SOEM's own rule: a direction with
+    // fewer than 8 bits reports 0 bytes.
     // SOEM never populates the per-slave Ooffset/Ioffset fields — only the outputs/inputs
     // pointers into the IOmap — so reading those offsets yields 0 and a single slave's inputs
     // wrap to -Obytes. Derive each window's offset within its direction's image from the
@@ -542,12 +561,14 @@ PdoLayout SoemFieldbusDriver::processDataLayout() {
     // sub-byte-only direction reports 0 bytes; its pointer is never set, so it gets a 0 offset.
     // outputs/inputs are uint8_t*, so each pointer difference is already the byte offset into its
     // direction's image (the [all outputs | all inputs] IOmap) — no element scaling.
+    const uint32_t outputBytes = s.Obits > 7 ? (s.Obits + 7u) / 8u : 0u;
+    const uint32_t inputBytes = s.Ibits > 7 ? (s.Ibits + 7u) / 8u : 0u;
     layout.slaves.push_back(SlaveIo{
         .slavePosition = static_cast<uint16_t>(i),
-        .outputOffset = s.Obytes ? static_cast<uint32_t>(s.outputs - grp.outputs) : 0,
-        .outputBytes = s.Obytes,
-        .inputOffset = s.Ibytes ? static_cast<uint32_t>(s.inputs - grp.inputs) : 0,
-        .inputBytes = s.Ibytes,
+        .outputOffset = outputBytes ? static_cast<uint32_t>(s.outputs - grp.outputs) : 0,
+        .outputBytes = outputBytes,
+        .inputOffset = inputBytes ? static_cast<uint32_t>(s.inputs - grp.inputs) : 0,
+        .inputBytes = inputBytes,
     });
   }
   return layout;

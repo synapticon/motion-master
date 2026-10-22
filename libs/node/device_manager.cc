@@ -48,6 +48,11 @@ DeviceManager::~DeviceManager() = default;
 
 namespace {
 
+/// How many times a re-map is tried before it is refused. A map reads every mapped object of every
+/// device over the mailbox, and one frame that comes back late or not at all fails it. The second
+/// and third attempts run only after a failure, so a bus that answers pays nothing for them.
+constexpr int kProcessDataMapAttempts = 3;
+
 /// Decodes a raw AL Status read-back into the API-facing DeviceStateInfo:
 /// bits 3:0 are the state, bit 4 is the error indicator.
 DeviceStateInfo decodeState(uint16_t slavePosition,
@@ -337,15 +342,27 @@ std::expected<void, std::string> DeviceManager::remapProcessImage() {
         "re-mapped — check GET /api/game-loop for a stalled loop or a cyclic task that overruns");
   }
 
-  if (auto r = set->driver->configureProcessData(); !r) {
-    return std::unexpected(r.error());
-  }
-  for (auto& device : set->devices) {
-    if (auto r = device.readFlatPdoMapping(); !r) {
+  // One attempt is the driver's map, the read of every device's PDO mapping, and the image built
+  // from the two. A failed attempt is tried again, because a frame that comes back late or not at
+  // all fails a read inside it, and the next attempt runs against the same bus. The last failure is
+  // the one reported.
+  const auto mapOnce = [&]() -> std::expected<ProcessImage, std::string> {
+    if (auto r = set->driver->configureProcessData(); !r) {
       return std::unexpected(r.error());
     }
+    for (auto& device : set->devices) {
+      if (auto r = device.readFlatPdoMapping(); !r) {
+        return std::unexpected(r.error());
+      }
+    }
+    return buildProcessImage(set->driver->processDataLayout(), set->devices);
+  };
+  std::expected<ProcessImage, std::string> image = mapOnce();
+  for (int attempt = 2; !image && attempt <= kProcessDataMapAttempts; ++attempt) {
+    spdlog::warn("Process data map failed: {}. Mapping again, attempt {} of {}", image.error(),
+                 attempt, kProcessDataMapAttempts);
+    image = mapOnce();
   }
-  auto image = buildProcessImage(set->driver->processDataLayout(), set->devices);
   if (!image) {
     return std::unexpected(image.error());
   }

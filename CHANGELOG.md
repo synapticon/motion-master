@@ -19,6 +19,10 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The step to SAFE-OP maps all the process data a device assigns, also when a frame comes back late.** SOEM took a read of the PDO mapping that got no usable answer for a mapping of nothing, and mapped the device short with no error. On a fresh process Motion Master refused the step with "the driver reserved only 0 bytes". On a re-map it published an image with no outputs and reported no error, because its check compared against the byte count of the map before. Now a failed read inside the map fails the map, the check uses the bit counts of the current map, and the step tries the map up to three times before it refuses. (#119)
+
 ## [6.0.0-alpha.96] - 2026-10-21
 
 ### Added

@@ -4364,3 +4364,79 @@ fix: 24 rounds of the real procedure through the HTTP API, two packages in turn,
 during each install. A clean run of the fix proves nothing about this class of defect, and a CI
 that does not induce late frames does not test it. The HIL tests for the Belgrade office get a
 netem leg for that reason. The loop is `tools/install-loop.sh`, beside `flaky-bus.sh`.
+
+## Session 2026-10-22 — A late frame maps a device short, and nothing said so (as-built)
+
+Issue #119. On a desk PC that returns frames late, the step to SAFE-OP on an Integro sometimes
+failed with "output mapping is 280 bits but the driver reserved only 0 bytes", once with 31 bytes.
+The report read it as the counter-0 recovery of Session 2026-10-20: the one request the netX stack
+drops after a recovery landed inside SOEM's map, where a dropped read is silent.
+
+**Reproduced without the recovery.** Bench Integro, alpha.95, `netem delay 150ms reorder 98% 0%`
+on the adapter during 30 rounds of INIT, PRE-OP, SAFE-OP, OP, INIT through `POST /api/devices/state`,
+with the rule off during reset, init, scan and the first PRE-OP. The loop is
+`tools/al-state-loop.sh`, beside `flaky-bus.sh`. SOEM mapped short in 3 rounds (0 of
+35 output bytes; 0 of 47 input bytes; 45 of 47 input bytes). MM's own read of the mapping failed in
+6 rounds with "no frame returned" or a mailbox timeout, and the step was refused. No request went
+out with counter 0. So one late frame inside the map is enough, and the recovery's dropped request
+is one way to lose a read there, not the only one. The wire was not captured. A map that came out
+short took no longer than a good one, which fits a stale reply that `ecx_SDOread` refused on its
+index, and does not fit a 100 ms wait for a frame. That is a reading of the timing, not a
+measurement.
+
+**The worse finding: the check passed a map of nothing.** In one round SOEM mapped 0 output bytes
+and the step passed. The log said "Process data configured: 0 output bytes, 47 input bytes,
+expected WKC 1", the drive reached SAFE-OP and OP, and every output write landed nowhere. SOEM sets
+`Obits` on every map and `Obytes` only when `Obits > 7` (`ecx_map_sm` in `ec_config.c`). After a
+short map `Obytes` still held the 35 of the map before, and `buildProcessImage` compared 280 bits
+against 35 bytes. The report saw the 500 because its process was fresh: `ecx_config_init` had
+zeroed `Obytes`. On a re-map the same fault is silent. `insertBits` is bounded, so nothing was
+corrupted. `ecx_readPDOmap` sets the length of SM2 from the size it found, so SOEM programmed SM2
+with length 0, and the Integro accepted that.
+
+**Why SOEM maps short.** `ecx_readPDOassign` and `ecx_readPDOmap`, and their Complete Access
+forms, never check the working counter of a read. A read with no usable answer leaves its value at
+zero: an assignment of no PDOs, a PDO with no entries, an entry of no bits. The map returns the
+short size with no error. The same code was seen on a capture in August, on a bus of the previous
+master.
+
+**The decisions.**
+
+- **A failed read inside the map fails the map.** `ports/soem` counts, per slave, every read in
+  the four mapping readers whose working counter is not positive, in `pdomapreadfails`. The count
+  starts at zero at the top of `ecx_readPDOmap` and `ecx_readPDOmapCA`, so a Complete Access read
+  that failed and fell back does not fail the plain read that succeeded.
+  `SoemFieldbusDriver::configureProcessData` zeroes the count of every slave before the map and
+  refuses the map after it when any count is not zero, with the slave and the count in the message.
+  A SOMANET device advertises no Complete Access, so the plain readers are the ones the bench
+  exercised. The Complete Access readers carry the same patch and are untested.
+- **The window comes from the bit counts.** `processDataLayout` derives each slave's bytes from
+  `Obits` and `Ibits`, with SOEM's own rule that fewer than 8 bits is 0 bytes, so the check sees
+  the map that was just made.
+- **Three attempts.** `remapProcessImage` runs the driver's map, the read of every device's
+  mapping and the image build as one attempt, up to `kProcessDataMapAttempts`, which is 3. An
+  attempt after a failure is logged at warning with the reason. The whole bus is mapped again,
+  because `ecx_config_map_group` maps the group. A bus that answers pays nothing. One attempt on
+  this bench costs 0.35 s, plus the timeouts that failed it. On the reporter's PC an attempt
+  failed once in 60 rounds, so a second attempt there is rare and a third is rarer.
+
+**Rejected.**
+
+- **A throwaway request after a counter-0 recovery**, the report's first option. It costs a 700 ms
+  timeout on every recovery where the drive had the write, and it covers one of the causes.
+- **A longer `EC_TIMEOUTLATE`.** Nothing measured how late the reporter's frames are. Their log
+  proves later than 100 ms and nothing more, so a new number is a new guess. A lost frame needs the
+  retry anyway. Deferred until the port reports the latest frame it saw come back, which would give
+  the number.
+- **Map one slave again.** SOEM maps a group.
+
+**Results.** The same 30 rounds under the same rule, before and after:
+
+| Build | SOEM maps short, silent | Images with 0 output bytes | Attempts tried again | Steps refused |
+| --- | --- | --- | --- | --- |
+| alpha.95 | 3 | 1 | none | 6, each on MM's own read |
+| fixed | 0 | 0 | 8, 5 of them a short SOEM map the count refused | 1, three attempts failed in a row |
+
+Without the rule, 3 rounds: no attempt tried again, 1.1 s per round. `ctest` passes. Not tested: a
+Circulo, two drives, the Complete Access readers, the Windows and macOS builds. SPoE has no SOEM
+and is not touched.

@@ -66,6 +66,7 @@ argument. `windows-env.ps1` is the exception: it is PowerShell, and it takes swi
 | `check.sh` | format + cppcheck + lint + cmake-lint + shellcheck |
 | `flaky-bus.sh` | Run the mailbox workload of `NEXTGEN.md` Session 2026-10-20 with a `netem` rule on the bus adapter. `NETEM="delay 150ms reorder 98% 0%"` makes 2 % of the frames late, `NETEM="loss 1%"` loses 1 %. Needs passwordless `sudo tc` |
 | `install-loop.sh` | Run the firmware-installation procedure again and again on one device, two packages in turn, with an optional `netem` rule during each install, and record every run. The loop of `NEXTGEN.md` Session 2026-10-21. Needs passwordless `sudo tc` |
+| `al-state-loop.sh` | Walk one drive INIT, PRE-OP, SAFE-OP, OP, INIT again and again against a running server, with an optional `netem` rule during the rounds, and count the short maps and the map attempts in the server log. The loop of `NEXTGEN.md` Session 2026-10-22. Needs passwordless `sudo tc` |
 | `clean.sh` | Remove `build/<preset>` |
 | `package.sh` | Build .deb and .rpm. Needs cert.pem/key.pem in the build dir |
 
@@ -555,7 +556,7 @@ partial-bus operations.
 So a device can go to BOOT or PRE-OP while the others keep exchanging. Re-mapping briefly
 pauses the whole bus, which is the accepted cost.
 
-**Two rules the re-map depends on:**
+**Three rules the re-map depends on:**
 
 1. **Illegal AL transitions are rejected up front** (`kValidStateTransitions` in
    `device_manager.cc`). This is not UX. The re-map reads PDO mapping over the CoE mailbox,
@@ -568,6 +569,15 @@ pauses the whole bus, which is the accepted cost.
    `FMMU[]` and `FMMUunused` and FPWR-clears the ESC registers before every map. Without it,
    a re-map after a BOOT excursion writes an out-of-bounds `ec_fmmut` past the array and
    corrupts adjacent `ec_slavet` fields.
+3. **A read that fails inside SOEM's map fails the map, and the map is tried three times.**
+   SOEM's `ecx_readPDOassign` takes a read with no usable answer for a mapping of nothing and
+   maps the slave short with no error, so `ports/soem` counts those reads in `pdomapreadfails`
+   and the driver refuses the map when a count is not zero. Each slave's window comes from
+   SOEM's `Obits` and `Ibits`, which SOEM sets on every map. `Obytes` keeps the value of the
+   map before when a map finds nothing, and a check against it passed a map of 0 output bytes.
+   `remapProcessImage` makes up to `kProcessDataMapAttempts` attempts, because one frame that
+   comes back late or not at all fails a read inside the map. A bus that answers pays nothing
+   for the attempts it does not need. See `NEXTGEN.md`, Session 2026-10-22.
 
 ### Procedures
 

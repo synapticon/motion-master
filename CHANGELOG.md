@@ -21,6 +21,7 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ### Added
 
+- **`POST /api/devices/restart`** takes every device, or the `positions` given, to INIT and then up one AL state at a time to `target`, OP by default. A target of BOOT is INIT and then BOOT. The walk stops at the first step a device does not reach, and the response names that step beside the settled state of every device. The Console's Fieldbus Control page has a Restart button with a target select beside Refresh.
 - **Plant identification, as one procedure.** `plant-identification` on a SOMANET drive enables it in cyclic synchronous torque mode with a zero target, excites it with the chirp, records its velocity and torque, has the auto-tuning program fit the plant model, and writes the model to `plant_model.csv` on the drive. The run refuses a recording the chirp did not excite or in which the motor did not move, warns when the motion was small, and refuses an unstable model. On every way out, a cancel included, it disarms the chirp, engages again a brake it released, returns the drive to Switched On and puts the operation mode back. The result carries the model, its inertia and friction, the chirp and the Bode data. A chirp that does not fit in the drive's recording with its 200 ms of padding is refused before anything moves.
 - **`GET /api/devices/{slavePosition}/plant-model`** reads the stored model back. A drive that was never identified answers 404.
 

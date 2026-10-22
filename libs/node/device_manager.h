@@ -47,6 +47,15 @@ struct DeviceStateInfo {
 /// @brief Serialises a DeviceStateInfo to JSON.
 void to_json(nlohmann::json& j, const DeviceStateInfo& info);
 
+/// @brief Where a restart of a set of devices stopped, and the state of each device there.
+struct RestartOutcome {
+  /// The last AL state the restart commanded. It is the target when every device arrived, and
+  /// the step a device fell short of otherwise.
+  mm::comm::EtherCatState step = mm::comm::EtherCatState::Init;
+  /// The state of every targeted device after that step, in the order targeted.
+  std::vector<DeviceStateInfo> states;
+};
+
 /// @brief Whether the devices of the last scan still match the bus.
 struct ScanStatus {
   /// True when a device does not answer at its address, or the device count changed.
@@ -634,6 +643,26 @@ class DeviceManager {
   ///         refuses state changes (see @c stateChangeRefusal), or the final state read-back
   ///         fails.
   std::expected<std::vector<DeviceStateInfo>, std::string> transitionToState(
+      const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
+      std::chrono::steady_clock::duration timeout);
+
+  /// @brief Takes a set of devices to INIT and then up to @p targetState one AL state at a time.
+  ///
+  /// The steps are INIT, PRE-OP, SAFE-OP and OP, as far as @p targetState. A target of BOOT is
+  /// INIT and then BOOT, and a target of INIT is INIT alone. Each step is a call of
+  /// @c transitionToState, so the re-map and the check of the AL transition stay in one place. The
+  /// walk stops at the first step a device does not reach, and the outcome names that step and the
+  /// state of every device after it.
+  ///
+  /// The steps are separate bus operations. A scan between two of them is possible, and the next
+  /// step then fails on the devices it cannot resolve, as it does for a procedure.
+  ///
+  /// @param positions    1-based slave positions to restart; empty = all devices.
+  /// @param targetState  The state to end in.
+  /// @param timeout      Maximum time to wait for all devices, for each step.
+  /// @return Where the walk stopped and the state of each device there, or an error string when a
+  ///         step could not be commanded (see @c transitionToState).
+  std::expected<RestartOutcome, std::string> restartToState(
       const std::vector<uint16_t>& positions, mm::comm::EtherCatState targetState,
       std::chrono::steady_clock::duration timeout);
 

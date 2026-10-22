@@ -3002,6 +3002,7 @@ TEST(RunPlantIdentificationProcedure, ExcitesRecordsFitsStoresAndRestores) {
   EXPECT_EQ(driver.fileWrites[0].first, "plant_model.csv");
   const std::string csv(driver.fileWrites[0].second.begin(), driver.fileWrites[0].second.end());
   EXPECT_EQ(csv, "1\n0.01,0.5\n1,100,50,5,0\n");
+  EXPECT_EQ(stepById(steps, "store")->value.at("content"), csv);
 
   // CST and a zero target torque before the enable.
   EXPECT_EQ(driver.store.at(OsCommandFakeDriver::key(Object::kTargetTorque, 0)),

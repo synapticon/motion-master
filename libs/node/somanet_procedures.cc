@@ -3041,8 +3041,11 @@ std::expected<void, std::string> runPlantIdentificationProcedure(
     reporter.fail(kPlantIdStoreStep, r.error().message);
     return std::unexpected(r.error().message);
   }
-  reporter.succeed(kPlantIdStoreStep,
-                   nlohmann::json{{"file", kPlantModelFile}, {"bytes", csv.size()}});
+  // The text as written, so the step shows exactly what the drive holds, and a client that wants
+  // a copy of the file does not have to read it back from the drive.
+  reporter.succeed(
+      kPlantIdStoreStep,
+      nlohmann::json{{"file", kPlantModelFile}, {"bytes", csv.size()}, {"content", csv}});
   return {};
 }
 

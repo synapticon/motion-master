@@ -701,7 +701,8 @@ std::vector<ProgressStep> plantIdentificationSteps();
 ///    while the program computes.
 /// 6. **fit** — sends the measurement to the auto-tuning program through @p fitPlantModel. A model
 ///    with a negative denominator coefficient fails here, because it is unstable.
-/// 7. **store** — writes the model and the chirp settings to the drive.
+/// 7. **store** — writes the model and the chirp settings to the drive, and records the text it
+///    wrote.
 ///
 /// Cancelling during the recording aborts it on the drive, and the restore runs as on any other
 /// way out.

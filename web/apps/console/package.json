@@ -1,6 +1,6 @@
 {
   "name": "console",
-  "version": "6.0.0-alpha.99",
+  "version": "6.0.0-alpha.100",
   "private": true,
   "type": "module",
   "scripts": {

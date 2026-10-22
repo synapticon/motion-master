@@ -21,7 +21,7 @@ add_executable(
   operation_modes_test.cc
   parameter_cache_test.cc
   parameter_refresher_test.cc
-  procedure_catalogue_test.cc
+  procedure_registry_test.cc
   procedure_manager_test.cc
   procedure_test.cc
   process_data_dump_test.cc

@@ -539,7 +539,7 @@ std::vector<ProgressStep> triggerErrorSteps();
 
 /// @brief Provokes a firmware error in a control service as a procedure body.
 ///
-/// **The only deliberately destructive procedure in the catalogue.** It exists because the firmware
+/// **The only deliberately destructive procedure in the registry.** It exists because the firmware
 /// has the command, and because the behaviour around a stopped control service — what the master
 /// sees, what the bus does, what the other devices do — cannot be tested without being able to stop
 /// one on purpose. It is a test instrument, not a commissioning step.

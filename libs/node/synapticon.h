@@ -16,7 +16,7 @@ using mm::comm::kSynapticonVendorId;
 /// @brief Whether a device with this vendor ID is a SOMANET device.
 ///
 /// Lives in @c comm/vendor_ids.h for the same reason as @c kSynapticonVendorId. This name lets the
-/// profile-view chain (@c SomanetDrive), the procedure catalogue and the object-dictionary cache
+/// profile-view chain (@c SomanetDrive), the procedure registry and the object-dictionary cache
 /// (@c ParameterCache) share it without either one depending on the headers of the other.
 using mm::comm::isSomanetDevice;
 

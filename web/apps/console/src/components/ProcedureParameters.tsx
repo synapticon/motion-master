@@ -185,7 +185,7 @@ export function parseParameterValues(
  * The fields for one procedure's parameters, rendered from what its descriptor declares.
  *
  * Generic on purpose: the console knows the four parameter types, not the procedures. Adding a
- * procedure that takes parameters is a row in the server's catalogue and nothing here.
+ * procedure that takes parameters is a row in the server's registry and nothing here.
  */
 export default function ProcedureParameters({
   parameters,

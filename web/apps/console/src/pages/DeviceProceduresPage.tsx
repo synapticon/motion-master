@@ -355,7 +355,7 @@ function ProcedureDetail({
         )}
 
         {/* Parameters, rendered from what the descriptor declares rather than from a form written
-            per procedure — so a new parameterized procedure is a row in the server's catalogue and
+            per procedure — so a new parameterized procedure is a row in the server's registry and
             nothing here. */}
         {/* A picker over the encoder's register map, for the one procedure whose address and length
             it can fill. It sits outside ProcedureParameters deliberately — the parameters are the

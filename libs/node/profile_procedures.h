@@ -18,7 +18,7 @@ namespace mm::node {
 /// @brief Generic CANopen (CiA301) procedure bodies — the non-volatile storage commands every CoE
 ///        device carries, whatever profile it implements.
 ///
-/// The @c ProfileDevice counterpart of @c somanet_procedures.h, and the reason the catalogue is not
+/// The @c ProfileDevice counterpart of @c somanet_procedures.h, and the reason the registry is not
 /// a vendor's list: these apply to any device with a CoE mailbox, so a third-party slave offers
 /// them too.
 ///
@@ -53,7 +53,7 @@ std::vector<ProgressStep> storeParametersSteps();
 /// @param device   Device to run against, borrowed by the manager for this call.
 /// @param reporter Where step progress is recorded.
 /// @param stop     Cancellation token; checked between confirmation polls.
-/// @param config   Retry/timing. **Not** part of the procedure's client surface — the catalogue
+/// @param config   Retry/timing. **Not** part of the procedure's client surface — the registry
 ///                 always passes the defaults, since how long a device takes to write flash is a
 ///                 property of the device rather than a caller's choice. It is a parameter so that
 ///                 a test can run the confirmation walk without real waiting, exactly as

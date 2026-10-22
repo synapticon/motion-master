@@ -254,6 +254,8 @@ main.cc  (composition root)
  ├── WebSocketServer (port 62281, own loop and thread)
  ├── MonitoringManager  (off-RT; owns ParameterRefresher and a sampler thread)
  ├── ProcedureManager   (off-RT jthreads, busy token, retained snapshot; poll-only)
+ ├── ProcedureRegistry  (every procedure as a row; borrows DeviceManager and ProcedureManager;
+ │                       ProcedureRegistryConfig carries the callbacks from outside libs/node)
  ├── NotificationBus    (off-RT poll thread; Source[] → the "notifications" topic)
  └── stateFollower      (off-RT jthread; followObservedStates while the driver refuses state changes)
 ```
@@ -591,19 +593,27 @@ holds the per-device busy token and the retained `ProcedureSnapshot` a client po
 A body is a plain callable `(Device&, ProgressReporter&, std::stop_token)`. Adding a
 procedure never touches the manager, and the manager names no profile type.
 
-**The registry is one table**, `libs/node/procedure_catalogue.{h,cc}`. Each
-`ProcedureCatalogueEntry` is a `ProcedureDescriptor` (name, title, description, caveats, `movesMotor`, `requiresEnabled`, step
+**The registry is one table**, `libs/node/procedure_registry.{h,cc}`. Each
+`ProcedureRegistryEntry` is a `ProcedureDescriptor` (name, title, description, caveats, `movesMotor`, `requiresEnabled`, step
 template), an `applies(Device&)` predicate, and a `makeBody(json)` factory. Four handlers
 serve every procedure, so **adding one is a row in that table and touches no route.**
 
-Two rules the catalogue enforces:
+**A procedure that needs something from outside `libs/node` gets it through
+`ProcedureRegistryConfig`.** `ProcedureRegistry` is built once in `main.cc` from the device
+manager, the procedure manager and that config, a struct of `std::function` callbacks like
+`HttpServer::Config`. The plant model fit is the first: `libs/node` names only `PlantModelFitFn`
+(`plant_identification.h`), and `main.cc` binds it to the auto-tuning client, or to a refusal that
+names the missing program. A body never learns which. Add a new outside dependency as a field
+there, never as a global or a setter.
+
+Two rules the registry enforces:
 
 - **`applies` may only consult state that exists as soon as the device does** — the vendor
   ID from SII, not `createSomanetDrive`, whose CiA402 check needs the object dictionary to
   have been enumerated. Binding to that would report a real drive as having no procedures.
 - **Never-run is a state, not a 404.** The singleton `GET` returns 200 with an idle
   snapshot, because the manager learns a step template only when a run starts, but the
-  catalogue holds it.
+  registry holds it.
 
 `ProcedureError` maps to status in one place: `kBusy`→409, `kUnknownDevice`→404,
 `kUnknownProcedure`→404, `kInvalidRequest`→400.

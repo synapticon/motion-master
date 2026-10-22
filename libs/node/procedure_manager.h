@@ -62,8 +62,8 @@ using ProcedureBody = std::function<std::expected<void, std::string>(
 ///
 /// Two layers raise these, and the split is worth knowing: @c ProcedureManager produces only
 /// @c kBusy and @c kUnknownDevice, because those are the only two things it can judge. Whether a
-/// procedure *exists* and whether a request *is valid* are the catalogue's business
-/// (@c procedure_catalogue.h) — the manager is told a body, never a name it could validate. One
+/// procedure *exists* and whether a request *is valid* are the registry's business
+/// (@c procedure_registry.h) — the manager is told a body, never a name it could validate. One
 /// error type across both keeps a handler's mapping in one place instead of translating between
 /// two.
 struct ProcedureError {

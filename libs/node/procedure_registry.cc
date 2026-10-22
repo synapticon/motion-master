@@ -1,4 +1,4 @@
-#include "node/procedure_catalogue.h"
+#include "node/procedure_registry.h"
 
 #include <algorithm>
 #include <expected>
@@ -17,9 +17,10 @@ namespace mm::node {
 
 namespace {
 
-// Every entry the server knows. Built once, never mutated: a caller may hold the reference.
-std::vector<ProcedureCatalogueEntry> buildCatalogue() {
-  std::vector<ProcedureCatalogueEntry> entries;
+// Every entry the server knows. Built once per registry, never mutated: a caller may hold a
+// pointer into the result.
+std::vector<ProcedureRegistryEntry> buildRegistry(const ProcedureRegistryConfig&) {
+  std::vector<ProcedureRegistryEntry> entries;
 
   // Authored in the order the table is sorted into below — alphabetically by name, which is the
   // order every consumer renders in (the list endpoint, the Console sidebar). The sort is what
@@ -70,7 +71,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   commutationOffset.requiresEnabled = false;
   commutationOffset.steps = commutationOffsetMeasurementSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(commutationOffset),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
@@ -108,7 +109,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   encoderRegister.parameters = encoderRegisterParameters();
   encoderRegister.steps = encoderRegisterSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(encoderRegister),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
@@ -154,7 +155,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   firmware.parameters = firmwareInstallationParameters();
   firmware.steps = firmwareInstallationSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(firmware),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
@@ -203,7 +204,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   firmwareLatency.requiresEnabled = false;
   firmwareLatency.steps = firmwareLatencySteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(firmwareLatency),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
@@ -252,7 +253,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   hrdStreaming.parameters = hrdStreamingParameters();
   hrdStreaming.steps = hrdStreamingSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(hrdStreaming),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
@@ -297,7 +298,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   icMuCalibrationMode.parameters = icMuCalibrationModeParameters();
   icMuCalibrationMode.steps = icMuCalibrationModeSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(icMuCalibrationMode),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
@@ -344,7 +345,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   ignoreBissStatusBits.requiresEnabled = false;
   ignoreBissStatusBits.steps = ignoreBissStatusBitsSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(ignoreBissStatusBits),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
@@ -389,7 +390,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   kueblerRegister.requiresEnabled = false;
   kueblerRegister.steps = kueblerRegisterSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(kueblerRegister),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
@@ -433,7 +434,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   motorPhaseOrder.requiresEnabled = false;
   motorPhaseOrder.steps = motorPhaseOrderDetectionSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(motorPhaseOrder),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
@@ -481,7 +482,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   commissioning.requiresEnabled = false;
   commissioning.steps = offsetDetectionSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(commissioning),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
@@ -518,7 +519,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   openPhase.requiresEnabled = false;
   openPhase.steps = openPhaseDetectionSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(openPhase),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       // Takes no parameters: the timings are properties of the command, not a caller's choice.
@@ -561,7 +562,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   osCommand.parameters = osCommandParameters();
   osCommand.steps = osCommandSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(osCommand),
       // Vendor ID, deliberately, and not createSomanetDrive: that also requires the device's object
       // dictionary to be enumerated first (its CiA402 check looks for controlword/statusword in
@@ -611,7 +612,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   readObjectDictionary.requiresEnabled = false;
   readObjectDictionary.steps = readObjectDictionarySteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(readObjectDictionary),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
@@ -648,7 +649,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   phaseInductance.requiresEnabled = false;
   phaseInductance.steps = phaseInductanceMeasurementSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(phaseInductance),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
@@ -684,7 +685,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   phaseResistance.requiresEnabled = false;
   phaseResistance.steps = phaseResistanceMeasurementSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(phaseResistance),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
@@ -722,7 +723,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   polePair.requiresEnabled = false;
   polePair.steps = polePairDetectionSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(polePair),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
@@ -754,7 +755,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   restoreDefaults.parameters = restoreDefaultParametersParameters();
   restoreDefaults.steps = restoreDefaultParametersSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(restoreDefaults),
       .applies = [](Device& device) { return device.supportsCoe(); },
       .makeBody = [](const nlohmann::json& request) -> std::expected<ProcedureBody, std::string> {
@@ -785,7 +786,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   deviceLocate.parameters = deviceLocateParameters();
   deviceLocate.steps = deviceLocateSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(deviceLocate),
       // A transport capability, copied when the device is constructed, so it is known at once.
       .applies = [](Device& device) { return device.supportsLocate(); },
@@ -827,7 +828,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   skippedCycles.requiresEnabled = false;
   skippedCycles.steps = skippedCyclesSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(skippedCycles),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
@@ -862,7 +863,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   storeParameters.requiresEnabled = false;
   storeParameters.steps = storeParametersSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(storeParameters),
       .applies = [](Device& device) { return device.supportsCoe(); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
@@ -904,7 +905,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   systemIdentification.requiresEnabled = false;
   systemIdentification.steps = systemIdentificationSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(systemIdentification),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
@@ -952,7 +953,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   torqueConstant.requiresEnabled = false;
   torqueConstant.steps = torqueConstantMeasurementSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(torqueConstant),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json&) -> std::expected<ProcedureBody, std::string> {
@@ -993,7 +994,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   triggerError.requiresEnabled = false;
   triggerError.steps = triggerErrorSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(triggerError),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
@@ -1040,7 +1041,7 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   velocitySource.requiresEnabled = false;
   velocitySource.steps = velocitySourceSteps();
 
-  entries.push_back(ProcedureCatalogueEntry{
+  entries.push_back(ProcedureRegistryEntry{
       .descriptor = std::move(velocitySource),
       .applies = [](Device& device) { return isSomanetDevice(device.vendorId()); },
       .makeBody = [](const nlohmann::json& body) -> std::expected<ProcedureBody, std::string> {
@@ -1060,59 +1061,18 @@ std::vector<ProcedureCatalogueEntry> buildCatalogue() {
   // authored in this same order, so the two normally agree — but the sort is what *guarantees* it,
   // and it is what keeps a row appended in the wrong place from moving a procedure in the sidebar.
   // Sorting here rather than in listProcedures does it once for the process instead of once per
-  // poll, and means every consumer of the catalogue sees the same order: applicableEntries
+  // poll, and means every consumer of the registry sees the same order: applicableEntries
   // preserves it, so the list endpoint and the Console's sidebar are ordered without either of them
   // sorting.
   //
   // By name rather than title because the name is the stable identifier — it is what the URL and
   // the API carry, so the order cannot drift when a title is reworded. The two happen to agree for
   // every entry, each name being its title's slug.
-  std::ranges::sort(entries, {}, [](const ProcedureCatalogueEntry& entry) {
+  std::ranges::sort(entries, {}, [](const ProcedureRegistryEntry& entry) {
     return std::string_view(entry.descriptor.name);
   });
 
   return entries;
-}
-
-// The procedures @p devicePosition supports, as pointers into the immortal catalogue.
-//
-std::expected<std::vector<const ProcedureCatalogueEntry*>, ProcedureError> applicableEntries(
-    DeviceManager& deviceManager, uint16_t devicePosition) {
-  using Entries = std::vector<const ProcedureCatalogueEntry*>;
-  const auto device = deviceManager.deviceAt(devicePosition);
-  std::expected<Entries, std::string> found = deviceNotFound(devicePosition);
-  if (device) {
-    Entries entries;
-    for (const auto& entry : procedureCatalogue()) {
-      if (entry.applies(*device)) {
-        entries.push_back(&entry);
-      }
-    }
-    found = std::move(entries);
-  }
-  if (!found) {
-    return std::unexpected(
-        ProcedureError{.kind = ProcedureError::Kind::kUnknownDevice, .message = found.error()});
-  }
-  return *found;
-}
-
-// One procedure by name, if the device has it. A name the catalogue does not hold and one this
-// device does not support are the same answer to a client: nothing is addressable there.
-std::expected<const ProcedureCatalogueEntry*, ProcedureError> applicableEntry(
-    DeviceManager& deviceManager, uint16_t devicePosition, std::string_view name) {
-  auto entries = applicableEntries(deviceManager, devicePosition);
-  if (!entries) {
-    return std::unexpected(entries.error());
-  }
-  auto it = std::ranges::find_if(
-      *entries, [name](const auto* entry) { return entry->descriptor.name == name; });
-  if (it == entries->end()) {
-    return std::unexpected(ProcedureError{
-        .kind = ProcedureError::Kind::kUnknownProcedure,
-        .message = std::format("device {} has no procedure '{}'", devicePosition, name)});
-  }
-  return *it;
 }
 
 // The retained snapshot, or the descriptor's all-idle one when the procedure never ran here.
@@ -1124,11 +1084,6 @@ ProcedureSnapshot snapshotOrIdle(ProcedureManager& procedureManager, uint16_t de
 
 }  // namespace
 
-const std::vector<ProcedureCatalogueEntry>& procedureCatalogue() {
-  static const std::vector<ProcedureCatalogueEntry> entries = buildCatalogue();
-  return entries;
-}
-
 void to_json(nlohmann::json& j, const ProcedureListing& listing) {
   j = nlohmann::json{
       {"descriptor", listing.descriptor},
@@ -1136,38 +1091,78 @@ void to_json(nlohmann::json& j, const ProcedureListing& listing) {
   };
 }
 
-std::expected<std::vector<ProcedureListing>, ProcedureError> listProcedures(
-    DeviceManager& deviceManager, ProcedureManager& procedureManager, uint16_t devicePosition) {
-  auto entries = applicableEntries(deviceManager, devicePosition);
-  if (!entries) {
-    return std::unexpected(entries.error());
+ProcedureRegistry::ProcedureRegistry(DeviceManager& deviceManager,
+                                     ProcedureManager& procedureManager,
+                                     ProcedureRegistryConfig config)
+    : deviceManager_(deviceManager),
+      procedureManager_(procedureManager),
+      entries_(buildRegistry(config)) {}
+
+std::expected<std::vector<const ProcedureRegistryEntry*>, ProcedureError>
+ProcedureRegistry::applicableEntries(uint16_t devicePosition) const {
+  using Applicable = std::vector<const ProcedureRegistryEntry*>;
+  const auto device = deviceManager_.deviceAt(devicePosition);
+  std::expected<Applicable, std::string> found = deviceNotFound(devicePosition);
+  if (device) {
+    Applicable applicable;
+    for (const auto& entry : entries_) {
+      if (entry.applies(*device)) {
+        applicable.push_back(&entry);
+      }
+    }
+    found = std::move(applicable);
+  }
+  if (!found) {
+    return std::unexpected(
+        ProcedureError{.kind = ProcedureError::Kind::kUnknownDevice, .message = found.error()});
+  }
+  return *found;
+}
+
+std::expected<const ProcedureRegistryEntry*, ProcedureError> ProcedureRegistry::applicableEntry(
+    uint16_t devicePosition, std::string_view name) const {
+  auto applicable = applicableEntries(devicePosition);
+  if (!applicable) {
+    return std::unexpected(applicable.error());
+  }
+  auto it = std::ranges::find_if(
+      *applicable, [name](const auto* entry) { return entry->descriptor.name == name; });
+  if (it == applicable->end()) {
+    return std::unexpected(ProcedureError{
+        .kind = ProcedureError::Kind::kUnknownProcedure,
+        .message = std::format("device {} has no procedure '{}'", devicePosition, name)});
+  }
+  return *it;
+}
+
+std::expected<std::vector<ProcedureListing>, ProcedureError> ProcedureRegistry::list(
+    uint16_t devicePosition) const {
+  auto applicable = applicableEntries(devicePosition);
+  if (!applicable) {
+    return std::unexpected(applicable.error());
   }
   std::vector<ProcedureListing> listings;
-  listings.reserve(entries->size());
-  for (const auto* entry : *entries) {
+  listings.reserve(applicable->size());
+  for (const auto* entry : *applicable) {
     listings.push_back(ProcedureListing{
         .descriptor = entry->descriptor,
-        .snapshot = snapshotOrIdle(procedureManager, devicePosition, entry->descriptor)});
+        .snapshot = snapshotOrIdle(procedureManager_, devicePosition, entry->descriptor)});
   }
   return listings;
 }
 
-std::expected<ProcedureSnapshot, ProcedureError> procedureSnapshot(
-    DeviceManager& deviceManager, ProcedureManager& procedureManager, uint16_t devicePosition,
-    std::string_view name) {
-  auto entry = applicableEntry(deviceManager, devicePosition, name);
+std::expected<ProcedureSnapshot, ProcedureError> ProcedureRegistry::snapshot(
+    uint16_t devicePosition, std::string_view name) const {
+  auto entry = applicableEntry(devicePosition, name);
   if (!entry) {
     return std::unexpected(entry.error());
   }
-  return snapshotOrIdle(procedureManager, devicePosition, (*entry)->descriptor);
+  return snapshotOrIdle(procedureManager_, devicePosition, (*entry)->descriptor);
 }
 
-std::expected<ProcedureSnapshot, ProcedureError> startProcedure(DeviceManager& deviceManager,
-                                                                ProcedureManager& procedureManager,
-                                                                uint16_t devicePosition,
-                                                                std::string_view name,
-                                                                const nlohmann::json& request) {
-  auto entry = applicableEntry(deviceManager, devicePosition, name);
+std::expected<ProcedureSnapshot, ProcedureError> ProcedureRegistry::start(
+    uint16_t devicePosition, std::string_view name, const nlohmann::json& request) const {
+  auto entry = applicableEntry(devicePosition, name);
   if (!entry) {
     return std::unexpected(entry.error());
   }
@@ -1178,22 +1173,20 @@ std::expected<ProcedureSnapshot, ProcedureError> startProcedure(DeviceManager& d
   }
   const auto& descriptor = (*entry)->descriptor;
   auto started =
-      procedureManager.start(devicePosition, descriptor.name, descriptor.steps, std::move(*body));
+      procedureManager_.start(devicePosition, descriptor.name, descriptor.steps, std::move(*body));
   if (!started) {
     return std::unexpected(started.error());
   }
-  return snapshotOrIdle(procedureManager, devicePosition, descriptor);
+  return snapshotOrIdle(procedureManager_, devicePosition, descriptor);
 }
 
-std::expected<void, ProcedureError> cancelProcedure(DeviceManager& deviceManager,
-                                                    ProcedureManager& procedureManager,
-                                                    uint16_t devicePosition,
-                                                    std::string_view name) {
-  auto entry = applicableEntry(deviceManager, devicePosition, name);
+std::expected<void, ProcedureError> ProcedureRegistry::cancel(uint16_t devicePosition,
+                                                              std::string_view name) const {
+  auto entry = applicableEntry(devicePosition, name);
   if (!entry) {
     return std::unexpected(entry.error());
   }
-  if (!procedureManager.cancel(devicePosition, (*entry)->descriptor.name)) {
+  if (!procedureManager_.cancel(devicePosition, (*entry)->descriptor.name)) {
     return std::unexpected(ProcedureError{
         .kind = ProcedureError::Kind::kUnknownProcedure,
         .message = std::format("device {} has no run of '{}' to cancel", devicePosition, name)});

@@ -19,9 +19,9 @@ the HTTP/WebSocket API may break between any two alphas.
 
 ## [Unreleased]
 
-## [6.0.0-alpha.100] - 2026-10-22
+## [6.0.0-alpha.110] - 2026-10-22
 
-No change to the server, the web apps or the client against 6.0.0-alpha.99. The repository gained `hil/foe_read_abort`, the reproduction of a Circulo firmware fault, which is not in the packages.
+No change to the server, the web apps or the client against 6.0.0-alpha.99. The repository gained `hil/foe_read_abort`, the reproduction of a Circulo firmware fault, which is not in the packages. The numbers 100 to 109 are skipped: the version library of the build refuses a prerelease number with a zero after its first digit, and 6.0.0-alpha.100 did not build.
 
 ## [6.0.0-alpha.99] - 2026-10-22
 
@@ -941,8 +941,8 @@ this point — see the git history for the pre-alpha.18 commits.)
 
 - Clean shutdown (Ctrl+C exits even with a client connected); object-dictionary names no longer corrupted; slaves with terminal AL status codes are dropped during a transition; refresh no longer re-scans and resets slaves to INIT.
 
-[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.100...HEAD
-[6.0.0-alpha.100]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.99...v6.0.0-alpha.100
+[Unreleased]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.110...HEAD
+[6.0.0-alpha.110]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.99...v6.0.0-alpha.110
 [6.0.0-alpha.99]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.98...v6.0.0-alpha.99
 [6.0.0-alpha.98]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.97...v6.0.0-alpha.98
 [6.0.0-alpha.97]: https://github.com/synapticon/motion-master/compare/v6.0.0-alpha.96...v6.0.0-alpha.97

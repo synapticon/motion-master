@@ -544,25 +544,19 @@ vcpkg_replace_string(
 #     value the slave accepted last.
 #   - No frame within EC_TIMEOUTLATE: it is not known whether the slave got the message, so it is
 #     not sent again. The call returns 1, and the caller waits for the answer. A late frame is the
-#     usual cause, and in that case the slave answers. The SyncManager status is read first, with
-#     the same wait for a late frame: a message in SM0 or an answer in SM1 shows that the slave has
-#     the message, and nothing more is needed. Otherwise the write is recorded as unknown, and an
-#     answer that ecx_mbxreceive reads for it settles it.
-#   - After a write that stayed unknown, the next request goes out with counter 0, and the request
-#     after that takes the unknown counter again. The two SOMANET stacks need this. The XMOS stack
-#     of a Circulo ignores a request whose counter equals the last one it accepted, and that is
-#     either the unknown counter or the one before it. It accepts counter 0 and stores it, so after
-#     the counter-0 request it accepts the unknown counter. The netX stack of an Integro accepts a
-#     request only when its counter is the one after the last counter it accepted, and drops every
-#     request until the sequence comes round, up to six. It accepts counter 0 without storing it.
-#     When the unknown write was lost, the unknown counter is the one it expects. When the slave
-#     had the write and did not answer, it drops the one request and takes the next. A counter-0
-#     request whose own outcome is unknown is followed by another counter-0 request, because both
-#     stacks accept a repeated counter 0. Counter 0 is the one value the two stacks agree on, which
-#     is why no other sequence does without a per-stack rule. Measured on both with
-#     hil/mailbox_counter0 and hil/mailbox_duplicate.
-# mbxwriteunknowns counts the writes without a frame, and mbxwriterecovers the requests sent with
-# counter 0, for the driver to report.
+#     usual cause, and in that case the slave answers. The next request takes the next counter, and
+#     the counter of the unknown write is never used again. A write the port gave up on can still
+#     reach the slave: on the host of #132 a write left the host 150 ms after the port sent it, and
+#     a counter-0 request followed by the unknown counter, which an earlier version of this port
+#     sent, met it on the way. The XMOS stack of a Circulo locks only on two requests in a row with
+#     the same counter, so a counter that is never used again cannot lock it, whenever the late
+#     write lands. The netX stack of an Integro takes a request only when its counter is the one
+#     after the last one it accepted, so a write that was truly lost leaves it a gap of one, and it
+#     drops the requests after it until the sequence comes round, up to six. A late write costs it
+#     nothing. A lost frame on a wired segment is rare and costs the netX a few seconds; a late
+#     frame is common and locked a Circulo. Measured on both with hil/mailbox_counter0 and
+#     hil/mailbox_duplicate, and on the wire in NEXTGEN.md Session 2026-10-22.
+# mbxwriteunknowns counts the writes without a frame, for the driver to report.
 #
 # Every other slave keeps the upstream behaviour, because a slave that follows ETG.1000.4 discards
 # a repeated message and the repeat recovers a write that was lost on the wire.
@@ -574,16 +568,8 @@ vcpkg_replace_string(
    uint8 mbx_cnt;
    /** write each mailbox message once, never repeat it */
    boolean mbxwriteonce;
-   /** the last counted write got no frame back, and nothing shows that the slave has it */
-   boolean mbxunknown;
-   /** counter of that write */
-   uint8 mbxunknowncnt;
-   /** that write is the one in flight, so an answer proves that the slave has it */
-   boolean mbxunknownpending;
    /** mailbox writes that got no frame back */
-   uint32 mbxwriteunknowns;
-   /** requests sent with counter 0 after a write with an unknown outcome */
-   uint32 mbxwriterecovers;")
+   uint32 mbxwriteunknowns;")
 
 vcpkg_replace_string(
     "${SOURCE_PATH}/include/soem/ec_base.h"
@@ -672,23 +658,9 @@ static int ecx_mbxsendonce(ecx_contextt *context, uint16 slave, ec_mbxbuft *mbx,
    ec_slavet *slaveitem = &(context->slavelist[slave]);
    ec_mbxheadert *mbxh = (ec_mbxheadert *)mbx;
    uint8 cnt = (uint8)((mbxh->mbxtype >> 4) & 0x07);
-   boolean recover = FALSE;
-   uint8 sm[16];
    int wkc = 0;
    int attempt;
 
-   /* A new transfer starts, so an answer from now on does not prove the earlier write. */
-   slaveitem->mbxunknownpending = FALSE;
-   if (slaveitem->mbxunknown && (cnt != 0))
-   {
-      /* Counter 0 instead of the counter the caller took, and the next request takes the unknown
-       * counter: mbx_cnt goes back to the counter before it. */
-      mbxh->mbxtype = (uint8)(mbxh->mbxtype & 0x8F);
-      cnt = 0;
-      recover = TRUE;
-      slaveitem->mbx_cnt = (uint8)((slaveitem->mbxunknowncnt == 1) ? 7 : (slaveitem->mbxunknowncnt - 1));
-      slaveitem->mbxwriterecovers++;
-   }
    for (attempt = 0; (attempt < 2) && (wkc == 0); attempt++)
    {
       if (!ecx_mbxempty(context, slave, timeout))
@@ -699,22 +671,11 @@ static int ecx_mbxsendonce(ecx_contextt *context, uint16 slave, ec_mbxbuft *mbx,
    }
    if (wkc > 0)
    {
-      if (recover)
-      {
-         slaveitem->mbxunknown = FALSE;
-      }
       return wkc;
    }
    if (wkc == 0)
    {
-      if (recover)
-      {
-         /* SM0 holds a message, and that is the unknown write. The slave has it, so the next
-          * request takes the counter after it. */
-         slaveitem->mbxunknown = FALSE;
-         slaveitem->mbx_cnt = slaveitem->mbxunknowncnt;
-      }
-      else if (cnt != 0)
+      if (cnt != 0)
       {
          /* The ESC refused the write, so the slave did not see this counter. The caller took it
           * with ec_nextmbxcnt, and giving it back means the counter before it. */
@@ -722,26 +683,9 @@ static int ecx_mbxsendonce(ecx_contextt *context, uint16 slave, ec_mbxbuft *mbx,
       }
       return 0;
    }
+   /* No frame back. The slave may have the message, so it is not sent again, and its counter is
+    * never used again: the caller already moved mbx_cnt past it. The caller waits for the answer. */
    slaveitem->mbxwriteunknowns++;
-   if (recover || (cnt == 0))
-   {
-      /* A counter-0 write with an unknown outcome. In recovery, mbxunknown stays set and the next
-       * request goes out with counter 0 again. Outside it, there is nothing to track. */
-      return 1;
-   }
-   /* The status byte of SM0 is at offset 5 of the 16 bytes from ECT_REG_SM0, and that of SM1 at
-    * offset 13. Bit 3 is set while the mailbox holds a message. The read waits EC_TIMEOUTLATE,
-    * because it decides between a settled write and a recovery, and on the host that makes an
-    * unknown write it comes back as late as any other datagram. A register read is safe to send
-    * again, so ecx_FPRD sends it again every EC_TIMEOUTRET until then. */
-   if ((ecx_FPRD(&context->port, slaveitem->configadr, ECT_REG_SM0, sizeof(sm), sm, EC_TIMEOUTLATE) > 0) &&
-       (((sm[5] & 0x08) != 0) || ((sm[13] & 0x08) != 0)))
-   {
-      return 1;
-   }
-   slaveitem->mbxunknown = TRUE;
-   slaveitem->mbxunknowncnt = cnt;
-   slaveitem->mbxunknownpending = TRUE;
    return 1;
 }
 
@@ -772,13 +716,6 @@ vcpkg_replace_string(
 # `mbxin`, the message. So an emergency is never recognised in this path and reaches the caller as
 # the reply, which fails the transfer. The patch reads the message.
 #
-# A message read in this loop is the slave's answer to the request in flight, because every CoE
-# and FoE transfer empties the mailbox before it writes. When that request is a write whose
-# outcome was unknown (mbxunknownpending, see ecx_mbxsendonce), the answer settles it. A mailbox
-# error reply is such an answer. An emergency is not: it is the slave's own event, and it can come
-# while a lost write waits, so it settles nothing. Without that rule a lost write followed by an
-# emergency continued the counter sequence, and a netX dropped the requests of the gap.
-#
 # The mailbox read is sent once, and its frame is awaited for up to EC_TIMEOUTLATE, the same wait
 # as a mailbox write gets in ecx_mbxsendonce. Upstream
 # sends it through ecx_FPRD, which gives up after EC_TIMEOUTRET and sends the read again. The
@@ -802,8 +739,7 @@ vcpkg_replace_string(
          do
          {
             wkc = ecx_FPRD(&context->port, configadr, mbxro, mbxl, mbxin, EC_TIMEOUTRET); /* get mailbox */"
-"         boolean gotmsg = FALSE;
-         mbxro = slavelist->mbx_ro;
+"         mbxro = slavelist->mbx_ro;
          mbxin = NULL;
          do
          {
@@ -833,40 +769,6 @@ vcpkg_replace_string(
             {
                EMp = (ec_emcyt *)mbxin;")
 
-# The answer branches record that the slave answered. The mailbox error branch and the three that
-# hand the message to the caller are answers. The emergency branch is left out on purpose.
-vcpkg_replace_string(
-    "${SOURCE_PATH}/src/ec_main.c"
-"               MBXEp = (ec_mbxerrort *)mbxin;
-               ecx_mbxerror(context, slave, etohs(MBXEp->Detail));"
-"               MBXEp = (ec_mbxerrort *)mbxin;
-               gotmsg = TRUE;
-               ecx_mbxerror(context, slave, etohs(MBXEp->Detail));")
-
-# Two matches: the CoE reply and the EoE reply.
-vcpkg_replace_string(
-    "${SOURCE_PATH}/src/ec_main.c"
-"                  *mbx = mbxin;
-                  mbxin = NULL;"
-"                  gotmsg = TRUE;
-                  *mbx = mbxin;
-                  mbxin = NULL;")
-
-# Every other mailbox type.
-vcpkg_replace_string(
-    "${SOURCE_PATH}/src/ec_main.c"
-"            else if (wkc > 0)
-            {
-               *mbx = mbxin;
-               mbxin = NULL;
-            }"
-"            else if (wkc > 0)
-            {
-               gotmsg = TRUE;
-               *mbx = mbxin;
-               mbxin = NULL;
-            }")
-
 vcpkg_replace_string(
     "${SOURCE_PATH}/src/ec_main.c"
 "            else /* read mailbox lost */
@@ -879,18 +781,6 @@ vcpkg_replace_string(
             else /* read mailbox lost */
             {
                do /* read extended mailbox status */")
-
-vcpkg_replace_string(
-    "${SOURCE_PATH}/src/ec_main.c"
-"         } while ((wkc <= 0) && (osal_timer_is_expired(&timer) == FALSE)); /* if WKC<=0 repeat */
-         if (mbxin) ecx_dropmbx(context, mbxin);"
-"         } while ((wkc <= 0) && (osal_timer_is_expired(&timer) == FALSE)); /* if WKC<=0 repeat */
-         if (mbxin) ecx_dropmbx(context, mbxin);
-         if (gotmsg && slavelist->mbxunknownpending)
-         {
-            slavelist->mbxunknown = FALSE;
-            slavelist->mbxunknownpending = FALSE;
-         }")
 
 # SOEM matches a returning frame to its datagram by the 8-bit index alone. An index goes back into
 # use as soon as its datagram is answered or given up on, and EC_MAXBUF datagrams later at the
